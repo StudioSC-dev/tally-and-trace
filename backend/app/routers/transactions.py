@@ -6,7 +6,6 @@ from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
-from app.models.transaction import RecurrenceFrequency
 from app.models.account import Account
 from app.models.category import Category
 from app.models.user import User
@@ -560,10 +559,12 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
     if db_transaction.is_posted:
         if db_transaction.transaction_type == TransactionType.CREDIT:
             account = db.query(Account).filter(Account.id == db_transaction.account_id).first()
-            if account: account.balance -= db_transaction.amount
+            if account:
+                account.balance -= db_transaction.amount
         elif db_transaction.transaction_type == TransactionType.DEBIT:
             account = db.query(Account).filter(Account.id == db_transaction.account_id).first()
-            if account: account.balance += db_transaction.amount
+            if account:
+                account.balance += db_transaction.amount
         elif db_transaction.transaction_type == TransactionType.TRANSFER:
             if db_transaction.transfer_from_account_id:
                 from_account = db.query(Account).filter(Account.id == db_transaction.transfer_from_account_id).first()

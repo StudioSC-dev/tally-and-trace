@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.entity_context import require_entity_owner
 from app.models.entity import Entity, EntityMembership, MemberRole
 from app.models.user import User
 from app.schemas.entity import (

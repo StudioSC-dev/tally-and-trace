@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.models.account import Account
 from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
@@ -68,7 +67,7 @@ def get_snapshot(
     goals_query = db.query(Allocation).filter(
         Allocation.user_id == current_user.id,
         Allocation.allocation_type == AllocationType.GOAL,
-        Allocation.is_active == True,
+        Allocation.is_active.is_(True),
     )
     if entity_id is not None:
         goals_query = goals_query.filter(Allocation.entity_id == entity_id)
@@ -105,7 +104,7 @@ def get_snapshot(
         db.query(WishlistItem)
         .filter(
             WishlistItem.user_id == current_user.id,
-            WishlistItem.is_purchased == False,
+            WishlistItem.is_purchased.is_(False),
         )
         .order_by(priority_order, WishlistItem.created_at)
         .limit(3)

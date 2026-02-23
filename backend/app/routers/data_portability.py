@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
@@ -28,7 +28,7 @@ router = APIRouter()
 
 
 def _check_entity_access(db: Session, entity_id: int, user_id: int) -> Entity:
-    entity = db.query(Entity).filter(Entity.id == entity_id, Entity.is_active == True).first()
+    entity = db.query(Entity).filter(Entity.id == entity_id, Entity.is_active.is_(True)).first()
     if not entity:
         raise HTTPException(status_code=404, detail="Entity not found")
     membership = (

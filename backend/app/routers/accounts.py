@@ -103,7 +103,6 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     # Calculate running balance from transactions
     from app.models.transaction import Transaction, TransactionType
     
-    from sqlalchemy import or_
     
     transactions = db.query(Transaction).filter(
         or_(

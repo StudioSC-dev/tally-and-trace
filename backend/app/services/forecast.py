@@ -7,9 +7,8 @@ unposted transactions, this service generates a forward-looking timeline.
 
 from __future__ import annotations
 
-import math
 from calendar import monthrange
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -63,7 +62,7 @@ def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = N
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
         Account.user_id == user_id,
-        Account.is_active == True,
+        Account.is_active.is_(True),
     )
     if entity_id is not None:
         query = query.filter(Account.entity_id == entity_id)
@@ -95,7 +94,7 @@ def project_cashflow(
     # Active budget entries for the entity/user
     be_query = db.query(BudgetEntry).filter(
         BudgetEntry.user_id == user_id,
-        BudgetEntry.is_active == True,
+        BudgetEntry.is_active.is_(True),
     )
     if entity_id is not None:
         be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
@@ -104,7 +103,7 @@ def project_cashflow(
     # Unposted transactions (confirmed upcoming expenses)
     txn_query = db.query(Transaction).filter(
         Transaction.user_id == user_id,
-        Transaction.is_posted == False,
+        Transaction.is_posted.is_(False),
     )
     if entity_id is not None:
         txn_query = txn_query.filter(Transaction.entity_id == entity_id)
@@ -181,7 +180,7 @@ def get_upcoming_items(
 
     be_query = db.query(BudgetEntry).filter(
         BudgetEntry.user_id == user_id,
-        BudgetEntry.is_active == True,
+        BudgetEntry.is_active.is_(True),
     )
     if entity_id is not None:
         be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
@@ -205,7 +204,7 @@ def get_upcoming_items(
 
     txn_query = db.query(Transaction).filter(
         Transaction.user_id == user_id,
-        Transaction.is_posted == False,
+        Transaction.is_posted.is_(False),
         Transaction.transaction_date >= now,
         Transaction.transaction_date <= cutoff,
     )
@@ -237,7 +236,7 @@ def get_disposable_income(
     """
     be_query = db.query(BudgetEntry).filter(
         BudgetEntry.user_id == user_id,
-        BudgetEntry.is_active == True,
+        BudgetEntry.is_active.is_(True),
     )
     if entity_id is not None:
         be_query = be_query.filter(BudgetEntry.entity_id == entity_id)

@@ -1,7 +1,6 @@
 import json
 import copy
 import os
-from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models import Account, Category, Transaction, Allocation, User, BudgetEntry
 from app.models.account import AccountType

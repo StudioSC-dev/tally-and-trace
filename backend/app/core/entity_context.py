@@ -45,7 +45,7 @@ def get_active_entity(
     if resolved_id is None:
         return None
 
-    entity = db.query(Entity).filter(Entity.id == resolved_id, Entity.is_active == True).first()
+    entity = db.query(Entity).filter(Entity.id == resolved_id, Entity.is_active.is_(True)).first()
     if not entity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
 

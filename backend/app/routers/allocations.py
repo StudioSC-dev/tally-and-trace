@@ -202,7 +202,7 @@ def get_goals_summary(
         .filter(
             Allocation.user_id == current_user.id,
             Allocation.allocation_type == AllocationType.GOAL,
-            Allocation.is_active == True,
+            Allocation.is_active.is_(True),
         )
         .all()
     )

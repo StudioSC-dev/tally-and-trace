@@ -85,7 +85,7 @@ def get_wishlist_plan(
         db.query(WishlistItem)
         .filter(
             WishlistItem.user_id == current_user.id,
-            WishlistItem.is_purchased == False,
+            WishlistItem.is_purchased.is_(False),
         )
         .order_by(priority_order, WishlistItem.created_at)
         .all()

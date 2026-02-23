@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """Email token model for verification and password reset flows."""
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey

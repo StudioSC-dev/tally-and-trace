@@ -1,14 +1,14 @@
 # Database models
 from sqlalchemy.orm import relationship
-from app.models.user import User, CurrencyType
-from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
-from app.models.account import Account, AccountType
-from app.models.transaction import Transaction, TransactionType
-from app.models.category import Category
-from app.models.allocation import Allocation, AllocationType
-from app.models.budget_entry import BudgetEntry, BudgetEntryType
-from app.models.email_token import EmailToken, EmailTokenType
-from app.models.wishlist_item import WishlistItem, WishlistPriority
+from app.models.user import User as User, CurrencyType as CurrencyType
+from app.models.entity import Entity as Entity, EntityMembership as EntityMembership, EntityType as EntityType, MemberRole as MemberRole
+from app.models.account import Account as Account, AccountType as AccountType
+from app.models.transaction import Transaction as Transaction, TransactionType as TransactionType
+from app.models.category import Category as Category
+from app.models.allocation import Allocation as Allocation, AllocationType as AllocationType
+from app.models.budget_entry import BudgetEntry as BudgetEntry, BudgetEntryType as BudgetEntryType
+from app.models.email_token import EmailToken as EmailToken, EmailTokenType as EmailTokenType
+from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPriority as WishlistPriority
 
 # ---------------------------------------------------------------------------
 # User relationships

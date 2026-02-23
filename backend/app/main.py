@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.routers import api_router
 from app.core.database import engine
-from app.models import User, Account, Transaction, Category, Allocation, Entity, EntityMembership, WishlistItem
 from app.core.seed import seed_database
 import os
 
