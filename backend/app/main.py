@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.routers import api_router
 from app.core.database import engine
-from app.models import User, Account, Transaction, Category, Allocation
+from app.models import User, Account, Transaction, Category, Allocation, Entity, EntityMembership, WishlistItem
 from app.core.seed import seed_database
 import os
 
@@ -33,7 +33,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Accounting for Dummies API"}
+    return {"message": "Welcome to Tally & Trace API"}
 
 @app.get("/health")
 async def health_check():
@@ -95,7 +95,31 @@ async def startup_event():
                 WHEN duplicate_object THEN null;
             END $$;
         """))
-        
+
+        conn.execute(text("""
+            DO $$ BEGIN
+                CREATE TYPE entitytype AS ENUM ('personal', 'business');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
+
+        conn.execute(text("""
+            DO $$ BEGIN
+                CREATE TYPE memberrole AS ENUM ('owner', 'member');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
+
+        conn.execute(text("""
+            DO $$ BEGIN
+                CREATE TYPE wishlistpriority AS ENUM ('low', 'medium', 'high', 'critical');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
+
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -210,7 +234,154 @@ async def startup_event():
             ALTER TABLE transactions
             ADD COLUMN IF NOT EXISTS budget_entry_id INTEGER REFERENCES budget_entries(id)
         """))
-    
+
+        # ── Columns added after initial schema ──────────────────────────────
+        # accounts
+        conn.execute(text("""
+            ALTER TABLE accounts
+            ADD COLUMN IF NOT EXISTS currency currencytype NOT NULL DEFAULT 'PHP'
+        """))
+        conn.execute(text("""
+            ALTER TABLE accounts
+            ADD COLUMN IF NOT EXISTS days_until_due_date INTEGER DEFAULT 21
+        """))
+
+        # transactions – FX / multi-currency fields
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS projected_amount DECIMAL(15,2)
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS projected_currency currencytype
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS original_amount DECIMAL(15,2)
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS original_currency currencytype
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(15,6)
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS transfer_fee DECIMAL(15,2) NOT NULL DEFAULT 0
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS is_posted BOOLEAN NOT NULL DEFAULT TRUE
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS transfer_from_account_id INTEGER REFERENCES accounts(id)
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS transfer_to_account_id INTEGER REFERENCES accounts(id)
+        """))
+        conn.execute(text("""
+            ALTER TABLE transactions
+            ADD COLUMN IF NOT EXISTS recurrence_frequency recurrencefrequency
+        """))
+
+        # allocations – columns added after initial schema
+        conn.execute(text("""
+            DO $$ BEGIN
+                CREATE TYPE allocationperiodfrequency AS ENUM ('daily', 'weekly', 'monthly', 'quarterly');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
+        conn.execute(text("""
+            ALTER TABLE allocations
+            ADD COLUMN IF NOT EXISTS currency currencytype NOT NULL DEFAULT 'PHP'
+        """))
+        conn.execute(text("""
+            ALTER TABLE allocations
+            ADD COLUMN IF NOT EXISTS configuration JSONB
+        """))
+        conn.execute(text("""
+            ALTER TABLE allocations
+            ADD COLUMN IF NOT EXISTS period_frequency allocationperiodfrequency
+        """))
+        conn.execute(text("""
+            ALTER TABLE allocations
+            ADD COLUMN IF NOT EXISTS period_start TIMESTAMP WITH TIME ZONE
+        """))
+        conn.execute(text("""
+            ALTER TABLE allocations
+            ADD COLUMN IF NOT EXISTS period_end TIMESTAMP WITH TIME ZONE
+        """))
+
+        # budget_entries – columns added after initial schema
+        conn.execute(text("""
+            ALTER TABLE budget_entries
+            ADD COLUMN IF NOT EXISTS end_mode VARCHAR(20) NOT NULL DEFAULT 'indefinite'
+        """))
+        conn.execute(text("""
+            ALTER TABLE budget_entries
+            ADD COLUMN IF NOT EXISTS end_date TIMESTAMP WITH TIME ZONE
+        """))
+        conn.execute(text("""
+            ALTER TABLE budget_entries
+            ADD COLUMN IF NOT EXISTS max_occurrences INTEGER
+        """))
+
+        # Entity tables
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS entities (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(150) NOT NULL,
+                entity_type entitytype NOT NULL DEFAULT 'personal',
+                description TEXT,
+                default_currency VARCHAR(10) DEFAULT 'PHP',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS entity_memberships (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                role memberrole NOT NULL DEFAULT 'member',
+                joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        # Add entity_id columns to existing tables if they don't exist
+        for tbl in ("accounts", "transactions", "categories", "allocations", "budget_entries"):
+            conn.execute(text(f"""
+                ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS entity_id INTEGER REFERENCES entities(id)
+            """))
+
+        # Wishlist items table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS wishlist_items (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                entity_id INTEGER REFERENCES entities(id) ON DELETE SET NULL,
+                name VARCHAR(200) NOT NULL,
+                estimated_cost DECIMAL(15,2) NOT NULL,
+                currency currencytype NOT NULL DEFAULT 'PHP',
+                priority wishlistpriority NOT NULL DEFAULT 'medium',
+                category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+                url VARCHAR(500),
+                notes TEXT,
+                target_date TIMESTAMP WITH TIME ZONE,
+                is_purchased BOOLEAN NOT NULL DEFAULT FALSE,
+                purchased_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE
+            )
+        """))
+
     print("Database tables initialized successfully!")
     
     # Seed database with initial data

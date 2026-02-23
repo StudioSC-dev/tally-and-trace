@@ -29,6 +29,7 @@ class Allocation(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
 
     name = Column(String(100), nullable=False, index=True)
     allocation_type = Column(
@@ -63,6 +64,7 @@ class Allocation(Base):
 
     # Relationships
     user = relationship("User", back_populates="allocations")
+    entity = relationship("Entity", back_populates="allocations", foreign_keys="Allocation.entity_id")
     account = relationship("Account", back_populates="allocations")
     transactions = relationship("Transaction", back_populates="allocation")
     budget_entries = relationship("BudgetEntry", back_populates="allocation")

@@ -9,6 +9,7 @@ from app.models.transaction import TransactionType, RecurrenceFrequency
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
 from app.models.budget_entry import BudgetEntryType
 from app.models.user import CurrencyType
+from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
 from datetime import datetime
 
 def seed_database():
@@ -41,7 +42,35 @@ def seed_database():
         db.add(default_user)
         db.commit()
         db.refresh(default_user)
-        
+
+        # ---------------------------------------------------------------
+        # Create two entities for the demo user
+        # ---------------------------------------------------------------
+        household_entity = Entity(
+            name="Seth & Crisha's Household",
+            entity_type=EntityType.PERSONAL,
+            description="Shared household finances",
+            default_currency="PHP",
+            is_active=True,
+        )
+        business_entity = Entity(
+            name="StudioSC",
+            entity_type=EntityType.BUSINESS,
+            description="StudioSC business account",
+            default_currency="PHP",
+            is_active=True,
+        )
+        db.add(household_entity)
+        db.add(business_entity)
+        db.flush()
+
+        db.add(EntityMembership(user_id=default_user.id, entity_id=household_entity.id, role=MemberRole.OWNER))
+        db.add(EntityMembership(user_id=default_user.id, entity_id=business_entity.id, role=MemberRole.OWNER))
+        db.commit()
+        db.refresh(household_entity)
+        db.refresh(business_entity)
+        default_entity_id = household_entity.id
+
         # Create accounts associated with the default user
         accounts = []
         account_id_mapping = {}  # Map original index to actual ID
@@ -52,6 +81,7 @@ def seed_database():
             account_data["account_type"] = AccountType(account_type_str)
             # Add user_id to account data
             account_data["user_id"] = default_user.id
+            account_data["entity_id"] = default_entity_id
             account_data.setdefault("currency", default_user.default_currency)
             if account_data.get("days_until_due_date") is None:
                 account_data["days_until_due_date"] = 21
@@ -72,6 +102,7 @@ def seed_database():
         for i, category_data in enumerate(seed_data["categories"]):
             # Add user_id to category data
             category_data["user_id"] = default_user.id
+            category_data["entity_id"] = default_entity_id
             category = Category(**category_data)
             db.add(category)
             categories.append(category)
@@ -99,6 +130,7 @@ def seed_database():
                 allocation_data["period_end"] = datetime.fromisoformat(allocation_data["period_end"])
             # Add user_id to allocation data
             allocation_data["user_id"] = default_user.id
+            allocation_data["entity_id"] = default_entity_id
             # Map account_id to actual account ID
             original_account_id = allocation_data["account_id"]
             allocation_data["account_id"] = account_id_mapping[original_account_id]
@@ -142,6 +174,7 @@ def seed_database():
         for i, entry_data in enumerate(seed_data.get("budget_entries", [])):
             entry_copy = entry_data.copy()
             entry_copy["user_id"] = default_user.id
+            entry_copy["entity_id"] = default_entity_id
             entry_copy["entry_type"] = BudgetEntryType(entry_copy["entry_type"].lower())
             entry_copy["currency"] = CurrencyType(entry_copy.get("currency", default_user.default_currency.name))
             entry_copy["cadence"] = RecurrenceFrequency(entry_copy.get("cadence", "monthly").lower())
@@ -178,6 +211,7 @@ def seed_database():
                 transaction_data["posting_date"] = datetime.fromisoformat(transaction_data["posting_date"])
             # Add user_id to transaction data
             transaction_data["user_id"] = default_user.id
+            transaction_data["entity_id"] = default_entity_id
             # Map foreign key IDs to actual IDs
             transaction_data["account_id"] = account_id_mapping[original_account_id]
             original_category_id = transaction_data.get("category_id")

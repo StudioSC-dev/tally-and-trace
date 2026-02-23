@@ -5,15 +5,15 @@ import type { Transaction, BudgetEntry } from '../store/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 
-type RecurrenceFrequency = 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
-
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
   debit: 'Expense',
   transfer: 'Transfer',
 }
 
-const RECURRENCE_LABELS: Record<RecurrenceFrequency, string> = {
+const RECURRENCE_LABELS: Record<string, string> = {
+  daily: 'Daily',
+  weekly: 'Weekly',
   monthly: 'Monthly',
   quarterly: 'Quarterly',
   semi_annual: 'Semi-Annual',
@@ -854,10 +854,10 @@ export function TransactionsPage() {
           : null
       const typeBadgeStyles =
         transaction.transaction_type === 'credit'
-          ? 'bg-green-100 text-green-700'
+          ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
           : transaction.transaction_type === 'debit'
-          ? 'bg-red-100 text-red-700'
-          : 'bg-blue-100 text-blue-700'
+          ? 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
+          : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
       const amountClass =
         transaction.transaction_type === 'credit'
           ? 'text-green-600'
@@ -975,7 +975,7 @@ export function TransactionsPage() {
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
           <div className="loading-spinner mx-auto mb-4"></div>
-          <p className="text-gray-600 font-medium">Loading transactions...</p>
+          <p className="text-gray-600 dark:text-gray-300 font-medium">Loading transactions...</p>
         </div>
       </div>
     )
@@ -983,14 +983,14 @@ export function TransactionsPage() {
 
   const emptyState = (
     <div className="card p-6 text-center space-y-4">
-      <div className="w-16 h-16 mx-auto rounded-full bg-gray-100 flex items-center justify-center">
-        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="w-16 h-16 mx-auto rounded-full bg-gray-100 dark:bg-slate-700 flex items-center justify-center">
+        <svg className="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
         </svg>
       </div>
       <div>
-        <p className="text-lg font-semibold text-gray-900">No transactions found</p>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-lg font-semibold text-gray-900 dark:text-white">No transactions found</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           {hasActiveFilters
             ? 'No transactions match the current filters. Try adjusting them or reset to see more.'
             : 'No activity recorded for this month yet. Add your first transaction to get started.'}
@@ -1008,7 +1008,7 @@ export function TransactionsPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Transactions</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Transactions</h1>
         <button
           onClick={() => setIsCreateModalOpen(true)}
           className="btn-primary focus-ring w-full sm:w-auto justify-center"
@@ -1042,18 +1042,18 @@ export function TransactionsPage() {
               <button
                 type="button"
                 onClick={() => handleMonthChange('prev')}
-                className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="inline-flex items-center rounded-full border border-gray-200 bg-white dark:bg-slate-700 dark:border-slate-600 px-2.5 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 transition hover:bg-gray-100 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label="View previous month"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
-              <span className="text-sm font-semibold text-gray-900">{currentMonthLabel}</span>
+              <span className="text-sm font-semibold text-gray-900 dark:text-white">{currentMonthLabel}</span>
               <button
                 type="button"
                 onClick={() => handleMonthChange('next')}
-                className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center rounded-full border border-gray-200 bg-white dark:bg-slate-700 dark:border-slate-600 px-2.5 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 transition hover:bg-gray-100 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 aria-label="View next month"
                 disabled={isAtCurrentMonth}
               >
@@ -1065,7 +1065,7 @@ export function TransactionsPage() {
             <button
               type="button"
               onClick={() => setShowFilters((prev) => !prev)}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white dark:bg-slate-700 dark:border-slate-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-200 transition hover:bg-gray-100 dark:hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18l-7 8v6l-4 2v-8z" />
@@ -1076,8 +1076,8 @@ export function TransactionsPage() {
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-gray-700">Date range: {dateRangeSummary}</p>
-            <p className="text-xs text-gray-500">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Date range: {dateRangeSummary}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               {isCustomRange ? 'Custom range selected' : 'Automatically showing whole-month activity'}
             </p>
           </div>
@@ -1094,7 +1094,7 @@ export function TransactionsPage() {
         {showFilters && (
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-semibold text-gray-700">Accounts</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Accounts</h3>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1102,7 +1102,7 @@ export function TransactionsPage() {
                   className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
                     selectedAccountIds.length === 0
                       ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                   }`}
                   disabled={selectedAccountIds.length === 0}
                 >
@@ -1116,7 +1116,7 @@ export function TransactionsPage() {
                       key={account.id}
                       onClick={() => toggleAccountFilter(account.id)}
                       className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                       }`}
                     >
                   {account.name}
@@ -1126,7 +1126,7 @@ export function TransactionsPage() {
           </div>
             </div>
           <div>
-              <h3 className="text-sm font-semibold text-gray-700">Transaction types</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Transaction types</h3>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1134,7 +1134,7 @@ export function TransactionsPage() {
                   className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
                     selectedTypes.length === 0
                       ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                   }`}
                   disabled={selectedTypes.length === 0}
                 >
@@ -1148,7 +1148,7 @@ export function TransactionsPage() {
                       key={option.value}
                       onClick={() => toggleTypeFilter(option.value)}
                       className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition ${
-                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                       }`}
                     >
                       {option.label}
@@ -1158,7 +1158,7 @@ export function TransactionsPage() {
           </div>
         </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-700">Categories</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Categories</h3>
               <div className="mt-2 flex flex-wrap gap-2">
             <button
                   type="button"
@@ -1166,7 +1166,7 @@ export function TransactionsPage() {
                   className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
                     selectedCategoryIds.length === 0
                       ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                   }`}
                   disabled={selectedCategoryIds.length === 0}
                 >
@@ -1180,7 +1180,7 @@ export function TransactionsPage() {
                       key={category.id}
                       onClick={() => toggleCategoryFilter(category.id)}
                       className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                       }`}
                     >
                       {category.name}
@@ -1212,7 +1212,7 @@ export function TransactionsPage() {
               </div>
             </div>
             {isCustomRange && (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
                 Month navigation will snap back to calendar months. Use reset to return to the current month view.
               </p>
             )}
@@ -1242,7 +1242,7 @@ export function TransactionsPage() {
             const exactDate = formatDateWithOrdinal(new Date(transaction.transaction_date))
             const postedDate = transaction.posting_date ? formatDateWithOrdinal(new Date(transaction.posting_date)) : null
             const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
-            const cardStateClasses = transaction.is_posted ? '' : 'bg-gray-50 border border-gray-100'
+            const cardStateClasses = transaction.is_posted ? '' : 'bg-gray-50 dark:bg-slate-700/50 border border-gray-100 dark:border-slate-600'
             const description = transaction.description?.trim() || 'Untitled transaction'
                 
                 return (
@@ -1262,14 +1262,14 @@ export function TransactionsPage() {
                 <div className="flex flex-col gap-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         <span>{relativeDate}</span>
-                        <span className="hidden md:inline text-gray-300">•</span>
-                        <span className="text-gray-400">{exactDate}</span>
+                        <span className="hidden md:inline text-gray-300 dark:text-gray-600">•</span>
+                        <span className="text-gray-400 dark:text-gray-500">{exactDate}</span>
                       </div>
-                      <p className="text-base font-semibold text-gray-900">{description}</p>
-                      <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <p className="text-base font-semibold text-gray-900 dark:text-white">{description}</p>
+                      <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                           </svg>
@@ -1277,14 +1277,14 @@ export function TransactionsPage() {
                             ? `${fromAccount?.name || primaryAccount?.name || 'Source'} → ${toAccount?.name || 'Destination'}`
                             : primaryAccount?.name || 'Account'}
                       </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
                           </svg>
                           {transaction.transaction_type === 'transfer' ? 'Transfer' : category?.name || 'Uncategorized'}
                       </span>
                         {scheduleLabel && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-indigo-700">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 px-2 py-1 text-indigo-700 dark:text-indigo-300">
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
@@ -1292,7 +1292,7 @@ export function TransactionsPage() {
                           </span>
                         )}
                         {transferFeeLabel && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-1 text-orange-700">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-900/50 px-2 py-1 text-orange-700 dark:text-orange-300">
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
                             </svg>
@@ -1300,7 +1300,7 @@ export function TransactionsPage() {
                           </span>
                         )}
                         {projectedLabel && !transaction.is_posted && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-sky-700">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 dark:bg-sky-900/50 px-2 py-1 text-sky-700 dark:text-sky-300">
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
                             </svg>
@@ -1312,24 +1312,24 @@ export function TransactionsPage() {
                     <div className="space-y-2 text-right">
                       <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
                       {transaction.original_amount !== undefined && transaction.original_currency && (
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
                           Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
                         </p>
                       )}
-                      {postedDate && <p className="text-xs text-gray-500">Posted {postedDate}</p>}
+                      {postedDate && <p className="text-xs text-gray-500 dark:text-gray-400">Posted {postedDate}</p>}
                       <div className="flex flex-wrap justify-end gap-2">
                         <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
                           {typeLabel}
                         </span>
                         <span
                           className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                            transaction.is_posted ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-700'
+                            transaction.is_posted ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : 'bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-gray-300'
                           }`}
                         >
                           {transaction.is_posted ? 'Posted' : 'Planned'}
                         </span>
                         {transaction.is_reconciled && (
-                          <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold bg-emerald-100 text-emerald-700">
+                          <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
                             Reconciled
                           </span>
                         )}
@@ -1342,16 +1342,16 @@ export function TransactionsPage() {
           })}
           <div ref={sentinelRef} className="h-3" />
           {!isInitialLoading && (isFetchingMore || hasMoreTransactions) && (
-            <p className="text-center text-xs text-gray-500 pb-2">
+            <p className="text-center text-xs text-gray-500 dark:text-gray-400 pb-2">
               {isFetchingMore ? 'Loading more transactions...' : 'Scroll for more transactions'}
             </p>
           )}
           {!isInitialLoading && !hasMoreTransactions && orderedTransactions.length === totalTransactions && totalTransactions > 0 && (
-            <p className="text-center text-xs text-gray-400 pb-2">End of list</p>
+            <p className="text-center text-xs text-gray-400 dark:text-gray-500 pb-2">End of list</p>
           )}
           </div>
           <div className="flex justify-end px-1">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               Showing {transactions.length} of {totalTransactions} transactions
             </p>
           </div>
@@ -1360,23 +1360,24 @@ export function TransactionsPage() {
 
       {isActionModalOpen && actionTransaction && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
           onClick={closeActionModal}
         >
+          <div className="min-h-full flex items-center justify-center">
           <div
-            className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-2xl rounded-xl bg-white dark:bg-slate-800 p-6 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">Transaction Actions</h2>
-                <p className="text-sm text-gray-500">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Transaction Actions</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   {actionTransaction.description || 'No description'}
                 </p>
               </div>
                         <button
                 onClick={closeActionModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors duration-200"
                 aria-label="Close actions modal"
               >
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1386,15 +1387,15 @@ export function TransactionsPage() {
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Dates</h3>
-                <dl className="mt-3 space-y-2 text-sm text-gray-600">
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Dates</h3>
+                <dl className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                   <div className="flex justify-between gap-3">
                     <dt>Transaction</dt>
                     <dd className="text-right">
                       {actionModalMeta?.transactionDate}
                       {actionModalMeta?.transactionRelative && (
-                        <span className="ml-2 text-gray-400">({actionModalMeta.transactionRelative})</span>
+                        <span className="ml-2 text-gray-400 dark:text-gray-500">({actionModalMeta.transactionRelative})</span>
                       )}
                     </dd>
                   </div>
@@ -1403,16 +1404,16 @@ export function TransactionsPage() {
                     <dd className="text-right">
                       {actionModalMeta?.postingDate}
                       {actionModalMeta?.postingRelative && (
-                        <span className="ml-2 text-gray-400">({actionModalMeta.postingRelative})</span>
+                        <span className="ml-2 text-gray-400 dark:text-gray-500">({actionModalMeta.postingRelative})</span>
                       )}
                     </dd>
                   </div>
                 </dl>
               </div>
 
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Details</h3>
-                <dl className="mt-3 space-y-2 text-sm text-gray-600">
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Details</h3>
+                <dl className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                   <div className="flex justify-between">
                     <dt>Amount</dt>
                     <dd className={
@@ -1431,7 +1432,7 @@ export function TransactionsPage() {
                   </div>
                   <div className="flex justify-between">
                     <dt>Status</dt>
-                    <dd className={actionTransaction.is_posted ? 'text-emerald-600' : 'text-amber-600'}>
+                    <dd className={actionTransaction.is_posted ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
                       {actionTransaction.is_posted ? 'Posted' : 'Planned'}
                     </dd>
                   </div>
@@ -1452,7 +1453,7 @@ export function TransactionsPage() {
                       {actionTransferMeta?.transferFeeLabel && (
                         <div className="flex justify-between gap-3">
                           <dt>Transfer Fee</dt>
-                          <dd className="text-right text-rose-600">{actionTransferMeta.transferFeeLabel}</dd>
+                          <dd className="text-right text-rose-600 dark:text-rose-400">{actionTransferMeta.transferFeeLabel}</dd>
                         </div>
                       )}
                     </>
@@ -1461,7 +1462,7 @@ export function TransactionsPage() {
                     <>
                       <div className="flex justify-between gap-3">
                         <dt>Schedule</dt>
-                        <dd className="text-right text-indigo-700 font-medium">{actionSchedule.name}</dd>
+                        <dd className="text-right text-indigo-700 dark:text-indigo-300 font-medium">{actionSchedule.name}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt>Cadence</dt>
@@ -1476,13 +1477,13 @@ export function TransactionsPage() {
                         <dd>{formatDateWithOrdinal(new Date(actionSchedule.next_occurrence))}</dd>
                       </div>
                       {actionSchedule.lead_time_days ? (
-                        <div className="flex justify-between gap-3 text-xs text-gray-500">
+                        <div className="flex justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
                           <dt>Reminder</dt>
                           <dd>{actionSchedule.lead_time_days} day{actionSchedule.lead_time_days === 1 ? '' : 's'} before</dd>
                         </div>
                       ) : null}
                       {actionSchedule.is_autopay && (
-                        <div className="flex justify-between gap-3 text-xs text-indigo-600">
+                        <div className="flex justify-between gap-3 text-xs text-indigo-600 dark:text-indigo-400">
                           <dt>Autopay</dt>
                           <dd>Enabled</dd>
                         </div>
@@ -1498,7 +1499,7 @@ export function TransactionsPage() {
                 {actionTransaction.is_posted ? (
                   <button
                     onClick={() => handleRevertPostedFromModal(actionTransaction)}
-                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1508,7 +1509,7 @@ export function TransactionsPage() {
                 ) : (
                   <button
                     onClick={() => handleInitPostingForm(actionTransaction)}
-                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1527,7 +1528,7 @@ export function TransactionsPage() {
                         </button>
                         <button
                   onClick={() => handleDelete(actionTransaction.id)}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors duration-200 hover:bg-gray-200"
+                  className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-slate-700 px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200 hover:bg-gray-200 dark:hover:bg-slate-600"
                         >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1536,8 +1537,8 @@ export function TransactionsPage() {
                         </button>
                       </div>
               {!actionTransaction.is_posted && postingFormState.visible && (
-                <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 space-y-3">
-                  <p className="text-sm font-medium text-blue-900">
+                <div className="rounded-lg border border-blue-100 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
+                  <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
                     {postingFormState.projectedAmount
                       ? `Projected amount: ${formatCurrency(
                           postingFormState.projectedAmount,
@@ -1545,16 +1546,16 @@ export function TransactionsPage() {
                         )}`
                       : 'No projected amount recorded.'}
                   </p>
-                  <p className="text-xs text-blue-800">
+                  <p className="text-xs text-blue-800 dark:text-blue-300">
                     {postingFormState.needsConversion
                       ? `Enter the amount received in ${postingFormState.accountCurrency}. We will infer the exchange rate.`
                       : 'Verify the received amount. Update it only if the actual amount differs.'}
                   </p>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <div className="flex-1">
-                      <label className="label text-blue-900">Amount in {postingFormState.accountCurrency}</label>
+                      <label className="label text-blue-900 dark:text-blue-200">Amount in {postingFormState.accountCurrency}</label>
                       <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-blue-500 text-sm">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-blue-500 dark:text-blue-400 text-sm">
                           {getCurrencySymbol(postingFormState.accountCurrency)}
                         </span>
                         <input
@@ -1589,7 +1590,7 @@ export function TransactionsPage() {
                               error: null,
                             }))
                           }
-                          className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow hover:bg-blue-100"
+                          className="rounded-lg bg-white dark:bg-slate-700 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300 shadow hover:bg-blue-100 dark:hover:bg-slate-600"
                         >
                           Use projected amount
                         </button>
@@ -1615,19 +1616,21 @@ export function TransactionsPage() {
               )}
             </div>
         </div>
+          </div>
       </div>
       )}
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-xl shadow-2xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
+          <div className="min-h-full flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-xl shadow-2xl">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
               {editingTransaction ? 'Edit Transaction' : 'Create Transaction'}
             </h2>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   {formData.transaction_type === 'transfer'
                     ? 'Move funds between your accounts and optionally include fees.'
                     : 'Log income, expenses, and projections to keep budgets on track.'}
@@ -1638,7 +1641,7 @@ export function TransactionsPage() {
                   setIsCreateModalOpen(false)
                   resetForm()
                 }}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors duration-200"
                 aria-label="Close transaction modal"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1677,7 +1680,7 @@ export function TransactionsPage() {
                         key={account.id}
                         onClick={() => handleAccountSelect(account.id)}
                         className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                          isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                         }`}
                       >
                         {account.name}
@@ -1688,13 +1691,13 @@ export function TransactionsPage() {
                     )
                   })}
                 </div>
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {formData.transaction_type === 'transfer'
                     ? 'Funds will move out of this account.'
                     : 'This is the account where the transaction will be recorded.'}
                 </p>
                 {formData.account_id !== 0 && (
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Recording in {formData.currency} ({formCurrencySymbol})
                   </p>
                 )}
@@ -1705,7 +1708,7 @@ export function TransactionsPage() {
                   <label className="label">Destination Account</label>
                   <div className="flex flex-wrap gap-2">
                     {transferDestinationOptions.length === 0 && (
-                      <p className="text-sm text-gray-500">Select a different source account to see destinations.</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Select a different source account to see destinations.</p>
                     )}
                     {transferDestinationOptions.map((account) => {
                       const isSelected = formData.transfer_to_account_id === account.id
@@ -1720,7 +1723,7 @@ export function TransactionsPage() {
                             }))
                           }
                           className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                            isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                           }`}
                         >
                           {account.name}
@@ -1745,9 +1748,9 @@ export function TransactionsPage() {
                         }))
                       }
                       className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                        formData.category_id === undefined
+                          formData.category_id === undefined
                           ? 'bg-blue-600 text-white shadow-sm'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                       }`}
                     >
                       Uncategorized
@@ -1765,7 +1768,7 @@ export function TransactionsPage() {
                             }))
                           }
                           className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                            isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                           }`}
                         >
                       {category.name}
@@ -1787,7 +1790,7 @@ export function TransactionsPage() {
                         key={option.value}
                         onClick={() => handleTypeChange(option.value)}
                         className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition ${
-                          isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
                         }`}
                       >
                         {option.label}
@@ -1802,7 +1805,7 @@ export function TransactionsPage() {
                   <div>
                     <label className="label">Amount</label>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 text-sm">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
                         {projectedCurrencySymbol}
                       </span>
                       <input
@@ -1849,7 +1852,7 @@ export function TransactionsPage() {
               <div>
                   <label className="label">Transfer Fee</label>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 text-sm">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
                       {formCurrencySymbol}
                     </span>
                 <input
@@ -1868,7 +1871,7 @@ export function TransactionsPage() {
                       placeholder="0.00"
                 />
               </div>
-                  <p className="mt-1 text-xs text-gray-500">
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Automatically deducted from the source account. Default is 0.
                   </p>
                 </div>
@@ -1878,7 +1881,7 @@ export function TransactionsPage() {
               <div>
                   <label className="label">Amount</label>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 text-sm">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-500 dark:text-gray-400 text-sm">
                       {formCurrencySymbol}
                     </span>
                 <input
@@ -1928,14 +1931,14 @@ export function TransactionsPage() {
                         posting_date: e.target.value || undefined,
                       }))
                     }
-                    className="input-field focus-ring disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
+                    className="input-field focus-ring disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-slate-700/50 disabled:text-gray-500 dark:disabled:text-gray-500"
                     disabled={!formData.is_posted}
                   />
                 </div>
               </div>
               
               <div className="flex flex-wrap gap-4">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200 cursor-pointer">
                   <input
                     type="checkbox"
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -1959,7 +1962,7 @@ export function TransactionsPage() {
                 <div className="space-y-3">
                   <label className="label">Budget Schedule</label>
                   {matchingBudgetEntries.length === 0 ? (
-                    <p className="text-sm text-gray-500">No active schedules available for this transaction type.</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No active schedules available for this transaction type.</p>
                   ) : (
                     <select
                       className="input-field focus-ring"
@@ -1984,8 +1987,8 @@ export function TransactionsPage() {
                     </select>
                   )}
                   {selectedBudgetEntry && (
-                    <div className="rounded-lg bg-indigo-50 p-3 text-xs text-indigo-800 space-y-1">
-                      <p className="font-semibold text-indigo-900">{selectedBudgetEntry.name}</p>
+                    <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/30 p-3 text-xs text-indigo-800 dark:text-indigo-300 space-y-1">
+                      <p className="font-semibold text-indigo-900 dark:text-indigo-200">{selectedBudgetEntry.name}</p>
                       <p>Cadence: {RECURRENCE_LABELS[selectedBudgetEntry.cadence]}</p>
                       <p>Next due: {formatDateWithOrdinal(new Date(selectedBudgetEntry.next_occurrence))}</p>
                       <p>Amount: {formatCurrency(selectedBudgetEntry.amount, selectedBudgetEntry.currency)}</p>
@@ -2011,6 +2014,7 @@ export function TransactionsPage() {
                 </button>
               </div>
             </form>
+          </div>
           </div>
         </div>
       )}

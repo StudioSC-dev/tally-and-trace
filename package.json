@@ -1,0 +1,13 @@
+{
+  "name": "tally-and-trace",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:mobile": "pnpm --filter mobile start",
+    "build:frontend": "pnpm --filter frontend build",
+    "build:shared": "pnpm --filter @tally-trace/shared build",
+    "build": "pnpm run build:shared && pnpm run build:frontend"
+  },
+  "packageManager": "pnpm@10.13.1"
+}

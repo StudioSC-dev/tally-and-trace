@@ -3,16 +3,16 @@ from typing import List, Optional
 import os
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Accounting for Dummies API"
-    VERSION: str = "1.0.0"
-    DESCRIPTION: str = "A comprehensive accounting management system"
+    PROJECT_NAME: str = "Tally & Trace API"
+    VERSION: str = "2.0.0"
+    DESCRIPTION: str = "Multi-entity personal and business financial management"
     API_V1_STR: str = "/api/v1"
     
     # CORS - will be parsed from comma-separated string
     BACKEND_CORS_ORIGINS_STR: str = "http://localhost:3000,http://localhost:8000"
     
     # Database - PostgreSQL
-    DATABASE_URL: str = "postgresql://user:password@localhost:5432/accounting_db"
+    DATABASE_URL: str = "postgresql://user:password@localhost:5432/tally_trace"
     
     # Security
     SECRET_KEY: str = "your-secret-key-here-change-in-production"

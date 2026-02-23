@@ -28,6 +28,7 @@ class Transaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     allocation_id = Column(Integer, ForeignKey("allocations.id"), nullable=True)
     budget_entry_id = Column(Integer, ForeignKey("budget_entries.id"), nullable=True)
@@ -70,6 +71,7 @@ class Transaction(Base):
     
     # Relationships
     user = relationship("User", back_populates="transactions")
+    entity = relationship("Entity", back_populates="transactions", foreign_keys="Transaction.entity_id")
     account = relationship(
         "Account",
         back_populates="transactions",

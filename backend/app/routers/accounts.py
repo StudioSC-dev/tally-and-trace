@@ -17,11 +17,15 @@ def get_accounts(
     current_user: User = Depends(get_current_active_user),
     account_type: Optional[str] = Query(None, description="Filter by account type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Get all accounts with optional filtering"""
     query = db.query(Account).filter(Account.user_id == current_user.id)
+
+    if entity_id is not None:
+        query = query.filter(Account.entity_id == entity_id)
     
     if account_type:
         # Convert string to enum

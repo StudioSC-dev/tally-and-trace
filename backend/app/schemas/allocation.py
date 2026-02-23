@@ -6,6 +6,7 @@ from app.models.allocation import AllocationType, BudgetPeriodFrequency
 
 class AllocationBase(BaseModel):
     account_id: int = Field(..., gt=0)
+    entity_id: Optional[int] = Field(None, gt=0)
     name: str = Field(..., min_length=1, max_length=100)
     allocation_type: AllocationType
     description: Optional[str] = None
@@ -28,6 +29,7 @@ class AllocationCreate(AllocationBase):
 
 class AllocationUpdate(BaseModel):
     account_id: Optional[int] = Field(None, gt=0)
+    entity_id: Optional[int] = Field(None, gt=0)
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     allocation_type: Optional[AllocationType] = None
     description: Optional[str] = None

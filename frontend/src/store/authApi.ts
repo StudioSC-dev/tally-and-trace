@@ -1,47 +1,20 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 
-export interface User {
-  id: number
-  email: string
-  first_name: string
-  last_name: string
-  default_currency: string
-  is_active: boolean
-  is_verified: boolean
-  created_at: string
-  updated_at?: string
-  last_login?: string
-}
+// Re-export auth types from shared so existing imports continue to work
+export type {
+  User,
+  LoginRequest,
+  RegisterRequest,
+  TokenResponse,
+  UpdateUserRequest,
+} from '@tally-trace/shared'
 
-export interface LoginRequest {
-  email: string
-  password: string
-}
+import type { User, LoginRequest, RegisterRequest, TokenResponse, UpdateUserRequest } from '@tally-trace/shared'
 
-export interface RegisterRequest {
-  email: string
-  password: string
-  first_name: string
-  last_name: string
-  default_currency: string
-}
+// ─── Base Query ───────────────────────────────────────────────────────────────
 
-export interface TokenResponse {
-  access_token: string
-  token_type: string
-  expires_in: number
-}
-
-export interface UpdateUserRequest {
-  first_name?: string
-  last_name?: string
-  default_currency?: string
-  is_active?: boolean
-}
-
-// Custom baseQuery with auth token
 const rawBaseQuery = fetchBaseQuery({
-  baseUrl: '/api/v1',
+  baseUrl: `${import.meta.env.VITE_API_URL || ''}/api/v1`,
   prepareHeaders: (headers) => {
     const token = localStorage.getItem('access_token')
     if (token) {
@@ -53,16 +26,18 @@ const rawBaseQuery = fetchBaseQuery({
 
 const baseQueryWithAuth: typeof rawBaseQuery = async (args, api, extraOptions) => {
   const result = await rawBaseQuery(args, api, extraOptions)
-  
+
   // If we get a 401, clear the token and redirect to login
   if (result.error && 'status' in result.error && result.error.status === 401) {
     localStorage.removeItem('access_token')
     localStorage.removeItem('user')
     window.location.href = '/login'
   }
-  
+
   return result
 }
+
+// ─── Auth API ─────────────────────────────────────────────────────────────────
 
 export const authApi = createApi({
   reducerPath: 'authApi',
@@ -77,7 +52,7 @@ export const authApi = createApi({
         body: userData,
       }),
     }),
-    
+
     // Login user
     login: builder.mutation<TokenResponse, LoginRequest>({
       query: (credentials) => ({
@@ -96,7 +71,7 @@ export const authApi = createApi({
         }
       },
     }),
-    
+
     // Get current user
     getCurrentUser: builder.query<User, void>({
       query: () => 'auth/me',
@@ -110,7 +85,7 @@ export const authApi = createApi({
         }
       },
     }),
-    
+
     // Update current user
     updateUser: builder.mutation<User, UpdateUserRequest>({
       query: (userData) => ({
@@ -120,7 +95,7 @@ export const authApi = createApi({
       }),
       invalidatesTags: ['User'],
     }),
-    
+
     // Logout user
     logout: builder.mutation<void, void>({
       query: () => ({

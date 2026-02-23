@@ -7,6 +7,7 @@ from app.models.user import CurrencyType
 class AccountBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     account_type: AccountType
+    entity_id: Optional[int] = Field(None, gt=0)
     balance: float = Field(default=0.0)  # Allow negative balances for credit cards
     description: Optional[str] = None
     currency: CurrencyType = CurrencyType.PHP
@@ -23,6 +24,7 @@ class AccountCreate(AccountBase):
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     account_type: Optional[AccountType] = None
+    entity_id: Optional[int] = Field(None, gt=0)
     balance: Optional[float] = Field(None)  # Allow negative balances for credit cards
     description: Optional[str] = None
     currency: Optional[CurrencyType] = None

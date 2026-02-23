@@ -6,6 +6,7 @@ from app.models.user import CurrencyType
 
 class TransactionBase(BaseModel):
     account_id: int = Field(..., gt=0)
+    entity_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     budget_entry_id: Optional[int] = Field(None, gt=0)
@@ -39,6 +40,7 @@ class TransactionCreate(TransactionBase):
 
 class TransactionUpdate(BaseModel):
     account_id: Optional[int] = Field(None, gt=0)
+    entity_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     budget_entry_id: Optional[int] = Field(None, gt=0)

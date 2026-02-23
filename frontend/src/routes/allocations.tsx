@@ -1067,20 +1067,20 @@ export function AllocationsPage() {
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-3 md:block">
                 <div>
-                <p className="text-base font-semibold text-gray-900">{allocation.name}</p>
-                <p className="text-sm text-gray-500 capitalize">
+                <p className="text-base font-semibold text-gray-900 dark:text-white">{allocation.name}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 capitalize">
                   {allocation.allocation_type === 'budget' ? 'Budget Envelope' : allocation.allocation_type}
                 </p>
-                {account && <p className="text-sm text-gray-600">{account.name}</p>}
+                {account && <p className="text-sm text-gray-600 dark:text-gray-300">{account.name}</p>}
                   {allocation.description && (
-                    <p className="text-sm text-gray-600 mt-1">{allocation.description}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">{allocation.description}</p>
                   )}
                 {allocation.allocation_type === 'budget' && budgetCategoryNames.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
                     {budgetCategoryNames.map((name) => (
                       <span
                         key={name}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-amber-700"
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 px-2 py-1 text-amber-700 dark:text-amber-300"
                       >
                         {name}
                       </span>
@@ -1088,27 +1088,27 @@ export function AllocationsPage() {
                 </div>
                 )}
                 {isBudget && (
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600">
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
                     {budgetCadenceLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Cadence: {budgetCadenceLabel}
                       </span>
                     )}
                     {budgetPeriodStartLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Starts {budgetPeriodStartLabel}
                       </span>
                     )}
                     {budgetPeriodEndLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Ends {budgetPeriodEndLabel}
                       </span>
                     )}
                   </div>
                 )}
                 {allocation.allocation_type === 'savings' && goalMode && (
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-blue-700">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1">
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-blue-700 dark:text-blue-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/50 px-2 py-1">
                       Goal Mode: {goalMode === 'target_balance'
                         ? 'Target Balance'
                         : goalMode === 'multi_account'
@@ -1116,12 +1116,12 @@ export function AllocationsPage() {
                         : 'Savings Transactions'}
                     </span>
                     {goalMode === 'multi_account' && linkedAccounts.length > 0 && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-blue-600">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2 py-1 text-blue-600 dark:text-blue-300">
                         {linkedAccounts.join(', ')}
                       </span>
                     )}
                     {goalMode === 'transaction_total' && savingsCategoryName && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-blue-600">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-900/30 px-2 py-1 text-blue-600 dark:text-blue-300">
                         Savings category: {savingsCategoryName}
                       </span>
                     )}
@@ -1130,21 +1130,21 @@ export function AllocationsPage() {
               </div>
               <span
                 className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${
-                  allocation.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                  allocation.is_active ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : 'bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300'
                 } md:hidden`}
               >
                 {allocation.is_active ? 'Active' : 'Paused'}
               </span>
               </div>
               
-            <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+            <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
               {allocation.target_date && !isBudget && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-indigo-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 px-2 py-1 text-indigo-700 dark:text-indigo-300">
                   Target {new Date(allocation.target_date).toLocaleDateString()}
                 </span>
               )}
               {allocation.monthly_target !== undefined && !isBudget && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-sky-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 dark:bg-sky-900/50 px-2 py-1 text-sky-700 dark:text-sky-300">
                   Monthly {format(allocation.monthly_target)}
                 </span>
               )}
@@ -1155,24 +1155,24 @@ export function AllocationsPage() {
             {isBudget ? (
               <>
                 {limitAmount !== null && limitAmount > 0 && (
-                  <div className="flex items-center justify-between text-sm text-gray-600">
+                  <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                     <span>Spending limit</span>
-                    <span className="font-medium text-gray-900">{format(limitAmount)}</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{format(limitAmount)}</span>
                   </div>
                 )}
-                <div className="flex items-center justify-between text-sm text-gray-600">
+                <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>Spent this period</span>
-                  <span className="font-semibold text-rose-600">{format(usedAmount)}</span>
+                  <span className="font-semibold text-rose-600 dark:text-rose-400">{format(usedAmount)}</span>
                 </div>
                 {limitAmount !== null && limitAmount > 0 && (
                   <BudgetUsageBar usagePercentage={usagePercentage} />
                 )}
                 {limitAmount !== null && (
-                  <div className="flex items-center justify-between text-sm text-gray-600">
+                  <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                     <span>Remaining</span>
                     <span
                       className={`font-semibold ${
-                        remainingAmount !== null && remainingAmount < 0 ? 'text-rose-600' : 'text-gray-900'
+                        remainingAmount !== null && remainingAmount < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-white'
                       }`}
                     >
                       {format(remainingAmount ?? 0)}
@@ -1182,23 +1182,23 @@ export function AllocationsPage() {
               </>
             ) : (
               <>
-                <div className="flex items-center justify-between text-sm text-gray-600">
+                <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                   <span>Current</span>
-                  <span className="font-semibold text-gray-900">{format(allocation.current_amount)}</span>
+                  <span className="font-semibold text-gray-900 dark:text-white">{format(allocation.current_amount)}</span>
                 </div>
                 {allocation.target_amount && (
                   <>
-                    <div className="flex items-center justify-between text-sm text-gray-600">
+                    <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
                       <span>Target</span>
                       <span className="font-medium">{format(allocation.target_amount)}</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
                       <div
                         className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                         style={{ width: `${Math.min(savingsProgressPercentage, 100)}%` }}
                       />
                     </div>
-                    <p className="text-right text-xs font-medium text-gray-500">
+                    <p className="text-right text-xs font-medium text-gray-500 dark:text-gray-400">
                       {savingsProgressPercentage.toFixed(1)}% funded
                     </p>
                   </>
@@ -1210,7 +1210,7 @@ export function AllocationsPage() {
           <div className="flex flex-wrap justify-end gap-2">
             <span
               className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${
-                allocation.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                allocation.is_active ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : 'bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300'
               }`}
             >
               {allocation.is_active ? 'Active' : 'Paused'}
@@ -1254,61 +1254,61 @@ export function AllocationsPage() {
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
-              <p className="text-base font-semibold text-gray-900">{entry.name}</p>
-              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
+              <p className="text-base font-semibold text-gray-900 dark:text-white">{entry.name}</p>
+              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
-                <span className="text-gray-300">•</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
                 <span>{cadenceLabel}</span>
-                <span className="text-gray-300">•</span>
+                <span className="text-gray-300 dark:text-gray-600">•</span>
                 <span>{entry.is_autopay ? 'Auto-pay' : 'Manual'}</span>
                 {!entry.is_active && (
                   <>
-                    <span className="text-gray-300">•</span>
+                    <span className="text-gray-300 dark:text-gray-600">•</span>
                     <span>Paused</span>
                   </>
                 )}
                   </div>
-              {entry.description && <p className="text-sm text-gray-600">{entry.description}</p>}
+              {entry.description && <p className="text-sm text-gray-600 dark:text-gray-300">{entry.description}</p>}
             </div>
             <div className="text-right">
               <p
                 className={`text-lg font-bold ${
-                  entry.entry_type === 'income' ? 'text-emerald-600' : 'text-rose-600'
+                  entry.entry_type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
                 }`}
               >
                 {amountLabel}
               </p>
-              <p className="text-xs text-gray-500">{cadenceLabel}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{cadenceLabel}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-indigo-700">
+          <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
+            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 px-2 py-1 text-indigo-700 dark:text-indigo-300">
               Next {formatFullDate(entry.next_occurrence)}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
               {formatRelativeDate(entry.next_occurrence)}
             </span>
             {entry.lead_time_days > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-1 text-sky-700">
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 dark:bg-sky-900/50 px-2 py-1 text-sky-700 dark:text-sky-300">
                 Reminder {entry.lead_time_days} day{entry.lead_time_days === 1 ? '' : 's'} ahead
               </span>
             )}
             {account && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                 Account: {account.name}
               </span>
             )}
             {category && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                 Category: {category.name}
               </span>
             )}
             {allocation && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                 Envelope: {allocation.name}
               </span>
             )}
-            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
               {endLabel}
             </span>
           </div>
@@ -1325,11 +1325,11 @@ export function AllocationsPage() {
   ) => (
     <section className="space-y-3">
       <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-        <p className="text-sm text-gray-500">{subtitle}</p>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{title}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
       </header>
       {allocations.length === 0 ? (
-        <div className="card p-6 text-center text-gray-500">{emptyMessage}</div>
+        <div className="card p-6 text-center text-gray-500 dark:text-gray-400">{emptyMessage}</div>
       ) : (
         <div className="grid grid-cols-1 gap-3">{allocations.map(renderAllocationCard)}</div>
       )}
@@ -1344,13 +1344,13 @@ export function AllocationsPage() {
   ) => (
     <section className="space-y-3">
       <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-        <p className="text-sm text-gray-500">{subtitle}</p>
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{title}</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
       </header>
       {isRecurringLoading ? (
-        <div className="card p-6 text-center text-gray-500">Loading recurring entries…</div>
+        <div className="card p-6 text-center text-gray-500 dark:text-gray-400">Loading recurring entries…</div>
       ) : entries.length === 0 ? (
-        <div className="card p-6 text-center text-gray-500">{emptyMessage}</div>
+        <div className="card p-6 text-center text-gray-500 dark:text-gray-400">{emptyMessage}</div>
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {entries.map(renderBudgetEntryCard)}
@@ -1386,15 +1386,15 @@ export function AllocationsPage() {
     <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">Allocations</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Allocations</h1>
         <button
             onClick={openCreateModal}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 w-full sm:w-auto flex items-center justify-center"
+          className="btn-primary focus-ring w-full sm:w-auto justify-center"
         >
             {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
         </button>
       </div>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 rounded-lg p-2 bg-white">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 dark:border-slate-700 rounded-lg p-2 bg-white dark:bg-slate-800">
           <nav className="flex gap-1">
             {[
               { value: 'subscriptions' as const, label: 'Subscriptions' },
@@ -1407,7 +1407,7 @@ export function AllocationsPage() {
                   key={tab.value}
                   onClick={() => setActiveTab(tab.value)}
                   className={`px-4 py-2 text-sm font-semibold rounded-md transition ${
-                    isActive ? 'bg-blue-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'
+                    isActive ? 'bg-blue-600 text-white shadow' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'
                   }`}
                 >
                   {tab.label}
@@ -1415,7 +1415,7 @@ export function AllocationsPage() {
               )
             })}
           </nav>
-          <p className="text-xs sm:text-sm text-gray-500">
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
             Switch tabs to view recurring subscriptions, monthly budgets, or savings envelopes.
           </p>
                 </div>
@@ -1457,15 +1457,15 @@ export function AllocationsPage() {
         <>
           <div ref={sentinelRef} className="h-3" />
           {!isInitialLoading && (isFetchingMore || hasMoreAllocations) && (
-            <p className="text-center text-xs text-gray-500 pb-2">
+            <p className="text-center text-xs text-gray-500 dark:text-gray-400 pb-2">
               {isFetchingMore ? 'Loading more envelopes...' : 'Scroll for more envelopes'}
             </p>
           )}
           {!isInitialLoading && !hasMoreAllocations && totalAllocations > 0 && (
-            <p className="text-center text-xs text-gray-400 pb-2">End of envelope list</p>
+            <p className="text-center text-xs text-gray-400 dark:text-gray-500 pb-2">End of envelope list</p>
           )}
           <div className="flex justify-end px-4">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               Showing {activeAllocationList.length} of {totalAllocations} envelopes
             </p>
           </div>
@@ -1474,26 +1474,27 @@ export function AllocationsPage() {
 
       {isActionModalOpen && actionAllocation && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
           onClick={closeActionModal}
         >
+          <div className="min-h-full flex items-center justify-center">
           <div
-            className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-2xl rounded-xl bg-white dark:bg-slate-800 p-6 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
                 <div>
-                <h2 className="text-xl font-semibold text-gray-900">{actionAllocation.name}</h2>
-                <p className="text-sm text-gray-500">{actionAllocationTypeLabel}</p>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{actionAllocation.name}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{actionAllocationTypeLabel}</p>
                 {actionAllocationAccount && (
-                  <p className="text-sm text-gray-500">{actionAllocationAccount.name}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{actionAllocationAccount.name}</p>
                 )}
                 {actionAllocationIsBudget && actionAllocationCategoryNames.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
                     {actionAllocationCategoryNames.map((name) => (
                       <span
                         key={name}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-amber-700"
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 px-2 py-1 text-amber-700 dark:text-amber-300"
                       >
                         {name}
                       </span>
@@ -1501,19 +1502,19 @@ export function AllocationsPage() {
                 </div>
                 )}
                 {actionAllocationIsBudget && (
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600">
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300">
                     {actionBudgetCadenceLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Cadence: {actionBudgetCadenceLabel}
                       </span>
                     )}
                     {actionBudgetPeriodStartLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Starts {actionBudgetPeriodStartLabel}
                       </span>
                     )}
                     {actionBudgetPeriodEndLabel && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
                         Ends {actionBudgetPeriodEndLabel}
                       </span>
                     )}
@@ -1522,7 +1523,7 @@ export function AllocationsPage() {
               </div>
                   <button
                 onClick={closeActionModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors duration-200"
                 aria-label="Close allocation actions modal"
                   >
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1532,19 +1533,19 @@ export function AllocationsPage() {
                 </div>
                 
             <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                   {actionAllocationIsBudget ? 'Budget snapshot' : 'Current progress'}
                 </h3>
                 {actionAllocationIsBudget ? (
                   <>
                     {actionAllocationLimit !== null && (
-                      <p className="mt-2 text-sm text-gray-500">
-                        Limit <span className="font-semibold text-gray-900">{format(actionAllocationLimit)}</span>
+                      <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        Limit <span className="font-semibold text-gray-900 dark:text-white">{format(actionAllocationLimit)}</span>
                       </p>
                     )}
-                    <p className="mt-2 text-sm text-gray-500">
-                      Spent <span className="font-semibold text-rose-600">{format(actionAllocation.current_amount)}</span>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                      Spent <span className="font-semibold text-rose-600 dark:text-rose-400">{format(actionAllocation.current_amount)}</span>
                     </p>
                     {actionAllocationUsagePct !== null && actionAllocationLimit !== null && actionAllocationLimit > 0 && (
                       <BudgetUsageBar usagePercentage={actionAllocationUsagePct} />
@@ -1552,7 +1553,7 @@ export function AllocationsPage() {
                     {actionAllocationRemaining !== null && (
                       <p
                         className={`mt-2 text-sm ${
-                          actionAllocationRemaining < 0 ? 'text-rose-600' : 'text-gray-700'
+                          actionAllocationRemaining < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-700 dark:text-gray-300'
                         }`}
                       >
                         Remaining{' '}
@@ -1564,11 +1565,11 @@ export function AllocationsPage() {
                   </>
                 ) : (
                   <>
-                    <p className="mt-2 text-lg font-bold text-gray-900">{format(actionAllocation.current_amount)}</p>
+                    <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">{format(actionAllocation.current_amount)}</p>
                     {actionAllocation.target_amount && (
                       <>
-                        <p className="text-sm text-gray-500">Target {format(actionAllocation.target_amount)}</p>
-                        <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Target {format(actionAllocation.target_amount)}</p>
+                        <div className="mt-2 w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
                           <div
                             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                             style={{
@@ -1579,7 +1580,7 @@ export function AllocationsPage() {
                             }}
                           />
                         </div>
-                        <p className="mt-1 text-xs text-gray-500 text-right">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 text-right">
                           {Math.min((actionAllocation.current_amount / actionAllocation.target_amount) * 100, 999).toFixed(1)}% funded
                         </p>
                       </>
@@ -1588,17 +1589,17 @@ export function AllocationsPage() {
                 )}
               </div>
 
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Details</h3>
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Details</h3>
                 {actionAllocation.monthly_target !== undefined && !actionAllocationIsBudget && (
-                  <p className="mt-2 text-sm text-gray-500">Monthly target {format(actionAllocation.monthly_target)}</p>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Monthly target {format(actionAllocation.monthly_target)}</p>
                 )}
                 {actionAllocation.target_date && !actionAllocationIsBudget && (
-                  <p className="mt-1 text-sm text-gray-500">Target date {new Date(actionAllocation.target_date).toLocaleDateString()}</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Target date {new Date(actionAllocation.target_date).toLocaleDateString()}</p>
                 )}
                 <p
                   className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${
-                    actionAllocation.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                    actionAllocation.is_active ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-400'
                   }`}
                 >
                   {actionAllocation.is_active ? 'Active' : 'Paused'}
@@ -1611,8 +1612,8 @@ export function AllocationsPage() {
                 onClick={() => handleToggleAllocationActive(actionAllocation)}
                 className={`flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 ${
                   actionAllocation.is_active
-                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+                    : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                 }`}
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1635,7 +1636,7 @@ export function AllocationsPage() {
               </button>
               <button
                 onClick={() => handleDelete(actionAllocation.id)}
-                className="flex items-center justify-center gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors duration-200 hover:bg-red-100 sm:col-span-2"
+                className="flex items-center justify-center gap-2 rounded-lg bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm font-semibold text-red-600 dark:text-red-400 transition-colors duration-200 hover:bg-red-100 dark:hover:bg-red-900/40 sm:col-span-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1644,16 +1645,18 @@ export function AllocationsPage() {
                   </button>
                 </div>
               </div>
+          </div>
       </div>
       )}
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl shadow-2xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
+          <div className="min-h-full flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-2xl shadow-2xl">
             <div className="flex items-start justify-between mb-4">
               <div className="space-y-1">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                   {modalMode === 'subscription'
                     ? 'Add Recurring Entry'
                     : editingAllocation
@@ -1662,7 +1665,7 @@ export function AllocationsPage() {
                     ? 'Create Budget Envelope'
                     : 'Create Savings Tracker'}
             </h2>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   {modalMode === 'subscription'
                     ? 'Project upcoming income or expenses so they feed into your budgets automatically.'
                     : activeTab === 'budgets'
@@ -1672,7 +1675,7 @@ export function AllocationsPage() {
               </div>
               <button
                 onClick={closeModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors duration-200"
                 aria-label="Close allocation modal"
               >
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1685,19 +1688,19 @@ export function AllocationsPage() {
               {modalMode === 'subscription' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Name</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 dark:text-gray-200">Name</label>
                     <input
                       type="text"
                       value={subscriptionForm.name}
                       onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, name: e.target.value }))}
-                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       required
                     />
                     </div>
                     
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Entry Type</label>
-                    <div className="mt-1 inline-flex rounded-md bg-gray-100 p-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Entry Type</label>
+                    <div className="mt-1 inline-flex rounded-md bg-gray-100 dark:bg-slate-700 p-1">
                       {(['expense', 'income'] as Array<'expense' | 'income'>).map((type) => {
                         const isActive = subscriptionForm.entry_type === type
                         return (
@@ -1706,7 +1709,7 @@ export function AllocationsPage() {
                             key={type}
                             onClick={() => setSubscriptionForm((prev) => ({ ...prev, entry_type: type }))}
                             className={`px-3 py-1 text-sm font-semibold rounded-md transition ${
-                              isActive ? 'bg-blue-600 text-white shadow' : 'text-gray-600 hover:bg-gray-200'
+                              isActive ? 'bg-blue-600 text-white shadow' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                             }`}
                           >
                             {type === 'expense' ? 'Expense' : 'Income'}
@@ -1718,11 +1721,11 @@ export function AllocationsPage() {
                     
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Account</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Account</label>
                 <select
                         value={subscriptionForm.account_id}
                         onChange={(e) => handleSubscriptionAccountChange(parseInt(e.target.value))}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                 >
                         <option value={0}>Select account</option>
@@ -1734,7 +1737,7 @@ export function AllocationsPage() {
                 </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Category</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Category</label>
                       <select
                         value={subscriptionForm.category_id ?? 0}
                         onChange={(e) =>
@@ -1743,7 +1746,7 @@ export function AllocationsPage() {
                             category_id: parseInt(e.target.value) || undefined,
                           }))
                         }
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                        className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       >
                         <option value={0}>Uncategorized</option>
                         {categories.map((category) => (
@@ -1756,7 +1759,7 @@ export function AllocationsPage() {
               </div>
               
               <div>
-                    <label className="block text-sm font-medium text-gray-700">Currency</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Currency</label>
                     <select
                       value={subscriptionForm.currency}
                       onChange={(e) =>
@@ -1765,7 +1768,7 @@ export function AllocationsPage() {
                           currency: e.target.value as CurrencyCode,
                         }))
                       }
-                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                     >
                       {currencyOptions.map((code) => (
                         <option key={code} value={code}>
@@ -1776,7 +1779,7 @@ export function AllocationsPage() {
                   </div>
 
               <div>
-                    <label className="block text-sm font-medium text-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                       Amount ({subscriptionForm.currency})
                     </label>
                 <input
@@ -1790,14 +1793,14 @@ export function AllocationsPage() {
                           amount: parseFloat(e.target.value) || 0,
                         }))
                       }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                 />
                   </div>
               
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                      <label className="block text-sm font-medium text-gray-700">Cadence</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Cadence</label>
                 <select
                         value={subscriptionForm.cadence}
                         onChange={(e) =>
@@ -1806,7 +1809,7 @@ export function AllocationsPage() {
                             cadence: e.target.value as BudgetEntry['cadence'],
                           }))
                         }
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                        className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       >
                         {(['monthly', 'quarterly', 'semi_annual', 'annual'] as BudgetEntry['cadence'][]).map(
                           (value) => (
@@ -1818,7 +1821,7 @@ export function AllocationsPage() {
                       </select>
               </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Next Occurrence</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Next Occurrence</label>
                       <input
                         type="datetime-local"
                         value={subscriptionForm.next_occurrence}
@@ -1828,7 +1831,7 @@ export function AllocationsPage() {
                             next_occurrence: e.target.value,
                           }))
                         }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                       />
             </div>
@@ -1836,7 +1839,7 @@ export function AllocationsPage() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Lead Time (days)</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Lead Time (days)</label>
                       <input
                         type="number"
                         min="0"
@@ -1847,11 +1850,11 @@ export function AllocationsPage() {
                             lead_time_days: parseInt(e.target.value) || 0,
                           }))
                         }
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                        className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       />
                   </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Link to Budget (optional)</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Link to Budget (optional)</label>
                       <select
                         value={subscriptionForm.allocation_id ?? 0}
                         onChange={(e) =>
@@ -1860,7 +1863,7 @@ export function AllocationsPage() {
                             allocation_id: parseInt(e.target.value, 10) || undefined,
                           }))
                         }
-                        className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                        className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       >
                         <option value={0}>No linked envelope</option>
                         {budgetEnvelopes.map((allocation) => (
@@ -1874,7 +1877,7 @@ export function AllocationsPage() {
 
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Ends</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Ends</label>
                       <div className="mt-1 flex flex-wrap gap-2">
                         {[
                           { value: 'indefinite', label: 'Keep running' },
@@ -1902,7 +1905,7 @@ export function AllocationsPage() {
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${
                                 isSelected
                                   ? 'bg-blue-600 text-white shadow'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                  : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                               }`}
                             >
                               {label}
@@ -1914,7 +1917,7 @@ export function AllocationsPage() {
 
                     {subscriptionForm.end_mode === 'on_date' && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">End after</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">End after</label>
                         <input
                           type="datetime-local"
                           value={subscriptionForm.end_date ?? ''}
@@ -1924,9 +1927,9 @@ export function AllocationsPage() {
                               end_date: e.target.value || undefined,
                             }))
                           }
-                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                         />
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           No additional transactions will be generated after this date.
                         </p>
                       </div>
@@ -1934,7 +1937,7 @@ export function AllocationsPage() {
 
                     {subscriptionForm.end_mode === 'after_occurrences' && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Number of runs</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Number of runs</label>
                         <input
                           type="number"
                           min={1}
@@ -1945,9 +1948,9 @@ export function AllocationsPage() {
                               max_occurrences: e.target.value ? Math.max(1, parseInt(e.target.value, 10)) : undefined,
                             }))
                           }
-                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                         />
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           Stop once this many transactions have been created.
                         </p>
                       </div>
@@ -1955,10 +1958,10 @@ export function AllocationsPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                    <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-3">
               <div>
-                        <p className="text-sm font-medium text-gray-700">Autopay</p>
-                        <p className="text-xs text-gray-500">Mark if the charge posts automatically.</p>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Autopay</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Mark if the charge posts automatically.</p>
                       </div>
                       <button
                         type="button"
@@ -1970,8 +1973,8 @@ export function AllocationsPage() {
                         }
                         className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${
                           subscriptionForm.is_autopay
-                            ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+                            : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                         }`}
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1985,10 +1988,10 @@ export function AllocationsPage() {
                       </button>
               </div>
 
-                    <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                    <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-3">
                       <div>
-                        <p className="text-sm font-medium text-gray-700">Entry status</p>
-                        <p className="text-xs text-gray-500">Pause recurring entries without deleting them.</p>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Entry status</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Pause recurring entries without deleting them.</p>
             </div>
                       <button
                         type="button"
@@ -2000,8 +2003,8 @@ export function AllocationsPage() {
                         }
                         className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${
                           subscriptionForm.is_active
-                            ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+                            : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                         }`}
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2017,7 +2020,7 @@ export function AllocationsPage() {
       </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Notes</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Notes</label>
                     <textarea
                       value={subscriptionForm.description}
                       onChange={(e) =>
@@ -2026,7 +2029,7 @@ export function AllocationsPage() {
                           description: e.target.value,
                         }))
                       }
-                      className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                      className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       rows={3}
                     />
                   </div>
@@ -2034,7 +2037,7 @@ export function AllocationsPage() {
               ) : (
                 <>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Account</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Account</label>
                 <select
                       value={allocationForm.account_id}
                       onChange={(e) =>
@@ -2043,7 +2046,7 @@ export function AllocationsPage() {
                           account_id: parseInt(e.target.value),
                         }))
                       }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                 >
                       <option value={0}>Select account</option>
@@ -2056,7 +2059,7 @@ export function AllocationsPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700">Name</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Name</label>
                 <input
                   type="text"
                       value={allocationForm.name}
@@ -2066,13 +2069,13 @@ export function AllocationsPage() {
                           name: e.target.value,
                         }))
                       }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                 />
               </div>
               
               <div>
-                    <label className="block text-sm font-medium text-gray-700">Description</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Description</label>
                     <textarea
                       value={allocationForm.description}
                       onChange={(e) =>
@@ -2081,14 +2084,14 @@ export function AllocationsPage() {
                           description: e.target.value,
                         }))
                       }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                       rows={3}
                     />
                   </div>
 
                   {allocationForm.allocation_type === 'budget' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">Tracked Categories</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Tracked Categories</label>
                       <div className="mt-1 flex flex-wrap gap-2">
                         {categories.map((category) => {
                           const isSelected = selectedBudgetCategoryIds.includes(category.id)
@@ -2100,7 +2103,7 @@ export function AllocationsPage() {
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${
                                 isSelected
                                   ? 'bg-blue-600 text-white shadow'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                  : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                               }`}
                             >
                               {category.name}
@@ -2108,11 +2111,11 @@ export function AllocationsPage() {
                           )
                         })}
               </div>
-                    <p className="mt-2 text-xs text-gray-500">
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                       Transactions in these categories will roll into this envelope when they post.
                     </p>
                     <div className="mt-4 space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Budget cadence</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Budget cadence</label>
                       <div className="flex flex-wrap gap-2">
                         {budgetCadenceOptions.map((cadence) => {
                           const isSelected = allocationForm.period_frequency === cadence
@@ -2124,7 +2127,7 @@ export function AllocationsPage() {
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${
                                 isSelected
                                   ? 'bg-blue-600 text-white shadow'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                  : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                               }`}
                             >
                               {formatBudgetCadenceLabel(cadence)}
@@ -2132,23 +2135,23 @@ export function AllocationsPage() {
                           )
                         })}
                       </div>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
                         Choose how often this envelope resets so we can bucket transactions correctly.
                       </p>
                     </div>
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Period start</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Period start</label>
                         <input
                           type="date"
                           value={allocationForm.period_start ?? ''}
                           onChange={(e) => handleBudgetPeriodStartChange(e.target.value)}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700">Period end (optional)</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Period end (optional)</label>
                         <input
                           type="date"
                           value={allocationForm.period_end ?? ''}
@@ -2158,7 +2161,7 @@ export function AllocationsPage() {
                               period_end: e.target.value || undefined,
                             }))
                           }
-                          className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                          className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                         />
                       </div>
                     </div>
@@ -2168,7 +2171,7 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type === 'savings' && (
                     <div className="space-y-3">
               <div>
-                        <label className="block text-sm font-medium text-gray-700">Tracking Mode</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Tracking Mode</label>
                         <div className="mt-1 flex flex-wrap gap-2">
                           {[
                             {
@@ -2200,12 +2203,12 @@ export function AllocationsPage() {
                                 }
                                 className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
                                   isSelected
-                                    ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
-                                    : 'border-gray-200 bg-white hover:border-blue-300'
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm'
+                                    : 'border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-500 dark:text-gray-200'
                                 }`}
                               >
                                 <span className="block font-semibold">{option.label}</span>
-                                <span className="block text-xs text-gray-500">{option.description}</span>
+                                <span className="block text-xs text-gray-500 dark:text-gray-400">{option.description}</span>
                               </button>
                             )
                           })}
@@ -2214,7 +2217,7 @@ export function AllocationsPage() {
               
                       {allocationForm.goal_mode === 'multi_account' && (
               <div>
-                          <label className="block text-sm font-medium text-gray-700">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                             Accounts to aggregate
                           </label>
                           <div className="mt-1 flex flex-wrap gap-2">
@@ -2228,7 +2231,7 @@ export function AllocationsPage() {
                                   className={`rounded-full px-3 py-1 text-sm font-medium transition ${
                                     isSelected
                                       ? 'bg-blue-600 text-white shadow'
-                                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                      : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                                   }`}
                                 >
                                   {account.name}
@@ -2239,7 +2242,7 @@ export function AllocationsPage() {
                         </div>
                       )}
                       {allocationForm.goal_mode === 'transaction_total' && (
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
                           {savingsCategory
                             ? `We'll total any transactions categorized as "${savingsCategory.name}".`
                             : 'Tip: add a "Savings" category so we know which transactions to roll up.'}
@@ -2250,7 +2253,7 @@ export function AllocationsPage() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                         {allocationForm.allocation_type === 'budget' ? 'Amount already spent' : 'Current Amount'}
                       </label>
                 <input
@@ -2264,17 +2267,17 @@ export function AllocationsPage() {
                             current_amount: parseFloat(e.target.value) || 0,
                           }))
                         }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                   required
                 />
                       {allocationForm.allocation_type === 'budget' && (
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           Track how much of the envelope has already been used this period.
                         </p>
                       )}
               </div>
               <div>
-                      <label className="block text-sm font-medium text-gray-700">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                         {allocationForm.allocation_type === 'budget'
                           ? 'Spending limit'
                           : 'Target Amount (Optional)'}
@@ -2290,15 +2293,15 @@ export function AllocationsPage() {
                             target_amount: parseFloat(e.target.value) || undefined,
                           }))
                         }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                         required={allocationForm.allocation_type === 'budget'}
                       />
                       {allocationForm.allocation_type === 'budget' ? (
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           The maximum amount available for this envelope before it resets.
                         </p>
                       ) : (
-                        <p className="mt-1 text-xs text-gray-500">
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                           Optional goal amount you'd like to reach.
                         </p>
                       )}
@@ -2308,7 +2311,7 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type !== 'budget' && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                        <label className="block text-sm font-medium text-gray-700">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                           Monthly Target
                         </label>
                 <input
@@ -2322,11 +2325,11 @@ export function AllocationsPage() {
                               monthly_target: parseFloat(e.target.value) || undefined,
                             }))
                           }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                 />
               </div>
               <div>
-                        <label className="block text-sm font-medium text-gray-700">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
                           Target Date
                         </label>
                 <input
@@ -2338,16 +2341,16 @@ export function AllocationsPage() {
                               target_date: e.target.value || undefined,
                             }))
                           }
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
                 />
               </div>
                     </div>
                   )}
               
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-slate-700 px-4 py-3">
               <div>
-                      <p className="text-sm font-medium text-gray-700">Allocation status</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Allocation status</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
                         Pause allocations to hide them from planning without losing history.
                       </p>
               </div>
@@ -2361,8 +2364,8 @@ export function AllocationsPage() {
                       }
                       className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${
                         allocationForm.is_active
-                          ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50'
+                          : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                       }`}
                     >
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2388,7 +2391,7 @@ export function AllocationsPage() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400"
+                  className="flex-1 bg-gray-300 dark:bg-slate-700 text-gray-700 dark:text-gray-200 py-2 px-4 rounded-md hover:bg-gray-400 dark:hover:bg-slate-600"
                 >
                   Cancel
                 </button>
@@ -2396,13 +2399,14 @@ export function AllocationsPage() {
                   <button
                     type="button"
                     onClick={() => handleDeleteBudgetEntry(editingBudgetEntry)}
-                    className="bg-red-50 text-red-600 py-2 px-4 rounded-md hover:bg-red-100 sm:w-auto"
+                    className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 py-2 px-4 rounded-md hover:bg-red-100 dark:hover:bg-red-900/40 sm:w-auto"
                   >
                     Delete Recurring Entry
                   </button>
                 )}
               </div>
             </form>
+          </div>
           </div>
         </div>
       )}
@@ -2412,7 +2416,7 @@ export function AllocationsPage() {
 
 const BudgetUsageBar: React.FC<{ usagePercentage: number }> = ({ usagePercentage }) => {
   const clampedUsage = Math.min(Math.max(usagePercentage, 0), 100)
-  const remainingColor = clampedUsage >= 100 ? 'bg-gray-200' : clampedUsage >= 80 ? 'bg-amber-200' : 'bg-emerald-200'
+  const remainingColor = clampedUsage >= 100 ? 'bg-gray-200 dark:bg-slate-700' : clampedUsage >= 80 ? 'bg-amber-200 dark:bg-amber-900/40' : 'bg-emerald-200 dark:bg-emerald-900/40'
   const usageColor = clampedUsage >= 100 ? 'bg-rose-700' : clampedUsage >= 80 ? 'bg-rose-600' : 'bg-rose-500'
  
   return (
@@ -2425,7 +2429,7 @@ const BudgetUsageBar: React.FC<{ usagePercentage: number }> = ({ usagePercentage
           />
         )}
       </div>
-      <p className="text-right text-xs font-medium text-gray-500">
+      <p className="text-right text-xs font-medium text-gray-500 dark:text-gray-400">
         {clampedUsage.toFixed(1)}% of limit used
       </p>
     </>

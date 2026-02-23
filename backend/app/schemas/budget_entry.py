@@ -7,6 +7,7 @@ from app.models.user import CurrencyType
 
 
 class BudgetEntryBase(BaseModel):
+    entity_id: Optional[int] = Field(None, gt=0)
     name: str = Field(..., min_length=1, max_length=150)
     entry_type: BudgetEntryType
     amount: float = Field(..., gt=0)
@@ -30,6 +31,7 @@ class BudgetEntryCreate(BudgetEntryBase):
 
 
 class BudgetEntryUpdate(BaseModel):
+    entity_id: Optional[int] = Field(None, gt=0)
     name: Optional[str] = Field(None, min_length=1, max_length=150)
     entry_type: Optional[BudgetEntryType] = None
     amount: Optional[float] = Field(None, gt=0)

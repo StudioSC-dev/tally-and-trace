@@ -1,5 +1,5 @@
 {
-  "name": "accounting-frontend",
+  "name": "tally-and-trace-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,6 +12,7 @@
   "dependencies": {
     "@reduxjs/toolkit": "^2.0.1",
     "@tanstack/react-router": "^1.16.6",
+    "@tally-trace/shared": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-redux": "^9.0.4"

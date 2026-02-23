@@ -1,4 +1,4 @@
--- Create user and database for Accounting for Dummies
+-- Create user and database for Tally & Trace
 CREATE USER "user" WITH PASSWORD 'password';
 CREATE DATABASE accounting_db OWNER "user";
 GRANT ALL PRIVILEGES ON DATABASE accounting_db TO "user";

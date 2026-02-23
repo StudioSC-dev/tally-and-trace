@@ -202,6 +202,7 @@ def get_transactions(
     end_date: Optional[datetime] = Query(None, description="End date for filtering"),
     is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
     search: Optional[str] = Query(None, description="Search by description"),
+    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -218,6 +219,8 @@ def get_transactions(
         )
     )
     
+    if entity_id is not None:
+        query = query.filter(Transaction.entity_id == entity_id)
     if account_ids:
         query = query.filter(
             or_(

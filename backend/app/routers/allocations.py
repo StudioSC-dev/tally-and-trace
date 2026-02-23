@@ -18,12 +18,15 @@ def get_allocations(
     account_id: Optional[int] = Query(None, description="Filter by account ID"),
     allocation_type: Optional[str] = Query(None, description="Filter by allocation type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Get all allocations with optional filtering"""
     query = db.query(Allocation).filter(Allocation.user_id == current_user.id)
-    
+
+    if entity_id is not None:
+        query = query.filter(Allocation.entity_id == entity_id)
     if account_id:
         query = query.filter(Allocation.account_id == account_id)
     if allocation_type:

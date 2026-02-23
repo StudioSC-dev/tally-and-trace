@@ -159,10 +159,10 @@ export function AccountsPage() {
 
   if (isInitialLoading) {
     return (
-      <div className="flex items-center justify-center min-h-96">
+        <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
           <div className="loading-spinner mx-auto mb-4"></div>
-          <p className="text-gray-600 font-medium">Loading accounts...</p>
+          <p className="text-gray-600 dark:text-slate-400 font-medium">Loading accounts...</p>
         </div>
       </div>
     )
@@ -276,10 +276,10 @@ export function AccountsPage() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-        <h1 className="text-3xl font-bold text-gray-900">Accounts Management</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Accounts</h1>
         <button
           onClick={() => setIsCreateModalOpen(true)}
-          className="w-full sm:w-auto flex items-center justify-center px-5 py-3 rounded-lg bg-blue-600 text-white text-base font-semibold shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200"
+          className="btn-primary focus-ring w-full sm:w-auto justify-center"
         >
           Add Account
         </button>
@@ -292,7 +292,8 @@ export function AccountsPage() {
         </div>
       ) : (
         <>
-          <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+          <div className="overflow-x-auto">
+          <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-500 mb-2">
             <span>Account</span>
             <span className="text-right">Balance</span>
             <span className="text-right">Status</span>
@@ -316,32 +317,32 @@ export function AccountsPage() {
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-3 md:block">
                       <div>
-                        <p className="text-base font-semibold text-gray-900">{account.name}</p>
-                        <p className="text-sm text-gray-500 capitalize">{account.account_type.replace('_', ' ')}</p>
+                        <p className="text-base font-semibold text-gray-900 dark:text-white">{account.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400 capitalize">{account.account_type.replace('_', ' ')}</p>
                         {account.description && (
-                          <p className="text-sm text-gray-600 mt-1">{account.description}</p>
+                          <p className="text-sm text-gray-600 dark:text-slate-400 mt-1">{account.description}</p>
                         )}
                       </div>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${
-                          account.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+                          account.is_active ? 'bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-400'
                         } md:hidden`}
                       >
                         {account.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                    <div className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-slate-400">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-800 px-2 py-1">
                         Currency: {account.currency}
                       </span>
                       {account.account_type === 'credit' && account.credit_limit !== undefined && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-blue-700">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-500/10 px-2 py-1 text-blue-700 dark:text-blue-400">
                           Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
                         </span>
                       )}
                       {account.account_type === 'credit' && account.days_until_due_date && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-indigo-700">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-500/10 px-2 py-1 text-indigo-700 dark:text-indigo-400">
                           +{account.days_until_due_date} days to due
                         </span>
                       )}
@@ -349,16 +350,16 @@ export function AccountsPage() {
                   </div>
 
                   <div className="text-right space-y-2">
-                    <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                       {formatCurrency(account.balance, account.currency as CurrencyCode)}
                     </p>
                     {account.account_type === 'credit' && account.due_date && (
-                      <p className="text-xs text-gray-500">Statement due every {account.due_date}th</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-500">Statement due every {account.due_date}th</p>
                     )}
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-2">
-                    <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${account.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
+                    <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${account.is_active ? 'bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-400'}`}>
                       {account.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </div>
@@ -367,16 +368,17 @@ export function AccountsPage() {
             ))}
             <div ref={sentinelRef} className="h-3" />
             {!isInitialLoading && (isFetchingMore || hasMoreAccounts) && (
-              <p className="text-center text-xs text-gray-500 pb-2">
+              <p className="text-center text-xs text-gray-500 dark:text-slate-500 pb-2">
                 {isFetchingMore ? 'Loading more accounts...' : 'Scroll for more accounts'}
               </p>
             )}
             {!isInitialLoading && !hasMoreAccounts && orderedAccounts.length === totalAccounts && totalAccounts > 0 && (
-              <p className="text-center text-xs text-gray-400 pb-2">End of list</p>
+              <p className="text-center text-xs text-gray-400 dark:text-slate-600 pb-2">End of list</p>
             )}
           </div>
+          </div>{/* end overflow-x-auto */}
           <div className="flex justify-end px-4">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-slate-500">
               Showing {orderedAccounts.length} of {totalAccounts} accounts
             </p>
           </div>
@@ -385,21 +387,22 @@ export function AccountsPage() {
 
       {isActionModalOpen && actionAccount && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
           onClick={closeActionModal}
         >
+          <div className="min-h-full flex items-center justify-center">
           <div
-            className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-2xl rounded-xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-gray-200 dark:border-slate-700"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">{actionAccount.name}</h2>
-                <p className="text-sm text-gray-500 capitalize">{actionAccount.account_type.replace('_', ' ')}</p>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{actionAccount.name}</h2>
+                <p className="text-sm text-gray-500 dark:text-slate-400 capitalize">{actionAccount.account_type.replace('_', ' ')}</p>
               </div>
-              <button
+                <button
                 onClick={closeActionModal}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 transition-colors duration-200"
                 aria-label="Close account actions modal"
               >
                 <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,29 +412,29 @@ export function AccountsPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Balance</h3>
-                <p className={`mt-2 text-lg font-bold ${actionAccount.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">Balance</h3>
+                <p className={`mt-2 text-lg font-bold ${actionAccount.balance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                   {formatCurrency(actionAccount.balance, actionAccount.currency as CurrencyCode)}
                 </p>
-                <p className="mt-2 text-sm text-gray-500">Currency: {actionAccount.currency}</p>
+                <p className="mt-2 text-sm text-gray-500 dark:text-slate-400">Currency: {actionAccount.currency}</p>
                 {actionAccount.account_type === 'credit' && actionAccount.credit_limit !== undefined && (
-                  <p className="mt-1 text-sm text-gray-500">
+                  <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
                     Credit limit {formatCurrency(actionAccount.credit_limit, actionAccount.currency as CurrencyCode)}
                   </p>
                 )}
               </div>
 
-              <div className="rounded-lg border border-gray-200 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Status</h3>
-                <p className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${actionAccount.is_active ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'}`}>
+              <div className="rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 p-4">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-slate-300">Status</h3>
+                <p className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${actionAccount.is_active ? 'bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400' : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-slate-400'}`}>
                   {actionAccount.is_active ? 'Active' : 'Inactive'}
                 </p>
                 {actionAccount.account_type === 'credit' && actionAccount.due_date && (
-                  <p className="mt-2 text-sm text-gray-500">Statement closes every {actionAccount.due_date}th</p>
+                  <p className="mt-2 text-sm text-gray-500 dark:text-slate-400">Statement closes every {actionAccount.due_date}th</p>
                 )}
                 {actionAccount.account_type === 'credit' && actionAccount.days_until_due_date && (
-                  <p className="text-sm text-gray-500">Due {actionAccount.days_until_due_date} days after statement</p>
+                  <p className="text-sm text-gray-500 dark:text-slate-400">Due {actionAccount.days_until_due_date} days after statement</p>
                 )}
               </div>
             </div>
@@ -440,13 +443,13 @@ export function AccountsPage() {
               <button
                 onClick={() => handleToggleActive(actionAccount)}
                 className={`flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold transition-colors duration-200 ${
-                  actionAccount.is_active ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  actionAccount.is_active ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20' : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-600'
                 }`}
               >
                 <span>{actionAccount.is_active ? 'Mark as inactive' : 'Activate account'}</span>
                 <span
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                    actionAccount.is_active ? 'bg-blue-600' : 'bg-gray-300'
+                    actionAccount.is_active ? 'bg-blue-500' : 'bg-gray-300 dark:bg-slate-600'
                   }`}
                 >
                   <span
@@ -458,7 +461,7 @@ export function AccountsPage() {
               </button>
               <button
                 onClick={() => openEditFromModal(actionAccount)}
-                className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-700"
+                className="flex items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-3 text-sm font-semibold text-white transition-colors duration-200 hover:bg-blue-600"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -467,7 +470,7 @@ export function AccountsPage() {
               </button>
               <button
                 onClick={() => handleDelete(actionAccount.id)}
-                className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-3 text-sm font-semibold text-gray-700 transition-colors duration-200 hover:bg-gray-200 sm:col-span-2"
+                className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 dark:bg-slate-700 px-4 py-3 text-sm font-semibold text-gray-700 dark:text-slate-300 transition-colors duration-200 hover:bg-gray-200 dark:hover:bg-slate-600 sm:col-span-2"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -476,15 +479,17 @@ export function AccountsPage() {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center px-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
+          <div className="min-h-full flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-gray-200 dark:border-slate-700">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                 {editingAccount ? 'Edit Account' : 'Create Account'}
               </h2>
               <button
@@ -505,7 +510,7 @@ export function AccountsPage() {
                   })
                   setShowCreditSettings(false)
                 }}
-                className="text-gray-400 hover:text-gray-600 transition-colors duration-200 w-full sm:w-auto"
+                className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 transition-colors duration-200 w-full sm:w-auto"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -564,7 +569,7 @@ export function AccountsPage() {
                 <label className="label">Initial Balance</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">{formCurrencySymbol}</span>
+                    <span className="text-gray-500 dark:text-slate-400 sm:text-sm">{formCurrencySymbol}</span>
                   </div>
                   <input
                     type="number"
@@ -590,13 +595,13 @@ export function AccountsPage() {
               </div>
               
               {formData.account_type === 'credit' && (
-                <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-500/10 rounded-lg border border-blue-200 dark:border-blue-500/20">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-blue-800">Credit Card Settings</h3>
+                    <h3 className="text-sm font-medium text-blue-800 dark:text-blue-300">Credit Card Settings</h3>
                     <button
                       type="button"
                       onClick={() => setShowCreditSettings((prev) => !prev)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-900"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300"
                     >
                       <svg
                         className={`h-4 w-4 transition-transform duration-200 ${showCreditSettings ? 'rotate-180' : ''}`}
@@ -616,7 +621,7 @@ export function AccountsPage() {
                         <label className="label">Credit Limit</label>
                         <div className="relative">
                           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <span className="text-gray-500 sm:text-sm">{formCurrencySymbol}</span>
+                            <span className="text-gray-500 dark:text-slate-400 sm:text-sm">{formCurrencySymbol}</span>
                           </div>
                           <input
                             type="number"
@@ -674,20 +679,20 @@ export function AccountsPage() {
                           className="input-field focus-ring"
                           placeholder="21"
                         />
-                        <p className="mt-1 text-xs text-gray-500">Default is 21 days after the statement date.</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Default is 21 days after the statement date.</p>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+              <div className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/50 px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Account status</p>
-                  <p className="text-xs text-gray-500">Inactive accounts stay in history but are hidden from most views.</p>
+                  <p className="text-sm font-medium text-gray-700 dark:text-slate-300">Account status</p>
+                  <p className="text-xs text-gray-500 dark:text-slate-500">Inactive accounts stay in history but are hidden from most views.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-600">{formData.is_active ? 'Active' : 'Inactive'}</span>
+                  <span className="text-sm text-gray-600 dark:text-slate-400">{formData.is_active ? 'Active' : 'Inactive'}</span>
                   <button
                     type="button"
                     onClick={() =>
@@ -697,7 +702,7 @@ export function AccountsPage() {
                       }))
                     }
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-                      formData.is_active ? 'bg-blue-600' : 'bg-gray-300'
+                      formData.is_active ? 'bg-blue-500' : 'bg-gray-300 dark:bg-slate-600'
                     }`}
                   >
                     <span
@@ -709,14 +714,11 @@ export function AccountsPage() {
                 </div>
               </div>
               
-              <div className="flex space-x-3 pt-6 border-t border-gray-200">
+              <div className="flex space-x-3 pt-6 border-t border-gray-200 dark:border-slate-700">
                 <button
                   type="submit"
                   className="flex-1 btn-primary focus-ring w-full sm:w-auto py-3 px-4 text-base rounded-lg"
                 >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
                   {editingAccount ? 'Update Account' : 'Create Account'}
                 </button>
                 <button
@@ -743,6 +745,7 @@ export function AccountsPage() {
                 </button>
               </div>
             </form>
+          </div>
           </div>
         </div>
       )}

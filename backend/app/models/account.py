@@ -36,6 +36,9 @@ class Account(Base):
     billing_cycle_start = Column(Integer, nullable=True)  # Day of month for billing cycle start / statement day
     days_until_due_date = Column(Integer, nullable=True, default=21)
     
+    # Entity scoping (nullable – existing data retains null until backfilled)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
+
     # Account status
     is_active = Column(Boolean, default=True)
     
@@ -44,6 +47,7 @@ class Account(Base):
     
     # Relationships
     user = relationship("User", back_populates="accounts")
+    entity = relationship("Entity", back_populates="accounts", foreign_keys="Account.entity_id")
     transactions = relationship(
         "Transaction",
         back_populates="account",

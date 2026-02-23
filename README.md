@@ -1,52 +1,80 @@
-# FastAPI + React Monorepo
+# Tally & Trace
 
-A **full-stack, type-safe monorepo** featuring a modern React frontend and an async Python FastAPI backend for accounting management. This project follows the [react-kit](https://github.com/DivineDemon/react-kit) template structure for rapid, scalable development.
+A **full-stack, type-safe monorepo** for personal and business financial management. Features a React web frontend, a FastAPI backend, a shared TypeScript package, and a React Native mobile app (coming soon). Built with the [react-kit](https://github.com/DivineDemon/react-kit) template structure for rapid, scalable development.
 
 ---
 
 ## Project Structure
 
 ```
-accounting-for-dummies-fastapi/
-├── backend/                # FastAPI backend (Python)
-│   ├── app/                # Main backend application code
-│   │   ├── core/           # Core config, DB, logger, etc.
-│   │   ├── constants/      # Seed data and static files
-│   │   ├── models/         # SQLAlchemy ORM models
-│   │   ├── routers/        # API route definitions
-│   │   ├── schemas/        # Pydantic schemas for validation
-│   │   └── main.py         # FastAPI app entrypoint
-│   ├── requirements.txt    # Python dependencies
-│   ├── .env.example        # Backend environment variables
-│   └── main.py            # Backend entry point
+tally-and-trace/
+├── backend/                  # FastAPI backend (Python)
+│   ├── app/
+│   │   ├── core/             # Config, DB engine, auth, seeding
+│   │   ├── constants/        # Seed data (JSON)
+│   │   ├── models/           # SQLAlchemy ORM models
+│   │   ├── routers/          # API route definitions
+│   │   ├── schemas/          # Pydantic request/response schemas
+│   │   ├── services/         # Business-logic services
+│   │   └── main.py           # FastAPI app entrypoint
+│   ├── migrations/           # Alembic migration versions
+│   ├── requirements.txt      # Python dependencies
+│   └── env.example           # Backend environment variables
 │
-├── frontend/               # React frontend (TypeScript)
-│   ├── src/                # Source code
-│   │   ├── routes/         # Route components (file-based routing)
-│   │   ├── store/          # Redux store & API services
-│   │   ├── assets/         # Static assets (CSS, images)
-│   │   └── main.tsx        # App entrypoint
-│   ├── index.html          # HTML template
-│   ├── package.json        # Frontend dependencies & scripts
-│   ├── tsconfig*.json      # TypeScript configs
-│   └── vite.config.ts      # Vite build config
+├── frontend/                 # React web app (TypeScript + Vite)
+│   ├── src/
+│   │   ├── routes/           # Route components (TanStack Router)
+│   │   ├── store/            # Redux Toolkit + RTK Query services
+│   │   ├── components/       # Reusable UI components
+│   │   ├── contexts/         # React context providers
+│   │   ├── hooks/            # Custom hooks
+│   │   ├── utils/            # Frontend utilities
+│   │   └── main.tsx          # App entrypoint
+│   ├── vite.config.ts        # Vite build & dev-proxy config
+│   └── package.json
 │
-├── .gitignore              # Git ignore rules
-└── README.md               # This file
+├── mobile/                   # React Native app (Expo, coming soon)
+│   ├── app/
+│   │   ├── (auth)/           # Auth screens (login, register)
+│   │   ├── (tabs)/           # Tab screens (dashboard, accounts, etc.)
+│   │   └── _layout.tsx       # Root layout
+│   ├── src/
+│   │   ├── components/       # Mobile UI components
+│   │   ├── contexts/         # Mobile context providers
+│   │   ├── store/            # Redux store (mirrors web)
+│   │   └── utils/            # Mobile utilities
+│   ├── app.json              # Expo configuration
+│   └── package.json
+│
+├── packages/
+│   └── shared/               # Shared TypeScript types & utilities
+│       └── src/
+│           ├── types/         # API & auth type definitions
+│           ├── utils/         # Currency & date helpers
+│           └── index.ts       # Package entry
+│
+├── render.yaml               # Render Blueprint (backend + frontend)
+├── pnpm-workspace.yaml       # pnpm workspace config
+├── scripts/
+│   └── setup-supabase.sh     # Supabase DB setup helper
+└── package.json              # Root scripts & workspace config
 ```
 
 ---
 
 ## Features
 
-- **Account Management**: Create and manage multiple accounts
-- **Transaction Tracking**: Record income, expenses, and transfers
-- **Category Organization**: Categorize transactions with colors
-- **RESTful API**: FastAPI with automatic OpenAPI documentation
-- **Type Safety**: Pydantic + TypeScript end-to-end validation
-- **Modern Frontend**: React with TanStack Router and Redux Toolkit
-- **Database**: SQLAlchemy ORM with SQLite/PostgreSQL support
-- **Seed Data**: Pre-populated with sample accounts and transactions
+- **Multi-Entity Architecture**: Manage personal and business finances under separate entities
+- **Account Management**: Cash, e-wallets, savings, checking, and credit accounts with multi-currency support
+- **Transaction Tracking**: Record income, expenses, and transfers with FX fields
+- **Budget Entries**: Recurring income/expense items with configurable cadence and end rules
+- **Allocations**: Savings goals, budgets, and period-based allocations
+- **Wishlist**: Prioritised wishlist items linked to categories and entities
+- **Category Organisation**: Color-coded categories for transactions and budgets
+- **Auth & Email**: JWT authentication with email verification and password reset (via Resend)
+- **Shared Package**: `@tally-trace/shared` provides types and utilities consumed by both web and mobile
+- **Type Safety**: Pydantic v2 on the backend, TypeScript everywhere on the frontend
+- **Mobile App** *(coming soon)*: React Native (Expo) app with NativeWind styling, tab navigation, and secure token storage
 
 ---
 
@@ -55,23 +83,24 @@ accounting-for-dummies-fastapi/
 ### Prerequisites
 
 - **Python 3.10+** (recommended: 3.12)
-- **Node.js 18+** and **pnpm** (or npm/yarn)
+- **Node.js 18+** and **pnpm**
+- **PostgreSQL** (local or Supabase)
 
-### 1. Setup Backend
+### 1. Clone and Install
+
+```bash
+# Install frontend, mobile, and shared workspace dependencies
+pnpm install
+```
+
+### 2. Setup Backend
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env  # Edit .env for your configuration
-```
-
-### 2. Setup Frontend
-
-```bash
-cd frontend
-pnpm install
+cp env.example .env         # Edit .env with your DB URL and secrets
 ```
 
 ### 3. Start Development Servers
@@ -79,84 +108,155 @@ pnpm install
 **Backend:**
 ```bash
 cd backend
-python main.py
-# Or: uvicorn app.main:app --reload
+uvicorn app.main:app --reload
 ```
 
 **Frontend:**
 ```bash
-cd frontend
-pnpm run dev
+pnpm run dev:frontend
+```
+
+**Mobile** *(requires Expo Go or a simulator)*:
+```bash
+pnpm run dev:mobile
 ```
 
 ### 4. Access the Application
 
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+| Service            | URL                          |
+|--------------------|------------------------------|
+| Frontend           | http://localhost:3000         |
+| Backend API        | http://localhost:8000         |
+| API Docs (Swagger) | http://localhost:8000/docs    |
 
 ---
 
 ## API Endpoints
 
+All endpoints are prefixed with `/api/v1`.
+
+### Auth
+- `POST /auth/register` — Register a new user
+- `POST /auth/login` — Login and receive a JWT
+- `GET  /auth/me` — Get current user
+- `PUT  /auth/me` — Update current user
+
 ### Accounts
-- `GET /api/v1/accounts/` - Get all accounts
-- `POST /api/v1/accounts/` - Create a new account
-- `GET /api/v1/accounts/{account_id}` - Get specific account
+- `GET    /accounts/` — List accounts
+- `POST   /accounts/` — Create an account
+- `GET    /accounts/{id}` — Get account details
+- `PUT    /accounts/{id}` — Update an account
+- `DELETE /accounts/{id}` — Delete an account
+- `GET    /accounts/{id}/balance` — Get account balance
 
 ### Transactions
-- `GET /api/v1/transactions/` - Get all transactions
-- `POST /api/v1/transactions/` - Create a new transaction
-- `GET /api/v1/transactions/{transaction_id}` - Get specific transaction
+- `GET    /transactions/` — List transactions (paginated)
+- `POST   /transactions/` — Create a transaction
+- `GET    /transactions/{id}` — Get transaction details
+- `PUT    /transactions/{id}` — Update a transaction
+- `DELETE /transactions/{id}` — Delete a transaction
 
 ### Categories
-- `GET /api/v1/categories/` - Get all categories
-- `POST /api/v1/categories/` - Create a new category
-- `GET /api/v1/categories/{category_id}` - Get specific category
+- `GET    /categories/` — List categories
+- `POST   /categories/` — Create a category
+- `GET    /categories/{id}` — Get category details
+- `PUT    /categories/{id}` — Update a category
+- `DELETE /categories/{id}` — Delete a category
+
+### Allocations
+- `GET    /allocations/` — List allocations
+- `POST   /allocations/` — Create an allocation
+- `GET    /allocations/{id}` — Get allocation details
+- `PUT    /allocations/{id}` — Update an allocation
+- `DELETE /allocations/{id}` — Delete an allocation
+
+### Budget Entries
+- `GET    /budget-entries/` — List budget entries
+- `POST   /budget-entries/` — Create a budget entry
+- `GET    /budget-entries/{id}` — Get budget entry details
+- `PUT    /budget-entries/{id}` — Update a budget entry
+- `DELETE /budget-entries/{id}` — Delete a budget entry
+
+### Entities
+- `GET    /entities/` — List entities for current user
+- `POST   /entities/` — Create an entity
+- `GET    /entities/{id}` — Get entity details
+
+### Wishlist
+- `GET    /wishlist/` — List wishlist items
+- `POST   /wishlist/` — Create a wishlist item
+- `GET    /wishlist/{id}` — Get wishlist item
+- `PUT    /wishlist/{id}` — Update a wishlist item
+- `DELETE /wishlist/{id}` — Delete a wishlist item
 
 ---
 
 ## Development
 
-### Backend Development
+### Backend
 
-The backend follows the react-kit structure:
-- **Database migrations**: Use Alembic to manage schema changes. To set it up:
-  1. `cd backend && source .venv/bin/activate`
-  2. `alembic init migrations`
-  3. Update `alembic.ini` to point `sqlalchemy.url` at your `DATABASE_URL`, or configure it inside `migrations/env.py` using `settings.DATABASE_URL`.
-  4. Wire the models inside `migrations/env.py` by importing `Base` from `app.core.database`.
-  5. Generate migrations with `alembic revision --autogenerate -m "describe change"` and apply them via `alembic upgrade head`.
-  6. For a quick reset during development, you can still run `python -m app.core.init_db` to rebuild and reseed the database from scratch.
-- **Auto-router inclusion**: All files in `app/routers/` are automatically included
-- **Database seeding**: Initial data is loaded from `app/constants/seed_data.json`
-- **Type safety**: Pydantic v2 for request/response validation
-- **Async support**: SQLAlchemy async engine for high concurrency
+- **Database migrations**: Managed with Alembic.
+  ```bash
+  cd backend && source .venv/bin/activate
+  alembic revision --autogenerate -m "describe change"
+  alembic upgrade head
+  ```
+- **Auto-router inclusion**: All files in `app/routers/` are automatically registered.
+- **Database seeding**: Initial data loaded from `app/constants/seed_data.json` on startup.
+- **Type safety**: Pydantic v2 for request/response validation.
 
-### Frontend Development
+### Frontend (Web)
 
-The frontend uses modern React patterns:
-- **File-based routing**: TanStack Router for zero-config routing
-- **State management**: Redux Toolkit with RTK Query for API calls
-- **Type safety**: Full TypeScript support with generated types
-- **Styling**: Tailwind CSS for utility-first styling
+- **File-based routing**: TanStack Router
+- **State management**: Redux Toolkit with RTK Query
+- **Styling**: Tailwind CSS
+- **API proxy**: Vite dev server proxies `/api` to `http://localhost:8000`
+
+### Mobile (Coming Soon)
+
+- **Framework**: React Native via Expo SDK 52
+- **Routing**: Expo Router with file-based routes
+- **Styling**: NativeWind (Tailwind CSS for React Native)
+- **State management**: Redux Toolkit + RTK Query (mirrors web store)
+- **Secure storage**: `expo-secure-store` for token persistence
+
+### Shared Package
+
+`@tally-trace/shared` is consumed by both `frontend` and `mobile` via the pnpm workspace. It contains:
+- **Types** (`types/api.ts`, `types/auth.ts`): shared API response/request interfaces
+- **Utilities** (`utils/currency.ts`, `utils/date.ts`): common formatting helpers
 
 ### Adding New Features
 
-1. **Backend**: Add new models in `backend/app/models/`, schemas in `backend/app/schemas/`, and routers in `backend/app/routers/`
-2. **Frontend**: Add new routes in `frontend/src/routes/` and API endpoints in `frontend/src/store/api.ts`
+1. **Backend**: Add models in `backend/app/models/`, schemas in `backend/app/schemas/`, and routers in `backend/app/routers/`.
+2. **Shared types**: Update `packages/shared/src/types/` and re-export from `index.ts`.
+3. **Web frontend**: Add routes in `frontend/src/routes/` and API endpoints in `frontend/src/store/api.ts`.
+4. **Mobile**: Add screens in `mobile/app/` and wire up the shared store.
 
 ---
 
-## Production Deployment
+## Deployment
 
-For production deployment:
+Both the backend and the web frontend are deployed on **Render** via the `render.yaml` Blueprint.
 
-1. **Database**: Use PostgreSQL instead of SQLite
-2. **Environment**: Set proper environment variables
-3. **CORS**: Configure allowed origins
-4. **Authentication**: Add JWT authentication
-5. **Build**: Use `pnpm run build` for frontend and proper WSGI server for backend
+| Service               | Type         | URL (default)                                   |
+|-----------------------|--------------|--------------------------------------------------|
+| `tally-and-trace-api` | Web Service  | `https://tally-and-trace-api.onrender.com`       |
+| `tally-and-trace-web` | Static Site  | `https://tally-and-trace-web.onrender.com`       |
+| `tally-and-trace-db`  | PostgreSQL   | Internal connection string                       |
+
+### Deploying
+
+1. Connect the repo to Render as a **Blueprint**.
+2. Render auto-creates the backend web service, static site, and PostgreSQL database.
+3. Set the two manual environment variables on the backend service:
+   - `RESEND_API_KEY`
+   - `RESEND_FROM_EMAIL`
+4. (Optional) Add a custom domain to the static site and update `BACKEND_CORS_ORIGINS_STR` / `FRONTEND_BASE_URL` on the backend accordingly.
+
+### Mobile Distribution
+
+The mobile app will be distributed via **Expo Application Services (EAS)** for both iOS and Android builds. Details will be added once the mobile app is feature-complete.
 
 ---
 
@@ -170,4 +270,4 @@ For production deployment:
 
 ---
 
-**Happy accounting!** 📊💰
+**Happy accounting!**

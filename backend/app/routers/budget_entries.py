@@ -63,6 +63,7 @@ def list_budget_entries(
         None, description="Filter by entry type (income or expense)"
     ),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     before: Optional[datetime] = Query(
         None, description="Filter entries occurring before this datetime"
     ),
@@ -74,6 +75,8 @@ def list_budget_entries(
 ):
     query = db.query(BudgetEntry).filter(BudgetEntry.user_id == current_user.id)
 
+    if entity_id is not None:
+        query = query.filter(BudgetEntry.entity_id == entity_id)
     if entry_type:
         query = query.filter(BudgetEntry.entry_type == entry_type)
     if is_active is not None:

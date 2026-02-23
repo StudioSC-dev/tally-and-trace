@@ -1,0 +1,17 @@
+{
+  "name": "@tally-trace/shared",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shared types, utilities, and API client for Tally & Trace",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2"
+  }
+}
