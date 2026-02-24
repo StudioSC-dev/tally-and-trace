@@ -6,6 +6,7 @@ export interface User {
   default_currency: string
   is_active: boolean
   is_verified: boolean
+  onboarding_completed: boolean
   created_at: string
   updated_at?: string
   last_login?: string

@@ -110,7 +110,7 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      navigate({ to: '/login' })
+      navigate({ to: '/login', search: { message: undefined } })
     }
   }, [isAuthenticated, authLoading, navigate])
 

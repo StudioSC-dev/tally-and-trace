@@ -100,7 +100,7 @@ export function AccountsPage() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      navigate({ to: '/login' })
+      navigate({ to: '/login', search: { message: undefined } })
     }
   }, [authLoading, isAuthenticated, navigate])
 

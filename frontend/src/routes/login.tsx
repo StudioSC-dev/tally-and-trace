@@ -5,7 +5,7 @@ import { useEffect } from 'react'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
-  validateSearch: (search: Record<string, unknown>) => {
+  validateSearch: (search: Record<string, unknown>): { message?: string } => {
     return {
       message: (search.message as string) || undefined,
     }

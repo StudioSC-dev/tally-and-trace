@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setUser(userData)
             localStorage.setItem('user', JSON.stringify(userData))
           })
-          .catch((error) => {
+          .catch(() => {
             // Token is invalid, clear everything
             localStorage.removeItem('access_token')
             localStorage.removeItem('user')

@@ -2,9 +2,9 @@ import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useVerifyEmailMutation } from '../store/authApi'
 
-export const Route = createFileRoute('/verify-email')({
+export const Route = createFileRoute('/verify-email' as any)({
   component: VerifyEmailPage,
-  validateSearch: (search: Record<string, unknown>) => {
+  validateSearch: (search: Record<string, unknown>): { token?: string } => {
     return {
       token: (search.token as string) || undefined,
     }
@@ -13,7 +13,7 @@ export const Route = createFileRoute('/verify-email')({
 
 export function VerifyEmailPage() {
   const navigate = useNavigate()
-  const { token } = useSearch({ from: '/verify-email' })
+  const { token } = useSearch({ from: Route.fullPath as any })
   const [verifyEmail, { isLoading, isSuccess, isError, error }] = useVerifyEmailMutation()
   const [countdown, setCountdown] = useState(5)
   const [errorMessage, setErrorMessage] = useState<string>('')
@@ -73,7 +73,7 @@ export function VerifyEmailPage() {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Verification Failed</h2>
           <p className="text-gray-600 dark:text-slate-400 mb-6">{errorMessage}</p>
           <button
-            onClick={() => navigate({ to: '/login' })}
+            onClick={() => navigate({ to: '/login', search: { message: undefined } })}
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
           >
             Go to Login

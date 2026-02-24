@@ -145,7 +145,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600 dark:text-slate-400">
             Or{' '}
-            <Link to="/login" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
+            <Link to="/login" search={{ message: undefined }} className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
               sign in to your existing account
             </Link>
           </p>

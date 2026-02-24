@@ -230,7 +230,6 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
         const spaceBelow = window.innerHeight - rect.bottom
         const spaceAbove = rect.top
         const spaceRight = window.innerWidth - rect.right
-        const spaceLeft = rect.left
         
         const bubbleWidth = 320
         const bubbleHeight = 200

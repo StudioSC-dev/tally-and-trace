@@ -35,7 +35,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
       const timer = setTimeout(() => {
         navigate({ 
           to: '/login',
-          search: {} // Clear search params
+          search: { message: undefined } // Clear search params
         })
       }, 5000) // Auto-hide after 5 seconds
 
@@ -50,7 +50,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
       setShowSuccessMessage(false)
       navigate({ 
         to: '/login',
-        search: {} // Clear search params
+        search: { message: undefined } // Clear search params
       })
     }
   }
@@ -61,7 +61,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
       setShowSuccessMessage(false)
       navigate({ 
         to: '/login',
-        search: {} // Clear search params
+        search: { message: undefined } // Clear search params
       })
     }
   }
@@ -91,7 +91,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
     setShowSuccessMessage(false) // Clear success message on submit
     navigate({ 
       to: '/login',
-      search: {} // Clear search params
+      search: { message: undefined } // Clear search params
     })
 
     try {

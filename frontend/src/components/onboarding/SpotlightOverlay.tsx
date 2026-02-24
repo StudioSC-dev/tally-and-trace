@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 interface SpotlightOverlayProps {
   targetSelector?: string
   targetElement?: HTMLElement | null
-  onClose?: () => void
   children?: React.ReactNode
   padding?: number
   borderRadius?: number
@@ -12,7 +11,6 @@ interface SpotlightOverlayProps {
 export function SpotlightOverlay({
   targetSelector,
   targetElement,
-  onClose,
   children,
   padding = 8,
   borderRadius = 8,
