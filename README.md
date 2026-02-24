@@ -2,6 +2,12 @@
 
 A **full-stack, type-safe monorepo** for personal and business financial management. Features a React web frontend, a FastAPI backend, a shared TypeScript package, and a React Native mobile app (coming soon). Built with the [react-kit](https://github.com/DivineDemon/react-kit) template structure for rapid, scalable development.
 
+## Why I Built This
+
+I developed Tally & Trace to solve my own need for a simple, flexible financial tracking tool that would replace my aging Google Sheet tracker. Existing solutions were either too complex, too expensive, or lacked the multi-entity support I needed to manage both personal and business finances in one place. This app represents my ideal balance of functionality and simplicity, built with modern tools and best practices.
+
+I built this with my own use cases (my personal use cases, my wife's, our household's and our potential business ventures) in mind. It might not fit yours right away, but do let me know if you have certain features in mind via seth@studiosc.dev.
+
 ---
 
 ## Project Structure
@@ -123,11 +129,21 @@ pnpm run dev:mobile
 
 ### 4. Access the Application
 
+**Local Development:**
+
 | Service            | URL                          |
 |--------------------|------------------------------|
 | Frontend           | http://localhost:3000         |
 | Backend API        | http://localhost:8000         |
 | API Docs (Swagger) | http://localhost:8000/docs    |
+
+**Production (Deployed):**
+
+| Service            | Custom Domain                              |
+|--------------------|--------------------------------------------|
+| Frontend           | https://tallyandtrace.studiosc.dev         |
+| Backend API        | https://api.tallyandtrace.studiosc.dev     |
+| API Docs (Swagger) | https://api.tallyandtrace.studiosc.dev/docs |
 
 ---
 
@@ -239,20 +255,93 @@ All endpoints are prefixed with `/api/v1`.
 
 Both the backend and the web frontend are deployed on **Render** via the `render.yaml` Blueprint.
 
-| Service               | Type         | URL (default)                                   |
-|-----------------------|--------------|--------------------------------------------------|
-| `tally-and-trace-api` | Web Service  | `https://tally-and-trace-api.onrender.com`       |
-| `tally-and-trace-web` | Static Site  | `https://tally-and-trace-web.onrender.com`       |
-| `tally-and-trace-db`  | PostgreSQL   | Internal connection string                       |
+| Service               | Type         | Custom Domain                              |
+|-----------------------|--------------|---------------------------------------------|
+| `tally-and-trace-api` | Web Service  | `https://api.tallyandtrace.studiosc.dev`    |
+| `tally-and-trace-web` | Static Site  | `https://tallyandtrace.studiosc.dev`        |
+
+**Note:** The database is hosted on **Supabase** (not Render). Connection string is configured via the `DATABASE_URL` environment variable.
 
 ### Deploying
 
 1. Connect the repo to Render as a **Blueprint**.
-2. Render auto-creates the backend web service, static site, and PostgreSQL database.
-3. Set the two manual environment variables on the backend service:
-   - `RESEND_API_KEY`
-   - `RESEND_FROM_EMAIL`
-4. (Optional) Add a custom domain to the static site and update `BACKEND_CORS_ORIGINS_STR` / `FRONTEND_BASE_URL` on the backend accordingly.
+2. Render auto-creates the backend web service and static site from `render.yaml`.
+3. Set the manual environment variables on the backend service:
+   - `DATABASE_URL` — Supabase pooler connection string
+   - `RESEND_API_KEY` — Resend API key for transactional emails
+   - `RESEND_FROM_EMAIL` — Verified sender email address
+4. Custom domains are configured in `render.yaml`:
+   - Frontend: `tallyandtrace.studiosc.dev`
+   - API: `api.tallyandtrace.studiosc.dev`
+   - Add corresponding CNAME records in your DNS provider pointing to the Render service URLs
+   - Render automatically provisions SSL certificates for custom domains
+
+### Testing Production Deployment
+
+#### Frontend Testing
+
+1. **Access the web app:**
+   ```bash
+   https://tallyandtrace.studiosc.dev
+   ```
+
+2. **Verify functionality:**
+   - User registration and login
+   - Dashboard loads with account summaries
+   - Navigation between pages (Accounts, Transactions, Allocations, Wishlist)
+   - Responsive design on mobile devices
+   - Dark mode toggle
+
+#### API Testing
+
+1. **Health check:**
+   ```bash
+   curl https://api.tallyandtrace.studiosc.dev/health
+   ```
+   Expected response: `{"status": "healthy"}`
+
+2. **API documentation:**
+   ```bash
+   https://api.tallyandtrace.studiosc.dev/docs
+   ```
+
+3. **Test authentication flow:**
+   ```bash
+   # Register a new user
+   curl -X POST https://api.tallyandtrace.studiosc.dev/api/v1/auth/register \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "test@example.com",
+       "password": "SecurePass123!",
+       "firstName": "Test",
+       "lastName": "User"
+     }'
+   
+   # Login
+   curl -X POST https://api.tallyandtrace.studiosc.dev/api/v1/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "test@example.com",
+       "password": "SecurePass123!"
+     }'
+   ```
+
+4. **Test protected endpoints** (requires JWT token from login):
+   ```bash
+   # Get current user
+   curl https://api.tallyandtrace.studiosc.dev/api/v1/auth/me \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN"
+   
+   # List accounts
+   curl https://api.tallyandtrace.studiosc.dev/api/v1/accounts/ \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN"
+   ```
+
+5. **Verify CORS configuration:**
+   - Open browser DevTools → Network tab
+   - Access `https://tallyandtrace.studiosc.dev`
+   - Check API requests to `https://api.tallyandtrace.studiosc.dev`
+   - Verify no CORS errors in the console
 
 ### Mobile Distribution
 
@@ -270,4 +359,4 @@ The mobile app will be distributed via **Expo Application Services (EAS)** for b
 
 ---
 
-**Happy accounting!**
+**Tally and trace!**
