@@ -7,6 +7,7 @@ Create Date: 2026-02-23 00:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ENUM
 
 # revision identifiers, used by Alembic.
 revision = 'a1b2c3d4e5f6'
@@ -16,37 +17,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Create new enum types
-    op.execute("""
-        DO $$ BEGIN
-            CREATE TYPE entitytype AS ENUM ('personal', 'business');
-        EXCEPTION
-            WHEN duplicate_object THEN null;
-        END $$;
-    """)
+    # 1. Define enum types (PostgreSQL-specific ENUM gives us proper create_type control)
+    entitytype = ENUM('personal', 'business', name='entitytype', create_type=False)
+    memberrole = ENUM('owner', 'member', name='memberrole', create_type=False)
+    currencytype = ENUM('PHP', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'CNY', 'SGD', name='currencytype', create_type=False)
+    wishlistpriority = ENUM('low', 'medium', 'high', 'critical', name='wishlistpriority', create_type=False)
 
-    op.execute("""
-        DO $$ BEGIN
-            CREATE TYPE memberrole AS ENUM ('owner', 'member');
-        EXCEPTION
-            WHEN duplicate_object THEN null;
-        END $$;
-    """)
-
-    op.execute("""
-        DO $$ BEGIN
-            CREATE TYPE wishlistpriority AS ENUM ('low', 'medium', 'high', 'critical');
-        EXCEPTION
-            WHEN duplicate_object THEN null;
-        END $$;
-    """)
+    # Create only the NEW enum types (currencytype already exists from earlier migration)
+    entitytype.create(op.get_bind(), checkfirst=True)
+    memberrole.create(op.get_bind(), checkfirst=True)
+    wishlistpriority.create(op.get_bind(), checkfirst=True)
 
     # 2. Create entities table
     op.create_table(
         'entities',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(150), nullable=False),
-        sa.Column('entity_type', sa.Enum('personal', 'business', name='entitytype'), nullable=False, server_default='personal'),
+        sa.Column('entity_type', entitytype, nullable=False, server_default='personal'),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('default_currency', sa.String(10), nullable=True, server_default='PHP'),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
@@ -63,7 +50,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('entity_id', sa.Integer(), nullable=False),
-        sa.Column('role', sa.Enum('owner', 'member', name='memberrole'), nullable=False, server_default='member'),
+        sa.Column('role', memberrole, nullable=False, server_default='member'),
         sa.Column('joined_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['entity_id'], ['entities.id'], ondelete='CASCADE'),
@@ -79,8 +66,8 @@ def upgrade() -> None:
         sa.Column('entity_id', sa.Integer(), nullable=True),
         sa.Column('name', sa.String(200), nullable=False),
         sa.Column('estimated_cost', sa.Float(), nullable=False),
-        sa.Column('currency', sa.Enum('PHP', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'CNY', 'SGD', name='currencytype'), nullable=False, server_default='PHP'),
-        sa.Column('priority', sa.Enum('low', 'medium', 'high', 'critical', name='wishlistpriority'), nullable=False, server_default='medium'),
+        sa.Column('currency', currencytype, nullable=False, server_default='PHP'),
+        sa.Column('priority', wishlistpriority, nullable=False, server_default='medium'),
         sa.Column('category_id', sa.Integer(), nullable=True),
         sa.Column('url', sa.String(500), nullable=True),
         sa.Column('notes', sa.Text(), nullable=True),
