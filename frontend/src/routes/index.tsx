@@ -488,7 +488,7 @@ export function Dashboard() {
       </div>
 
       {/* Financial Snapshot */}
-      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
+      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="financial-snapshot">
         <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -553,7 +553,7 @@ export function Dashboard() {
       {/* Two column grid */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Budget Envelopes */}
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="budget-envelopes">
           <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <div>
@@ -589,7 +589,7 @@ export function Dashboard() {
         </div>
 
         {/* Upcoming Planned Expenses */}
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="upcoming-expenses">
           <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <div>
@@ -639,7 +639,7 @@ export function Dashboard() {
       </div>
 
       {/* Top Expenditure Categories */}
-      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
+      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="top-categories">
         <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">

@@ -2,15 +2,20 @@ import { Outlet } from '@tanstack/react-router'
 import { Navigation } from './Navigation'
 import { BottomNav } from './BottomNav'
 import { useAuth } from '../contexts/AuthContext'
+import { OnboardingFlow } from './onboarding/OnboardingFlow'
+import { useEffect, useState } from 'react'
 
 export function Layout() {
-  console.log('Layout component rendering...')
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated, isLoading, user } = useAuth()
+  const [showOnboarding, setShowOnboarding] = useState(false)
 
-  console.log('Layout: Auth state:', { isAuthenticated, isLoading })
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && user && !user.onboarding_completed) {
+      setShowOnboarding(true)
+    }
+  }, [isLoading, isAuthenticated, user])
 
   if (isLoading) {
-    console.log('Layout: Showing loading spinner')
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
@@ -19,11 +24,8 @@ export function Layout() {
   }
 
   if (!isAuthenticated) {
-    console.log('Layout: Not authenticated, showing Outlet (login/register)')
     return <Outlet />
   }
-
-  console.log('Layout: Authenticated, showing full layout with navigation')
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
       <Navigation />
@@ -34,6 +36,20 @@ export function Layout() {
         </div>
       </main>
       <BottomNav />
+      {showOnboarding && (
+        <OnboardingFlow
+          onComplete={() => {
+            setShowOnboarding(false)
+            // Refresh user data to get updated onboarding_completed status
+            window.location.reload()
+          }}
+          onSkip={() => {
+            setShowOnboarding(false)
+            // Refresh user data to get updated onboarding_completed status
+            window.location.reload()
+          }}
+        />
+      )}
     </div>
   )
 }

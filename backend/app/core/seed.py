@@ -16,6 +16,13 @@ def seed_database():
     db = SessionLocal()
     
     try:
+        # Always reset demo user's onboarding status for testing (runs every time)
+        demo_user = db.query(User).filter(User.email == "demo@example.com").first()
+        if demo_user:
+            demo_user.onboarding_completed = False
+            db.commit()
+            print("Demo user onboarding status reset for testing.")
+        
         # Check if data already exists
         existing_accounts = db.query(Account).count()
         if existing_accounts > 0:
@@ -27,20 +34,25 @@ def seed_database():
         with open(seed_file_path, "r") as f:
             seed_data = json.load(f)
         
-        # Create a default user first
+        # Create a default user first (if it doesn't exist)
         from app.core.auth import get_password_hash
-        default_user = User(
-            email="demo@example.com",
-            password_hash=get_password_hash("password123"),
-            first_name="Demo",
-            last_name="User",
-            is_active=True,
-            is_verified=True,
-            default_currency=CurrencyType.PHP
-        )
-        db.add(default_user)
-        db.commit()
-        db.refresh(default_user)
+        if not demo_user:
+            default_user = User(
+                email="demo@example.com",
+                password_hash=get_password_hash("password123"),
+                first_name="Demo",
+                last_name="User",
+                is_active=True,
+                is_verified=True,
+                onboarding_completed=False,  # Always reset onboarding for demo user for testing
+                default_currency=CurrencyType.PHP
+            )
+            db.add(default_user)
+            db.commit()
+            db.refresh(default_user)
+            default_user = default_user
+        else:
+            default_user = demo_user
 
         # ---------------------------------------------------------------
         # Create two entities for the demo user

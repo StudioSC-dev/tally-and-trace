@@ -412,6 +412,21 @@ async def startup_event():
     logger.info("Database tables initialized successfully!")
     print("Database tables initialized successfully!")
     
+    # Always reset demo user's onboarding for testing
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        demo_user = db.query(User).filter(User.email == "demo@example.com").first()
+        if demo_user:
+            demo_user.onboarding_completed = False
+            db.commit()
+            logger.info("Demo user onboarding status reset for testing")
+    except Exception as e:
+        logger.warning(f"Could not reset demo user onboarding: {e}")
+    finally:
+        db.close()
+    
     # Seed database with initial data
     seed_database()
     logger.info("Database seeding completed")

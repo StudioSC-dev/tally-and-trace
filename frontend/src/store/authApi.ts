@@ -118,6 +118,34 @@ export const authApi = createApi({
         body: data,
       }),
     }),
+
+    // Verify email
+    verifyEmail: builder.mutation<{ message: string }, { token: string }>({
+      query: (data) => ({
+        url: 'auth/verify-email',
+        method: 'POST',
+        body: data,
+      }),
+    }),
+
+    // Complete onboarding
+    completeOnboarding: builder.mutation<User, void>({
+      query: () => ({
+        url: 'auth/complete-onboarding',
+        method: 'PATCH',
+      }),
+      invalidatesTags: ['User'],
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled
+          localStorage.setItem('user', JSON.stringify(data))
+          // Refetch user to update state
+          dispatch(authApi.endpoints.getCurrentUser.initiate())
+        } catch (error) {
+          console.error('Failed to complete onboarding:', error)
+        }
+      },
+    }),
   }),
 })
 
@@ -128,4 +156,6 @@ export const {
   useUpdateUserMutation,
   useLogoutMutation,
   useResendVerificationMutation,
+  useVerifyEmailMutation,
+  useCompleteOnboardingMutation,
 } = authApi

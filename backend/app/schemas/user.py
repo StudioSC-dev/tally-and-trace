@@ -31,6 +31,7 @@ class UserResponse(UserBase):
     id: int
     is_active: bool
     is_verified: bool
+    onboarding_completed: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None

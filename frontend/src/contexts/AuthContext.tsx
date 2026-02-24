@@ -32,33 +32,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check for existing token on mount
   useEffect(() => {
-    console.log('AuthContext: Checking authentication status...')
     const token = localStorage.getItem('access_token')
     const savedUser = localStorage.getItem('user')
-    
-    console.log('AuthContext: Token exists:', !!token, 'Saved user exists:', !!savedUser)
     
     if (token && savedUser) {
       try {
         setUser(JSON.parse(savedUser))
-        console.log('AuthContext: Parsed saved user, verifying token...')
         // Verify token is still valid by fetching current user
         dispatch(authApi.endpoints.getCurrentUser.initiate())
           .unwrap()
           .then((userData: User) => {
-            console.log('AuthContext: Token valid, user data:', userData)
             setUser(userData)
             localStorage.setItem('user', JSON.stringify(userData))
           })
           .catch((error) => {
-            console.log('AuthContext: Token invalid, clearing data:', error)
             // Token is invalid, clear everything
             localStorage.removeItem('access_token')
             localStorage.removeItem('user')
             setUser(null)
           })
           .finally(() => {
-            console.log('AuthContext: Auth check complete, setting loading false')
             setIsLoading(false)
           })
       } catch (error) {
@@ -69,7 +62,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setIsLoading(false)
       }
     } else {
-      console.log('AuthContext: No token or saved user, setting loading false')
       setIsLoading(false)
     }
   }, [dispatch])

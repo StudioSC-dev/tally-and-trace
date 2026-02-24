@@ -136,6 +136,16 @@ def logout(current_user: User = Depends(get_current_active_user)):
     return {"message": "Successfully logged out"}
 
 
+@router.patch("/complete-onboarding", response_model=UserResponse)
+def complete_onboarding(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """Mark onboarding as completed for the current user."""
+    current_user.onboarding_completed = True
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
 @router.post("/verify-email")
 def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
     token = (

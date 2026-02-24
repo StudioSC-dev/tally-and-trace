@@ -26,6 +26,7 @@ class User(Base):
     last_name = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
+    onboarding_completed = Column(Boolean, default=False)
     default_currency = Column(Enum(CurrencyType), default=CurrencyType.PHP)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
