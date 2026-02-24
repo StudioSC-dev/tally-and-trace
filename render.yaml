@@ -16,13 +16,13 @@ services:
       - key: DEBUG
         value: false
       - key: BACKEND_CORS_ORIGINS_STR
-        value: https://tally-and-trace-web.onrender.com
+        value: https://tallyandtrace.studiosc.dev,https://tally-and-trace-web.onrender.com
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
       - key: FRONTEND_BASE_URL
-        value: https://tally-and-trace-web.onrender.com
+        value: https://tallyandtrace.studiosc.dev
 
   # ── Frontend: Vite React SPA ──────────────────────────────────────────────────
   - type: web
@@ -30,6 +30,8 @@ services:
     runtime: static
     buildCommand: cd frontend && pnpm install && pnpm run build
     staticPublishPath: ./frontend/dist
+    domains:
+      - tallyandtrace.studiosc.dev
     routes:
       - type: rewrite
         source: /*
