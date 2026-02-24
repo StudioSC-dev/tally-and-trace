@@ -6,6 +6,8 @@ services:
     runtime: python
     buildCommand: cd backend && pip install -r requirements.txt && alembic upgrade head
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    domains:
+      - api.tallyandtrace.studiosc.dev
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -38,4 +40,4 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        value: https://tally-and-trace-api.onrender.com
+        value: https://api.tallyandtrace.studiosc.dev
