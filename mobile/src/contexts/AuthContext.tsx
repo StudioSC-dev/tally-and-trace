@@ -73,7 +73,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     default_currency: string
   }) => {
     await dispatch(authApi.endpoints.register.initiate(userData)).unwrap()
-    await login(userData.email, userData.password)
+    // Registration successful - user needs to verify email before logging in
   }
 
   const logout = async () => {

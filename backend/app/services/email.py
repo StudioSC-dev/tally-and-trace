@@ -9,7 +9,8 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _is_configured() -> bool:
+def is_email_configured() -> bool:
+    """Check if email service is properly configured."""
     if not settings.RESEND_API_KEY:
         logger.warning("RESEND_API_KEY is not configured; email will not be sent.")
         return False
@@ -18,25 +19,40 @@ def _is_configured() -> bool:
         return False
     return True
 
+def _is_configured() -> bool:
+    """Internal function - use is_email_configured() for external access."""
+    return is_email_configured()
+
 
 def send_email(*, to: Iterable[str], subject: str, html_body: str) -> bool:
     """Send an email using the Resend API. Returns True on success."""
     if not _is_configured():
+        logger.warning(
+            "Email not sent: Email service is not configured. "
+            "Please set RESEND_API_KEY and RESEND_FROM_EMAIL environment variables."
+        )
         return False
 
     try:
         resend.api_key = settings.RESEND_API_KEY  # Set per call to avoid global side-effects.
-        resend.Emails.send(
-            {
-                "from": settings.RESEND_FROM_EMAIL,
-                "to": list(to),
-                "subject": subject,
-                "html": html_body,
-            }
-        )
-        return True
-    except Exception:  # pragma: no cover - log unexpected errors
-        logger.exception("Failed to send email via Resend.")
+        params = {
+            "from": settings.RESEND_FROM_EMAIL,
+            "to": list(to),
+            "subject": subject,
+            "html": html_body,
+        }
+        
+        result = resend.Emails.send(params)
+        
+        if result:
+            logger.info(f"Email sent successfully to {', '.join(to)}")
+            return True
+        else:
+            logger.warning(f"Resend API returned falsy result for email to {', '.join(to)}")
+            return False
+            
+    except Exception as e:  # pragma: no cover - log unexpected errors
+        logger.exception(f"Failed to send email via Resend to {', '.join(to)}: {e}")
         return False
 
 
@@ -48,7 +64,7 @@ def build_verification_email(*, recipient: str, verification_url: str) -> dict:
         <p><a href="{verification_url}">Verify Email</a></p>
         <p>If you did not create an account, you can safely ignore this message.</p>
     """
-    return {"to": [recipient], "subject": subject, "html": html}
+    return {"to": [recipient], "subject": subject, "html_body": html}
 
 
 def build_password_reset_email(*, recipient: str, reset_url: str) -> dict:
@@ -59,5 +75,5 @@ def build_password_reset_email(*, recipient: str, reset_url: str) -> dict:
         <p><a href="{reset_url}">Reset Password</a></p>
         <p>If you did not request a password reset, please ignore this message.</p>
     """
-    return {"to": [recipient], "subject": subject, "html": html}
+    return {"to": [recipient], "subject": subject, "html_body": html}
 

@@ -1,4 +1,5 @@
 import secrets
+import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,7 +25,10 @@ from app.services.email import (
     build_password_reset_email,
     build_verification_email,
     send_email,
+    is_email_configured,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -53,8 +57,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
-    # Send verification email
-    _send_verification_email(db, db_user)
+    # Send verification email (non-blocking - log warning if it fails)
+    email_sent = _send_verification_email(db, db_user)
+    if not email_sent:
+        logger.warning(
+            f"Failed to send verification email to {user.email}. "
+            "User registration succeeded but email verification may not be available. "
+            "Please check email configuration (RESEND_API_KEY and RESEND_FROM_EMAIL)."
+        )
 
     return db_user
 
@@ -158,6 +168,7 @@ def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db
 
 @router.post("/resend-verification")
 def resend_verification(request: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Resend verification email to user."""
     user = db.query(User).filter(User.email == request.email).first()
     if not user:
         # Do not leak registered emails
@@ -166,8 +177,11 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
     if user.is_verified:
         return {"message": "Email is already verified."}
 
-    _send_verification_email(db, user)
-    return {"message": "Verification email sent."}
+    email_sent = _send_verification_email(db, user)
+    if not email_sent:
+        logger.warning(f"Failed to resend verification email to {request.email}")
+    
+    return {"message": "If that account exists, a verification email has been sent."}
 
 
 @router.post("/forgot-password")
@@ -220,6 +234,40 @@ def reset_password(payload: PasswordResetConfirm, db: Session = Depends(get_db))
     return {"message": "Password updated successfully."}
 
 
+@router.get("/email-config")
+def check_email_config():
+    """Diagnostic endpoint to check email service configuration."""
+    logger.info("Email configuration check requested")
+    is_configured = is_email_configured()
+    config_status = {
+        "configured": is_configured,
+        "has_api_key": bool(settings.RESEND_API_KEY),
+        "has_from_email": bool(settings.RESEND_FROM_EMAIL),
+        "from_email": settings.RESEND_FROM_EMAIL if settings.RESEND_FROM_EMAIL else None,
+        "frontend_base_url": settings.FRONTEND_BASE_URL,
+        "environment": settings.ENVIRONMENT,
+    }
+    
+    if not is_configured:
+        config_status["message"] = "Email service is not configured. Please set RESEND_API_KEY and RESEND_FROM_EMAIL environment variables."
+        if not settings.RESEND_API_KEY:
+            config_status["issues"] = config_status.get("issues", []) + ["RESEND_API_KEY is missing"]
+            logger.warning("RESEND_API_KEY is missing")
+        if not settings.RESEND_FROM_EMAIL:
+            config_status["issues"] = config_status.get("issues", []) + ["RESEND_FROM_EMAIL is missing"]
+            logger.warning("RESEND_FROM_EMAIL is missing")
+    else:
+        config_status["message"] = "Email service is configured."
+        logger.info(f"Email service is configured - From: {settings.RESEND_FROM_EMAIL}")
+        # Check if API key looks valid (starts with 're_')
+        if settings.RESEND_API_KEY and not settings.RESEND_API_KEY.startswith('re_'):
+            config_status["warning"] = "RESEND_API_KEY does not start with 're_' - it may be invalid."
+            logger.warning("RESEND_API_KEY does not start with 're_' - it may be invalid")
+    
+    logger.info(f"Email config check result: {config_status}")
+    return config_status
+
+
 def _create_email_token(
     db: Session,
     *,
@@ -244,13 +292,19 @@ def _create_email_token(
     return token_value
 
 
-def _send_verification_email(db: Session, user: User) -> None:
-    token = _create_email_token(
-        db,
-        user=user,
-        token_type=EmailTokenType.VERIFY_EMAIL,
-        expire_hours=settings.EMAIL_VERIFICATION_EXPIRE_HOURS,
-    )
-    verification_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/verify-email?token={token}"
-    email_payload = build_verification_email(recipient=user.email, verification_url=verification_url)
-    send_email(**email_payload)
+def _send_verification_email(db: Session, user: User) -> bool:
+    """Send verification email to user. Returns True if email was sent successfully."""
+    try:
+        token = _create_email_token(
+            db,
+            user=user,
+            token_type=EmailTokenType.VERIFY_EMAIL,
+            expire_hours=settings.EMAIL_VERIFICATION_EXPIRE_HOURS,
+        )
+        verification_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/verify-email?token={token}"
+        email_payload = build_verification_email(recipient=user.email, verification_url=verification_url)
+        result = send_email(**email_payload)
+        return result
+    except Exception as e:
+        logger.exception(f"Error sending verification email to {user.email}: {e}")
+        return False

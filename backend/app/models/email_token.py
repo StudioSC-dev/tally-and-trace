@@ -15,13 +15,21 @@ class EmailTokenType(str, enum.Enum):
     RESET_PASSWORD = "reset_password"
 
 
+def _enum_values(enum_cls):
+    return [member.value for member in enum_cls]
+
+
 class EmailToken(Base):
     __tablename__ = "email_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     token = Column(String(128), unique=True, nullable=False, index=True)
-    token_type = Column(Enum(EmailTokenType), nullable=False, index=True)
+    token_type = Column(
+        Enum(EmailTokenType, values_callable=_enum_values, name="emailtokentype"),
+        nullable=False,
+        index=True
+    )
     expires_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

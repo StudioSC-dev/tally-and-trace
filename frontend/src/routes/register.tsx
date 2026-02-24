@@ -18,7 +18,11 @@ export function RegisterPage() {
   }, [isAuthenticated, authLoading, navigate])
 
   const handleSuccess = () => {
-    navigate({ to: '/' })
+    // Redirect to login page with message about email verification
+    navigate({ 
+      to: '/login',
+      search: { message: 'Registration successful! Please check your email to verify your account before logging in.' }
+    })
   }
 
   if (authLoading) {

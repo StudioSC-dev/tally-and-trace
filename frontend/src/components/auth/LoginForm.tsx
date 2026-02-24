@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { useResendVerificationMutation } from '../../store/authApi'
 
 type ApiErrorPayload = {
   data?: {
@@ -11,15 +12,59 @@ type ApiErrorPayload = {
 
 interface LoginFormProps {
   onSuccess?: () => void
+  successMessage?: string
 }
 
-export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
+export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage }) => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resendMessage, setResendMessage] = useState('')
+  const [resendLoading, setResendLoading] = useState(false)
+  const [showSuccessMessage, setShowSuccessMessage] = useState(!!successMessage)
+  const navigate = useNavigate()
 
   const { login } = useAuth()
+  const [resendVerification] = useResendVerificationMutation()
+
+  // Clear success message from URL after it's shown
+  useEffect(() => {
+    if (successMessage) {
+      // Clear the message from URL after a short delay or when user interacts
+      const timer = setTimeout(() => {
+        navigate({ 
+          to: '/login',
+          search: {} // Clear search params
+        })
+      }, 5000) // Auto-hide after 5 seconds
+
+      return () => clearTimeout(timer)
+    }
+  }, [successMessage, navigate])
+
+  // Clear success message when user starts typing or submitting
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value)
+    if (showSuccessMessage) {
+      setShowSuccessMessage(false)
+      navigate({ 
+        to: '/login',
+        search: {} // Clear search params
+      })
+    }
+  }
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value)
+    if (showSuccessMessage) {
+      setShowSuccessMessage(false)
+      navigate({ 
+        to: '/login',
+        search: {} // Clear search params
+      })
+    }
+  }
 
   const handleDemoLogin = async () => {
     setIsLoading(true)
@@ -43,6 +88,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
     e.preventDefault()
     setIsLoading(true)
     setError('')
+    setShowSuccessMessage(false) // Clear success message on submit
+    navigate({ 
+      to: '/login',
+      search: {} // Clear search params
+    })
 
     try {
       await login(email, password)
@@ -65,6 +115,33 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
       setIsLoading(false)
     }
   }
+
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setResendMessage('Please enter your email address first.')
+      return
+    }
+    
+    setResendLoading(true)
+    setResendMessage('')
+    try {
+      const result = await resendVerification({ email: email.trim() }).unwrap()
+      setResendMessage(result.message || 'Verification email sent! Please check your inbox.')
+      setError('') // Clear error message
+    } catch (err: unknown) {
+      if (typeof err === 'object' && err !== null) {
+        const apiError = err as ApiErrorPayload
+        const detail = apiError.data?.detail || apiError.message
+        setResendMessage(detail || 'Failed to send verification email. Please try again.')
+      } else {
+        setResendMessage('Failed to send verification email. Please try again.')
+      }
+    } finally {
+      setResendLoading(false)
+    }
+  }
+
+  const isEmailNotVerified = error === 'Email not verified'
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950 py-12 px-4 sm:px-6 lg:px-8">
@@ -91,16 +168,53 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
 
         <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-gray-200 dark:border-slate-800 p-8 shadow-sm">
           <form className="space-y-5" onSubmit={handleSubmit}>
+            {showSuccessMessage && successMessage && (
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 p-4">
+                <div className="flex">
+                  <svg className="h-5 w-5 text-emerald-500 dark:text-emerald-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <div className="ml-3">
+                    <p className="text-sm text-emerald-700 dark:text-emerald-400">{successMessage}</p>
+                  </div>
+                </div>
+              </div>
+            )}
             {error && (
               <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 p-4">
                 <div className="flex">
                   <svg className="h-5 w-5 text-red-500 dark:text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                   </svg>
-                  <div className="ml-3">
+                  <div className="ml-3 flex-1">
                     <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                    {isEmailNotVerified && (
+                      <button
+                        type="button"
+                        onClick={handleResendVerification}
+                        disabled={resendLoading}
+                        className="mt-2 text-sm font-medium text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 underline disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {resendLoading ? 'Sending...' : 'Resend verification email'}
+                      </button>
+                    )}
                   </div>
                 </div>
+              </div>
+            )}
+            {resendMessage && !isEmailNotVerified && (
+              <div className={`rounded-lg p-4 border ${
+                resendMessage.includes('sent') || resendMessage.includes('already verified')
+                  ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20'
+                  : 'bg-yellow-50 dark:bg-yellow-500/10 border-yellow-200 dark:border-yellow-500/20'
+              }`}>
+                <p className={`text-sm ${
+                  resendMessage.includes('sent') || resendMessage.includes('already verified')
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-yellow-700 dark:text-yellow-400'
+                }`}>
+                  {resendMessage}
+                </p>
               </div>
             )}
 
@@ -117,7 +231,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                 className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={handleEmailChange}
               />
             </div>
 
@@ -134,7 +248,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                 className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
                 placeholder="Your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={handlePasswordChange}
               />
             </div>
 

@@ -7,7 +7,7 @@ import {
   Platform,
   TouchableOpacity,
 } from 'react-native'
-import { Link } from 'expo-router'
+import { Link, useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { Button, Input } from '../../src/components/ui'
@@ -15,6 +15,7 @@ import { SUPPORTED_CURRENCIES } from '@tally-trace/shared'
 
 export default function RegisterScreen() {
   const { register } = useAuth()
+  const router = useRouter()
   const [form, setForm] = useState({
     first_name: '',
     last_name: '',
@@ -25,6 +26,20 @@ export default function RegisterScreen() {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  
+  // Password validation
+  const passwordRequirements = {
+    minLength: form.password.length >= 8,
+    hasUpperCase: /[A-Z]/.test(form.password),
+    hasLowerCase: /[a-z]/.test(form.password),
+    hasNumber: /\d/.test(form.password),
+    hasSpecialChar: /[!@#$%^&*()._+\-=]/.test(form.password),
+  }
+  
+  const isPasswordValid = Object.values(passwordRequirements).every(Boolean)
 
   const update = (key: keyof typeof form, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -34,15 +49,16 @@ export default function RegisterScreen() {
       setError('Please fill in all required fields.')
       return
     }
+    if (!isPasswordValid) {
+      setError('Password does not meet all requirements. Please check the requirements below.')
+      return
+    }
     if (form.password !== form.confirm_password) {
       setError('Passwords do not match.')
       return
     }
-    if (form.password.length < 8) {
-      setError('Password must be at least 8 characters.')
-      return
-    }
     setError('')
+    setSuccess(false)
     setLoading(true)
     try {
       await register({
@@ -52,12 +68,31 @@ export default function RegisterScreen() {
         password: form.password,
         default_currency: form.default_currency,
       })
+      setSuccess(true)
+      // Navigate to login after a short delay
+      setTimeout(() => {
+        router.push('/(auth)/login')
+      }, 2000)
     } catch (err: unknown) {
-      const message =
-        err && typeof err === 'object' && 'data' in err
-          ? (err as { data: { detail: string } }).data?.detail
-          : 'Registration failed. Please try again.'
-      setError(message || 'Registration failed.')
+      let errorMessage = 'Registration failed. Please try again.'
+      
+      if (err && typeof err === 'object' && 'data' in err) {
+        const errorData = (err as { data: { detail?: string | Array<{ msg: string }> } }).data
+        const detail = errorData?.detail
+        
+        if (detail) {
+          // Handle Pydantic validation errors (array of error objects)
+          if (Array.isArray(detail)) {
+            errorMessage = detail.map((error: { msg: string }) => error.msg).join('; ')
+          } 
+          // Handle simple string error
+          else if (typeof detail === 'string') {
+            errorMessage = detail
+          }
+        }
+      }
+      
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -118,21 +153,70 @@ export default function RegisterScreen() {
                 autoComplete="email"
               />
 
-              <Input
-                label="Password"
-                placeholder="Min. 8 characters"
-                value={form.password}
-                onChangeText={(v) => update('password', v)}
-                secureTextEntry
-              />
+              <View>
+                <View className="flex-row items-center justify-between mb-1">
+                  <Text className="text-slate-400 text-sm font-medium">Password</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    className="px-2 py-1"
+                  >
+                    <Text className="text-sky-400 text-xs">
+                      {showPassword ? 'Hide' : 'Show'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Input
+                  placeholder="Enter a strong password"
+                  value={form.password}
+                  onChangeText={(v) => update('password', v)}
+                  secureTextEntry={!showPassword}
+                />
+                {form.password ? (
+                  <View className="mt-2 gap-1">
+                    <Text className="text-slate-400 text-xs font-medium">Password requirements:</Text>
+                    <View className="gap-0.5">
+                      <Text className={`text-xs ${passwordRequirements.minLength ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {passwordRequirements.minLength ? '✓' : '○'} At least 8 characters
+                      </Text>
+                      <Text className={`text-xs ${passwordRequirements.hasUpperCase ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {passwordRequirements.hasUpperCase ? '✓' : '○'} One uppercase letter
+                      </Text>
+                      <Text className={`text-xs ${passwordRequirements.hasLowerCase ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {passwordRequirements.hasLowerCase ? '✓' : '○'} One lowercase letter
+                      </Text>
+                      <Text className={`text-xs ${passwordRequirements.hasNumber ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {passwordRequirements.hasNumber ? '✓' : '○'} One number
+                      </Text>
+                      <Text className={`text-xs ${passwordRequirements.hasSpecialChar ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {passwordRequirements.hasSpecialChar ? '✓' : '○'} One special character (!@#$%^&*().-_+=)
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
 
-              <Input
-                label="Confirm Password"
-                placeholder="Repeat password"
-                value={form.confirm_password}
-                onChangeText={(v) => update('confirm_password', v)}
-                secureTextEntry
-              />
+              <View>
+                <View className="flex-row items-center justify-between mb-1">
+                  <Text className="text-slate-400 text-sm font-medium">Confirm Password</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="px-2 py-1"
+                  >
+                    <Text className="text-sky-400 text-xs">
+                      {showConfirmPassword ? 'Hide' : 'Show'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Input
+                  placeholder="Repeat password"
+                  value={form.confirm_password}
+                  onChangeText={(v) => update('confirm_password', v)}
+                  secureTextEntry={!showConfirmPassword}
+                />
+                {form.confirm_password && form.password !== form.confirm_password && (
+                  <Text className="mt-1 text-xs text-red-400">Passwords do not match</Text>
+                )}
+              </View>
 
               {/* Currency Picker */}
               <View className="gap-1">
@@ -170,7 +254,13 @@ export default function RegisterScreen() {
                 </ScrollView>
               </View>
 
-              {error ? (
+              {success ? (
+                <View className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+                  <Text className="text-emerald-400 text-sm text-center">
+                    Registration successful! Please check your email to verify your account before logging in.
+                  </Text>
+                </View>
+              ) : error ? (
                 <Text className="text-red-400 text-sm text-center">{error}</Text>
               ) : null}
 
@@ -178,6 +268,7 @@ export default function RegisterScreen() {
                 label="Create Account"
                 onPress={handleRegister}
                 loading={loading}
+                disabled={success}
                 className="mt-2"
               />
             </View>

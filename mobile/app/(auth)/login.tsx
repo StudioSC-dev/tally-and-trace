@@ -11,6 +11,7 @@ import { Link } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { Button, Input } from '../../src/components/ui'
+import { useResendVerificationMutation } from '../../src/store/authApi'
 
 export default function LoginScreen() {
   const { login } = useAuth()
@@ -18,6 +19,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resendMessage, setResendMessage] = useState('')
+  const [resendLoading, setResendLoading] = useState(false)
+  const [resendVerification] = useResendVerificationMutation()
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -25,15 +29,53 @@ export default function LoginScreen() {
       return
     }
     setError('')
+    setResendMessage('')
     setLoading(true)
     try {
       await login(email.trim(), password)
-    } catch {
-      setError('Invalid email or password. Please try again.')
+    } catch (err: unknown) {
+      let errorMessage = 'Invalid email or password. Please try again.'
+      
+      if (err && typeof err === 'object' && 'data' in err) {
+        const errorData = (err as { data: { detail?: string } }).data
+        const detail = errorData?.detail
+        if (detail && typeof detail === 'string') {
+          errorMessage = detail
+        }
+      }
+      
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
   }
+
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setResendMessage('Please enter your email address first.')
+      return
+    }
+    
+    setResendLoading(true)
+    setResendMessage('')
+    try {
+      const result = await resendVerification({ email: email.trim() }).unwrap()
+      setResendMessage(result.message || 'Verification email sent! Please check your inbox.')
+      setError('') // Clear error message
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'data' in err) {
+        const errorData = (err as { data: { detail?: string } }).data
+        const detail = errorData?.detail
+        setResendMessage(detail || 'Failed to send verification email. Please try again.')
+      } else {
+        setResendMessage('Failed to send verification email. Please try again.')
+      }
+    } finally {
+      setResendLoading(false)
+    }
+  }
+
+  const isEmailNotVerified = error === 'Email not verified'
 
   return (
     <SafeAreaView className="flex-1 bg-slate-900">
@@ -76,8 +118,37 @@ export default function LoginScreen() {
               />
 
               {error ? (
-                <Text className="text-red-400 text-sm text-center">{error}</Text>
+                <View className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                  <Text className="text-red-400 text-sm text-center mb-2">{error}</Text>
+                  {isEmailNotVerified && (
+                    <TouchableOpacity
+                      onPress={handleResendVerification}
+                      disabled={resendLoading}
+                      className="mt-2"
+                    >
+                      <Text className="text-sky-400 text-sm text-center underline disabled:opacity-50">
+                        {resendLoading ? 'Sending...' : 'Resend verification email'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               ) : null}
+
+              {resendMessage && !isEmailNotVerified && (
+                <View className={`rounded-lg p-3 border ${
+                  resendMessage.includes('sent') || resendMessage.includes('already verified')
+                    ? 'bg-emerald-500/10 border-emerald-500/20'
+                    : 'bg-yellow-500/10 border-yellow-500/20'
+                }`}>
+                  <Text className={`text-sm text-center ${
+                    resendMessage.includes('sent') || resendMessage.includes('already verified')
+                      ? 'text-emerald-400'
+                      : 'text-yellow-400'
+                  }`}>
+                    {resendMessage}
+                  </Text>
+                </View>
+              )}
 
               <Button
                 label="Sign In"

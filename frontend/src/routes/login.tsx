@@ -1,15 +1,21 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { LoginForm } from '../components/auth/LoginForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useEffect } from 'react'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      message: (search.message as string) || undefined,
+    }
+  },
 })
 
 export function LoginPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const { message } = useSearch({ from: '/login' })
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -33,5 +39,5 @@ export function LoginPage() {
     return null // Will redirect
   }
 
-  return <LoginForm onSuccess={handleSuccess} />
+  return <LoginForm onSuccess={handleSuccess} successMessage={message} />
 }

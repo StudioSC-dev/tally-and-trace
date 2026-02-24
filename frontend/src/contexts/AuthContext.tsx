@@ -95,8 +95,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }) => {
     try {
       await dispatch(authApi.endpoints.register.initiate(userData)).unwrap()
-      // After registration, automatically log in
-      await login(userData.email, userData.password)
+      // Registration successful - user needs to verify email before logging in
     } catch (error) {
       console.error('Registration failed:', error)
       throw error

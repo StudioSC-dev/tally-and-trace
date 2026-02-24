@@ -88,6 +88,14 @@ export const authApi = createApi({
         dispatch(authApi.util.resetApiState())
       },
     }),
+
+    resendVerification: builder.mutation<{ message: string }, { email: string }>({
+      query: (data) => ({
+        url: 'auth/resend-verification',
+        method: 'POST',
+        body: data,
+      }),
+    }),
   }),
 })
 
@@ -97,4 +105,5 @@ export const {
   useGetCurrentUserQuery,
   useUpdateUserMutation,
   useLogoutMutation,
+  useResendVerificationMutation,
 } = authApi

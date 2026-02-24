@@ -6,6 +6,33 @@ from app.routers import api_router
 from app.core.database import engine
 from app.core.seed import seed_database
 import os
+import logging
+import sys
+
+# Configure logging - must be done before uvicorn starts
+# Use force=True to override any existing configuration
+logging.basicConfig(
+    level=logging.INFO,  # Always use INFO so we can see our logs
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,  # Override uvicorn's default logging
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Explicitly use stdout
+    ]
+)
+
+# Set specific loggers to INFO level for better debugging
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("app.services.email").setLevel(logging.INFO)
+logging.getLogger("app.routers.auth").setLevel(logging.INFO)
+logging.getLogger("app.routers").setLevel(logging.INFO)
+
+# Reduce noise from uvicorn access logs
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} in {settings.ENVIRONMENT} mode")
+logger.info("Logging configured successfully.")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -42,6 +69,7 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     """Initialize database tables and seed data on startup"""
+    logger.info("Application startup event triggered - logging is active")
     from sqlalchemy import text
     
     # Create tables using synchronous engine
@@ -381,7 +409,9 @@ async def startup_event():
             )
         """))
 
+    logger.info("Database tables initialized successfully!")
     print("Database tables initialized successfully!")
     
     # Seed database with initial data
     seed_database()
+    logger.info("Database seeding completed")

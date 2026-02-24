@@ -1,7 +1,8 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import datetime
 from app.models.user import CurrencyType
+from app.core.password import validate_password_strength
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -11,6 +12,14 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=100)
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        is_valid, errors = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError('; '.join(errors))
+        return v
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -57,3 +66,11 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirm(BaseModel):
     token: str = Field(..., min_length=10)
     new_password: str = Field(..., min_length=8, max_length=100)
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        is_valid, errors = validate_password_strength(v)
+        if not is_valid:
+            raise ValueError('; '.join(errors))
+        return v
