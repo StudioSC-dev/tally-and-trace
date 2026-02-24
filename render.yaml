@@ -25,10 +25,11 @@ services:
       - key: FRONTEND_BASE_URL
         value: https://tally-and-trace-web.onrender.com
 
-# ── Frontend: Vite React SPA (static sites are always free) ─────────────────
-staticSites:
-  - name: tally-and-trace-web
-    buildCommand: pnpm install && pnpm run build
+  # ── Frontend: Vite React SPA (static sites are always free) ─────────────────
+  - type: web
+    name: tally-and-trace-web
+    runtime: static
+    buildCommand: cd frontend && pnpm install && pnpm run build
     staticPublishPath: frontend/dist
     routes:
       - type: rewrite
