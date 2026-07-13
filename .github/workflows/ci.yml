@@ -60,7 +60,7 @@ jobs:
       - name: Run tests
         run: |
           pip install pytest pytest-cov httpx
-          pytest --tb=short -q || true
+          pytest --tb=short -q
 
   # ---------------------------------------------------------------------------
   # Frontend – build check
