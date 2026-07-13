@@ -54,6 +54,9 @@ jobs:
           pip install ruff
           ruff check app/
 
+      - name: Apply database migrations
+        run: alembic upgrade head
+
       - name: Run tests
         run: |
           pip install pytest pytest-cov httpx

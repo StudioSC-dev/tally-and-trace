@@ -107,6 +107,8 @@ python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp env.example .env         # Edit .env with your DB URL and secrets
+alembic upgrade head        # Apply migrations — REQUIRED before first run.
+                            # Alembic owns the schema; the app no longer creates tables on boot.
 ```
 
 ### 3. Start Development Servers
