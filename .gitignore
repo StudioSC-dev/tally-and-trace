@@ -124,3 +124,7 @@ public
 # Temporary folders
 tmp/
 temp/
+
+# Claude Code working docs
+CLAUDE.md
+HANDOVER.md

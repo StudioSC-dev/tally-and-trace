@@ -61,9 +61,7 @@ const rawBaseQuery = fetchBaseQuery({
 })
 
 const baseQueryWithAuth: typeof rawBaseQuery = async (args, api, extraOptions) => {
-  console.log('API Request:', args)
   const result = await rawBaseQuery(args, api, extraOptions)
-  console.log('API Response:', result)
 
   // If we get a 401, clear the token and redirect to login
   if (result.error && 'status' in result.error && result.error.status === 401) {

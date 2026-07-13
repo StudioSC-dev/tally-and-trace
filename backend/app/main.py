@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.routers import api_router
 from app.core.database import engine
 from app.core.seed import seed_database
+from contextlib import asynccontextmanager
 import os
 import logging
 import sys
@@ -34,11 +35,20 @@ logger = logging.getLogger(__name__)
 logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} in {settings.ENVIRONMENT} mode")
 logger.info("Logging configured successfully.")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize schema + seed on startup (replaces the deprecated on_event hook)."""
+    _run_startup()
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description=settings.DESCRIPTION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
 # Set up CORS middleware
@@ -65,11 +75,13 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# Database initialization
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables and seed data on startup"""
-    logger.info("Application startup event triggered - logging is active")
+# Database initialization (invoked from the lifespan handler above).
+# NOTE: this raw DDL is idempotent (IF NOT EXISTS) and duplicates the Alembic
+# migrations that render.yaml runs at build time. Retiring it in favour of
+# Alembic-only is tracked in HANDOVER Phase 0, pending a prod schema baseline check.
+def _run_startup():
+    """Initialize database tables and seed data on startup."""
+    logger.info("Application startup - initializing database")
     from sqlalchemy import text
     
     # Create tables using synchronous engine
@@ -410,23 +422,7 @@ async def startup_event():
         """))
 
     logger.info("Database tables initialized successfully!")
-    print("Database tables initialized successfully!")
-    
-    # Always reset demo user's onboarding for testing
-    from app.core.database import SessionLocal
-    from app.models.user import User
-    db = SessionLocal()
-    try:
-        demo_user = db.query(User).filter(User.email == "demo@example.com").first()
-        if demo_user:
-            demo_user.onboarding_completed = False
-            db.commit()
-            logger.info("Demo user onboarding status reset for testing")
-    except Exception as e:
-        logger.warning(f"Could not reset demo user onboarding: {e}")
-    finally:
-        db.close()
-    
-    # Seed database with initial data
+
+    # Seed database with initial data (no-op if already seeded)
     seed_database()
     logger.info("Database seeding completed")

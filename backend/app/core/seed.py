@@ -16,13 +16,8 @@ def seed_database():
     db = SessionLocal()
     
     try:
-        # Always reset demo user's onboarding status for testing (runs every time)
         demo_user = db.query(User).filter(User.email == "demo@example.com").first()
-        if demo_user:
-            demo_user.onboarding_completed = False
-            db.commit()
-            print("Demo user onboarding status reset for testing.")
-        
+
         # Check if data already exists
         existing_accounts = db.query(Account).count()
         if existing_accounts > 0:
@@ -44,7 +39,7 @@ def seed_database():
                 last_name="User",
                 is_active=True,
                 is_verified=True,
-                onboarding_completed=False,  # Always reset onboarding for demo user for testing
+                onboarding_completed=False,  # demo user starts pre-onboarding
                 default_currency=CurrencyType.PHP
             )
             db.add(default_user)

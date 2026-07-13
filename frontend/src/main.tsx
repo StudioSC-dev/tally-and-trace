@@ -23,17 +23,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-console.log('Main.tsx loading...', { router, store })
-
-// Add router event listeners for debugging
-router.subscribe('onLoad', () => {
-  console.log('Router: onLoad event')
-})
-
-router.subscribe('onBeforeLoad', () => {
-  console.log('Router: onBeforeLoad event')
-})
-
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Provider store={store}>
