@@ -27,6 +27,15 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 const addCadence = (date: Date, cadence: BudgetEntry['cadence']) => {
   const next = new Date(date.getTime())
   switch (cadence) {
+    case 'daily':
+      next.setDate(next.getDate() + 1)
+      break
+    case 'weekly':
+      next.setDate(next.getDate() + 7)
+      break
+    case 'biweekly':
+      next.setDate(next.getDate() + 14)
+      break
     case 'monthly':
       next.setMonth(next.getMonth() + 1)
       break
@@ -40,6 +49,7 @@ const addCadence = (date: Date, cadence: BudgetEntry['cadence']) => {
       next.setFullYear(next.getFullYear() + 1)
       break
     default:
+      // 'semi_monthly' is handled directly in generateOccurrencesWithinRange
       break
   }
   return next
@@ -74,21 +84,50 @@ const generateOccurrencesWithinRange = (
   entry: BudgetEntry,
   rangeStart: Date,
   rangeEnd: Date,
-  maxIterations = 24
+  maxIterations = 60
 ) => {
   const occurrences: Date[] = []
   if (!entry.next_occurrence) return occurrences
 
-  let occurrence = new Date(entry.next_occurrence)
-  if (Number.isNaN(occurrence.getTime())) return occurrences
+  const anchor = new Date(entry.next_occurrence)
+  if (Number.isNaN(anchor.getTime())) return occurrences
 
   const endDateLimit =
     entry.end_mode === 'on_date' && entry.end_date ? new Date(entry.end_date) : null
-  let occurrencesRemaining =
+  const cap =
     entry.end_mode === 'after_occurrences' && entry.max_occurrences
       ? entry.max_occurrences
       : Infinity
 
+  // Semi-monthly fires on two configurable days each month (default 1 & 15),
+  // clamped to the month length — mirrors the backend iter_occurrences.
+  if (entry.cadence === 'semi_monthly') {
+    const days = Array.from(
+      new Set([entry.semi_monthly_day_1 ?? 1, entry.semi_monthly_day_2 ?? 15])
+    ).sort((a, b) => a - b)
+    let produced = 0
+    let cursor = new Date(anchor.getFullYear(), anchor.getMonth(), 1)
+    for (let i = 0; i < maxIterations && cursor <= rangeEnd; i++) {
+      const lastDay = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate()
+      for (const day of days) {
+        const occ = new Date(
+          cursor.getFullYear(), cursor.getMonth(), Math.min(day, lastDay),
+          anchor.getHours(), anchor.getMinutes(), anchor.getSeconds()
+        )
+        if (occ < anchor) continue
+        if (endDateLimit && occ > endDateLimit) return occurrences
+        if (produced >= cap) return occurrences
+        produced++
+        if (occ >= rangeStart && occ <= rangeEnd) occurrences.push(new Date(occ))
+      }
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+    }
+    return occurrences
+  }
+
+  // Fixed-step cadences (weekly / biweekly / monthly / quarterly / semi-annual / annual).
+  let occurrence = new Date(anchor)
+  let occurrencesRemaining = cap
   for (let i = 0; i < maxIterations && occurrencesRemaining > 0 && occurrence <= rangeEnd; i++) {
     if (endDateLimit && occurrence > endDateLimit) break
     if (occurrence >= rangeStart && occurrence <= rangeEnd) {
