@@ -1,0 +1,23 @@
+name: Keep-alive – Tally & Trace API
+
+# Pings the health endpoint on a schedule so the Render free-tier web service
+# doesn't spin down (which causes 30–60s cold starts). Free, zero-infra.
+# NOTE: GitHub cron is best-effort — runs may be delayed a few minutes under
+# load, and scheduled workflows are auto-disabled after 60 days of repo
+# inactivity. Good enough to keep the instance warm during normal use.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every ~10 minutes
+  workflow_dispatch: {} # allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
+            https://api.tallyandtrace.studiosc.dev/health)
+          echo "Health check returned HTTP $code"
+          test "$code" = "200"
