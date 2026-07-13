@@ -9,7 +9,9 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WishlistRouteImport } from './routes/wishlist'
 import { Route as TransactionsRouteImport } from './routes/transactions'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForecastRouteImport } from './routes/forecast'
@@ -17,9 +19,19 @@ import { Route as AllocationsRouteImport } from './routes/allocations'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
 
+const WishlistRoute = WishlistRouteImport.update({
+  id: '/wishlist',
+  path: '/wishlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TransactionsRoute = TransactionsRouteImport.update({
   id: '/transactions',
   path: '/transactions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterRoute = RegisterRouteImport.update({
@@ -60,7 +72,9 @@ export interface FileRoutesByFullPath {
   '/forecast': typeof ForecastRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
+  '/wishlist': typeof WishlistRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -69,7 +83,9 @@ export interface FileRoutesByTo {
   '/forecast': typeof ForecastRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
+  '/wishlist': typeof WishlistRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -79,7 +95,9 @@ export interface FileRoutesById {
   '/forecast': typeof ForecastRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/settings': typeof SettingsRoute
   '/transactions': typeof TransactionsRoute
+  '/wishlist': typeof WishlistRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -90,7 +108,9 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/login'
     | '/register'
+    | '/settings'
     | '/transactions'
+    | '/wishlist'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -99,7 +119,9 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/login'
     | '/register'
+    | '/settings'
     | '/transactions'
+    | '/wishlist'
   id:
     | '__root__'
     | '/'
@@ -108,7 +130,9 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/login'
     | '/register'
+    | '/settings'
     | '/transactions'
+    | '/wishlist'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -118,16 +142,32 @@ export interface RootRouteChildren {
   ForecastRoute: typeof ForecastRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  SettingsRoute: typeof SettingsRoute
   TransactionsRoute: typeof TransactionsRoute
+  WishlistRoute: typeof WishlistRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/wishlist': {
+      id: '/wishlist'
+      path: '/wishlist'
+      fullPath: '/wishlist'
+      preLoaderRoute: typeof WishlistRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/transactions': {
       id: '/transactions'
       path: '/transactions'
       fullPath: '/transactions'
       preLoaderRoute: typeof TransactionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register': {
@@ -182,7 +222,9 @@ const rootRouteChildren: RootRouteChildren = {
   ForecastRoute: ForecastRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  SettingsRoute: SettingsRoute,
   TransactionsRoute: TransactionsRoute,
+  WishlistRoute: WishlistRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
