@@ -1,3 +1,4 @@
+from calendar import monthrange
 from datetime import datetime
 from typing import Optional
 
@@ -10,13 +11,16 @@ from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account
 from app.models.category import Category
 from app.models.allocation import Allocation
+from app.models.transaction import RecurrenceFrequency, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import (
     BudgetEntryCreate,
     BudgetEntryUpdate,
     BudgetEntryResponse,
     BudgetEntryListResponse,
+    BudgetEntryMaterialize,
 )
+from app.schemas.transaction import TransactionResponse
 
 router = APIRouter()
 
@@ -193,4 +197,93 @@ def delete_budget_entry(
 
     db.delete(entry)
     db.commit()
+
+
+def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
+    """Return the occurrence following ``current`` for this entry's cadence."""
+    from app.services.forecast import _next_occurrence
+
+    if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
+        d1 = entry.semi_monthly_day_1 or 1
+        d2 = entry.semi_monthly_day_2 or 15
+        days = sorted({d1, d2})
+        months = [(current.year, current.month)]
+        months.append((current.year + 1, 1) if current.month == 12 else (current.year, current.month + 1))
+        candidates = []
+        for (y, m) in months:
+            last = monthrange(y, m)[1]
+            for d in days:
+                candidates.append(current.replace(year=y, month=m, day=min(d, last)))
+        future = sorted(c for c in candidates if c > current)
+        return future[0] if future else _next_occurrence(current, RecurrenceFrequency.MONTHLY)
+
+    return _next_occurrence(current, entry.cadence)
+
+
+@router.post("/{entry_id}/materialize", response_model=TransactionResponse, status_code=201)
+def materialize_budget_entry(
+    entry_id: int,
+    payload: BudgetEntryMaterialize = BudgetEntryMaterialize(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Post a due recurring entry as an actual transaction and advance its schedule.
+
+    Reuses the transaction-create path (so account balances and budget-allocation
+    deltas stay consistent), then moves ``next_occurrence`` to the following one —
+    deactivating the entry when it passes its end date or exhausts its occurrences.
+    """
+    from app.routers.transactions import create_transaction
+    from app.schemas.transaction import TransactionCreate
+
+    entry = (
+        db.query(BudgetEntry)
+        .filter(BudgetEntry.id == entry_id, BudgetEntry.user_id == current_user.id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    if not entry.account_id:
+        raise HTTPException(status_code=400, detail="This entry has no account to post to")
+
+    occurrence_date = payload.transaction_date or entry.next_occurrence
+    amount = payload.amount if payload.amount is not None else entry.amount
+    txn_type = (
+        TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
+    )
+
+    txn_create = TransactionCreate(
+        account_id=entry.account_id,
+        amount=amount,
+        currency=entry.currency,
+        transaction_type=txn_type,
+        transaction_date=occurrence_date,
+        category_id=entry.category_id,
+        allocation_id=entry.allocation_id,
+        entity_id=entry.entity_id,
+        budget_entry_id=entry.id,
+        description=entry.name,
+        is_posted=True,
+    )
+    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user)
+
+    if payload.advance:
+        next_occ = _advance_occurrence(entry, entry.next_occurrence)
+        deactivate = False
+        if entry.end_mode == "on_date" and entry.end_date and next_occ > entry.end_date:
+            deactivate = True
+        if entry.end_mode == "after_occurrences" and entry.max_occurrences is not None:
+            entry.max_occurrences = max(entry.max_occurrences - 1, 0)
+            if entry.max_occurrences <= 0:
+                deactivate = True
+        if deactivate:
+            entry.is_active = False
+        else:
+            entry.next_occurrence = next_occ
+        entry.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(db_txn)
+
+    return db_txn
 

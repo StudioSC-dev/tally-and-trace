@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetTransactionsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery } from '../store/api'
+import { useGetAccountsQuery, useGetTransactionsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useMaterializeBudgetEntryMutation } from '../store/api'
 import type { Transaction, Allocation } from '../store/api'
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -62,6 +62,19 @@ export function Dashboard() {
   }, [isAuthenticated, authLoading, navigate])
 
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month')
+  const [postingId, setPostingId] = useState<number | null>(null)
+  const [materializeEntry] = useMaterializeBudgetEntryMutation()
+
+  const handleMarkPaid = async (entryId: number) => {
+    setPostingId(entryId)
+    try {
+      await materializeEntry({ id: entryId }).unwrap()
+    } catch (error) {
+      console.error('Error posting budget entry:', error)
+    } finally {
+      setPostingId(null)
+    }
+  }
 
   const { data: accountsData, isLoading: accountsLoading, error: accountsError } =
     useGetAccountsQuery({ is_active: true, limit: 1000 }, { skip: !isAuthenticated })
@@ -579,6 +592,13 @@ export function Dashboard() {
                       <p className="text-xs text-gray-500 dark:text-slate-500">
                         {reminder.daysUntil === 0 ? 'Due today' : `${reminder.daysUntil} day${reminder.daysUntil === 1 ? '' : 's'} remaining`}
                       </p>
+                      <button
+                        onClick={() => handleMarkPaid(entry.id)}
+                        disabled={postingId === entry.id}
+                        className="mt-1 inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        {postingId === entry.id ? 'Posting…' : 'Mark paid'}
+                      </button>
                     </div>
                   </div>
                 )

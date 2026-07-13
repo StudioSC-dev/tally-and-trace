@@ -192,6 +192,10 @@ export const accountingApi = createApi({
       query: (id) => ({ url: `budget-entries/${id}`, method: 'DELETE' }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
     }),
+    materializeBudgetEntry: builder.mutation<Transaction, { id: number; data?: { transaction_date?: string; amount?: number; advance?: boolean } }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data ?? {} }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
 
     // ── Transactions ──────────────────────────────────────────────────────────
     getTransactions: builder.query<PaginatedResponse<Transaction>, {
@@ -332,6 +336,7 @@ export const {
   useCreateBudgetEntryMutation,
   useUpdateBudgetEntryMutation,
   useDeleteBudgetEntryMutation,
+  useMaterializeBudgetEntryMutation,
 
   // Transaction hooks
   useGetTransactionsQuery,

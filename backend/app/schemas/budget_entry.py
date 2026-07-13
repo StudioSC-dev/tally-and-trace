@@ -69,3 +69,10 @@ class BudgetEntryListResponse(BaseModel):
     total: int
     has_more: bool
 
+
+class BudgetEntryMaterialize(BaseModel):
+    """Post a due recurring entry as an actual transaction."""
+    transaction_date: Optional[datetime] = None  # defaults to the entry's next_occurrence
+    amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
+    advance: bool = True                          # advance next_occurrence to the following one
+
