@@ -48,6 +48,10 @@ class BudgetEntry(Base):
     )
     next_occurrence = Column(DateTime, nullable=False)
     lead_time_days = Column(Integer, nullable=False, default=0)
+    # Only used when cadence == SEMI_MONTHLY: the two days-of-month it fires on.
+    # Stored so the pair can be changed per entry; defaults to the 1st and 15th.
+    semi_monthly_day_1 = Column(Integer, nullable=False, default=1)
+    semi_monthly_day_2 = Column(Integer, nullable=False, default=15)
     end_mode = Column(String(20), nullable=False, default="indefinite")
     end_date = Column(DateTime, nullable=True)
     max_occurrences = Column(Integer, nullable=True)
