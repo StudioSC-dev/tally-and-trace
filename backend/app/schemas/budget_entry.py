@@ -15,6 +15,9 @@ class BudgetEntryBase(BaseModel):
     cadence: RecurrenceFrequency = RecurrenceFrequency.MONTHLY
     next_occurrence: datetime
     lead_time_days: int = Field(0, ge=0, le=365)
+    # Only meaningful when cadence == SEMI_MONTHLY. Days clamp to month length at projection time.
+    semi_monthly_day_1: int = Field(1, ge=1, le=31)
+    semi_monthly_day_2: int = Field(15, ge=1, le=31)
     end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
     account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
@@ -39,6 +42,8 @@ class BudgetEntryUpdate(BaseModel):
     cadence: Optional[RecurrenceFrequency] = None
     next_occurrence: Optional[datetime] = None
     lead_time_days: Optional[int] = Field(None, ge=0, le=365)
+    semi_monthly_day_1: Optional[int] = Field(None, ge=1, le=31)
+    semi_monthly_day_2: Optional[int] = Field(None, ge=1, le=31)
     account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)

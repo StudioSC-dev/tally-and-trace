@@ -8,14 +8,15 @@ unposted transactions, this service generates a forward-looking timeline.
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Iterator, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 from app.models.transaction import RecurrenceFrequency
 
 
@@ -32,6 +33,10 @@ def _add_months(dt: datetime, months: int) -> datetime:
 
 
 def _next_occurrence(current: datetime, cadence: RecurrenceFrequency) -> datetime:
+    if cadence == RecurrenceFrequency.WEEKLY:
+        return current + timedelta(days=7)
+    if cadence == RecurrenceFrequency.BIWEEKLY:
+        return current + timedelta(days=14)
     if cadence == RecurrenceFrequency.MONTHLY:
         return _add_months(current, 1)
     if cadence == RecurrenceFrequency.QUARTERLY:
@@ -40,18 +45,22 @@ def _next_occurrence(current: datetime, cadence: RecurrenceFrequency) -> datetim
         return _add_months(current, 6)
     if cadence == RecurrenceFrequency.ANNUAL:
         return _add_months(current, 12)
+    # SEMI_MONTHLY is not a fixed step (two days per month) — handled by iter_occurrences.
     return _add_months(current, 1)
 
 
 def _monthly_equivalent(amount: float, cadence: RecurrenceFrequency) -> float:
     """Normalize any cadence to a monthly amount."""
-    divisors = {
-        RecurrenceFrequency.MONTHLY: 1,
-        RecurrenceFrequency.QUARTERLY: 3,
-        RecurrenceFrequency.SEMI_ANNUAL: 6,
-        RecurrenceFrequency.ANNUAL: 12,
+    per_month = {
+        RecurrenceFrequency.WEEKLY: 52 / 12,
+        RecurrenceFrequency.BIWEEKLY: 26 / 12,
+        RecurrenceFrequency.SEMI_MONTHLY: 2.0,
+        RecurrenceFrequency.MONTHLY: 1.0,
+        RecurrenceFrequency.QUARTERLY: 1 / 3,
+        RecurrenceFrequency.SEMI_ANNUAL: 1 / 6,
+        RecurrenceFrequency.ANNUAL: 1 / 12,
     }
-    return amount / divisors.get(cadence, 1)
+    return amount * per_month.get(cadence, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +98,8 @@ def project_cashflow(
     period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     accounts = get_account_balances(db, user_id, entity_id)
-    opening = sum(a.balance for a in accounts)
+    # Exclude credit-card accounts — their balance is money owed, not cash on hand.
+    opening = sum(a.balance for a in accounts if a.account_type != AccountType.CREDIT)
 
     # Active budget entries for the entity/user
     be_query = db.query(BudgetEntry).filter(
@@ -256,4 +266,250 @@ def get_disposable_income(
         "monthly_income": round(monthly_income, 2),
         "monthly_expenses": round(monthly_expenses, 2),
         "monthly_disposable": round(disposable, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Dated running-balance timeline (pre-due-date solvency)
+#
+# The month-bucket projection above answers "does the month net out?". This
+# section answers the question that actually keeps you solvent: "at any point
+# WITHIN the window, does the running balance go negative before payday?".
+# It walks every income/payable in date order, carries a running balance, and
+# reports the trough (lowest point + date) and any shortfall.
+# ---------------------------------------------------------------------------
+
+_CENTS = Decimal("0.01")
+
+
+def _money(x) -> Decimal:
+    """Coerce a float/Decimal/int into a 2dp Decimal (money is stored as float today)."""
+    return Decimal(str(x)).quantize(_CENTS, rounding=ROUND_HALF_UP)
+
+
+def _naive(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _clamp_day(year: int, month: int, day: int) -> int:
+    """Clamp a day-of-month to the month's length (so e.g. day 31 -> 30/28)."""
+    return min(day, monthrange(year, month)[1])
+
+
+def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime]:
+    """Yield naive occurrence datetimes for a budget entry in ``[start, end)``.
+
+    - Fixed-step cadences (weekly/biweekly/monthly/quarterly/semi-annual/annual)
+      walk forward from ``next_occurrence``.
+    - ``SEMI_MONTHLY`` fires on two configurable days each month (default 1 & 15),
+      clamped to the month length.
+    - Respects ``end_date`` (``end_mode == "on_date"``) and caps future occurrences
+      at ``max_occurrences`` (``end_mode == "after_occurrences"``; counted from
+      ``next_occurrence`` forward — best-effort, since elapsed count isn't stored).
+    """
+    start = _naive(start)
+    end = _naive(end)
+    anchor = _naive(entry.next_occurrence)
+    end_date = _naive(entry.end_date) if getattr(entry, "end_date", None) else None
+    cap = entry.max_occurrences if getattr(entry, "end_mode", None) == "after_occurrences" else None
+    produced = 0
+
+    if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
+        d1 = getattr(entry, "semi_monthly_day_1", None) or 1
+        d2 = getattr(entry, "semi_monthly_day_2", None) or 15
+        days = sorted({d1, d2})
+        y, m = anchor.year, anchor.month
+        guard = 0
+        while guard < 600:
+            guard += 1
+            if datetime(y, m, 1) > end:
+                break
+            for day in days:
+                occ = datetime(y, m, _clamp_day(y, m, day),
+                               anchor.hour, anchor.minute, anchor.second)
+                if occ < anchor:
+                    continue
+                if end_date is not None and occ > end_date:
+                    return
+                if cap is not None and produced >= cap:
+                    return
+                produced += 1
+                if start <= occ < end:
+                    yield occ
+            m += 1
+            if m > 12:
+                m, y = 1, y + 1
+        return
+
+    # Fixed-step cadences
+    occ = anchor
+    guard = 0
+    while occ < end and guard < 2000:
+        guard += 1
+        if end_date is not None and occ > end_date:
+            break
+        if cap is not None and produced >= cap:
+            break
+        produced += 1
+        if occ >= start:
+            yield occ
+        occ = _next_occurrence(occ, entry.cadence)
+
+
+def build_timeline(opening, events: List[dict]) -> dict:
+    """Pure core: walk signed-amount events in date order over an opening balance.
+
+    ``events`` items: ``{date, name, amount, type, source, source_id}`` where
+    ``amount`` is signed (positive = inflow, negative = outflow). Same-day ties
+    put OUTFLOWS before inflows — the conservative assumption for solvency.
+
+    Returns opening/closing balances, the per-event running balance, the trough
+    (lowest balance + its date, ``None`` date meaning the opening is the low), and
+    every point where the running balance goes negative (``shortfalls``).
+    """
+    opening = _money(opening)
+
+    def _key(e):
+        d = e["date"]
+        d = d.date() if isinstance(d, datetime) else d
+        return (d, 0 if _money(e["amount"]) < 0 else 1)
+
+    running = opening
+    lowest = opening
+    trough_date: Optional[date] = None
+    out_events: List[dict] = []
+    shortfalls: List[dict] = []
+
+    for e in sorted(events, key=_key):
+        amt = _money(e["amount"])
+        running = (running + amt).quantize(_CENTS)
+        d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
+        out_events.append({
+            "date": d,
+            "name": e.get("name"),
+            "amount": amt,
+            "type": e.get("type"),
+            "source": e.get("source"),
+            "source_id": e.get("source_id"),
+            "running_balance": running,
+        })
+        if running < lowest:
+            lowest = running
+            trough_date = d
+        if running < 0:
+            shortfalls.append({"date": d, "name": e.get("name"), "balance_after": running})
+
+    return {
+        "opening_balance": opening,
+        "events": out_events,
+        "lowest_balance": lowest,
+        "trough_date": trough_date,   # None => the opening balance is the lowest point
+        "closing_balance": running,
+        "shortfall": bool(shortfalls),
+        "shortfalls": shortfalls,
+    }
+
+
+def project_running_balance(
+    db: Session,
+    user_id: int,
+    entity_id: Optional[int] = None,
+    days: int = 60,
+    reference: Optional[datetime] = None,
+) -> dict:
+    """Build the dated running-balance timeline over the next ``days`` days."""
+    now = reference or datetime.utcnow()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=days)
+
+    accounts = get_account_balances(db, user_id, entity_id)
+    # Available cash EXCLUDES credit-card accounts — those balances are money owed,
+    # not money on hand. (Card payments show up as payable events instead.)
+    opening = sum(
+        (Decimal(str(a.balance)) for a in accounts if a.account_type != AccountType.CREDIT),
+        Decimal("0"),
+    )
+
+    events: List[dict] = []
+
+    be_query = db.query(BudgetEntry).filter(
+        BudgetEntry.user_id == user_id,
+        BudgetEntry.is_active.is_(True),
+    )
+    if entity_id is not None:
+        be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
+    for entry in be_query.all():
+        sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
+        for occ in iter_occurrences(entry, start, end):
+            events.append({
+                "date": occ,
+                "name": entry.name,
+                "amount": sign * Decimal(str(entry.amount)),
+                "type": entry.entry_type.value,
+                "source": "budget_entry",
+                "source_id": entry.id,
+            })
+
+    txn_query = db.query(Transaction).filter(
+        Transaction.user_id == user_id,
+        Transaction.is_posted.is_(False),
+        Transaction.transaction_date >= start,
+        Transaction.transaction_date < end,
+    )
+    if entity_id is not None:
+        txn_query = txn_query.filter(Transaction.entity_id == entity_id)
+    for txn in txn_query.all():
+        if txn.transaction_type == TransactionType.CREDIT:
+            amt = Decimal(str(txn.amount))       # inflow
+        elif txn.transaction_type == TransactionType.DEBIT:
+            amt = -Decimal(str(txn.amount))      # outflow
+        else:
+            continue  # transfers don't change total available cash (account-aware routing is a follow-up)
+        events.append({
+            "date": _naive(txn.transaction_date),
+            "name": txn.description or "Unposted transaction",
+            "amount": amt,
+            "type": txn.transaction_type.value,
+            "source": "transaction",
+            "source_id": txn.id,
+        })
+
+    result = build_timeline(opening, events)
+    result["window_start"] = start.date()
+    result["window_end"] = end.date()
+    return result
+
+
+def serialize_timeline(result: dict) -> dict:
+    """Convert a build_timeline/project_running_balance result to JSON-friendly types."""
+    def f(x):
+        return float(x) if isinstance(x, Decimal) else x
+
+    def iso(d):
+        return d.isoformat() if d is not None else None
+
+    return {
+        "window_start": iso(result.get("window_start")),
+        "window_end": iso(result.get("window_end")),
+        "opening_balance": f(result["opening_balance"]),
+        "lowest_balance": f(result["lowest_balance"]),
+        "trough_date": iso(result["trough_date"]),
+        "closing_balance": f(result["closing_balance"]),
+        "shortfall": result["shortfall"],
+        "shortfalls": [
+            {"date": iso(s["date"]), "name": s["name"], "balance_after": f(s["balance_after"])}
+            for s in result["shortfalls"]
+        ],
+        "events": [
+            {
+                "date": iso(e["date"]),
+                "name": e["name"],
+                "amount": f(e["amount"]),
+                "type": e["type"],
+                "source": e["source"],
+                "source_id": e["source_id"],
+                "running_balance": f(e["running_balance"]),
+            }
+            for e in result["events"]
+        ],
     }

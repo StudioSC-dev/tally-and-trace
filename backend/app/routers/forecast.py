@@ -50,6 +50,30 @@ def get_upcoming(
     return {"items": items, "days": days}
 
 
+@router.get("/timeline")
+def get_timeline(
+    days: int = Query(60, ge=1, le=365, description="Look-ahead window in days"),
+    entity_id: Optional[int] = Query(None, description="Entity context"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Dated running-balance timeline (pre-due-date solvency).
+
+    Unlike /cashflow (which nets whole months), this walks every income/payable in
+    date order and reports the running balance after each, the trough (lowest point
+    + date), and any shortfall — i.e. whether bills due before payday can be covered
+    with funds on hand. Available cash excludes credit-card balances.
+    """
+    result = forecast_svc.project_running_balance(
+        db=db,
+        user_id=current_user.id,
+        entity_id=entity_id,
+        days=days,
+    )
+    return forecast_svc.serialize_timeline(result)
+
+
 @router.get("/disposable")
 def get_disposable(
     entity_id: Optional[int] = Query(None, description="Entity context"),

@@ -12,6 +12,9 @@ class TransactionType(str, enum.Enum):
 
 
 class RecurrenceFrequency(str, enum.Enum):
+    WEEKLY = "weekly"
+    BIWEEKLY = "biweekly"
+    SEMI_MONTHLY = "semi_monthly"  # twice a month, on two configurable days (default 1 & 15)
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
     SEMI_ANNUAL = "semi_annual"
