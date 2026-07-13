@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
+import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 
 const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
 
@@ -486,6 +487,9 @@ export function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Cash-Flow Timeline (pre-due-date solvency) */}
+      <CashflowTimelineCard />
 
       {/* Financial Snapshot */}
       <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="financial-snapshot">
