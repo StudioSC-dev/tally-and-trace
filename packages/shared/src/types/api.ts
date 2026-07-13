@@ -64,7 +64,15 @@ export interface Allocation {
 // ─── Budget Entry ────────────────────────────────────────────────────────────
 
 export type BudgetEntryType = 'income' | 'expense'
-export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
+export type RecurrenceFrequency =
+  | 'daily'
+  | 'weekly'
+  | 'biweekly'
+  | 'semi_monthly'
+  | 'monthly'
+  | 'quarterly'
+  | 'semi_annual'
+  | 'annual'
 export type EndMode = 'indefinite' | 'on_date' | 'after_occurrences'
 
 export interface BudgetEntry {
@@ -79,6 +87,9 @@ export interface BudgetEntry {
   cadence: RecurrenceFrequency
   next_occurrence: string
   lead_time_days: number
+  /** Only meaningful when cadence === 'semi_monthly' (defaults 1 & 15). */
+  semi_monthly_day_1?: number
+  semi_monthly_day_2?: number
   end_mode: EndMode
   end_date?: string
   max_occurrences?: number
@@ -263,6 +274,38 @@ export interface NetDisposableIncome {
   total_expenses: number
   net_disposable_income: number
   currency?: CurrencyCode
+}
+
+// ─── Cash-flow timeline (pre-due-date solvency) ───────────────────────────────
+
+export interface CashflowTimelineEvent {
+  date: string
+  name: string
+  /** Signed: positive = inflow, negative = outflow. */
+  amount: number
+  type: string
+  source: 'budget_entry' | 'transaction'
+  source_id: number | null
+  running_balance: number
+}
+
+export interface CashflowShortfall {
+  date: string
+  name: string
+  balance_after: number
+}
+
+export interface CashflowTimeline {
+  window_start: string
+  window_end: string
+  opening_balance: number
+  lowest_balance: number
+  /** null => the opening balance is the lowest point in the window. */
+  trough_date: string | null
+  closing_balance: number
+  shortfall: boolean
+  shortfalls: CashflowShortfall[]
+  events: CashflowTimelineEvent[]
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────

@@ -32,6 +32,9 @@ export type {
   UpcomingBill,
   NetDisposableIncome,
   DashboardSnapshot,
+  CashflowTimeline,
+  CashflowTimelineEvent,
+  CashflowShortfall,
 } from '@tally-trace/shared'
 
 import type {
@@ -45,6 +48,7 @@ import type {
   AllocationProgress,
   GoalsSummary,
   TransactionSummary,
+  CashflowTimeline,
 } from '@tally-trace/shared'
 
 // ─── Base Query ───────────────────────────────────────────────────────────────
@@ -240,6 +244,12 @@ export const accountingApi = createApi({
       query: (params) => ({ url: 'transactions/summary/period', params }),
       providesTags: ['Transaction'],
     }),
+
+    // ── Forecast ──────────────────────────────────────────────────────────────
+    getForecastTimeline: builder.query<CashflowTimeline, { days?: number; entity_id?: number } | void>({
+      query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
+      providesTags: ['Account', 'BudgetEntry', 'Transaction'],
+    }),
   }),
 })
 
@@ -286,4 +296,7 @@ export const {
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
   useGetTransactionSummaryQuery,
+
+  // Forecast hooks
+  useGetForecastTimelineQuery,
 } = accountingApi
