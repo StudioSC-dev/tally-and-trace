@@ -139,13 +139,16 @@ export interface Transaction {
 
 // ─── Entity ──────────────────────────────────────────────────────────────────
 
-export type EntityType = 'household' | 'business' | 'personal'
-export type EntityMembershipRole = 'owner' | 'admin' | 'member'
+export type EntityType = 'personal' | 'business'
+export type EntityMembershipRole = 'owner' | 'member'
 
 export interface Entity {
   id: number
   name: string
   entity_type: EntityType
+  description?: string
+  default_currency?: string
+  is_active: boolean
   created_at: string
   updated_at?: string
 }
@@ -169,16 +172,45 @@ export type WishlistItemPriority = 'low' | 'medium' | 'high' | 'critical'
 
 export interface WishlistItem {
   id: number
-  entity_id: number
+  user_id: number
+  entity_id?: number
   name: string
-  description?: string
   estimated_cost: number
   currency: CurrencyCode
   priority: WishlistItemPriority
+  category_id?: number
+  url?: string
+  notes?: string
   target_date?: string
-  is_achieved: boolean
+  is_purchased: boolean
+  purchased_at?: string
   created_at: string
   updated_at?: string
+}
+
+export interface WishlistReadiness {
+  item_id: number
+  name: string
+  estimated_cost: number
+  monthly_disposable: number
+  savings_rate: number
+  months_needed: number
+  estimated_purchase_date: string
+  affordable_now: boolean
+}
+
+export interface WishlistPlanItem {
+  item_id: number
+  name: string
+  estimated_cost: number
+  estimated_purchase_date: string
+  cumulative_months: number
+}
+
+export interface WishlistPlan {
+  monthly_disposable: number
+  savings_rate: number
+  items: WishlistPlanItem[]
 }
 
 // ─── Shared Response Wrappers ─────────────────────────────────────────────────

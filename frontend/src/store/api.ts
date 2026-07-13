@@ -35,6 +35,9 @@ export type {
   CashflowTimeline,
   CashflowTimelineEvent,
   CashflowShortfall,
+  WishlistPlan,
+  WishlistReadiness,
+  WishlistPlanItem,
 } from '@tally-trace/shared'
 
 import type {
@@ -49,6 +52,9 @@ import type {
   GoalsSummary,
   TransactionSummary,
   CashflowTimeline,
+  WishlistItem,
+  WishlistPlan,
+  Entity,
 } from '@tally-trace/shared'
 
 // ─── Base Query ───────────────────────────────────────────────────────────────
@@ -82,7 +88,7 @@ const baseQueryWithAuth: typeof rawBaseQuery = async (args, api, extraOptions) =
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithAuth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Entity'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; limit?: number; offset?: number }>({
@@ -250,6 +256,46 @@ export const accountingApi = createApi({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
       providesTags: ['Account', 'BudgetEntry', 'Transaction'],
     }),
+
+    // ── Wishlist ──────────────────────────────────────────────────────────────
+    getWishlist: builder.query<WishlistItem[], { entity_id?: number; is_purchased?: boolean } | void>({
+      query: (params) => ({ url: 'wishlist/', params: params ?? {} }),
+      providesTags: ['Wishlist'],
+    }),
+    getWishlistPlan: builder.query<WishlistPlan, { entity_id?: number } | void>({
+      query: (params) => ({ url: 'wishlist/plan', params: params ?? {} }),
+      providesTags: ['Wishlist', 'BudgetEntry'],
+    }),
+    createWishlistItem: builder.mutation<WishlistItem, Partial<WishlistItem>>({
+      query: (body) => ({ url: 'wishlist/', method: 'POST', body }),
+      invalidatesTags: ['Wishlist'],
+    }),
+    updateWishlistItem: builder.mutation<WishlistItem, { id: number; data: Partial<WishlistItem> }>({
+      query: ({ id, data }) => ({ url: `wishlist/${id}`, method: 'PUT', body: data }),
+      invalidatesTags: ['Wishlist'],
+    }),
+    deleteWishlistItem: builder.mutation<void, number>({
+      query: (id) => ({ url: `wishlist/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Wishlist'],
+    }),
+
+    // ── Entities ──────────────────────────────────────────────────────────────
+    getEntities: builder.query<Entity[], { is_active?: boolean } | void>({
+      query: (params) => ({ url: 'entities/', params: params ?? {} }),
+      providesTags: ['Entity'],
+    }),
+    createEntity: builder.mutation<Entity, Partial<Entity>>({
+      query: (body) => ({ url: 'entities/', method: 'POST', body }),
+      invalidatesTags: ['Entity'],
+    }),
+    updateEntity: builder.mutation<Entity, { id: number; data: Partial<Entity> }>({
+      query: ({ id, data }) => ({ url: `entities/${id}`, method: 'PUT', body: data }),
+      invalidatesTags: ['Entity'],
+    }),
+    deleteEntity: builder.mutation<void, number>({
+      query: (id) => ({ url: `entities/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Entity'],
+    }),
   }),
 })
 
@@ -299,4 +345,17 @@ export const {
 
   // Forecast hooks
   useGetForecastTimelineQuery,
+
+  // Wishlist hooks
+  useGetWishlistQuery,
+  useGetWishlistPlanQuery,
+  useCreateWishlistItemMutation,
+  useUpdateWishlistItemMutation,
+  useDeleteWishlistItemMutation,
+
+  // Entity hooks
+  useGetEntitiesQuery,
+  useCreateEntityMutation,
+  useUpdateEntityMutation,
+  useDeleteEntityMutation,
 } = accountingApi
