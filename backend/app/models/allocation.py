@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Enum, Boolean, JSON
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -39,9 +39,9 @@ class Allocation(Base):
     description = Column(Text, nullable=True)
 
     # Financial details
-    target_amount = Column(Float, nullable=True)
-    current_amount = Column(Float, default=0.0, nullable=False)
-    monthly_target = Column(Float, nullable=True)
+    target_amount = Column(Numeric(15, 2), nullable=True)
+    current_amount = Column(Numeric(15, 2), default=0, nullable=False)
+    monthly_target = Column(Numeric(15, 2), nullable=True)
     currency = Column(Enum(CurrencyType), default=CurrencyType.PHP)
     configuration = Column(JSON, nullable=True)
     period_frequency = Column(

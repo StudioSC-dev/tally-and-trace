@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Enum, Boolean
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -36,14 +36,14 @@ class Transaction(Base):
     allocation_id = Column(Integer, ForeignKey("allocations.id"), nullable=True)
     budget_entry_id = Column(Integer, ForeignKey("budget_entries.id"), nullable=True)
     
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
     currency = Column(Enum(CurrencyType), default=CurrencyType.PHP)
-    projected_amount = Column(Float, nullable=True)
+    projected_amount = Column(Numeric(15, 2), nullable=True)
     projected_currency = Column(Enum(CurrencyType), nullable=True)
-    original_amount = Column(Float, nullable=True)
+    original_amount = Column(Numeric(15, 2), nullable=True)
     original_currency = Column(Enum(CurrencyType), nullable=True)
-    exchange_rate = Column(Float, nullable=True)
-    transfer_fee = Column(Float, nullable=False, default=0.0)
+    exchange_rate = Column(Numeric(15, 6), nullable=True)
+    transfer_fee = Column(Numeric(15, 2), nullable=False, default=0)
     description = Column(Text, nullable=True)
     transaction_type = Column(
         Enum(TransactionType, values_callable=_enum_values, name="transactiontype"),

@@ -3,7 +3,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    Float,
+    Numeric,
     Enum,
     DateTime,
     Boolean,
@@ -39,7 +39,7 @@ class BudgetEntry(Base):
     name = Column(String(150), nullable=False, index=True)
     description = Column(Text, nullable=True)
 
-    amount = Column(Float, nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
     currency = Column(Enum(CurrencyType), nullable=False, default=CurrencyType.PHP)
     cadence = Column(
         Enum(RecurrenceFrequency, values_callable=_enum_values, name="recurrencefrequency"),
@@ -57,6 +57,8 @@ class BudgetEntry(Base):
     max_occurrences = Column(Integer, nullable=True)
 
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # UC1: secondary funding source — payments draw from account_id first, overflow here.
+    overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     allocation_id = Column(Integer, ForeignKey("allocations.id"), nullable=True)
 
@@ -68,7 +70,8 @@ class BudgetEntry(Base):
 
     user = relationship("User", back_populates="budget_entries")
     entity = relationship("Entity", back_populates="budget_entries", foreign_keys="BudgetEntry.entity_id")
-    account = relationship("Account", back_populates="budget_entries")
+    account = relationship("Account", back_populates="budget_entries", foreign_keys=[account_id])
+    overflow_account = relationship("Account", foreign_keys=[overflow_account_id])
     category = relationship("Category", back_populates="budget_entries")
     allocation = relationship("Allocation", back_populates="budget_entries")
     transactions = relationship(

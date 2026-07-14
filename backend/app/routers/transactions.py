@@ -14,10 +14,16 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
 from datetime import datetime, timedelta
 from calendar import monthrange
+from decimal import Decimal
 import os
 from app.core.config import settings
 
 router = APIRouter()
+
+
+def _D(value) -> Decimal:
+    """Normalise a money value (float from a schema, Decimal from the ORM, or None) to Decimal."""
+    return Decimal(str(value)) if value is not None else Decimal("0")
 
 
 def _normalize_reference(reference: Optional[datetime]) -> datetime:
@@ -105,7 +111,7 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
         period_changed = True
 
     if period_changed:
-        allocation.current_amount = 0.0
+        allocation.current_amount = Decimal("0")
 
     allocation.period_start = period_start
     allocation.period_end = period_end
@@ -185,8 +191,7 @@ def _apply_budget_delta(
         if allocation.allocation_type != AllocationType.BUDGET:
             continue
         _ensure_budget_period(allocation, normalized_reference)
-        current = allocation.current_amount or 0.0
-        allocation.current_amount = current + delta
+        allocation.current_amount = _D(allocation.current_amount) + _D(delta)
         allocation.updated_at = now
 
 @router.get("/", response_model=TransactionListResponse)
@@ -334,14 +339,13 @@ def create_transaction(transaction: TransactionCreate, db: Session = Depends(get
     db.add(db_transaction)
     
     if transaction.transaction_type == TransactionType.CREDIT and transaction.is_posted:
-        primary_account.balance += transaction.amount
+        primary_account.balance = _D(primary_account.balance) + _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
-        primary_account.balance -= transaction.amount
+        primary_account.balance = _D(primary_account.balance) - _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.TRANSFER and transaction.is_posted:
-        transfer_fee = transaction.transfer_fee or 0.0
-        primary_account.balance -= (transaction.amount + transfer_fee)
+        primary_account.balance = _D(primary_account.balance) - (_D(transaction.amount) + _D(transaction.transfer_fee))
         if destination_account:
-            destination_account.balance += transaction.amount
+            destination_account.balance = _D(destination_account.balance) + _D(transaction.amount)
 
     if transaction.is_posted:
         delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)
@@ -412,20 +416,20 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         if old_type == TransactionType.CREDIT:
             old_account = db.query(Account).filter(Account.id == old_account_id).first()
             if old_account:
-                old_account.balance -= old_amount
+                old_account.balance = _D(old_account.balance) - _D(old_amount)
         elif old_type == TransactionType.DEBIT:
             old_account = db.query(Account).filter(Account.id == old_account_id).first()
             if old_account:
-                old_account.balance += old_amount
+                old_account.balance = _D(old_account.balance) + _D(old_amount)
         elif old_type == TransactionType.TRANSFER:
             if old_transfer_from:
                 from_account = db.query(Account).filter(Account.id == old_transfer_from).first()
                 if from_account:
-                    from_account.balance += old_amount + old_transfer_fee
+                    from_account.balance = _D(from_account.balance) + _D(old_amount) + _D(old_transfer_fee)
             if old_transfer_to:
                 to_account = db.query(Account).filter(Account.id == old_transfer_to).first()
                 if to_account:
-                    to_account.balance -= old_amount
+                    to_account.balance = _D(to_account.balance) - _D(old_amount)
         old_budget_delta = _budget_delta_for_transaction(old_type, old_amount)
         if old_budget_delta:
             previous_budget_allocations = _get_budget_allocations_for_transaction(
@@ -517,12 +521,12 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     # Apply new balance effects if posted
     if db_transaction.is_posted:
         if db_transaction.transaction_type == TransactionType.CREDIT and primary_account:
-            primary_account.balance += db_transaction.amount
+            primary_account.balance = _D(primary_account.balance) + _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.DEBIT and primary_account:
-            primary_account.balance -= db_transaction.amount
+            primary_account.balance = _D(primary_account.balance) - _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER and primary_account and destination_account:
-            primary_account.balance -= db_transaction.amount + db_transaction.transfer_fee
-            destination_account.balance += db_transaction.amount
+            primary_account.balance = _D(primary_account.balance) - (_D(db_transaction.amount) + _D(db_transaction.transfer_fee))
+            destination_account.balance = _D(destination_account.balance) + _D(db_transaction.amount)
         new_budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if new_budget_delta:
             new_budget_allocations = _get_budget_allocations_for_transaction(

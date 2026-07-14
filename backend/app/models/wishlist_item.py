@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, Boolean, ForeignKey, Enum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -24,7 +24,7 @@ class WishlistItem(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False)
-    estimated_cost = Column(Float, nullable=False)
+    estimated_cost = Column(Numeric(15, 2), nullable=False)
     currency = Column(
         Enum(CurrencyType),
         nullable=False,

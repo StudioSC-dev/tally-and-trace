@@ -60,7 +60,7 @@ def _monthly_equivalent(amount: float, cadence: RecurrenceFrequency) -> float:
         RecurrenceFrequency.SEMI_ANNUAL: 1 / 6,
         RecurrenceFrequency.ANNUAL: 1 / 12,
     }
-    return amount * per_month.get(cadence, 1.0)
+    return float(amount) * per_month.get(cadence, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,8 @@ def project_cashflow(
 
     accounts = get_account_balances(db, user_id, entity_id)
     # Exclude credit-card accounts — their balance is money owed, not cash on hand.
-    opening = sum(a.balance for a in accounts if a.account_type != AccountType.CREDIT)
+    # (This is an advisory monthly projection, so float is fine here.)
+    opening = sum(float(a.balance) for a in accounts if a.account_type != AccountType.CREDIT)
 
     # Active budget entries for the entity/user
     be_query = db.query(BudgetEntry).filter(
@@ -135,9 +136,9 @@ def project_cashflow(
 
             while period_start <= occ < period_end:
                 if entry.entry_type == BudgetEntryType.INCOME:
-                    income += entry.amount
+                    income += float(entry.amount)
                 else:
-                    expenses += entry.amount
+                    expenses += float(entry.amount)
                 occ = _next_occurrence(occ, entry.cadence)
 
         # Unposted transactions within the period
@@ -147,9 +148,9 @@ def project_cashflow(
             if period_start <= txn_date < period_end:
                 from app.models.transaction import TransactionType
                 if txn.transaction_type == TransactionType.DEBIT:
-                    unposted_period += txn.amount
+                    unposted_period += float(txn.amount)
                 elif txn.transaction_type == TransactionType.CREDIT:
-                    unposted_period -= txn.amount
+                    unposted_period -= float(txn.amount)
 
         net = income - expenses - unposted_period
         closing = opening + net
@@ -410,6 +411,57 @@ def build_timeline(opening, events: List[dict]) -> dict:
     }
 
 
+def route_accounts(opening_by_account: dict, events: List[dict], account_names: dict) -> List[dict]:
+    """Per-account funding projection with primary → overflow routing (UC1).
+
+    Walks the same events as the aggregate timeline, but tracks each funding
+    account separately. A payable draws down its ``funding_account_id``; if that
+    would go negative, the shortfall is pulled from ``overflow_account_id`` when
+    set. Anything still uncovered is reported as an **account shortfall** — the
+    account you intended to pay from can't cover this bill (even with overflow),
+    so you'd have to move money in. Returns the shortfalls, date-ordered.
+    """
+    balances = {aid: _money(bal) for aid, bal in opening_by_account.items()}
+    shortfalls: List[dict] = []
+
+    def _key(e):
+        d = e["date"]
+        d = d.date() if isinstance(d, datetime) else d
+        return (d, 0 if _money(e["amount"]) < 0 else 1)
+
+    for e in sorted(events, key=_key):
+        acc = e.get("funding_account_id")
+        if acc is None:
+            continue
+        amt = _money(e["amount"])
+        d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
+        if amt >= 0:  # inflow into the account
+            balances[acc] = balances.get(acc, Decimal("0")) + amt
+            continue
+
+        balances[acc] = balances.get(acc, Decimal("0")) + amt  # amt is negative
+        overflow_used = Decimal("0")
+        ov = e.get("overflow_account_id")
+        if balances[acc] < 0 and ov is not None:
+            need = -balances[acc]
+            ov_avail = balances.get(ov, Decimal("0"))
+            transfer = min(need, ov_avail) if ov_avail > 0 else Decimal("0")
+            balances[acc] += transfer
+            balances[ov] = ov_avail - transfer
+            overflow_used = transfer
+        if balances[acc] < 0:
+            shortfalls.append({
+                "date": d,
+                "name": e.get("name"),
+                "account_id": acc,
+                "account_name": account_names.get(acc),
+                "short_amount": -balances[acc],
+                "overflow_used": overflow_used,
+            })
+
+    return shortfalls
+
+
 def project_running_balance(
     db: Session,
     user_id: int,
@@ -425,10 +477,10 @@ def project_running_balance(
     accounts = get_account_balances(db, user_id, entity_id)
     # Available cash EXCLUDES credit-card accounts — those balances are money owed,
     # not money on hand. (Card payments show up as payable events instead.)
-    opening = sum(
-        (Decimal(str(a.balance)) for a in accounts if a.account_type != AccountType.CREDIT),
-        Decimal("0"),
-    )
+    asset_accounts = [a for a in accounts if a.account_type != AccountType.CREDIT]
+    opening = sum((Decimal(str(a.balance)) for a in asset_accounts), Decimal("0"))
+    opening_by_account = {a.id: Decimal(str(a.balance)) for a in asset_accounts}
+    account_names = {a.id: a.name for a in accounts}
 
     events: List[dict] = []
 
@@ -448,6 +500,8 @@ def project_running_balance(
                 "type": entry.entry_type.value,
                 "source": "budget_entry",
                 "source_id": entry.id,
+                "funding_account_id": entry.account_id,
+                "overflow_account_id": entry.overflow_account_id,
             })
 
     txn_query = db.query(Transaction).filter(
@@ -472,9 +526,12 @@ def project_running_balance(
             "type": txn.transaction_type.value,
             "source": "transaction",
             "source_id": txn.id,
+            "funding_account_id": txn.account_id,
+            "overflow_account_id": None,
         })
 
     result = build_timeline(opening, events)
+    result["account_shortfalls"] = route_accounts(opening_by_account, events, account_names)
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
@@ -499,6 +556,17 @@ def serialize_timeline(result: dict) -> dict:
         "shortfalls": [
             {"date": iso(s["date"]), "name": s["name"], "balance_after": f(s["balance_after"])}
             for s in result["shortfalls"]
+        ],
+        "account_shortfalls": [
+            {
+                "date": iso(s["date"]),
+                "name": s["name"],
+                "account_id": s["account_id"],
+                "account_name": s["account_name"],
+                "short_amount": f(s["short_amount"]),
+                "overflow_used": f(s["overflow_used"]),
+            }
+            for s in result.get("account_shortfalls", [])
         ],
         "events": [
             {

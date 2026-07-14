@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, Boolean, ForeignKey, Enum
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -26,12 +26,12 @@ class Account(Base):
         Enum(AccountType, values_callable=_enum_values, name="accounttype"),
         nullable=False,
     )
-    balance = Column(Float, default=0.0, nullable=False)
+    balance = Column(Numeric(15, 2), default=0, nullable=False)
     currency = Column(Enum(CurrencyType), nullable=False, default=CurrencyType.PHP)
     description = Column(Text, nullable=True)
     
     # Credit card specific fields
-    credit_limit = Column(Float, nullable=True)
+    credit_limit = Column(Numeric(15, 2), nullable=True)
     due_date = Column(Integer, nullable=True)  # Day of month for due date (legacy support)
     billing_cycle_start = Column(Integer, nullable=True)  # Day of month for billing cycle start / statement day
     days_until_due_date = Column(Integer, nullable=True, default=21)

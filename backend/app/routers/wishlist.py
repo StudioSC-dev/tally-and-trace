@@ -96,7 +96,7 @@ def get_wishlist_plan(
     plan: List[WishlistPlanItem] = []
 
     for item in items:
-        months_needed = math.ceil(item.estimated_cost / savings_rate)
+        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
         cumulative_months += months_needed
         purchase_date = now + timedelta(days=cumulative_months * 30)
         plan.append(
@@ -197,8 +197,8 @@ def get_readiness(
         months_needed = 9999
         affordable_now = False
     else:
-        months_needed = math.ceil(item.estimated_cost / savings_rate)
-        affordable_now = item.estimated_cost <= monthly_disposable
+        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
+        affordable_now = float(item.estimated_cost) <= monthly_disposable
 
     estimated_date = (datetime.utcnow() + timedelta(days=months_needed * 30)).date().isoformat()
 

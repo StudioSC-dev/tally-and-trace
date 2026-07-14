@@ -114,7 +114,7 @@ def get_snapshot(
     from datetime import timedelta
     wishlist_next_up = []
     for item in wishlist_items:
-        months_needed = math.ceil(item.estimated_cost / savings_rate)
+        months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
         affordable_by = (datetime.utcnow() + timedelta(days=months_needed * 30)).date().isoformat()
         wishlist_next_up.append({
             "id": item.id,
