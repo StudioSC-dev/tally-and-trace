@@ -228,6 +228,7 @@ type SubscriptionFormState = {
   amount: number
   currency: CurrencyCode
   account_id: number
+  overflow_account_id?: number
   category_id?: number
   allocation_id?: number
   cadence: BudgetEntry['cadence']
@@ -600,6 +601,7 @@ export function AllocationsPage() {
           amount: entry.amount,
           currency: (entry.currency as CurrencyCode) || defaultCurrencyCode,
           account_id: entry.account_id ?? 0,
+          overflow_account_id: entry.overflow_account_id ?? undefined,
           category_id: entry.category_id ?? undefined,
           allocation_id: entry.allocation_id ?? undefined,
           cadence: entry.cadence,
@@ -751,6 +753,7 @@ export function AllocationsPage() {
           amount: subscriptionForm.amount,
           currency: subscriptionForm.currency,
           account_id: subscriptionForm.account_id,
+          overflow_account_id: subscriptionForm.overflow_account_id || undefined,
           category_id: subscriptionForm.category_id || undefined,
           allocation_id: subscriptionForm.allocation_id ?? undefined,
           cadence: subscriptionForm.cadence,
@@ -1757,7 +1760,24 @@ export function AllocationsPage() {
                       </select>
                     </div>
               </div>
-              
+
+              {subscriptionForm.entry_type === 'expense' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Overflow account (optional)</label>
+                  <select
+                    value={subscriptionForm.overflow_account_id ?? 0}
+                    onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, overflow_account_id: parseInt(e.target.value) || undefined }))}
+                    className="mt-1 block w-full border border-gray-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-md px-3 py-2"
+                  >
+                    <option value={0}>None</option>
+                    {accounts.filter((a) => a.id !== subscriptionForm.account_id).map((account) => (
+                      <option key={account.id} value={account.id}>{account.name}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">If the primary account can't cover a payment, the shortfall is drawn from here.</p>
+                </div>
+              )}
+
               <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Currency</label>
                     <select

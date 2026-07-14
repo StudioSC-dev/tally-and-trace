@@ -1,4 +1,5 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
+import { createApi } from '@reduxjs/toolkit/query/react'
+import { baseQueryWithReauth } from './baseQuery'
 
 // ─── Re-export shared types so existing imports continue to work ──────────────
 export type {
@@ -35,6 +36,7 @@ export type {
   CashflowTimeline,
   CashflowTimelineEvent,
   CashflowShortfall,
+  AccountShortfall,
   WishlistPlan,
   WishlistReadiness,
   WishlistPlanItem,
@@ -57,37 +59,11 @@ import type {
   Entity,
 } from '@tally-trace/shared'
 
-// ─── Base Query ───────────────────────────────────────────────────────────────
-
-const rawBaseQuery = fetchBaseQuery({
-  baseUrl: `${import.meta.env.VITE_API_URL || ''}/api/v1`,
-  prepareHeaders: (headers) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      headers.set('authorization', `Bearer ${token}`)
-    }
-    return headers
-  },
-})
-
-const baseQueryWithAuth: typeof rawBaseQuery = async (args, api, extraOptions) => {
-  const result = await rawBaseQuery(args, api, extraOptions)
-
-  // If we get a 401, clear the token and redirect to login
-  if (result.error && 'status' in result.error && result.error.status === 401) {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('user')
-    window.location.href = '/login'
-  }
-
-  return result
-}
-
 // ─── RTK Query API ────────────────────────────────────────────────────────────
 
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
-  baseQuery: baseQueryWithAuth,
+  baseQuery: baseQueryWithReauth,
   tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Entity'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────

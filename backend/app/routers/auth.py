@@ -6,7 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.auth import verify_password, get_password_hash, create_access_token, get_current_active_user
+from app.core.auth import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    get_current_active_user,
+    create_refresh_token,
+    rotate_refresh_token,
+    revoke_refresh_token,
+)
 from app.core.config import settings
 from app.models.email_token import EmailToken, EmailTokenType
 from app.models.user import User
@@ -14,6 +22,7 @@ from app.schemas.user import (
     EmailVerificationRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
+    RefreshRequest,
     ResendVerificationRequest,
     Token,
     UserCreate,
@@ -96,16 +105,40 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     db.commit()
     
-    # Create access token
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Create access + refresh tokens
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    
+    refresh_token = create_refresh_token(db, user)
+
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
+@router.post("/refresh", response_model=Token)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a new access token (rotates the refresh token)."""
+    user, new_refresh = rotate_refresh_token(db, payload.refresh_token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = create_access_token(
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
 
 @router.get("/me", response_model=UserResponse)
@@ -131,8 +164,9 @@ def update_current_user(
     return current_user
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_active_user)):
-    """Logout user (client should discard token)."""
+def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Revoke the given refresh token (the client also discards its access token)."""
+    revoke_refresh_token(db, payload.refresh_token)
     return {"message": "Successfully logged out"}
 
 

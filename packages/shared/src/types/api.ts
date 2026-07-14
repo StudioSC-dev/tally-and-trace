@@ -94,6 +94,8 @@ export interface BudgetEntry {
   end_date?: string
   max_occurrences?: number
   account_id?: number
+  /** UC1: secondary funding source — payments draw from account_id first, overflow here. */
+  overflow_account_id?: number
   category_id?: number
   allocation_id?: number
   is_autopay: boolean
@@ -327,6 +329,16 @@ export interface CashflowShortfall {
   balance_after: number
 }
 
+export interface AccountShortfall {
+  date: string
+  name: string
+  account_id: number
+  account_name: string | null
+  /** How much the funding account is still short after overflow. */
+  short_amount: number
+  overflow_used: number
+}
+
 export interface CashflowTimeline {
   window_start: string
   window_end: string
@@ -337,6 +349,7 @@ export interface CashflowTimeline {
   closing_balance: number
   shortfall: boolean
   shortfalls: CashflowShortfall[]
+  account_shortfalls: AccountShortfall[]
   events: CashflowTimelineEvent[]
 }
 

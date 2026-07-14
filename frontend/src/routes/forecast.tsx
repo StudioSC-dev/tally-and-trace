@@ -117,6 +117,32 @@ function ForecastPage() {
             </dl>
           </div>
 
+          {/* Account funding shortfalls (UC1) */}
+          {data.account_shortfalls.length > 0 && (
+            <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-amber-200 dark:border-amber-500/30 shadow-sm">
+              <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Funding shortfalls</h2>
+                <p className="text-sm text-gray-500 dark:text-slate-400">
+                  Bills where the account you pay from can't cover them (even after overflow) — you'd need to move money in first.
+                </p>
+              </div>
+              <ul className="divide-y divide-gray-100 dark:divide-slate-800/50">
+                {data.account_shortfalls.map((s, i) => (
+                  <li key={`${s.account_id}-${i}`} className="p-4 sm:px-6 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 dark:text-white truncate">{s.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-slate-500">
+                        {longDate(s.date)} · from {s.account_name ?? 'account'}
+                        {s.overflow_used > 0 ? ` · ${format(s.overflow_used)} pulled from overflow` : ''}
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold text-amber-600 dark:text-amber-400 flex-shrink-0">short {format(s.short_amount)}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Event table (the accessible table view of the chart) */}
           <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
             <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">

@@ -20,6 +20,7 @@ class BudgetEntryBase(BaseModel):
     semi_monthly_day_2: int = Field(15, ge=1, le=31)
     end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
     account_id: Optional[int] = Field(None, gt=0)
+    overflow_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     is_autopay: bool = False
@@ -45,6 +46,7 @@ class BudgetEntryUpdate(BaseModel):
     semi_monthly_day_1: Optional[int] = Field(None, ge=1, le=31)
     semi_monthly_day_2: Optional[int] = Field(None, ge=1, le=31)
     account_id: Optional[int] = Field(None, gt=0)
+    overflow_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     is_autopay: Optional[bool] = None

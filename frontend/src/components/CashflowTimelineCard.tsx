@@ -66,6 +66,13 @@ export function CashflowTimelineCard() {
 
             <RunningBalanceChart timeline={data} format={format} height={150} compact />
 
+            {data.account_shortfalls.length > 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                ⚠ {data.account_shortfalls.length} funding shortfall{data.account_shortfalls.length === 1 ? '' : 's'} — a bill can't be covered from its funding account.{' '}
+                <Link to="/forecast" className="underline">See details</Link>
+              </p>
+            )}
+
             <dl className="grid grid-cols-3 gap-2 text-center">
               {[
                 { label: 'Opening', value: data.opening_balance, color: 'text-gray-900 dark:text-white' },

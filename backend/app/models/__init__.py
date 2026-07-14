@@ -8,6 +8,7 @@ from app.models.category import Category as Category
 from app.models.allocation import Allocation as Allocation, AllocationType as AllocationType
 from app.models.budget_entry import BudgetEntry as BudgetEntry, BudgetEntryType as BudgetEntryType
 from app.models.email_token import EmailToken as EmailToken, EmailTokenType as EmailTokenType
+from app.models.refresh_token import RefreshToken as RefreshToken
 from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPriority as WishlistPriority
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ BudgetEntry.transactions = relationship(
 
 User.budget_entries = relationship("BudgetEntry", back_populates="user")
 User.email_tokens = relationship("EmailToken", back_populates="user", cascade="all, delete-orphan")
-Account.budget_entries = relationship("BudgetEntry", back_populates="account")
+Account.budget_entries = relationship("BudgetEntry", back_populates="account", foreign_keys="BudgetEntry.account_id")
 
 Transaction.budget_entry = relationship(
     "BudgetEntry",

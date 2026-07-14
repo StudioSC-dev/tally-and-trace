@@ -45,11 +45,15 @@ class UserLogin(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=10)
 
 
 class EmailVerificationRequest(BaseModel):
