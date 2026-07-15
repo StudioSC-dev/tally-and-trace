@@ -1,14 +1,17 @@
 import { Link } from '@tanstack/react-router'
 import { useAuth } from '../contexts/AuthContext'
+import { useEntity } from '../contexts/EntityContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { useState } from 'react'
 import { getCurrencyLogoSymbol } from '../utils/currency'
 
 export function Navigation() {
   const { user, logout } = useAuth()
+  const { entities, activeEntity, setActiveEntityId } = useEntity()
   const { theme, toggleTheme } = useTheme()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [showEntityMenu, setShowEntityMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
 
   const navLinkBase = "inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
@@ -72,8 +75,37 @@ export function Navigation() {
             </div>
           </div>
 
-          {/* Right side: theme toggle + user menu + mobile hamburger */}
+          {/* Right side: entity switcher + theme toggle + user menu + mobile hamburger */}
           <div className="flex items-center space-x-2">
+            {/* Entity Switcher */}
+            {entities.length > 1 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowEntityMenu(!showEntityMenu)}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
+                >
+                  <span className="capitalize">{activeEntity?.name ?? 'Select entity'}</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showEntityMenu && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-lg py-1 z-50 border border-gray-200 dark:border-slate-700">
+                    {entities.map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={() => { setShowEntityMenu(false); if (e.id !== activeEntity?.id) setActiveEntityId(e.id) }}
+                        className={`block w-full text-left px-4 py-2 text-sm transition-colors duration-200 ${e.id === activeEntity?.id ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10' : 'text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'}`}
+                      >
+                        <span className="font-medium">{e.name}</span>
+                        <span className="ml-2 text-xs text-gray-400 dark:text-slate-500 capitalize">{e.entity_type}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}

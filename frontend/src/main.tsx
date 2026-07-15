@@ -4,6 +4,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { Provider } from 'react-redux'
 import { store } from './store'
 import { AuthProvider } from './contexts/AuthContext'
+import { EntityProvider } from './contexts/EntityContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import './assets/index.css'
 
@@ -28,7 +29,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <Provider store={store}>
       <ThemeProvider>
         <AuthProvider>
-          <RouterProvider router={router} />
+          <EntityProvider>
+            <RouterProvider router={router} />
+          </EntityProvider>
         </AuthProvider>
       </ThemeProvider>
     </Provider>
