@@ -4,10 +4,12 @@ from sqlalchemy import or_
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.entity_context import get_active_entity, validate_entity_ownership
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account
 from app.models.category import Category
+from app.models.entity import Entity
 from app.models.user import User
 from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
@@ -198,6 +200,7 @@ def _apply_budget_delta(
 def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_ids: Optional[List[int]] = Query(None, alias="account_ids", description="Filter by account IDs"),
     category_ids: Optional[List[int]] = Query(None, alias="category_ids", description="Filter by category IDs"),
     allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),

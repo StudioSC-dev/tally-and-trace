@@ -66,6 +66,32 @@ def get_active_entity(
     return entity
 
 
+def validate_entity_ownership(db: Session, user: User, entity_id: Optional[int]) -> None:
+    """
+    Raise if ``entity_id`` is supplied but the user isn't a member of that entity.
+
+    Used by create/update endpoints that accept a client-supplied ``entity_id`` in
+    the request body (independent of the ``get_active_entity`` header/query path),
+    so a caller can't tag a record onto an entity they don't belong to.
+    """
+    if entity_id is None:
+        return
+
+    membership = (
+        db.query(EntityMembership)
+        .filter(
+            EntityMembership.entity_id == entity_id,
+            EntityMembership.user_id == user.id,
+        )
+        .first()
+    )
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this entity",
+        )
+
+
 def require_entity_owner(
     entity: Optional[Entity] = Depends(get_active_entity),
     db: Session = Depends(get_db),

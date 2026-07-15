@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.entity_context import get_active_entity, validate_entity_ownership
 from app.models.category import Category
+from app.models.entity import Entity
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 
@@ -13,15 +15,15 @@ router = APIRouter()
 def get_categories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     is_expense: Optional[bool] = Query(None, description="Filter by expense/income type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
 ):
     """Get all categories with optional filtering"""
     query = db.query(Category).filter(Category.user_id == current_user.id)
 
-    if entity_id is not None:
-        query = query.filter(Category.entity_id == entity_id)
+    if active_entity is not None:
+        query = query.filter(Category.entity_id == active_entity.id)
     if is_expense is not None:
         query = query.filter(Category.is_expense == is_expense)
     if is_active is not None:
@@ -35,6 +37,7 @@ def create_category(
     category: CategoryCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new category"""
     # Check if category name already exists for this user
@@ -45,7 +48,13 @@ def create_category(
     if existing_category:
         raise HTTPException(status_code=400, detail="Category with this name already exists")
 
-    db_category = Category(**category.dict(), user_id=current_user.id)
+    category_data = category.dict()
+    if category_data.get("entity_id") is None and active_entity is not None:
+        category_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, category_data.get("entity_id"))
+
+    db_category = Category(**category_data, user_id=current_user.id)
     db.add(db_category)
     db.commit()
     db.refresh(db_category)

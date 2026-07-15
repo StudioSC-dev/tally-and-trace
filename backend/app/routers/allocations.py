@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.entity_context import get_active_entity, validate_entity_ownership
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
 from app.models.account import Account
+from app.models.entity import Entity
 from app.models.user import User
 from datetime import datetime
 
@@ -15,18 +17,18 @@ router = APIRouter()
 def get_allocations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_id: Optional[int] = Query(None, description="Filter by account ID"),
     allocation_type: Optional[str] = Query(None, description="Filter by allocation type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Get all allocations with optional filtering"""
     query = db.query(Allocation).filter(Allocation.user_id == current_user.id)
 
-    if entity_id is not None:
-        query = query.filter(Allocation.entity_id == entity_id)
+    if active_entity is not None:
+        query = query.filter(Allocation.entity_id == active_entity.id)
     if account_id:
         query = query.filter(Allocation.account_id == account_id)
     if allocation_type:
@@ -54,6 +56,7 @@ def create_allocation(
     allocation: AllocationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new allocation"""
     # Verify account exists
@@ -64,8 +67,14 @@ def create_allocation(
     )
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    db_allocation = Allocation(**allocation.dict(), user_id=current_user.id)
+
+    allocation_data = allocation.dict()
+    if allocation_data.get("entity_id") is None and active_entity is not None:
+        allocation_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, allocation_data.get("entity_id"))
+
+    db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
     db.commit()
     db.refresh(db_allocation)
