@@ -4,7 +4,9 @@ from sqlalchemy import or_
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.entity_context import get_active_entity, validate_entity_ownership
 from app.models.account import Account, AccountType
+from app.models.entity import Entity
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
 from datetime import datetime
@@ -15,18 +17,18 @@ router = APIRouter()
 def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_type: Optional[str] = Query(None, description="Filter by account type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Get all accounts with optional filtering"""
     query = db.query(Account).filter(Account.user_id == current_user.id)
 
-    if entity_id is not None:
-        query = query.filter(Account.entity_id == entity_id)
-    
+    if active_entity is not None:
+        query = query.filter(Account.entity_id == active_entity.id)
+
     if account_type:
         # Convert string to enum
         try:
@@ -49,9 +51,20 @@ def get_accounts(
     return {"items": accounts, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=AccountResponse)
-def create_account(account: AccountCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+def create_account(
+    account: AccountCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
+):
     """Create a new account"""
-    db_account = Account(**account.dict(), user_id=current_user.id)
+    account_data = account.dict()
+    if account_data.get("entity_id") is None and active_entity is not None:
+        account_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, account_data.get("entity_id"))
+
+    db_account = Account(**account_data, user_id=current_user.id)
     db.add(db_account)
     db.commit()
     db.refresh(db_account)
@@ -118,16 +131,16 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     for transaction in transactions:
         if not transaction.is_posted:
             continue
-        
+
         if transaction.transaction_type == TransactionType.CREDIT and transaction.account_id == account_id:
-            running_balance += transaction.amount
+            running_balance += float(transaction.amount)
         elif transaction.transaction_type == TransactionType.DEBIT and transaction.account_id == account_id:
-            running_balance -= transaction.amount
+            running_balance -= float(transaction.amount)
         elif transaction.transaction_type == TransactionType.TRANSFER:
             if transaction.transfer_from_account_id == account_id:
-                running_balance -= transaction.amount + (transaction.transfer_fee or 0.0)
+                running_balance -= float(transaction.amount) + float(transaction.transfer_fee or 0.0)
             elif transaction.transfer_to_account_id == account_id:
-                running_balance += transaction.amount
+                running_balance += float(transaction.amount)
             else:
                 continue
         else:

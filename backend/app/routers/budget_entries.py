@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
+from app.core.entity_context import get_active_entity, validate_entity_ownership
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account
 from app.models.category import Category
 from app.models.allocation import Allocation
+from app.models.entity import Entity
 from app.models.transaction import RecurrenceFrequency, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import (
@@ -63,11 +65,11 @@ def _ensure_related_resources(
 def list_budget_entries(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     entry_type: Optional[BudgetEntryType] = Query(
         None, description="Filter by entry type (income or expense)"
     ),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     before: Optional[datetime] = Query(
         None, description="Filter entries occurring before this datetime"
     ),
@@ -79,8 +81,8 @@ def list_budget_entries(
 ):
     query = db.query(BudgetEntry).filter(BudgetEntry.user_id == current_user.id)
 
-    if entity_id is not None:
-        query = query.filter(BudgetEntry.entity_id == entity_id)
+    if active_entity is not None:
+        query = query.filter(BudgetEntry.entity_id == active_entity.id)
     if entry_type:
         query = query.filter(BudgetEntry.entry_type == entry_type)
     if is_active is not None:
@@ -126,6 +128,7 @@ def create_budget_entry(
     entry_in: BudgetEntryCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     _ensure_related_resources(
         db=db,
@@ -136,6 +139,11 @@ def create_budget_entry(
     )
 
     entry_data = entry_in.dict()
+    if entry_data.get("entity_id") is None and active_entity is not None:
+        entry_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, entry_data.get("entity_id"))
+
     entry_data["user_id"] = current_user.id
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
     entry = BudgetEntry(**entry_data)
@@ -266,7 +274,7 @@ def materialize_budget_entry(
         description=entry.name,
         is_posted=True,
     )
-    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user)
+    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user, active_entity=None)
 
     if payload.advance:
         next_occ = _advance_occurrence(entry, entry.next_occurrence)
