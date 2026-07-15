@@ -206,7 +206,6 @@ def get_transactions(
     end_date: Optional[datetime] = Query(None, description="End date for filtering"),
     is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
     search: Optional[str] = Query(None, description="Search by description"),
-    entity_id: Optional[int] = Query(None, description="Filter by entity ID"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -214,7 +213,7 @@ def get_transactions(
     # First get user's accounts to filter transactions
     user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
     user_account_ids = [account.id for account in user_accounts]
-    
+
     query = db.query(Transaction).filter(
         or_(
             Transaction.account_id.in_(user_account_ids),
@@ -222,9 +221,9 @@ def get_transactions(
             Transaction.transfer_to_account_id.in_(user_account_ids)
         )
     )
-    
-    if entity_id is not None:
-        query = query.filter(Transaction.entity_id == entity_id)
+
+    if active_entity is not None:
+        query = query.filter(Transaction.entity_id == active_entity.id)
     if account_ids:
         query = query.filter(
             or_(
@@ -263,9 +262,18 @@ def get_transactions(
     return {"items": transactions, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=TransactionResponse)
-def create_transaction(transaction: TransactionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+def create_transaction(
+    transaction: TransactionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
+):
     """Create a new transaction and update account balance"""
     transaction_data = transaction.dict()
+    if transaction_data.get("entity_id") is None and active_entity is not None:
+        transaction_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, transaction_data.get("entity_id"))
     transaction_data["user_id"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
@@ -564,20 +572,20 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
         if db_transaction.transaction_type == TransactionType.CREDIT:
             account = db.query(Account).filter(Account.id == db_transaction.account_id).first()
             if account:
-                account.balance -= db_transaction.amount
+                account.balance = _D(account.balance) - _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.DEBIT:
             account = db.query(Account).filter(Account.id == db_transaction.account_id).first()
             if account:
-                account.balance += db_transaction.amount
+                account.balance = _D(account.balance) + _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER:
             if db_transaction.transfer_from_account_id:
                 from_account = db.query(Account).filter(Account.id == db_transaction.transfer_from_account_id).first()
                 if from_account:
-                    from_account.balance += db_transaction.amount + (db_transaction.transfer_fee or 0.0)
+                    from_account.balance = _D(from_account.balance) + _D(db_transaction.amount) + _D(db_transaction.transfer_fee)
             if db_transaction.transfer_to_account_id:
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
-                    to_account.balance -= db_transaction.amount
+                    to_account.balance = _D(to_account.balance) - _D(db_transaction.amount)
         budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if budget_delta:
             budget_allocations = _get_budget_allocations_for_transaction(

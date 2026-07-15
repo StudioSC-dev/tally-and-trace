@@ -49,9 +49,20 @@ def get_accounts(
     return {"items": accounts, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=AccountResponse)
-def create_account(account: AccountCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+def create_account(
+    account: AccountCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
+):
     """Create a new account"""
-    db_account = Account(**account.dict(), user_id=current_user.id)
+    account_data = account.dict()
+    if account_data.get("entity_id") is None and active_entity is not None:
+        account_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, account_data.get("entity_id"))
+
+    db_account = Account(**account_data, user_id=current_user.id)
     db.add(db_account)
     db.commit()
     db.refresh(db_account)
