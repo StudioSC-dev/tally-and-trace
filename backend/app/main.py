@@ -90,6 +90,8 @@ async def root():
     return {"message": "Welcome to Tally & Trace API"}
 
 
-@app.get("/health")
+# HEAD is explicit: FastAPI's APIRoute, unlike Starlette's Route, does not add
+# HEAD alongside GET, and uptime monitors probe with HEAD by default.
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
     return {"status": "healthy"}
