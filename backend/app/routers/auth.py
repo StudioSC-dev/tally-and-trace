@@ -1,8 +1,9 @@
 import secrets
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -16,6 +17,7 @@ from app.core.auth import (
     revoke_refresh_token,
 )
 from app.core.config import settings
+from app.core.time import utc_now
 from app.models.email_token import EmailToken, EmailTokenType
 from app.models.user import User
 from app.schemas.user import (
@@ -40,6 +42,35 @@ from app.services.email import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    """Store the refresh token in an httpOnly cookie so JS/XSS can't read it.
+
+    Scoped to the auth path so it's only sent to /refresh and /logout, not on every
+    API call. Attributes are config-driven (see REFRESH_COOKIE_* in config): host-only
+    over http in dev; Domain=.studiosc.dev + Secure in prod, where web and api are
+    same-site subdomains so SameSite=lax still delivers it on the cross-subdomain XHR.
+    """
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
+        domain=settings.REFRESH_COOKIE_DOMAIN,
+        path=settings.REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    """Delete the refresh cookie. Domain/path must match the set call or it lingers."""
+    response.delete_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        domain=settings.REFRESH_COOKIE_DOMAIN,
+        path=settings.REFRESH_COOKIE_PATH,
+    )
 
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
@@ -78,7 +109,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return db_user
 
 @router.post("/login", response_model=Token)
-def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
+def login(user_credentials: UserLogin, response: Response, db: Session = Depends(get_db)):
     """Login user and return access token."""
     # Verify user credentials
     user = db.query(User).filter(User.email == user_credentials.email).first()
@@ -102,7 +133,7 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         )
     
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = utc_now()
     db.commit()
     
     # Create access + refresh tokens
@@ -111,9 +142,11 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
     refresh_token = create_refresh_token(db, user)
+    _set_refresh_cookie(response, refresh_token)
 
     return {
         "access_token": access_token,
+        # Also returned in the body for native clients (no cookie jar). Web ignores it.
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -121,10 +154,29 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=Token)
-def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
-    """Exchange a valid refresh token for a new access token (rotates the refresh token)."""
-    user, new_refresh = rotate_refresh_token(db, payload.refresh_token)
+def refresh(
+    response: Response,
+    payload: RefreshRequest = RefreshRequest(),
+    db: Session = Depends(get_db),
+    tt_refresh: Optional[str] = Cookie(default=None, alias=settings.REFRESH_COOKIE_NAME),
+):
+    """Exchange a valid refresh token for a new access token (rotates the refresh token).
+
+    Reads the token from the httpOnly cookie (web) or the request body (native).
+    """
+    token = payload.refresh_token or tt_refresh
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user, new_refresh = rotate_refresh_token(db, token)
     if not user:
+        # Rotation failed: the token is bad or already used. Clear any stale cookie
+        # so the browser stops presenting it on every retry.
+        _clear_refresh_cookie(response)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
@@ -134,6 +186,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         data={"sub": user.email},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
+    _set_refresh_cookie(response, new_refresh)
     return {
         "access_token": access_token,
         "refresh_token": new_refresh,
@@ -157,16 +210,28 @@ def update_current_user(
     for field, value in update_data.items():
         setattr(current_user, field, value)
     
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = utc_now()
     db.commit()
     db.refresh(current_user)
     
     return current_user
 
 @router.post("/logout")
-def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
-    """Revoke the given refresh token (the client also discards its access token)."""
-    revoke_refresh_token(db, payload.refresh_token)
+def logout(
+    response: Response,
+    payload: RefreshRequest = RefreshRequest(),
+    db: Session = Depends(get_db),
+    tt_refresh: Optional[str] = Cookie(default=None, alias=settings.REFRESH_COOKIE_NAME),
+):
+    """Revoke the refresh token (from cookie or body) and clear the cookie.
+
+    Always clears the cookie and returns 200, even if no token was presented, so
+    logout is idempotent and can't fail the client's sign-out flow.
+    """
+    token = payload.refresh_token or tt_refresh
+    if token:
+        revoke_refresh_token(db, token)
+    _clear_refresh_cookie(response)
     return {"message": "Successfully logged out"}
 
 
@@ -174,7 +239,7 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
 def complete_onboarding(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """Mark onboarding as completed for the current user."""
     current_user.onboarding_completed = True
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = utc_now()
     db.commit()
     db.refresh(current_user)
     return current_user
@@ -193,14 +258,14 @@ def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db
     if not token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
-    if token.expires_at < datetime.utcnow():
+    if token.expires_at < utc_now():
         db.delete(token)
         db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token has expired")
 
     user = token.user
     user.is_verified = True
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utc_now()
     db.query(EmailToken).filter(
         EmailToken.user_id == user.id,
         EmailToken.token_type == EmailTokenType.VERIFY_EMAIL,
@@ -261,14 +326,14 @@ def reset_password(payload: PasswordResetConfirm, db: Session = Depends(get_db))
     if not token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
-    if token.expires_at < datetime.utcnow():
+    if token.expires_at < utc_now():
         db.delete(token)
         db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token has expired")
 
     user = token.user
     user.password_hash = get_password_hash(payload.new_password)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utc_now()
     db.query(EmailToken).filter(
         EmailToken.user_id == user.id,
         EmailToken.token_type == EmailTokenType.RESET_PASSWORD,
@@ -323,7 +388,7 @@ def _create_email_token(
     db.query(EmailToken).filter(EmailToken.user_id == user.id, EmailToken.token_type == token_type).delete()
 
     token_value = secrets.token_urlsafe(48)
-    expires_at = datetime.utcnow() + timedelta(hours=expire_hours)
+    expires_at = utc_now() + timedelta(hours=expire_hours)
     db_token = EmailToken(
         user_id=user.id,
         token=token_value,

@@ -3,18 +3,20 @@ Unified dashboard snapshot endpoint for Tally & Trace.
 Returns everything the front-end needs in a single call.
 """
 import math
-from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
+from app.core.entity_context import get_active_entity, scope_criterion
 from app.models.allocation import Allocation, AllocationType
+from app.models.entity import Entity
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.services import forecast as forecast_svc
+from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -23,9 +25,9 @@ SAVINGS_RATE_FACTOR = 0.5
 
 @router.get("/snapshot")
 def get_snapshot(
-    entity_id: Optional[int] = Query(None, description="Entity context"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """
     Single-call snapshot returning:
@@ -36,6 +38,9 @@ def get_snapshot(
     - Goal progress
     - Top 3 wishlist items with readiness advisory
     """
+    # Was an unvalidated entity_id query param; get_active_entity verifies membership.
+    entity_id = active_entity.id if active_entity else None
+
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
@@ -65,12 +70,10 @@ def get_snapshot(
     # 5. Goals progress
     # -----------------------------------------------------------------------
     goals_query = db.query(Allocation).filter(
-        Allocation.user_id == current_user.id,
+        scope_criterion(Allocation, current_user.id, entity_id),
         Allocation.allocation_type == AllocationType.GOAL,
         Allocation.is_active.is_(True),
     )
-    if entity_id is not None:
-        goals_query = goals_query.filter(Allocation.entity_id == entity_id)
 
     goals_progress = []
     for goal in goals_query.all():
@@ -103,7 +106,7 @@ def get_snapshot(
     wishlist_items = (
         db.query(WishlistItem)
         .filter(
-            WishlistItem.user_id == current_user.id,
+            scope_criterion(WishlistItem, current_user.id, entity_id),
             WishlistItem.is_purchased.is_(False),
         )
         .order_by(priority_order, WishlistItem.created_at)
@@ -115,7 +118,7 @@ def get_snapshot(
     wishlist_next_up = []
     for item in wishlist_items:
         months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
-        affordable_by = (datetime.utcnow() + timedelta(days=months_needed * 30)).date().isoformat()
+        affordable_by = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
         wishlist_next_up.append({
             "id": item.id,
             "name": item.name,

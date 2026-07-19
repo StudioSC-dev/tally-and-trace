@@ -39,7 +39,9 @@ export const authApi = createApi({
         try {
           const { data } = await queryFulfilled
           localStorage.setItem('access_token', data.access_token)
-          localStorage.setItem('refresh_token', data.refresh_token)
+          // The refresh token is NOT stored in JS — it arrives as an httpOnly cookie
+          // the browser holds and sends automatically. data.refresh_token is present
+          // only for native clients and is deliberately ignored here.
           // Fetch user data after successful login
           dispatch(authApi.endpoints.getCurrentUser.initiate())
         } catch (error) {
@@ -77,11 +79,12 @@ export const authApi = createApi({
       query: () => ({
         url: 'auth/logout',
         method: 'POST',
-        body: { refresh_token: localStorage.getItem('refresh_token') || '' },
+        // No body: the server reads the refresh token from the cookie and clears it.
+        body: {},
       }),
       async onQueryStarted(_, { dispatch }) {
         localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('refresh_token') // legacy key cleanup
         localStorage.removeItem('user')
         localStorage.removeItem('active_entity_id')
         // Clear all cached data

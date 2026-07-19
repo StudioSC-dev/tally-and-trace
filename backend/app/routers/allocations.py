@@ -3,13 +3,19 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import get_active_entity, validate_entity_ownership
+from app.core.entity_context import (
+    can_access_record,
+    get_accessible_or_404,
+    get_active_entity,
+    scope_criterion,
+    validate_entity_ownership,
+)
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
 from app.models.account import Account
 from app.models.entity import Entity
 from app.models.user import User
-from datetime import datetime
+from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -25,10 +31,10 @@ def get_allocations(
     offset: int = Query(0, ge=0),
 ):
     """Get all allocations with optional filtering"""
-    query = db.query(Allocation).filter(Allocation.user_id == current_user.id)
+    query = db.query(Allocation).filter(
+        scope_criterion(Allocation, current_user.id, active_entity.id if active_entity else None)
+    )
 
-    if active_entity is not None:
-        query = query.filter(Allocation.entity_id == active_entity.id)
     if account_id:
         query = query.filter(Allocation.account_id == account_id)
     if allocation_type:
@@ -60,12 +66,8 @@ def create_allocation(
 ):
     """Create a new allocation"""
     # Verify account exists
-    account = (
-        db.query(Account)
-        .filter(Account.id == allocation.account_id, Account.user_id == current_user.id)
-        .first()
-    )
-    if not account:
+    account = db.query(Account).filter(Account.id == allocation.account_id).first()
+    if not account or not can_access_record(db, current_user, account):
         raise HTTPException(status_code=404, detail="Account not found")
 
     allocation_data = allocation.dict()
@@ -87,13 +89,7 @@ def get_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Get a specific allocation by ID"""
-    allocation = (
-        db.query(Allocation)
-        .filter(Allocation.id == allocation_id, Allocation.user_id == current_user.id)
-        .first()
-    )
-    if not allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
+    allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     return allocation
 
 @router.put("/{allocation_id}", response_model=AllocationResponse)
@@ -104,27 +100,16 @@ def update_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Update an existing allocation"""
-    db_allocation = (
-        db.query(Allocation)
-        .filter(Allocation.id == allocation_id, Allocation.user_id == current_user.id)
-        .first()
-    )
-    if not db_allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-    
+    db_allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     update_data = allocation_update.dict(exclude_unset=True)
     if "account_id" in update_data and update_data["account_id"] is not None:
-        account = (
-            db.query(Account)
-            .filter(Account.id == update_data["account_id"], Account.user_id == current_user.id)
-            .first()
-        )
-        if not account:
+        account = db.query(Account).filter(Account.id == update_data["account_id"]).first()
+        if not account or not can_access_record(db, current_user, account):
             raise HTTPException(status_code=404, detail="Account not found")
     for field, value in update_data.items():
         setattr(db_allocation, field, value)
     
-    db_allocation.updated_at = datetime.utcnow()
+    db_allocation.updated_at = utc_now()
     db.commit()
     db.refresh(db_allocation)
     return db_allocation
@@ -136,16 +121,9 @@ def delete_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Soft delete an allocation (mark as inactive)"""
-    db_allocation = (
-        db.query(Allocation)
-        .filter(Allocation.id == allocation_id, Allocation.user_id == current_user.id)
-        .first()
-    )
-    if not db_allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-    
+    db_allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     db_allocation.is_active = False
-    db_allocation.updated_at = datetime.utcnow()
+    db_allocation.updated_at = utc_now()
     db.commit()
     return {"message": "Allocation deleted successfully"}
 
@@ -156,14 +134,7 @@ def get_allocation_progress(
     current_user: User = Depends(get_current_active_user),
 ):
     """Get progress details for an allocation"""
-    allocation = (
-        db.query(Allocation)
-        .filter(Allocation.id == allocation_id, Allocation.user_id == current_user.id)
-        .first()
-    )
-    if not allocation:
-        raise HTTPException(status_code=404, detail="Allocation not found")
-    
+    allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     # Calculate progress percentage
     progress_percentage = 0
     if allocation.target_amount and allocation.target_amount > 0:
@@ -204,12 +175,13 @@ def get_allocation_progress(
 def get_goals_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Get summary of all active goals"""
     goals = (
         db.query(Allocation)
         .filter(
-            Allocation.user_id == current_user.id,
+            scope_criterion(Allocation, current_user.id, active_entity.id if active_entity else None),
             Allocation.allocation_type == AllocationType.GOAL,
             Allocation.is_active.is_(True),
         )

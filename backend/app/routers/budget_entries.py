@@ -3,17 +3,24 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.entity_context import get_active_entity, validate_entity_ownership
+from app.core.entity_context import (
+    can_access_record,
+    get_accessible_or_404,
+    get_active_entity,
+    scope_criterion,
+    validate_entity_ownership,
+)
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account
 from app.models.category import Category
 from app.models.allocation import Allocation
 from app.models.entity import Entity
-from app.models.transaction import RecurrenceFrequency, TransactionType
+from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import (
     BudgetEntryCreate,
@@ -23,42 +30,74 @@ from app.schemas.budget_entry import (
     BudgetEntryMaterialize,
 )
 from app.schemas.transaction import TransactionResponse
+from app.core.time import utc_now
 
 router = APIRouter()
+
+
+def _attach_occurrence_counts(db: Session, entries: list) -> list:
+    """Annotate fixed-term entries with how many occurrences have actually been paid.
+
+    An installment is "n of m". Neither n nor m is a single stored field:
+    ``max_occurrences`` is decremented on each materialisation (it means occurrences
+    REMAINING, which is also how ``iter_occurrences`` reads it), and ``n`` isn't
+    stored at all because ``next_occurrence`` only moves forward. So n is recovered
+    from the transactions that materialisation links back via ``budget_entry_id``,
+    and the true total is ``n + remaining`` (computed on the client).
+
+    The guard is ``end_mode == "after_occurrences"``, NOT ``max_occurrences`` being
+    truthy: a fully-paid installment has ``max_occurrences == 0`` (falsy) but is
+    still very much an installment -- it should read "6 of 6", not "Indefinite".
+
+    Consequence worth knowing: an installment whose payments were entered by hand
+    rather than via "Mark paid" reads as 0 paid, because nothing links those
+    transactions to the entry. Better to under-claim than to invent a number.
+
+    Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
+    ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
+    meaningless.
+    """
+    installments = [e for e in entries if e.end_mode == "after_occurrences"]
+    counts: dict = {}
+    if installments:
+        rows = (
+            db.query(Transaction.budget_entry_id, func.count(Transaction.id))
+            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]))
+            .group_by(Transaction.budget_entry_id)
+            .all()
+        )
+        counts = {entry_id: total for entry_id, total in rows}
+
+    for entry in entries:
+        is_installment = entry.end_mode == "after_occurrences"
+        entry.occurrences_paid = counts.get(entry.id, 0) if is_installment else None
+    return entries
 
 
 def _ensure_related_resources(
     *,
     db: Session,
-    user_id: int,
+    user: User,
     account_id: Optional[int],
     category_id: Optional[int],
     allocation_id: Optional[int],
 ):
-    if account_id:
-        account = (
-            db.query(Account)
-            .filter(Account.id == account_id, Account.user_id == user_id)
-            .first()
-        )
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-    if category_id:
-        category = (
-            db.query(Category)
-            .filter(Category.id == category_id, Category.user_id == user_id)
-            .first()
-        )
-        if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
-    if allocation_id:
-        allocation = (
-            db.query(Allocation)
-            .filter(Allocation.id == allocation_id, Allocation.user_id == user_id)
-            .first()
-        )
-        if not allocation:
-            raise HTTPException(status_code=404, detail="Allocation not found")
+    """Verify the caller may reference each related record.
+
+    Takes the User rather than a bare user_id so it can honour entity sharing: a
+    member may attach an entry to a co-member's account/category/allocation within
+    an entity they both belong to.
+    """
+    for model, record_id, label in (
+        (Account, account_id, "Account"),
+        (Category, category_id, "Category"),
+        (Allocation, allocation_id, "Allocation"),
+    ):
+        if not record_id:
+            continue
+        record = db.query(model).filter(model.id == record_id).first()
+        if not record or not can_access_record(db, user, record):
+            raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
 @router.get("/", response_model=BudgetEntryListResponse)
@@ -79,10 +118,10 @@ def list_budget_entries(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    query = db.query(BudgetEntry).filter(BudgetEntry.user_id == current_user.id)
+    query = db.query(BudgetEntry).filter(
+        scope_criterion(BudgetEntry, current_user.id, active_entity.id if active_entity else None)
+    )
 
-    if active_entity is not None:
-        query = query.filter(BudgetEntry.entity_id == active_entity.id)
     if entry_type:
         query = query.filter(BudgetEntry.entry_type == entry_type)
     if is_active is not None:
@@ -101,7 +140,7 @@ def list_budget_entries(
     )
 
     return BudgetEntryListResponse(
-        items=entries,
+        items=_attach_occurrence_counts(db, entries),
         total=total,
         has_more=(offset + len(entries)) < total,
     )
@@ -113,13 +152,7 @@ def get_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = (
-        db.query(BudgetEntry)
-        .filter(BudgetEntry.id == entry_id, BudgetEntry.user_id == current_user.id)
-        .first()
-    )
-    if not entry:
-        raise HTTPException(status_code=404, detail="Budget entry not found")
+    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     return entry
 
 
@@ -132,7 +165,7 @@ def create_budget_entry(
 ):
     _ensure_related_resources(
         db=db,
-        user_id=current_user.id,
+        user=current_user,
         account_id=entry_in.account_id,
         category_id=entry_in.category_id,
         allocation_id=entry_in.allocation_id,
@@ -161,18 +194,11 @@ def update_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = (
-        db.query(BudgetEntry)
-        .filter(BudgetEntry.id == entry_id, BudgetEntry.user_id == current_user.id)
-        .first()
-    )
-    if not entry:
-        raise HTTPException(status_code=404, detail="Budget entry not found")
-
+    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     prospective_data = entry_update.dict(exclude_unset=True)
     _ensure_related_resources(
         db=db,
-        user_id=current_user.id,
+        user=current_user,
         account_id=prospective_data.get("account_id", entry.account_id),
         category_id=prospective_data.get("category_id", entry.category_id),
         allocation_id=prospective_data.get("allocation_id", entry.allocation_id),
@@ -195,14 +221,7 @@ def delete_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = (
-        db.query(BudgetEntry)
-        .filter(BudgetEntry.id == entry_id, BudgetEntry.user_id == current_user.id)
-        .first()
-    )
-    if not entry:
-        raise HTTPException(status_code=404, detail="Budget entry not found")
-
+    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     db.delete(entry)
     db.commit()
 
@@ -245,13 +264,7 @@ def materialize_budget_entry(
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate
 
-    entry = (
-        db.query(BudgetEntry)
-        .filter(BudgetEntry.id == entry_id, BudgetEntry.user_id == current_user.id)
-        .first()
-    )
-    if not entry:
-        raise HTTPException(status_code=404, detail="Budget entry not found")
+    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
 
@@ -289,7 +302,7 @@ def materialize_budget_entry(
             entry.is_active = False
         else:
             entry.next_occurrence = next_occ
-        entry.updated_at = datetime.utcnow()
+        entry.updated_at = utc_now()
         db.commit()
         db.refresh(db_txn)
 

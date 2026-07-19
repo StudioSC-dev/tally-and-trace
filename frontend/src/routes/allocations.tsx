@@ -1231,12 +1231,27 @@ export function AllocationsPage() {
     const cadenceLabel = formatCadenceLabel(entry.cadence)
     const amountLabel = formatAmount(entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
+    // Installment "n of m". The backend decrements max_occurrences on each payment
+    // (it means occurrences REMAINING), and occurrences_paid is the count materialised
+    // so far, so the fixed total is paid + remaining. Guard on end_mode, not on
+    // max_occurrences being truthy — a fully-paid installment has max_occurrences === 0
+    // but should still read "6 of 6", not "Indefinite".
+    const isInstallment = entry.end_mode === 'after_occurrences'
+    const paid = entry.occurrences_paid ?? 0
+    const remaining = isInstallment ? entry.max_occurrences ?? 0 : null
+    const total = isInstallment ? paid + (entry.max_occurrences ?? 0) : null
+
+    const installmentLabel =
+      isInstallment && total
+        ? paid > 0
+          ? `Payment ${paid} of ${total}`
+          : `${total} payment${total === 1 ? '' : 's'} planned`
+        : null
+
     const endLabel =
       entry.end_mode === 'on_date' && endDate
         ? `Ends ${formatFullDate(entry.end_date!)}`
-        : entry.end_mode === 'after_occurrences' && entry.max_occurrences
-        ? `Stops after ${entry.max_occurrences} run${entry.max_occurrences === 1 ? '' : 's'}`
-        : 'Indefinite'
+        : installmentLabel ?? 'Indefinite'
 
     return (
       <article
@@ -1314,6 +1329,16 @@ export function AllocationsPage() {
             <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-slate-700 px-2 py-1">
               {endLabel}
             </span>
+            {remaining !== null && remaining > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1">
+                {remaining} left
+              </span>
+            )}
+            {remaining === 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-1">
+                Fully paid
+              </span>
+            )}
           </div>
         </div>
       </article>

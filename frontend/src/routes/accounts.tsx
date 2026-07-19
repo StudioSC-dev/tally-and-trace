@@ -29,6 +29,8 @@ export function AccountsPage() {
     billing_cycle_start: undefined as number | undefined,
     currency: defaultCurrency,
     days_until_due_date: 21,
+    payment_account_id: undefined as number | undefined,
+    payment_overflow_account_id: undefined as number | undefined,
     is_active: true,
   })
   const [showCreditSettings, setShowCreditSettings] = useState(false)
@@ -46,6 +48,28 @@ export function AccountsPage() {
   const loadMoreObserver = useRef<IntersectionObserver | null>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
+
+  // Only non-credit accounts can fund a statement, and a card can't pay itself.
+  // Mirrors the backend validation in routers/accounts.py::_validate_payment_routing.
+  const fundingAccounts = accounts.filter(
+    (a) => a.account_type !== 'credit' && a.is_active && a.id !== editingAccount?.id,
+  )
+
+  // Spell out the cycle the backend will derive, so "closes 24th, +21 days" doesn't
+  // have to be worked out in your head.
+  const statementSummary = (() => {
+    const close = formData.billing_cycle_start
+    const days = formData.days_until_due_date
+    if (!close || !days) return null
+    const due = new Date(Date.UTC(2026, 0, close))
+    due.setUTCDate(due.getUTCDate() + days)
+    const ordinal = (n: number) => {
+      const suffix =
+        n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'
+      return `${n}${suffix}`
+    }
+    return `Closes the ${ordinal(close)}, due around the ${ordinal(due.getUTCDate())} of the following month.`
+  })()
 
   const loadAccounts = useCallback(
     async (reset = false) => {
@@ -191,6 +215,8 @@ export function AccountsPage() {
         billing_cycle_start: undefined,
         currency: defaultCurrency,
         days_until_due_date: 21,
+        payment_account_id: undefined,
+        payment_overflow_account_id: undefined,
         is_active: true,
       })
       setIsCreateModalOpen(false)
@@ -212,6 +238,8 @@ export function AccountsPage() {
       billing_cycle_start: account.billing_cycle_start,
       currency: (account.currency as CurrencyCode) || defaultCurrency,
       days_until_due_date: account.days_until_due_date ?? 21,
+      payment_account_id: account.payment_account_id ?? undefined,
+      payment_overflow_account_id: account.payment_overflow_account_id ?? undefined,
       is_active: account.is_active,
     })
     setShowCreditSettings(false)
@@ -506,6 +534,8 @@ export function AccountsPage() {
                     billing_cycle_start: undefined,
                     currency: defaultCurrency,
                     days_until_due_date: 21,
+                    payment_account_id: undefined,
+                    payment_overflow_account_id: undefined,
                     is_active: true,
                   })
                   setShowCreditSettings(false)
@@ -649,7 +679,7 @@ export function AccountsPage() {
                       </div>
 
                       <div>
-                        <label className="label">Billing Cycle Start (Day of Month)</label>
+                        <label className="label">Statement Closes (Day of Month)</label>
                         <select
                           value={formData.billing_cycle_start || ''}
                           onChange={(e) => setFormData({ ...formData, billing_cycle_start: parseInt(e.target.value) || undefined })}
@@ -660,6 +690,9 @@ export function AccountsPage() {
                             <option key={i + 1} value={i + 1}>{i + 1}</option>
                           ))}
                         </select>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">
+                          Charges up to this day form that month's statement.
+                        </p>
                       </div>
 
                       <div>
@@ -679,7 +712,50 @@ export function AccountsPage() {
                           className="input-field focus-ring"
                           placeholder="21"
                         />
-                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">Default is 21 days after the statement date.</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">
+                          {statementSummary ?? 'Default is 21 days after the statement date.'}
+                        </p>
+                      </div>
+
+                      <div className="pt-2 border-t border-gray-200 dark:border-slate-700">
+                        <p className="text-sm font-medium text-gray-700 dark:text-slate-300">Statement payment</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">
+                          Where the forecast expects this card's statement to be paid from.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="label">Paid From</label>
+                        <select
+                          value={formData.payment_account_id ?? ''}
+                          onChange={(e) => setFormData({ ...formData, payment_account_id: parseInt(e.target.value) || undefined })}
+                          className="select-field focus-ring"
+                        >
+                          <option value="">Not set</option>
+                          {fundingAccounts.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="label">Overflow To</label>
+                        <select
+                          value={formData.payment_overflow_account_id ?? ''}
+                          onChange={(e) => setFormData({ ...formData, payment_overflow_account_id: parseInt(e.target.value) || undefined })}
+                          className="select-field focus-ring"
+                          disabled={!formData.payment_account_id}
+                        >
+                          <option value="">Not set</option>
+                          {fundingAccounts
+                            .filter((a) => a.id !== formData.payment_account_id)
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-slate-500">
+                          Used when "Paid From" can't cover the statement on its own.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -736,6 +812,8 @@ export function AccountsPage() {
                       billing_cycle_start: undefined,
                     currency: defaultCurrency,
                     days_until_due_date: 21,
+                    payment_account_id: undefined,
+                    payment_overflow_account_id: undefined,
                     is_active: true,
                     })
                   }}
