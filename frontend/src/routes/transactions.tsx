@@ -11,6 +11,21 @@ const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> =
   transfer: 'Transfer',
 }
 
+type CategoryKind = 'income' | 'expense' | 'transfer'
+
+// Each transaction type has a natural category kind: income for credit,
+// expense for debit, and transfer (savings/investment contributions, card
+// payments) for transfer. The picker only offers categories that match.
+const TYPE_TO_KIND: Record<Transaction['transaction_type'], CategoryKind> = {
+  credit: 'income',
+  debit: 'expense',
+  transfer: 'transfer',
+}
+
+// Tolerate categories created before `kind` existed by falling back to is_expense.
+const categoryKind = (category: { kind?: CategoryKind; is_expense?: boolean }): CategoryKind =>
+  category.kind ?? (category.is_expense === false ? 'income' : 'expense')
+
 const RECURRENCE_LABELS: Record<string, string> = {
   daily: 'Daily',
   weekly: 'Weekly',
@@ -510,6 +525,56 @@ export function TransactionsPage() {
     ? budgetEntries.find((entry) => entry.id === formData.budget_entry_id)
     : undefined
 
+  // Only offer categories whose kind matches the current type; a transfer now
+  // gets its own (savings/investment/contribution) categories.
+  const categoryKindForType = TYPE_TO_KIND[formData.transaction_type]
+  const visibleCategories = useMemo(
+    () => categories.filter((category) => categoryKind(category) === categoryKindForType),
+    [categories, categoryKindForType]
+  )
+
+  const selectedFormAccount = useMemo(
+    () => accounts.find((account) => account.id === formData.account_id),
+    [accounts, formData.account_id]
+  )
+  const destinationFormAccount = useMemo(
+    () => accounts.find((account) => account.id === formData.transfer_to_account_id),
+    [accounts, formData.transfer_to_account_id]
+  )
+
+  // Account-type-aware nudge toward the correct dual-perspective framing.
+  const contextHint = useMemo<{ text: string; suggestTransfer: boolean } | null>(() => {
+    const type = formData.transaction_type
+    if (type !== 'transfer') {
+      if (selectedFormAccount?.account_type === 'savings' && type === 'debit') {
+        return {
+          text: 'Taking money out of savings is usually a transfer to another account, not an expense — record it as a Transfer so your net worth stays accurate.',
+          suggestTransfer: true,
+        }
+      }
+      if (selectedFormAccount?.account_type === 'savings' && type === 'credit') {
+        return {
+          text: 'Interest earned? Income is correct. But if you are moving your own money into savings, use a Transfer so it does not count as income.',
+          suggestTransfer: true,
+        }
+      }
+      if (selectedFormAccount?.account_type === 'credit' && type === 'debit') {
+        return {
+          text: 'This records a new charge on the card and increases what you owe. Paying the card off later is a Transfer from your funding account.',
+          suggestTransfer: false,
+        }
+      }
+      return null
+    }
+    if (destinationFormAccount?.account_type === 'credit') {
+      return { text: 'Card payment: this reduces the balance you owe on the destination card.', suggestTransfer: false }
+    }
+    if (destinationFormAccount?.account_type === 'savings') {
+      return { text: 'Savings contribution: the amount leaves the source account and lands in savings. Net worth is unchanged.', suggestTransfer: false }
+    }
+    return null
+  }, [formData.transaction_type, selectedFormAccount, destinationFormAccount])
+
   const isLoading = isInitialLoading || isAccountsLoading || isCategoriesLoading || budgetEntriesLoading
 
   const orderedTransactions = useMemo(() => {
@@ -553,11 +618,21 @@ export function TransactionsPage() {
         }
       }
 
+      // Keep the category only if its kind still fits the new type
+      // (an expense category makes no sense on a transfer, and vice versa).
+      let nextCategoryId = prev.category_id
+      if (nextCategoryId) {
+        const linkedCategory = categories.find((cat) => cat.id === nextCategoryId)
+        if (!linkedCategory || categoryKind(linkedCategory) !== TYPE_TO_KIND[nextType]) {
+          nextCategoryId = undefined
+        }
+      }
+
       return {
         ...prev,
         transaction_type: nextType,
         budget_entry_id: nextBudgetEntryId,
-        category_id: nextType === 'transfer' ? undefined : prev.category_id,
+        category_id: nextCategoryId,
         allocation_id: nextType === 'transfer' ? undefined : prev.allocation_id,
         transfer_fee: nextType === 'transfer' ? prev.transfer_fee : 0,
         transfer_from_account_id:
@@ -647,7 +722,7 @@ export function TransactionsPage() {
             : undefined,
         transfer_to_account_id:
           formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined,
-        category_id: formData.transaction_type === 'transfer' ? undefined : formData.category_id,
+        category_id: formData.category_id,
         allocation_id: formData.transaction_type === 'transfer' ? undefined : formData.allocation_id,
         budget_entry_id: formData.transaction_type === 'transfer' ? undefined : formData.budget_entry_id,
         projected_amount: projectedAmount ?? undefined,
@@ -1281,7 +1356,9 @@ export function TransactionsPage() {
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
                           </svg>
-                          {transaction.transaction_type === 'transfer' ? 'Transfer' : category?.name || 'Uncategorized'}
+                          {transaction.transaction_type === 'transfer'
+                            ? category?.name || 'Transfer'
+                            : category?.name || 'Uncategorized'}
                       </span>
                         {scheduleLabel && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-900/50 px-2 py-1 text-indigo-700 dark:text-indigo-300">
@@ -1735,50 +1812,55 @@ export function TransactionsPage() {
                 </div>
               )}
               
-              {formData.transaction_type !== 'transfer' && (
-                <div>
-                  <label className="label">Category</label>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          category_id: undefined,
-                        }))
-                      }
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                          formData.category_id === undefined
-                          ? 'bg-blue-600 text-white shadow-sm'
-                          : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
-                      }`}
-                    >
-                      Uncategorized
-                    </button>
-                    {categories.map((category) => {
-                      const isSelected = formData.category_id === category.id
-                      return (
-                        <button
-                          type="button"
-                          key={category.id}
-                          onClick={() =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              category_id: category.id,
-                            }))
-                          }
-                          className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                            isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
-                          }`}
-                        >
-                      {category.name}
-                        </button>
-                      )
-                    })}
-              </div>
+              <div>
+                <label className="label">
+                  {formData.transaction_type === 'transfer' ? 'Contribution category' : 'Category'}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        category_id: undefined,
+                      }))
+                    }
+                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                        formData.category_id === undefined
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
+                    }`}
+                  >
+                    {formData.transaction_type === 'transfer' ? 'None' : 'Uncategorized'}
+                  </button>
+                  {visibleCategories.map((category) => {
+                    const isSelected = formData.category_id === category.id
+                    return (
+                      <button
+                        type="button"
+                        key={category.id}
+                        onClick={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            category_id: category.id,
+                          }))
+                        }
+                        className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                          isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-slate-600'
+                        }`}
+                      >
+                    {category.name}
+                      </button>
+                    )
+                  })}
                 </div>
-              )}
-              
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {formData.transaction_type === 'transfer'
+                    ? 'Tag this move (e.g. Savings, Investments) to track contributions. It stays out of income and expense totals.'
+                    : `Showing ${TRANSACTION_TYPE_LABELS[formData.transaction_type].toLowerCase()} categories.`}
+                </p>
+              </div>
+
               <div>
                 <label className="label">Transaction Type</label>
                 <div className="flex flex-wrap gap-2">
@@ -1798,6 +1880,25 @@ export function TransactionsPage() {
                     )
                   })}
                 </div>
+                {contextHint && (
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+                    <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="space-y-1">
+                      <p>{contextHint.text}</p>
+                      {contextHint.suggestTransfer && (
+                        <button
+                          type="button"
+                          onClick={() => handleTypeChange('transfer')}
+                          className="font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
+                        >
+                          Switch to Transfer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {!formData.is_posted && (
