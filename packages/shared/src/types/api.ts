@@ -30,12 +30,20 @@ export interface Account {
 
 // ─── Category ───────────────────────────────────────────────────────────────
 
+export type CategoryKind = 'income' | 'expense' | 'transfer'
+
 export interface Category {
   id: number
   name: string
   description?: string
   color?: string
   is_expense: boolean
+  /**
+   * Directional role. `transfer` marks movements of the user's own money
+   * (savings/investment contributions, card payments) — net-worth-neutral,
+   * unlike true income/expense.
+   */
+  kind: CategoryKind
   is_active: boolean
   entity_id: number
   created_at: string

@@ -45,79 +45,99 @@
       "name": "Food & Dining",
       "description": "Restaurants, groceries, and food delivery",
       "color": "#FF6B6B",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Transportation",
       "description": "Gas, public transit, and car maintenance",
       "color": "#4ECDC4",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Entertainment",
       "description": "Movies, games, and leisure activities",
       "color": "#45B7D1",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Utilities",
       "description": "Electricity, water, internet, and phone bills",
       "color": "#96CEB4",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Shopping",
       "description": "Clothing, electronics, and general purchases",
       "color": "#FFEAA7",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Healthcare",
       "description": "Medical expenses, prescriptions, and insurance",
       "color": "#FF8A80",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Housing",
       "description": "Rent, mortgage, and home maintenance",
       "color": "#A8E6CF",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Education",
       "description": "Tuition, books, and educational expenses",
       "color": "#FFB347",
-      "is_expense": true
+      "is_expense": true,
+      "kind": "expense"
     },
     {
       "name": "Salary",
       "description": "Regular employment income",
       "color": "#DDA0DD",
-      "is_expense": false
+      "is_expense": false,
+      "kind": "income"
     },
     {
       "name": "Freelance",
       "description": "Freelance and contract work income",
       "color": "#98D8C8",
-      "is_expense": false
+      "is_expense": false,
+      "kind": "income"
     },
     {
       "name": "Investment Income",
       "description": "Dividends, interest, and investment returns",
       "color": "#F7DC6F",
-      "is_expense": false
+      "is_expense": false,
+      "kind": "income"
     },
     {
       "name": "Gifts",
       "description": "Gifts received from others",
       "color": "#BB8FCE",
-      "is_expense": false
+      "is_expense": false,
+      "kind": "income"
     },
     {
       "name": "Savings",
-      "description": "Transfers earmarked for long-term savings goals",
+      "description": "Contributions moved into a savings account (net worth unchanged)",
       "color": "#4C6EF5",
-      "is_expense": true
+      "is_expense": false,
+      "kind": "transfer"
+    },
+    {
+      "name": "Investments",
+      "description": "Cash moved into an investment account (net worth unchanged)",
+      "color": "#2F9E44",
+      "is_expense": false,
+      "kind": "transfer"
     }
   ],
   "allocations": [

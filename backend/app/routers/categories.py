@@ -9,12 +9,30 @@ from app.core.entity_context import (
     scope_criterion,
     validate_entity_ownership,
 )
-from app.models.category import Category
+from app.models.category import Category, CategoryKind
 from app.models.entity import Entity
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 
 router = APIRouter()
+
+
+def _reconcile_kind(data: dict) -> None:
+    """Keep `kind` and the legacy `is_expense` flag consistent.
+
+    `kind` is the source of truth: when present, is_expense is derived from it
+    (only an expense category counts as an expense). When only is_expense is
+    supplied (legacy clients), kind is derived from it. Mutates `data` in place.
+    """
+    kind = data.get("kind")
+    if kind is not None:
+        kind_value = kind.value if isinstance(kind, CategoryKind) else str(kind)
+        data["kind"] = kind_value
+        data["is_expense"] = kind_value == CategoryKind.EXPENSE.value
+    elif data.get("is_expense") is not None:
+        data["kind"] = (
+            CategoryKind.EXPENSE.value if data["is_expense"] else CategoryKind.INCOME.value
+        )
 
 @router.get("/", response_model=List[CategoryResponse])
 def get_categories(
@@ -22,6 +40,7 @@ def get_categories(
     current_user: User = Depends(get_current_active_user),
     active_entity: Optional[Entity] = Depends(get_active_entity),
     is_expense: Optional[bool] = Query(None, description="Filter by expense/income type"),
+    kind: Optional[CategoryKind] = Query(None, description="Filter by category kind (income/expense/transfer)"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ):
     """Get all categories with optional filtering"""
@@ -29,6 +48,8 @@ def get_categories(
         scope_criterion(Category, current_user.id, active_entity.id if active_entity else None)
     )
 
+    if kind is not None:
+        query = query.filter(Category.kind == kind)
     if is_expense is not None:
         query = query.filter(Category.is_expense == is_expense)
     if is_active is not None:
@@ -56,6 +77,7 @@ def create_category(
         raise HTTPException(status_code=400, detail="Category with this name already exists")
 
     category_data = category.dict()
+    _reconcile_kind(category_data)
     if category_data.get("entity_id") is None and active_entity is not None:
         category_data["entity_id"] = active_entity.id
     else:
@@ -97,6 +119,7 @@ def update_category(
             raise HTTPException(status_code=400, detail="Category with this name already exists")
 
     update_data = category_update.dict(exclude_unset=True)
+    _reconcile_kind(update_data)
     for field, value in update_data.items():
         setattr(db_category, field, value)
 
