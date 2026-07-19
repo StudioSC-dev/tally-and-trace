@@ -12,9 +12,16 @@ export interface Account {
   currency: CurrencyCode
   description?: string
   credit_limit?: number
+  /** Day of month the payment is due. Legacy: prefer billing_cycle_start. */
   due_date?: number
+  /** Day of month the statement closes. */
   billing_cycle_start?: number
+  /** Days from statement close to payment due. Defaults to 21. */
   days_until_due_date?: number
+  /** Credit cards: account the statement payment is funded from. */
+  payment_account_id?: number | null
+  /** Credit cards: account the statement payment spills to when the primary can't cover it. */
+  payment_overflow_account_id?: number | null
   entity_id: number
   is_active: boolean
   created_at: string
@@ -92,7 +99,14 @@ export interface BudgetEntry {
   semi_monthly_day_2?: number
   end_mode: EndMode
   end_date?: string
+  /** Installments: the "m" in "n of m". */
   max_occurrences?: number
+  /**
+   * Installments: the "n" in "n of m" — occurrences materialised so far, counted
+   * from linked transactions. `null` for open-ended entries. Payments entered by
+   * hand rather than via "Mark paid" aren't linked, so they don't count.
+   */
+  occurrences_paid?: number | null
   account_id?: number
   /** UC1: secondary funding source — payments draw from account_id first, overflow here. */
   overflow_account_id?: number
@@ -318,7 +332,11 @@ export interface CashflowTimelineEvent {
   /** Signed: positive = inflow, negative = outflow. */
   amount: number
   type: string
-  source: 'budget_entry' | 'transaction'
+  /**
+   * Where the event came from. `statement` is a credit card's derived payable for
+   * one billing cycle — its `source_id` is the CARD's account id, not a transaction.
+   */
+  source: 'budget_entry' | 'transaction' | 'statement'
   source_id: number | null
   running_balance: number
 }

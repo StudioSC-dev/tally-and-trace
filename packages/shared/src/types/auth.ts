@@ -27,7 +27,11 @@ export interface RegisterRequest {
 
 export interface TokenResponse {
   access_token: string
-  refresh_token: string
+  /**
+   * Present only for native clients (mobile) that have no cookie jar. Web receives
+   * the refresh token as an httpOnly cookie instead and never reads this field.
+   */
+  refresh_token?: string
   token_type: string
   expires_in: number
 }

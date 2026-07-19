@@ -5,6 +5,8 @@ const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`
 
 const rawBaseQuery = fetchBaseQuery({
   baseUrl: API_BASE,
+  // Send the httpOnly refresh cookie on cross-origin (web -> api subdomain) requests.
+  credentials: 'include',
   prepareHeaders: (headers) => {
     const token = localStorage.getItem('access_token')
     if (token) headers.set('authorization', `Bearer ${token}`)
@@ -20,6 +22,9 @@ let refreshing: Promise<boolean> | null = null
 
 function clearSession() {
   localStorage.removeItem('access_token')
+  // 'refresh_token' is a leftover key from the pre-cookie flow; remove it so no
+  // stale token lingers in storage after upgrade. The live token is an httpOnly
+  // cookie the server clears on logout / failed refresh.
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
   localStorage.removeItem('active_entity_id')
@@ -28,18 +33,18 @@ function clearSession() {
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshing) {
     refreshing = (async () => {
-      const refresh_token = localStorage.getItem('refresh_token')
-      if (!refresh_token) return false
       try {
+        // No body: the refresh token rides in the httpOnly cookie, sent because of
+        // credentials:'include'. The server rotates it and sets a fresh cookie.
         const res = await fetch(`${API_BASE}/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token }),
+          credentials: 'include',
+          body: '{}',
         })
         if (!res.ok) return false
         const data = await res.json()
         localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('refresh_token', data.refresh_token)
         return true
       } catch {
         return false
