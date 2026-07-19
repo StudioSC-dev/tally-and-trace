@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional, Tuple
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -8,6 +8,7 @@ from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.core.database import get_db
+from app.core.time import naive_utc_now, utc_now
 from app.models.user import User
 from app.models.refresh_token import RefreshToken
 from app.schemas.user import TokenData
@@ -36,9 +37,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = utc_now() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = utc_now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -97,7 +98,7 @@ def create_refresh_token(db: Session, user: User) -> str:
     record = RefreshToken(
         user_id=user.id,
         token_hash=_hash_token(token),
-        expires_at=datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=naive_utc_now() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(record)
     db.commit()
@@ -106,7 +107,7 @@ def create_refresh_token(db: Session, user: User) -> str:
 
 def _get_valid_refresh(db: Session, token: str) -> Optional[RefreshToken]:
     record = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(token)).first()
-    if not record or record.revoked_at is not None or record.expires_at < datetime.utcnow():
+    if not record or record.revoked_at is not None or record.expires_at < naive_utc_now():
         return None
     return record
 
@@ -119,7 +120,7 @@ def rotate_refresh_token(db: Session, token: str) -> Tuple[Optional[User], Optio
     user = db.query(User).filter(User.id == record.user_id).first()
     if not user or not user.is_active:
         return None, None
-    record.revoked_at = datetime.utcnow()
+    record.revoked_at = naive_utc_now()
     db.commit()
     return user, create_refresh_token(db, user)
 
@@ -127,5 +128,5 @@ def rotate_refresh_token(db: Session, token: str) -> Tuple[Optional[User], Optio
 def revoke_refresh_token(db: Session, token: str) -> None:
     record = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(token)).first()
     if record and record.revoked_at is None:
-        record.revoked_at = datetime.utcnow()
+        record.revoked_at = naive_utc_now()
         db.commit()

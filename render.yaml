@@ -5,9 +5,10 @@ services:
     plan: free
     runtime: python
     # Co-locate with Supabase (ap-southeast-1) to kill cross-Pacific DB latency.
-    # NOTE: Render region is immutable after a service is created — an existing
-    # Oregon service must be recreated (or blueprint re-synced as a new service)
-    # for this to take effect. Verify the current region in the Render dashboard.
+    # Live service confirmed running in Singapore (2026-07-16); the Oregon->SG
+    # recreation is done. Render regions are immutable per service, so changing
+    # this line again would require deleting and recreating the service — see the
+    # runbook in HANDOVER Session 5 before touching it.
     region: singapore
     buildCommand: cd backend && pip install -r requirements.txt && alembic upgrade head
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -30,6 +31,12 @@ services:
         sync: false
       - key: FRONTEND_BASE_URL
         value: https://tallyandtrace.studiosc.dev
+      # Refresh-token cookie shared across the web + api subdomains (same site),
+      # https-only in production. See app/core/config.py REFRESH_COOKIE_*.
+      - key: REFRESH_COOKIE_DOMAIN
+        value: .studiosc.dev
+      - key: REFRESH_COOKIE_SECURE
+        value: true
 
   # ── Frontend: Vite React SPA ──────────────────────────────────────────────────
   - type: web

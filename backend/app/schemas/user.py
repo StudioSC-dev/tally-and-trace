@@ -45,7 +45,10 @@ class UserLogin(BaseModel):
 
 class Token(BaseModel):
     access_token: str
-    refresh_token: str
+    # Omitted for web callers (the refresh token lives in an httpOnly cookie they
+    # never read); still returned for native clients (mobile/expo-secure-store) that
+    # have no cookie jar and pass it back in the request body.
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     expires_in: int
 
@@ -53,7 +56,9 @@ class TokenData(BaseModel):
     email: Optional[str] = None
 
 class RefreshRequest(BaseModel):
-    refresh_token: str = Field(..., min_length=10)
+    # Optional: web clients send nothing here and let the httpOnly cookie carry the
+    # token; native clients pass it in the body. The endpoint reads cookie-or-body.
+    refresh_token: Optional[str] = Field(None, min_length=10)
 
 
 class EmailVerificationRequest(BaseModel):
