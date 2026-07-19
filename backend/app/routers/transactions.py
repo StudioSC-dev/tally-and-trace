@@ -4,7 +4,12 @@ from sqlalchemy import or_
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import get_active_entity, validate_entity_ownership
+from app.core.entity_context import (
+    can_access_record,
+    get_accessible_or_404,
+    get_active_entity,
+    validate_entity_ownership,
+)
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account
@@ -14,6 +19,7 @@ from app.models.user import User
 from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
+from app.core.time import naive_utc_now, utc_now
 from datetime import datetime, timedelta
 from calendar import monthrange
 from decimal import Decimal
@@ -29,7 +35,8 @@ def _D(value) -> Decimal:
 
 
 def _normalize_reference(reference: Optional[datetime]) -> datetime:
-    value = reference or datetime.utcnow()
+    """Naive UTC, to match the naive allocations.period_start/period_end columns."""
+    value = reference or naive_utc_now()
     return value.replace(tzinfo=None) if value.tzinfo else value
 
 
@@ -187,7 +194,7 @@ def _apply_budget_delta(
         return
 
     normalized_reference = _normalize_reference(reference_date)
-    now = datetime.utcnow()
+    now = utc_now()  # allocations.updated_at is timestamptz
 
     for allocation in allocations:
         if allocation.allocation_type != AllocationType.BUDGET:
@@ -213,20 +220,24 @@ def get_transactions(
     offset: int = Query(0, ge=0),
 ):
     """Get all transactions with optional filtering"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-
-    query = db.query(Transaction).filter(
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
-    )
-
     if active_entity is not None:
-        query = query.filter(Transaction.entity_id == active_entity.id)
+        # Shared scope: every transaction in the entity, regardless of which member
+        # created it. Membership was already proven by get_active_entity.
+        query = db.query(Transaction).filter(Transaction.entity_id == active_entity.id)
+    else:
+        # No entity context: fall back to the user's own accounts (this also keeps
+        # transfers where either leg touches one of the user's accounts).
+        user_account_ids = [
+            a.id for a in db.query(Account.id).filter(Account.user_id == current_user.id).all()
+        ]
+        query = db.query(Transaction).filter(
+            or_(
+                Transaction.account_id.in_(user_account_ids),
+                Transaction.transfer_from_account_id.in_(user_account_ids),
+                Transaction.transfer_to_account_id.in_(user_account_ids)
+            )
+        )
+
     if account_ids:
         query = query.filter(
             or_(
@@ -282,15 +293,10 @@ def create_transaction(
     budget_entry: Optional[BudgetEntry] = None
 
     if transaction.budget_entry_id:
-        budget_entry = (
-            db.query(BudgetEntry)
-            .filter(
-                BudgetEntry.id == transaction.budget_entry_id,
-                BudgetEntry.user_id == current_user.id,
-            )
-            .first()
-        )
-        if not budget_entry:
+        budget_entry = db.query(BudgetEntry).filter(
+            BudgetEntry.id == transaction.budget_entry_id
+        ).first()
+        if not budget_entry or not can_access_record(db, current_user, budget_entry):
             raise HTTPException(status_code=404, detail="Budget entry not found")
         transaction_data["budget_entry_id"] = budget_entry.id
     
@@ -313,17 +319,15 @@ def create_transaction(
             raise HTTPException(status_code=400, detail="For transfers, account_id must match transfer_from_account_id")
         
         primary_account = db.query(Account).filter(
-            Account.id == transaction.transfer_from_account_id,
-            Account.user_id == current_user.id
+            Account.id == transaction.transfer_from_account_id
         ).first()
-        if not primary_account:
+        if not primary_account or not can_access_record(db, current_user, primary_account):
             raise HTTPException(status_code=404, detail="Source account not found")
         
         destination_account = db.query(Account).filter(
-            Account.id == transaction.transfer_to_account_id,
-            Account.user_id == current_user.id
+            Account.id == transaction.transfer_to_account_id
         ).first()
-        if not destination_account:
+        if not destination_account or not can_access_record(db, current_user, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
         
         if transaction_data.get("currency") is None:
@@ -334,10 +338,9 @@ def create_transaction(
             transaction_data["original_currency"] = destination_account.currency
     else:
         primary_account = db.query(Account).filter(
-            Account.id == transaction.account_id,
-            Account.user_id == current_user.id
+            Account.id == transaction.account_id
         ).first()
-        if not primary_account:
+        if not primary_account or not can_access_record(db, current_user, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = primary_account.currency
@@ -376,39 +379,13 @@ def create_transaction(
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-    
-    transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id,
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
-    ).first()
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     return transaction
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-    
-    db_transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id,
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
-    ).first()
-    if not db_transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
@@ -457,15 +434,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         new_budget_entry_id = update_data.get("budget_entry_id")
         budget_entry = None
         if new_budget_entry_id:
-            budget_entry = (
-                db.query(BudgetEntry)
-                .filter(
-                    BudgetEntry.id == new_budget_entry_id,
-                    BudgetEntry.user_id == current_user.id,
-                )
-                .first()
-            )
-            if not budget_entry:
+            budget_entry = db.query(BudgetEntry).filter(
+                BudgetEntry.id == new_budget_entry_id
+            ).first()
+            if not budget_entry or not can_access_record(db, current_user, budget_entry):
                 raise HTTPException(status_code=404, detail="Budget entry not found")
         setattr(db_transaction, "budget_entry_id", new_budget_entry_id)
         db_transaction.is_recurring = bool(budget_entry)
@@ -478,7 +450,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
     
-    db_transaction.updated_at = datetime.utcnow()
+    db_transaction.updated_at = utc_now()
     db_transaction.transfer_fee = db_transaction.transfer_fee or 0.0
     
     primary_account: Optional[Account] = None
@@ -492,17 +464,15 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 raise HTTPException(status_code=400, detail="Transfer accounts must be different")
             
             primary_account = db.query(Account).filter(
-                Account.id == db_transaction.transfer_from_account_id,
-                Account.user_id == current_user.id
+                Account.id == db_transaction.transfer_from_account_id
             ).first()
-            if not primary_account:
+            if not primary_account or not can_access_record(db, current_user, primary_account):
                 raise HTTPException(status_code=404, detail="Source account not found")
             
             destination_account = db.query(Account).filter(
-                Account.id == db_transaction.transfer_to_account_id,
-                Account.user_id == current_user.id
+                Account.id == db_transaction.transfer_to_account_id
             ).first()
-            if not destination_account:
+            if not destination_account or not can_access_record(db, current_user, destination_account):
                 raise HTTPException(status_code=404, detail="Destination account not found")
             
             db_transaction.account_id = db_transaction.transfer_from_account_id
@@ -514,10 +484,9 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 db_transaction.original_currency = destination_account.currency
         else:
             primary_account = db.query(Account).filter(
-                Account.id == db_transaction.account_id,
-                Account.user_id == current_user.id
+                Account.id == db_transaction.account_id
             ).first()
-            if not primary_account:
+            if not primary_account or not can_access_record(db, current_user, primary_account):
                 raise HTTPException(status_code=404, detail="Account not found")
             if db_transaction.currency is None:
                 db_transaction.currency = primary_account.currency
@@ -555,20 +524,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Delete a transaction and update account balance"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-    
-    db_transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id,
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
-    ).first()
-    if not db_transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     
     # Update account balances if posted
     if db_transaction.is_posted:
@@ -611,20 +567,7 @@ async def upload_receipt(
     current_user: User = Depends(get_current_active_user)
 ):
     """Upload a receipt for a transaction"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-    
-    db_transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id,
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
-    ).first()
-    if not db_transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     
     # Validate file type
     file_extension = file.filename.split(".")[-1].lower()
@@ -639,7 +582,7 @@ async def upload_receipt(
     os.makedirs(upload_dir, exist_ok=True)
     
     # Save file
-    filename = f"receipt_{transaction_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
+    filename = f"receipt_{transaction_id}_{utc_now().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
     file_path = os.path.join(upload_dir, filename)
     
     with open(file_path, "wb") as buffer:
@@ -656,24 +599,29 @@ async def upload_receipt(
 def get_transaction_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     start_date: datetime = Query(..., description="Start date for summary"),
     end_date: datetime = Query(..., description="End date for summary"),
     account_id: Optional[int] = Query(None, description="Filter by account ID")
 ):
     """Get transaction summary for a specific period"""
-    # First get user's accounts to filter transactions
-    user_accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
-    user_account_ids = [account.id for account in user_accounts]
-    
     query = db.query(Transaction).filter(
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date <= end_date,
-        or_(
-            Transaction.account_id.in_(user_account_ids),
-            Transaction.transfer_from_account_id.in_(user_account_ids),
-            Transaction.transfer_to_account_id.in_(user_account_ids)
-        )
     )
+    if active_entity is not None:
+        query = query.filter(Transaction.entity_id == active_entity.id)
+    else:
+        user_account_ids = [
+            a.id for a in db.query(Account.id).filter(Account.user_id == current_user.id).all()
+        ]
+        query = query.filter(
+            or_(
+                Transaction.account_id.in_(user_account_ids),
+                Transaction.transfer_from_account_id.in_(user_account_ids),
+                Transaction.transfer_to_account_id.in_(user_account_ids)
+            )
+        )
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)

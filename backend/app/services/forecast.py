@@ -14,6 +14,9 @@ from typing import Iterator, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.entity_context import scope_criterion
+from app.core.time import naive_utc_now
+from app.services.statements import get_statement_payables
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
@@ -70,11 +73,9 @@ def _monthly_equivalent(amount: float, cadence: RecurrenceFrequency) -> float:
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
-        Account.user_id == user_id,
+        scope_criterion(Account, user_id, entity_id),
         Account.is_active.is_(True),
     )
-    if entity_id is not None:
-        query = query.filter(Account.entity_id == entity_id)
     return query.all()
 
 
@@ -93,7 +94,8 @@ def project_cashflow(
       opening_balance, income, expenses, unposted_expenses,
       net, closing_balance
     """
-    now = reference or datetime.utcnow()
+    # Naive: compared against the naive next_occurrence / transaction_date columns.
+    now = reference or naive_utc_now()
     # Start of current month
     period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -104,20 +106,16 @@ def project_cashflow(
 
     # Active budget entries for the entity/user
     be_query = db.query(BudgetEntry).filter(
-        BudgetEntry.user_id == user_id,
+        scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
-    if entity_id is not None:
-        be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
     budget_entries = be_query.all()
 
     # Unposted transactions (confirmed upcoming expenses)
     txn_query = db.query(Transaction).filter(
-        Transaction.user_id == user_id,
+        scope_criterion(Transaction, user_id, entity_id),
         Transaction.is_posted.is_(False),
     )
-    if entity_id is not None:
-        txn_query = txn_query.filter(Transaction.entity_id == entity_id)
     unposted_txns = txn_query.all()
 
     timeline = []
@@ -184,17 +182,16 @@ def get_upcoming_items(
     Return all scheduled income/expense occurrences and unposted transactions
     within the next N days, sorted by date.
     """
-    now = reference or datetime.utcnow()
+    # Naive: compared against the naive next_occurrence / transaction_date columns.
+    now = reference or naive_utc_now()
     cutoff = now + timedelta(days=days)
 
     items: List[dict] = []
 
     be_query = db.query(BudgetEntry).filter(
-        BudgetEntry.user_id == user_id,
+        scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
-    if entity_id is not None:
-        be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
 
     for entry in be_query.all():
         occ = entry.next_occurrence.replace(tzinfo=None) if entry.next_occurrence.tzinfo else entry.next_occurrence
@@ -214,13 +211,11 @@ def get_upcoming_items(
             counter += 1
 
     txn_query = db.query(Transaction).filter(
-        Transaction.user_id == user_id,
+        scope_criterion(Transaction, user_id, entity_id),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date >= now,
         Transaction.transaction_date <= cutoff,
     )
-    if entity_id is not None:
-        txn_query = txn_query.filter(Transaction.entity_id == entity_id)
 
     for txn in txn_query.all():
         items.append({
@@ -246,11 +241,9 @@ def get_disposable_income(
     total monthly income - total monthly expenses (normalised from each cadence).
     """
     be_query = db.query(BudgetEntry).filter(
-        BudgetEntry.user_id == user_id,
+        scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
-    if entity_id is not None:
-        be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0
@@ -470,7 +463,8 @@ def project_running_balance(
     reference: Optional[datetime] = None,
 ) -> dict:
     """Build the dated running-balance timeline over the next ``days`` days."""
-    now = reference or datetime.utcnow()
+    # Naive: compared against the naive next_occurrence / transaction_date columns.
+    now = reference or naive_utc_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=days)
 
@@ -478,6 +472,7 @@ def project_running_balance(
     # Available cash EXCLUDES credit-card accounts — those balances are money owed,
     # not money on hand. (Card payments show up as payable events instead.)
     asset_accounts = [a for a in accounts if a.account_type != AccountType.CREDIT]
+    credit_account_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
     opening = sum((Decimal(str(a.balance)) for a in asset_accounts), Decimal("0"))
     opening_by_account = {a.id: Decimal(str(a.balance)) for a in asset_accounts}
     account_names = {a.id: a.name for a in accounts}
@@ -485,11 +480,9 @@ def project_running_balance(
     events: List[dict] = []
 
     be_query = db.query(BudgetEntry).filter(
-        BudgetEntry.user_id == user_id,
+        scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
-    if entity_id is not None:
-        be_query = be_query.filter(BudgetEntry.entity_id == entity_id)
     for entry in be_query.all():
         sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
         for occ in iter_occurrences(entry, start, end):
@@ -505,14 +498,18 @@ def project_running_balance(
             })
 
     txn_query = db.query(Transaction).filter(
-        Transaction.user_id == user_id,
+        scope_criterion(Transaction, user_id, entity_id),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date >= start,
         Transaction.transaction_date < end,
     )
-    if entity_id is not None:
-        txn_query = txn_query.filter(Transaction.entity_id == entity_id)
     for txn in txn_query.all():
+        # A charge on a credit card is NOT a cash outflow on its purchase date — the
+        # cash leaves when that card's statement is paid. Those cards are modelled as
+        # dated statement payables below; counting the charge here as well would both
+        # double-count it and date it wrongly (pessimistic, weeks early).
+        if txn.account_id in credit_account_ids:
+            continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
         elif txn.transaction_type == TransactionType.DEBIT:
@@ -529,6 +526,10 @@ def project_running_balance(
             "funding_account_id": txn.account_id,
             "overflow_account_id": None,
         })
+
+    # Each credit card contributes one dated payable per billing cycle due in the
+    # window, derived from its own transactions (see services/statements.py).
+    events.extend(get_statement_payables(db, user_id, entity_id, start, end))
 
     result = build_timeline(opening, events)
     result["account_shortfalls"] = route_accounts(opening_by_account, events, account_names)

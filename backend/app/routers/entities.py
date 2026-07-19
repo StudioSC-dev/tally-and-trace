@@ -1,11 +1,11 @@
 from typing import List, Optional
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
+from app.core.time import utc_now
 from app.models.entity import Entity, EntityMembership, MemberRole
 from app.models.user import User
 from app.schemas.entity import (
@@ -114,7 +114,7 @@ def update_entity(
 
     for field, value in payload.dict(exclude_unset=True).items():
         setattr(entity, field, value)
-    entity.updated_at = datetime.utcnow()
+    entity.updated_at = utc_now()
     db.commit()
     db.refresh(entity)
     return entity
@@ -144,7 +144,7 @@ def delete_entity(
         raise HTTPException(status_code=403, detail="Only owners can delete an entity")
 
     entity.is_active = False
-    entity.updated_at = datetime.utcnow()
+    entity.updated_at = utc_now()
     db.commit()
 
 

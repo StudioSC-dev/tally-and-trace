@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import get_active_entity, validate_entity_ownership
+from app.core.entity_context import (
+    get_accessible_or_404,
+    get_active_entity,
+    scope_criterion,
+    validate_entity_ownership,
+)
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -20,10 +25,10 @@ def get_categories(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ):
     """Get all categories with optional filtering"""
-    query = db.query(Category).filter(Category.user_id == current_user.id)
+    query = db.query(Category).filter(
+        scope_criterion(Category, current_user.id, active_entity.id if active_entity else None)
+    )
 
-    if active_entity is not None:
-        query = query.filter(Category.entity_id == active_entity.id)
     if is_expense is not None:
         query = query.filter(Category.is_expense == is_expense)
     if is_active is not None:
@@ -40,10 +45,12 @@ def create_category(
     active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new category"""
-    # Check if category name already exists for this user
+    # Uniqueness follows the same scope as visibility: within a shared entity two
+    # members must not both create "Groceries", but a name used in one entity
+    # mustn't block the same name in another.
     existing_category = db.query(Category).filter(
         Category.name == category.name,
-        Category.user_id == current_user.id,
+        scope_criterion(Category, current_user.id, active_entity.id if active_entity else None),
     ).first()
     if existing_category:
         raise HTTPException(status_code=400, detail="Category with this name already exists")
@@ -67,13 +74,7 @@ def get_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """Get a specific category by ID"""
-    category = db.query(Category).filter(
-        Category.id == category_id,
-        Category.user_id == current_user.id,
-    ).first()
-    if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
-    return category
+    return get_accessible_or_404(db, Category, category_id, current_user, "Category not found")
 
 @router.put("/{category_id}", response_model=CategoryResponse)
 def update_category(
@@ -83,18 +84,14 @@ def update_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """Update an existing category"""
-    db_category = db.query(Category).filter(
-        Category.id == category_id,
-        Category.user_id == current_user.id,
-    ).first()
-    if not db_category:
-        raise HTTPException(status_code=404, detail="Category not found")
+    db_category = get_accessible_or_404(db, Category, category_id, current_user, "Category not found")
 
-    # Check if new name conflicts with existing category
+    # Same scope as create: conflict against the category's own entity, not the editor's.
     if category_update.name and category_update.name != db_category.name:
         existing_category = db.query(Category).filter(
             Category.name == category_update.name,
-            Category.user_id == current_user.id,
+            Category.id != db_category.id,
+            scope_criterion(Category, db_category.user_id, db_category.entity_id),
         ).first()
         if existing_category:
             raise HTTPException(status_code=400, detail="Category with this name already exists")
@@ -114,12 +111,7 @@ def delete_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """Soft delete a category (mark as inactive)"""
-    db_category = db.query(Category).filter(
-        Category.id == category_id,
-        Category.user_id == current_user.id,
-    ).first()
-    if not db_category:
-        raise HTTPException(status_code=404, detail="Category not found")
+    db_category = get_accessible_or_404(db, Category, category_id, current_user, "Category not found")
 
     db_category.is_active = False
     db.commit()

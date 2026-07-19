@@ -23,6 +23,7 @@ from app.models.entity import Entity, EntityMembership
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
+from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -88,7 +89,7 @@ def export_json(
 
     payload = {
         "entity": _orm_to_dict(entity),
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": utc_now().isoformat(),
         "accounts": [_orm_to_dict(r) for r in accounts],
         "transactions": [_orm_to_dict(r) for r in transactions],
         "categories": [_orm_to_dict(r) for r in categories],
@@ -98,7 +99,7 @@ def export_json(
     }
 
     json_bytes = json.dumps(payload, default=str, indent=2).encode("utf-8")
-    filename = f"tally_trace_entity_{entity_id}_{datetime.utcnow().strftime('%Y%m%d')}.json"
+    filename = f"tally_trace_entity_{entity_id}_{utc_now().strftime('%Y%m%d')}.json"
 
     return Response(
         content=json_bytes,
@@ -148,7 +149,7 @@ def export_csv(
         "wishlist_items": lambda: db.query(WishlistItem).filter(WishlistItem.entity_id == entity_id).all(),
     }
 
-    date_str = datetime.utcnow().strftime("%Y%m%d")
+    date_str = utc_now().strftime("%Y%m%d")
 
     if table:
         if table not in table_map:

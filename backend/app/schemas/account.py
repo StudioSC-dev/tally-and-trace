@@ -15,8 +15,11 @@ class AccountBase(BaseModel):
     # Credit card specific fields
     credit_limit: Optional[float] = Field(None, ge=0)
     due_date: Optional[int] = Field(None, ge=1, le=31)  # Day of month (legacy support)
-    billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)  # Day of month / statement day
+    billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)  # Day of month the statement closes
     days_until_due_date: Optional[int] = Field(21, ge=1, le=90)
+    # Where the statement payment is funded from (primary -> overflow, as on budget entries).
+    payment_account_id: Optional[int] = Field(None, gt=0)
+    payment_overflow_account_id: Optional[int] = Field(None, gt=0)
 
 class AccountCreate(AccountBase):
     is_active: bool = True
@@ -32,6 +35,8 @@ class AccountUpdate(BaseModel):
     due_date: Optional[int] = Field(None, ge=1, le=31)
     billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)
     days_until_due_date: Optional[int] = Field(None, ge=1, le=90)
+    payment_account_id: Optional[int] = Field(None, gt=0)
+    payment_overflow_account_id: Optional[int] = Field(None, gt=0)
     is_active: Optional[bool] = None
 
 class AccountResponse(AccountBase):

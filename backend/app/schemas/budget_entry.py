@@ -61,6 +61,14 @@ class BudgetEntryResponse(BudgetEntryBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Input requires ge=1 (you can't create a 0-occurrence installment), but the
+    # stored value legitimately reaches 0 as materialisation counts it down, so the
+    # response must allow 0 — otherwise the list endpoint 500s once an installment is
+    # fully paid.
+    max_occurrences: Optional[int] = Field(None, ge=0, le=360)
+    # Installments only ("n of m"): occurrences materialised so far, counted from the
+    # linked transactions. None for open-ended entries, where the notion doesn't apply.
+    occurrences_paid: Optional[int] = None
 
     class Config:
         from_attributes = True

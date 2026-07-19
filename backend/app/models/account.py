@@ -33,8 +33,15 @@ class Account(Base):
     # Credit card specific fields
     credit_limit = Column(Numeric(15, 2), nullable=True)
     due_date = Column(Integer, nullable=True)  # Day of month for due date (legacy support)
-    billing_cycle_start = Column(Integer, nullable=True)  # Day of month for billing cycle start / statement day
+    billing_cycle_start = Column(Integer, nullable=True)  # Day of month the statement closes
     days_until_due_date = Column(Integer, nullable=True, default=21)
+
+    # Where this card's statement payment is funded from. Mirrors the UC1
+    # primary -> overflow routing on budget_entries: the statement draws on
+    # payment_account_id first, and anything it can't cover spills to
+    # payment_overflow_account_id. Credit cards only; null on other account types.
+    payment_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    payment_overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     
     # Entity scoping (nullable – existing data retains null until backfilled)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)

@@ -1,12 +1,19 @@
 import math
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
+from app.core.entity_context import (
+    get_accessible_or_404,
+    get_active_entity,
+    scope_criterion,
+    validate_entity_ownership,
+)
+from app.models.entity import Entity
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.schemas.wishlist import (
@@ -18,6 +25,7 @@ from app.schemas.wishlist import (
     WishlistReadiness,
 )
 from app.services import forecast as forecast_svc
+from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -32,7 +40,7 @@ SAVINGS_RATE_FACTOR = 0.5  # Assume 50% of disposable income goes to wishlist sa
 def list_wishlist(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    entity_id: Optional[int] = Query(None),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
     is_purchased: Optional[bool] = Query(None),
 ):
     """List wishlist items, sorted by priority then created_at."""
@@ -41,9 +49,11 @@ def list_wishlist(
         {"critical": 0, "high": 1, "medium": 2, "low": 3},
         value=WishlistItem.priority,
     )
-    query = db.query(WishlistItem).filter(WishlistItem.user_id == current_user.id)
-    if entity_id is not None:
-        query = query.filter(WishlistItem.entity_id == entity_id)
+    # Was an UNVALIDATED entity_id query param (Session 13 missed this router); now
+    # goes through get_active_entity, which verifies membership before scoping.
+    query = db.query(WishlistItem).filter(
+        scope_criterion(WishlistItem, current_user.id, active_entity.id if active_entity else None)
+    )
     if is_purchased is not None:
         query = query.filter(WishlistItem.is_purchased == is_purchased)
     return query.order_by(priority_order, WishlistItem.created_at).all()
@@ -54,8 +64,15 @@ def create_wishlist_item(
     payload: WishlistItemCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
-    item = WishlistItem(**payload.dict(), user_id=current_user.id)
+    item_data = payload.dict()
+    if item_data.get("entity_id") is None and active_entity is not None:
+        item_data["entity_id"] = active_entity.id
+    else:
+        validate_entity_ownership(db, current_user, item_data.get("entity_id"))
+
+    item = WishlistItem(**item_data, user_id=current_user.id)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -64,14 +81,15 @@ def create_wishlist_item(
 
 @router.get("/plan", response_model=WishlistPlanResponse)
 def get_wishlist_plan(
-    entity_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """
     Sequential purchase timeline for all unpurchased items ordered by priority.
     Each item is scheduled after the previous one has been saved up for.
     """
+    entity_id = active_entity.id if active_entity else None
     disposable_data = forecast_svc.get_disposable_income(db, current_user.id, entity_id)
     monthly_disposable = disposable_data["monthly_disposable"]
     savings_rate = max(monthly_disposable * SAVINGS_RATE_FACTOR, 0.01)
@@ -84,14 +102,14 @@ def get_wishlist_plan(
     items = (
         db.query(WishlistItem)
         .filter(
-            WishlistItem.user_id == current_user.id,
+            scope_criterion(WishlistItem, current_user.id, entity_id),
             WishlistItem.is_purchased.is_(False),
         )
         .order_by(priority_order, WishlistItem.created_at)
         .all()
     )
 
-    now = datetime.utcnow()
+    now = utc_now()
     cumulative_months = 0
     plan: List[WishlistPlanItem] = []
 
@@ -122,13 +140,7 @@ def get_wishlist_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    item = db.query(WishlistItem).filter(
-        WishlistItem.id == item_id,
-        WishlistItem.user_id == current_user.id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Wishlist item not found")
-    return item
+    return get_accessible_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
 
 
 @router.put("/{item_id}", response_model=WishlistItemResponse)
@@ -138,19 +150,14 @@ def update_wishlist_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    item = db.query(WishlistItem).filter(
-        WishlistItem.id == item_id,
-        WishlistItem.user_id == current_user.id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Wishlist item not found")
+    item = get_accessible_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
 
     update_data = payload.dict(exclude_unset=True)
     if update_data.get("is_purchased") and not item.is_purchased:
-        update_data.setdefault("purchased_at", datetime.utcnow())
+        update_data.setdefault("purchased_at", utc_now())
     for field, value in update_data.items():
         setattr(item, field, value)
-    item.updated_at = datetime.utcnow()
+    item.updated_at = utc_now()
     db.commit()
     db.refresh(item)
     return item
@@ -162,12 +169,7 @@ def delete_wishlist_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    item = db.query(WishlistItem).filter(
-        WishlistItem.id == item_id,
-        WishlistItem.user_id == current_user.id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Wishlist item not found")
+    item = get_accessible_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
     db.delete(item)
     db.commit()
 
@@ -175,20 +177,16 @@ def delete_wishlist_item(
 @router.get("/{item_id}/readiness", response_model=WishlistReadiness)
 def get_readiness(
     item_id: int,
-    entity_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """
     Advisory: Given disposable income, calculate when the user can afford this item.
     """
-    item = db.query(WishlistItem).filter(
-        WishlistItem.id == item_id,
-        WishlistItem.user_id == current_user.id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Wishlist item not found")
+    item = get_accessible_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
 
+    entity_id = active_entity.id if active_entity else None
     disposable_data = forecast_svc.get_disposable_income(db, current_user.id, entity_id)
     monthly_disposable = disposable_data["monthly_disposable"]
     savings_rate = monthly_disposable * SAVINGS_RATE_FACTOR
@@ -200,7 +198,7 @@ def get_readiness(
         months_needed = math.ceil(float(item.estimated_cost) / savings_rate)
         affordable_now = float(item.estimated_cost) <= monthly_disposable
 
-    estimated_date = (datetime.utcnow() + timedelta(days=months_needed * 30)).date().isoformat()
+    estimated_date = (utc_now() + timedelta(days=months_needed * 30)).date().isoformat()
 
     return WishlistReadiness(
         item_id=item.id,
