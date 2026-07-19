@@ -21,19 +21,19 @@ export function Navigation() {
 
   return (
     <nav className="bg-white dark:bg-slate-900/80 backdrop-blur-sm shadow-sm border-b border-gray-200 dark:border-slate-800 fixed top-0 left-0 right-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
+      <div className="w-full px-3 sm:px-4 lg:px-6">
+        <div className="flex justify-between h-16 gap-2">
           {/* Logo + Desktop Nav Links */}
-          <div className="flex items-center">
+          <div className="flex items-center min-w-0">
             <div className="flex-shrink-0 flex items-center">
               <Link to="/" className="flex items-center space-x-2 text-xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200">
                 <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-md">
                   <span className="text-white font-bold text-sm">{symbol}</span>
                 </div>
-                <span>Tally &amp; Trace</span>
+                <span className="hidden md:inline">Tally &amp; Trace</span>
               </Link>
             </div>
-            <div className="hidden sm:ml-8 sm:flex sm:space-x-1">
+            <div className="hidden sm:ml-6 sm:flex sm:space-x-0.5 min-w-0 overflow-x-auto">
               <Link to="/" className={navLinkBase} activeProps={{ className: navLinkActive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
@@ -66,23 +66,17 @@ export function Navigation() {
                 </svg>
                 Allocations
               </Link>
-              <Link to="/wishlist" className={navLinkBase} activeProps={{ className: navLinkActive }}>
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                </svg>
-                Wishlist
-              </Link>
             </div>
           </div>
 
           {/* Right side: entity switcher + theme toggle + user menu + mobile hamburger */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 shrink-0">
             {/* Entity Switcher */}
             {entities.length > 1 && (
               <div className="relative hidden sm:block sm:mr-1 sm:border-r sm:border-gray-200 sm:pr-3 dark:sm:border-slate-700">
                 <button
                   onClick={() => setShowEntityMenu(!showEntityMenu)}
-                  className="inline-flex items-center gap-1.5 max-w-[12rem] px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
+                  className="inline-flex items-center gap-1.5 max-w-[9rem] lg:max-w-[12rem] px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
                 >
                   <svg className="w-4 h-4 shrink-0 text-gray-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -137,7 +131,7 @@ export function Navigation() {
                     {user?.first_name?.[0]}{user?.last_name?.[0]}
                   </span>
                 </div>
-                <span className="hidden sm:block">{user?.first_name} {user?.last_name}</span>
+                <span className="hidden lg:block">{user?.first_name} {user?.last_name}</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>

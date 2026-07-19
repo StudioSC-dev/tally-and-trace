@@ -11,11 +11,12 @@ import {
   useUpdateBudgetEntryMutation,
   useDeleteBudgetEntryMutation,
 } from '../store/api'
-import type { Allocation, BudgetEntry, Account, Category } from '../store/api'
+import type { Allocation, BudgetEntry, Account, Category, WishlistItem } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { WishlistPanel } from '../components/WishlistPanel'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -261,7 +262,7 @@ export function AllocationsPage() {
   const [editingBudgetEntry, setEditingBudgetEntry] = useState<BudgetEntry | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
-  const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings'>('subscriptions')
+  const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
   const [modalMode, setModalMode] = useState<'allocation' | 'subscription'>('allocation')
   const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
 
@@ -586,6 +587,26 @@ export function AllocationsPage() {
     setEditingAllocation(null)
     setIsCreateModalOpen(true)
   }, [activeTab, createAllocationDefaults, createSubscriptionDefaults])
+
+  const openAllocationFromWishlist = useCallback(
+    (item: WishlistItem, kind: 'budget' | 'savings') => {
+      setModalMode('allocation')
+      setEditingAllocation(null)
+      setEditingBudgetEntry(null)
+      setSelectedBudgetCategoryIds([])
+      setSelectedSavingsAccountIds([])
+      setAllocationForm({
+        ...createAllocationDefaults(kind),
+        name: item.name,
+        description: `From wishlist: ${item.name}`,
+        target_amount: item.estimated_cost || undefined,
+        // A savings target keeps the item's target date; a budget envelope resets monthly.
+        target_date: kind === 'savings' && item.target_date ? item.target_date.slice(0, 10) : undefined,
+      })
+      setIsCreateModalOpen(true)
+    },
+    [createAllocationDefaults]
+  )
 
   const openRecurringModal = useCallback(
     (entry?: BudgetEntry) => {
@@ -1411,16 +1432,18 @@ export function AllocationsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Allocations</h1>
-        <button
-            onClick={openCreateModal}
-          className="btn-primary focus-ring w-full sm:w-auto justify-center"
-        >
-            {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
-        </button>
+        {activeTab !== 'wishlist' && (
+          <button
+              onClick={openCreateModal}
+            className="btn-primary focus-ring w-full sm:w-auto justify-center"
+          >
+              {activeTab === 'subscriptions' ? 'Add Recurring Entry' : 'Add Allocation'}
+          </button>
+        )}
       </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-gray-200 dark:border-slate-700 rounded-lg p-2 bg-white dark:bg-slate-800">
           <nav className="flex gap-1">
@@ -1428,6 +1451,7 @@ export function AllocationsPage() {
               { value: 'subscriptions' as const, label: 'Subscriptions' },
               { value: 'budgets' as const, label: 'Budgets' },
               { value: 'savings' as const, label: 'Savings' },
+              { value: 'wishlist' as const, label: 'Wishlist' },
             ].map((tab) => {
               const isActive = activeTab === tab.value
           return (
@@ -1444,7 +1468,7 @@ export function AllocationsPage() {
             })}
           </nav>
           <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-            Switch tabs to view recurring subscriptions, monthly budgets, or savings envelopes.
+            Switch tabs to view recurring subscriptions, monthly budgets, savings envelopes, or your wishlist.
           </p>
                 </div>
       </div>
@@ -1481,7 +1505,11 @@ export function AllocationsPage() {
           'No savings or goal envelopes yet. Create one to start building your future plans.'
         )}
 
-      {activeTab !== 'subscriptions' && (
+      {activeTab === 'wishlist' && (
+        <WishlistPanel onCreateAllocationFromItem={openAllocationFromWishlist} />
+      )}
+
+      {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (
         <>
           <div ref={sentinelRef} className="h-3" />
           {!isInitialLoading && (isFetchingMore || hasMoreAllocations) && (
