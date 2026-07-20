@@ -37,6 +37,12 @@ services:
         value: .studiosc.dev
       - key: REFRESH_COOKIE_SECURE
         value: true
+      # Sentry. DSN is not secret, but keep it out of the repo so a fork does
+      # not report into this project's quota. Blank/unset = Sentry disabled.
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"
 
   # ── Frontend: Vite React SPA ──────────────────────────────────────────────────
   - type: web
@@ -53,3 +59,9 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://api.tallyandtrace.studiosc.dev
+      # Baked into the bundle at build time (Vite inlines VITE_* vars), so a
+      # DSN change needs a redeploy, not just a restart.
+      - key: VITE_SENTRY_DSN
+        sync: false
+      - key: VITE_SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"

@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.routers import api_router
 from app.core.seed import seed_database
+from app.core.observability import init_sentry
 from contextlib import asynccontextmanager
 import os
 import logging
@@ -33,6 +34,10 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} in {settings.ENVIRONMENT} mode")
 logger.info("Logging configured successfully.")
+
+# Must run before the FastAPI app is constructed so the ASGI middleware Sentry
+# installs wraps every route, including anything added below.
+init_sentry()
 
 
 def _run_startup():

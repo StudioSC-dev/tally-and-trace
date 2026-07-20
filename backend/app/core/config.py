@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
+    # Observability (Sentry). Unset DSN = Sentry fully disabled, which is the
+    # default for local dev and CI so neither spends free-tier quota.
+    SENTRY_DSN: Optional[str] = None
+    # Fraction of requests traced for performance metrics. Render's free tier
+    # plus Sentry's free span quota means this stays low in production; 0
+    # disables tracing without disabling error reporting.
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     @model_validator(mode="after")
     def _reject_placeholder_secrets_in_production(self) -> "Settings":
         """Fail fast when production boots with a placeholder default still in place.
