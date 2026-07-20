@@ -130,3 +130,14 @@ def revoke_refresh_token(db: Session, token: str) -> None:
     if record and record.revoked_at is None:
         record.revoked_at = naive_utc_now()
         db.commit()
+
+
+def revoke_all_refresh_tokens(db: Session, user: User) -> int:
+    """Revoke every outstanding refresh token for a user. Returns the number revoked."""
+    revoked = (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+        .update({RefreshToken.revoked_at: naive_utc_now()}, synchronize_session=False)
+    )
+    db.commit()
+    return revoked

@@ -15,6 +15,7 @@ from app.core.auth import (
     create_refresh_token,
     rotate_refresh_token,
     revoke_refresh_token,
+    revoke_all_refresh_tokens,
 )
 from app.core.config import settings
 from app.core.time import utc_now
@@ -215,6 +216,31 @@ def update_current_user(
     db.refresh(current_user)
     
     return current_user
+
+@router.delete("/me")
+def deactivate_current_user(
+    response: Response,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Deactivate the current user's account (soft delete).
+
+    Financial records are never destroyed — this flips `is_active` to False and
+    revokes every outstanding refresh token. All protected endpoints depend on
+    `get_current_active_user`, so access is cut off on the next request rather
+    than lingering until the access token expires. Reactivation is deliberate
+    and manual; there is no self-service path back.
+    """
+    current_user.is_active = False
+    current_user.updated_at = utc_now()
+    db.commit()
+
+    revoke_all_refresh_tokens(db, current_user)
+    _clear_refresh_cookie(response)
+
+    logger.info("Account deactivated for user id=%s", current_user.id)
+    return {"message": "Account deactivated"}
+
 
 @router.post("/logout")
 def logout(
