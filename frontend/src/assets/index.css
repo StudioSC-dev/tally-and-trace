@@ -1,27 +1,163 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── CSS Custom Properties ────────────────────────────────────────────────── */
-:root {
-  /* Light mode tokens */
-  --bg-base:       #f8fafc;
-  --bg-surface:    #ffffff;
-  --bg-elevated:   #f1f5f9;
-  --border-color:  #e2e8f0;
-  --text-primary:  #0f172a;
-  --text-secondary:#475569;
-  --text-muted:    #94a3b8;
-  --accent:        #3b82f6;
-  --accent-hover:  #2563eb;
-  --success:       #10b981;
+/*
+  StudioSC design tokens.
 
-  font-family: 'Montserrat', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  Two themes. Components only ever reference the semantic names (--paper, --ink,
+  --line …), never a palette step, so light and dark cannot drift apart.
+
+  The theme is selected by `data-theme` on <html>, which the inline script in
+  index.html sets before first paint. Light is the default; the media query at
+  the bottom only covers the no-JS case, where no attribute is ever set.
+
+  Contrast is deliberately kept off the ceiling in dark: body text lands around
+  8:1 rather than the 15:1 of pure white on near-black, which is fatiguing to
+  read — and this is an app you stare at while reconciling numbers.
+*/
+
+:root {
+  /*
+    Dark palette held as constants, so switching themes below is pure aliasing
+    and no colour value is ever written twice.
+  */
+  --dark-paper: #1c1917;
+  --dark-surface: #231f1d;
+  --dark-sunken: #171412;
+  --dark-line: #332e2b;
+  --dark-line-strong: #443d39;
+  --dark-ink: #f5f5f4;
+  --dark-body: #d6d3d1;
+  --dark-muted: #a8a29e;
+  --dark-ok: #a3b18a;
+  --dark-warn: #d9a05b;
+  --dark-info: #a8a29e;
+  --dark-danger: #e0918a;
+
+  /*
+    Light theme (default).
+
+    The page is a soft grey, not white: it sits at ~70% of pure white's
+    luminance, because a full-white field at screen brightness is glaring over a
+    long read. Cards sit *lighter* than the page, so they separate without a
+    shadow and without being a near-white glare panel. Ink is pulled back off
+    true black for the same reason.
+
+    Greys are very slightly warm so light and dark read as one family (dark is a
+    warm stone), but the saturation is low enough that they present as neutral.
+
+    Dimming the page compresses contrast against dark text, so the whole ramp is
+    tuned to this specific page tone — every pairing that actually occurs still
+    clears 4.5:1 (worst is muted 11px label text on --sunken, at 4.68:1). If you
+    re-dim the page, re-darken --muted, --ok, --warn and --danger with it.
+  */
+
+  /* Surfaces — surface is lighter than paper, sunken is darker */
+  --paper: #dedad4;
+  --surface: #e9e6e0;
+  --sunken: #d2cdc6;
+
+  /* Hairlines */
+  --line: #c2bcb4;
+  --line-strong: #a9a29a;
+
+  /* Text */
+  --ink: #201d1a; /* headings */
+  --body: #43403c; /* paragraphs */
+  --muted: #59554f; /* metadata, labels — 4.68:1 on --sunken at 11px */
+
+  /* Status — desaturated, used as small dots and text, never as glowing fills */
+  --ok: #3c610b;
+  --warn: #7f4021;
+  --info: #59554f;
+  --danger: #8c221d;
+
+  /* Paper texture strength — see the body::before/::after rules below. */
+  --grain-opacity: 0.085;
+  --mottle-opacity: 0.075;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --paper: var(--dark-paper);
+  --surface: var(--dark-surface);
+  --sunken: var(--dark-sunken);
+  --line: var(--dark-line);
+  --line-strong: var(--dark-line-strong);
+  --ink: var(--dark-ink);
+  --body: var(--dark-body);
+  --muted: var(--dark-muted);
+  --ok: var(--dark-ok);
+  --warn: var(--dark-warn);
+  --info: var(--dark-info);
+  --danger: var(--dark-danger);
+
+  /* On a dark page the same texture reads as sensor noise, so dial it back. */
+  --grain-opacity: 0.028;
+  --mottle-opacity: 0.022;
+
+  color-scheme: dark;
+}
+
+/* No-JS fallback only: with scripting on, data-theme is always present. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --paper: var(--dark-paper);
+    --surface: var(--dark-surface);
+    --sunken: var(--dark-sunken);
+    --line: var(--dark-line);
+    --line-strong: var(--dark-line-strong);
+    --ink: var(--dark-ink);
+    --body: var(--dark-body);
+    --muted: var(--dark-muted);
+    --ok: var(--dark-ok);
+    --warn: var(--dark-warn);
+    --info: var(--dark-info);
+    --danger: var(--dark-danger);
+
+    --grain-opacity: 0.028;
+    --mottle-opacity: 0.022;
+
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/*
+  The page colour lives on <html>, not <body>, so the paper texture (a
+  z-index:-1 pseudo-element) is not painted over — body's own background would
+  render after negative-z-index children.
+*/
+html {
+  background-color: var(--paper);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: var(--body);
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: light dark;
+  /*
+    Tabular figures app-wide. Nearly every number here is money or a date in a
+    column, and Inter's proportional digits do not align down a ledger — the
+    decimal points visibly drift. Set once on the body rather than at hundreds
+    of format() call sites; `.tnum` remains for anything outside this tree.
+  */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -29,121 +165,267 @@
   -webkit-text-size-adjust: 100%;
 }
 
-/* Dark mode overrides via .dark class */
-.dark {
-  --bg-base:       #0a0a0f;
-  --bg-surface:    #0f172a;
-  --bg-elevated:   #1e293b;
-  --border-color:  #334155;
-  --text-primary:  #f8fafc;
-  --text-secondary:#94a3b8;
-  --text-muted:    #64748b;
-  --accent:        #3b82f6;
-  --accent-hover:  #60a5fa;
-  --success:       #10b981;
-  color-scheme: dark;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background-color: var(--bg-base);
-  color: var(--text-primary);
-  font-family: 'Montserrat', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
 #root {
   min-height: 100vh;
 }
 
-/* ── Custom Scrollbar ─────────────────────────────────────────────────────── */
+/*
+  Paper texture.
+
+  Real paper is not a flat tone: it has fine grain from the fibre, plus a
+  broader unevenness where the pulp settled thicker or thinner. Two overlays
+  reproduce that — a high-frequency grain and a low-frequency mottle — both
+  generated by SVG feTurbulence inlined as data URIs, so there are no image
+  files, no extra requests, and nothing to go stale.
+
+  Both are painted on fixed, pointer-events-none pseudo-elements at z-index -1:
+  above the page colour (which lives on <html>) but behind all content, so text
+  is never overlaid and hit-testing is untouched. `stitchTiles="stitch"` makes
+  the tiles seamless, which avoids the visible grid you get from naive noise.
+
+  Card surfaces are opaque and sit on top, so they read as a separate sheet laid
+  on the page — which is the intended effect.
+*/
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Fine fibre grain. */
+body::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23g)'/%3E%3C/svg%3E");
+  opacity: var(--grain-opacity);
+}
+
+/* Broad pulp mottling — the "traces of wood" unevenness. */
+body::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='700'%3E%3Cfilter id='m'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='700' height='700' filter='url(%23m)'/%3E%3C/svg%3E");
+  opacity: var(--mottle-opacity);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body::before,
+  body::after {
+    display: none;
+  }
+}
+
+/* ── Component Layer ──────────────────────────────────────────────────────── */
+/*
+  Type helpers live in this layer (not as loose CSS) so the component classes
+  below can @apply them — Tailwind only resolves @apply against classes it owns.
+*/
+@layer components {
+  /*
+    Section headings. Deliberately NOT the display serif: at subhead sizes
+    Instrument Serif's single 400 weight reads thin and fussy. Bold sans gives
+    these the weight to actually divide a page. The serif is reserved for
+    display type — page titles, card titles, and figures.
+  */
+  .subhead {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  /*
+    Mono eyebrow: section labels, metadata, and form field labels — the
+    portfolio uses this same class for all three, which is why the 41 existing
+    `<label className="label">` call sites need no rename.
+  */
+  .label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /*
+    Tabular figures. Aligning decimal columns is the whole point of a ledger,
+    and Inter's proportional digits do not line up.
+  */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /*
+    Buttons are square-edged and either ink-filled or outlined. The
+    rounded-lg + coloured-fill + shadow combination was the loudest
+    "generated UI" signature in this app. Primary inverts on hover — the fill
+    drops out, the outline stays put, so the footprint never shifts.
+  */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 border border-ink bg-ink px-4 py-2 text-sm text-paper transition-colors duration-200 hover:bg-transparent hover:text-ink;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 border border-line-strong px-4 py-2 text-sm text-ink transition-colors duration-200 hover:border-ink hover:bg-sunken;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 border border-danger px-4 py-2 text-sm text-danger transition-colors duration-200 hover:bg-danger hover:text-paper;
+  }
+
+  /*
+    Cards separate by tone and hairline, not by shadow: --surface is lighter
+    than --paper, so a border is enough. No radius, no hover-glow tinted border.
+  */
+  .card {
+    @apply border border-line bg-surface transition-colors duration-200 hover:border-line-strong;
+  }
+
+  .stat-card {
+    @apply border border-line bg-surface p-4 transition-colors duration-200 hover:border-line-strong sm:p-6;
+  }
+
+  .stat-value {
+    @apply tnum font-serif text-2xl text-ink sm:text-3xl;
+  }
+
+  .stat-label {
+    @apply label;
+  }
+
+  /*
+    Underline-only fields. A boxed input on a textured page reads as a second
+    card; a rule under the text reads as a form on paper.
+  */
+  .input-field,
+  .select-field {
+    @apply block w-full border-b border-line bg-transparent px-0 py-2 text-ink transition-colors placeholder:text-muted focus:border-ink focus:outline-none;
+  }
+
+  /*
+    Browsers give <input>, <select> and <input type="date"> different intrinsic
+    padding, line-height and box heights. Left alone, a cost field sits on a
+    different baseline from the currency select beside it and the underlines
+    land at different heights — which is exactly what a two-column form makes
+    obvious. Normalise the control box so every field in a row agrees.
+
+    Element selectors, not the class: textarea shares .input-field and must keep
+    its auto height (it is sized by `rows`).
+  */
+  input.input-field,
+  select.select-field {
+    height: 2.5rem;
+    line-height: 1.5;
+  }
+
+  /* Room for the native chevron so long option labels do not run under it. */
+  .select-field {
+    @apply pr-6;
+  }
+
+  /*
+    The select itself is transparent like every other field, so the dropdown
+    popup needs its surface named explicitly — otherwise the options inherit
+    the page and render ink-on-ink in dark.
+  */
+  .select-field option {
+    background-color: var(--surface);
+    color: var(--ink);
+  }
+
+  /*
+    Chrome renders the date picker indicator as a dark glyph. `color-scheme` on
+    :root already flips it in dark, but the light-theme default sits too heavy
+    against a hairline field.
+  */
+  .input-field::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+    cursor: pointer;
+  }
+
+  .input-field::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
+  /*
+    Status reads as a dot plus a mono label, never a tinted pill — those
+    bg-*-500/10 badges glowed and pulled focus off the numbers beside them.
+    Pair `.badge` with a dot:
+      <span class="badge"><span class="dot-ok" />Reconciled</span>
+  */
+  .badge {
+    @apply label inline-flex items-center gap-2 whitespace-nowrap;
+  }
+
+  .dot-ok,
+  .dot-warn,
+  .dot-info,
+  .dot-danger {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full;
+  }
+
+  .dot-ok {
+    @apply bg-ok;
+  }
+  .dot-warn {
+    @apply bg-warn;
+  }
+  .dot-info {
+    @apply bg-info;
+  }
+  .dot-danger {
+    @apply bg-danger;
+  }
+
+  /* Kept as class names so the sweep can migrate call sites incrementally. */
+  .badge-success {
+    @apply badge text-ok;
+  }
+  .badge-warning {
+    @apply badge text-warn;
+  }
+  .badge-danger {
+    @apply badge text-danger;
+  }
+  .badge-info {
+    @apply badge text-info;
+  }
+
+  .loading-spinner {
+    @apply h-8 w-8 animate-spin rounded-full border-2 border-line border-t-ink;
+  }
+
+  .focus-ring {
+    @apply focus:outline-2 focus:outline-offset-2 focus:outline-ink;
+  }
+}
+
+/*
+  Instrument Serif ships a single 400 weight — bolding it synthesises a fake
+  weight and looks muddy, so display headings get tighter tracking for presence
+  instead of more weight. Outside @layer so it wins over the font-serif utility.
+*/
+.font-serif {
+  font-weight: 400;
+  letter-spacing: -0.015em;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-elevated);
+  background: var(--sunken);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
+  background: var(--line-strong);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
-
-/* ── Component Layer ──────────────────────────────────────────────────────── */
-@layer components {
-  .btn-primary {
-    @apply bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md;
-  }
-
-  .btn-secondary {
-    @apply bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-100 font-medium py-2 px-4 rounded-lg transition-colors duration-200;
-  }
-
-  .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md;
-  }
-
-  .card {
-    @apply bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-md transition-shadow duration-200;
-  }
-
-  .input-field {
-    @apply w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200;
-  }
-
-  .select-field {
-    @apply w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200;
-  }
-
-  .label {
-    @apply block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1;
-  }
-
-  .stat-card {
-    @apply bg-white dark:bg-slate-900/50 rounded-xl p-4 sm:p-6 shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-md transition-all duration-200;
-  }
-
-  .stat-value {
-    @apply text-xl sm:text-2xl font-bold text-gray-900 dark:text-white;
-  }
-
-  .stat-label {
-    @apply text-sm font-medium text-gray-600 dark:text-slate-400;
-  }
-
-  .loading-spinner {
-    @apply animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500;
-  }
-
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400;
-  }
-
-  .badge-warning {
-    @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400;
-  }
-
-  .badge-danger {
-    @apply bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400;
-  }
-
-  .badge-info {
-    @apply bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-400;
-  }
+  background: var(--muted);
 }
 
 /* ── Animations ───────────────────────────────────────────────────────────── */
@@ -160,11 +442,6 @@ body {
 
 .fade-in {
   animation: fadeIn 0.3s ease-out;
-}
-
-/* ── Focus Styles ─────────────────────────────────────────────────────────── */
-.focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900;
 }
 
 /* ── Safe Area (notched phones) ───────────────────────────────────────────── */
