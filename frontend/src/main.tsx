@@ -5,7 +5,6 @@ import { Provider } from 'react-redux'
 import { store } from './store'
 import { AuthProvider } from './contexts/AuthContext'
 import { EntityProvider } from './contexts/EntityContext'
-import { ThemeProvider } from './contexts/ThemeContext'
 import { initSentry, Sentry } from './utils/sentry'
 import './assets/index.css'
 
@@ -31,13 +30,13 @@ declare module '@tanstack/react-router' {
 function CrashFallback() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
-      <h1 className="text-xl font-semibold">Something went wrong</h1>
-      <p className="text-sm opacity-70">
+      <h1 className="font-serif text-2xl text-ink">Something went wrong</h1>
+      <p className="text-sm text-muted">
         The error has been reported. Reloading usually fixes it.
       </p>
       <button
         onClick={() => window.location.reload()}
-        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        className="btn-primary"
       >
         Reload
       </button>
@@ -49,13 +48,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Sentry.ErrorBoundary fallback={<CrashFallback />}>
       <Provider store={store}>
-        <ThemeProvider>
-          <AuthProvider>
-            <EntityProvider>
-              <RouterProvider router={router} />
-            </EntityProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <EntityProvider>
+            <RouterProvider router={router} />
+          </EntityProvider>
+        </AuthProvider>
       </Provider>
     </Sentry.ErrorBoundary>
   </React.StrictMode>,

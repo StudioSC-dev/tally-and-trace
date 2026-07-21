@@ -66,13 +66,13 @@ export function SpotlightOverlay({
     >
       {/* Gray background overlay */}
       <div
-        className="absolute inset-0 bg-gray-500/75 dark:bg-gray-900/75 transition-opacity duration-300"
+        className="absolute inset-0 bg-surface transition-opacity duration-300"
         style={{ opacity: isVisible ? 1 : 0 }}
       />
 
       {/* Highlight border - no dimming, just the border to draw attention */}
       <div
-        className="absolute border-4 border-blue-500 dark:border-blue-400 shadow-2xl shadow-blue-500/70 transition-all duration-300 ring-4 ring-blue-500/30 dark:ring-blue-400/30"
+        className="absolute border-2 border-ink transition-all duration-300"
         style={{
           top: highlightTop,
           left: highlightLeft,

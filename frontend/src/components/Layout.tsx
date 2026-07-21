@@ -17,8 +17,8 @@ export function Layout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="loading-spinner" />
       </div>
     )
   }
@@ -27,7 +27,9 @@ export function Layout() {
     return <Outlet />
   }
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-950">
+    // No background here on purpose: the page colour lives on <html> so the
+    // paper texture (a z-index:-1 pseudo-element) is not painted over.
+    <div className="min-h-screen">
       <Navigation />
       {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
       <main className="pt-20 pb-20 sm:pb-8">

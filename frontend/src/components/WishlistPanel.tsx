@@ -13,11 +13,20 @@ import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } fro
 
 const PRIORITIES: WishlistItemPriority[] = ['critical', 'high', 'medium', 'low']
 
+// Priority reads as a dot plus a label, never a tinted pill — the status colour
+// belongs to the text, so it cannot collide with the fill behind it.
 const PRIORITY_BADGE: Record<WishlistItemPriority, string> = {
-  critical: 'bg-rose-100 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400',
-  high: 'bg-orange-100 dark:bg-orange-500/10 text-orange-700 dark:text-orange-400',
-  medium: 'bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400',
-  low: 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-400',
+  critical: 'text-danger',
+  high: 'text-warn',
+  medium: 'text-body',
+  low: 'text-muted',
+}
+
+const PRIORITY_DOT: Record<WishlistItemPriority, string> = {
+  critical: 'bg-danger',
+  high: 'bg-warn',
+  medium: 'bg-line-strong',
+  low: 'bg-line',
 }
 
 const longDate = (iso?: string | null) => {
@@ -136,8 +145,8 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Wishlist</h2>
-          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+          <h2 className="text-lg font-semibold text-ink">Wishlist</h2>
+          <p className="text-sm text-muted mt-1">
             Prioritised things you're saving up for — turn any of them into a budget envelope or savings target.
           </p>
         </div>
@@ -146,23 +155,23 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
 
       {/* Purchase plan */}
       {plan && plan.items.length > 0 && (
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm">
-          <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Purchase plan</h3>
-            <p className="text-sm text-gray-500 dark:text-slate-400">
+        <div className="bg-surface border border-line">
+          <div className="p-4 sm:p-6 border-b border-line">
+            <h3 className="text-base font-semibold text-ink">Purchase plan</h3>
+            <p className="text-sm text-muted">
               Assuming {format(plan.savings_rate)}/mo toward the wishlist ({format(plan.monthly_disposable)} disposable) — items saved for in priority order.
             </p>
           </div>
-          <ol className="divide-y divide-gray-100 dark:divide-slate-800/50">
+          <ol className="divide-y divide-line/50">
             {plan.items.map((p, i) => (
               <li key={p.item_id} className="p-4 sm:px-6 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 text-xs font-semibold">{i + 1}</span>
-                  <span className="font-medium text-gray-900 dark:text-white truncate">{p.name}</span>
+                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-ink text-xs font-semibold">{i + 1}</span>
+                  <span className="font-medium text-ink truncate">{p.name}</span>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{format(p.estimated_cost)}</p>
-                  <p className="text-xs text-gray-500 dark:text-slate-500">~{longDate(p.estimated_purchase_date)} · {p.cumulative_months} mo</p>
+                  <p className="text-sm font-semibold text-ink">{format(p.estimated_cost)}</p>
+                  <p className="text-xs text-muted">~{longDate(p.estimated_purchase_date)} · {p.cumulative_months} mo</p>
                 </div>
               </li>
             ))}
@@ -172,17 +181,17 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
 
       {/* Filter */}
       <div className="flex items-center justify-end">
-        <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-slate-400">
-          <input type="checkbox" checked={showPurchased} onChange={(e) => setShowPurchased(e.target.checked)} className="rounded border-gray-300 dark:border-slate-600" />
+        <label className="inline-flex items-center gap-2 text-sm text-body">
+          <input type="checkbox" checked={showPurchased} onChange={(e) => setShowPurchased(e.target.checked)} className="border-line" />
           Show purchased
         </label>
       </div>
 
       {/* List */}
       {isLoading ? (
-        <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" /></div>
+        <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" /></div>
       ) : items.length === 0 ? (
-        <div className="card p-6 text-center text-gray-500 dark:text-slate-500">Nothing on your wishlist yet.</div>
+        <div className="card p-6 text-center text-muted">Nothing on your wishlist yet.</div>
       ) : (
         <div className="grid grid-cols-1 gap-3">
           {items.map((item) => (
@@ -190,21 +199,24 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize ${PRIORITY_BADGE[item.priority]}`}>{item.priority}</span>
-                    <p className={`text-base font-semibold text-gray-900 dark:text-white ${item.is_purchased ? 'line-through' : ''}`}>{item.name}</p>
+                    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium capitalize ${PRIORITY_BADGE[item.priority]}`}>
+                      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
+                      {item.priority}
+                    </span>
+                    <p className={`text-base font-semibold text-ink ${item.is_purchased ? 'line-through' : ''}`}>{item.name}</p>
                   </div>
-                  {item.notes && <p className="text-sm text-gray-600 dark:text-slate-400 mt-1">{item.notes}</p>}
-                  <div className="flex flex-wrap gap-2 mt-2 text-xs text-gray-500 dark:text-slate-500">
-                    {item.target_date && <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-slate-800 px-2 py-1">Target {longDate(item.target_date)}</span>}
-                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-500/10 px-2 py-1 text-blue-700 dark:text-blue-400 hover:underline">Link ↗</a>}
-                    {item.is_purchased && item.purchased_at && <span className="inline-flex items-center rounded-full bg-emerald-100 dark:bg-emerald-500/10 px-2 py-1 text-emerald-700 dark:text-emerald-400">Bought {longDate(item.purchased_at)}</span>}
+                  {item.notes && <p className="text-sm text-body mt-1">{item.notes}</p>}
+                  <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted">
+                    {item.target_date && <span className="inline-flex items-center rounded-full bg-sunken px-2 py-1">Target {longDate(item.target_date)}</span>}
+                    {item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-full px-2 py-1 text-ink hover:underline">Link ↗</a>}
+                    {item.is_purchased && item.purchased_at && <span className="inline-flex items-center rounded-full px-2 py-1 text-ok">Bought {longDate(item.purchased_at)}</span>}
                   </div>
                   {onCreateAllocationFromItem && !item.is_purchased && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => onCreateAllocationFromItem(item, 'savings')}
-                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-500/20"
+                        className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold text-ink hover:bg-sunken"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V6m0 12v-2" /></svg>
                         Savings target
@@ -212,7 +224,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                       <button
                         type="button"
                         onClick={() => onCreateAllocationFromItem(item, 'budget')}
-                        className="inline-flex items-center gap-1 rounded-full border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20"
+                        className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1 text-xs font-semibold text-warn hover:bg-sunken"
                       >
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
                         Budget envelope
@@ -221,15 +233,15 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   )}
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(item.estimated_cost, item.currency as CurrencyCode)}</p>
+                  <p className="text-lg font-bold text-ink">{formatCurrency(item.estimated_cost, item.currency as CurrencyCode)}</p>
                   <div className="mt-2 flex items-center justify-end gap-1">
-                    <button onClick={() => togglePurchased(item)} title={item.is_purchased ? 'Mark as not purchased' : 'Mark as purchased'} className="p-1.5 rounded-md text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10">
+                    <button onClick={() => togglePurchased(item)} title={item.is_purchased ? 'Mark as not purchased' : 'Mark as purchased'} className="p-1.5 text-ok hover:bg-sunken">
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                     </button>
-                    <button onClick={() => openEdit(item)} title="Edit" className="p-1.5 rounded-md text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800">
+                    <button onClick={() => openEdit(item)} title="Edit" className="p-1.5 text-muted hover:bg-sunken">
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                     </button>
-                    <button onClick={() => handleDelete(item)} title="Delete" className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10">
+                    <button onClick={() => handleDelete(item)} title="Delete" className="p-1.5 text-danger hover:bg-sunken">
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
                   </div>
@@ -244,10 +256,10 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       {isModalOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6" onClick={closeModal}>
           <div className="min-h-full flex items-center justify-center">
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-gray-200 dark:border-slate-700" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{editing ? 'Edit item' : 'Add item'}</h2>
-                <button onClick={closeModal} className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300">
+                <h2 className="text-xl font-semibold text-ink">{editing ? 'Edit item' : 'Add item'}</h2>
+                <button onClick={closeModal} className="text-muted hover:text-body">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
@@ -260,7 +272,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   <div>
                     <label className="label">Estimated cost</label>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span className="text-gray-500 dark:text-slate-400 sm:text-sm">{formSymbol}</span></div>
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span className="text-muted sm:text-sm">{formSymbol}</span></div>
                       <input type="number" step="0.01" min="0" value={form.estimated_cost} onChange={(e) => setForm({ ...form, estimated_cost: parseFloat(e.target.value) || 0 })} className="input-field pl-7 focus-ring" placeholder="0.00" required />
                     </div>
                   </div>
@@ -291,9 +303,9 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
                   <label className="label">Notes (optional)</label>
                   <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="input-field focus-ring resize-none" rows={2} placeholder="Any details" />
                 </div>
-                <div className="flex space-x-3 pt-6 border-t border-gray-200 dark:border-slate-700">
-                  <button type="submit" className="flex-1 btn-primary focus-ring py-3 px-4 text-base rounded-lg">{editing ? 'Update' : 'Add'}</button>
-                  <button type="button" onClick={closeModal} className="flex-1 btn-secondary focus-ring py-3 px-4 text-base rounded-lg">Cancel</button>
+                <div className="flex space-x-3 pt-6 border-t border-line">
+                  <button type="submit" className="flex-1 btn-primary focus-ring py-3 px-4 text-base">{editing ? 'Update' : 'Add'}</button>
+                  <button type="button" onClick={closeModal} className="flex-1 btn-secondary focus-ring py-3 px-4 text-base">Cancel</button>
                 </div>
               </form>
             </div>

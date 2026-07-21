@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useAuth } from '../contexts/AuthContext'
 import { useEntity } from '../contexts/EntityContext'
-import { useTheme } from '../contexts/ThemeContext'
+import { useTheme } from '../hooks/useTheme'
 import { useState } from 'react'
 import { getCurrencyLogoSymbol } from '../utils/currency'
 
@@ -14,23 +14,26 @@ export function Navigation() {
   const [showEntityMenu, setShowEntityMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
 
-  const navLinkBase = "inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
-  const navLinkActive = "inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10"
-  const mobileNavLinkBase = "flex items-center w-full px-3 py-3 rounded-lg text-base font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
-  const mobileNavLinkActive = "flex items-center w-full px-3 py-3 rounded-lg text-base font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10"
+  // Active tab is an ink underline rather than a tinted pill — a saturated fill
+  // in the chrome competes with the figures, which are what should carry colour
+  // on a ledger screen.
+  const navLinkBase = "inline-flex items-center border-b-2 border-transparent px-3 py-2 text-sm text-muted transition-colors duration-200 hover:text-ink"
+  const navLinkActive = "inline-flex items-center border-b-2 border-ink px-3 py-2 text-sm text-ink"
+  const mobileNavLinkBase = "flex w-full items-center border-l-2 border-transparent px-3 py-3 text-base text-muted transition-colors duration-200 hover:text-ink"
+  const mobileNavLinkActive = "flex w-full items-center border-l-2 border-ink px-3 py-3 text-base text-ink"
 
   return (
-    <nav className="bg-white dark:bg-slate-900/80 backdrop-blur-sm shadow-sm border-b border-gray-200 dark:border-slate-800 fixed top-0 left-0 right-0 z-50">
+    <nav className="fixed left-0 right-0 top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-sm">
       <div className="w-full px-3 sm:px-4 lg:px-6">
         <div className="flex justify-between h-16 gap-2">
           {/* Logo + Desktop Nav Links */}
           <div className="flex items-center min-w-0">
             <div className="flex-shrink-0 flex items-center">
-              <Link to="/" className="flex items-center space-x-2 text-xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-md">
-                  <span className="text-white font-bold text-sm">{symbol}</span>
-                </div>
-                <span className="hidden md:inline">Tally &amp; Trace</span>
+              <Link to="/" className="flex items-center gap-2.5 text-ink transition-colors hover:text-body">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-line-strong font-mono text-xs">
+                  {symbol}
+                </span>
+                <span className="hidden font-serif text-lg md:inline">Tally &amp; Trace</span>
               </Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-0.5 min-w-0 overflow-x-auto">
@@ -73,12 +76,12 @@ export function Navigation() {
           <div className="flex items-center space-x-2 shrink-0">
             {/* Entity Switcher */}
             {entities.length > 1 && (
-              <div className="relative hidden sm:block sm:mr-1 sm:border-r sm:border-gray-200 sm:pr-3 dark:sm:border-slate-700">
+              <div className="relative hidden sm:block sm:mr-1 sm:border-r sm:border-line sm:pr-3">
                 <button
                   onClick={() => setShowEntityMenu(!showEntityMenu)}
-                  className="inline-flex items-center gap-1.5 max-w-[9rem] lg:max-w-[12rem] px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-700 text-sm font-medium text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
+                  className="inline-flex max-w-[9rem] items-center gap-1.5 border border-line px-3 py-2 text-sm text-body transition-colors duration-200 hover:border-line-strong hover:text-ink lg:max-w-[12rem]"
                 >
-                  <svg className="w-4 h-4 shrink-0 text-gray-400 dark:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 shrink-0 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
                   <span className="truncate min-w-0 capitalize">{activeEntity?.name ?? 'Select entity'}</span>
@@ -87,15 +90,15 @@ export function Navigation() {
                   </svg>
                 </button>
                 {showEntityMenu && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-800 rounded-xl shadow-lg py-1 z-50 border border-gray-200 dark:border-slate-700">
+                  <div className="absolute right-0 z-50 mt-2 w-56 border border-line bg-surface py-1">
                     {entities.map((e) => (
                       <button
                         key={e.id}
                         onClick={() => { setShowEntityMenu(false); if (e.id !== activeEntity?.id) setActiveEntityId(e.id) }}
-                        className={`block w-full text-left px-4 py-2 text-sm transition-colors duration-200 ${e.id === activeEntity?.id ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10' : 'text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700'}`}
+                        className={`block w-full text-left px-4 py-2 text-sm transition-colors duration-200 ${e.id === activeEntity?.id ? 'text-ink' : 'text-body hover:bg-sunken'}`}
                       >
                         <span className="font-medium">{e.name}</span>
-                        <span className="ml-2 text-xs text-gray-400 dark:text-slate-500 capitalize">{e.entity_type}</span>
+                        <span className="label ml-2 inline">{e.entity_type}</span>
                       </button>
                     ))}
                   </div>
@@ -107,7 +110,7 @@ export function Navigation() {
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
-              className="p-2 rounded-lg text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors duration-200"
+              className="p-2 text-muted transition-colors duration-200 hover:text-ink"
             >
               {theme === 'dark' ? (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,10 +127,10 @@ export function Navigation() {
             <div className="relative">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg px-3 py-2 transition-colors duration-200"
+                className="flex items-center space-x-2 px-3 py-2 text-sm text-body transition-colors duration-200 hover:text-ink focus:outline-none"
               >
-                <div className="w-8 h-8 bg-blue-100 dark:bg-blue-500/20 rounded-full flex items-center justify-center">
-                  <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">
+                <div className="flex h-8 w-8 items-center justify-center border border-line-strong">
+                  <span className="font-mono text-xs text-body">
                     {user?.first_name?.[0]}{user?.last_name?.[0]}
                   </span>
                 </div>
@@ -138,16 +141,16 @@ export function Navigation() {
               </button>
 
               {showUserMenu && (
-                <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-slate-800 rounded-xl shadow-lg py-1 z-50 border border-gray-200 dark:border-slate-700">
-                  <div className="px-4 py-3 text-sm border-b border-gray-100 dark:border-slate-700">
-                    <div className="font-semibold text-gray-900 dark:text-white">{user?.first_name} {user?.last_name}</div>
-                    <div className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{user?.email}</div>
-                    <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">Default: {user?.default_currency}</div>
+                <div className="absolute right-0 z-50 mt-2 w-52 border border-line bg-surface py-1">
+                  <div className="border-b border-line px-4 py-3 text-sm">
+                    <div className="font-medium text-ink">{user?.first_name} {user?.last_name}</div>
+                    <div className="mt-0.5 text-xs text-muted">{user?.email}</div>
+                    <div className="label mt-1.5">Default {user?.default_currency}</div>
                   </div>
                   <Link
                     to="/settings"
                     onClick={() => setShowUserMenu(false)}
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors duration-200"
+                    className="block w-full px-4 py-2 text-left text-sm text-body transition-colors duration-200 hover:bg-sunken hover:text-ink"
                   >
                     <svg className="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -160,7 +163,7 @@ export function Navigation() {
                       logout()
                       setShowUserMenu(false)
                     }}
-                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors duration-200"
+                    className="block w-full px-4 py-2 text-left text-sm text-body transition-colors duration-200 hover:bg-sunken hover:text-ink"
                   >
                     <svg className="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -177,7 +180,7 @@ export function Navigation() {
               <button
                 type="button"
                 onClick={() => setShowMobileMenu(!showMobileMenu)}
-                className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 dark:text-slate-500 hover:text-gray-500 dark:hover:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 transition-colors duration-200"
+                className="inline-flex items-center justify-center p-2 text-muted transition-colors duration-200 hover:text-ink focus:outline-none"
               >
                 <span className="sr-only">Open main menu</span>
                 {showMobileMenu ? (
@@ -197,7 +200,7 @@ export function Navigation() {
 
       {/* Mobile menu dropdown */}
       {showMobileMenu && (
-        <div className="sm:hidden bg-white dark:bg-slate-900 border-t border-gray-200 dark:border-slate-800 px-4 pt-2 pb-4 space-y-1">
+        <div className="space-y-1 border-t border-line bg-surface px-4 pb-4 pt-2 sm:hidden">
           <Link to="/" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
@@ -223,14 +226,14 @@ export function Navigation() {
             </svg>
             Allocations
           </Link>
-          <div className="pt-2 border-t border-gray-100 dark:border-slate-800">
-            <div className="px-3 py-2 text-sm text-gray-500 dark:text-slate-400">
-              <div className="font-medium text-gray-900 dark:text-white">{user?.first_name} {user?.last_name}</div>
+          <div className="border-t border-line pt-2">
+            <div className="px-3 py-2 text-sm text-muted">
+              <div className="font-medium text-ink">{user?.first_name} {user?.last_name}</div>
               <div className="text-xs mt-0.5">{user?.email}</div>
             </div>
             <button
               onClick={() => { logout(); setShowMobileMenu(false) }}
-              className="flex items-center w-full px-3 py-3 rounded-lg text-base font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors duration-200"
+              className="flex w-full items-center px-3 py-3 text-base text-danger transition-colors duration-200 hover:bg-sunken"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

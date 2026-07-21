@@ -290,7 +290,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     >
       {bubblePosition && (
         <div 
-          className="absolute z-[10000] bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-800 shadow-2xl pointer-events-auto w-80 transition-all duration-300"
+          className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 transition-all duration-300"
           style={{
             top: `${bubblePosition.top}px`,
             left: `${bubblePosition.left}px`,
@@ -301,19 +301,19 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
             {/* Progress indicator */}
             <div className="mb-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-600 dark:text-slate-400">
+                <span className="text-xs font-medium text-body">
                   Step {currentStep + 1} of {TOTAL_STEPS}
                 </span>
                 <button
                   onClick={handleSkip}
-                  className="text-xs text-gray-500 dark:text-slate-500 hover:text-gray-700 dark:hover:text-slate-300 transition-colors"
+                  className="text-xs text-muted hover:text-body transition-colors"
                 >
                   Skip
                 </button>
               </div>
-              <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-1.5">
+              <div className="w-full bg-sunken rounded-full h-1.5">
                 <div
-                  className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                  className="bg-ink h-1.5 rounded-full transition-all duration-300"
                   style={{ width: `${((currentStep + 1) / TOTAL_STEPS) * 100}%` }}
                 ></div>
               </div>
@@ -321,10 +321,10 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
             {/* Step content */}
             <div className="mb-4">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1.5">
+              <h3 className="text-base font-semibold text-ink mb-1.5">
                 {currentStepData.title}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-slate-400">{currentStepData.description}</p>
+              <p className="text-sm text-body">{currentStepData.description}</p>
             </div>
 
             {/* Navigation buttons */}
@@ -332,13 +332,13 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
               <button
                 onClick={handlePrevious}
                 disabled={currentStep === 0}
-                className="px-3 py-1.5 text-sm text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-800 rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Previous
               </button>
               <button
                 onClick={handleNext}
-                className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
               >
                 {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
               </button>
@@ -347,15 +347,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           
           {/* Arrow pointing to the highlighted element */}
           <div
-            className={`absolute w-0 h-0 border-8 ${
-              bubblePosition.placement === 'bottom'
-                ? 'border-b-white dark:border-b-slate-900 border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2'
-                : bubblePosition.placement === 'top'
-                ? 'border-t-white dark:border-t-slate-900 border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2'
-                : bubblePosition.placement === 'right'
-                ? 'border-r-white dark:border-r-slate-900 border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2'
-                : 'border-l-white dark:border-l-slate-900 border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2'
-            }`}
+            className={`absolute w-0 h-0 border-8 ${ bubblePosition.placement === 'bottom' ? 'border-b-white border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'top' ? 'border-t-white border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'right' ? 'border-r-white border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2' : 'border-l-white border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2' }`}
           />
         </div>
       )}
