@@ -261,7 +261,7 @@ export function Dashboard() {
   const renderPlannedExpenseIcon = (status: 'danger' | 'autopay' | 'manual') => {
     if (status === 'danger') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <polygon points="10,1 18,6 18,14 10,19 2,14 2,6" />
             <rect x="9" y="7" width="2" height="5" fill="white" rx="1" />
@@ -272,7 +272,7 @@ export function Dashboard() {
     }
     if (status === 'autopay') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 dark:bg-emerald-500/80 text-white">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
           </svg>
@@ -280,7 +280,7 @@ export function Dashboard() {
       )
     }
     return (
-      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400">
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
           <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
@@ -356,8 +356,8 @@ export function Dashboard() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen flex items-center justify-center bg-paper">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink"></div>
       </div>
     )
   }
@@ -387,7 +387,7 @@ export function Dashboard() {
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
           <div className="loading-spinner mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-slate-400 font-medium">Loading your financial data...</p>
+          <p className="text-body font-medium">Loading your financial data...</p>
         </div>
       </div>
     )
@@ -397,14 +397,14 @@ export function Dashboard() {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
-          <div className="w-16 h-16 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Error Loading Data</h3>
-          <p className="text-gray-600 dark:text-slate-400 mb-4">There was an issue loading your financial data.</p>
-          <div className="text-sm text-gray-500 dark:text-slate-500 space-y-1">
+          <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
+          <p className="text-body mb-4">There was an issue loading your financial data.</p>
+          <div className="text-sm text-muted space-y-1">
             {accountsError && <p>• Accounts: {getErrorDetail(accountsError) ?? 'Failed to load'}</p>}
             {transactionsError && <p>• Transactions: {getErrorDetail(transactionsError) ?? 'Failed to load'}</p>}
             {categoriesError && <p>• Categories: {getErrorDetail(categoriesError) ?? 'Failed to load'}</p>}
@@ -413,7 +413,7 @@ export function Dashboard() {
           </div>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors duration-200"
+            className="mt-4 px-4 py-2 bg-ink text-paper hover:bg-ink transition-colors duration-200"
           >
             Retry
           </button>
@@ -427,19 +427,15 @@ export function Dashboard() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">Your financial overview</p>
+          <h1 className="text-2xl font-bold text-ink">Dashboard</h1>
+          <p className="text-sm text-muted mt-1">Your financial overview</p>
         </div>
-        <div className="flex space-x-1 bg-gray-100 dark:bg-slate-800 rounded-lg p-1">
+        <div className="flex space-x-1 bg-sunken p-1">
           {(['week', 'month', 'year'] as const).map((period) => (
             <button
               key={period}
               onClick={() => setSelectedPeriod(period)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors duration-200 capitalize ${
-                selectedPeriod === period
-                  ? 'bg-white dark:bg-slate-700 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
             >
               {period}
             </button>
@@ -451,12 +447,12 @@ export function Dashboard() {
       <CashflowTimelineCard />
 
       {/* Financial Snapshot */}
-      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="financial-snapshot">
-        <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
+      <div className="bg-surface border border-line" data-onboarding="financial-snapshot">
+        <div className="p-4 sm:p-6 border-b border-line">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Financial Snapshot</h2>
-              <p className="text-sm text-gray-500 dark:text-slate-400">
+              <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
+              <p className="text-sm text-muted">
                 {selectedPeriod === 'year'
                   ? 'Tracking year-to-date performance.'
                   : 'Comparing actuals with projections for the current period.'}
@@ -467,44 +463,44 @@ export function Dashboard() {
         </div>
         <div className={`p-4 sm:p-6 grid gap-6 ${showProjections ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
           <div className="space-y-4">
-            <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-wide">
+            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
               Actual Totals ({periodHeadingLabel})
             </h3>
             <dl className="space-y-3">
               {[
                 { label: 'Total balance', value: format(totalBalance), color: '' },
-                { label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-emerald-600 dark:text-emerald-400' },
-                { label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-rose-600 dark:text-rose-400' },
-                { label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' },
+                { label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
+                { label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
+                { label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex items-center justify-between">
-                  <dt className="text-sm text-gray-500 dark:text-slate-400">{label}</dt>
-                  <dd className={`text-base font-semibold ${color || 'text-gray-900 dark:text-white'}`}>{value}</dd>
+                  <dt className="text-sm text-muted">{label}</dt>
+                  <dd className={`text-base font-semibold ${color || 'text-ink'}`}>{value}</dd>
                 </div>
               ))}
             </dl>
           </div>
           {showProjections && (
             <div className="space-y-4">
-              <h3 className="text-xs font-semibold text-gray-500 dark:text-slate-500 uppercase tracking-wide">
+              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
                 Projected End of {projectionPeriodLabel}
               </h3>
               <dl className="space-y-3">
                 {[
                   { label: 'Projected balance', value: format(projectedBalanceEnd), color: '' },
-                  { label: 'Projected income', value: format(projectedIncome), color: 'text-emerald-600 dark:text-emerald-400' },
-                  { label: 'Projected expenses', value: format(projectedExpenses), color: 'text-rose-600 dark:text-rose-400' },
-                  { label: 'Projected net flow', value: format(projectedNetFlow), color: projectedNetFlow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' },
+                  { label: 'Projected income', value: format(projectedIncome), color: 'text-ok' },
+                  { label: 'Projected expenses', value: format(projectedExpenses), color: 'text-danger' },
+                  { label: 'Projected net flow', value: format(projectedNetFlow), color: projectedNetFlow >= 0 ? 'text-ok' : 'text-danger' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="flex items-center justify-between">
-                    <dt className="text-sm text-gray-500 dark:text-slate-400">{label}</dt>
-                    <dd className={`text-base font-semibold ${color || 'text-gray-900 dark:text-white'}`}>{value}</dd>
+                    <dt className="text-sm text-muted">{label}</dt>
+                    <dd className={`text-base font-semibold ${color || 'text-ink'}`}>{value}</dd>
                   </div>
                 ))}
               </dl>
-              <p className="text-xs text-gray-500 dark:text-slate-500">
+              <p className="text-xs text-muted">
                 Net realized so far:{' '}
-                <span className={`font-medium ${periodNet >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                <span className={`font-medium ${periodNet >= 0 ? 'text-ok' : 'text-danger'}`}>
                   {format(periodNet)}
                 </span>
               </p>
@@ -516,32 +512,32 @@ export function Dashboard() {
       {/* Two column grid */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Budget Envelopes */}
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="budget-envelopes">
-          <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
+        <div className="bg-surface border border-line" data-onboarding="budget-envelopes">
+          <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Budget Envelope Status</h2>
-                <p className="text-sm text-gray-500 dark:text-slate-400">Current month spending against your envelope limits.</p>
+                <h2 className="text-lg font-semibold text-ink">Budget Envelope Status</h2>
+                <p className="text-sm text-muted">Current month spending against your envelope limits.</p>
               </div>
               <span className="badge badge-info">{budgetEnvelopeSummaries.length}</span>
             </div>
           </div>
           <div className="p-4 sm:p-6 space-y-5">
             {budgetEnvelopeSummaries.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-slate-500">No active budget envelopes yet.</p>
+              <p className="text-sm text-muted">No active budget envelopes yet.</p>
             ) : (
               budgetEnvelopeSummaries.map(({ allocation, limit, spent, remaining, usagePercentage }) => (
                 <div key={allocation.id} className="space-y-3">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{allocation.name}</p>
+                      <p className="font-medium text-ink">{allocation.name}</p>
                       {allocation.description && (
-                        <p className="text-xs text-gray-500 dark:text-slate-500">{allocation.description}</p>
+                        <p className="text-xs text-muted">{allocation.description}</p>
                       )}
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Remaining {format(remaining)}</p>
-                      <p className="text-xs text-gray-500 dark:text-slate-500">Limit {format(limit)} · Spent {format(spent)}</p>
+                      <p className="text-sm font-semibold text-ink">Remaining {format(remaining)}</p>
+                      <p className="text-xs text-muted">Limit {format(limit)} · Spent {format(spent)}</p>
                     </div>
                   </div>
                   <BudgetUsageBar usagePercentage={usagePercentage} />
@@ -552,20 +548,20 @@ export function Dashboard() {
         </div>
 
         {/* Upcoming Planned Expenses */}
-        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="upcoming-expenses">
-          <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
+        <div className="bg-surface border border-line" data-onboarding="upcoming-expenses">
+          <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Upcoming Planned Expenses</h2>
-                <p className="text-sm text-gray-500 dark:text-slate-400">Recurring expenses scheduled for the remainder of this month.</p>
+                <h2 className="text-lg font-semibold text-ink">Upcoming Planned Expenses</h2>
+                <p className="text-sm text-muted">Recurring expenses scheduled for the remainder of this month.</p>
               </div>
               <span className="badge badge-info">{upcomingPlannedExpenses.length}</span>
             </div>
           </div>
           {upcomingPlannedExpenses.length === 0 ? (
-            <div className="p-4 sm:p-6 text-sm text-gray-500 dark:text-slate-500">No upcoming planned expenses detected.</div>
+            <div className="p-4 sm:p-6 text-sm text-muted">No upcoming planned expenses detected.</div>
           ) : (
-            <div className="divide-y divide-gray-100 dark:divide-slate-800">
+            <div className="divide-y divide-line">
               {upcomingPlannedExpenses.map(({ reminder, account, projectedBalance, status }) => {
                 const entry = reminder.entry
                 return (
@@ -573,11 +569,11 @@ export function Dashboard() {
                     <div className="flex items-start gap-3">
                       {renderPlannedExpenseIcon(status)}
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{entry.name}</p>
-                        <p className="text-sm text-gray-500 dark:text-slate-400">
+                        <p className="font-medium text-ink">{entry.name}</p>
+                        <p className="text-sm text-muted">
                           {formatDateWithOrdinal(reminder.occurrence)} · {formatCurrency(entry.amount, entry.currency)}
                         </p>
-                        <p className="text-xs text-gray-400 dark:text-slate-600">
+                        <p className="text-xs text-muted">
                           {entry.is_autopay ? 'Autopay enabled' : 'Manual payment required'}
                           {account ? ` · ${account.name}` : ''}
                         </p>
@@ -585,17 +581,17 @@ export function Dashboard() {
                     </div>
                     <div className="text-right space-y-1 flex-shrink-0">
                       {account && projectedBalance !== null && (
-                        <p className={`text-sm font-semibold ${projectedBalance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-white'}`}>
+                        <p className={`text-sm font-semibold ${projectedBalance < 0 ? 'text-danger' : 'text-ink'}`}>
                           After: {formatCurrency(projectedBalance, account.currency)}
                         </p>
                       )}
-                      <p className="text-xs text-gray-500 dark:text-slate-500">
+                      <p className="text-xs text-muted">
                         {reminder.daysUntil === 0 ? 'Due today' : `${reminder.daysUntil} day${reminder.daysUntil === 1 ? '' : 's'} remaining`}
                       </p>
                       <button
                         onClick={() => handleMarkPaid(entry.id)}
                         disabled={postingId === entry.id}
-                        className="mt-1 inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                        className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
                       >
                         {postingId === entry.id ? 'Posting…' : 'Mark paid'}
                       </button>
@@ -609,10 +605,10 @@ export function Dashboard() {
       </div>
 
       {/* Top Expenditure Categories */}
-      <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-gray-200 dark:border-slate-800 shadow-sm" data-onboarding="top-categories">
-        <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-slate-800">
+      <div className="bg-surface border border-line" data-onboarding="top-categories">
+        <div className="p-4 sm:p-6 border-b border-line">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-lg font-semibold text-ink">
               Top Expenditure Categories ({selectedPeriod === 'year' ? 'YTD' : 'Current period'})
             </h2>
             <span className="badge badge-info">{expenditureInsights.length} categories</span>
@@ -621,46 +617,46 @@ export function Dashboard() {
         <div className="p-4 sm:p-6">
           {expenditureInsights.length === 0 ? (
             <div className="text-center py-8">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-gray-400 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-16 h-16 bg-sunken rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
-              <p className="text-gray-500 dark:text-slate-400 font-medium">No spending recorded yet.</p>
-              <p className="text-sm text-gray-400 dark:text-slate-600 mt-1">Record expenses to see category insights.</p>
+              <p className="text-muted font-medium">No spending recorded yet.</p>
+              <p className="text-sm text-muted mt-1">Record expenses to see category insights.</p>
             </div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:items-center">
               <div className="flex justify-center">
-                <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-full border border-gray-200 dark:border-slate-700 shadow-inner" style={expenditureChartStyle}>
+                <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-full border border-line shadow-inner" style={expenditureChartStyle}>
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm">
-                    <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-slate-500">Total spend</span>
-                    <span className="text-base font-semibold text-gray-900 dark:text-white">{format(totalExpenditureAmount)}</span>
+                    <span className="text-xs uppercase tracking-wide text-muted">Total spend</span>
+                    <span className="text-base font-semibold text-ink">{format(totalExpenditureAmount)}</span>
                   </div>
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-slate-800 text-sm">
+                <table className="min-w-full divide-y divide-line text-sm">
                   <thead>
-                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-500">
+                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
                       <th className="py-2">Category</th>
                       <th className="py-2 text-right">Amount</th>
                       <th className="py-2 text-right">Share</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/50">
+                  <tbody className="divide-y divide-line/50">
                     {expenditureInsights.map((category, index) => (
-                      <tr key={category.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors duration-150">
+                      <tr key={category.id} className="hover:bg-sunken/50 transition-colors duration-150">
                         <td className="py-2 pr-4">
                           <div className="flex items-center gap-2">
                             <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: category.displayColor }}></span>
-                            <span className="font-medium text-gray-900 dark:text-white truncate">
+                            <span className="font-medium text-ink truncate">
                               #{index + 1}&nbsp;{category.name}
                             </span>
                           </div>
                         </td>
-                        <td className="py-2 text-right font-medium text-gray-900 dark:text-white">{format(category.amount)}</td>
-                        <td className="py-2 text-right text-gray-500 dark:text-slate-400">{category.percentage.toFixed(1)}%</td>
+                        <td className="py-2 text-right font-medium text-ink">{format(category.amount)}</td>
+                        <td className="py-2 text-right text-muted">{category.percentage.toFixed(1)}%</td>
                       </tr>
                     ))}
                   </tbody>
@@ -676,8 +672,8 @@ export function Dashboard() {
 
 function BudgetUsageBar({ usagePercentage }: { usagePercentage: number }) {
   const clampedUsage = Math.min(Math.max(usagePercentage, 0), 100)
-  const remainingColor = clampedUsage >= 100 ? 'bg-gray-200 dark:bg-slate-700' : clampedUsage >= 80 ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'
-  const usageColor = clampedUsage >= 100 ? 'bg-rose-700' : clampedUsage >= 80 ? 'bg-rose-500' : 'bg-rose-400'
+  const remainingColor = clampedUsage >= 100 ? 'bg-sunken' : clampedUsage >= 80 ? '' : ' '
+  const usageColor = clampedUsage >= 100 ? 'bg-danger' : clampedUsage >= 80 ? 'bg-danger' : 'bg-danger'
 
   return (
     <div className={`relative w-full overflow-hidden h-2 rounded-full transition-colors duration-300 ${remainingColor}`}>

@@ -9,9 +9,14 @@ interface Props {
 }
 
 const W = 720
-const BLUE = '#3b82f6'
-const ROSE = '#e11d48'
-const AMBER = '#f59e0b'
+
+// SVG paint reads the same tokens as everything else, so the chart re-themes
+// with the page instead of staying a saturated blue island on paper. The
+// balance series is ink: on a ledger the primary series is the subject, and
+// colour is reserved for the exceptions (shortfall, trough).
+const SERIES = 'var(--ink)'
+const DANGER = 'var(--danger)'
+const WARN = 'var(--warn)'
 
 const shortDate = (iso: string) => {
   const d = new Date(iso)
@@ -66,7 +71,7 @@ export function RunningBalanceChart({ timeline, format, height = 280, compact = 
   }, [timeline, H, padL, padR, padT, padB])
 
   const negative = timeline.lowest_balance < 0
-  const troughColor = negative ? ROSE : AMBER
+  const troughColor = negative ? DANGER : WARN
   const dangerH = Math.max(0, H - padB - geom.zeroY)
 
   return (
@@ -80,35 +85,35 @@ export function RunningBalanceChart({ timeline, format, height = 280, compact = 
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={BLUE} stopOpacity={0.22} />
-          <stop offset="100%" stopColor={BLUE} stopOpacity={0.02} />
+          <stop offset="0%" stopColor={SERIES} stopOpacity={0.22} />
+          <stop offset="100%" stopColor={SERIES} stopOpacity={0.02} />
         </linearGradient>
       </defs>
 
       {/* Danger zone: anything below the zero line is a shortfall */}
       {dangerH > 0 && (
-        <rect x={padL} y={geom.zeroY} width={W - padL - padR} height={dangerH} fill={ROSE} opacity={0.06} />
+        <rect x={padL} y={geom.zeroY} width={W - padL - padR} height={dangerH} fill={DANGER} opacity={0.06} />
       )}
 
       {/* Zero baseline */}
       <line
         x1={padL} x2={W - padR} y1={geom.zeroY} y2={geom.zeroY}
-        className="text-gray-400 dark:text-slate-600" stroke="currentColor" strokeWidth={1} strokeDasharray="4 4"
+        className="text-muted" stroke="currentColor" strokeWidth={1} strokeDasharray="4 4"
       />
       {!compact && (
         <text x={padL - 8} y={geom.zeroY + 3} textAnchor="end" fontSize={11}
-          className="text-gray-400 dark:text-slate-500" fill="currentColor">0</text>
+          className="text-muted" fill="currentColor">0</text>
       )}
 
       {/* Area + line */}
       <path d={geom.area} fill={`url(#${gradId})`} />
-      <path d={geom.line} fill="none" stroke={BLUE} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={geom.line} fill="none" stroke={SERIES} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
 
       {/* Event points (rose when the balance is negative there) */}
       {geom.coords.map((c, i) => (
         <circle key={i} cx={c.x} cy={c.y} r={i === 0 ? 3 : 3.2}
-          fill={c.v < 0 ? ROSE : BLUE}
-          className="stroke-white dark:stroke-slate-900" strokeWidth={1.5} />
+          fill={c.v < 0 ? DANGER : SERIES}
+          className="stroke-paper" strokeWidth={1.5} />
       ))}
 
       {/* Trough marker + direct label */}
@@ -128,9 +133,9 @@ export function RunningBalanceChart({ timeline, format, height = 280, compact = 
       {!compact && (
         <>
           <text x={padL} y={H - 8} fontSize={11} textAnchor="start"
-            className="text-gray-400 dark:text-slate-500" fill="currentColor">{shortDate(timeline.window_start)}</text>
+            className="text-muted" fill="currentColor">{shortDate(timeline.window_start)}</text>
           <text x={W - padR} y={H - 8} fontSize={11} textAnchor="end"
-            className="text-gray-400 dark:text-slate-500" fill="currentColor">{shortDate(timeline.window_end)}</text>
+            className="text-muted" fill="currentColor">{shortDate(timeline.window_end)}</text>
         </>
       )}
     </svg>
