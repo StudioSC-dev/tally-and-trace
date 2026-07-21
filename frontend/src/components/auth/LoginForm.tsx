@@ -144,82 +144,60 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const isEmailNotVerified = error === 'Email not verified'
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-            <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <h1 className="mt-4 text-center text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
-            Tally &amp; Trace
+    <div className="flex min-h-screen items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+      <div className="w-full max-w-md">
+        {/* Left-aligned: a centred masthead over left-aligned form copy was part
+            of what made every screen read the same. */}
+        <header className="mb-8">
+          <p className="label mb-3">Tally &amp; Trace</p>
+          <h1 className="font-serif text-4xl leading-[1.05] text-ink">
+            Sign in
           </h1>
-          <h2 className="mt-1 text-center text-sm font-medium text-gray-500 dark:text-slate-400">
-            Sign in to your account
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-slate-400">
+          <p className="mt-3 text-sm text-body">
             Or{' '}
-            <Link to="/register" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
+            <Link
+              to="/register"
+              className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink"
+            >
               create a new account
             </Link>
           </p>
-        </div>
+        </header>
 
-        <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-gray-200 dark:border-slate-800 p-8 shadow-sm">
+        <div className="border border-line bg-surface p-8">
           <form className="space-y-5" onSubmit={handleSubmit}>
+            {/* Alerts are a coloured rule plus text, not a tinted fill panel —
+                the bg-*-500/10 blocks glowed and outweighed the form itself. */}
             {showSuccessMessage && successMessage && (
-              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 p-4">
-                <div className="flex">
-                  <svg className="h-5 w-5 text-emerald-500 dark:text-emerald-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <div className="ml-3">
-                    <p className="text-sm text-emerald-700 dark:text-emerald-400">{successMessage}</p>
-                  </div>
-                </div>
+              <div className="border-l-2 border-ok py-1 pl-4">
+                <p className="text-sm text-body">{successMessage}</p>
               </div>
             )}
             {error && (
-              <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 p-4">
-                <div className="flex">
-                  <svg className="h-5 w-5 text-red-500 dark:text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                  <div className="ml-3 flex-1">
-                    <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-                    {isEmailNotVerified && (
-                      <button
-                        type="button"
-                        onClick={handleResendVerification}
-                        disabled={resendLoading}
-                        className="mt-2 text-sm font-medium text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 underline disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {resendLoading ? 'Sending...' : 'Resend verification email'}
-                      </button>
-                    )}
-                  </div>
-                </div>
+              <div className="border-l-2 border-danger py-1 pl-4">
+                <p className="text-sm text-danger">{error}</p>
+                {isEmailNotVerified && (
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendLoading}
+                    className="mt-2 text-sm text-ink underline decoration-line-strong underline-offset-4 hover:decoration-ink disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {resendLoading ? 'Sending...' : 'Resend verification email'}
+                  </button>
+                )}
               </div>
             )}
             {resendMessage && !isEmailNotVerified && (
-              <div className={`rounded-lg p-4 border ${
-                resendMessage.includes('sent') || resendMessage.includes('already verified')
-                  ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20'
-                  : 'bg-yellow-50 dark:bg-yellow-500/10 border-yellow-200 dark:border-yellow-500/20'
-              }`}>
-                <p className={`text-sm ${
-                  resendMessage.includes('sent') || resendMessage.includes('already verified')
-                    ? 'text-emerald-700 dark:text-emerald-400'
-                    : 'text-yellow-700 dark:text-yellow-400'
-                }`}>
-                  {resendMessage}
-                </p>
+              <div
+                className={`border-l-2 py-1 pl-4 ${ resendMessage.includes('sent') || resendMessage.includes('already verified') ? 'border-ok' : 'border-warn' }`}
+              >
+                <p className="text-sm text-body">{resendMessage}</p>
               </div>
             )}
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5">
+              <label htmlFor="email" className="label mb-1">
                 Email address
               </label>
               <input
@@ -228,7 +206,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 type="email"
                 autoComplete="email"
                 required
-                className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
+                className="input-field text-sm"
                 placeholder="you@example.com"
                 value={email}
                 onChange={handleEmailChange}
@@ -236,7 +214,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5">
+              <label htmlFor="password" className="label mb-1">
                 Password
               </label>
               <input
@@ -245,27 +223,30 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 type="password"
                 autoComplete="current-password"
                 required
-                className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
+                className="input-field text-sm"
                 placeholder="Your password"
                 value={password}
                 onChange={handlePasswordChange}
               />
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pt-2">
               <div className="flex items-center">
                 <input
                   id="remember-me"
                   name="remember-me"
                   type="checkbox"
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-slate-600 rounded"
+                  className="h-3.5 w-3.5 accent-ink"
                 />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700 dark:text-slate-300">
+                <label htmlFor="remember-me" className="ml-2 block text-sm text-body">
                   Remember me
                 </label>
               </div>
               <div className="text-sm">
-                <a href="#" className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
+                <a
+                  href="#"
+                  className="text-muted underline decoration-line-strong underline-offset-4 hover:text-ink hover:decoration-ink"
+                >
                   Forgot password?
                 </a>
               </div>
@@ -274,13 +255,13 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold rounded-lg text-white bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+              className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? (
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                <>
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
                   Signing in...
-                </div>
+                </>
               ) : (
                 'Sign in'
               )}
@@ -288,34 +269,19 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
           </form>
 
           {/* Demo account quick access */}
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200 dark:border-slate-700" />
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="px-3 bg-white dark:bg-slate-900/50 text-gray-500 dark:text-slate-500">
-                  or jump in quickly
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <p className="text-center text-xs text-gray-500 dark:text-slate-500 mb-3">
-                Explore with pre-loaded demo data
-              </p>
-              <button
-                type="button"
-                onClick={handleDemoLogin}
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 border-2 border-dashed border-blue-300 dark:border-blue-500/40 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/20 hover:border-blue-400 dark:hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Sign in as Demo User
-              </button>
-            </div>
+          <div className="mt-8 border-t border-line pt-6">
+            <p className="label mb-1">Or jump in quickly</p>
+            <p className="mb-4 text-sm text-body">
+              Explore with pre-loaded demo data.
+            </p>
+            <button
+              type="button"
+              onClick={handleDemoLogin}
+              disabled={isLoading}
+              className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Sign in as Demo User
+            </button>
           </div>
         </div>
       </div>

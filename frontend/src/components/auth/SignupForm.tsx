@@ -125,42 +125,42 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
     }
   }
 
-  const inputClass = "w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
-  const labelClass = "block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5"
+  const inputClass = "w-full px-3 py-2.5 border border-line  bg-surface text-ink placeholder:text-muted  focus:outline-none   focus:border-ink transition-colors duration-200 text-sm"
+  const labelClass = "block text-sm font-medium text-body mb-1.5"
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-950 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-paper py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-lg">
-            <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="mx-auto h-16 w-16 flex items-center justify-center">
+            <svg className="h-8 w-8 text-paper" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
             </svg>
           </div>
-          <h1 className="mt-4 text-center text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
+          <h1 className="mt-4 text-center text-2xl font-bold text-ink tracking-tight">
             Tally &amp; Trace
           </h1>
-          <h2 className="mt-1 text-center text-sm font-medium text-gray-500 dark:text-slate-400">
+          <h2 className="mt-1 text-center text-sm font-medium text-muted">
             Create your account
           </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-slate-400">
+          <p className="mt-2 text-center text-sm text-body">
             Or{' '}
-            <Link to="/login" search={{ message: undefined }} className="font-medium text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300">
+            <Link to="/login" search={{ message: undefined }} className="font-medium text-ink hover:text-ink">
               sign in to your existing account
             </Link>
           </p>
         </div>
 
-        <div className="bg-white dark:bg-slate-900/50 rounded-2xl border border-gray-200 dark:border-slate-800 p-8 shadow-sm">
+        <div className="bg-surface border border-line p-8">
           <form className="space-y-5" onSubmit={handleSubmit}>
             {error && (
-              <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 p-4">
+              <div className="border border-line p-4">
                 <div className="flex">
-                  <svg className="h-5 w-5 text-red-500 dark:text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <svg className="h-5 w-5 text-danger flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                   </svg>
                   <div className="ml-3">
-                    <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                    <p className="text-sm text-danger">{error}</p>
                   </div>
                 </div>
               </div>
@@ -215,7 +215,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
               <select
                 id="defaultCurrency"
                 name="defaultCurrency"
-                className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-200 text-sm"
+                className="w-full px-3 py-2.5 border border-line bg-surface text-ink focus:outline-none focus:border-ink transition-colors duration-200 text-sm"
                 value={formData.defaultCurrency}
                 onChange={handleChange}
               >
@@ -244,7 +244,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? (
@@ -261,25 +261,25 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
               </div>
               {formData.password && (
                 <div className="mt-2 space-y-1">
-                  <p className="text-xs text-gray-600 dark:text-slate-400 font-medium">Password requirements:</p>
+                  <p className="text-xs text-body font-medium">Password requirements:</p>
                   <ul className="text-xs space-y-1">
-                    <li className={`flex items-center ${passwordRequirements.minLength ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-500'}`}>
+                    <li className={`flex items-center ${passwordRequirements.minLength ? 'text-ok' : 'text-muted'}`}>
                       <span className="mr-2">{passwordRequirements.minLength ? '✓' : '○'}</span>
                       At least 8 characters
                     </li>
-                    <li className={`flex items-center ${passwordRequirements.hasUpperCase ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-500'}`}>
+                    <li className={`flex items-center ${passwordRequirements.hasUpperCase ? 'text-ok' : 'text-muted'}`}>
                       <span className="mr-2">{passwordRequirements.hasUpperCase ? '✓' : '○'}</span>
                       One uppercase letter
                     </li>
-                    <li className={`flex items-center ${passwordRequirements.hasLowerCase ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-500'}`}>
+                    <li className={`flex items-center ${passwordRequirements.hasLowerCase ? 'text-ok' : 'text-muted'}`}>
                       <span className="mr-2">{passwordRequirements.hasLowerCase ? '✓' : '○'}</span>
                       One lowercase letter
                     </li>
-                    <li className={`flex items-center ${passwordRequirements.hasNumber ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-500'}`}>
+                    <li className={`flex items-center ${passwordRequirements.hasNumber ? 'text-ok' : 'text-muted'}`}>
                       <span className="mr-2">{passwordRequirements.hasNumber ? '✓' : '○'}</span>
                       One number
                     </li>
-                    <li className={`flex items-center ${passwordRequirements.hasSpecialChar ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-slate-500'}`}>
+                    <li className={`flex items-center ${passwordRequirements.hasSpecialChar ? 'text-ok' : 'text-muted'}`}>
                       <span className="mr-2">{passwordRequirements.hasSpecialChar ? '✓' : '○'}</span>
                       One special character (!@#$%^&*().-_+=)
                     </li>
@@ -305,7 +305,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-body focus:outline-none"
                   aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                 >
                   {showConfirmPassword ? (
@@ -321,14 +321,14 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
                 </button>
               </div>
               {formData.confirmPassword && formData.password !== formData.confirmPassword && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">Passwords do not match</p>
+                <p className="mt-1 text-xs text-danger">Passwords do not match</p>
               )}
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold rounded-lg text-white bg-emerald-500 hover:bg-emerald-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 dark:focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+              className="w-full flex justify-center py-2.5 px-4 border border-transparent text-sm font-semibold text-paper bg-ok hover:bg-ok focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
             >
               {isLoading ? (
                 <div className="flex items-center">
