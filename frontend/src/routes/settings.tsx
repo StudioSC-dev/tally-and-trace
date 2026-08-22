@@ -190,7 +190,7 @@ function SettingsPage() {
 
       {/* Entity modal */}
       {entityModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6" onClick={() => setEntityModal(false)}>
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60" onClick={() => setEntityModal(false)}>
           <div className="min-h-full flex items-center justify-center">
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-semibold text-ink mb-6">{editingEntity ? 'Edit entity' : 'Add entity'}</h2>
@@ -230,7 +230,7 @@ function SettingsPage() {
 
       {/* Category modal */}
       {categoryModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6" onClick={() => setCategoryModal(false)}>
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60" onClick={() => setCategoryModal(false)}>
           <div className="min-h-full flex items-center justify-center">
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <h2 className="text-xl font-semibold text-ink mb-6">{editingCategory ? 'Edit category' : 'Add category'}</h2>

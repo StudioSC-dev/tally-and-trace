@@ -23,7 +23,10 @@ export function Navigation() {
   const mobileNavLinkActive = "flex w-full items-center border-l-2 border-ink px-3 py-3 text-base text-ink"
 
   return (
-    <nav className="fixed left-0 right-0 top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-sm">
+    // safe-area-top: index.html asks for a translucent status bar, so when the
+    // app is installed to the Home Screen the page owns the full height and a
+    // `top-0` bar would render under the clock. Resolves to 0 in a browser tab.
+    <nav className="safe-area-top fixed left-0 right-0 top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-sm">
       <div className="w-full px-3 sm:px-4 lg:px-6">
         <div className="flex justify-between h-16 gap-2">
           {/* Logo + Desktop Nav Links */}

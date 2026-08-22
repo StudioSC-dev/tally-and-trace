@@ -254,7 +254,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
 
       {/* Create/Edit modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6" onClick={closeModal}>
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60" onClick={closeModal}>
           <div className="min-h-full flex items-center justify-center">
             <div className="bg-surface p-6 w-full max-w-md border border-line" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-6">

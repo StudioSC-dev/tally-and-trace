@@ -1417,7 +1417,7 @@ export function TransactionsPage() {
 
       {isActionModalOpen && actionTransaction && (
         <div
-          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
+          className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60"
           onClick={closeActionModal}
         >
           <div className="min-h-full flex items-center justify-center">
@@ -1679,7 +1679,7 @@ export function TransactionsPage() {
 
       {/* Create/Edit Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
+        <div className="modal-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/60">
           <div className="min-h-full flex items-center justify-center">
           <div className="bg-surface p-6 w-full max-w-xl">
             <div className="flex items-start justify-between mb-4">

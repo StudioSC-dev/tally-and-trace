@@ -31,8 +31,13 @@ export function Layout() {
     // paper texture (a z-index:-1 pseudo-element) is not painted over.
     <div className="min-h-screen">
       <Navigation />
-      {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
-      <main className="pt-20 pb-20 sm:pb-8">
+      {/*
+        below-nav clears the fixed top nav *including* its status-bar inset —
+        a flat pt-20 is 16px of slack over the 64px bar, which the ~59px inset
+        on a notched phone in standalone mode swallows whole, hiding the top of
+        every screen. pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile.
+      */}
+      <main className="below-nav pb-20 sm:pb-8">
         <div className="fade-in">
           <Outlet />
         </div>

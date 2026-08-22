@@ -206,7 +206,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 type="email"
                 autoComplete="email"
                 required
-                className="input-field text-sm"
+                className="input-field"
                 placeholder="you@example.com"
                 value={email}
                 onChange={handleEmailChange}
@@ -223,7 +223,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 type="password"
                 autoComplete="current-password"
                 required
-                className="input-field text-sm"
+                className="input-field"
                 placeholder="Your password"
                 value={password}
                 onChange={handlePasswordChange}
