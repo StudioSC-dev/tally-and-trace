@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.routers import api_router
 from app.core.seed import seed_database
 from app.core.observability import init_sentry
@@ -97,6 +99,36 @@ async def root():
 
 # HEAD is explicit: FastAPI's APIRoute, unlike Starlette's Route, does not add
 # HEAD alongside GET, and uptime monitors probe with HEAD by default.
+#
+# The `SELECT 1` is deliberate and load-bearing beyond liveness: Supabase pauses
+# a free-tier project after ~7 days with no activity, and this endpoint is the
+# only thing that runs on a schedule. Without a query it reported "healthy"
+# while generating zero database activity, so Render stayed warm and Supabase
+# could pause underneath it — two clocks, only one being wound.
+#
+# `def`, not `async def`: SQLAlchemy here is sync, so an `async` handler would
+# block the event loop for the round-trip. FastAPI runs sync handlers in a
+# threadpool.
+#
+# The session is opened inline rather than via `Depends(get_db)` because a
+# dependency that cannot connect raises before the handler runs, which would
+# surface as an opaque 500 instead of the explicit signal below.
 @app.api_route("/health", methods=["GET", "HEAD"])
-async def health_check():
-    return {"status": "healthy"}
+def health_check(response: Response):
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+    except Exception:
+        # 503 so a HEAD probe — which discards the body — still carries the
+        # signal. Safe today because render.yaml sets no `healthCheckPath`, so
+        # nothing restarts the container on this status; it reaches the uptime
+        # monitor only. Adding a health check to render.yaml later would turn a
+        # database outage into a restart loop, which would not fix anything.
+        logger.exception("Health check database probe failed")
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "degraded", "database": "unavailable"}
+
+    return {"status": "healthy", "database": "ok"}
