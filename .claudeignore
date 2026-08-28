@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+*.egg-info/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+frontend/dist/
+dist/
+*.tsbuildinfo
+
+# Generated route tree
+**/routeTree.gen.ts
+
+# Git internals
+.git/
+
+# OS cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude worktrees
+.claude/worktrees/
+
+# Local-only session state
+HANDOVER.md
