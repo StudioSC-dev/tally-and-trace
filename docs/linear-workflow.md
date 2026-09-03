@@ -26,6 +26,8 @@ repo's `CLAUDE.md`.
    and create a PR following our template.
 7. **Check the checkboxes on Linear** as each criterion is validated. Once all boxes are
    checked and the PR passes CI/CD with no errors, move the ticket to **Ready for QA**.
+8. **Do not append** `🤖 Generated with Claude Code` to PR descriptions, commit
+   messages, or any shipped text. All work is Seth's.
 
 ---
 
