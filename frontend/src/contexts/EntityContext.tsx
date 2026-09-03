@@ -15,6 +15,7 @@ interface EntityContextType {
 
 const EntityContext = createContext<EntityContextType | undefined>(undefined)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getStoredEntityId(): number | null {
   const raw = localStorage.getItem(ACTIVE_ENTITY_KEY)
   const parsed = raw ? Number(raw) : NaN

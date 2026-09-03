@@ -20,6 +20,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [emailError, setEmailError] = useState('')
   const [resendMessage, setResendMessage] = useState('')
   const [resendLoading, setResendLoading] = useState(false)
   const [showSuccessMessage, setShowSuccessMessage] = useState(!!successMessage)
@@ -45,10 +46,20 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
 
   // Clear success message when user starts typing or submitting
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEmail(e.target.value)
+    const value = e.target.value
+    setEmail(value)
+
+    // Validate email format
+    const trimmedValue = value.trim()
+    if (trimmedValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValue)) {
+      setEmailError('Please enter a valid email address')
+    } else {
+      setEmailError('')
+    }
+
     if (showSuccessMessage) {
       setShowSuccessMessage(false)
-      navigate({ 
+      navigate({
         to: '/login',
         search: { message: undefined } // Clear search params
       })
@@ -86,10 +97,18 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Guard: prevent submission with invalid email format
+    const trimmedEmail = email.trim()
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setEmailError('Please enter a valid email address')
+      return
+    }
+
     setIsLoading(true)
     setError('')
     setShowSuccessMessage(false) // Clear success message on submit
-    navigate({ 
+    navigate({
       to: '/login',
       search: { message: undefined } // Clear search params
     })
@@ -165,7 +184,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
         </header>
 
         <div className="border border-line bg-surface p-8">
-          <form className="space-y-5" onSubmit={handleSubmit}>
+          <form className="space-y-5" onSubmit={handleSubmit} noValidate>
             {/* Alerts are a coloured rule plus text, not a tinted fill panel —
                 the bg-*-500/10 blocks glowed and outweighed the form itself. */}
             {showSuccessMessage && successMessage && (
@@ -211,6 +230,9 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
                 value={email}
                 onChange={handleEmailChange}
               />
+              {emailError && (
+                <p className="mt-1 text-xs text-danger">{emailError}</p>
+              )}
             </div>
 
             <div>
@@ -254,7 +276,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !!emailError}
               className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? (

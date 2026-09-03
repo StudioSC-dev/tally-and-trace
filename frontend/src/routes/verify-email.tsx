@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useVerifyEmailMutation } from '../store/authApi'
 
-export const Route = createFileRoute('/verify-email' as any)({
+export const Route = createFileRoute('/verify-email')({
   component: VerifyEmailPage,
   validateSearch: (search: Record<string, unknown>): { token?: string } => {
     return {
@@ -13,7 +13,7 @@ export const Route = createFileRoute('/verify-email' as any)({
 
 export function VerifyEmailPage() {
   const navigate = useNavigate()
-  const { token } = useSearch({ from: Route.fullPath as any })
+  const { token } = useSearch({ from: '/verify-email' })
   const [verifyEmail, { isLoading, isSuccess, isError, error }] = useVerifyEmailMutation()
   const [countdown, setCountdown] = useState(5)
   const [errorMessage, setErrorMessage] = useState<string>('')
