@@ -24,6 +24,8 @@ repo's `CLAUDE.md`.
    update the ticket accordingly.
 6. **After all acceptance criteria are checked**, push to the branch assigned by Linear
    and create a PR following our template.
+7. **Check the checkboxes on Linear** as each criterion is validated. Once all boxes are
+   checked and the PR passes CI/CD with no errors, move the ticket to **Ready for QA**.
 
 ---
 
