@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay } from './SpotlightOverlay'
@@ -69,7 +69,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
   }, [])
 
-  const steps: OnboardingStep[] = [
+  const steps: OnboardingStep[] = useMemo(() => [
     {
       id: 1,
       title: 'Welcome to Your Dashboard',
@@ -126,7 +126,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       targetSelector: '[data-onboarding="top-categories"]',
       navigateTo: '/',
     },
-  ]
+  ], [])
 
   useEffect(() => {
     const step = steps[currentStep]
@@ -134,7 +134,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
     // Navigate to the appropriate page if needed
     if (step.navigateTo) {
-      navigate({ to: step.navigateTo as any })
+      navigate({ to: step.navigateTo as '/' })
     }
 
     // Wait for navigation and DOM update, then find target element
@@ -174,7 +174,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [currentStep, navigate])
+  }, [currentStep, navigate, steps])
 
   const handleNext = () => {
     if (currentStep < TOTAL_STEPS - 1) {
@@ -208,12 +208,6 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       console.error('Failed to complete onboarding:', error)
       onComplete?.()
     }
-  }
-
-  const currentStepData = steps[currentStep]
-
-  if (!currentStepData) {
-    return null
   }
 
   // Calculate bubble position based on target element
@@ -280,6 +274,12 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       setBubblePosition(null)
     }
   }, [targetElement])
+
+  const currentStepData = steps[currentStep]
+
+  if (!currentStepData) {
+    return null
+  }
 
   return (
     <SpotlightOverlay

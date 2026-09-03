@@ -27,6 +27,7 @@ declare module '@tanstack/react-router' {
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 function CrashFallback() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
