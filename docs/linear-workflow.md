@@ -70,6 +70,28 @@ issue with a checklist of atomic sub-tasks.
   replaced by) a child ticket.
 - **Project:** still assign it to the relevant project so it appears in the project view.
 
+### Label scope
+
+**Trailhead labels are for single-repo tickets only.** A `Trailhead` / `Trailhead - CC` /
+`Trailhead - T&T` / `Trailhead - Portfolio` label may only be applied to a ticket whose
+entire change lives in that one repository, because Trailhead runs one repo per ticket.
+Two kinds of work never carry a Trailhead label:
+
+- **Multi-repo integration work** — anything that touches both sides of a link, or edits
+  a contract in `integrations/` (which lives outside every repo). Keep the parent ticket
+  label-free (or `Epic`), and split the buildable parts into one single-repo child per
+  side; only those children may be Trailhead-labelled, and only after the contract is
+  written.
+- **Infrastructure work** — Cloudflare secrets and cron triggers, ntfy / Uptime Kuma /
+  Traefik / docker-socket-proxy configuration, CI wiring, deploy verification, host
+  migration checks. A semi-automated headless orchestrator must not perform
+  infrastructure changes with minimal human intervention.
+
+Both kinds are done in manual Claude Code sessions run from the `Personal` parent
+directory, with the work delegated to subagents and verified by a human, even when that
+is slower. This may be revisited once Trailhead has stronger guards; it is not revisited
+implicitly.
+
 ---
 
 ## Linear details
