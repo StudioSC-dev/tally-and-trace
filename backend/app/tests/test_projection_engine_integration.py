@@ -321,3 +321,56 @@ def test_upcoming_items_come_from_collect_events(db, user):
         ("2026-08-21", "Card C statement", 700.0, "expense", "statement"),
         ("2026-08-31", "Cutoff-day bill", 40.0, "debit", "transaction"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# /dashboard/snapshot additions
+# ---------------------------------------------------------------------------
+
+def test_snapshot_returns_available_cash_closings_and_payables(db, user, client):
+    from datetime import timedelta
+
+    from app.core.time import naive_utc_now
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+
+    checking_b = _account(db, user, "Checking B", AccountType.CHECKING, "5000.00")
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "1000.00")
+    _account(db, user, "Card C", AccountType.CREDIT, "300.00", billing_cycle_start=5)
+    due = (naive_utc_now() + timedelta(days=5)).replace(hour=0, minute=0, second=0, microsecond=0)
+    _entry(db, user, "Bill from B", BudgetEntryType.EXPENSE, "1200.00", due,
+           account=checking_b, overflow_account_id=savings_a.id,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    login = client.post("/api/v1/auth/login",
+                        json={"email": user.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    r = client.get("/api/v1/dashboard/snapshot",
+                   headers={"Authorization": f"Bearer {login.json()['access_token']}"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Existing fields are still there.
+    for key in ("balances", "upcoming_this_month", "monthly_summary",
+                "forecast_next_3_months", "goals_progress", "wishlist_next_up"):
+        assert key in body
+
+    # Card balances are owed, not cash.
+    assert body["available_cash"] == 6000.0
+
+    assert body["payables"] == [{
+        "due_date": due.date().isoformat(), "name": "Bill from B", "amount": 1200.0,
+        "source": "budget_entry", "source_id": body["payables"][0]["source_id"],
+        "account_id": checking_b.id, "account_name": "Checking B",
+        "overflow_account_id": savings_a.id, "overflow_account_name": "Savings A",
+    }]
+
+    closings = body["account_closings"]
+    assert len(closings) == 3
+    assert [c["period_label"] for c in closings] == [
+        p["period_label"] for p in body["forecast_next_3_months"]
+    ]
+    final = {a["account_name"]: a["closing_balance"] for a in closings[-1]["by_account"]}
+    assert final == {"Checking B": 3800.0, "Savings A": 1000.0}  # no card, no overflow pull
+    assert closings[-1]["unassigned_closing"] == 0.0
+    assert all(c["overflow_moves"] == [] for c in closings)

@@ -224,6 +224,50 @@ def get_upcoming_items(
     return items
 
 
+def get_available_cash(accounts) -> Decimal:
+    """Pooled projection cash: the sum of projection-cash account balances."""
+    return sum((_money(a.balance) for a in accounts if is_projection_cash(a)), Decimal("0"))
+
+
+def get_payables(
+    db: Session,
+    user_id: int,
+    entity_id: Optional[int] = None,
+    days: int = 30,
+    reference: Optional[datetime] = None,
+) -> List[dict]:
+    """Cash outflows due within the next N days, with the account each draws on.
+
+    Same window and events as ``get_upcoming_items``, restricted to events that
+    take cash out of the pool (bills, unposted debits, card statements). Transfers
+    between your own accounts are not payables; card charges reach cash via their
+    statement payable instead.
+    """
+    start, end = _upcoming_window(days, reference)
+    accounts = get_account_balances(db, user_id, entity_id)
+    names = {a.id: a.name for a in accounts}
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+
+    payables = []
+    for e in sorted(events, key=_event_sort_key):
+        if not e["counts_as_cash"] or e["amount"] >= 0 or e["type"] == TransactionType.TRANSFER.value:
+            continue
+        acc = e["funding_account_id"]
+        ov = e["overflow_account_id"]
+        payables.append({
+            "due_date": _naive(e["date"]).date().isoformat(),
+            "name": e["name"],
+            "amount": round(float(-e["amount"]), 2),
+            "source": e["source"],
+            "source_id": e["source_id"],
+            "account_id": acc,
+            "account_name": names.get(acc),
+            "overflow_account_id": ov,
+            "overflow_account_name": names.get(ov),
+        })
+    return payables
+
+
 def get_disposable_income(
     db: Session,
     user_id: int,
