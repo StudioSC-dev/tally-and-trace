@@ -347,7 +347,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           
           {/* Arrow pointing to the highlighted element */}
           <div
-            className={`absolute w-0 h-0 border-8 ${ bubblePosition.placement === 'bottom' ? 'border-b-white border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'top' ? 'border-t-white border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'right' ? 'border-r-white border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2' : 'border-l-white border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2' }`}
+            className={`absolute w-0 h-0 border-8 ${ bubblePosition.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2' }`}
           />
         </div>
       )}

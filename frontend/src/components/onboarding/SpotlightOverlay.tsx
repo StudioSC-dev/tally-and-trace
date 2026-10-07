@@ -64,14 +64,12 @@ export function SpotlightOverlay({
       className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden"
       style={{ top: 0, left: 0, right: 0, bottom: 0 }}
     >
-      {/* Gray background overlay */}
+      {/* Highlight: its huge spread shadow is the scrim, so the target inside
+          the cut-out stays undimmed while the rest of the app shows through.
+          The scrim is a fixed translucent black rather than a token: --ink
+          flips light in dark mode, and the paper tokens carry no alpha channel. */}
       <div
-        className="absolute inset-0 bg-surface transition-opacity duration-300"
-        style={{ opacity: isVisible ? 1 : 0 }}
-      />
-
-      {/* Highlight border - no dimming, just the border to draw attention */}
-      <div
+        data-onboarding-highlight
         className="absolute border-2 border-ink transition-all duration-300"
         style={{
           top: highlightTop,
@@ -79,6 +77,7 @@ export function SpotlightOverlay({
           width: highlightWidth,
           height: highlightHeight,
           borderRadius: borderRadius,
+          boxShadow: '0 0 0 9999px rgb(0 0 0 / 0.55)',
           pointerEvents: 'none',
         }}
       />
