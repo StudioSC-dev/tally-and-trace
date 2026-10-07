@@ -94,43 +94,11 @@ def resolve_cycle_fields(card: Account) -> Optional[Tuple[int, int]]:
     return None
 
 
-def iter_statement_cycles(card: Account, start: datetime, end: datetime) -> Iterator[dict]:
-    """Yield ``{window_start, close, due}`` for every cycle DUE in ``[start, end)``.
-
-    Walks by close date and reports the cycles whose *payment* lands in the window,
-    which is what the cash timeline cares about -- a statement that closed before
-    ``start`` but is due inside it must still be paid.
-    """
-    fields = resolve_cycle_fields(card)
-    if fields is None:
-        return
-    close_day, days_until_due = fields
-
-    # Start far enough back that a cycle closing before the window but due inside
-    # it is still produced. Two months of slack covers any close->due offset.
-    y, m = _month_step(start.year, start.month, -2)
-    guard = 0
-    while guard < 60:
-        guard += 1
-        close = datetime(y, m, _clamp_day(y, m, close_day))
-        due = close + timedelta(days=days_until_due)
-
-        if due >= end:
-            return
-
-        py, pm = _month_step(y, m, -1)
-        prev_close = datetime(py, pm, _clamp_day(py, pm, close_day))
-
-        if due >= start:
-            yield {"window_start": prev_close, "close": close, "due": due}
-
-        y, m = _month_step(y, m, 1)
-
-
 def iter_cycles_from(card: Account, first: date, end: datetime) -> Iterator[dict]:
     """Yield every cycle from the one containing day ``first`` up to those due before ``end``.
 
-    Unlike ``iter_statement_cycles`` this reaches back to the card's history, which
+    Each cycle is ``{window_start, close, due}``. Walking from the card's first
+    line item, not from the window start, reaches back through its history, which
     is what allocating payments oldest-statement-first needs.
     """
     fields = resolve_cycle_fields(card)

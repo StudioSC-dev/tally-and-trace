@@ -4,7 +4,7 @@ The headline case is the owner's real shape: a card closing on the 24th with a
 21-day grace period, whose SOA line items sum to the statement balance, paid from
 the biweekly payroll account with the main checking account as overflow.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -13,7 +13,7 @@ from app.models.transaction import TransactionType
 from app.services.statements import (
     allocate_payments,
     build_statement_payables,
-    iter_statement_cycles,
+    iter_cycles_from,
     resolve_cycle_fields,
     statement_balance,
 )
@@ -86,7 +86,7 @@ def test_card_with_no_cycle_fields_is_unmodellable():
 
 def test_unmodellable_card_yields_no_cycles():
     card = _card(billing_cycle_start=None, due_date=None)
-    assert list(iter_statement_cycles(card, datetime(2026, 8, 1), datetime(2026, 10, 1))) == []
+    assert list(iter_cycles_from(card, date(2026, 7, 1), datetime(2026, 10, 1))) == []
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def test_unmodellable_card_yields_no_cycles():
 
 def test_cycle_window_and_due_date_for_the_worked_example():
     """Close 24 Jul -> due 14 Aug, covering charges from 25 Jun to 24 Jul."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 8, 31)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 31)))
     assert len(cycles) == 1
     cycle = cycles[0]
     assert cycle["close"] == datetime(2026, 7, 24)
@@ -103,20 +103,20 @@ def test_cycle_window_and_due_date_for_the_worked_example():
     assert cycle["window_start"] == datetime(2026, 6, 24)
 
 
-def test_statement_closed_before_the_window_but_due_inside_it_is_included():
-    """The cash still leaves in the window -- this is the case a naive walk drops."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 10), datetime(2026, 8, 20)))
-    assert [c["due"] for c in cycles] == [datetime(2026, 8, 14)]
+def test_walk_starts_at_the_cycle_containing_the_first_day():
+    """A first line item after the close day belongs to the next month's cycle."""
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 25), datetime(2026, 10, 1)))
+    assert [c["close"] for c in cycles] == [datetime(2026, 8, 24)]
 
 
 def test_due_date_on_the_window_end_is_excluded():
     """Window is half-open [start, end), consistent with the rest of the engine."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 8, 14)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 14)))
     assert cycles == []
 
 
 def test_multiple_cycles_across_a_longer_window():
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 11, 1)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 11, 1)))
     assert [c["due"] for c in cycles] == [
         datetime(2026, 8, 14),
         datetime(2026, 9, 14),
@@ -127,7 +127,7 @@ def test_multiple_cycles_across_a_longer_window():
 def test_close_day_clamps_to_short_months():
     """Day 31 must not explode on February."""
     card = _card(billing_cycle_start=31, days_until_due_date=21)
-    cycles = list(iter_statement_cycles(card, datetime(2027, 3, 1), datetime(2027, 3, 31)))
+    cycles = list(iter_cycles_from(card, date(2027, 2, 1), datetime(2027, 3, 31)))
     assert cycles[0]["close"] == datetime(2027, 2, 28)
 
 
