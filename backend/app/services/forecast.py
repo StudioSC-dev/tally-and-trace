@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
 from app.core.time import naive_utc_now
-from app.services.statements import get_statement_payables
+from app.services.statements import get_statement_payables, resolve_cycle_fields
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
@@ -528,7 +528,8 @@ def _event_sort_key(e: dict):
 
 
 def _transfer_event(txn, cash_ids: set, card_ids: set,
-                    date: Optional[datetime] = None, **extra) -> dict:
+                    date: Optional[datetime] = None, *,
+                    billed_ids: Optional[set] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
     Legs are kept only for accounts in the projection's scope (``cash_ids`` and
@@ -549,18 +550,28 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     A transfer FROM a credit card (a cash advance) is cash coming in on the
     receiving account: statements bill the advance plus its fee as a charge on the
     card, so the statement payable repays it later.
+
+    Both rules need the card's statements to be modelled. ``billed_ids`` are the
+    cards that have them (cycle settings; default: every card). A transfer
+    touching a card without cycle settings moves no projection cash at all: no
+    statement bills an advance from it or is netted by a payment into it, so
+    counting either side would leave cash that nothing balances.
     """
+    if billed_ids is None:
+        billed_ids = card_ids
+    unbilled = card_ids - billed_ids
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids
+    via_unbilled = src in unbilled or dst in unbilled
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids))
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_unbilled))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids))
-    if dst in card_ids:
+        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
+    if dst in billed_ids:
         extra = {**extra, "card_payment": True}
     return _event(
         date=date or _naive(txn.transaction_date),
@@ -570,6 +581,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
+        counts_as_cash=False if via_unbilled else None,
         transfer_fee=_money(fee),
         **extra,
     )
@@ -589,7 +601,9 @@ def collect_events(
     Sources: active budget-entry occurrences, unposted transactions, and one dated
     payable per credit-card statement cycle due in the window. Occurrences of a
     budget entry scheduled on a credit card are charges on that card's statement,
-    not cash events (see ``_card_entry_charges``). Events that move no
+    not cash events (see ``_card_entry_charges``). A card without cycle settings
+    has no statements, so occurrences scheduled on it stay cash events and
+    transfers touching it move no cash (see ``_transfer_event``). Events that move no
     projection cash are included (``counts_as_cash`` False) so listings can show
     them; cash views must filter on ``counts_as_cash``.
 
@@ -616,6 +630,9 @@ def collect_events(
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if not is_projection_cash(a)}
+    # Cards whose statements are modelled; the rest keep their charges as cash.
+    billed_ids = {a.id for a in accounts
+                  if a.id in card_ids and resolve_cycle_fields(a) is not None}
 
     events: List[dict] = []
 
@@ -625,7 +642,7 @@ def collect_events(
     )
     card_entries = []
     for entry in be_query.all():
-        if entry.account_id in card_ids:
+        if entry.account_id in billed_ids:
             card_entries.append(entry)
             continue
         sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
@@ -666,7 +683,8 @@ def collect_events(
                 continue
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
-            events.append(_transfer_event(txn, cash_ids, card_ids, date=when, **overdue))
+            events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
+                                          billed_ids=billed_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow

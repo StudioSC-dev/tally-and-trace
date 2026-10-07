@@ -977,6 +977,36 @@ def test_card_installment_dated_before_the_window_is_still_billed(db, user):
     assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-2000.00"))]
 
 
+def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfers_non_cash(
+        db, user):
+    """No statements are modelled for it: its schedule is cash on its own date, and
+    neither an advance from it nor a payment into it moves projection cash."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
+                    payment_account_id=checking.id)
+    _entry(db, user, "Card subscription", BudgetEntryType.EXPENSE, "2000.00",
+           datetime(2026, 8, 5), account=card, end_mode="after_occurrences", max_occurrences=1)
+    _txn(db, user, card, TransactionType.TRANSFER, "500.00", datetime(2026, 8, 10),
+         transfer_fee=Decimal("10.00"), description="Cash advance",
+         transfer_from_account_id=card.id, transfer_to_account_id=checking.id)
+    _pay_card(db, user, checking, card, "700.00", datetime(2026, 8, 12))
+    _txn(db, user, card, TransactionType.DEBIT, "300.00", datetime(2026, 8, 15))
+
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, days=31, reference=reference)
+    assert _cash_events(r) == [("2026-08-05", "Card subscription", Decimal("-2000.00"))]
+    assert r["closing_balance"] == Decimal("8000.00")
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert (aug["expenses"], aug["unposted_expenses"], aug["statement_payables"]) == (
+        2000.0, 0.0, 0.0)
+    assert aug["closing_balance"] == 8000.0 == float(r["closing_balance"])
+
+
 def test_timeline_closing_equals_monthly_end_balance_with_card_payments_and_schedules(db, user):
     """Overdue statement, planned payment, cash advance and a card schedule together."""
     from app.models.account import AccountType

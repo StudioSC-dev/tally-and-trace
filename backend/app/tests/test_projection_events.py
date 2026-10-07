@@ -3,6 +3,8 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.account import AccountType
 from app.models.transaction import TransactionType
 from app.services.forecast import (
@@ -115,6 +117,16 @@ def test_cash_advance_is_cash_on_the_receiving_account_only():
         _leg(CHECKING_B, Decimal("3000"), cash=True),
     ]
     assert ev["amount"] == Decimal("3000.00")
+
+
+@pytest.mark.parametrize("src,dst", [(CHECKING_B, CARD_C), (CARD_C, CHECKING_B)])
+def test_transfer_touching_a_card_without_statements_moves_no_cash(src, dst):
+    """No statement nets a payment into it or bills an advance from it."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 50, src, dst), CASH, CARDS, billed_ids=set())
+    assert ev["counts_as_cash"] is False
+    assert ev["amount"] == Decimal("0")
+    assert "card_payment" not in ev
+    assert [leg["cash"] for leg in ev["legs"]] == [False, False]
 
 
 def test_transfer_out_of_scope_costs_the_pool_amount_and_fee():
