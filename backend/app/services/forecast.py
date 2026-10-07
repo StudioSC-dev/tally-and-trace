@@ -111,8 +111,9 @@ def project_cashflow(
 
     ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
     net unposted cash transactions (debits - credits + transfer fees, plus transfer
-    amounts crossing the scope boundary);
-    ``statement_payables`` are credit-card statements due in the period.
+    amounts crossing the scope boundary), excluding card payments;
+    ``statement_payables`` is cash paid to credit cards in the period: statement
+    payables due (net of payments) plus planned card payments.
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     """
@@ -151,8 +152,10 @@ def project_cashflow(
 
         income = total("budget_entry", 1)
         expenses = -total("budget_entry", -1)
-        unposted = -total("transaction")
-        statements = -total("statement")
+        card_payments = sum(
+            (e["amount"] for e in in_period if e.get("card_payment")), Decimal("0"))
+        unposted = -(total("transaction") - card_payments)
+        statements = -(total("statement") + card_payments)
         net = sum((e["amount"] for e in in_period), Decimal("0"))
         closing = opening + net
 
@@ -241,9 +244,9 @@ def get_payables(
     """Cash outflows due within the next N days, with the account each draws on.
 
     Same window and events as ``get_upcoming_items``, restricted to events that
-    take cash out of the pool (bills, unposted debits, card statements). Transfers
-    between your own accounts are not payables; card charges reach cash via their
-    statement payable instead.
+    take cash out of the pool (bills, unposted debits, card statements and planned
+    card payments). Other transfers between your own accounts are not payables;
+    card charges reach cash via their statement payable instead.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -252,7 +255,9 @@ def get_payables(
 
     payables = []
     for e in sorted(events, key=_event_sort_key):
-        if not e["counts_as_cash"] or e["amount"] >= 0 or e["type"] == TransactionType.TRANSFER.value:
+        if not e["counts_as_cash"] or e["amount"] >= 0:
+            continue
+        if e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment"):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -533,26 +538,29 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     - out of the pool to an outside account costs the pool amount + fee;
     - into the pool from an outside account adds the amount.
 
-    A transfer INTO a credit card (a card payment) is listed with its legs but does
-    not count as cash yet: the card's statement payable already models that cash
-    leaving, and allocating payments against statements is a follow-up. Counting
-    both would double-count the payment.
+    A transfer INTO a credit card (a card payment) is cash on the paying account:
+    statements net payments (services/statements.py), so the statement payable
+    only carries what the payments leave unpaid, and the payment itself is where
+    the rest of the cash leaves. The card's leg is never cash. Such an event is
+    marked ``card_payment``.
 
-    A transfer FROM a credit card (a cash advance or balance transfer) is treated
-    the same way: statements ignore transfers, so nothing would ever repay the
-    cash it adds. Neither kind has a cash leg until statements net transfers.
+    A transfer FROM a credit card (a cash advance or balance transfer) is listed
+    but has no cash leg: statements don't bill it, so nothing would ever repay the
+    cash it adds.
     """
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids
-    via_card = src in card_ids or dst in card_ids
+    from_card = src in card_ids
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_card))
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not from_card))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_card))
+        legs.append(_leg(dst, amount, cash=dst in cash_ids and not from_card))
+    if dst in card_ids:
+        extra = {**extra, "card_payment": True}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -561,7 +569,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
-        counts_as_cash=False if via_card else None,
+        counts_as_cash=False if from_card else None,
         transfer_fee=_money(fee),
         **extra,
     )
@@ -587,16 +595,17 @@ def collect_events(
     projection-cash accounts. Unposted transfers into or out of any scoped account
     (projection-cash or credit card) are collected even when the transaction row
     belongs to another scope (a cross-entity transfer), but only their in-scope
-    legs are kept, and a transfer touching a card is never cash (see
-    ``_transfer_event``).
+    legs are kept; a card payment is cash on the paying account and a transfer
+    out of a card is never cash (see ``_transfer_event``).
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
     Overdue charges on a credit card are skipped (they reach cash through their
     statements); a non-transfer row's card involvement comes from ``account_id``
-    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are listed like in-window ones, as non-cash
-    events: statements ignore transfers, so listing them counts nothing twice.
+    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are
+    handled like in-window ones: an overdue card payment is still cash leaving at
+    ``start`` (its statement is netted by it, so the cash appears only here).
     """
     start = _naive(start)
     end = _naive(end)

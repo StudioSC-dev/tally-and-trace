@@ -23,7 +23,17 @@ matching how the owner keeps per-card SOA ledgers, where line items sum to the
 statement balance. DEBIT (a purchase) increases what's owed; CREDIT (a refund or
 payment) decreases it. Both posted and unposted transactions count: an unposted
 charge inside the window is planned spending that will still land on that
-statement. A cycle whose balance is <= 0 produces no payable.
+statement. A cycle whose balance is <= 0 owes nothing.
+
+Payments are transfers INTO the card (``transfer_to_account_id``), posted or
+planned. They are netted against statements, not against the cycle they are dated
+in: each payment is consumed exactly once, oldest outstanding statement first,
+whether it was made before the close, early, on time or late. A statement's
+payable is what remains of its line-item balance after that allocation, so a
+fully paid statement has no payable and a partly paid one owes the remainder.
+The cash side of a payment is modelled on the paying account by the forecast
+engine (a posted one is in its balance, a planned one is a dated outflow), so
+each peso of a statement leaves cash exactly once: as payment or as payable.
 
 All money is Decimal end to end; dates are naive UTC to match the naive
 transaction_date column (see app/core/time.py for the naive/aware split).
@@ -32,10 +42,11 @@ transaction_date column (see app/core/time.py for the naive/aware split).
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Iterator, List, Optional, Tuple
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
@@ -111,6 +122,74 @@ def iter_statement_cycles(card: Account, start: datetime, end: datetime) -> Iter
         y, m = _month_step(y, m, 1)
 
 
+def iter_cycles_from(card: Account, first: date, end: datetime) -> Iterator[dict]:
+    """Yield every cycle from the one containing day ``first`` up to those due before ``end``.
+
+    Unlike ``iter_statement_cycles`` this reaches back to the card's history, which
+    is what allocating payments oldest-statement-first needs.
+    """
+    fields = resolve_cycle_fields(card)
+    if fields is None:
+        return
+    close_day, days_until_due = fields
+
+    y, m = first.year, first.month
+    if first.day > _clamp_day(y, m, close_day):
+        y, m = _month_step(y, m, 1)
+    while True:
+        close = datetime(y, m, _clamp_day(y, m, close_day))
+        due = close + timedelta(days=days_until_due)
+        if due >= end:
+            return
+        py, pm = _month_step(y, m, -1)
+        yield {
+            "window_start": datetime(py, pm, _clamp_day(py, pm, close_day)),
+            "close": close,
+            "due": due,
+        }
+        y, m = _month_step(y, m, 1)
+
+
+def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[Decimal]:
+    """What each statement still owes after the payments, oldest statement first.
+
+    ``balances`` are statement balances in close order; ``payments`` in date order.
+    Each payment is consumed exactly once: it pays down the oldest statement with
+    something outstanding and spills any excess into the next one. Payments left
+    over after the last statement are a credit on the card and pay nothing here.
+    """
+    remaining = [max(b, Decimal("0")) for b in balances]
+    i = 0
+    for amount in payments:
+        left = amount
+        while left > 0 and i < len(remaining):
+            paid = min(left, remaining[i])
+            remaining[i] -= paid
+            left -= paid
+            if remaining[i] == 0:
+                i += 1
+    return remaining
+
+
+def _split_card_rows(card_id: int, rows: list) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
+    """Separate a card's rows into statement line items and payments into the card.
+
+    Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
+    transfer into a debit may keep stale ones). A transfer into the card is a
+    payment; other transfers are not line items.
+    """
+    lines: list = []
+    payments: List[Tuple[datetime, Decimal]] = []
+    for row in rows:
+        if row.transaction_type == TransactionType.TRANSFER:
+            if getattr(row, "transfer_to_account_id", None) == card_id:
+                payments.append((row.transaction_date, Decimal(str(row.amount))))
+            continue
+        lines.append(row)
+    payments.sort(key=lambda p: p[0])
+    return lines, payments
+
+
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime) -> Decimal:
     """Sum a card's charges over the calendar days ``(window_start, close]``.
 
@@ -118,9 +197,9 @@ def statement_balance(transactions: List[Transaction], window_start: datetime, c
     any time ON that day belongs to this statement, and one at any time on the
     previous closing day belongs to the previous statement.
 
-    Purchases add to what's owed, refunds/payments subtract. Transfers are ignored:
-    a card payment is recorded as a transfer, and its cash side is already modelled
-    on the paying account -- counting it here too would net the statement to zero.
+    This is the LINE-ITEM balance: purchases add to what's owed, refunds subtract.
+    Transfers are not line items -- a card payment (a transfer into the card) is
+    netted against statements by ``allocate_payments`` instead.
     """
     first_excluded, last_included = window_start.date(), close.date()
     total = Decimal("0")
@@ -142,26 +221,38 @@ def build_statement_payables(
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
 
+    ``transactions_by_card`` holds every row touching each card: its own charges
+    and refunds, and transfers into it (payments). Every cycle from the card's
+    first line item onward is balanced and the payments are allocated across them
+    (see ``allocate_payments``); a cycle still owing something and due in
+    ``[start, end)`` becomes a payable for the remainder.
+
     Returns timeline events shaped like the ones ``build_timeline`` /
     ``route_accounts`` already consume (negative amount = outflow).
     """
     events: List[dict] = []
     for card in cards:
-        card_txns = transactions_by_card.get(card.id, [])
-        for cycle in iter_statement_cycles(card, start, end):
-            balance = statement_balance(card_txns, cycle["window_start"], cycle["close"])
-            if balance <= 0:
+        lines, payments = _split_card_rows(card.id, transactions_by_card.get(card.id, []))
+        if not lines:
+            continue  # no charges -> nothing owed, whatever was paid in
+        first = min(row.transaction_date for row in lines).date()
+        cycles = list(iter_cycles_from(card, first, end))
+        balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+        remaining = allocate_payments(balances, [amount for _, amount in payments])
+        for cycle, balance, owed in zip(cycles, balances, remaining):
+            if owed <= 0 or cycle["due"] < start:
                 continue  # nothing owed -> nothing to pay
             events.append({
                 "date": cycle["due"],
                 "name": f"{card.name} statement",
-                "amount": -balance,
+                "amount": -owed,
                 "type": "expense",
                 "source": "statement",
                 "source_id": card.id,
                 "funding_account_id": card.payment_account_id,
                 "overflow_account_id": card.payment_overflow_account_id,
                 "statement_close": cycle["close"],
+                "statement_balance": balance,
             })
     return events
 
@@ -183,17 +274,28 @@ def get_statement_payables(
     if not cards:
         return []
 
-    # Charges are filtered by card id ALONE, not re-scoped by user/entity: the card
+    # Rows are filtered by card id ALONE, not re-scoped by user/entity: the card
     # itself was already access-checked above, and a statement must include every
-    # charge on it — including ones a co-member entered in a shared entity.
+    # charge on it and every payment into it — including ones a co-member entered
+    # in a shared entity, or a transfer from another entity's account.
     card_ids = [c.id for c in cards]
     txns = (
         db.query(Transaction)
-        .filter(Transaction.account_id.in_(card_ids))
+        .filter(or_(
+            Transaction.account_id.in_(card_ids),
+            and_(
+                Transaction.transaction_type == TransactionType.TRANSFER,
+                Transaction.transfer_to_account_id.in_(card_ids),
+            ),
+        ))
         .all()
     )
     by_card: dict = {cid: [] for cid in card_ids}
     for txn in txns:
-        by_card.setdefault(txn.account_id, []).append(txn)
+        touched = {txn.account_id}
+        if txn.transaction_type == TransactionType.TRANSFER:
+            touched.add(txn.transfer_to_account_id)
+        for cid in touched & set(card_ids):
+            by_card[cid].append(txn)
 
     return build_statement_payables(cards, by_card, start, end)

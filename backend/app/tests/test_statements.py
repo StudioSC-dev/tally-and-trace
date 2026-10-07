@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from app.models.transaction import TransactionType
 from app.services.statements import (
+    allocate_payments,
     build_statement_payables,
     iter_statement_cycles,
     resolve_cycle_fields,
@@ -37,6 +38,18 @@ def _txn(day, amount, kind=TransactionType.DEBIT, month=7, year=2026):
         transaction_date=datetime(year, month, day),
         amount=Decimal(str(amount)),
         transaction_type=kind,
+    )
+
+
+def _pay(day, amount, month=7, year=2026, card_id=1, from_account=10):
+    """A transfer from a bank account into the card: a card payment."""
+    return SimpleNamespace(
+        transaction_date=datetime(year, month, day),
+        amount=Decimal(str(amount)),
+        transaction_type=TransactionType.TRANSFER,
+        account_id=from_account,
+        transfer_from_account_id=from_account,
+        transfer_to_account_id=card_id,
     )
 
 
@@ -178,9 +191,9 @@ def test_refunds_reduce_the_balance():
     assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("750.00")
 
 
-def test_transfers_are_ignored():
-    """The cash side of a card payment is modelled on the paying account."""
-    txns = [_txn(5, "1000.00"), _txn(10, "1000.00", kind=TransactionType.TRANSFER)]
+def test_transfers_are_not_line_items():
+    """A payment is netted against statements by allocation, not summed as a line."""
+    txns = [_txn(5, "1000.00"), _pay(10, "1000.00")]
     assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("1000.00")
 
 
@@ -244,3 +257,95 @@ def test_multiple_cards_each_get_their_own_payable():
     assert by_name["Metrobank CC statement"]["amount"] == Decimal("-1000.00")
     assert by_name["BPI CC statement"]["date"] == datetime(2026, 8, 25)  # 5 Aug + 20d
     assert by_name["BPI CC statement"]["amount"] == Decimal("-2000.00")
+
+
+# ---------------------------------------------------------------------------
+# Payments netted against statements
+#
+# The card closes on the 24th, due 21 days later: the 10 Jul charge is on the
+# 24 Jul statement, due 14 Aug.
+# ---------------------------------------------------------------------------
+
+AUG, SEP = datetime(2026, 8, 1), datetime(2026, 9, 1)
+
+
+def _owed(rows, start=AUG, end=SEP):
+    return [(e["date"], e["amount"]) for e in build_statement_payables([_card()], {1: rows}, start, end)]
+
+
+def test_full_payment_leaves_no_payable():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "12000.00", month=8)]) == []
+
+
+def test_partial_payment_leaves_the_remainder():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "5000.00", month=8)]) == [
+        (datetime(2026, 8, 14), Decimal("-7000.00")),
+    ]
+
+
+def test_early_payment_after_close_nets_the_statement():
+    assert _owed([_txn(10, "12000.00"), _pay(26, "12000.00")]) == []
+
+
+def test_payment_before_close_nets_the_statement_it_is_dated_in():
+    """Paid 20 Jul, before the 24 Jul close: still pays that statement."""
+    assert _owed([_txn(10, "12000.00"), _pay(20, "12000.00")]) == []
+
+
+def test_late_full_payment_nets_the_statement():
+    """Paid 20 Aug, after the 14 Aug due date: the statement is still paid."""
+    assert _owed([_txn(10, "12000.00"), _pay(20, "12000.00", month=8)]) == []
+
+
+def test_late_partial_payment_leaves_the_remainder():
+    assert _owed([_txn(10, "12000.00"), _pay(20, "4000.00", month=8)]) == [
+        (datetime(2026, 8, 14), Decimal("-8000.00")),
+    ]
+
+
+def test_payment_outside_the_window_still_nets_its_statement():
+    """A payment dated after the window end is an allocation, not a window event."""
+    assert _owed([_txn(10, "12000.00"), _pay(5, "12000.00", month=10)]) == []
+
+
+def test_incoming_bank_transfer_is_a_payment_via_transfer_to_account_id():
+    """The row's account_id is the bank account; only transfer_to names the card."""
+    pay = _pay(10, "3000.00", month=8, from_account=99)
+    assert pay.account_id == 99
+    assert _owed([_txn(10, "12000.00"), pay]) == [(datetime(2026, 8, 14), Decimal("-9000.00"))]
+
+
+def test_transfer_into_another_card_does_not_pay_this_one():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "12000.00", month=8, card_id=2)]) == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+def test_each_payment_is_consumed_once_oldest_outstanding_statement_first():
+    """1,500 paid after two statements of 1,000 (Jul) and 2,000 (Aug) clears July
+    and leaves 1,500 on August; it is not applied to August in full as well."""
+    rows = [_txn(10, "1000.00"), _txn(10, "2000.00", month=8), _pay(1, "1500.00", month=9)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-1500.00")),
+    ]
+
+
+def test_overpayment_carries_to_the_next_statement():
+    rows = [_txn(10, "1000.00"), _txn(10, "2000.00", month=8), _pay(10, "1800.00", month=8)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-1200.00")),
+    ]
+
+
+def test_payment_dated_in_the_window_settles_an_older_unpaid_statement_first():
+    """June's 500 (due 15 Jul, before the window) is still owed; an August payment of
+    500 settles it, so July's statement stays owed in full."""
+    rows = [_txn(10, "500.00", month=6), _txn(10, "12000.00"), _pay(10, "500.00", month=8)]
+    assert _owed(rows) == [(datetime(2026, 8, 14), Decimal("-12000.00"))]
+
+
+def test_allocate_payments_oldest_first():
+    assert allocate_payments(
+        [Decimal("100"), Decimal("0"), Decimal("-50"), Decimal("200")],
+        [Decimal("150"), Decimal("30")],
+    ) == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("120")]

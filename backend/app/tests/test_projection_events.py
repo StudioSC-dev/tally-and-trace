@@ -87,11 +87,22 @@ def test_payable_without_the_transfer_is_short():
     assert sf[0]["short_amount"] == Decimal("4000.00")
 
 
-def test_transfer_into_a_card_is_listed_but_not_cash():
-    """The card's statement payable already models that cash; don't count it twice."""
-    ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), CASH, CARDS)
+def test_card_payment_is_cash_on_the_paying_account_only():
+    """Statements net payments, so the payment is where that cash leaves."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 15, CHECKING_B, CARD_C), CASH, CARDS)
+    assert ev["counts_as_cash"] is True
+    assert ev["card_payment"] is True
+    assert ev["legs"] == [
+        _leg(CHECKING_B, Decimal("-3015"), cash=True),
+        _leg(CARD_C, Decimal("3000"), cash=False),
+    ]
+    assert ev["amount"] == Decimal("-3015.00")
+
+
+def test_card_payment_from_outside_the_scope_moves_no_pool_cash():
+    ev = _transfer_event(_txn_transfer(5, 3000, 0, OUTSIDE, CARD_C), CASH, CARDS)
     assert ev["counts_as_cash"] is False
-    assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
+    assert ev["legs"] == [_leg(CARD_C, Decimal("3000"), cash=False)]
 
 
 def test_transfer_from_a_card_is_listed_but_not_cash():
