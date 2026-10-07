@@ -191,6 +191,9 @@ def test_paid_statement_is_absent_once_the_due_date_passes(db, scenario):
         transfer_to_account_id=scenario["card"].id,
         transaction_date=datetime(2026, 8, 13), is_posted=True,
     ))
+    # Posting moves both stored balances, as routers/transactions.py does.
+    scenario["checking"].balance = Decimal("38000.00")
+    scenario["card"].balance = Decimal("12000.00")
     db.commit()
 
     result = _timeline(db, scenario, reference=datetime(2026, 8, 15))

@@ -279,8 +279,12 @@ def build_statement_payables(
     payment restricted to closed cycles, spent first, so a recorded or planned
     payment is never consumed by debt the stored balance says is already settled
     (which would leave the debt it was meant for owed a second time). Open cycles
-    are never cut. A card whose history is complete has no gap and is untouched; a
-    stored balance owing more than the ledger never adds debt. A card without a
+    are never cut. When the stored balance owes MORE than the posted rows (gap < 0,
+    e.g. an opening balance never entered as charges), the difference is a
+    synthetic opening statement placed before the oldest cycle: payments and
+    credits pay it first, oldest first as usual, but it is never emitted as a
+    payable or overdue event, so the guard never adds debt of its own. A card
+    whose history is complete has no gap and is untouched. A card without a
     ``balance`` skips the guard.
 
     Returns timeline events shaped like the ones ``build_timeline`` /
@@ -296,6 +300,7 @@ def build_statement_payables(
         cycles = list(iter_cycles_from(card, first, end))
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
         owing = balances
+        opening = Decimal("0")
         stored = getattr(card, "balance", None)
         if stored is not None:
             rows = transactions_by_card.get(card.id, [])
@@ -306,7 +311,11 @@ def build_statement_payables(
                     logger.warning(
                         "Card %s: trimmed %s from closed statements not reflected in its "
                         "stored balance (incomplete history)", card.id, trimmed)
-        remaining = allocate_payments(owing, [amount for _, amount in payments])
+            elif gap < 0:
+                opening = -gap
+        # The opening statement (0 when there is none) only absorbs payments.
+        remaining = allocate_payments([opening, *owing],
+                                      [amount for _, amount in payments])[1:]
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0:
                 continue  # nothing owed -> nothing to pay

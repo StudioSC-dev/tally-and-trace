@@ -501,3 +501,23 @@ def test_planned_payment_is_not_spent_on_closed_debt_the_stored_balance_says_is_
     statement is payable: 500 of cash in all, not the payment plus a 500 payable."""
     rows = [_posted(10, "3000.00", 7), _posted(28, "500.00", 7), _pay(10, "500.00", month=9)]
     assert _guarded("-500.00", rows, end=datetime(2026, 10, 1)) == []
+
+
+def test_opening_balance_missing_from_the_ledger_absorbs_payments_first():
+    """A 5,000 opening balance was never entered as charges; the posted 5,000
+    payment settled it, so July's 1,000 charge is still owed (stored -1,000)."""
+    payment = _pay(1, "5000.00", month=6)
+    payment.is_posted = True
+    rows = [payment, _posted(10, "1000.00", 7)]
+    assert _guarded("-1000.00", rows) == [
+        (datetime(2026, 8, 14), Decimal("-1000.00"), False),
+    ]
+
+
+def test_missing_opening_balance_is_never_billed_itself():
+    """Stored -1,500 against a ledger owing 500: the 1,000 opening balance is not a
+    payable, it only takes the planned 1,000 payment before July's charge does."""
+    rows = [_posted(10, "500.00", 7), _pay(1, "1000.00", month=8)]
+    assert _guarded("-1500.00", rows) == [
+        (datetime(2026, 8, 14), Decimal("-500.00"), False),
+    ]
