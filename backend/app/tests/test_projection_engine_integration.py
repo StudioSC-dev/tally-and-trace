@@ -535,6 +535,37 @@ def test_overdue_unposted_transactions_land_at_the_window_start_in_every_view(db
     ]
 
 
+def test_overdue_debit_with_stale_transfer_fields_still_counts(db, user):
+    """A transfer edited into a debit keeps its old transfer_* fields; only account_id matters."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import collect_events, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "1000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    yesterday = datetime(2026, 8, 9, 14)
+    t = _txn(db, user, checking, TransactionType.TRANSFER, "500.00", yesterday,
+             description="Was a card payment",
+             transfer_from_account_id=checking.id, transfer_to_account_id=card.id)
+    # The update path changes the type but leaves the transfer fields behind.
+    t.transaction_type = TransactionType.DEBIT
+    db.commit()
+
+    start = datetime(2026, 8, 10)
+    events = collect_events(db, start, datetime(2026, 9, 1), user_id=user.id)
+    assert [(e["name"], e["date"], e.get("overdue"), e["amount"], e["counts_as_cash"])
+            for e in events] == [("Was a card payment", start, True, Decimal("-500.00"), True)]
+
+    reference = datetime(2026, 8, 10, 9)
+    r = project_running_balance(db, user.id, days=22, reference=reference)
+    assert r["closing_balance"] == Decimal("500.00")
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["closing_balance"] == 500.0
+    assert aug["unposted_expenses"] == 500.0
+
+
 def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType

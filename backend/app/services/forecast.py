@@ -594,7 +594,8 @@ def collect_events(
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
     Overdue charges on a credit card are skipped (they reach cash through their
-    statements). Overdue card transfers are listed like in-window ones, as non-cash
+    statements); a non-transfer row's card involvement comes from ``account_id``
+    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are listed like in-window ones, as non-cash
     events: statements ignore transfers, so listing them counts nothing twice.
     """
     start = _naive(start)
@@ -643,8 +644,9 @@ def collect_events(
         when = _naive(txn.transaction_date)
         overdue: dict = {}
         if when < start:
-            touched = {txn.account_id, txn.transfer_from_account_id, txn.transfer_to_account_id}
-            if txn.transaction_type != TransactionType.TRANSFER and touched & card_ids:
+            # Only a transfer's transfer_* fields are meaningful: a row edited from a
+            # transfer into a debit/credit may still carry stale ones.
+            if txn.transaction_type != TransactionType.TRANSFER and txn.account_id in card_ids:
                 continue
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
