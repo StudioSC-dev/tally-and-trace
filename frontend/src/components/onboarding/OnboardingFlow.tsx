@@ -37,10 +37,44 @@ function isInFixedLayer(element: HTMLElement) {
   return false
 }
 
+// Nearest ancestor that clips the element, e.g. the desktop nav link strip,
+// which scrolls sideways when the links do not fit (narrow desktop widths, or
+// with the entity switcher shown).
+function clippingAncestor(element: HTMLElement) {
+  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') return node
+  }
+  return null
+}
+
+function isClippedBy(rect: DOMRect, container: HTMLElement) {
+  const box = container.getBoundingClientRect()
+  return rect.left < box.left || rect.right > box.right || rect.top < box.top || rect.bottom > box.bottom
+}
+
+// Scroll only the clipping container, by adjusting its scroll offsets directly.
+// scrollIntoView would also be free to scroll the window, and for elements in
+// a fixed layer browsers disagree on whether it does.
+function revealWithinClippingAncestor(element: HTMLElement) {
+  const container = clippingAncestor(element)
+  if (!container) return
+  const rect = element.getBoundingClientRect()
+  const box = container.getBoundingClientRect()
+  if (rect.left < box.left) container.scrollLeft -= Math.ceil(box.left - rect.left)
+  else if (rect.right > box.right) container.scrollLeft += Math.ceil(rect.right - box.right)
+  if (rect.top < box.top) container.scrollTop -= Math.ceil(box.top - rect.top)
+  else if (rect.bottom > box.bottom) container.scrollTop += Math.ceil(rect.bottom - box.bottom)
+}
+
 // Bring a below-the-fold target to the middle of the screen. Nav items live in
-// fixed bars and are always on screen, so they are left alone.
+// fixed bars and are always on screen, so the page is left alone and only the
+// bar's own clipped strip is scrolled, if needed.
 function scrollTargetIntoView(element: HTMLElement) {
-  if (isInFixedLayer(element)) return
+  if (isInFixedLayer(element)) {
+    revealWithinClippingAncestor(element)
+    return
+  }
   const rect = element.getBoundingClientRect()
   if (rect.top >= CHROME_CLEARANCE && rect.bottom <= window.innerHeight - CHROME_CLEARANCE) return
   element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
@@ -282,6 +316,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     let frame = 0
     let lastRescroll = 0
     const targetIsFixed = targetElement ? isInFixedLayer(targetElement) : true
+    const clipper = targetElement && targetIsFixed ? clippingAncestor(targetElement) : null
     const measure = () => {
       let target: SpotlightRect | null = null
       if (targetElement) {
@@ -292,12 +327,14 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
         } else {
           target = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
           // Content above the target grew after it was scrolled to (a card
-          // finishing its own load) and pushed it off screen. The user cannot
-          // scroll during the tour, so bring it back.
-          const offScreen =
-            rect.bottom <= CHROME_CLEARANCE || rect.top >= window.innerHeight - CHROME_CLEARANCE
+          // finishing its own load) and pushed it off screen, or a nav link sits
+          // under its strip's clip edge. The user cannot scroll during the
+          // tour, so bring it back.
+          const hidden = targetIsFixed
+            ? clipper !== null && isClippedBy(rect, clipper)
+            : rect.bottom <= CHROME_CLEARANCE || rect.top >= window.innerHeight - CHROME_CLEARANCE
           const now = performance.now()
-          if (!targetIsFixed && offScreen && now - lastRescroll >= RESCROLL_INTERVAL_MS) {
+          if (hidden && now - lastRescroll >= RESCROLL_INTERVAL_MS) {
             lastRescroll = now
             scrollTargetIntoView(targetElement)
           }
