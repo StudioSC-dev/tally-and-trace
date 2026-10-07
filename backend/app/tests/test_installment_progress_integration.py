@@ -166,3 +166,110 @@ def test_open_ended_entry_has_no_paid_count(client, db):
     finally:
         db.query(BudgetEntry).filter(BudgetEntry.id == entry_id).delete()
         db.commit()
+
+
+def _create_installment(client, headers, *, offset, remaining, next_occurrence, name):
+    accounts = client.get(f"{API}/accounts/", headers=headers, params={"limit": 1000}).json()["items"]
+    funding = next(a for a in accounts if a["account_type"] != "credit")
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense",
+            "name": name,
+            "amount": 1000.00,
+            "cadence": "monthly",
+            "next_occurrence": next_occurrence.isoformat(),
+            "end_mode": "after_occurrences",
+            "max_occurrences": remaining,
+            "occurrences_paid_offset": offset,
+            "account_id": funding["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def _cleanup(db, entry_id):
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    db.query(Transaction).filter(Transaction.budget_entry_id == entry_id).delete()
+    db.query(BudgetEntry).filter(BudgetEntry.id == entry_id).delete()
+    db.commit()
+
+
+def test_offset_plus_one_materialisation_gives_five_of_six(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=4, remaining=2,
+        next_occurrence=datetime(2026, 8, 1), name="Offset installment 4+1",
+    )
+    try:
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+        resp = client.post(f"{API}/budget-entries/{entry_id}/materialize", json={}, headers=headers)
+        assert resp.status_code in (200, 201), resp.text
+        entry = _fetch(client, headers, entry_id)
+        assert entry["occurrences_paid"] == 5
+        assert entry["max_occurrences"] == 1          # remaining -> total 5 + 1 = 6
+        assert entry["occurrences_paid_offset"] == 4
+        assert entry["is_active"] is True
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_offset_installment_reaches_six_of_six_and_goes_inactive(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Offset installment 5+1",
+    )
+    try:
+        resp = client.post(f"{API}/budget-entries/{entry_id}/materialize", json={}, headers=headers)
+        assert resp.status_code in (200, 201), resp.text
+        resp = client.get(
+            f"{API}/budget-entries/", headers=headers, params={"limit": 200, "is_active": False}
+        )
+        entry = next(e for e in resp.json()["items"] if e["id"] == entry_id)
+        assert entry["occurrences_paid"] == 6
+        assert entry["max_occurrences"] == 0
+        assert entry["is_active"] is False
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_offset_installment_projects_only_remaining_occurrences(client, db):
+    """Imported charges carry no budget_entry_id, so projection must not re-emit them.
+
+    Offset 4 of 6, next_occurrence already after the last imported line, 2 remaining:
+    the timeline shows exactly those 2 future charges and nothing else for this entry.
+    """
+    headers = _auth(client)
+    name = "Offset installment projection"
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=10)
+    entry_id = _create_installment(
+        client, headers, offset=4, remaining=2, next_occurrence=start, name=name,
+    )
+    try:
+        r = client.get(f"{API}/forecast/timeline", headers=headers, params={"days": 365})
+        assert r.status_code == 200, r.text
+        mine = [e for e in r.json()["events"] if name in e.get("name", "")]
+        assert len(mine) == 2, mine
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_negative_offset_is_rejected(client):
+    headers = _auth(client)
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": "Bad offset", "amount": 10,
+            "cadence": "monthly", "next_occurrence": datetime(2026, 8, 1).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": 2,
+            "occurrences_paid_offset": -1,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422

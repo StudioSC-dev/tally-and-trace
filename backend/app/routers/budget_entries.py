@@ -52,6 +52,8 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     Consequence worth knowing: an installment whose payments were entered by hand
     rather than via "Mark paid" reads as 0 paid, because nothing links those
     transactions to the entry. Better to under-claim than to invent a number.
+    ``occurrences_paid_offset`` is the explicit escape hatch: charges paid before
+    import (no linked transaction) are added to the linked count.
 
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
@@ -70,7 +72,11 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
 
     for entry in entries:
         is_installment = entry.end_mode == "after_occurrences"
-        entry.occurrences_paid = counts.get(entry.id, 0) if is_installment else None
+        entry.occurrences_paid = (
+            counts.get(entry.id, 0) + (entry.occurrences_paid_offset or 0)
+            if is_installment
+            else None
+        )
     return entries
 
 
