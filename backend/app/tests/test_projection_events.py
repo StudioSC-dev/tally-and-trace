@@ -105,12 +105,16 @@ def test_card_payment_from_outside_the_scope_moves_no_pool_cash():
     assert ev["legs"] == [_leg(CARD_C, Decimal("3000"), cash=False)]
 
 
-def test_transfer_from_a_card_is_listed_but_not_cash():
-    """A cash advance is repaid through the card, which statements don't model yet."""
+def test_cash_advance_is_cash_on_the_receiving_account_only():
+    """The card's statement bills amount + fee, so the inflow is repaid later."""
     ev = _transfer_event(_txn_transfer(5, 3000, 50, CARD_C, CHECKING_B), CASH, CARDS)
-    assert ev["counts_as_cash"] is False
-    assert [leg["cash"] for leg in ev["legs"]] == [False, False]
-    assert ev["amount"] == Decimal("0")
+    assert ev["counts_as_cash"] is True
+    assert "card_payment" not in ev
+    assert ev["legs"] == [
+        _leg(CARD_C, Decimal("-3050"), cash=False),
+        _leg(CHECKING_B, Decimal("3000"), cash=True),
+    ]
+    assert ev["amount"] == Decimal("3000.00")
 
 
 def test_transfer_out_of_scope_costs_the_pool_amount_and_fee():

@@ -35,6 +35,10 @@ The cash side of a payment is modelled on the paying account by the forecast
 engine (a posted one is in its balance, a planned one is a dated outflow), so
 each peso of a statement leaves cash exactly once: as payment or as payable.
 
+A transfer OUT of the card (a cash advance or balance transfer) is a line item:
+the card is charged the amount plus the transfer fee on the transfer's date, so
+the cash it brought in is repaid through that statement.
+
 All money is Decimal end to end; dates are naive UTC to match the naive
 transaction_date column (see app/core/time.py for the naive/aware split).
 """
@@ -44,6 +48,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Iterator, List, Optional, Tuple
 
 from sqlalchemy import and_, or_
@@ -176,14 +181,22 @@ def _split_card_rows(card_id: int, rows: list) -> Tuple[list, List[Tuple[datetim
 
     Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
     transfer into a debit may keep stale ones). A transfer into the card is a
-    payment; other transfers are not line items.
+    payment; a transfer out of it is a charge of its amount plus fee.
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
     for row in rows:
         if row.transaction_type == TransactionType.TRANSFER:
+            amount = Decimal(str(row.amount))
             if getattr(row, "transfer_to_account_id", None) == card_id:
-                payments.append((row.transaction_date, Decimal(str(row.amount))))
+                payments.append((row.transaction_date, amount))
+            elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
+                fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
+                lines.append(SimpleNamespace(
+                    transaction_date=row.transaction_date,
+                    amount=amount + fee,
+                    transaction_type=TransactionType.DEBIT,
+                ))
             continue
         lines.append(row)
     payments.sort(key=lambda p: p[0])
@@ -222,7 +235,8 @@ def build_statement_payables(
     """Pure core: turn cards + their transactions into dated payable events.
 
     ``transactions_by_card`` holds every row touching each card: its own charges
-    and refunds, and transfers into it (payments). Every cycle from the card's
+    and refunds, transfers out of it (cash advances, billed as charges) and
+    transfers into it (payments). Every cycle from the card's
     first line item onward is balanced and the payments are allocated across them
     (see ``allocate_payments``); a cycle still owing something and due in
     ``[start, end)`` becomes a payable for the remainder.
@@ -293,7 +307,10 @@ def get_statement_payables(
             Transaction.account_id.in_(card_ids),
             and_(
                 Transaction.transaction_type == TransactionType.TRANSFER,
-                Transaction.transfer_to_account_id.in_(card_ids),
+                or_(
+                    Transaction.transfer_to_account_id.in_(card_ids),
+                    Transaction.transfer_from_account_id.in_(card_ids),
+                ),
             ),
         ))
         .all()
@@ -302,7 +319,7 @@ def get_statement_payables(
     for txn in txns:
         touched = {txn.account_id}
         if txn.transaction_type == TransactionType.TRANSFER:
-            touched.add(txn.transfer_to_account_id)
+            touched |= {txn.transfer_to_account_id, txn.transfer_from_account_id}
         for cid in touched & set(card_ids):
             by_card[cid].append(txn)
 

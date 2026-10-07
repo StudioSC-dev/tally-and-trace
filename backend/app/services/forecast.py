@@ -544,21 +544,20 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     the rest of the cash leaves. The card's leg is never cash. Such an event is
     marked ``card_payment``.
 
-    A transfer FROM a credit card (a cash advance or balance transfer) is listed
-    but has no cash leg: statements don't bill it, so nothing would ever repay the
-    cash it adds.
+    A transfer FROM a credit card (a cash advance) is cash coming in on the
+    receiving account: statements bill the advance plus its fee as a charge on the
+    card, so the statement payable repays it later.
     """
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids
-    from_card = src in card_ids
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not from_card))
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids and not from_card))
+        legs.append(_leg(dst, amount, cash=dst in cash_ids))
     if dst in card_ids:
         extra = {**extra, "card_payment": True}
     return _event(
@@ -569,7 +568,6 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
-        counts_as_cash=False if from_card else None,
         transfer_fee=_money(fee),
         **extra,
     )
@@ -595,8 +593,8 @@ def collect_events(
     projection-cash accounts. Unposted transfers into or out of any scoped account
     (projection-cash or credit card) are collected even when the transaction row
     belongs to another scope (a cross-entity transfer), but only their in-scope
-    legs are kept; a card payment is cash on the paying account and a transfer
-    out of a card is never cash (see ``_transfer_event``).
+    legs are kept; a card's own leg is never cash, while the other side of a card
+    payment or cash advance is (see ``_transfer_event``).
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -605,7 +603,8 @@ def collect_events(
     statements); a non-transfer row's card involvement comes from ``account_id``
     alone, never from leftover ``transfer_*`` fields. Overdue card transfers are
     handled like in-window ones: an overdue card payment is still cash leaving at
-    ``start`` (its statement is netted by it, so the cash appears only here).
+    ``start`` (its statement is netted by it, so the cash appears only here), and
+    an overdue cash advance is cash arriving at ``start`` (its statement bills it).
     """
     start = _naive(start)
     end = _naive(end)

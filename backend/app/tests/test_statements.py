@@ -380,3 +380,26 @@ def test_paid_statement_due_before_the_window_is_not_overdue():
 def test_in_window_statement_is_not_marked_overdue():
     (ev,) = build_statement_payables([_card()], {1: [_txn(10, "12000.00")]}, AUG, SEP)
     assert "overdue" not in ev and "original_date" not in ev
+
+
+# ---------------------------------------------------------------------------
+# Cash advances
+# ---------------------------------------------------------------------------
+
+def test_cash_advance_is_billed_with_its_fee_on_the_statement_containing_it():
+    advance = _pay(10, "3000.00", from_account=1, card_id=10)
+    advance.transfer_fee = Decimal("50.00")
+    assert _owed([advance]) == [(datetime(2026, 8, 14), Decimal("-3050.00"))]
+
+
+def test_balance_transfer_charges_the_source_card_and_pays_the_destination():
+    move = _pay(10, "2000.00", from_account=1, card_id=2)
+    other = _card(id=2, name="BPI CC")
+    events = build_statement_payables(
+        [_card(), other],
+        {1: [move], 2: [_txn(5, "2000.00"), move]},
+        AUG, SEP,
+    )
+    assert [(e["name"], e["amount"]) for e in events] == [
+        ("Metrobank CC statement", Decimal("-2000.00")),
+    ]
