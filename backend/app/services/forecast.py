@@ -19,7 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
 from app.core.time import naive_utc_now
-from app.services.statements import get_statement_payables, resolve_cycle_fields
+from app.services.statements import (
+    get_statement_payables, resolve_cycle_fields, statement_due_date,
+)
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
@@ -713,7 +715,8 @@ def collect_events(
             **overdue,
         ))
 
-    projected_charges = _card_entry_charges(db, card_entries, start, end, events)
+    cards = {a.id: a for a in accounts if a.id in billed_ids}
+    projected_charges = _card_entry_charges(db, card_entries, cards, start, end, events)
 
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
@@ -738,15 +741,22 @@ def collect_events(
     return events
 
 
-def _card_entry_charges(db: Session, entries: list, start: datetime, end: datetime,
-                        events: List[dict]) -> dict:
+def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
+                        end: datetime, events: List[dict]) -> dict:
     """Projected statement charges for budget entries scheduled on a credit card.
 
     A card-backed occurrence is not a cash event: it is a charge on the card, so it
     is billed on the statement cycle containing its date and reaches cash inside
     that statement's payable, funded from the card's ``payment_account_id``.
-    Occurrences are taken from ``next_occurrence`` onward (not just from ``start``):
-    one dated before the window is still an unbilled charge on its cycle.
+    ``cards`` maps each entry's ``account_id`` to its card.
+
+    Occurrences are taken from ``next_occurrence`` onward (not just from ``start``),
+    but one dated before ``start`` is billed only while its statement is not yet
+    due: due on or after ``start``, it is still an unbilled charge on that cycle.
+    A lapsed occurrence whose statement fell due before ``start`` is dropped, as a
+    cash entry's occurrences before ``start`` are: nothing advances
+    ``next_occurrence`` except materialising, so billing every occurrence since a
+    stale one would invent overdue statements nobody recorded.
 
     An occurrence whose linked transaction already exists is suppressed: a
     transaction with this ``budget_entry_id`` dated the same calendar day stands in
@@ -770,11 +780,14 @@ def _card_entry_charges(db: Session, entries: list, start: datetime, end: dateti
     for entry in entries:
         income = entry.entry_type == BudgetEntryType.INCOME
         amount = Decimal(str(entry.amount))
+        card = cards[entry.account_id]
         for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
             key = (entry.id, occ.date())
             if linked[key]:
                 linked[key] -= 1
                 continue
+            if occ < start and statement_due_date(card, occ.date()) < start:
+                continue  # lapsed: its statement fell due before the window
             charges.setdefault(entry.account_id, []).append(SimpleNamespace(
                 transaction_date=occ,
                 amount=amount,

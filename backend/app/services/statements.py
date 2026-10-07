@@ -130,6 +130,16 @@ def iter_cycles_from(card: Account, first: date, end: datetime,
         y, m = _month_step(y, m, 1)
 
 
+def statement_due_date(card: Account, day: date) -> Optional[datetime]:
+    """Due date of the card's statement whose cycle contains calendar day ``day``.
+
+    ``None`` for a card without cycle settings.
+    """
+    # end=datetime.min stops the walk right after the cycle containing ``day``.
+    cycle = next(iter_cycles_from(card, day, datetime.min, through=day), None)
+    return cycle["due"] if cycle else None
+
+
 def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[Decimal]:
     """What each statement still owes after the payments, oldest statement first.
 

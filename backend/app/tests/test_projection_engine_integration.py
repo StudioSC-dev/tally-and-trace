@@ -982,6 +982,32 @@ def test_card_installment_dated_before_the_window_is_still_billed(db, user):
     assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-2000.00"))]
 
 
+def test_lapsed_card_schedule_does_not_backfill_overdue_statements(db, user):
+    """A monthly card subscription whose next_occurrence was left on 3 Mar. Viewed on
+    1 Aug, March to June are on statements due before the window (the last on
+    15 Jul) and are dropped; 3 Jul is on the 24 Jul statement, due 14 Aug, so it is
+    still billed, and 3 Aug lands on the 24 Aug statement, due 14 Sep."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import collect_events, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _entry(db, user, "Card subscription", BudgetEntryType.EXPENSE, "300.00",
+           datetime(2026, 3, 3), account=card)
+
+    r = project_running_balance(db, user.id, days=45, reference=datetime(2026, 8, 1))
+    assert _cash_events(r) == [
+        ("2026-08-14", "Card C statement", Decimal("-300.00")),
+        ("2026-09-14", "Card C statement", Decimal("-300.00")),
+    ]
+    assert r["closing_balance"] == Decimal("9400.00")
+    events = collect_events(db, datetime(2026, 8, 1), datetime(2026, 9, 15), user_id=user.id)
+    assert not [e for e in events if e.get("overdue")]
+
+
 def _statements_by_window(db, user, days_list):
     from app.services.forecast import project_running_balance
 
