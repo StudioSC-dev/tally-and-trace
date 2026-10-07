@@ -70,6 +70,15 @@ def _monthly_equivalent(amount: float, cadence: RecurrenceFrequency) -> float:
 # Public API
 # ---------------------------------------------------------------------------
 
+def is_projection_cash(account) -> bool:
+    """True when an account's balance is money on hand for projection purposes.
+
+    Credit-card balances are money owed, not cash: card spending reaches cash only
+    when the statement is paid (modelled as dated statement payables).
+    """
+    return account.account_type != AccountType.CREDIT
+
+
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
@@ -100,9 +109,9 @@ def project_cashflow(
     period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     accounts = get_account_balances(db, user_id, entity_id)
-    # Exclude credit-card accounts — their balance is money owed, not cash on hand.
+    # Only projection-cash accounts count (see is_projection_cash).
     # (This is an advisory monthly projection, so float is fine here.)
-    opening = sum(float(a.balance) for a in accounts if a.account_type != AccountType.CREDIT)
+    opening = sum(float(a.balance) for a in accounts if is_projection_cash(a))
 
     # Active budget entries for the entity/user
     be_query = db.query(BudgetEntry).filter(
@@ -469,10 +478,10 @@ def project_running_balance(
     end = start + timedelta(days=days)
 
     accounts = get_account_balances(db, user_id, entity_id)
-    # Available cash EXCLUDES credit-card accounts — those balances are money owed,
-    # not money on hand. (Card payments show up as payable events instead.)
-    asset_accounts = [a for a in accounts if a.account_type != AccountType.CREDIT]
-    credit_account_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
+    # Available cash is projection-cash accounts only (see is_projection_cash).
+    # (Card payments show up as payable events instead.)
+    asset_accounts = [a for a in accounts if is_projection_cash(a)]
+    credit_account_ids = {a.id for a in accounts if not is_projection_cash(a)}
     opening = sum((Decimal(str(a.balance)) for a in asset_accounts), Decimal("0"))
     opening_by_account = {a.id: Decimal(str(a.balance)) for a in asset_accounts}
     account_names = {a.id: a.name for a in accounts}
