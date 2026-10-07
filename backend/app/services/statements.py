@@ -199,7 +199,7 @@ def _split_card_rows(card_id: int, rows: list) -> Tuple[list, List[Tuple[datetim
                 ))
             continue
         lines.append(row)
-    payments.sort(key=lambda p: p[0])
+    payments.sort(key=lambda p: p[0].date())
     return lines, payments
 
 
@@ -253,7 +253,8 @@ def build_statement_payables(
         lines, payments = _split_card_rows(card.id, transactions_by_card.get(card.id, []))
         if not lines:
             continue  # no charges -> nothing owed, whatever was paid in
-        first = min(row.transaction_date for row in lines).date()
+        # Calendar dates: rows may mix naive and aware datetimes.
+        first = min(row.transaction_date.date() for row in lines)
         cycles = list(iter_cycles_from(card, first, end))
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
         remaining = allocate_payments(balances, [amount for _, amount in payments])
@@ -285,8 +286,14 @@ def get_statement_payables(
     entity_id: Optional[int],
     start: datetime,
     end: datetime,
+    projected_charges: Optional[dict] = None,
 ) -> List[dict]:
-    """DB wrapper: load the user's credit cards and build their statement payables."""
+    """DB wrapper: load the user's credit cards and build their statement payables.
+
+    ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
+    transaction yet (budget entries scheduled on a card); each is billed like a
+    transaction on its date.
+    """
     card_query = db.query(Account).filter(
         scope_criterion(Account, user_id, entity_id),
         Account.is_active.is_(True),
@@ -322,5 +329,8 @@ def get_statement_payables(
             touched |= {txn.transfer_to_account_id, txn.transfer_from_account_id}
         for cid in touched & set(card_ids):
             by_card[cid].append(txn)
+    for cid, lines in (projected_charges or {}).items():
+        if cid in by_card:
+            by_card[cid].extend(lines)
 
     return build_statement_payables(cards, by_card, start, end)

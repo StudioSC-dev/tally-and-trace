@@ -8,8 +8,10 @@ unposted transactions, this service generates a forward-looking timeline.
 from __future__ import annotations
 
 from calendar import monthrange
+from collections import Counter
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
 from sqlalchemy import and_, or_
@@ -585,7 +587,9 @@ def collect_events(
     """Every dated event in ``[start, end)``, each with per-account legs.
 
     Sources: active budget-entry occurrences, unposted transactions, and one dated
-    payable per credit-card statement cycle due in the window. Events that move no
+    payable per credit-card statement cycle due in the window. Occurrences of a
+    budget entry scheduled on a credit card are charges on that card's statement,
+    not cash events (see ``_card_entry_charges``). Events that move no
     projection cash are included (``counts_as_cash`` False) so listings can show
     them; cash views must filter on ``counts_as_cash``.
 
@@ -619,7 +623,11 @@ def collect_events(
         scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
+    card_entries = []
     for entry in be_query.all():
+        if entry.account_id in card_ids:
+            card_entries.append(entry)
+            continue
         sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
         for occ in iter_occurrences(entry, start, end):
             events.append(_event(
@@ -680,9 +688,13 @@ def collect_events(
             **overdue,
         ))
 
+    projected_charges = _card_entry_charges(db, card_entries, start, end, events)
+
     # Each credit card contributes one dated payable per billing cycle due in the
-    # window, derived from its own transactions (see services/statements.py).
-    for p in get_statement_payables(db, user_id, entity_id, start, end):
+    # window, derived from its own transactions (see services/statements.py) and
+    # the projected charges of budget entries scheduled on it.
+    for p in get_statement_payables(db, user_id, entity_id, start, end,
+                                    projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
@@ -699,6 +711,58 @@ def collect_events(
         ))
 
     return events
+
+
+def _card_entry_charges(db: Session, entries: list, start: datetime, end: datetime,
+                        events: List[dict]) -> dict:
+    """Projected statement charges for budget entries scheduled on a credit card.
+
+    A card-backed occurrence is not a cash event: it is a charge on the card, so it
+    is billed on the statement cycle containing its date and reaches cash inside
+    that statement's payable, funded from the card's ``payment_account_id``.
+    Occurrences are taken from ``next_occurrence`` onward (not just from ``start``):
+    one dated before the window is still an unbilled charge on its cycle.
+
+    An occurrence whose linked transaction already exists is suppressed: a
+    transaction with this ``budget_entry_id`` dated the same calendar day stands in
+    for it (each transaction suppresses at most one occurrence), since that
+    transaction is itself a line item on the card.
+
+    In-window occurrences are appended to ``events`` as non-cash listings, like
+    unposted card charges. Returns ``{card_id: [line items]}``.
+    """
+    if not entries:
+        return {}
+    linked = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_([e.id for e in entries]))
+    )
+    charges: dict = {}
+    for entry in entries:
+        income = entry.entry_type == BudgetEntryType.INCOME
+        amount = Decimal(str(entry.amount))
+        for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue
+            charges.setdefault(entry.account_id, []).append(SimpleNamespace(
+                transaction_date=occ,
+                amount=amount,
+                transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
+            ))
+            if occ >= start:
+                events.append(_event(
+                    date=occ,
+                    name=entry.name,
+                    type=entry.entry_type.value,
+                    source="budget_entry",
+                    source_id=entry.id,
+                    face_amount=entry.amount,
+                    legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
+                ))
+    return charges
 
 
 def _route_legs(
