@@ -662,8 +662,7 @@ def card_setup(db, user):
     from app.models.transaction import TransactionType
 
     checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
-    # Stored balance agrees with the posted charge (a card's balance is negative
-    # while owed), so the incomplete-history guard leaves its statements alone.
+    # A card's stored balance is negative while owed; this one matches the charge.
     card = _account(db, user, "Card C", AccountType.CREDIT, "-12000.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
@@ -868,30 +867,6 @@ def test_unpaid_statement_due_before_the_window_is_overdue_on_the_start_in_every
         db, user.id, days=10, reference=reference)] == [("2026-08-20", 8000.0)]
     assert [(i["due_date"], i["source"], float(i["amount"])) for i in get_upcoming_items(
         db, user.id, days=10, reference=reference)] == [("2026-08-20", "statement", 8000.0)]
-
-
-def test_statements_missing_from_the_ledger_are_capped_by_the_stored_balance(db, user):
-    """June and July charges posted, June's payment never entered: the stored
-    balance owes only July's 12,000, so June's 3,000 is not overdue anywhere."""
-    from app.models.account import AccountType
-    from app.models.transaction import TransactionType
-    from app.services.forecast import get_payables, project_cashflow, project_running_balance
-
-    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
-    card = _account(db, user, "Card C", AccountType.CREDIT, "-12000.00",
-                    billing_cycle_start=24, days_until_due_date=21,
-                    payment_account_id=checking.id)
-    _txn(db, user, card, TransactionType.DEBIT, "3000.00", datetime(2026, 6, 10), is_posted=True)
-    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 10), is_posted=True)
-
-    reference = datetime(2026, 8, 1)
-    r = project_running_balance(db, user.id, days=30, reference=reference)
-    assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-12000.00"))]
-    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
-    assert aug["statement_payables"] == 12000.0
-    assert aug["closing_balance"] == 38000.0 == float(r["closing_balance"])
-    assert [(p["due_date"], p["amount"]) for p in get_payables(
-        db, user.id, days=30, reference=reference)] == [("2026-08-14", 12000.0)]
 
 
 # ---------------------------------------------------------------------------
@@ -1204,16 +1179,17 @@ def test_snapshot_returns_available_cash_closings_and_payables(db, user, client)
     assert all(c["overflow_moves"] == [] for c in closings)
 
 
-def test_planned_payment_of_debt_settled_off_the_books_is_the_only_cash(db, user):
-    """July's 3,000 was paid but never entered; the stored balance owes only the
-    28 Jul 500 on the open cycle, which the planned 10 Sep payment settles. That
-    500 is the only cash leaving, in the timeline and the monthly view alike."""
+def test_planned_payment_pays_the_oldest_unpaid_statement_and_each_peso_leaves_once(db, user):
+    """July's 3,000 statement has no recorded payment, so it is owed. The planned
+    10 Sep payment of 500 pays it down oldest first (2,500 left, due 14 Aug), and
+    the 28 Jul 500 on the next statement is still payable on 14 Sep: 3,500 of cash
+    in all, the same in the timeline and the monthly view."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
     from app.services.forecast import get_payables, project_cashflow, project_running_balance
 
     checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
-    card = _account(db, user, "Card C", AccountType.CREDIT, "-500.00",
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-3500.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
     _txn(db, user, card, TransactionType.DEBIT, "3000.00", datetime(2026, 7, 10), is_posted=True)
@@ -1225,9 +1201,14 @@ def test_planned_payment_of_debt_settled_off_the_books_is_the_only_cash(db, user
     window_end = datetime.fromisoformat(periods[-1]["period_end"])
     r = project_running_balance(db, user.id, days=(window_end - reference).days,
                                 reference=reference)
-    assert _cash_events(r) == [("2026-09-10", "Card payment", Decimal("-500.00"))]
-    assert r["closing_balance"] == Decimal("49500.00")
-    assert [p["statement_payables"] for p in periods] == [0.0, 500.0]
-    assert periods[-1]["closing_balance"] == 49500.0
+    assert _cash_events(r) == [
+        ("2026-08-14", "Card C statement", Decimal("-2500.00")),
+        ("2026-09-10", "Card payment", Decimal("-500.00")),
+        ("2026-09-14", "Card C statement", Decimal("-500.00")),
+    ]
+    assert r["closing_balance"] == Decimal("46500.00")
+    assert [p["statement_payables"] for p in periods] == [2500.0, 1000.0]
+    assert periods[-1]["closing_balance"] == 46500.0
     assert [(p["due_date"], p["amount"]) for p in get_payables(
-        db, user.id, days=60, reference=reference)] == [("2026-09-10", 500.0)]
+        db, user.id, days=60, reference=reference)] == [
+        ("2026-08-14", 2500.0), ("2026-09-10", 500.0), ("2026-09-14", 500.0)]

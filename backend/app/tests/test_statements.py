@@ -422,118 +422,8 @@ def test_balance_transfer_charges_the_source_card_and_pays_the_destination():
 
 
 # ---------------------------------------------------------------------------
-# Incomplete-history guard
-#
-# Posted charges of 1,000 (May), 2,000 (Jun) and 3,000 (Jul) with no payments
-# recorded. The stored balance (negative = owed) says what the card really owes.
+# Payments from a card without statements
 # ---------------------------------------------------------------------------
-
-def _posted(day, amount, month, kind=TransactionType.DEBIT):
-    row = _txn(day, amount, kind=kind, month=month)
-    row.is_posted = True
-    return row
-
-
-HISTORY = [_posted(10, "1000.00", 5), _posted(10, "2000.00", 6), _posted(10, "3000.00", 7)]
-
-
-def _guarded(balance, rows, start=AUG, end=SEP):
-    events = build_statement_payables([_card(balance=Decimal(balance))], {1: rows}, start, end)
-    return [(e["date"], e["amount"], e.get("overdue", False)) for e in events]
-
-
-def test_unrecorded_payments_leave_only_what_the_stored_balance_owes(caplog):
-    """Only July's 3,000 is really owed: May and June are not phantom-overdue."""
-    with caplog.at_level("WARNING", logger="app.services.statements"):
-        assert _guarded("-3000.00", HISTORY) == [
-            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-        ]
-    assert "Card 1" in caplog.text
-
-
-def test_unrecorded_history_is_trimmed_from_the_oldest_statements_first():
-    """4,000 owed of 6,000 charged: May (1,000) and half of June are cut."""
-    assert _guarded("-4000.00", HISTORY) == [
-        (AUG, Decimal("-1000.00"), True),
-        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-    ]
-
-
-def test_open_cycle_charges_are_never_trimmed():
-    """July's statement was paid off the books; the 28 Jul charge is on the open
-    24 Aug cycle and the stored 500 is exactly that, so only it stays owed."""
-    rows = [_posted(10, "3000.00", 7), _posted(28, "500.00", 7)]
-    assert _guarded("-500.00", rows, end=datetime(2026, 10, 1)) == [
-        (datetime(2026, 9, 14), Decimal("-500.00"), False),
-    ]
-
-
-def test_complete_history_is_untouched_by_the_guard(caplog):
-    """May's payment is recorded: the ledger owes 5,000, exactly the stored balance."""
-    payment = _pay(14, "1000.00", month=6)
-    payment.is_posted = True
-    with caplog.at_level("WARNING", logger="app.services.statements"):
-        assert _guarded("-5000.00", HISTORY + [payment]) == [
-            (AUG, Decimal("-2000.00"), True),
-            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-        ]
-    assert caplog.text == ""
-
-
-def test_stored_balance_owing_more_than_the_ledger_adds_no_debt():
-    assert _guarded("-9000.00", HISTORY) == [
-        (AUG, Decimal("-1000.00"), True),
-        (AUG, Decimal("-2000.00"), True),
-        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-    ]
-
-
-def test_unposted_rows_do_not_count_against_the_stored_balance():
-    """A planned charge is not in the stored balance, so it is not trimmed."""
-    assert _guarded("0.00", [_txn(10, "3000.00")]) == [
-        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-    ]
-
-
-def test_planned_payment_is_not_spent_on_closed_debt_the_stored_balance_says_is_paid():
-    """July's 3,000 was paid off the books; the stored 500 is the 28 Jul charge on
-    the open cycle. The planned 10 Sep payment of 500 settles that charge, so no
-    statement is payable: 500 of cash in all, not the payment plus a 500 payable."""
-    rows = [_posted(10, "3000.00", 7), _posted(28, "500.00", 7), _pay(10, "500.00", month=9)]
-    assert _guarded("-500.00", rows, end=datetime(2026, 10, 1)) == []
-
-
-def test_opening_balance_missing_from_the_ledger_absorbs_payments_first():
-    """A 5,000 opening balance was never entered as charges; the posted 5,000
-    payment settled it, so July's 1,000 charge is still owed (stored -1,000)."""
-    payment = _pay(1, "5000.00", month=6)
-    payment.is_posted = True
-    rows = [payment, _posted(10, "1000.00", 7)]
-    assert _guarded("-1000.00", rows) == [
-        (datetime(2026, 8, 14), Decimal("-1000.00"), False),
-    ]
-
-
-def test_missing_opening_balance_is_never_billed_itself():
-    """Stored -1,500 against a ledger owing 500: the 1,000 opening balance is not a
-    payable, it only takes the planned 1,000 payment before July's charge does."""
-    rows = [_posted(10, "500.00", 7), _pay(1, "1000.00", month=8)]
-    assert _guarded("-1500.00", rows) == [
-        (datetime(2026, 8, 14), Decimal("-500.00"), False),
-    ]
-
-
-def test_positive_stored_balance_against_posted_debt_trims_nothing(caplog):
-    """+3,000 stored while the posted rows owe 6,000 is most likely a sign entered
-    the wrong way round, not 9,000 of unrecorded payments: real debt stays owed."""
-    with caplog.at_level("WARNING", logger="app.services.statements"):
-        assert _guarded("3000.00", HISTORY) == [
-            (AUG, Decimal("-1000.00"), True),
-            (AUG, Decimal("-2000.00"), True),
-            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
-        ]
-    assert "trimmed" not in caplog.text
-
 
 def _from_unbilled_card(posted=False):
     """12,000 charged on card 1, then 'paid' by a transfer from card 2, which has
@@ -541,7 +431,7 @@ def _from_unbilled_card(posted=False):
     unbilled = _card(id=2, name="Store card", billing_cycle_start=None, due_date=None)
     move = _pay(10, "12000.00", month=8, from_account=2)
     move.is_posted = posted
-    return unbilled, [_posted(10, "12000.00", 7), move]
+    return unbilled, [_txn(10, "12000.00"), move]
 
 
 def test_payment_from_a_card_without_statements_does_not_net_the_billed_card():
@@ -552,12 +442,9 @@ def test_payment_from_a_card_without_statements_does_not_net_the_billed_card():
     ]
 
 
-def test_posted_payment_from_a_card_without_statements_still_matches_the_stored_balance():
-    """Posting raised card 1's stored balance to 0, and the ledger agrees: the
-    guard leaves the statement alone, so the 12,000 is still billed."""
+def test_posted_payment_from_a_card_without_statements_does_not_net_the_billed_card():
     unbilled, rows = _from_unbilled_card(posted=True)
-    events = build_statement_payables(
-        [_card(balance=Decimal("0.00")), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
+    events = build_statement_payables([_card(), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
     assert [(e["date"], e["amount"]) for e in events] == [
         (datetime(2026, 8, 14), Decimal("-12000.00")),
     ]
@@ -573,9 +460,9 @@ def test_posted_payment_from_a_card_without_statements_still_matches_the_stored_
 def test_refund_in_a_cycle_due_after_the_window_still_pays_the_older_statement():
     """1,000 charged 10 Jul, refunded 28 Jul (the 24 Aug statement, due 14 Sep):
     the 14 Aug statement is settled even in a window ending before 14 Sep."""
-    rows = [_posted(10, "1000.00", 7), _posted(28, "1000.00", 7, kind=TransactionType.CREDIT)]
-    assert _guarded("0.00", rows, AUG, SEP) == []
-    assert _guarded("0.00", rows, AUG, datetime(2026, 10, 1)) == []
+    rows = [_txn(10, "1000.00"), _txn(28, "1000.00", kind=TransactionType.CREDIT)]
+    assert build_statement_payables([_card()], {1: rows}, AUG, SEP) == []
+    assert build_statement_payables([_card()], {1: rows}, AUG, datetime(2026, 10, 1)) == []
 
 
 def _advance(day, amount, fee, month):

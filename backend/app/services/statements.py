@@ -46,7 +46,6 @@ transaction_date column (see app/core/time.py for the naive/aware split).
 
 from __future__ import annotations
 
-import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -60,8 +59,6 @@ from app.core.entity_context import scope_criterion
 
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_DAYS_UNTIL_DUE = 21
 
@@ -195,51 +192,6 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
     return lines, payments
 
 
-def _posted_owed(card_id: int, rows: list) -> Decimal:
-    """What a card's POSTED rows say it owes, net of posted payments.
-
-    Mirrors how posting moves an account's stored ``balance`` (routers/
-    transactions.py): a debit lowers it, a credit raises it, a transfer lowers the
-    source by amount + fee and raises the destination by the amount. A card's
-    balance is therefore negative while it is owed, and this is its negation over
-    the posted rows alone. Unposted rows and projected charges never touch the
-    stored balance, so they are left out.
-    """
-    owed = Decimal("0")
-    for row in rows:
-        if not getattr(row, "is_posted", False):
-            continue
-        amount = Decimal(str(row.amount))
-        if row.transaction_type == TransactionType.TRANSFER:
-            if getattr(row, "transfer_to_account_id", None) == card_id:
-                owed -= amount
-            elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
-                owed += amount + Decimal(str(getattr(row, "transfer_fee", None) or 0))
-        elif row.transaction_type == TransactionType.DEBIT:
-            owed += amount
-        elif row.transaction_type == TransactionType.CREDIT:
-            owed -= amount
-    return owed
-
-
-def _trim_closed(cycles: List[dict], balances: List[Decimal], start: datetime,
-                 excess: Decimal) -> Tuple[List[Decimal], Decimal]:
-    """Cut ``excess`` from closed cycles' positive balances, oldest first.
-
-    Returns the cut balances and the amount cut. Runs before payments are
-    allocated, so no payment is ever spent on debt the cut removes.
-    """
-    cut_balances = list(balances)
-    left = excess
-    for i, cycle in enumerate(cycles):
-        if left <= 0 or cycle["close"].date() >= start.date():
-            break
-        cut = min(left, max(cut_balances[i], Decimal("0")))
-        cut_balances[i] -= cut
-        left -= cut
-    return cut_balances, excess - left
-
-
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime) -> Decimal:
     """Sum a card's charges over the calendar days ``(window_start, close]``.
 
@@ -290,30 +242,6 @@ def build_statement_payables(
     like an overdue unposted transaction, it is emitted dated ``start`` with
     ``overdue`` True and its due date as ``original_date``.
 
-    Incomplete-history guard: history the ledger lacks (payments never entered as
-    transfers, an opening balance never entered as charges) would otherwise surface
-    as phantom unpaid statements. A card's stored ``balance`` (negative = owed) is
-    the authority on what it owes. When its posted rows say it owes MORE than that
-    (``_posted_owed`` > -balance), the gap is debt the stored balance says was
-    settled, so it is cut from the balances of CLOSED cycles (closing day before
-    ``start``), oldest first, since recent statements are the more reliable ones.
-    The cut happens BEFORE payments are allocated: the gap acts as an unrecorded
-    payment restricted to closed cycles, spent first, so a recorded or planned
-    payment is never consumed by debt the stored balance says is already settled
-    (which would leave the debt it was meant for owed a second time). Open cycles
-    are never cut. When the stored balance owes MORE than the posted rows (gap < 0,
-    e.g. an opening balance never entered as charges), the difference is a
-    synthetic opening statement placed before the oldest cycle: payments and
-    credits pay it first, oldest first as usual, but it is never emitted as a
-    payable or overdue event, so the guard never adds debt of its own. A card
-    whose history is complete has no gap and is untouched. A card without a
-    ``balance`` skips the guard.
-
-    The guard depends on the stored balance following the negative-when-owed
-    convention. A POSITIVE stored balance while the posted rows say the card owes
-    something contradicts itself (most likely a sign entered the wrong way round),
-    so nothing is trimmed then: trimming would erase real debt.
-
     Returns timeline events shaped like the ones ``build_timeline`` /
     ``route_accounts`` already consume (negative amount = outflow).
     """
@@ -329,30 +257,7 @@ def build_statement_payables(
         last = max(row.transaction_date.date() for row in lines)
         cycles = list(iter_cycles_from(card, first, end, through=last))
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
-        owing = balances
-        opening = Decimal("0")
-        stored = getattr(card, "balance", None)
-        if stored is not None:
-            rows = transactions_by_card.get(card.id, [])
-            posted_owed = _posted_owed(card.id, rows)
-            stored = Decimal(str(stored))
-            gap = posted_owed + stored
-            if stored > 0 and posted_owed > 0:
-                logger.warning(
-                    "Card %s: stored balance %s is positive while its posted rows owe %s; "
-                    "not trimming statements (check the balance's sign)",
-                    card.id, stored, posted_owed)
-            elif gap > 0:
-                owing, trimmed = _trim_closed(cycles, balances, start, gap)
-                if trimmed > 0:
-                    logger.warning(
-                        "Card %s: trimmed %s from closed statements not reflected in its "
-                        "stored balance (incomplete history)", card.id, trimmed)
-            elif gap < 0:
-                opening = -gap
-        # The opening statement (0 when there is none) only absorbs payments.
-        remaining = allocate_payments([opening, *owing],
-                                      [amount for _, amount in payments])[1:]
+        remaining = allocate_payments(balances, [amount for _, amount in payments])
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0 or cycle["due"] >= end:
                 continue  # nothing owed, or due after the window
