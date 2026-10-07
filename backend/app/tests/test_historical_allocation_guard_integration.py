@@ -7,7 +7,7 @@ leave the period dates and the spent total alone; only deltas dated inside the a
 period count.
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -280,3 +280,27 @@ def test_a_missing_period_end_is_derived_not_re_anchored(client, db, october, no
 
     _charge(client, october, OCT_DAY, amount=80.0)
     _assert_october(db, october, OCT_SPENT + Decimal("80.00"))
+
+
+def _delete(client, ctx, txn_id):
+    resp = client.delete(f"{API}/transactions/{txn_id}", headers=ctx["headers"])
+    assert resp.status_code == 200, resp.text
+    ctx["txn_ids"].remove(txn_id)
+
+
+def test_an_offset_date_before_the_period_in_utc_is_excluded(client, db, october, now_is):
+    """2026-10-01T00:30+08:00 is 2026-09-30 16:30 UTC: historical on create and on delete."""
+    when = datetime(2026, 10, 1, 0, 30, tzinfo=timezone(timedelta(hours=8)))
+    txn_id = _charge(client, october, when)
+    _assert_october(db, october, OCT_SPENT)
+    _delete(client, october, txn_id)
+    _assert_october(db, october, OCT_SPENT)
+
+
+def test_an_offset_date_inside_the_period_in_utc_counts(client, db, october, now_is):
+    """2026-09-30T23:30-04:00 is 2026-10-01 03:30 UTC: counted on create, reversed on delete."""
+    when = datetime(2026, 9, 30, 23, 30, tzinfo=timezone(timedelta(hours=-4)))
+    txn_id = _charge(client, october, when)
+    _assert_october(db, october, OCT_SPENT + Decimal("120.00"))
+    _delete(client, october, txn_id)
+    _assert_october(db, october, OCT_SPENT)

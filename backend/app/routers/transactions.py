@@ -20,7 +20,7 @@ from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
 from app.core.time import naive_utc_now, utc_now
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from calendar import monthrange
 from decimal import Decimal
 import os
@@ -35,9 +35,13 @@ def _D(value) -> Decimal:
 
 
 def _normalize_reference(reference: Optional[datetime]) -> datetime:
-    """Naive UTC, to match the naive allocations.period_start/period_end columns."""
+    """Naive UTC, to match the naive allocations.period_start/period_end columns.
+
+    Aware values are converted to UTC first, as Postgres does when it stores them, so a
+    row is classified the same way on create as on a later edit or delete.
+    """
     value = reference or naive_utc_now()
-    return value.replace(tzinfo=None) if value.tzinfo else value
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
 
 
 def _start_of_period(reference: datetime, frequency: BudgetPeriodFrequency) -> datetime:
