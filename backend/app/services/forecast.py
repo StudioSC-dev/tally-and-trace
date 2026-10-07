@@ -584,15 +584,18 @@ def collect_events(
     them; cash views must filter on ``counts_as_cash``.
 
     A transaction leg is cash only when its account is one of the scoped
-    projection-cash accounts. Unposted transfers into or out of a scoped
-    projection-cash account are collected even when the transaction row belongs to
-    another scope (a cross-entity transfer), but only their in-scope legs count.
+    projection-cash accounts. Unposted transfers into or out of any scoped account
+    (projection-cash or credit card) are collected even when the transaction row
+    belongs to another scope (a cross-entity transfer), but only their in-scope
+    legs are kept, and a transfer touching a card is never cash (see
+    ``_transfer_event``).
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
-    Overdue items touching a credit card are skipped (charges reach cash through
-    their statements, and card transfers are not cash yet).
+    Overdue charges on a credit card are skipped (they reach cash through their
+    statements). Overdue card transfers are listed like in-window ones, as non-cash
+    events: statements ignore transfers, so listing them counts nothing twice.
     """
     start = _naive(start)
     end = _naive(end)
@@ -622,12 +625,13 @@ def collect_events(
             ))
 
     in_scope = scope_criterion(Transaction, user_id, entity_id)
-    if cash_ids:
+    scoped_ids = cash_ids | card_ids
+    if scoped_ids:
         in_scope = or_(in_scope, and_(
             Transaction.transaction_type == TransactionType.TRANSFER,
             or_(
-                Transaction.transfer_to_account_id.in_(cash_ids),
-                Transaction.transfer_from_account_id.in_(cash_ids),
+                Transaction.transfer_to_account_id.in_(scoped_ids),
+                Transaction.transfer_from_account_id.in_(scoped_ids),
             ),
         ))
     txn_query = db.query(Transaction).filter(
@@ -640,7 +644,7 @@ def collect_events(
         overdue: dict = {}
         if when < start:
             touched = {txn.account_id, txn.transfer_from_account_id, txn.transfer_to_account_id}
-            if touched & card_ids:
+            if txn.transaction_type != TransactionType.TRANSFER and touched & card_ids:
                 continue
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
