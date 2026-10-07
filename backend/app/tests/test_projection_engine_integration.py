@@ -1202,3 +1202,32 @@ def test_snapshot_returns_available_cash_closings_and_payables(db, user, client)
     assert final == {"Checking B": 3800.0, "Savings A": 1000.0}  # no card, no overflow pull
     assert closings[-1]["unassigned_closing"] == 0.0
     assert all(c["overflow_moves"] == [] for c in closings)
+
+
+def test_planned_payment_of_debt_settled_off_the_books_is_the_only_cash(db, user):
+    """July's 3,000 was paid but never entered; the stored balance owes only the
+    28 Jul 500 on the open cycle, which the planned 10 Sep payment settles. That
+    500 is the only cash leaving, in the timeline and the monthly view alike."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-500.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "3000.00", datetime(2026, 7, 10), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "500.00", datetime(2026, 7, 28), is_posted=True)
+    _pay_card(db, user, checking, card, "500.00", datetime(2026, 9, 10))
+
+    reference = datetime(2026, 8, 1)
+    periods = project_cashflow(db, user.id, months=2, reference=reference)
+    window_end = datetime.fromisoformat(periods[-1]["period_end"])
+    r = project_running_balance(db, user.id, days=(window_end - reference).days,
+                                reference=reference)
+    assert _cash_events(r) == [("2026-09-10", "Card payment", Decimal("-500.00"))]
+    assert r["closing_balance"] == Decimal("49500.00")
+    assert [p["statement_payables"] for p in periods] == [0.0, 500.0]
+    assert periods[-1]["closing_balance"] == 49500.0
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=60, reference=reference)] == [("2026-09-10", 500.0)]

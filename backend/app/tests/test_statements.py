@@ -493,3 +493,11 @@ def test_unposted_rows_do_not_count_against_the_stored_balance():
     assert _guarded("0.00", [_txn(10, "3000.00")]) == [
         (datetime(2026, 8, 14), Decimal("-3000.00"), False),
     ]
+
+
+def test_planned_payment_is_not_spent_on_closed_debt_the_stored_balance_says_is_paid():
+    """July's 3,000 was paid off the books; the stored 500 is the 28 Jul charge on
+    the open cycle. The planned 10 Sep payment of 500 settles that charge, so no
+    statement is payable: 500 of cash in all, not the payment plus a 500 payable."""
+    rows = [_posted(10, "3000.00", 7), _posted(28, "500.00", 7), _pay(10, "500.00", month=9)]
+    assert _guarded("-500.00", rows, end=datetime(2026, 10, 1)) == []

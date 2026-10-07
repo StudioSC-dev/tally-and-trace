@@ -208,17 +208,22 @@ def _posted_owed(card_id: int, rows: list) -> Decimal:
     return owed
 
 
-def _trim_closed(cycles: List[dict], remaining: List[Decimal], start: datetime,
-                 excess: Decimal) -> Decimal:
-    """Cut ``excess`` from closed cycles' remainders, oldest first; return the cut."""
+def _trim_closed(cycles: List[dict], balances: List[Decimal], start: datetime,
+                 excess: Decimal) -> Tuple[List[Decimal], Decimal]:
+    """Cut ``excess`` from closed cycles' positive balances, oldest first.
+
+    Returns the cut balances and the amount cut. Runs before payments are
+    allocated, so no payment is ever spent on debt the cut removes.
+    """
+    cut_balances = list(balances)
     left = excess
     for i, cycle in enumerate(cycles):
         if left <= 0 or cycle["close"].date() >= start.date():
             break
-        cut = min(left, remaining[i])
-        remaining[i] -= cut
+        cut = min(left, max(cut_balances[i], Decimal("0")))
+        cut_balances[i] -= cut
         left -= cut
-    return excess - left
+    return cut_balances, excess - left
 
 
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime) -> Decimal:
@@ -268,13 +273,15 @@ def build_statement_payables(
     as phantom unpaid statements. A card's stored ``balance`` (negative = owed) is
     the authority on what it owes. When its posted rows say it owes MORE than that
     (``_posted_owed`` > -balance), the gap is debt the stored balance says was
-    settled, so it is cut from the remainders of CLOSED cycles (closing day before
+    settled, so it is cut from the balances of CLOSED cycles (closing day before
     ``start``), oldest first, since recent statements are the more reliable ones.
-    Payments are allocated oldest first too, so this caps the closed-cycle total at
-    the stored debt (adjusted by planned rows, which neither side's comparison
-    counts) less the open cycles' unpaid charges, floored at 0. A card whose
-    history is complete has no gap and is untouched; a stored balance owing more
-    than the ledger never adds debt. A card without a ``balance`` skips the guard.
+    The cut happens BEFORE payments are allocated: the gap acts as an unrecorded
+    payment restricted to closed cycles, spent first, so a recorded or planned
+    payment is never consumed by debt the stored balance says is already settled
+    (which would leave the debt it was meant for owed a second time). Open cycles
+    are never cut. A card whose history is complete has no gap and is untouched; a
+    stored balance owing more than the ledger never adds debt. A card without a
+    ``balance`` skips the guard.
 
     Returns timeline events shaped like the ones ``build_timeline`` /
     ``route_accounts`` already consume (negative amount = outflow).
@@ -288,17 +295,18 @@ def build_statement_payables(
         first = min(row.transaction_date.date() for row in lines)
         cycles = list(iter_cycles_from(card, first, end))
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
-        remaining = allocate_payments(balances, [amount for _, amount in payments])
+        owing = balances
         stored = getattr(card, "balance", None)
         if stored is not None:
             rows = transactions_by_card.get(card.id, [])
             gap = _posted_owed(card.id, rows) + Decimal(str(stored))
             if gap > 0:
-                trimmed = _trim_closed(cycles, remaining, start, gap)
+                owing, trimmed = _trim_closed(cycles, balances, start, gap)
                 if trimmed > 0:
                     logger.warning(
                         "Card %s: trimmed %s from closed statements not reflected in its "
                         "stored balance (incomplete history)", card.id, trimmed)
+        remaining = allocate_payments(owing, [amount for _, amount in payments])
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0:
                 continue  # nothing owed -> nothing to pay
