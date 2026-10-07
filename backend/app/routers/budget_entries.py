@@ -275,6 +275,13 @@ def materialize_budget_entry(
     Reuses the transaction-create path (so account balances and budget-allocation
     deltas stay consistent), then moves ``next_occurrence`` to the following one —
     deactivating the entry when it passes its end date or exhausts its occurrences.
+
+    With ``advance`` False the schedule stays put, so for an entry on a credit card
+    the projection would bill that occurrence AND the new transaction. It doesn't:
+    a transaction linked to the entry suppresses one occurrence dated the same
+    calendar day (see ``_card_entry_charges`` in services/forecast.py). A custom
+    ``transaction_date`` on another day suppresses nothing, so with ``advance``
+    False the occurrence is still projected alongside the transaction.
     """
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate

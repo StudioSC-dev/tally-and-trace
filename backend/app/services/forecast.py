@@ -744,7 +744,10 @@ def _card_entry_charges(db: Session, entries: list, start: datetime, end: dateti
     An occurrence whose linked transaction already exists is suppressed: a
     transaction with this ``budget_entry_id`` dated the same calendar day stands in
     for it (each transaction suppresses at most one occurrence), since that
-    transaction is itself a line item on the card.
+    transaction is itself a line item on the card. This is what keeps a
+    ``materialize`` with ``advance=False`` from billing twice. Matching is by day
+    only: materialising with a custom ``transaction_date`` on another day and
+    ``advance=False`` suppresses nothing, so that occurrence is still billed too.
 
     In-window occurrences are appended to ``events`` as non-cash listings, like
     unposted card charges. Returns ``{card_id: [line items]}``.
