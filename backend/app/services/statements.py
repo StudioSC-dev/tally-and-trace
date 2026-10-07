@@ -157,6 +157,61 @@ def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[
     return remaining
 
 
+def unspent_pool(balances: List[Decimal], payments: List[Decimal],
+                 remaining: List[Decimal]) -> Decimal:
+    """What ``allocate_payments`` left of its pool: payments and net credits it
+    did not spend because no statement was left owing anything."""
+    pool = sum(payments, Decimal("0")) + sum((-b for b in balances if b < 0), Decimal("0"))
+    spent = sum((max(b, Decimal("0")) for b in balances), Decimal("0")) - sum(
+        remaining, Decimal("0"))
+    return pool - spent
+
+
+def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
+                     projected: list) -> List[Decimal]:
+    """Apply projected line items on top of the settled recorded ledger.
+
+    ``owed`` is what each cycle still owes after ``allocate_payments`` ran over
+    the recorded rows alone, and ``pool`` what that left unspent. Projected rows
+    never reopen that settlement, so they cannot change what a recorded payment
+    or credit already paid:
+
+    - a projected charge adds to the cycle containing it;
+    - the unspent recorded pool then pays outstanding cycles oldest first;
+    - a projected credit (an income scheduled on the card) pays, in date order,
+      the oldest outstanding statement due on or after its date. It never
+      reaches a statement already due before it was credited, so one dated
+      after a window cannot change a payable inside it.
+    """
+    owed = list(owed)
+
+    def spend(amount: Decimal, i: int) -> None:
+        while amount > 0 and i < len(owed):
+            paid = min(amount, owed[i])
+            owed[i] -= paid
+            amount -= paid
+            i += 1
+
+    credits = []
+    for row in projected:
+        day = row.transaction_date.date()
+        amount = Decimal(str(row.amount))
+        if row.transaction_type == TransactionType.CREDIT:
+            credits.append((day, amount))
+            continue
+        if row.transaction_type != TransactionType.DEBIT:
+            continue
+        for i, cycle in enumerate(cycles):
+            if cycle["window_start"].date() < day <= cycle["close"].date():
+                owed[i] += amount
+                break
+    spend(pool, 0)
+    for day, amount in sorted(credits, key=lambda c: c[0]):
+        first = next((i for i, c in enumerate(cycles) if c["due"].date() >= day), len(cycles))
+        spend(amount, first)
+    return owed
+
+
 def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
                      ) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
     """Separate a card's rows into statement line items and payments into the card.
@@ -221,6 +276,7 @@ def build_statement_payables(
     start: datetime,
     end: datetime,
     unbilled_sources: frozenset = frozenset(),
+    projected_by_card: Optional[dict] = None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
 
@@ -230,17 +286,26 @@ def build_statement_payables(
     ignored, see ``_split_card_rows``). Such a source is any card in ``cards``
     without cycle settings, plus the ids in ``unbilled_sources``: the caller
     names those from the source account itself, so a card outside ``cards``
-    (another entity's, or an inactive one) counts too. Every cycle from the card's
-    first line item onward is balanced and the payments are allocated across them
-    (see ``allocate_payments``); a cycle still owing something and due in
-    ``[start, end)`` becomes a payable for the remainder.
+    (another entity's, or an inactive one) counts too.
+
+    ``projected_by_card`` holds line items that have no transaction yet (budget
+    entries scheduled on the card), which the caller projects only up to ``end``.
+    The recorded ledger is settled first: every cycle from the card's first line
+    item onward is balanced from recorded rows alone and the payments are
+    allocated across them (see ``allocate_payments``). Projected rows are applied
+    to that result (see ``settle_projected``), so they never change what a
+    recorded payment or credit did for an earlier statement. A cycle still owing
+    something and due in ``[start, end)`` becomes a payable for the remainder.
 
     The allocation runs over every cycle up to the one holding the card's last
     line item, even when that cycle is due on or after ``end``: a net-credit cycle
-    beyond the window still pays older statements, so a payable inside the window
-    is the same whatever the window's length. Only the emitted events are limited
-    to the window. Line items are what the caller passes: every recorded row, and
-    projected charges only as far as the caller projected them (``end``).
+    beyond the window still pays older statements. Only the emitted events are
+    limited to the window. So, given the same recorded rows, a payable inside a
+    window is the same for any longer window with the same start, whatever
+    projected rows the longer window adds: a projected charge dated on or after
+    ``end`` lands in a cycle due after ``end`` and only draws on what the earlier
+    cycles left of the pool, and a projected credit dated on or after ``end`` only
+    pays statements due on or after its date.
 
     A cycle still owing something whose due date is before ``start`` is overdue:
     like an overdue unposted transaction, it is emitted dated ``start`` with
@@ -255,14 +320,19 @@ def build_statement_payables(
     for card in cards:
         lines, payments = _split_card_rows(
             card.id, transactions_by_card.get(card.id, []), unbilled_ids)
-        if not lines:
+        projected = (projected_by_card or {}).get(card.id, [])
+        if not lines and not projected:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
-        first = min(row.transaction_date.date() for row in lines)
-        last = max(row.transaction_date.date() for row in lines)
-        cycles = list(iter_cycles_from(card, first, end, through=last))
-        balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
-        remaining = allocate_payments(balances, [amount for _, amount in payments])
+        days = [row.transaction_date.date() for row in [*lines, *projected]]
+        cycles = list(iter_cycles_from(card, min(days), end, through=max(days)))
+        recorded = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+        paid_in = [amount for _, amount in payments]
+        settled = allocate_payments(recorded, paid_in)
+        remaining = settle_projected(
+            cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
+        balances = [statement_balance([*lines, *projected], c["window_start"], c["close"])
+                    for c in cycles]
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0 or cycle["due"] >= end:
                 continue  # nothing owed, or due after the window
@@ -296,8 +366,9 @@ def get_statement_payables(
     """DB wrapper: load the user's credit cards and build their statement payables.
 
     ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
-    transaction yet (budget entries scheduled on a card); each is billed like a
-    transaction on its date.
+    transaction yet (budget entries scheduled on a card); each is billed on the
+    cycle containing its date, after the recorded rows are settled (see
+    ``build_statement_payables``).
     """
     card_query = db.query(Account).filter(
         scope_criterion(Account, user_id, entity_id),
@@ -334,9 +405,6 @@ def get_statement_payables(
             touched |= {txn.transfer_to_account_id, txn.transfer_from_account_id}
         for cid in touched & set(card_ids):
             by_card[cid].append(txn)
-    for cid, lines in (projected_charges or {}).items():
-        if cid in by_card:
-            by_card[cid].extend(lines)
 
     # Whether a payment's source card is billed is a fact about that account, not
     # about this view: it is loaded by id, outside the card scope above, so a
@@ -355,4 +423,5 @@ def get_statement_payables(
             if a.account_type == AccountType.CREDIT and resolve_cycle_fields(a) is None
         )
 
-    return build_statement_payables(cards, by_card, start, end, unbilled_sources)
+    return build_statement_payables(cards, by_card, start, end, unbilled_sources,
+                                    projected_by_card=projected_charges)

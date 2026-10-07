@@ -982,6 +982,56 @@ def test_card_installment_dated_before_the_window_is_still_billed(db, user):
     assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-2000.00"))]
 
 
+def _statements_by_window(db, user, days_list):
+    from app.services.forecast import project_running_balance
+
+    reference = datetime(2026, 8, 1)
+    return {
+        days: _cash_events(project_running_balance(db, user.id, days=days, reference=reference))
+        for days in days_list
+    }
+
+
+def _assert_earlier_payables_agree(by_days):
+    """Windows of 31/61/92 days from 1 Aug end on 1 Sep, 1 Oct and 1 Nov."""
+    ends = {31: "2026-09-01", 61: "2026-10-01", 92: "2026-11-01"}
+    for short in by_days:
+        for long in by_days:
+            if long > short:
+                assert [e for e in by_days[long] if e[0] < ends[short]] == by_days[short]
+
+
+@pytest.mark.parametrize("entry_type,expected", [
+    # The 5 Sep expense is billed on its own 24 Sep statement, due 15 Oct.
+    ("expense", [("2026-10-15", "Card C statement", Decimal("-500.00"))]),
+    # The 5 Sep income comes after July's 14 Aug due date and does not pay it.
+    ("income", [("2026-08-14", "Card C statement", Decimal("-1000.00"))]),
+])
+def test_scheduled_card_occurrence_after_the_window_keeps_earlier_payables(
+        db, user, entry_type, expected):
+    """1,000 charged 10 Jul (14 Aug statement). For the expense case a recorded refund
+    on 28 Aug settles July; a projected occurrence on 5 Sep must not change what
+    the recorded rows paid, however long the window."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-1000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 7, 10), is_posted=True)
+    if entry_type == "expense":
+        _txn(db, user, card, TransactionType.CREDIT, "1000.00", datetime(2026, 8, 28))
+    kind = BudgetEntryType.EXPENSE if entry_type == "expense" else BudgetEntryType.INCOME
+    _entry(db, user, "Card schedule", kind, "500.00", datetime(2026, 9, 5), account=card,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    by_days = _statements_by_window(db, user, [31, 61, 92])
+    _assert_earlier_payables_agree(by_days)
+    assert by_days[92] == expected
+
+
 def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfers_non_cash(
         db, user):
     """No statements are modelled for it: its schedule is cash on its own date, and
