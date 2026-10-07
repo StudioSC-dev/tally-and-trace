@@ -419,3 +419,77 @@ def test_balance_transfer_charges_the_source_card_and_pays_the_destination():
     assert [(e["name"], e["amount"]) for e in events] == [
         ("Metrobank CC statement", Decimal("-2000.00")),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Incomplete-history guard
+#
+# Posted charges of 1,000 (May), 2,000 (Jun) and 3,000 (Jul) with no payments
+# recorded. The stored balance (negative = owed) says what the card really owes.
+# ---------------------------------------------------------------------------
+
+def _posted(day, amount, month, kind=TransactionType.DEBIT):
+    row = _txn(day, amount, kind=kind, month=month)
+    row.is_posted = True
+    return row
+
+
+HISTORY = [_posted(10, "1000.00", 5), _posted(10, "2000.00", 6), _posted(10, "3000.00", 7)]
+
+
+def _guarded(balance, rows, start=AUG, end=SEP):
+    events = build_statement_payables([_card(balance=Decimal(balance))], {1: rows}, start, end)
+    return [(e["date"], e["amount"], e.get("overdue", False)) for e in events]
+
+
+def test_unrecorded_payments_leave_only_what_the_stored_balance_owes(caplog):
+    """Only July's 3,000 is really owed: May and June are not phantom-overdue."""
+    with caplog.at_level("WARNING", logger="app.services.statements"):
+        assert _guarded("-3000.00", HISTORY) == [
+            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+        ]
+    assert "Card 1" in caplog.text
+
+
+def test_unrecorded_history_is_trimmed_from_the_oldest_statements_first():
+    """4,000 owed of 6,000 charged: May (1,000) and half of June are cut."""
+    assert _guarded("-4000.00", HISTORY) == [
+        (AUG, Decimal("-1000.00"), True),
+        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+    ]
+
+
+def test_open_cycle_charges_are_never_trimmed():
+    """July's statement was paid off the books; the 28 Jul charge is on the open
+    24 Aug cycle and the stored 500 is exactly that, so only it stays owed."""
+    rows = [_posted(10, "3000.00", 7), _posted(28, "500.00", 7)]
+    assert _guarded("-500.00", rows, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-500.00"), False),
+    ]
+
+
+def test_complete_history_is_untouched_by_the_guard(caplog):
+    """May's payment is recorded: the ledger owes 5,000, exactly the stored balance."""
+    payment = _pay(14, "1000.00", month=6)
+    payment.is_posted = True
+    with caplog.at_level("WARNING", logger="app.services.statements"):
+        assert _guarded("-5000.00", HISTORY + [payment]) == [
+            (AUG, Decimal("-2000.00"), True),
+            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+        ]
+    assert caplog.text == ""
+
+
+def test_stored_balance_owing_more_than_the_ledger_adds_no_debt():
+    assert _guarded("-9000.00", HISTORY) == [
+        (AUG, Decimal("-1000.00"), True),
+        (AUG, Decimal("-2000.00"), True),
+        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+    ]
+
+
+def test_unposted_rows_do_not_count_against_the_stored_balance():
+    """A planned charge is not in the stored balance, so it is not trimmed."""
+    assert _guarded("0.00", [_txn(10, "3000.00")]) == [
+        (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+    ]
