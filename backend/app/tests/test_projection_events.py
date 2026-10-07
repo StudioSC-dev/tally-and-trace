@@ -28,6 +28,9 @@ def test_is_projection_cash_excludes_credit_cards_only():
 
 SAVINGS_A, CHECKING_B, CARD_C = 1, 2, 3
 NAMES = {SAVINGS_A: "Savings A", CHECKING_B: "Checking B", CARD_C: "Card C"}
+CASH = {SAVINGS_A, CHECKING_B}
+CARDS = {CARD_C}
+OUTSIDE = 4  # an account outside the projection's scope (another entity, or inactive)
 
 
 def _txn_transfer(day, amount, fee, src, dst):
@@ -47,7 +50,7 @@ def _payable(day, amount, account_id, name="Bill from B"):
 
 
 def test_transfer_between_cash_accounts_moves_pool_only_by_fee():
-    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set())
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS)
     assert [(leg["account_id"], leg["amount"]) for leg in ev["legs"]] == [
         (SAVINGS_A, Decimal("-5015.00")),
         (CHECKING_B, Decimal("5000.00")),
@@ -60,7 +63,7 @@ def test_transfer_between_cash_accounts_moves_pool_only_by_fee():
 def test_transfer_funds_destination_before_its_payable():
     opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
     events = [
-        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set()),
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS),
         _payable(10, 4000, CHECKING_B),
     ]
     assert route_accounts(opening, events, NAMES) == []
@@ -72,7 +75,7 @@ def test_same_day_transfer_runs_before_the_payable_it_funds():
     opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
     events = [
         _payable(10, 4000, CHECKING_B),
-        _transfer_event(_txn_transfer(10, 5000, 0, SAVINGS_A, CHECKING_B), set()),
+        _transfer_event(_txn_transfer(10, 5000, 0, SAVINGS_A, CHECKING_B), CASH, CARDS),
     ]
     assert route_accounts(opening, events, NAMES) == []
 
@@ -86,9 +89,29 @@ def test_payable_without_the_transfer_is_short():
 
 def test_transfer_into_a_card_is_listed_but_not_cash():
     """The card's statement payable already models that cash; don't count it twice."""
-    ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), {CARD_C})
+    ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), CASH, CARDS)
     assert ev["counts_as_cash"] is False
     assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
+
+
+def test_transfer_out_of_scope_costs_the_pool_amount_and_fee():
+    """The destination is not a projection-cash account: the money leaves the pool."""
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, OUTSIDE), CASH, CARDS)
+    assert [(leg["account_id"], leg["amount"], leg["cash"]) for leg in ev["legs"]] == [
+        (SAVINGS_A, Decimal("-5015.00"), True),
+    ]
+    assert ev["amount"] == Decimal("-5015.00")
+    assert ev["counts_as_cash"] is True
+
+
+def test_transfer_into_scope_from_outside_adds_the_amount():
+    """Only the in-scope leg is kept; the outside account is never exposed."""
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, OUTSIDE, CHECKING_B), CASH, CARDS)
+    assert [(leg["account_id"], leg["amount"], leg["cash"]) for leg in ev["legs"]] == [
+        (CHECKING_B, Decimal("5000.00"), True),
+    ]
+    assert ev["amount"] == Decimal("5000.00")
+    assert ev["funding_account_id"] == CHECKING_B
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +141,7 @@ def test_closings_exclude_virtual_overflow_moves_which_are_reported_separately()
 def test_checkpoint_closings_and_pooled_invariant():
     opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
     events = [
-        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set()),
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS),
         _payable(10, 4000, CHECKING_B),
         _event(date=datetime(2026, 9, 3), name="Unrouted income", type="income",
                source="budget_entry", source_id=8, face_amount=700,

@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterator, List, Optional, Sequence
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
@@ -522,11 +523,17 @@ def _event_sort_key(e: dict):
     return (d, rank)
 
 
-def _transfer_event(txn, non_cash_ids: set) -> dict:
+def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
-    Between two projection-cash accounts the pooled total moves only by the fee,
-    while each account's balance moves by its own leg.
+    Legs are kept only for accounts in the projection's scope (``cash_ids`` and
+    ``card_ids``); an account outside it (another entity's, or an inactive one) is
+    never exposed. A leg is cash when its account is a projection-cash account, so:
+
+    - between two projection-cash accounts the pooled total moves only by the fee,
+      while each account's balance moves by its own leg;
+    - out of the pool to an outside account costs the pool amount + fee;
+    - into the pool from an outside account adds the amount.
 
     A transfer INTO a credit card (a card payment) is listed with its legs but does
     not count as cash yet: the card's statement payable already models that cash
@@ -537,9 +544,12 @@ def _transfer_event(txn, non_cash_ids: set) -> dict:
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
-    legs = [_leg(src, -(amount + fee), cash=src not in non_cash_ids)]
-    if dst is not None:
-        legs.append(_leg(dst, amount, cash=dst not in non_cash_ids))
+    scoped = cash_ids | card_ids
+    legs = []
+    if src in scoped:
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids))
+    if dst in scoped:
+        legs.append(_leg(dst, amount, cash=dst in cash_ids))
     return _event(
         date=_naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -548,7 +558,7 @@ def _transfer_event(txn, non_cash_ids: set) -> dict:
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
-        counts_as_cash=False if dst in non_cash_ids else None,
+        counts_as_cash=False if dst in card_ids else None,
         transfer_fee=_money(fee),
     )
 
@@ -568,12 +578,18 @@ def collect_events(
     payable per credit-card statement cycle due in the window. Events that move no
     projection cash are included (``counts_as_cash`` False) so listings can show
     them; cash views must filter on ``counts_as_cash``.
+
+    A transaction leg is cash only when its account is one of the scoped
+    projection-cash accounts. Unposted transfers into or out of a scoped
+    projection-cash account are collected even when the transaction row belongs to
+    another scope (a cross-entity transfer), but only their in-scope legs count.
     """
     start = _naive(start)
     end = _naive(end)
     if accounts is None:
         accounts = get_account_balances(db, user_id, entity_id)
-    non_cash_ids = {a.id for a in accounts if not is_projection_cash(a)}
+    cash_ids = {a.id for a in accounts if is_projection_cash(a)}
+    card_ids = {a.id for a in accounts if not is_projection_cash(a)}
 
     events: List[dict] = []
 
@@ -595,15 +611,24 @@ def collect_events(
                            entry.overflow_account_id)],
             ))
 
+    in_scope = scope_criterion(Transaction, user_id, entity_id)
+    if cash_ids:
+        in_scope = or_(in_scope, and_(
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            or_(
+                Transaction.transfer_to_account_id.in_(cash_ids),
+                Transaction.transfer_from_account_id.in_(cash_ids),
+            ),
+        ))
     txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
+        in_scope,
         Transaction.is_posted.is_(False),
         Transaction.transaction_date >= start,
         Transaction.transaction_date < end,
     )
     for txn in txn_query.all():
         if txn.transaction_type == TransactionType.TRANSFER:
-            events.append(_transfer_event(txn, non_cash_ids))
+            events.append(_transfer_event(txn, cash_ids, card_ids))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -621,7 +646,7 @@ def collect_events(
             source="transaction",
             source_id=txn.id,
             face_amount=txn.amount,
-            legs=[_leg(txn.account_id, amt, cash=txn.account_id not in non_cash_ids)],
+            legs=[_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)],
         ))
 
     # Each credit card contributes one dated payable per billing cycle due in the

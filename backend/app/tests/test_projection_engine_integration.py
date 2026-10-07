@@ -152,6 +152,122 @@ def test_transfer_funds_destination_before_its_payable_and_costs_only_the_fee(db
     assert r["overflow_moves"] == []
 
 
+# ---------------------------------------------------------------------------
+# Transfers that leave or enter the projection's account set
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def entities(db, user):
+    """Two throwaway entities; the user's accounts and transactions go first on teardown."""
+    from app.models.account import Account
+    from app.models.entity import Entity, EntityType
+    from app.models.transaction import Transaction
+
+    created = []
+    for label in ("A", "B"):
+        e = Entity(name=f"Proj {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+        db.add(e)
+        created.append(e)
+    db.commit()
+    ids = [e.id for e in created]
+
+    yield created
+
+    db.rollback()
+    db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+    db.query(Account).filter(Account.user_id == user.id).update(
+        {"payment_account_id": None, "payment_overflow_account_id": None}
+    )
+    db.commit()
+    db.query(Account).filter(Account.user_id == user.id).delete()
+    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+
+
+def _cross_entity_transfer(db, user, entities, row_entity):
+    """5,000 + 15 fee from entity A's 10,000 account to an empty entity-B account."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+
+    ent_a, ent_b = entities
+    acc_a = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00", entity_id=ent_a.id)
+    acc_b = _account(db, user, "Checking B", AccountType.CHECKING, "0.00", entity_id=ent_b.id)
+    _txn(db, user, acc_a, TransactionType.TRANSFER, "5000.00", datetime(2026, 8, 5),
+         transfer_fee=Decimal("15.00"), description="Move to B",
+         transfer_from_account_id=acc_a.id, transfer_to_account_id=acc_b.id,
+         entity_id=row_entity.id)
+    return acc_a, acc_b
+
+
+@pytest.mark.parametrize("row_owner", ["source", "destination"])
+def test_transfer_out_of_scope_costs_the_pool_amount_and_fee(db, user, entities, row_owner):
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    ent_a, ent_b = entities
+    acc_a, _ = _cross_entity_transfer(
+        db, user, entities, ent_a if row_owner == "source" else ent_b)
+
+    r = project_running_balance(db, user.id, ent_a.id, days=30, reference=datetime(2026, 8, 1))
+    assert r["closing_balance"] == Decimal("4985.00")
+    assert [(a["account_id"], a["closing_balance"]) for a in r["by_account"]] == [
+        (acc_a.id, Decimal("4985.00")),
+    ]
+    assert r["unassigned_closing"] == Decimal("0")
+
+    (aug,) = project_cashflow(db, user.id, ent_a.id, months=1, reference=datetime(2026, 8, 1))
+    assert aug["closing_balance"] == 4985.0
+    assert aug["unassigned_closing"] == 0.0
+
+
+@pytest.mark.parametrize("row_owner", ["source", "destination"])
+def test_transfer_into_scope_from_outside_adds_the_amount(db, user, entities, row_owner):
+    from app.services.forecast import (
+        get_upcoming_items, project_cashflow, project_running_balance, serialize_timeline,
+    )
+
+    ent_a, ent_b = entities
+    _, acc_b = _cross_entity_transfer(
+        db, user, entities, ent_a if row_owner == "source" else ent_b)
+
+    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    assert r["closing_balance"] == Decimal("5000.00")
+    assert [(a["account_id"], a["closing_balance"]) for a in r["by_account"]] == [
+        (acc_b.id, Decimal("5000.00")),
+    ]
+    assert r["unassigned_closing"] == Decimal("0")
+    # Entity A's account is never named in B's view.
+    assert "Savings A" not in repr(serialize_timeline(r))
+
+    (aug,) = project_cashflow(db, user.id, ent_b.id, months=1, reference=datetime(2026, 8, 1))
+    assert aug["closing_balance"] == 5000.0
+    assert "Savings A" not in repr(aug)
+
+    items = get_upcoming_items(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
+        ("2026-08-05", "Move to B", 5000.0),
+    ]
+
+
+def test_transfer_into_an_inactive_account_leaves_the_pool(db, user):
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00")
+    closed = _account(db, user, "Closed account", AccountType.CHECKING, "0.00", is_active=False)
+    _txn(db, user, savings_a, TransactionType.TRANSFER, "5000.00", datetime(2026, 8, 5),
+         transfer_fee=Decimal("15.00"),
+         transfer_from_account_id=savings_a.id, transfer_to_account_id=closed.id)
+
+    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    assert r["closing_balance"] == Decimal("4985.00")
+    assert r["unassigned_closing"] == Decimal("0")
+
+    (aug,) = project_cashflow(db, user.id, months=1, reference=datetime(2026, 8, 1))
+    assert aug["closing_balance"] == 4985.0
+    assert aug["unassigned_closing"] == 0.0
+
+
 def test_timeline_reports_overflow_use_without_moving_closings(db, user, client):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
