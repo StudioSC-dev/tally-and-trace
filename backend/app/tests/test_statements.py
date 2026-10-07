@@ -561,3 +561,63 @@ def test_posted_payment_from_a_card_without_statements_still_matches_the_stored_
     assert [(e["date"], e["amount"]) for e in events] == [
         (datetime(2026, 8, 14), Decimal("-12000.00")),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Window independence
+#
+# A net-credit cycle due after the window still pays older statements, so a
+# payable inside a window must not depend on how far the window reaches.
+# ---------------------------------------------------------------------------
+
+def test_refund_in_a_cycle_due_after_the_window_still_pays_the_older_statement():
+    """1,000 charged 10 Jul, refunded 28 Jul (the 24 Aug statement, due 14 Sep):
+    the 14 Aug statement is settled even in a window ending before 14 Sep."""
+    rows = [_posted(10, "1000.00", 7), _posted(28, "1000.00", 7, kind=TransactionType.CREDIT)]
+    assert _guarded("0.00", rows, AUG, SEP) == []
+    assert _guarded("0.00", rows, AUG, datetime(2026, 10, 1)) == []
+
+
+def _advance(day, amount, fee, month):
+    row = _pay(day, amount, month=month, from_account=1, card_id=10)
+    row.transfer_fee = Decimal(fee)
+    return row
+
+
+WINDOW_SCENARIO = [
+    _txn(10, "5000.00"),                                     # 24 Jul statement
+    _pay(20, "1000.00"),                                     # early, before the close
+    _txn(28, "1000.00", kind=TransactionType.CREDIT),        # refund, 24 Aug statement
+    _advance(5, "2000.00", "50.00", month=8),                # cash advance, 24 Aug
+    _pay(20, "500.00", month=8),                             # late for the 14 Aug due date
+    _txn(2, "3000.00", kind=TransactionType.CREDIT, month=9),  # net-credit 24 Sep cycle
+    _txn(5, "400.00", month=10),                             # 24 Oct statement, due 14 Nov
+    _pay(10, "700.00", month=11),                            # planned, beyond every window
+]
+
+
+def _window_events(end):
+    return [(e["date"], e["amount"], e.get("overdue", False))
+            for e in build_statement_payables([_card()], {1: WINDOW_SCENARIO}, AUG, end)]
+
+
+def test_payables_inside_a_window_do_not_depend_on_its_length():
+    ends = [SEP, datetime(2026, 10, 1), datetime(2026, 11, 1), datetime(2026, 12, 1)]
+    by_end = {end: _window_events(end) for end in ends}
+    for i, short in enumerate(ends):
+        for long in ends[i + 1:]:
+            assert [e for e in by_end[long] if e[0] < short] == by_end[short], (short, long)
+    # 5,000 + 1,050 charged, 3,000 + 1,000 credited, 2,200 paid: the 24 Jul
+    # statement is settled and 850 of the 24 Aug one is left, due 14 Sep.
+    assert by_end[datetime(2026, 12, 1)] == [
+        (datetime(2026, 9, 14), Decimal("-850.00"), False),
+        (datetime(2026, 11, 14), Decimal("-400.00"), False),
+    ]
+
+
+def test_window_independence_holds_for_overdue_statements():
+    """Starting after the 14 Aug due date, the overdue amount is window-independent."""
+    start = datetime(2026, 8, 20)
+    short = build_statement_payables([_card()], {1: WINDOW_SCENARIO}, start, SEP)
+    long = build_statement_payables([_card()], {1: WINDOW_SCENARIO}, start, datetime(2026, 12, 1))
+    assert short == [e for e in long if e["date"] < SEP]

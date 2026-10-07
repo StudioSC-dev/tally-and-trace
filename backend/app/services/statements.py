@@ -98,12 +98,17 @@ def resolve_cycle_fields(card: Account) -> Optional[Tuple[int, int]]:
     return None
 
 
-def iter_cycles_from(card: Account, first: date, end: datetime) -> Iterator[dict]:
+def iter_cycles_from(card: Account, first: date, end: datetime,
+                     through: Optional[date] = None) -> Iterator[dict]:
     """Yield every cycle from the one containing day ``first`` up to those due before ``end``.
 
     Each cycle is ``{window_start, close, due}``. Walking from the card's first
     line item, not from the window start, reaches back through its history, which
     is what allocating payments oldest-statement-first needs.
+
+    With ``through``, the walk also continues past ``end`` until it has yielded
+    the cycle containing day ``through``, so a line item dated after the window
+    (a refund whose credit pays an earlier statement) still gets its cycle.
     """
     fields = resolve_cycle_fields(card)
     if fields is None:
@@ -116,11 +121,12 @@ def iter_cycles_from(card: Account, first: date, end: datetime) -> Iterator[dict
     while True:
         close = datetime(y, m, _clamp_day(y, m, close_day))
         due = close + timedelta(days=days_until_due)
-        if due >= end:
-            return
         py, pm = _month_step(y, m, -1)
+        window_start = datetime(py, pm, _clamp_day(py, pm, close_day))
+        if due >= end and (through is None or window_start.date() >= through):
+            return
         yield {
-            "window_start": datetime(py, pm, _clamp_day(py, pm, close_day)),
+            "window_start": window_start,
             "close": close,
             "due": due,
         }
@@ -273,6 +279,13 @@ def build_statement_payables(
     (see ``allocate_payments``); a cycle still owing something and due in
     ``[start, end)`` becomes a payable for the remainder.
 
+    The allocation runs over every cycle up to the one holding the card's last
+    line item, even when that cycle is due on or after ``end``: a net-credit cycle
+    beyond the window still pays older statements, so a payable inside the window
+    is the same whatever the window's length. Only the emitted events are limited
+    to the window. Line items are what the caller passes: every recorded row, and
+    projected charges only as far as the caller projected them (``end``).
+
     A cycle still owing something whose due date is before ``start`` is overdue:
     like an overdue unposted transaction, it is emitted dated ``start`` with
     ``overdue`` True and its due date as ``original_date``.
@@ -313,7 +326,8 @@ def build_statement_payables(
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
         first = min(row.transaction_date.date() for row in lines)
-        cycles = list(iter_cycles_from(card, first, end))
+        last = max(row.transaction_date.date() for row in lines)
+        cycles = list(iter_cycles_from(card, first, end, through=last))
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
         owing = balances
         opening = Decimal("0")
@@ -340,8 +354,8 @@ def build_statement_payables(
         remaining = allocate_payments([opening, *owing],
                                       [amount for _, amount in payments])[1:]
         for cycle, balance, owed in zip(cycles, balances, remaining):
-            if owed <= 0:
-                continue  # nothing owed -> nothing to pay
+            if owed <= 0 or cycle["due"] >= end:
+                continue  # nothing owed, or due after the window
             overdue = {}
             if cycle["due"] < start:
                 overdue = {"overdue": True, "original_date": cycle["due"]}
