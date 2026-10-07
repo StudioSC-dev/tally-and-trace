@@ -56,8 +56,9 @@ export function SpotlightOverlay({
   const { width, height, top, left } = highlightRect
   const highlightWidth = width + padding * 2
   const highlightHeight = height + padding * 2
-  const highlightTop = top - padding + window.scrollY
-  const highlightLeft = left - padding + window.scrollX
+  // The overlay is position:fixed, so viewport coordinates are used as-is
+  const highlightTop = top - padding
+  const highlightLeft = left - padding
 
   return (
     <div

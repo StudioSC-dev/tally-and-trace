@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay } from './SpotlightOverlay'
 import { resolveOnboardingTarget } from './resolveTarget'
+import { placeBubble, type BubbleLayout } from './placeBubble'
 
 interface OnboardingStep {
   id: number
@@ -20,6 +21,27 @@ interface OnboardingFlowProps {
 }
 
 const TOTAL_STEPS = 8
+const HIGHLIGHT_PADDING = 12
+// Used until the bubble has rendered once and can be measured (w-80 ≈ 320px).
+const BUBBLE_FALLBACK_SIZE = { width: 320, height: 200 }
+// Clearance for the fixed top bar and the mobile bottom tab bar (both h-16).
+const CHROME_CLEARANCE = 72
+
+function isInFixedLayer(element: HTMLElement) {
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    if (getComputedStyle(node).position === 'fixed') return true
+  }
+  return false
+}
+
+// Bring a below-the-fold target to the middle of the screen. Nav items live in
+// fixed bars and are always on screen, so they are left alone.
+function scrollTargetIntoView(element: HTMLElement) {
+  if (isInFixedLayer(element)) return
+  const rect = element.getBoundingClientRect()
+  if (rect.top >= CHROME_CLEARANCE && rect.bottom <= window.innerHeight - CHROME_CLEARANCE) return
+  element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+}
 
 export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0)
@@ -27,13 +49,14 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const navigate = useNavigate()
   const [completeOnboarding] = useCompleteOnboardingMutation()
 
-  // Disable scrolling and prevent body scroll when onboarding is active
+  // Stop the user scrolling while the tour is active. overflow:hidden on the
+  // root still allows programmatic scrolling, which the tour needs to bring
+  // below-the-fold cards into view (body position:fixed did not).
   useEffect(() => {
-    // Disable body scroll
-    document.body.style.overflow = 'hidden'
-    document.body.style.position = 'fixed'
-    document.body.style.width = '100%'
-    
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
     // Prevent keyboard navigation
     const handleKeyDown = (e: KeyboardEvent) => {
       // Allow only Tab, Enter, Escape for navigation
@@ -60,10 +83,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
     
     return () => {
-      // Re-enable scrolling when component unmounts
-      document.body.style.overflow = ''
-      document.body.style.position = ''
-      document.body.style.width = ''
+      root.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
       window.removeEventListener('wheel', handleWheel, { capture: true })
       window.removeEventListener('touchmove', handleTouchMove, { capture: true })
@@ -143,22 +163,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       const element = resolveOnboardingTarget(step.targetSelector)
 
       setTargetElement(element)
-      
-      // Auto-scroll the element into view, accounting for the bottom onboarding panel
-      if (element) {
-        // Calculate the bottom panel height (approximately 200px for the onboarding panel)
-        const bottomPanelHeight = 250
-        const elementRect = element.getBoundingClientRect()
-        const elementTop = elementRect.top + window.scrollY
-        const elementHeight = elementRect.height
-        const windowHeight = window.innerHeight
-        const scrollPosition = elementTop - (windowHeight / 2) + (elementHeight / 2) + (bottomPanelHeight / 2)
-        
-        window.scrollTo({
-          top: Math.max(0, scrollPosition),
-          behavior: 'smooth',
-        })
-      }
+      if (element) scrollTargetIntoView(element)
     }, 500)
 
     return () => clearTimeout(timer)
@@ -198,68 +203,45 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
   }
 
-  // Calculate bubble position based on target element
-  const [bubblePosition, setBubblePosition] = useState<{ top: number; left: number; placement: 'top' | 'bottom' | 'left' | 'right' } | null>(null)
+  // Bubble position, in viewport coordinates (the overlay is position:fixed)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const [bubbleLayout, setBubbleLayout] = useState<BubbleLayout | null>(null)
 
   useEffect(() => {
-    if (targetElement) {
-      const updateBubblePosition = () => {
-        const rect = targetElement.getBoundingClientRect()
-        const scrollY = window.scrollY
-        const scrollX = window.scrollX
-        
-        // Determine best placement (prefer bottom, then top, then right, then left)
-        const spaceBelow = window.innerHeight - rect.bottom
-        const spaceAbove = rect.top
-        const spaceRight = window.innerWidth - rect.right
-        
-        const bubbleWidth = 320
-        const bubbleHeight = 200
-        const offset = 20
-        
-        let top = 0
-        let left = 0
-        let placement: 'top' | 'bottom' | 'left' | 'right' = 'bottom'
-        
-        if (spaceBelow >= bubbleHeight + offset) {
-          // Place below
-          top = rect.bottom + scrollY + offset
-          left = rect.left + scrollX + (rect.width / 2) - (bubbleWidth / 2)
-          placement = 'bottom'
-        } else if (spaceAbove >= bubbleHeight + offset) {
-          // Place above
-          top = rect.top + scrollY - bubbleHeight - offset
-          left = rect.left + scrollX + (rect.width / 2) - (bubbleWidth / 2)
-          placement = 'top'
-        } else if (spaceRight >= bubbleWidth + offset) {
-          // Place to the right
-          top = rect.top + scrollY + (rect.height / 2) - (bubbleHeight / 2)
-          left = rect.right + scrollX + offset
-          placement = 'right'
-        } else {
-          // Place to the left
-          top = rect.top + scrollY + (rect.height / 2) - (bubbleHeight / 2)
-          left = rect.left + scrollX - bubbleWidth - offset
-          placement = 'left'
-        }
-        
-        // Keep bubble within viewport bounds
-        left = Math.max(20, Math.min(left, window.innerWidth - bubbleWidth - 20))
-        top = Math.max(20, Math.min(top, document.documentElement.scrollHeight - bubbleHeight - 20))
-        
-        setBubblePosition({ top, left, placement })
-      }
-      
-      updateBubblePosition()
-      window.addEventListener('resize', updateBubblePosition)
-      window.addEventListener('scroll', updateBubblePosition, true)
-      
-      return () => {
-        window.removeEventListener('resize', updateBubblePosition)
-        window.removeEventListener('scroll', updateBubblePosition, true)
-      }
-    } else {
-      setBubblePosition(null)
+    if (!targetElement) {
+      setBubbleLayout(null)
+      return
+    }
+
+    const updateBubblePosition = () => {
+      const rect = targetElement.getBoundingClientRect()
+      const bubble = bubbleRef.current
+      setBubbleLayout(
+        placeBubble(
+          {
+            top: rect.top - HIGHLIGHT_PADDING,
+            left: rect.left - HIGHLIGHT_PADDING,
+            width: rect.width + HIGHLIGHT_PADDING * 2,
+            height: rect.height + HIGHLIGHT_PADDING * 2,
+          },
+          bubble
+            ? { width: bubble.offsetWidth, height: bubble.offsetHeight }
+            : BUBBLE_FALLBACK_SIZE,
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      )
+    }
+
+    updateBubblePosition()
+    // Place again once the bubble has rendered and its real size is known
+    const frame = requestAnimationFrame(updateBubblePosition)
+    window.addEventListener('resize', updateBubblePosition)
+    window.addEventListener('scroll', updateBubblePosition, true)
+
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updateBubblePosition)
+      window.removeEventListener('scroll', updateBubblePosition, true)
     }
   }, [targetElement])
 
@@ -273,15 +255,16 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     <SpotlightOverlay
       targetSelector={currentStepData.targetSelector}
       targetElement={targetElement}
-      padding={12}
+      padding={HIGHLIGHT_PADDING}
       borderRadius={8}
     >
-      {bubblePosition && (
-        <div 
-          className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 transition-all duration-300"
+      {bubbleLayout && (
+        <div
+          ref={bubbleRef}
+          className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)] transition-all duration-300"
           style={{
-            top: `${bubblePosition.top}px`,
-            left: `${bubblePosition.left}px`,
+            top: `${bubbleLayout.top}px`,
+            left: `${bubbleLayout.left}px`,
           }}
           data-onboarding-controls
         >
@@ -334,9 +317,16 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           </div>
           
           {/* Arrow pointing to the highlighted element */}
-          <div
-            className={`absolute w-0 h-0 border-8 ${ bubblePosition.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2' }`}
-          />
+          {bubbleLayout.placement !== 'center' && (
+            <div
+              className={`absolute w-0 h-0 border-8 ${ bubbleLayout.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 -translate-x-1/2' : bubbleLayout.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 -translate-x-1/2' : bubbleLayout.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 -translate-y-1/2' }`}
+              style={
+                bubbleLayout.placement === 'top' || bubbleLayout.placement === 'bottom'
+                  ? { left: bubbleLayout.arrowOffset }
+                  : { top: bubbleLayout.arrowOffset }
+              }
+            />
+          )}
         </div>
       )}
     </SpotlightOverlay>
