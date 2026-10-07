@@ -77,20 +77,13 @@ def _compute_period_end(start: datetime, frequency: BudgetPeriodFrequency) -> da
     return start
 
 
-def _compute_previous_start(start: datetime, frequency: BudgetPeriodFrequency) -> datetime:
-    freq = frequency or BudgetPeriodFrequency.MONTHLY
-    if freq == BudgetPeriodFrequency.DAILY:
-        return start - timedelta(days=1)
-    if freq == BudgetPeriodFrequency.WEEKLY:
-        return start - timedelta(weeks=1)
-    if freq == BudgetPeriodFrequency.MONTHLY:
-        return _add_months(start, -1)
-    if freq == BudgetPeriodFrequency.QUARTERLY:
-        return _add_months(start, -3)
-    return start
+def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> bool:
+    """Roll the allocation's active period forward to cover ``reference``.
 
-
-def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> None:
+    Returns whether ``reference`` falls inside the active period. A reference before
+    ``period_start`` is historical: the period is never rewound and the spent total is
+    left alone, so out-of-period rows cannot replace the active allocation.
+    """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
 
@@ -113,17 +106,15 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
-    while normalized_reference < period_start:
-        previous_start = _compute_previous_start(period_start, frequency)
-        period_end = period_start
-        period_start = previous_start
-        period_changed = True
+    if normalized_reference < period_start:
+        return False
 
     if period_changed:
         allocation.current_amount = Decimal("0")
 
     allocation.period_start = period_start
     allocation.period_end = period_end
+    return True
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
@@ -199,7 +190,8 @@ def _apply_budget_delta(
     for allocation in allocations:
         if allocation.allocation_type != AllocationType.BUDGET:
             continue
-        _ensure_budget_period(allocation, normalized_reference)
+        if not _ensure_budget_period(allocation, normalized_reference):
+            continue  # historical row: excluded from the active period's total
         allocation.current_amount = _D(allocation.current_amount) + _D(delta)
         allocation.updated_at = now
 
