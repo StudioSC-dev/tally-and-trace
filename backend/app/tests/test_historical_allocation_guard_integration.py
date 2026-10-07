@@ -304,3 +304,31 @@ def test_an_offset_date_inside_the_period_in_utc_counts(client, db, october, now
     _assert_october(db, october, OCT_SPENT + Decimal("120.00"))
     _delete(client, october, txn_id)
     _assert_october(db, october, OCT_SPENT)
+
+
+AUG_START = datetime(2026, 8, 1)
+SEPT_START = datetime(2026, 9, 1)
+
+
+def _set_periods(db, ctx, periods):
+    from app.models.allocation import Allocation
+
+    for allocation_id, (start, end) in periods.items():
+        db.query(Allocation).filter(Allocation.id == allocation_id).update(
+            {Allocation.period_start: start, Allocation.period_end: end}, synchronize_session=False
+        )
+    db.commit()
+
+
+def test_a_september_charge_does_not_pin_unset_or_stale_budgets_to_september(client, db, october, now_is):
+    """Unset and stale (August) budgets advance to October; the September row is not counted."""
+    _set_periods(
+        db,
+        october,
+        {october["explicit_id"]: (None, None), october["matched_id"]: (AUG_START, SEPT_START)},
+    )
+    _charge(client, october, SEPT_DAY)
+    _assert_october(db, october, Decimal("0"))
+
+    _charge(client, october, OCT_DAY, amount=80.0)
+    _assert_october(db, october, Decimal("80.00"))

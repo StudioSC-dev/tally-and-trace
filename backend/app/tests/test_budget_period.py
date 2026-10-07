@@ -88,18 +88,26 @@ def test_a_reference_beyond_the_current_period_is_future(now_is, frequency, star
         (BudgetPeriodFrequency.QUARTERLY, datetime(2026, 10, 1), datetime(2027, 1, 1)),
     ],
 )
-def test_a_missing_period_start_initialises_from_the_reference(now_is, frequency, expected_start, expected_end):
+def test_a_missing_period_start_initialises_to_the_current_period(now_is, frequency, expected_start, expected_end):
     now_is(NOW)
     allocation = _allocation(None, None, frequency)
     assert _ensure_budget_period(allocation, datetime(2026, 10, 7, 9, 0)) is True
     assert _snapshot(allocation) == (expected_start, expected_end, Decimal("0"))
 
 
-def test_a_missing_period_start_with_a_future_reference_is_left_alone(now_is):
+def test_a_missing_period_start_with_a_future_reference_initialises_to_now_and_excludes_it(now_is):
     now_is(NOW)
     allocation = _allocation(None, None)
     assert _ensure_budget_period(allocation, datetime(2026, 11, 10)) is False
-    assert _snapshot(allocation) == (None, None, SPENT)
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
+
+
+def test_a_missing_period_start_with_a_historical_reference_initialises_to_now_and_excludes_it(now_is):
+    """A September row must not pin an unset budget to September while October is current."""
+    now_is(NOW)
+    allocation = _allocation(None, None)
+    assert _ensure_budget_period(allocation, datetime(2026, 9, 15)) is False
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
 
 
 def test_a_missing_period_end_is_derived_from_period_start(now_is):
@@ -123,11 +131,32 @@ def test_a_stale_period_rolls_through_several_periods_to_the_current_one(now_is)
     assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
 
 
-def test_a_stale_period_rolls_only_as_far_as_the_reference(now_is):
+def test_a_stale_period_rolls_to_the_current_period_and_excludes_an_older_reference(now_is):
     now_is(NOW)
     allocation = _allocation(datetime(2026, 7, 1), datetime(2026, 8, 1))
-    assert _ensure_budget_period(allocation, datetime(2026, 8, 20)) is True
-    assert _snapshot(allocation) == (datetime(2026, 8, 1), datetime(2026, 9, 1), Decimal("0"))
+    assert _ensure_budget_period(allocation, datetime(2026, 8, 20)) is False
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
+
+
+def test_a_stale_august_period_excludes_a_september_reference_and_becomes_october(now_is):
+    now_is(NOW)
+    allocation = _allocation(datetime(2026, 8, 1), datetime(2026, 9, 1))
+    assert _ensure_budget_period(allocation, datetime(2026, 9, 15)) is False
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
+
+
+def test_a_stale_august_period_counts_an_october_reference_after_rolling(now_is):
+    now_is(NOW)
+    allocation = _allocation(datetime(2026, 8, 1), datetime(2026, 9, 1))
+    assert _ensure_budget_period(allocation, datetime(2026, 10, 5)) is True
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
+
+
+def test_a_stale_derived_period_end_is_advanced_to_the_current_period(now_is):
+    now_is(NOW)
+    allocation = _allocation(datetime(2026, 8, 1), None)
+    assert _ensure_budget_period(allocation, datetime(2026, 9, 15)) is False
+    assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), Decimal("0"))
 
 
 def test_a_period_that_has_not_started_yet_is_future(now_is):

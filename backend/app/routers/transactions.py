@@ -38,7 +38,9 @@ def _normalize_reference(reference: Optional[datetime]) -> datetime:
     """Naive UTC, to match the naive allocations.period_start/period_end columns.
 
     Aware values are converted to UTC first, as Postgres does when it stores them, so a
-    row is classified the same way on create as on a later edit or delete.
+    row is classified the same way on create as on a later edit or delete. That
+    equivalence holds because the DB session TimeZone is UTC, so a naive read-back of a
+    stored timestamptz is already UTC.
     """
     value = reference or naive_utc_now()
     return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
@@ -82,17 +84,22 @@ def _compute_period_end(start: datetime, frequency: BudgetPeriodFrequency) -> da
 
 
 def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> bool:
-    """Roll the allocation's active period forward to cover ``reference``.
+    """Keep the allocation on the period containing now; report whether ``reference`` is in it.
 
-    Returns whether ``reference`` falls inside the active period. A reference before
-    ``period_start`` is historical: the period is never rewound and the spent total is
-    left alone, so out-of-period rows cannot replace the active allocation. The period
-    only rolls forward as far as the one containing now; a reference beyond that, or in
-    a period that has not started yet, is future-dated and equally out of period until
-    the calendar reaches it.
+    The active period is always the one containing the current date, never the one
+    containing the triggering row. A missing ``period_start`` is initialised to it, and a
+    stale period (``period_end`` <= now, including one whose missing end is derived from
+    ``period_start``) is advanced to it with ``current_amount`` reset, as a normal roll
+    does. That initialisation or roll is persisted even when the triggering row is then
+    excluded, so an out-of-period row leaves the budget on the current period with a
+    zero total rather than pinning it to the row's period. The period is never rewound:
+    a stored period that has not started yet is left alone. ``reference`` counts only if
+    it falls inside the active period; earlier (historical) and later (future) rows are
+    excluded.
     """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
+    now = naive_utc_now()
 
     period_start = allocation.period_start
     period_end = allocation.period_end
@@ -104,23 +111,24 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     period_changed = False
 
     if period_start is None:
-        period_start = _start_of_period(normalized_reference, frequency)
+        period_start = _start_of_period(now, frequency)
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
     elif period_end is None:
         period_end = _compute_period_end(period_start, frequency)
 
-    now = naive_utc_now()
-    while normalized_reference >= period_end and now >= period_end:
+    while now >= period_end:
         period_start = period_end
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
-    if normalized_reference < period_start or normalized_reference >= period_end or period_start > now:
-        return False
-
     if period_changed:
         allocation.current_amount = Decimal("0")
+        allocation.period_start = period_start
+        allocation.period_end = period_end
+
+    if normalized_reference < period_start or normalized_reference >= period_end or period_start > now:
+        return False
 
     allocation.period_start = period_start
     allocation.period_end = period_end
@@ -201,7 +209,7 @@ def _apply_budget_delta(
         if allocation.allocation_type != AllocationType.BUDGET:
             continue
         if not _ensure_budget_period(allocation, normalized_reference):
-            continue  # historical row: excluded from the active period's total
+            continue  # out-of-period row (historical or future): excluded
         allocation.current_amount = _D(allocation.current_amount) + _D(delta)
         allocation.updated_at = now
 
