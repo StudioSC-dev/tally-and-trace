@@ -204,6 +204,8 @@ def update_budget_entry(
 ):
     entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     prospective_data = entry_update.dict(exclude_unset=True)
+    if "entity_id" in prospective_data:
+        validate_entity_ownership(db, current_user, prospective_data["entity_id"])
     _ensure_related_resources(
         db=db,
         user=current_user,

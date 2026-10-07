@@ -110,6 +110,8 @@ def update_category(
 
     # Same scope as create: conflict against the category's own entity, not the editor's.
     if category_update.name and category_update.name != db_category.name:
+        # The conflict query is scoped to the stored entity; refuse to probe one the caller is not in.
+        validate_entity_ownership(db, current_user, db_category.entity_id)
         existing_category = db.query(Category).filter(
             Category.name == category_update.name,
             Category.id != db_category.id,
@@ -119,6 +121,8 @@ def update_category(
             raise HTTPException(status_code=400, detail="Category with this name already exists")
 
     update_data = category_update.dict(exclude_unset=True)
+    if "entity_id" in update_data:
+        validate_entity_ownership(db, current_user, update_data["entity_id"])
     _reconcile_kind(update_data)
     for field, value in update_data.items():
         setattr(db_category, field, value)

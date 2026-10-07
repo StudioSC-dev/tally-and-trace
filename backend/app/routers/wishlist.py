@@ -153,6 +153,8 @@ def update_wishlist_item(
     item = get_accessible_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
 
     update_data = payload.dict(exclude_unset=True)
+    if "entity_id" in update_data:
+        validate_entity_ownership(db, current_user, update_data["entity_id"])
     if update_data.get("is_purchased") and not item.is_purchased:
         update_data.setdefault("purchased_at", utc_now())
     for field, value in update_data.items():

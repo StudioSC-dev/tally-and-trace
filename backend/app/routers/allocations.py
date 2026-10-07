@@ -102,6 +102,8 @@ def update_allocation(
     """Update an existing allocation"""
     db_allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     update_data = allocation_update.dict(exclude_unset=True)
+    if "entity_id" in update_data:
+        validate_entity_ownership(db, current_user, update_data["entity_id"])
     if "account_id" in update_data and update_data["account_id"] is not None:
         account = db.query(Account).filter(Account.id == update_data["account_id"]).first()
         if not account or not can_access_record(db, current_user, account):

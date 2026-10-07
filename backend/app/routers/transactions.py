@@ -386,7 +386,11 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance"""
     db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    
+
+    # Validate before any balance reversal or write.
+    if "entity_id" in transaction_update.dict(exclude_unset=True):
+        validate_entity_ownership(db, current_user, transaction_update.entity_id)
+
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
     old_type = db_transaction.transaction_type
