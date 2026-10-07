@@ -94,6 +94,14 @@ def test_transfer_into_a_card_is_listed_but_not_cash():
     assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
 
 
+def test_transfer_from_a_card_is_listed_but_not_cash():
+    """A cash advance is repaid through the card, which statements don't model yet."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 50, CARD_C, CHECKING_B), CASH, CARDS)
+    assert ev["counts_as_cash"] is False
+    assert [leg["cash"] for leg in ev["legs"]] == [False, False]
+    assert ev["amount"] == Decimal("0")
+
+
 def test_transfer_out_of_scope_costs_the_pool_amount_and_fee():
     """The destination is not a projection-cash account: the money leaves the pool."""
     ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, OUTSIDE), CASH, CARDS)

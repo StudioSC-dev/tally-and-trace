@@ -351,6 +351,31 @@ def test_monthly_projection_does_not_count_unposted_card_charges_as_cash(db, use
     ]
 
 
+def test_monthly_projection_does_not_count_a_card_cash_advance_as_cash(db, user):
+    """Nothing repays the advance until statements net transfers, so it adds no cash."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "1000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.TRANSFER, "3000.00", datetime(2026, 8, 5),
+         transfer_fee=Decimal("50.00"), description="Cash advance",
+         transfer_from_account_id=card.id, transfer_to_account_id=checking.id)
+
+    (aug,) = project_cashflow(db, user.id, months=1, reference=datetime(2026, 8, 1))
+    assert aug["closing_balance"] == 1000.0
+    assert aug["by_account"] == [
+        {"account_id": checking.id, "account_name": "Checking B", "closing_balance": 1000.0}
+    ]
+    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    assert r["closing_balance"] == Decimal("1000.00")
+    assert r["events"] == []
+    assert get_payables(db, user.id, days=30, reference=datetime(2026, 8, 1)) == []
+
+
 def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType

@@ -539,17 +539,22 @@ def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
     not count as cash yet: the card's statement payable already models that cash
     leaving, and allocating payments against statements is a follow-up. Counting
     both would double-count the payment.
+
+    A transfer FROM a credit card (a cash advance or balance transfer) is treated
+    the same way: statements ignore transfers, so nothing would ever repay the
+    cash it adds. Neither kind has a cash leg until statements net transfers.
     """
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids
+    via_card = src in card_ids or dst in card_ids
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids))
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_card))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids))
+        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_card))
     return _event(
         date=_naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -558,7 +563,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
-        counts_as_cash=False if dst in card_ids else None,
+        counts_as_cash=False if via_card else None,
         transfer_fee=_money(fee),
     )
 
