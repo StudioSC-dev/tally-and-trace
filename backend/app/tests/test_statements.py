@@ -533,3 +533,31 @@ def test_positive_stored_balance_against_posted_debt_trims_nothing(caplog):
             (datetime(2026, 8, 14), Decimal("-3000.00"), False),
         ]
     assert "trimmed" not in caplog.text
+
+
+def _from_unbilled_card(posted=False):
+    """12,000 charged on card 1, then 'paid' by a transfer from card 2, which has
+    no cycle settings and so no statement that would ever bill the transfer."""
+    unbilled = _card(id=2, name="Store card", billing_cycle_start=None, due_date=None)
+    move = _pay(10, "12000.00", month=8, from_account=2)
+    move.is_posted = posted
+    return unbilled, [_posted(10, "12000.00", 7), move]
+
+
+def test_payment_from_a_card_without_statements_does_not_net_the_billed_card():
+    unbilled, rows = _from_unbilled_card()
+    events = build_statement_payables([_card(), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
+    assert [(e["name"], e["date"], e["amount"]) for e in events] == [
+        ("Metrobank CC statement", datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+def test_posted_payment_from_a_card_without_statements_still_matches_the_stored_balance():
+    """Posting raised card 1's stored balance to 0, and the ledger agrees: the
+    guard leaves the statement alone, so the 12,000 is still billed."""
+    unbilled, rows = _from_unbilled_card(posted=True)
+    events = build_statement_payables(
+        [_card(balance=Decimal("0.00")), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]

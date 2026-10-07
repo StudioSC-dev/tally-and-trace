@@ -154,12 +154,18 @@ def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[
     return remaining
 
 
-def _split_card_rows(card_id: int, rows: list) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
+def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
+                     ) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
     """Separate a card's rows into statement line items and payments into the card.
 
     Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
     transfer into a debit may keep stale ones). A transfer into the card is a
     payment; a transfer out of it is a charge of its amount plus fee.
+
+    A transfer from a card in ``unbilled_ids`` (no cycle settings) is not a
+    payment: no statement of that card bills it, so no cash ever leaves for it
+    (the forecast treats it as moving no cash, see ``forecast._transfer_event``),
+    and netting it would make the debt it moved disappear.
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
@@ -167,7 +173,9 @@ def _split_card_rows(card_id: int, rows: list) -> Tuple[list, List[Tuple[datetim
         if row.transaction_type == TransactionType.TRANSFER:
             amount = Decimal(str(row.amount))
             if getattr(row, "transfer_to_account_id", None) == card_id:
-                payments.append((row.transaction_date, amount))
+                source = getattr(row, "transfer_from_account_id", None) or row.account_id
+                if source not in unbilled_ids:
+                    payments.append((row.transaction_date, amount))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
                 fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
                 lines.append(SimpleNamespace(
@@ -259,7 +267,8 @@ def build_statement_payables(
 
     ``transactions_by_card`` holds every row touching each card: its own charges
     and refunds, transfers out of it (cash advances, billed as charges) and
-    transfers into it (payments). Every cycle from the card's
+    transfers into it (payments; one from a card in ``cards`` without cycle
+    settings is ignored, see ``_split_card_rows``). Every cycle from the card's
     first line item onward is balanced and the payments are allocated across them
     (see ``allocate_payments``); a cycle still owing something and due in
     ``[start, end)`` becomes a payable for the remainder.
@@ -296,8 +305,10 @@ def build_statement_payables(
     ``route_accounts`` already consume (negative amount = outflow).
     """
     events: List[dict] = []
+    unbilled_ids = frozenset(c.id for c in cards if resolve_cycle_fields(c) is None)
     for card in cards:
-        lines, payments = _split_card_rows(card.id, transactions_by_card.get(card.id, []))
+        lines, payments = _split_card_rows(
+            card.id, transactions_by_card.get(card.id, []), unbilled_ids)
         if not lines:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
