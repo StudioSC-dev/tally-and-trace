@@ -284,3 +284,40 @@ def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, us
     # The window really did contain each kind of event.
     sources = {e["source"] for e in timeline["events"]}
     assert sources == {"budget_entry", "transaction", "statement"}
+
+
+# ---------------------------------------------------------------------------
+# Upcoming items on the shared event engine
+# ---------------------------------------------------------------------------
+
+def test_upcoming_items_come_from_collect_events(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency, TransactionType
+    from app.services.forecast import get_upcoming_items
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "5000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=1, days_until_due_date=20,
+                    payment_account_id=checking.id)
+    # Weekly, but only one occurrence remaining: listed once, not four times.
+    _entry(db, user, "Last weekly installment", BudgetEntryType.EXPENSE, "250.00",
+           datetime(2026, 8, 3), cadence=RecurrenceFrequency.WEEKLY,
+           end_mode="after_occurrences", max_occurrences=1)
+    _txn(db, user, card, TransactionType.DEBIT, "700.00", datetime(2026, 7, 15), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "90.00", datetime(2026, 8, 12),
+         description="Card charge")
+    # On the cutoff day itself: still inside the window.
+    _txn(db, user, checking, TransactionType.DEBIT, "40.00", datetime(2026, 8, 31, 18),
+         description="Cutoff-day bill")
+
+    items = get_upcoming_items(db, user.id, days=30, reference=datetime(2026, 8, 1, 9))
+
+    assert [(i["due_date"], i["name"], float(i["amount"]), i["entry_type"], i["source"])
+            for i in items] == [
+        ("2026-08-03", "Last weekly installment", 250.0, "expense", "budget_entry"),
+        ("2026-08-12", "Card charge", 90.0, "debit", "transaction"),
+        # 1 Aug close (charges 2 Jul..1 Aug) due 21 Aug.
+        ("2026-08-21", "Card C statement", 700.0, "expense", "statement"),
+        ("2026-08-31", "Cutoff-day bill", 40.0, "debit", "transaction"),
+    ]

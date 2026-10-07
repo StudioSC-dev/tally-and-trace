@@ -186,6 +186,14 @@ def project_cashflow(
     return timeline
 
 
+def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
+    """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
+    # Naive: compared against the naive next_occurrence / transaction_date columns.
+    now = reference or naive_utc_now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=days + 1)
+
+
 def get_upcoming_items(
     db: Session,
     user_id: int,
@@ -194,54 +202,24 @@ def get_upcoming_items(
     reference: Optional[datetime] = None,
 ) -> List[dict]:
     """
-    Return all scheduled income/expense occurrences and unposted transactions
-    within the next N days, sorted by date.
+    Return every dated event from ``collect_events`` within the next N days
+    (budget-entry occurrences, unposted transactions and credit-card statement
+    payables), sorted by date. ``amount`` is the unsigned amount as entered.
     """
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
-    cutoff = now + timedelta(days=days)
+    start, end = _upcoming_window(days, reference)
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id)
 
-    items: List[dict] = []
-
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
-        BudgetEntry.is_active.is_(True),
-    )
-
-    for entry in be_query.all():
-        occ = entry.next_occurrence.replace(tzinfo=None) if entry.next_occurrence.tzinfo else entry.next_occurrence
-        # Walk forward occurrences within the window
-        counter = 0
-        while occ <= cutoff and counter < 100:
-            if occ >= now:
-                items.append({
-                    "name": entry.name,
-                    "amount": entry.amount,
-                    "due_date": occ.date().isoformat(),
-                    "entry_type": entry.entry_type.value,
-                    "source": "budget_entry",
-                    "source_id": entry.id,
-                })
-            occ = _next_occurrence(occ, entry.cadence)
-            counter += 1
-
-    txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
-        Transaction.is_posted.is_(False),
-        Transaction.transaction_date >= now,
-        Transaction.transaction_date <= cutoff,
-    )
-
-    for txn in txn_query.all():
-        items.append({
-            "name": txn.description or "Unposted transaction",
-            "amount": txn.amount,
-            "due_date": txn.transaction_date.date().isoformat(),
-            "entry_type": txn.transaction_type.value,
-            "source": "transaction",
-            "source_id": txn.id,
-        })
-
+    items = [
+        {
+            "name": e["name"],
+            "amount": e["face_amount"],
+            "due_date": _naive(e["date"]).date().isoformat(),
+            "entry_type": e["type"],
+            "source": e["source"],
+            "source_id": e["source_id"],
+        }
+        for e in events
+    ]
     items.sort(key=lambda x: x["due_date"])
     return items
 
