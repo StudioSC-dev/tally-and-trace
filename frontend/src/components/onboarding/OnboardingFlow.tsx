@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay, type SpotlightRect } from './SpotlightOverlay'
@@ -128,8 +128,15 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     const previousOverflow = root.style.overflow
     root.style.overflow = 'hidden'
 
+    // The bubble's body text is the one region allowed to scroll, so long
+    // copy stays readable on short screens.
+    const inBubbleScroll = (e: Event) =>
+      e.target instanceof Element && e.target.closest('[data-onboarding-scroll]') !== null
+
     // Prevent keyboard navigation
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Scrolling keys work inside the focused body text region
+      if (inBubbleScroll(e)) return
       // Allow only Tab, Enter, Escape for navigation
       if (!['Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault()
@@ -138,11 +145,6 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
     
     // Prevent scroll events
-    // The bubble's body text is the one region allowed to scroll, so long
-    // copy stays readable on short screens.
-    const inBubbleScroll = (e: Event) =>
-      e.target instanceof Element && e.target.closest('[data-onboarding-scroll]') !== null
-
     const handleWheel = (e: WheelEvent) => {
       if (inBubbleScroll(e)) return
       e.preventDefault()
@@ -316,6 +318,11 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   // active, so the highlight follows layout shifts (cards loading, smooth
   // scroll, resize). State only changes when something actually moved.
   const bubbleRef = useRef<HTMLDivElement>(null)
+  // Whether the body text overflows; only then is it a (keyboard) scroll region
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const lastBodyScrollable = useRef(false)
+  const [bodyScrollable, setBodyScrollable] = useState(false)
+  const titleId = useId()
   const lastGeometry = useRef<Geometry | null>(null)
   const [geometry, setGeometry] = useState<Geometry | null>(null)
 
@@ -357,6 +364,12 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       if (!sameGeometry(lastGeometry.current, next)) {
         lastGeometry.current = next
         setGeometry(next)
+      }
+      const body = bodyRef.current
+      const scrollable = !!body && body.scrollHeight > body.clientHeight + 1
+      if (scrollable !== lastBodyScrollable.current) {
+        lastBodyScrollable.current = scrollable
+        setBodyScrollable(scrollable)
       }
       frame = requestAnimationFrame(measure)
     }
@@ -422,8 +435,15 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           </div>
 
           {/* Step content — the only part that scrolls when space is short */}
-          <div className="mb-4 min-h-0 overflow-y-auto" data-onboarding-scroll>
-            <h3 className="text-base font-semibold text-ink mb-1.5">
+          <div
+            ref={bodyRef}
+            className="mb-4 min-h-0 overflow-y-auto overscroll-contain focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            data-onboarding-scroll
+            {...(bodyScrollable
+              ? { tabIndex: 0, role: 'region', 'aria-labelledby': titleId }
+              : {})}
+          >
+            <h3 id={titleId} className="text-base font-semibold text-ink mb-1.5">
               {currentStepData.title}
             </h3>
             <p className="text-sm text-body">{currentStepData.description}</p>
