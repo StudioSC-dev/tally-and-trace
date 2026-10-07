@@ -441,9 +441,12 @@ def _leg(account_id, amount, overflow_account_id=None, cash: bool = True) -> dic
     }
 
 
-def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict], **extra) -> dict:
+def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict],
+           counts_as_cash: Optional[bool] = None, **extra) -> dict:
     cash_legs = [leg for leg in legs if leg["cash"]]
     primary = legs[0] if legs else {}
+    if counts_as_cash is None:
+        counts_as_cash = bool(cash_legs)
     ev = {
         "date": date,
         "name": name,
@@ -453,7 +456,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
         "source_id": source_id,
         "face_amount": _money(face_amount),
         "legs": legs,
-        "counts_as_cash": bool(cash_legs),
+        "counts_as_cash": counts_as_cash,
         "funding_account_id": primary.get("account_id"),
         "overflow_account_id": primary.get("overflow_account_id"),
     }
@@ -475,9 +478,51 @@ def _legs_of(e: dict) -> List[dict]:
 
 
 def _event_sort_key(e: dict):
+    """Date order; same-day ties run transfers, then outflows, then inflows.
+
+    Transfers go first so money moved between your own accounts funds that day's
+    payables; outflows before inflows is the conservative solvency assumption.
+    """
     d = e["date"]
     d = d.date() if isinstance(d, datetime) else d
-    return (d, 0 if _money(e["amount"]) < 0 else 1)
+    if e.get("type") == TransactionType.TRANSFER.value:
+        rank = 0
+    elif _money(e["amount"]) < 0:
+        rank = 1
+    else:
+        rank = 2
+    return (d, rank)
+
+
+def _transfer_event(txn, non_cash_ids: set) -> dict:
+    """A transfer: -(amount + fee) on the source, +amount on the destination.
+
+    Between two projection-cash accounts the pooled total moves only by the fee,
+    while each account's balance moves by its own leg.
+
+    A transfer INTO a credit card (a card payment) is listed with its legs but does
+    not count as cash yet: the card's statement payable already models that cash
+    leaving, and allocating payments against statements is a follow-up. Counting
+    both would double-count the payment.
+    """
+    src = txn.transfer_from_account_id or txn.account_id
+    dst = txn.transfer_to_account_id
+    amount = Decimal(str(txn.amount))
+    fee = Decimal(str(txn.transfer_fee or 0))
+    legs = [_leg(src, -(amount + fee), cash=src not in non_cash_ids)]
+    if dst is not None:
+        legs.append(_leg(dst, amount, cash=dst not in non_cash_ids))
+    return _event(
+        date=_naive(txn.transaction_date),
+        name=txn.description or "Unposted transfer",
+        type=txn.transaction_type.value,
+        source="transaction",
+        source_id=txn.id,
+        face_amount=amount,
+        legs=legs,
+        counts_as_cash=False if dst in non_cash_ids else None,
+        transfer_fee=_money(fee),
+    )
 
 
 def collect_events(
@@ -529,12 +574,15 @@ def collect_events(
         Transaction.transaction_date < end,
     )
     for txn in txn_query.all():
+        if txn.transaction_type == TransactionType.TRANSFER:
+            events.append(_transfer_event(txn, non_cash_ids))
+            continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
         elif txn.transaction_type == TransactionType.DEBIT:
             amt = -Decimal(str(txn.amount))      # outflow
         else:
-            continue  # transfers don't change total available cash (account-aware routing is a follow-up)
+            continue
         # A charge on a credit card is NOT a cash outflow on its purchase date — the
         # cash leaves when that card's statement is paid, which is modelled as a
         # dated statement payable below. Its leg is therefore non-cash.

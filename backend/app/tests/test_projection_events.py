@@ -1,11 +1,90 @@
 """Unit tests for the unified dated-event projection engine (pure, no database)."""
+from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 from app.models.account import AccountType
-from app.services.forecast import is_projection_cash
+from app.models.transaction import TransactionType
+from app.services.forecast import (
+    _event,
+    _leg,
+    _transfer_event,
+    build_timeline,
+    is_projection_cash,
+    route_accounts,
+)
 
 
 def test_is_projection_cash_excludes_credit_cards_only():
     for t in (AccountType.CASH, AccountType.E_WALLET, AccountType.SAVINGS, AccountType.CHECKING):
         assert is_projection_cash(SimpleNamespace(account_type=t)) is True
     assert is_projection_cash(SimpleNamespace(account_type=AccountType.CREDIT)) is False
+
+
+# ---------------------------------------------------------------------------
+# Transfer legs
+# ---------------------------------------------------------------------------
+
+SAVINGS_A, CHECKING_B, CARD_C = 1, 2, 3
+NAMES = {SAVINGS_A: "Savings A", CHECKING_B: "Checking B", CARD_C: "Card C"}
+
+
+def _txn_transfer(day, amount, fee, src, dst):
+    return SimpleNamespace(
+        id=99, description="Move to B", transaction_type=TransactionType.TRANSFER,
+        transaction_date=datetime(2026, 8, day), amount=Decimal(str(amount)),
+        transfer_fee=Decimal(str(fee)), account_id=src,
+        transfer_from_account_id=src, transfer_to_account_id=dst,
+    )
+
+
+def _payable(day, amount, account_id, name="Bill from B"):
+    return _event(
+        date=datetime(2026, 8, day), name=name, type="expense", source="budget_entry",
+        source_id=7, face_amount=amount, legs=[_leg(account_id, -Decimal(str(amount)))],
+    )
+
+
+def test_transfer_between_cash_accounts_moves_pool_only_by_fee():
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set())
+    assert [(leg["account_id"], leg["amount"]) for leg in ev["legs"]] == [
+        (SAVINGS_A, Decimal("-5015.00")),
+        (CHECKING_B, Decimal("5000.00")),
+    ]
+    assert ev["amount"] == Decimal("-15.00")
+    assert ev["counts_as_cash"] is True
+    assert ev["face_amount"] == Decimal("5000.00")
+
+
+def test_transfer_funds_destination_before_its_payable():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
+    events = [
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set()),
+        _payable(10, 4000, CHECKING_B),
+    ]
+    assert route_accounts(opening, events, NAMES) == []
+    pooled = build_timeline(sum(opening.values()), events)
+    assert pooled["closing_balance"] == Decimal("5985.00")  # 10000 - 15 fee - 4000 bill
+
+
+def test_same_day_transfer_runs_before_the_payable_it_funds():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
+    events = [
+        _payable(10, 4000, CHECKING_B),
+        _transfer_event(_txn_transfer(10, 5000, 0, SAVINGS_A, CHECKING_B), set()),
+    ]
+    assert route_accounts(opening, events, NAMES) == []
+
+
+def test_payable_without_the_transfer_is_short():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
+    sf = route_accounts(opening, [_payable(10, 4000, CHECKING_B)], NAMES)
+    assert len(sf) == 1 and sf[0]["account_id"] == CHECKING_B
+    assert sf[0]["short_amount"] == Decimal("4000.00")
+
+
+def test_transfer_into_a_card_is_listed_but_not_cash():
+    """The card's statement payable already models that cash; don't count it twice."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), {CARD_C})
+    assert ev["counts_as_cash"] is False
+    assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
