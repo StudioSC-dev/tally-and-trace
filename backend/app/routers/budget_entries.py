@@ -28,6 +28,8 @@ from app.schemas.budget_entry import (
     BudgetEntryResponse,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    ZERO_REMAINING_MESSAGE,
+    zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionResponse
 from app.core.time import utc_now
@@ -52,6 +54,8 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     Consequence worth knowing: an installment whose payments were entered by hand
     rather than via "Mark paid" reads as 0 paid, because nothing links those
     transactions to the entry. Better to under-claim than to invent a number.
+    ``occurrences_paid_offset`` is the explicit escape hatch: charges paid before
+    import (no linked transaction) are added to the linked count.
 
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
@@ -70,7 +74,11 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
 
     for entry in entries:
         is_installment = entry.end_mode == "after_occurrences"
-        entry.occurrences_paid = counts.get(entry.id, 0) if is_installment else None
+        entry.occurrences_paid = (
+            counts.get(entry.id, 0) + (entry.occurrences_paid_offset or 0)
+            if is_installment
+            else None
+        )
     return entries
 
 
@@ -153,7 +161,7 @@ def get_budget_entry(
     current_user: User = Depends(get_current_active_user),
 ):
     entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.post("/", response_model=BudgetEntryResponse, status_code=201)
@@ -184,7 +192,7 @@ def create_budget_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.put("/{entry_id}", response_model=BudgetEntryResponse)
@@ -206,13 +214,20 @@ def update_budget_entry(
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
 
+    if not zero_remaining_allowed(
+        prospective_data.get("end_mode", entry.end_mode),
+        prospective_data.get("max_occurrences", entry.max_occurrences),
+        prospective_data.get("is_active", entry.is_active),
+    ):
+        raise HTTPException(status_code=422, detail=ZERO_REMAINING_MESSAGE)
+
     for field, value in prospective_data.items():
         setattr(entry, field, value)
 
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.delete("/{entry_id}", status_code=204)
