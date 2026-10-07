@@ -273,3 +273,35 @@ def test_negative_offset_is_rejected(client):
         headers=headers,
     )
     assert resp.status_code == 422
+
+
+def test_detail_create_and_update_return_installment_progress(client, db):
+    """Every endpoint that returns an entry must carry occurrences_paid, not just the list."""
+    headers = _auth(client)
+    accounts = client.get(f"{API}/accounts/", headers=headers, params={"limit": 1000}).json()["items"]
+    funding = next(a for a in accounts if a["account_type"] != "credit")
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": "Progress everywhere", "amount": 1000.00,
+            "cadence": "monthly", "next_occurrence": datetime(2026, 8, 1).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": 2,
+            "occurrences_paid_offset": 4, "account_id": funding["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    entry_id = resp.json()["id"]
+    try:
+        assert resp.json()["occurrences_paid"] == 4
+        detail = client.get(f"{API}/budget-entries/{entry_id}", headers=headers)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["occurrences_paid"] == 4
+        updated = client.put(
+            f"{API}/budget-entries/{entry_id}", json={"description": "touched"}, headers=headers
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["occurrences_paid"] == 4
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+    finally:
+        _cleanup(db, entry_id)

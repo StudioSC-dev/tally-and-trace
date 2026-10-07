@@ -159,7 +159,7 @@ def get_budget_entry(
     current_user: User = Depends(get_current_active_user),
 ):
     entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.post("/", response_model=BudgetEntryResponse, status_code=201)
@@ -190,7 +190,7 @@ def create_budget_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.put("/{entry_id}", response_model=BudgetEntryResponse)
@@ -218,7 +218,7 @@ def update_budget_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    return _attach_occurrence_counts(db, [entry])[0]
 
 
 @router.delete("/{entry_id}", status_code=204)
