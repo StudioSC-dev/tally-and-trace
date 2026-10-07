@@ -258,3 +258,25 @@ def test_a_november_charge_rolls_the_period_once_november_is_current(client, db,
     expected = (NOV_START, DEC_START, Decimal("120.00"))
     assert state[october["explicit_id"]] == expected
     assert state[october["matched_id"]] == expected
+
+
+def _clear_period_end(db, ctx):
+    from app.models.allocation import Allocation
+
+    db.query(Allocation).filter(Allocation.id.in_([ctx["explicit_id"], ctx["matched_id"]])).update(
+        {Allocation.period_end: None}, synchronize_session=False
+    )
+    db.commit()
+
+
+def test_a_missing_period_end_is_derived_not_re_anchored(client, db, october, now_is):
+    """period_start alone still pins the period: a September row stays historical."""
+    _clear_period_end(db, october)
+    _charge(client, october, SEPT_DAY)
+    state = _state(db, october)
+    expected = (OCT_START, None, OCT_SPENT)
+    assert state[october["explicit_id"]] == expected
+    assert state[october["matched_id"]] == expected
+
+    _charge(client, october, OCT_DAY, amount=80.0)
+    _assert_october(db, october, OCT_SPENT + Decimal("80.00"))

@@ -99,10 +99,12 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
 
     period_changed = False
 
-    if period_start is None or period_end is None:
+    if period_start is None:
         period_start = _start_of_period(normalized_reference, frequency)
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
+    elif period_end is None:
+        period_end = _compute_period_end(period_start, frequency)
 
     now = naive_utc_now()
     while normalized_reference >= period_end and now >= period_end:
