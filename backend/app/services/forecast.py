@@ -113,9 +113,12 @@ def project_cashflow(
 
     ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
     net unposted cash transactions (debits - credits + transfer fees, plus transfer
-    amounts crossing the scope boundary), excluding card payments;
+    amounts crossing the scope boundary), excluding card payments. A card cash
+    advance is cash coming in, so it shows here as a NEGATIVE amount, while its
+    repayment (advance plus fee) lands later in ``statement_payables``;
     ``statement_payables`` is cash paid to credit cards in the period: statement
-    payables due (net of payments) plus planned card payments.
+    payables due (net of payments) plus planned card payments, including those
+    payments' transfer fees.
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     """
