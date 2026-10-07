@@ -558,7 +558,11 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     cards that have them (cycle settings; default: every card). A transfer
     touching a card without cycle settings moves no projection cash at all: no
     statement bills an advance from it or is netted by a payment into it, so
-    counting either side would leave cash that nothing balances.
+    counting either side would leave cash that nothing balances. A payment into
+    a billed card from such a card outside the scope (another entity's, or an
+    inactive one) agrees: its source has no leg here, so it moves no cash, and
+    statements decide "unbilled" from the source account itself, so it does not
+    net the statement either; that debt is paid in cash on its due date.
     """
     if billed_ids is None:
         billed_ids = card_ids

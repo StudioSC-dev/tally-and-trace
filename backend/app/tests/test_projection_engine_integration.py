@@ -1012,6 +1012,55 @@ def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfer
     assert aug["closing_balance"] == 8000.0 == float(r["closing_balance"])
 
 
+def _billed_card_paid_from_an_unbilled_card(db, user, card_entity=None, source_entity=None,
+                                           source_active=True):
+    """1,000 charged on billed Card C (24 Jul statement, due 14 Aug), then 'paid' on
+    5 Aug by a transfer from Card D, which has no cycle settings."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+
+    ids = {"entity_id": card_entity.id} if card_entity else {}
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00", **ids)
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-1000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id, **ids)
+    source = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
+                      is_active=source_active,
+                      **({"entity_id": source_entity.id} if source_entity else {}))
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 7, 10),
+         is_posted=True, **ids)
+    _txn(db, user, source, TransactionType.TRANSFER, "1000.00", datetime(2026, 8, 5),
+         description="Pay C from D", transfer_from_account_id=source.id,
+         transfer_to_account_id=card.id,
+         **({"entity_id": source_entity.id} if source_entity else {}))
+    return checking, card
+
+
+def _assert_billed_debt_is_still_paid_in_cash(db, user, entity_id):
+    from app.services.forecast import get_payables, project_running_balance
+
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, entity_id, days=30, reference=reference)
+    assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-1000.00"))]
+    assert r["closing_balance"] == Decimal("9000.00")
+    assert [(p["due_date"], p["name"], p["amount"]) for p in get_payables(
+        db, user.id, entity_id, days=30, reference=reference)] == [
+        ("2026-08-14", "Card C statement", 1000.0),
+    ]
+
+
+def test_payment_from_another_entitys_unbilled_card_does_not_net_the_statement(
+        db, user, entities):
+    ent_a, ent_b = entities
+    _billed_card_paid_from_an_unbilled_card(db, user, card_entity=ent_b, source_entity=ent_a)
+    _assert_billed_debt_is_still_paid_in_cash(db, user, ent_b.id)
+
+
+def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):
+    _billed_card_paid_from_an_unbilled_card(db, user, source_active=False)
+    _assert_billed_debt_is_still_paid_in_cash(db, user, None)
+
+
 def test_refund_beyond_its_statement_reduces_the_next_payable_in_every_view(db, user):
     """July nets -400 (100 charge, 500 refund); August's 1,000 statement owes 600.
     Card spending of 600 net leaves cash exactly once, on 14 Sep."""

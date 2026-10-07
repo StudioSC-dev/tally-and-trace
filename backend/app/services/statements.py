@@ -220,13 +220,17 @@ def build_statement_payables(
     transactions_by_card: dict,
     start: datetime,
     end: datetime,
+    unbilled_sources: frozenset = frozenset(),
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
 
     ``transactions_by_card`` holds every row touching each card: its own charges
     and refunds, transfers out of it (cash advances, billed as charges) and
-    transfers into it (payments; one from a card in ``cards`` without cycle
-    settings is ignored, see ``_split_card_rows``). Every cycle from the card's
+    transfers into it (payments; one from a card without cycle settings is
+    ignored, see ``_split_card_rows``). Such a source is any card in ``cards``
+    without cycle settings, plus the ids in ``unbilled_sources``: the caller
+    names those from the source account itself, so a card outside ``cards``
+    (another entity's, or an inactive one) counts too. Every cycle from the card's
     first line item onward is balanced and the payments are allocated across them
     (see ``allocate_payments``); a cycle still owing something and due in
     ``[start, end)`` becomes a payable for the remainder.
@@ -246,7 +250,8 @@ def build_statement_payables(
     ``route_accounts`` already consume (negative amount = outflow).
     """
     events: List[dict] = []
-    unbilled_ids = frozenset(c.id for c in cards if resolve_cycle_fields(c) is None)
+    unbilled_ids = unbilled_sources | frozenset(
+        c.id for c in cards if resolve_cycle_fields(c) is None)
     for card in cards:
         lines, payments = _split_card_rows(
             card.id, transactions_by_card.get(card.id, []), unbilled_ids)
@@ -333,4 +338,21 @@ def get_statement_payables(
         if cid in by_card:
             by_card[cid].extend(lines)
 
-    return build_statement_payables(cards, by_card, start, end)
+    # Whether a payment's source card is billed is a fact about that account, not
+    # about this view: it is loaded by id, outside the card scope above, so a
+    # payment from another entity's or an inactive card without cycle settings
+    # still does not net the statement it was paid into.
+    source_ids = {
+        txn.transfer_from_account_id or txn.account_id
+        for txn in txns
+        if txn.transaction_type == TransactionType.TRANSFER
+        and txn.transfer_to_account_id in card_ids
+    }
+    unbilled_sources = frozenset()
+    if source_ids:
+        unbilled_sources = frozenset(
+            a.id for a in db.query(Account).filter(Account.id.in_(source_ids))
+            if a.account_type == AccountType.CREDIT and resolve_cycle_fields(a) is None
+        )
+
+    return build_statement_payables(cards, by_card, start, end, unbilled_sources)
