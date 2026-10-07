@@ -147,6 +147,32 @@ def test_window_is_exclusive_at_start_and_inclusive_at_close():
     assert statement_balance(on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("999.00")
 
 
+def test_midday_charge_on_the_closing_day_belongs_to_that_statement():
+    """Close is midnight of the 24th, but the whole 24th is inside the statement."""
+    noon_on_close = [_txn(24, "12000.00")]
+    noon_on_close[0].transaction_date = datetime(2026, 7, 24, 12)
+    assert statement_balance(noon_on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("12000.00")
+    # ...and therefore NOT in the next one.
+    assert statement_balance(noon_on_close, datetime(2026, 7, 24), datetime(2026, 8, 24)) == Decimal("0")
+
+
+def test_midday_charge_on_the_previous_closing_day_belongs_to_the_previous_statement():
+    noon_on_prev_close = [_txn(24, "500.00", month=6)]
+    noon_on_prev_close[0].transaction_date = datetime(2026, 6, 24, 12)
+    assert statement_balance(noon_on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("0")
+    assert statement_balance(noon_on_prev_close, datetime(2026, 5, 24), datetime(2026, 6, 24)) == Decimal("500.00")
+
+
+def test_midday_closing_day_charge_is_payable_on_that_statements_due_date():
+    """Repro: 12,000 at noon on 24 Jul is due 14 Aug, not 14 Sep."""
+    txns = {1: [_txn(24, "12000.00")]}
+    txns[1][0].transaction_date = datetime(2026, 7, 24, 12)
+    events = build_statement_payables([_card()], txns, datetime(2026, 8, 1), datetime(2026, 10, 1))
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
 def test_refunds_reduce_the_balance():
     txns = [_txn(5, "1000.00"), _txn(10, "250.00", kind=TransactionType.CREDIT)]
     assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("750.00")

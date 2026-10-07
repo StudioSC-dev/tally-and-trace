@@ -10,7 +10,7 @@ The cycle contract (see HANDOVER Session 14 for why):
     days_until_due_date   days from close to payment due (default 21)
 
     close  = <billing_cycle_start> of month M      e.g. Jul 24
-    window = (previous close, close]               e.g. Jun 25 .. Jul 24
+    window = (previous close, close], whole days   e.g. Jun 25 .. Jul 24
     due    = close + days_until_due_date           e.g. Aug 14
 
 Legacy fallback: a card with only ``due_date`` (day-of-month) set is read as
@@ -112,18 +112,20 @@ def iter_statement_cycles(card: Account, start: datetime, end: datetime) -> Iter
 
 
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime) -> Decimal:
-    """Sum a card's charges over ``(window_start, close]``.
+    """Sum a card's charges over the calendar days ``(window_start, close]``.
+
+    Days, not instants: ``close`` is midnight of the closing day, but a charge at
+    any time ON that day belongs to this statement, and one at any time on the
+    previous closing day belongs to the previous statement.
 
     Purchases add to what's owed, refunds/payments subtract. Transfers are ignored:
     a card payment is recorded as a transfer, and its cash side is already modelled
     on the paying account -- counting it here too would net the statement to zero.
     """
+    first_excluded, last_included = window_start.date(), close.date()
     total = Decimal("0")
     for txn in transactions:
-        when = txn.transaction_date
-        if when.tzinfo:
-            when = when.replace(tzinfo=None)
-        if not (window_start < when <= close):
+        if not (first_excluded < txn.transaction_date.date() <= last_included):
             continue
         if txn.transaction_type == TransactionType.DEBIT:
             total += Decimal(str(txn.amount))

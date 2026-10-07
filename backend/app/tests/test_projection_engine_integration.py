@@ -452,6 +452,27 @@ def test_monthly_projection_does_not_count_unposted_card_charges_as_cash(db, use
     ]
 
 
+def test_monthly_projection_bills_a_midday_closing_day_charge_on_that_statement(db, user):
+    """12,000 at noon on the 24 Jul closing day is due 14 Aug, so August closes at 38,000."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 24, 12),
+         description="Card charge")
+
+    aug, sep = project_cashflow(db, user.id, months=2, reference=datetime(2026, 8, 1))
+
+    assert aug["statement_payables"] == 12000.0
+    assert aug["closing_balance"] == 38000.0
+    assert sep["statement_payables"] == 0.0
+    assert sep["closing_balance"] == 38000.0
+
+
 def test_monthly_projection_does_not_count_a_card_cash_advance_as_cash(db, user):
     """Nothing repays the advance until statements net transfers, so it adds no cash."""
     from app.models.account import AccountType
