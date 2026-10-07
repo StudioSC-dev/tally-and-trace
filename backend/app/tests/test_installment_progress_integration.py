@@ -305,3 +305,58 @@ def test_detail_create_and_update_return_installment_progress(client, db):
         assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
     finally:
         _cleanup(db, entry_id)
+
+
+def _post_installment(client, headers, *, remaining, active, name):
+    return client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": name, "amount": 1000.00,
+            "cadence": "monthly",
+            "next_occurrence": (datetime.now() + timedelta(days=10)).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": remaining,
+            "occurrences_paid_offset": 6, "is_active": active,
+        },
+        headers=headers,
+    )
+
+
+def test_completed_installment_with_zero_remaining_can_be_created_inactive(client, db):
+    headers = _auth(client)
+    name = "Completed installment zero remaining"
+    resp = _post_installment(client, headers, remaining=0, active=False, name=name)
+    assert resp.status_code == 201, resp.text
+    entry_id = resp.json()["id"]
+    try:
+        assert resp.json()["occurrences_paid"] == 6
+        assert resp.json()["max_occurrences"] == 0
+        r = client.get(f"{API}/forecast/timeline", headers=headers, params={"days": 365})
+        assert r.status_code == 200, r.text
+        assert not [e for e in r.json()["events"] if name in e.get("name", "")]
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_zero_remaining_active_installment_is_rejected(client):
+    headers = _auth(client)
+    resp = _post_installment(client, headers, remaining=0, active=True, name="Active zero remaining")
+    assert resp.status_code == 422, resp.text
+
+
+def test_update_to_zero_remaining_requires_inactive(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Update to zero remaining",
+    )
+    try:
+        url = f"{API}/budget-entries/{entry_id}"
+        assert client.put(url, json={"max_occurrences": 0}, headers=headers).status_code == 422
+        resp = client.put(url, json={"max_occurrences": 0, "is_active": False}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["max_occurrences"] == 0
+        assert resp.json()["occurrences_paid"] == 5
+        # Reactivating a completed installment without giving it occurrences is rejected.
+        assert client.put(url, json={"is_active": True}, headers=headers).status_code == 422
+    finally:
+        _cleanup(db, entry_id)

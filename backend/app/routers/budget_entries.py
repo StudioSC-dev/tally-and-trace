@@ -28,6 +28,8 @@ from app.schemas.budget_entry import (
     BudgetEntryResponse,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    ZERO_REMAINING_MESSAGE,
+    zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionResponse
 from app.core.time import utc_now
@@ -211,6 +213,13 @@ def update_budget_entry(
     )
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
+
+    if not zero_remaining_allowed(
+        prospective_data.get("end_mode", entry.end_mode),
+        prospective_data.get("max_occurrences", entry.max_occurrences),
+        prospective_data.get("is_active", entry.is_active),
+    ):
+        raise HTTPException(status_code=422, detail=ZERO_REMAINING_MESSAGE)
 
     for field, value in prospective_data.items():
         setattr(entry, field, value)
