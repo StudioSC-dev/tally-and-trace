@@ -41,9 +41,9 @@ def _normalize_reference(reference: Optional[datetime]) -> datetime:
     """Naive UTC, to match the naive allocations.period_start/period_end columns.
 
     Aware values are converted to UTC first, as Postgres does when it stores them, so a
-    row is classified the same way on create as on a later edit or delete. That
-    equivalence holds because the DB session TimeZone is UTC, so a naive read-back of a
-    stored timestamptz is already UTC.
+    row is classified the same way on create as on a later edit or delete. Stored
+    timestamptz values read back aware and are converted to UTC here; naive inputs are
+    assumed to be UTC, which holds while the session TimeZone is UTC.
     """
     value = reference or naive_utc_now()
     return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
