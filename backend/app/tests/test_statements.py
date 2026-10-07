@@ -529,7 +529,7 @@ WINDOW_SCENARIO = [
     _pay(20, "500.00", month=8),                             # late for the 14 Aug due date
     _txn(2, "3000.00", kind=TransactionType.CREDIT, month=9),  # net-credit 24 Sep cycle
     _txn(5, "400.00", month=10),                             # 24 Oct statement, due 14 Nov
-    _pay(10, "700.00", month=11),                            # planned, beyond every window
+    _pay(10, "700.00", month=11),                # planned, after the last statement's 14 Nov due date
 ]
 
 
