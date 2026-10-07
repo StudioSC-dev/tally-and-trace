@@ -16,7 +16,8 @@ interface Box {
 }
 
 const GAP = 16 // between the highlight and the bubble
-const MARGIN = 16 // between the bubble and the viewport edge
+export const BUBBLE_VIEWPORT_MARGIN = 16
+const MARGIN = BUBBLE_VIEWPORT_MARGIN // between the bubble and the viewport edge
 const ARROW_INSET = 16 // keep the arrow off the bubble's corners
 
 function clamp(value: number, min: number, max: number) {

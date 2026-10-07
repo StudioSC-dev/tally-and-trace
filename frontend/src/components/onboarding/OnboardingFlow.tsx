@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay, type SpotlightRect } from './SpotlightOverlay'
 import { resolveOnboardingTarget } from './resolveTarget'
-import { placeBubble } from './placeBubble'
+import { placeBubble, BUBBLE_VIEWPORT_MARGIN } from './placeBubble'
 
 interface OnboardingStep {
   id: number
@@ -138,13 +138,20 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
     
     // Prevent scroll events
+    // The bubble's body text is the one region allowed to scroll, so long
+    // copy stays readable on short screens.
+    const inBubbleScroll = (e: Event) =>
+      e.target instanceof Element && e.target.closest('[data-onboarding-scroll]') !== null
+
     const handleWheel = (e: WheelEvent) => {
+      if (inBubbleScroll(e)) return
       e.preventDefault()
       e.stopPropagation()
     }
     
     // Prevent touch scroll
     const handleTouchMove = (e: TouchEvent) => {
+      if (inBubbleScroll(e)) return
       e.preventDefault()
       e.stopPropagation()
     }
@@ -382,16 +389,19 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           never strand the user behind the overlay without controls. */}
       <div
         ref={bubbleRef}
-        className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)]"
+        className="absolute z-[10000] flex flex-col bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)]"
         style={{
           top: `${bubbleLayout.top}px`,
           left: `${bubbleLayout.left}px`,
+          // Never taller than the viewport, so the controls cannot be clipped;
+          // the measured (capped) height is what placeBubble positions.
+          maxHeight: `${(geometry?.viewport.height ?? window.innerHeight) - BUBBLE_VIEWPORT_MARGIN * 2}px`,
         }}
         data-onboarding-controls
       >
-        <div className="p-4">
+        <div className="flex min-h-0 flex-col p-4">
           {/* Progress indicator */}
-          <div className="mb-3">
+          <div className="mb-3 shrink-0">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-body">
                 Step {currentStep + 1} of {TOTAL_STEPS}
@@ -411,8 +421,8 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
             </div>
           </div>
 
-          {/* Step content */}
-          <div className="mb-4">
+          {/* Step content — the only part that scrolls when space is short */}
+          <div className="mb-4 min-h-0 overflow-y-auto" data-onboarding-scroll>
             <h3 className="text-base font-semibold text-ink mb-1.5">
               {currentStepData.title}
             </h3>
@@ -420,7 +430,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           </div>
 
           {/* Navigation buttons */}
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
             <button
               onClick={handlePrevious}
               disabled={currentStep === 0}
@@ -430,7 +440,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
             </button>
             <button
               onClick={handleNext}
-              className="px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
+              className="ml-auto px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
             >
               {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
             </button>
