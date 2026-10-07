@@ -8,6 +8,7 @@ from app.models.transaction import TransactionType
 from app.services.forecast import (
     _event,
     _leg,
+    _route_legs,
     _transfer_event,
     build_timeline,
     is_projection_cash,
@@ -88,3 +89,47 @@ def test_transfer_into_a_card_is_listed_but_not_cash():
     ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), {CARD_C})
     assert ev["counts_as_cash"] is False
     assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
+
+
+# ---------------------------------------------------------------------------
+# Per-account closings and overflow use
+# ---------------------------------------------------------------------------
+
+def test_closings_exclude_virtual_overflow_moves_which_are_reported_separately():
+    opening = {SAVINGS_A: Decimal("1000"), CHECKING_B: Decimal("100")}
+    payable = _event(
+        date=datetime(2026, 8, 10), name="Bill from B", type="expense", source="budget_entry",
+        source_id=7, face_amount=300, legs=[_leg(CHECKING_B, Decimal("-300"), SAVINGS_A)],
+    )
+    r = _route_legs(opening, [payable], NAMES)
+
+    assert r["shortfalls"] == []  # overflow covered it
+    assert r["overflow_moves"] == [{
+        "date": datetime(2026, 8, 10).date(), "name": "Bill from B",
+        "from_account_id": SAVINGS_A, "from_account_name": "Savings A",
+        "to_account_id": CHECKING_B, "to_account_name": "Checking B",
+        "amount": Decimal("200.00"),
+    }]
+    # Scheduled legs only: B goes to -200, A is untouched by the virtual pull.
+    assert r["final"]["by_account"] == {SAVINGS_A: Decimal("1000.00"), CHECKING_B: Decimal("-200.00")}
+    assert r["final"]["unassigned"] == Decimal("0")
+
+
+def test_checkpoint_closings_and_pooled_invariant():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("0")}
+    events = [
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), set()),
+        _payable(10, 4000, CHECKING_B),
+        _event(date=datetime(2026, 9, 3), name="Unrouted income", type="income",
+               source="budget_entry", source_id=8, face_amount=700,
+               legs=[_leg(None, Decimal("700"))]),
+    ]
+    r = _route_legs(opening, events, NAMES, checkpoints=[datetime(2026, 9, 1).date()])
+
+    aug = r["closings"][0]
+    assert aug["by_account"] == {SAVINGS_A: Decimal("4985.00"), CHECKING_B: Decimal("1000.00")}
+    assert aug["unassigned"] == Decimal("0")
+    final = r["final"]
+    assert final["unassigned"] == Decimal("700.00")
+    pooled = build_timeline(sum(opening.values()), events)["closing_balance"]
+    assert sum(final["by_account"].values()) + final["unassigned"] == pooled

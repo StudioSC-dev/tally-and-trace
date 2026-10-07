@@ -145,3 +145,36 @@ def test_transfer_funds_destination_before_its_payable_and_costs_only_the_fee(db
     transfer = [e for e in r["events"] if e["type"] == "transfer"]
     assert len(transfer) == 1 and transfer[0]["amount"] == Decimal("-15.00")
     assert r["closing_balance"] == Decimal("5985.00")
+
+    # Per account: the transfer reduced Savings A and funded Checking B's bill.
+    closings = {a["account_name"]: a["closing_balance"] for a in r["by_account"]}
+    assert closings == {"Savings A": Decimal("4985.00"), "Checking B": Decimal("1000.00")}
+    assert r["overflow_moves"] == []
+
+
+def test_timeline_reports_overflow_use_without_moving_closings(db, user, client):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance, serialize_timeline
+
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "1000.00")
+    checking_b = _account(db, user, "Checking B", AccountType.CHECKING, "100.00")
+    _entry(db, user, "Bill from B", BudgetEntryType.EXPENSE, "300.00", datetime(2026, 8, 10),
+           account=checking_b, overflow_account_id=savings_a.id,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    body = serialize_timeline(
+        project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    )
+
+    assert body["account_shortfalls"] == []
+    assert body["overflow_moves"] == [{
+        "date": "2026-08-10", "name": "Bill from B",
+        "from_account_id": savings_a.id, "from_account_name": "Savings A",
+        "to_account_id": checking_b.id, "to_account_name": "Checking B",
+        "amount": 200.0,
+    }]
+    closings = {a["account_name"]: a["closing_balance"] for a in body["by_account"]}
+    assert closings == {"Savings A": 1000.0, "Checking B": -200.0}
+    assert body["unassigned_closing"] == 0.0
+    assert body["closing_balance"] == 800.0

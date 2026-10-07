@@ -10,7 +10,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
@@ -617,44 +617,117 @@ def collect_events(
     return events
 
 
-def _route_legs(opening_by_account: dict, events: List[dict], account_names: dict) -> dict:
-    """Walk events' cash legs per account with primary → overflow routing."""
-    balances = {aid: _money(bal) for aid, bal in opening_by_account.items()}
+def _route_legs(
+    opening_by_account: dict,
+    events: List[dict],
+    account_names: dict,
+    checkpoints: Sequence[date] = (),
+) -> dict:
+    """Walk events' cash legs per account with primary → overflow routing.
+
+    Keeps two books:
+
+    - the ROUTING book applies legs plus the virtual overflow pulls, and is what
+      account shortfalls are judged against;
+    - the SCHEDULED book applies legs only. Per-account closings come from it, so
+      an overflow pull (a "would have to move money" signal, not a planned
+      transfer) never shows up as a balance change. Overflow use is reported
+      separately in ``overflow_moves``.
+
+    ``checkpoints`` are dates (e.g. month starts); ``closings[i]`` is the scheduled
+    book just before the first event on/after ``checkpoints[i]``, and
+    ``final`` is the book after every event. Each closing reports the opening
+    accounts in ``by_account``; cash legs on any other account (or none) land in
+    ``unassigned``, so ``sum(by_account) + unassigned`` is always the pooled total.
+    """
+    routed = {aid: _money(bal) for aid, bal in opening_by_account.items()}
+    scheduled = dict(routed)
+    tracked = set(opening_by_account)
+    unassigned = Decimal("0")
     shortfalls: List[dict] = []
+    overflow_moves: List[dict] = []
+    pending = sorted(checkpoints)
+    closings: List[dict] = []
+
+    def _snapshot() -> dict:
+        extra = sum((v for k, v in scheduled.items() if k not in tracked), Decimal("0"))
+        return {
+            "by_account": {aid: scheduled[aid] for aid in opening_by_account},
+            "unassigned": unassigned + extra,
+        }
 
     for e in sorted(events, key=_event_sort_key):
         if not e.get("counts_as_cash", True):
             continue
         d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
+        while pending and d >= pending[0]:
+            closings.append(_snapshot())
+            pending.pop(0)
         for leg in _legs_of(e):
-            acc = leg.get("account_id")
-            if acc is None or not leg.get("cash", True):
+            if not leg.get("cash", True):
                 continue
+            acc = leg.get("account_id")
             amt = _money(leg["amount"])
-            balances[acc] = balances.get(acc, Decimal("0")) + amt
+            if acc is None:
+                unassigned += amt
+                continue
+            scheduled[acc] = scheduled.get(acc, Decimal("0")) + amt
+            routed[acc] = routed.get(acc, Decimal("0")) + amt
             if amt >= 0:  # inflow into the account
                 continue
 
             overflow_used = Decimal("0")
             ov = leg.get("overflow_account_id")
-            if balances[acc] < 0 and ov is not None:
-                need = -balances[acc]
-                ov_avail = balances.get(ov, Decimal("0"))
+            if routed[acc] < 0 and ov is not None:
+                need = -routed[acc]
+                ov_avail = routed.get(ov, Decimal("0"))
                 transfer = min(need, ov_avail) if ov_avail > 0 else Decimal("0")
-                balances[acc] += transfer
-                balances[ov] = ov_avail - transfer
+                routed[acc] += transfer
+                routed[ov] = ov_avail - transfer
                 overflow_used = transfer
-            if balances[acc] < 0:
+                if transfer > 0:
+                    overflow_moves.append({
+                        "date": d,
+                        "name": e.get("name"),
+                        "from_account_id": ov,
+                        "from_account_name": account_names.get(ov),
+                        "to_account_id": acc,
+                        "to_account_name": account_names.get(acc),
+                        "amount": transfer,
+                    })
+            if routed[acc] < 0:
                 shortfalls.append({
                     "date": d,
                     "name": e.get("name"),
                     "account_id": acc,
                     "account_name": account_names.get(acc),
-                    "short_amount": -balances[acc],
+                    "short_amount": -routed[acc],
                     "overflow_used": overflow_used,
                 })
 
-    return {"shortfalls": shortfalls}
+    while pending:
+        closings.append(_snapshot())
+        pending.pop(0)
+
+    return {
+        "shortfalls": shortfalls,
+        "overflow_moves": overflow_moves,
+        "closings": closings,
+        "final": _snapshot(),
+    }
+
+
+def account_closings(snapshot: dict, opening_by_account: dict, account_names: dict) -> List[dict]:
+    """Shape a routing snapshot as ``[{account_id, account_name, opening_balance, closing_balance}]``."""
+    return [
+        {
+            "account_id": aid,
+            "account_name": account_names.get(aid),
+            "opening_balance": _money(opening_by_account[aid]),
+            "closing_balance": snapshot["by_account"][aid],
+        }
+        for aid in opening_by_account
+    ]
 
 
 def route_accounts(opening_by_account: dict, events: List[dict], account_names: dict) -> List[dict]:
@@ -701,10 +774,31 @@ def project_running_balance(
     cash_events = [e for e in events if e["counts_as_cash"]]
 
     result = build_timeline(opening, cash_events)
-    result["account_shortfalls"] = route_accounts(opening_by_account, cash_events, account_names)
+    routing = _route_legs(opening_by_account, cash_events, account_names)
+    result["account_shortfalls"] = routing["shortfalls"]
+    # Per-account closings at window end exclude virtual overflow pulls; those
+    # are reported separately so the closings stay a plain sum of scheduled legs.
+    result["by_account"] = account_closings(routing["final"], opening_by_account, account_names)
+    result["unassigned_closing"] = routing["final"]["unassigned"]
+    result["overflow_moves"] = routing["overflow_moves"]
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
+
+
+def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
+    return [
+        {
+            "date": m["date"].isoformat(),
+            "name": m["name"],
+            "from_account_id": m["from_account_id"],
+            "from_account_name": m["from_account_name"],
+            "to_account_id": m["to_account_id"],
+            "to_account_name": m["to_account_name"],
+            "amount": float(m["amount"]),
+        }
+        for m in moves
+    ]
 
 
 def serialize_timeline(result: dict) -> dict:
@@ -738,6 +832,17 @@ def serialize_timeline(result: dict) -> dict:
             }
             for s in result.get("account_shortfalls", [])
         ],
+        "by_account": [
+            {
+                "account_id": a["account_id"],
+                "account_name": a["account_name"],
+                "opening_balance": f(a["opening_balance"]),
+                "closing_balance": f(a["closing_balance"]),
+            }
+            for a in result.get("by_account", [])
+        ],
+        "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
+        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
         "events": [
             {
                 "date": iso(e["date"]),
