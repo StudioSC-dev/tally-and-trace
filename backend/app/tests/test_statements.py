@@ -345,10 +345,26 @@ def test_payment_dated_in_the_window_settles_an_older_unpaid_statement_first():
 
 
 def test_allocate_payments_oldest_first():
+    """The -50 statement's credit pays like a payment: 150 + 30 + 50 against 300."""
     assert allocate_payments(
         [Decimal("100"), Decimal("0"), Decimal("-50"), Decimal("200")],
         [Decimal("150"), Decimal("30")],
-    ) == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("120")]
+    ) == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("70")]
+
+
+def test_net_credit_statement_carries_to_the_next_statement():
+    """July nets -400 (refund beyond its charges): August's 1,000 owes 600."""
+    rows = [_txn(5, "100.00"), _txn(10, "500.00", kind=TransactionType.CREDIT),
+            _txn(10, "1000.00", month=8)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-600.00")),
+    ]
+
+
+def test_net_credit_statement_pays_an_older_outstanding_statement_first():
+    """June's 500 is unpaid; July's -200 credit leaves 300 of it overdue on 1 Aug."""
+    rows = [_txn(10, "500.00", month=6), _txn(10, "200.00", kind=TransactionType.CREDIT)]
+    assert _owed(rows) == [(AUG, Decimal("-300.00"))]
 
 
 # ---------------------------------------------------------------------------

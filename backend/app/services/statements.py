@@ -23,7 +23,8 @@ matching how the owner keeps per-card SOA ledgers, where line items sum to the
 statement balance. DEBIT (a purchase) increases what's owed; CREDIT (a refund or
 payment) decreases it. Both posted and unposted transactions count: an unposted
 charge inside the window is planned spending that will still land on that
-statement. A cycle whose balance is <= 0 owes nothing.
+statement. A cycle whose balance is <= 0 owes nothing; a negative balance (refunds
+exceeding charges) is a credit that pays other statements like a payment does.
 
 Payments are transfers INTO the card (``transfer_to_account_id``), posted or
 planned. They are netted against statements, not against the cycle they are dated
@@ -130,10 +131,16 @@ def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[
     Each payment is consumed exactly once: it pays down the oldest statement with
     something outstanding and spills any excess into the next one. Payments left
     over after the last statement are a credit on the card and pay nothing here.
+
+    A statement with a negative balance (refunds exceeding charges) owes nothing,
+    and its net credit is consumed exactly like a payment: oldest outstanding
+    statement first, any excess carrying forward. Payments and credits form one
+    pool spent oldest-statement-first, so their order does not change the result.
     """
     remaining = [max(b, Decimal("0")) for b in balances]
+    credits = [-b for b in balances if b < 0]
     i = 0
-    for amount in payments:
+    for amount in [*payments, *credits]:
         left = amount
         while left > 0 and i < len(remaining):
             paid = min(left, remaining[i])

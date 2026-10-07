@@ -1007,6 +1007,31 @@ def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfer
     assert aug["closing_balance"] == 8000.0 == float(r["closing_balance"])
 
 
+def test_refund_beyond_its_statement_reduces_the_next_payable_in_every_view(db, user):
+    """July nets -400 (100 charge, 500 refund); August's 1,000 statement owes 600.
+    Card spending of 600 net leaves cash exactly once, on 14 Sep."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "400.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "100.00", datetime(2026, 7, 5), is_posted=True)
+    _txn(db, user, card, TransactionType.CREDIT, "500.00", datetime(2026, 7, 10), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 8, 10))
+
+    reference = datetime(2026, 8, 1)
+    periods = project_cashflow(db, user.id, months=2, reference=reference)
+    assert [p["statement_payables"] for p in periods] == [0.0, 600.0]
+    r = project_running_balance(db, user.id, days=61, reference=reference)
+    assert _cash_events(r) == [("2026-09-14", "Card C statement", Decimal("-600.00"))]
+    assert periods[-1]["closing_balance"] == 9400.0 == float(r["closing_balance"])
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=60, reference=reference)] == [("2026-09-14", 600.0)]
+
+
 def test_timeline_closing_equals_monthly_end_balance_with_card_payments_and_schedules(db, user):
     """Overdue statement, planned payment, cash advance and a card schedule together."""
     from app.models.account import AccountType
