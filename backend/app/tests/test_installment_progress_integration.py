@@ -362,6 +362,34 @@ def test_update_to_zero_remaining_requires_inactive(client, db):
         _cleanup(db, entry_id)
 
 
+def test_null_is_active_cannot_bypass_zero_remaining_guard(client, db):
+    headers = _auth(client)
+    done_id = _post_installment(
+        client, headers, remaining=0, active=False, name="Null is_active completed"
+    ).json()["id"]
+    open_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Null is_active with zero remaining",
+    )
+    try:
+        done_before = _fetch(client, headers, done_id)
+        resp = client.put(f"{API}/budget-entries/{done_id}", json={"is_active": None}, headers=headers)
+        assert resp.status_code == 422, resp.text
+        assert _fetch(client, headers, done_id) == done_before
+
+        open_before = _fetch(client, headers, open_id)
+        resp = client.put(
+            f"{API}/budget-entries/{open_id}",
+            json={"max_occurrences": 0, "is_active": None},
+            headers=headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert _fetch(client, headers, open_id) == open_before
+    finally:
+        _cleanup(db, done_id)
+        _cleanup(db, open_id)
+
+
 def test_offset_updates(client, db):
     headers = _auth(client)
     entry_id = _create_installment(

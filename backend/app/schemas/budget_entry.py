@@ -37,11 +37,11 @@ ZERO_REMAINING_MESSAGE = (
 )
 
 
-def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_active: bool) -> bool:
+def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_active: Optional[bool]) -> bool:
     """0 remaining means a completed installment: only valid when inactive."""
     if max_occurrences != 0:
         return True
-    return end_mode == "after_occurrences" and not is_active
+    return end_mode == "after_occurrences" and is_active is False
 
 
 class BudgetEntryCreate(BudgetEntryBase):
