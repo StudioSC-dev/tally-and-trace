@@ -82,7 +82,10 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
 
     Returns whether ``reference`` falls inside the active period. A reference before
     ``period_start`` is historical: the period is never rewound and the spent total is
-    left alone, so out-of-period rows cannot replace the active allocation.
+    left alone, so out-of-period rows cannot replace the active allocation. The period
+    only rolls forward as far as the one containing now; a reference beyond that, or in
+    a period that has not started yet, is future-dated and equally out of period until
+    the calendar reaches it.
     """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
@@ -101,12 +104,13 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
-    while normalized_reference >= period_end:
+    now = naive_utc_now()
+    while normalized_reference >= period_end and now >= period_end:
         period_start = period_end
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
-    if normalized_reference < period_start:
+    if normalized_reference < period_start or normalized_reference >= period_end or period_start > now:
         return False
 
     if period_changed:

@@ -208,3 +208,53 @@ def test_october_charges_still_count(client, db, october):
     assert resp.status_code == 200, resp.text
     october["txn_ids"].remove(txn_id)
     _assert_october(db, october, OCT_SPENT)
+
+
+NOV_DAY = datetime(2026, 11, 10, 12, 0)
+DEC_START = datetime(2026, 12, 1)
+
+
+@pytest.fixture
+def now_is(monkeypatch):
+    """Pin the clock the period helpers compare against (naive UTC)."""
+    import app.routers.transactions as transactions_module
+
+    def _set(value):
+        monkeypatch.setattr(transactions_module, "naive_utc_now", lambda: value)
+
+    _set(datetime(2026, 10, 7, 9, 0))
+    return _set
+
+
+def test_a_november_charge_while_october_is_current_leaves_october_alone(client, db, october, now_is):
+    """Future-dated rows are out of period: no roll-forward, no reset, no delta."""
+    txn_id = _charge(client, october, NOV_DAY)
+    _assert_october(db, october, OCT_SPENT)
+
+    resp = client.put(
+        f"{API}/transactions/{txn_id}",
+        json={"amount": 340.0, "transaction_date": datetime(2026, 11, 12, 12, 0).isoformat()},
+        headers=october["headers"],
+    )
+    assert resp.status_code == 200, resp.text
+    _assert_october(db, october, OCT_SPENT)
+
+    resp = client.delete(f"{API}/transactions/{txn_id}", headers=october["headers"])
+    assert resp.status_code == 200, resp.text
+    october["txn_ids"].remove(txn_id)
+    _assert_october(db, october, OCT_SPENT)
+
+
+def test_october_charges_still_count_after_a_november_row(client, db, october, now_is):
+    _charge(client, october, NOV_DAY)
+    _charge(client, october, OCT_DAY, amount=80.0)
+    _assert_october(db, october, OCT_SPENT + Decimal("80.00"))
+
+
+def test_a_november_charge_rolls_the_period_once_november_is_current(client, db, october, now_is):
+    now_is(datetime(2026, 11, 3, 9, 0))
+    _charge(client, october, NOV_DAY)
+    state = _state(db, october)
+    expected = (NOV_START, DEC_START, Decimal("120.00"))
+    assert state[october["explicit_id"]] == expected
+    assert state[october["matched_id"]] == expected
