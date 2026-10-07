@@ -26,6 +26,9 @@ const HIGHLIGHT_PADDING = 12
 const BUBBLE_FALLBACK_SIZE = { width: 320, height: 200 }
 // Clearance for the fixed top bar and the mobile bottom tab bar (both h-16).
 const CHROME_CLEARANCE = 72
+// Minimum gap between corrective re-scrolls, so a smooth scroll in progress is
+// not restarted every frame.
+const RESCROLL_INTERVAL_MS = 500
 
 function isInFixedLayer(element: HTMLElement) {
   for (let node: HTMLElement | null = element; node; node = node.parentElement) {
@@ -206,14 +209,28 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       setResolved({ step: currentStep, element })
       scrollTargetIntoView(element)
     }
-    const observer = new MutationObserver(attempt)
+    const observer = new MutationObserver((records) => {
+      // The tour's own re-renders (bubble and highlight moving) cannot reveal a target
+      const external = records.some(
+        (record) => !(record.target instanceof Element && record.target.closest('[data-onboarding-overlay]')),
+      )
+      if (external) attempt()
+    })
     const stop = () => {
       done = true
       observer.disconnect()
       window.removeEventListener('resize', attempt)
     }
 
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true })
+    // Attributes as well as childList: a target can be revealed by a class or
+    // style change (a breakpoint-hidden container, a collapsed section) without
+    // any node being added.
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden'],
+    })
     window.addEventListener('resize', attempt)
     attempt()
 
@@ -263,6 +280,8 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
   useLayoutEffect(() => {
     let frame = 0
+    let lastRescroll = 0
+    const targetIsFixed = targetElement ? isInFixedLayer(targetElement) : true
     const measure = () => {
       let target: SpotlightRect | null = null
       if (targetElement) {
@@ -272,6 +291,16 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           setResolved(null)
         } else {
           target = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+          // Content above the target grew after it was scrolled to (a card
+          // finishing its own load) and pushed it off screen. The user cannot
+          // scroll during the tour, so bring it back.
+          const offScreen =
+            rect.bottom <= CHROME_CLEARANCE || rect.top >= window.innerHeight - CHROME_CLEARANCE
+          const now = performance.now()
+          if (!targetIsFixed && offScreen && now - lastRescroll >= RESCROLL_INTERVAL_MS) {
+            lastRescroll = now
+            scrollTargetIntoView(targetElement)
+          }
         }
       }
       const bubble = bubbleRef.current

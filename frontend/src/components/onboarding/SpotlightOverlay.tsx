@@ -24,7 +24,7 @@ export function SpotlightOverlay({
   borderRadius = 8,
 }: SpotlightOverlayProps) {
   return (
-    <div className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden">
+    <div data-onboarding-overlay className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden">
       {rect ? (
         // Highlight: its huge spread shadow is the scrim, so the target inside
         // the cut-out stays undimmed while the rest of the app shows through.
