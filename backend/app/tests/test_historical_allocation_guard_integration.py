@@ -64,8 +64,23 @@ def _auth(client):
 
 
 @pytest.fixture
-def october(client, db):
-    """Two October budgets with spending: one linked explicitly, one by category auto-match."""
+def now_is(monkeypatch):
+    """Pin the clock the period helpers compare against (naive UTC)."""
+    import app.routers.transactions as transactions_module
+
+    def _set(value):
+        monkeypatch.setattr(transactions_module, "naive_utc_now", lambda: value)
+
+    _set(datetime(2026, 10, 7, 9, 0))
+    return _set
+
+
+@pytest.fixture
+def october(client, db, now_is):
+    """Two October budgets with spending: one linked explicitly, one by category auto-match.
+
+    The clock is pinned to 2026-10-07 09:00 UTC; tests that need another time call ``now_is``.
+    """
     from app.models.allocation import Allocation, AllocationType, BudgetPeriodFrequency
     from app.models.category import Category
     from app.models.user import User
@@ -214,19 +229,7 @@ NOV_DAY = datetime(2026, 11, 10, 12, 0)
 DEC_START = datetime(2026, 12, 1)
 
 
-@pytest.fixture
-def now_is(monkeypatch):
-    """Pin the clock the period helpers compare against (naive UTC)."""
-    import app.routers.transactions as transactions_module
-
-    def _set(value):
-        monkeypatch.setattr(transactions_module, "naive_utc_now", lambda: value)
-
-    _set(datetime(2026, 10, 7, 9, 0))
-    return _set
-
-
-def test_a_november_charge_while_october_is_current_leaves_october_alone(client, db, october, now_is):
+def test_a_november_charge_while_october_is_current_leaves_october_alone(client, db, october):
     """Future-dated rows are out of period: no roll-forward, no reset, no delta."""
     txn_id = _charge(client, october, NOV_DAY)
     _assert_october(db, october, OCT_SPENT)
@@ -245,7 +248,7 @@ def test_a_november_charge_while_october_is_current_leaves_october_alone(client,
     _assert_october(db, october, OCT_SPENT)
 
 
-def test_october_charges_still_count_after_a_november_row(client, db, october, now_is):
+def test_october_charges_still_count_after_a_november_row(client, db, october):
     _charge(client, october, NOV_DAY)
     _charge(client, october, OCT_DAY, amount=80.0)
     _assert_october(db, october, OCT_SPENT + Decimal("80.00"))
@@ -269,7 +272,7 @@ def _clear_period_end(db, ctx):
     db.commit()
 
 
-def test_a_missing_period_end_is_derived_not_re_anchored(client, db, october, now_is):
+def test_a_missing_period_end_is_derived_not_re_anchored(client, db, october):
     """period_start alone still pins the period: a September row stays historical."""
     _clear_period_end(db, october)
     _charge(client, october, SEPT_DAY)
@@ -288,7 +291,7 @@ def _delete(client, ctx, txn_id):
     ctx["txn_ids"].remove(txn_id)
 
 
-def test_an_offset_date_before_the_period_in_utc_is_excluded(client, db, october, now_is):
+def test_an_offset_date_before_the_period_in_utc_is_excluded(client, db, october):
     """2026-10-01T00:30+08:00 is 2026-09-30 16:30 UTC: historical on create and on delete."""
     when = datetime(2026, 10, 1, 0, 30, tzinfo=timezone(timedelta(hours=8)))
     txn_id = _charge(client, october, when)
@@ -297,7 +300,7 @@ def test_an_offset_date_before_the_period_in_utc_is_excluded(client, db, october
     _assert_october(db, october, OCT_SPENT)
 
 
-def test_an_offset_date_inside_the_period_in_utc_counts(client, db, october, now_is):
+def test_an_offset_date_inside_the_period_in_utc_counts(client, db, october):
     """2026-09-30T23:30-04:00 is 2026-10-01 03:30 UTC: counted on create, reversed on delete."""
     when = datetime(2026, 9, 30, 23, 30, tzinfo=timezone(timedelta(hours=-4)))
     txn_id = _charge(client, october, when)
@@ -320,7 +323,7 @@ def _set_periods(db, ctx, periods):
     db.commit()
 
 
-def test_a_september_charge_does_not_pin_unset_or_stale_budgets_to_september(client, db, october, now_is):
+def test_a_september_charge_does_not_pin_unset_or_stale_budgets_to_september(client, db, october):
     """Unset and stale (August) budgets advance to October; the September row is not counted."""
     _set_periods(
         db,
