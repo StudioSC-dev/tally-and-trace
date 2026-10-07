@@ -521,3 +521,15 @@ def test_missing_opening_balance_is_never_billed_itself():
     assert _guarded("-1500.00", rows) == [
         (datetime(2026, 8, 14), Decimal("-500.00"), False),
     ]
+
+
+def test_positive_stored_balance_against_posted_debt_trims_nothing(caplog):
+    """+3,000 stored while the posted rows owe 6,000 is most likely a sign entered
+    the wrong way round, not 9,000 of unrecorded payments: real debt stays owed."""
+    with caplog.at_level("WARNING", logger="app.services.statements"):
+        assert _guarded("3000.00", HISTORY) == [
+            (AUG, Decimal("-1000.00"), True),
+            (AUG, Decimal("-2000.00"), True),
+            (datetime(2026, 8, 14), Decimal("-3000.00"), False),
+        ]
+    assert "trimmed" not in caplog.text

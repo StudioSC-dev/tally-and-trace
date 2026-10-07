@@ -287,6 +287,11 @@ def build_statement_payables(
     whose history is complete has no gap and is untouched. A card without a
     ``balance`` skips the guard.
 
+    The guard depends on the stored balance following the negative-when-owed
+    convention. A POSITIVE stored balance while the posted rows say the card owes
+    something contradicts itself (most likely a sign entered the wrong way round),
+    so nothing is trimmed then: trimming would erase real debt.
+
     Returns timeline events shaped like the ones ``build_timeline`` /
     ``route_accounts`` already consume (negative amount = outflow).
     """
@@ -304,8 +309,15 @@ def build_statement_payables(
         stored = getattr(card, "balance", None)
         if stored is not None:
             rows = transactions_by_card.get(card.id, [])
-            gap = _posted_owed(card.id, rows) + Decimal(str(stored))
-            if gap > 0:
+            posted_owed = _posted_owed(card.id, rows)
+            stored = Decimal(str(stored))
+            gap = posted_owed + stored
+            if stored > 0 and posted_owed > 0:
+                logger.warning(
+                    "Card %s: stored balance %s is positive while its posted rows owe %s; "
+                    "not trimming statements (check the balance's sign)",
+                    card.id, stored, posted_owed)
+            elif gap > 0:
                 owing, trimmed = _trim_closed(cycles, balances, start, gap)
                 if trimmed > 0:
                     logger.warning(
