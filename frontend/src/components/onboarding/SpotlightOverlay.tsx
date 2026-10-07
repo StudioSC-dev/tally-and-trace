@@ -1,88 +1,50 @@
-import { useEffect, useRef, useState } from 'react'
-import { resolveOnboardingTarget } from './resolveTarget'
+export interface SpotlightRect {
+  top: number
+  left: number
+  width: number
+  height: number
+}
 
 interface SpotlightOverlayProps {
-  targetSelector?: string
-  targetElement?: HTMLElement | null
+  /** Target box in viewport coordinates; null while the target is not on screen yet. */
+  rect: SpotlightRect | null
   children?: React.ReactNode
   padding?: number
   borderRadius?: number
 }
 
+// A fixed translucent black rather than a token: --ink flips light in dark
+// mode, and the paper tokens carry no alpha channel.
+const SCRIM = 'rgb(0 0 0 / 0.55)'
+
 export function SpotlightOverlay({
-  targetSelector,
-  targetElement,
+  rect,
   children,
   padding = 8,
   borderRadius = 8,
 }: SpotlightOverlayProps) {
-  const overlayRef = useRef<HTMLDivElement>(null)
-  const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null)
-  const [isVisible, setIsVisible] = useState(false)
-
-  useEffect(() => {
-    const updateHighlight = () => {
-      let element: HTMLElement | null = null
-
-      if (targetElement) {
-        element = targetElement
-      } else if (targetSelector) {
-        element = resolveOnboardingTarget(targetSelector)
-      }
-
-      if (element) {
-        const rect = element.getBoundingClientRect()
-        setHighlightRect(rect)
-        setIsVisible(true)
-      } else {
-        setIsVisible(false)
-      }
-    }
-
-    updateHighlight()
-    window.addEventListener('resize', updateHighlight)
-    window.addEventListener('scroll', updateHighlight, true)
-
-    return () => {
-      window.removeEventListener('resize', updateHighlight)
-      window.removeEventListener('scroll', updateHighlight, true)
-    }
-  }, [targetSelector, targetElement])
-
-  if (!isVisible || !highlightRect) {
-    return null
-  }
-
-  const { width, height, top, left } = highlightRect
-  const highlightWidth = width + padding * 2
-  const highlightHeight = height + padding * 2
-  // The overlay is position:fixed, so viewport coordinates are used as-is
-  const highlightTop = top - padding
-  const highlightLeft = left - padding
-
   return (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden"
-      style={{ top: 0, left: 0, right: 0, bottom: 0 }}
-    >
-      {/* Highlight: its huge spread shadow is the scrim, so the target inside
-          the cut-out stays undimmed while the rest of the app shows through.
-          The scrim is a fixed translucent black rather than a token: --ink
-          flips light in dark mode, and the paper tokens carry no alpha channel. */}
-      <div
-        data-onboarding-highlight
-        className="absolute border-2 border-ink transition-all duration-300"
-        style={{
-          top: highlightTop,
-          left: highlightLeft,
-          width: highlightWidth,
-          height: highlightHeight,
-          borderRadius: borderRadius,
-          boxShadow: '0 0 0 9999px rgb(0 0 0 / 0.55)',
-          pointerEvents: 'none',
-        }}
-      />
+    <div className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden">
+      {rect ? (
+        // Highlight: its huge spread shadow is the scrim, so the target inside
+        // the cut-out stays undimmed while the rest of the app shows through.
+        // No transition here — the position is re-measured every frame.
+        <div
+          data-onboarding-highlight
+          className="absolute border-2 border-ink"
+          style={{
+            top: rect.top - padding,
+            left: rect.left - padding,
+            width: rect.width + padding * 2,
+            height: rect.height + padding * 2,
+            borderRadius: borderRadius,
+            boxShadow: `0 0 0 9999px ${SCRIM}`,
+          }}
+        />
+      ) : (
+        // Target not resolved yet: dim everything, keep the tour controls up
+        <div className="absolute inset-0" style={{ backgroundColor: SCRIM }} />
+      )}
 
       {/* Content overlay */}
       {children && (

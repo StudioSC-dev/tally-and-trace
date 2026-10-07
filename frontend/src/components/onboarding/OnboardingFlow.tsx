@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
-import { SpotlightOverlay } from './SpotlightOverlay'
+import { SpotlightOverlay, type SpotlightRect } from './SpotlightOverlay'
 import { resolveOnboardingTarget } from './resolveTarget'
-import { placeBubble, type BubbleLayout } from './placeBubble'
+import { placeBubble } from './placeBubble'
 
 interface OnboardingStep {
   id: number
@@ -43,9 +43,43 @@ function scrollTargetIntoView(element: HTMLElement) {
   element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
 }
 
+interface Size {
+  width: number
+  height: number
+}
+
+interface Geometry {
+  element: HTMLElement | null
+  target: SpotlightRect | null
+  bubble: Size
+  viewport: Size
+}
+
+// Sub-pixel jitter is not worth a re-render
+const GEOMETRY_EPSILON = 0.5
+
+function numbersClose(a: number, b: number) {
+  return Math.abs(a - b) <= GEOMETRY_EPSILON
+}
+
+function sameGeometry(a: Geometry | null, b: Geometry) {
+  if (!a || a.element !== b.element) return false
+  if (!numbersClose(a.bubble.width, b.bubble.width) || !numbersClose(a.bubble.height, b.bubble.height)) return false
+  if (!numbersClose(a.viewport.width, b.viewport.width) || !numbersClose(a.viewport.height, b.viewport.height)) return false
+  if (!a.target || !b.target) return a.target === b.target
+  return (
+    numbersClose(a.target.top, b.target.top) &&
+    numbersClose(a.target.left, b.target.left) &&
+    numbersClose(a.target.width, b.target.width) &&
+    numbersClose(a.target.height, b.target.height)
+  )
+}
+
 export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0)
-  const [targetElement, setTargetElement] = useState<HTMLElement | null>(null)
+  // Tagged with its step, so a target found for one step is never shown for another
+  const [resolved, setResolved] = useState<{ step: number; element: HTMLElement } | null>(null)
+  const targetElement = resolved?.step === currentStep ? resolved.element : null
   const navigate = useNavigate()
   const [completeOnboarding] = useCompleteOnboardingMutation()
 
@@ -151,23 +185,40 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
   useEffect(() => {
     const step = steps[currentStep]
-    if (!step) return
-
-    // Navigate to the appropriate page if needed
-    if (step.navigateTo) {
+    if (step?.navigateTo) {
       navigate({ to: step.navigateTo as '/' })
     }
-
-    // Wait for navigation and DOM update, then find target element
-    const timer = setTimeout(() => {
-      const element = resolveOnboardingTarget(step.targetSelector)
-
-      setTargetElement(element)
-      if (element) scrollTargetIntoView(element)
-    }, 500)
-
-    return () => clearTimeout(timer)
   }, [currentStep, navigate, steps])
+
+  // Find the step's target, waiting for it if the page has not rendered it yet
+  // (route change, dashboard still loading). Re-runs when the target is lost.
+  useEffect(() => {
+    if (targetElement) return
+    const step = steps[currentStep]
+    if (!step) return
+
+    let done = false
+    const attempt = () => {
+      if (done) return
+      const element = resolveOnboardingTarget(step.targetSelector)
+      if (!element) return
+      stop()
+      setResolved({ step: currentStep, element })
+      scrollTargetIntoView(element)
+    }
+    const observer = new MutationObserver(attempt)
+    const stop = () => {
+      done = true
+      observer.disconnect()
+      window.removeEventListener('resize', attempt)
+    }
+
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true })
+    window.addEventListener('resize', attempt)
+    attempt()
+
+    return stop
+  }, [currentStep, targetElement, steps])
 
   const handleNext = () => {
     if (currentStep < TOTAL_STEPS - 1) {
@@ -203,46 +254,41 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
   }
 
-  // Bubble position, in viewport coordinates (the overlay is position:fixed)
+  // Track the target, the bubble and the viewport every frame while a step is
+  // active, so the highlight follows layout shifts (cards loading, smooth
+  // scroll, resize). State only changes when something actually moved.
   const bubbleRef = useRef<HTMLDivElement>(null)
-  const [bubbleLayout, setBubbleLayout] = useState<BubbleLayout | null>(null)
+  const lastGeometry = useRef<Geometry | null>(null)
+  const [geometry, setGeometry] = useState<Geometry | null>(null)
 
-  useEffect(() => {
-    if (!targetElement) {
-      setBubbleLayout(null)
-      return
-    }
-
-    const updateBubblePosition = () => {
-      const rect = targetElement.getBoundingClientRect()
+  useLayoutEffect(() => {
+    let frame = 0
+    const measure = () => {
+      let target: SpotlightRect | null = null
+      if (targetElement) {
+        const rect = targetElement.getBoundingClientRect()
+        if (!targetElement.isConnected || rect.width === 0 || rect.height === 0) {
+          // The target went away (re-render, route change): look for it again
+          setResolved(null)
+        } else {
+          target = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+        }
+      }
       const bubble = bubbleRef.current
-      setBubbleLayout(
-        placeBubble(
-          {
-            top: rect.top - HIGHLIGHT_PADDING,
-            left: rect.left - HIGHLIGHT_PADDING,
-            width: rect.width + HIGHLIGHT_PADDING * 2,
-            height: rect.height + HIGHLIGHT_PADDING * 2,
-          },
-          bubble
-            ? { width: bubble.offsetWidth, height: bubble.offsetHeight }
-            : BUBBLE_FALLBACK_SIZE,
-          { width: window.innerWidth, height: window.innerHeight },
-        ),
-      )
+      const next: Geometry = {
+        element: target ? targetElement : null,
+        target,
+        bubble: bubble ? { width: bubble.offsetWidth, height: bubble.offsetHeight } : BUBBLE_FALLBACK_SIZE,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      }
+      if (!sameGeometry(lastGeometry.current, next)) {
+        lastGeometry.current = next
+        setGeometry(next)
+      }
+      frame = requestAnimationFrame(measure)
     }
-
-    updateBubblePosition()
-    // Place again once the bubble has rendered and its real size is known
-    const frame = requestAnimationFrame(updateBubblePosition)
-    window.addEventListener('resize', updateBubblePosition)
-    window.addEventListener('scroll', updateBubblePosition, true)
-
-    return () => {
-      cancelAnimationFrame(frame)
-      window.removeEventListener('resize', updateBubblePosition)
-      window.removeEventListener('scroll', updateBubblePosition, true)
-    }
+    measure()
+    return () => cancelAnimationFrame(frame)
   }, [targetElement])
 
   const currentStepData = steps[currentStep]
@@ -251,84 +297,92 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     return null
   }
 
+  const targetRect =
+    targetElement && geometry?.element === targetElement ? geometry.target : null
+  const bubbleLayout = placeBubble(
+    targetRect && {
+      top: targetRect.top - HIGHLIGHT_PADDING,
+      left: targetRect.left - HIGHLIGHT_PADDING,
+      width: targetRect.width + HIGHLIGHT_PADDING * 2,
+      height: targetRect.height + HIGHLIGHT_PADDING * 2,
+    },
+    geometry?.bubble ?? BUBBLE_FALLBACK_SIZE,
+    geometry?.viewport ?? { width: window.innerWidth, height: window.innerHeight },
+  )
+
   return (
-    <SpotlightOverlay
-      targetSelector={currentStepData.targetSelector}
-      targetElement={targetElement}
-      padding={HIGHLIGHT_PADDING}
-      borderRadius={8}
-    >
-      {bubbleLayout && (
-        <div
-          ref={bubbleRef}
-          className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)] transition-all duration-300"
-          style={{
-            top: `${bubbleLayout.top}px`,
-            left: `${bubbleLayout.left}px`,
-          }}
-          data-onboarding-controls
-        >
-          <div className="p-4">
-            {/* Progress indicator */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-body">
-                  Step {currentStep + 1} of {TOTAL_STEPS}
-                </span>
-                <button
-                  onClick={handleSkip}
-                  className="text-xs text-muted hover:text-body transition-colors"
-                >
-                  Skip
-                </button>
-              </div>
-              <div className="w-full bg-sunken rounded-full h-1.5">
-                <div
-                  className="bg-ink h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${((currentStep + 1) / TOTAL_STEPS) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Step content */}
-            <div className="mb-4">
-              <h3 className="text-base font-semibold text-ink mb-1.5">
-                {currentStepData.title}
-              </h3>
-              <p className="text-sm text-body">{currentStepData.description}</p>
-            </div>
-
-            {/* Navigation buttons */}
-            <div className="flex items-center justify-between gap-3">
+    <SpotlightOverlay rect={targetRect} padding={HIGHLIGHT_PADDING} borderRadius={8}>
+      {/* Always rendered, even before the target is found, so the tour can
+          never strand the user behind the overlay without controls. */}
+      <div
+        ref={bubbleRef}
+        className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)]"
+        style={{
+          top: `${bubbleLayout.top}px`,
+          left: `${bubbleLayout.left}px`,
+        }}
+        data-onboarding-controls
+      >
+        <div className="p-4">
+          {/* Progress indicator */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-body">
+                Step {currentStep + 1} of {TOTAL_STEPS}
+              </span>
               <button
-                onClick={handlePrevious}
-                disabled={currentStep === 0}
-                className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={handleSkip}
+                className="text-xs text-muted hover:text-body transition-colors"
               >
-                Previous
+                Skip
               </button>
-              <button
-                onClick={handleNext}
-                className="px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
-              >
-                {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
-              </button>
+            </div>
+            <div className="w-full bg-sunken rounded-full h-1.5">
+              <div
+                className="bg-ink h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${((currentStep + 1) / TOTAL_STEPS) * 100}%` }}
+              ></div>
             </div>
           </div>
-          
-          {/* Arrow pointing to the highlighted element */}
-          {bubbleLayout.placement !== 'center' && (
-            <div
-              className={`absolute w-0 h-0 border-8 ${ bubbleLayout.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 -translate-x-1/2' : bubbleLayout.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 -translate-x-1/2' : bubbleLayout.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 -translate-y-1/2' }`}
-              style={
-                bubbleLayout.placement === 'top' || bubbleLayout.placement === 'bottom'
-                  ? { left: bubbleLayout.arrowOffset }
-                  : { top: bubbleLayout.arrowOffset }
-              }
-            />
-          )}
+
+          {/* Step content */}
+          <div className="mb-4">
+            <h3 className="text-base font-semibold text-ink mb-1.5">
+              {currentStepData.title}
+            </h3>
+            <p className="text-sm text-body">{currentStepData.description}</p>
+          </div>
+
+          {/* Navigation buttons */}
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={handlePrevious}
+              disabled={currentStep === 0}
+              className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <button
+              onClick={handleNext}
+              className="px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
+            >
+              {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
+            </button>
+          </div>
         </div>
-      )}
+        
+        {/* Arrow pointing to the highlighted element */}
+        {bubbleLayout.placement !== 'center' && (
+          <div
+            className={`absolute w-0 h-0 border-8 ${ bubbleLayout.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 -translate-x-1/2' : bubbleLayout.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 -translate-x-1/2' : bubbleLayout.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 -translate-y-1/2' }`}
+            style={
+              bubbleLayout.placement === 'top' || bubbleLayout.placement === 'bottom'
+                ? { left: bubbleLayout.arrowOffset }
+                : { top: bubbleLayout.arrowOffset }
+            }
+          />
+        )}
+      </div>
     </SpotlightOverlay>
   )
 }
