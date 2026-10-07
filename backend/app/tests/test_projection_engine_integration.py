@@ -376,6 +376,64 @@ def test_monthly_projection_does_not_count_a_card_cash_advance_as_cash(db, user)
     assert get_payables(db, user.id, days=30, reference=datetime(2026, 8, 1)) == []
 
 
+def test_overdue_unposted_transactions_land_at_the_window_start_in_every_view(db, user):
+    """Balances move only on posting, so an unposted item dated before today is still pending."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import (
+        collect_events, get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00")
+    checking_b = _account(db, user, "Checking B", AccountType.CHECKING, "1000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking_b.id)
+    yesterday = datetime(2026, 8, 9, 14)
+    _txn(db, user, checking_b, TransactionType.DEBIT, "500.00", yesterday,
+         description="Overdue bill")
+    _txn(db, user, savings_a, TransactionType.TRANSFER, "2000.00", yesterday,
+         transfer_fee=Decimal("10.00"), description="Overdue move",
+         transfer_from_account_id=savings_a.id, transfer_to_account_id=checking_b.id)
+    # A card charge reaches cash through its statement; posted items are in the balance.
+    _txn(db, user, card, TransactionType.DEBIT, "700.00", yesterday, description="Card charge")
+    _txn(db, user, checking_b, TransactionType.DEBIT, "80.00", yesterday,
+         description="Posted bill", is_posted=True)
+
+    reference = datetime(2026, 8, 10, 9)
+    start = datetime(2026, 8, 10)
+
+    events = collect_events(db, start, datetime(2026, 9, 1), user_id=user.id)
+    overdue = sorted((e["name"], e["date"], e["overdue"], e["original_date"])
+                     for e in events if e.get("overdue"))
+    assert overdue == [
+        ("Overdue bill", start, True, yesterday),
+        ("Overdue move", start, True, yesterday),
+    ]
+
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["unposted_expenses"] == 510.0
+    assert aug["closing_balance"] == 10490.0
+    assert {a["account_name"]: a["closing_balance"] for a in aug["by_account"]} == {
+        "Savings A": 7990.0, "Checking B": 2500.0,
+    }
+
+    timeline = project_running_balance(db, user.id, days=22, reference=reference)
+    assert timeline["window_end"] == datetime(2026, 9, 1).date()
+    assert sorted((e["date"].isoformat(), e["name"]) for e in timeline["events"]) == [
+        ("2026-08-10", "Overdue bill"), ("2026-08-10", "Overdue move"),
+    ]
+    assert float(timeline["closing_balance"]) == aug["closing_balance"]
+    assert [float(a["closing_balance"]) for a in timeline["by_account"]] == [
+        a["closing_balance"] for a in aug["by_account"]
+    ]
+
+    items = get_upcoming_items(db, user.id, days=30, reference=reference)
+    assert sorted((i["due_date"], i["name"]) for i in items) == [
+        ("2026-08-10", "Overdue bill"), ("2026-08-10", "Overdue move"),
+    ]
+
+
 def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType

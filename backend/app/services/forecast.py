@@ -523,7 +523,8 @@ def _event_sort_key(e: dict):
     return (d, rank)
 
 
-def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
+def _transfer_event(txn, cash_ids: set, card_ids: set,
+                    date: Optional[datetime] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
     Legs are kept only for accounts in the projection's scope (``cash_ids`` and
@@ -556,7 +557,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
     if dst in scoped:
         legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_card))
     return _event(
-        date=_naive(txn.transaction_date),
+        date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
         source="transaction",
@@ -565,6 +566,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set) -> dict:
         legs=legs,
         counts_as_cash=False if via_card else None,
         transfer_fee=_money(fee),
+        **extra,
     )
 
 
@@ -588,6 +590,12 @@ def collect_events(
     projection-cash accounts. Unposted transfers into or out of a scoped
     projection-cash account are collected even when the transaction row belongs to
     another scope (a cross-entity transfer), but only their in-scope legs count.
+
+    Balances change only when a transaction is posted, so an unposted transaction
+    dated before ``start`` is a pending movement not yet in the opening balance: it
+    is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
+    Overdue items touching a credit card are skipped (charges reach cash through
+    their statements, and card transfers are not cash yet).
     """
     start = _naive(start)
     end = _naive(end)
@@ -628,12 +636,18 @@ def collect_events(
     txn_query = db.query(Transaction).filter(
         in_scope,
         Transaction.is_posted.is_(False),
-        Transaction.transaction_date >= start,
         Transaction.transaction_date < end,
     )
     for txn in txn_query.all():
+        when = _naive(txn.transaction_date)
+        overdue: dict = {}
+        if when < start:
+            touched = {txn.account_id, txn.transfer_from_account_id, txn.transfer_to_account_id}
+            if touched & card_ids:
+                continue
+            when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
-            events.append(_transfer_event(txn, cash_ids, card_ids))
+            events.append(_transfer_event(txn, cash_ids, card_ids, date=when, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -645,13 +659,14 @@ def collect_events(
         # cash leaves when that card's statement is paid, which is modelled as a
         # dated statement payable below. Its leg is therefore non-cash.
         events.append(_event(
-            date=_naive(txn.transaction_date),
+            date=when,
             name=txn.description or "Unposted transaction",
             type=txn.transaction_type.value,
             source="transaction",
             source_id=txn.id,
             face_amount=txn.amount,
             legs=[_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)],
+            **overdue,
         ))
 
     # Each credit card contributes one dated payable per billing cycle due in the
