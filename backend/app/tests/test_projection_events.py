@@ -122,6 +122,22 @@ def test_transfer_into_scope_from_outside_adds_the_amount():
     assert ev["funding_account_id"] == CHECKING_B
 
 
+def test_pooled_timeline_and_routing_order_same_day_events_alike():
+    """An inbound transfer funds a same-day bill in both views, not only per account."""
+    opening = {CHECKING_B: Decimal("0")}
+    events = [
+        _payable(10, 4000, CHECKING_B),
+        _transfer_event(_txn_transfer(10, 5000, 0, OUTSIDE, CHECKING_B), CASH, CARDS),
+    ]
+    assert route_accounts(opening, events, NAMES) == []
+    pooled = build_timeline(sum(opening.values()), events)
+    assert pooled["shortfall"] is False
+    assert pooled["shortfalls"] == []
+    assert pooled["lowest_balance"] == Decimal("0.00")
+    assert pooled["trough_date"] is None
+    assert [e["name"] for e in pooled["events"]] == ["Move to B", "Bill from B"]
+
+
 # ---------------------------------------------------------------------------
 # Per-account closings and overflow use
 # ---------------------------------------------------------------------------

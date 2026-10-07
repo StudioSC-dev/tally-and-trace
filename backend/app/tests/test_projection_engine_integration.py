@@ -158,8 +158,9 @@ def test_transfer_funds_destination_before_its_payable_and_costs_only_the_fee(db
 
 @pytest.fixture
 def entities(db, user):
-    """Two throwaway entities; the user's accounts and transactions go first on teardown."""
+    """Two throwaway entities; the user's accounts, entries and transactions go first on teardown."""
     from app.models.account import Account
+    from app.models.budget_entry import BudgetEntry
     from app.models.entity import Entity, EntityType
     from app.models.transaction import Transaction
 
@@ -175,6 +176,7 @@ def entities(db, user):
 
     db.rollback()
     db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+    db.query(BudgetEntry).filter(BudgetEntry.user_id == user.id).delete()
     db.query(Account).filter(Account.user_id == user.id).update(
         {"payment_account_id": None, "payment_overflow_account_id": None}
     )
@@ -246,6 +248,26 @@ def test_transfer_into_scope_from_outside_adds_the_amount(db, user, entities, ro
     assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
         ("2026-08-05", "Move to B", 5000.0),
     ]
+
+
+def test_same_day_inbound_transfer_funds_a_bill_in_the_pooled_timeline_too(db, user, entities):
+    """Zero opening cash: the pooled trough and shortfalls agree with account routing."""
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    ent_a, ent_b = entities
+    _, acc_b = _cross_entity_transfer(db, user, entities, ent_a)
+    _entry(db, user, "Bill from B", BudgetEntryType.EXPENSE, "4000.00", datetime(2026, 8, 5),
+           account=acc_b, entity_id=ent_b.id, end_mode="after_occurrences", max_occurrences=1)
+
+    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    assert r["opening_balance"] == Decimal("0.00")
+    assert r["account_shortfalls"] == []
+    assert r["shortfall"] is False
+    assert r["shortfalls"] == []
+    assert r["lowest_balance"] == Decimal("0.00")
+    assert r["trough_date"] is None
+    assert r["closing_balance"] == Decimal("1000.00")
 
 
 def test_transfer_into_an_inactive_account_leaves_the_pool(db, user):

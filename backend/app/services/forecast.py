@@ -110,7 +110,8 @@ def project_cashflow(
       net, closing_balance, by_account, unassigned_closing, overflow_moves
 
     ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
-    net unposted cash transactions (debits - credits + transfer fees);
+    net unposted cash transactions (debits - credits + transfer fees, plus transfer
+    amounts crossing the scope boundary);
     ``statement_payables`` are credit-card statements due in the period.
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
@@ -393,7 +394,8 @@ def build_timeline(opening, events: List[dict]) -> dict:
 
     ``events`` items: ``{date, name, amount, type, source, source_id}`` where
     ``amount`` is signed (positive = inflow, negative = outflow). Same-day ties
-    put OUTFLOWS before inflows — the conservative assumption for solvency.
+    use ``_event_sort_key`` (transfers, then outflows, then inflows), the same
+    order per-account routing uses, so the two views agree on shortfalls.
 
     Returns opening/closing balances, the per-event running balance, the trough
     (lowest balance + its date, ``None`` date meaning the opening is the low), and
@@ -401,18 +403,13 @@ def build_timeline(opening, events: List[dict]) -> dict:
     """
     opening = _money(opening)
 
-    def _key(e):
-        d = e["date"]
-        d = d.date() if isinstance(d, datetime) else d
-        return (d, 0 if _money(e["amount"]) < 0 else 1)
-
     running = opening
     lowest = opening
     trough_date: Optional[date] = None
     out_events: List[dict] = []
     shortfalls: List[dict] = []
 
-    for e in sorted(events, key=_key):
+    for e in sorted(events, key=_event_sort_key):
         amt = _money(e["amount"])
         running = (running + amt).quantize(_CENTS)
         d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
