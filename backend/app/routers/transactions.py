@@ -20,13 +20,16 @@ from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
 from app.core.time import naive_utc_now, utc_now
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from calendar import monthrange
 from decimal import Decimal
 import os
 from app.core.config import settings
 
 router = APIRouter()
+
+# Largest UTC offset in use (UTC+14): how far ahead of UTC a user's local "today" can reach.
+_MAX_UTC_OFFSET = timedelta(hours=14)
 
 
 def _D(value) -> Decimal:
@@ -35,9 +38,15 @@ def _D(value) -> Decimal:
 
 
 def _normalize_reference(reference: Optional[datetime]) -> datetime:
-    """Naive UTC, to match the naive allocations.period_start/period_end columns."""
+    """Naive UTC, to match the naive allocations.period_start/period_end columns.
+
+    Aware values are converted to UTC first, as Postgres does when it stores them, so a
+    row is classified the same way on create as on a later edit or delete. Stored
+    timestamptz values read back aware and are converted to UTC here; naive inputs are
+    assumed to be UTC, which holds while the session TimeZone is UTC.
+    """
     value = reference or naive_utc_now()
-    return value.replace(tzinfo=None) if value.tzinfo else value
+    return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
 
 
 def _start_of_period(reference: datetime, frequency: BudgetPeriodFrequency) -> datetime:
@@ -77,22 +86,32 @@ def _compute_period_end(start: datetime, frequency: BudgetPeriodFrequency) -> da
     return start
 
 
-def _compute_previous_start(start: datetime, frequency: BudgetPeriodFrequency) -> datetime:
-    freq = frequency or BudgetPeriodFrequency.MONTHLY
-    if freq == BudgetPeriodFrequency.DAILY:
-        return start - timedelta(days=1)
-    if freq == BudgetPeriodFrequency.WEEKLY:
-        return start - timedelta(weeks=1)
-    if freq == BudgetPeriodFrequency.MONTHLY:
-        return _add_months(start, -1)
-    if freq == BudgetPeriodFrequency.QUARTERLY:
-        return _add_months(start, -3)
-    return start
+def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> bool:
+    """Keep the allocation on the period containing now; report whether ``reference`` is in it.
 
+    The active period is always the one containing the current date, never the one
+    containing the triggering row. A missing ``period_start`` is initialised to it, and a
+    stale period (``period_end`` <= now, including one whose missing end is derived from
+    ``period_start``) is advanced to it with ``current_amount`` reset, as a normal roll
+    does. That initialisation or roll is persisted even when the triggering row is then
+    excluded, so an out-of-period row leaves the budget on the current period with a
+    zero total rather than pinning it to the row's period.
 
-def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime]) -> None:
+    Users east of UTC send day-precision dates as midnight UTC of their local date, which
+    can already be in the next UTC period. So a row at or after ``period_end`` but no
+    later than now + ``_MAX_UTC_OFFSET`` (the horizon) advances the period to the one
+    containing the row, with the same reset, and counts; rows still in the UTC period
+    containing now are then historical, as for any earlier period. A period that starts
+    within the horizon is treated as started; one that starts beyond it has not, so it
+    is left alone and its rows are excluded. The period is never rewound. ``reference``
+    counts only if it falls inside the resulting period and that period has started;
+    earlier (historical) rows and rows beyond the horizon in a later period (future) are
+    excluded.
+    """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
+    now = naive_utc_now()
+    horizon = now + _MAX_UTC_OFFSET
 
     period_start = allocation.period_start
     period_end = allocation.period_end
@@ -103,27 +122,34 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
 
     period_changed = False
 
-    if period_start is None or period_end is None:
-        period_start = _start_of_period(normalized_reference, frequency)
+    if period_start is None:
+        period_start = _start_of_period(now, frequency)
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
+    elif period_end is None:
+        period_end = _compute_period_end(period_start, frequency)
 
-    while normalized_reference >= period_end:
+    while now >= period_end:
         period_start = period_end
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
-    while normalized_reference < period_start:
-        previous_start = _compute_previous_start(period_start, frequency)
-        period_end = period_start
-        period_start = previous_start
+    while period_end <= normalized_reference <= horizon:
+        period_start = period_end
+        period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
     if period_changed:
         allocation.current_amount = Decimal("0")
+        allocation.period_start = period_start
+        allocation.period_end = period_end
+
+    if normalized_reference < period_start or normalized_reference >= period_end or period_start > horizon:
+        return False
 
     allocation.period_start = period_start
     allocation.period_end = period_end
+    return True
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
@@ -199,7 +225,8 @@ def _apply_budget_delta(
     for allocation in allocations:
         if allocation.allocation_type != AllocationType.BUDGET:
             continue
-        _ensure_budget_period(allocation, normalized_reference)
+        if not _ensure_budget_period(allocation, normalized_reference):
+            continue  # out-of-period row (historical or future): excluded
         allocation.current_amount = _D(allocation.current_amount) + _D(delta)
         allocation.updated_at = now
 
