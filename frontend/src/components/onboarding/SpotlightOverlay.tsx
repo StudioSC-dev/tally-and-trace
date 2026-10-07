@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { resolveOnboardingTarget } from './resolveTarget'
 
 interface SpotlightOverlayProps {
   targetSelector?: string
@@ -26,7 +27,7 @@ export function SpotlightOverlay({
       if (targetElement) {
         element = targetElement
       } else if (targetSelector) {
-        element = document.querySelector(targetSelector) as HTMLElement
+        element = resolveOnboardingTarget(targetSelector)
       }
 
       if (element) {

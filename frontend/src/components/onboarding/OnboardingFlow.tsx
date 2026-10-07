@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
 import { SpotlightOverlay } from './SpotlightOverlay'
+import { resolveOnboardingTarget } from './resolveTarget'
 
 interface OnboardingStep {
   id: number
@@ -74,28 +75,28 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       id: 1,
       title: 'Welcome to Your Dashboard',
       description: 'This is your home overview where you can see all your financial information at a glance.',
-      targetSelector: 'nav .hidden.sm\\:flex a[href="/"]',
+      targetSelector: '[data-onboarding="nav-home"]',
       navigateTo: '/',
     },
     {
       id: 2,
       title: 'Manage Your Accounts',
       description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.',
-      targetSelector: 'nav a[href="/accounts"]',
+      targetSelector: '[data-onboarding="nav-accounts"]',
       navigateTo: '/accounts',
     },
     {
       id: 3,
       title: 'Record Transactions',
       description: 'Add and categorize your income and expenses to keep track of your spending.',
-      targetSelector: 'nav a[href="/transactions"]',
+      targetSelector: '[data-onboarding="nav-transactions"]',
       navigateTo: '/transactions',
     },
     {
       id: 4,
       title: 'Set Financial Goals',
       description: 'Create budgets, savings goals, and track your progress toward financial milestones.',
-      targetSelector: 'nav a[href="/allocations"]',
+      targetSelector: '[data-onboarding="nav-allocations"]',
       navigateTo: '/allocations',
     },
     {
@@ -139,20 +140,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
     // Wait for navigation and DOM update, then find target element
     const timer = setTimeout(() => {
-      let element: HTMLElement | null = null
-
-      if (step.targetSelector) {
-        // For step 1, we need to find the Dashboard link specifically (not the logo)
-        if (step.id === 1) {
-          // Find all links with href="/" and get the one that contains "Dashboard" text
-          const allLinks = document.querySelectorAll('nav a[href="/"]')
-          element = Array.from(allLinks).find((link) => 
-            link.textContent?.includes('Dashboard')
-          ) as HTMLElement | null
-        } else {
-          element = document.querySelector(step.targetSelector) as HTMLElement
-        }
-      }
+      const element = resolveOnboardingTarget(step.targetSelector)
 
       setTargetElement(element)
       

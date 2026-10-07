@@ -40,14 +40,16 @@ function AllocationsIcon({ active }: { active?: boolean }) {
 interface TabItem {
   to: string
   label: string
+  // Tour target marker, shared with the matching desktop nav link
+  onboarding: string
   Icon: React.FC<{ active?: boolean }>
 }
 
 const TABS: TabItem[] = [
-  { to: '/',            label: 'Home',         Icon: HomeIcon },
-  { to: '/accounts',   label: 'Accounts',     Icon: AccountsIcon },
-  { to: '/transactions', label: 'Transactions', Icon: TransactionsIcon },
-  { to: '/allocations', label: 'Goals',        Icon: AllocationsIcon },
+  { to: '/',            label: 'Home',         onboarding: 'nav-home',         Icon: HomeIcon },
+  { to: '/accounts',   label: 'Accounts',     onboarding: 'nav-accounts',     Icon: AccountsIcon },
+  { to: '/transactions', label: 'Transactions', onboarding: 'nav-transactions', Icon: TransactionsIcon },
+  { to: '/allocations', label: 'Goals',        onboarding: 'nav-allocations',  Icon: AllocationsIcon },
 ]
 
 const tabBase =
@@ -58,10 +60,11 @@ export function BottomNav() {
     // Only visible on mobile – hides at sm (640 px) and above
     <nav className="safe-area-bottom fixed bottom-0 left-0 right-0 z-50 border-t border-line bg-surface sm:hidden">
       <div className="flex h-16 items-stretch">
-        {TABS.map(({ to, label, Icon }) => (
+        {TABS.map(({ to, label, onboarding, Icon }) => (
           <Link
             key={to}
             to={to}
+            data-onboarding={onboarding}
             className={tabBase}
             activeProps={{ className: `${tabBase} text-ink` }}
           >
