@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useId } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useCompleteOnboardingMutation } from '../../store/authApi'
-import { SpotlightOverlay } from './SpotlightOverlay'
+import { SpotlightOverlay, type SpotlightRect } from './SpotlightOverlay'
+import { resolveOnboardingTarget } from './resolveTarget'
+import { placeBubble, BUBBLE_VIEWPORT_MARGIN } from './placeBubble'
 
 interface OnboardingStep {
   id: number
@@ -19,22 +21,122 @@ interface OnboardingFlowProps {
 }
 
 const TOTAL_STEPS = 8
+const HIGHLIGHT_PADDING = 12
+// Used until the bubble has rendered once and can be measured (w-80 ≈ 320px).
+const BUBBLE_FALLBACK_SIZE = { width: 320, height: 200 }
+// Clearance for the fixed top bar and the mobile bottom tab bar (both h-16).
+const CHROME_CLEARANCE = 72
+// Minimum gap between corrective re-scrolls, so a smooth scroll in progress is
+// not restarted every frame.
+const RESCROLL_INTERVAL_MS = 500
+
+function isInFixedLayer(element: HTMLElement) {
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    if (getComputedStyle(node).position === 'fixed') return true
+  }
+  return false
+}
+
+// Nearest ancestor that clips the element, e.g. the desktop nav link strip,
+// which scrolls sideways when the links do not fit (narrow desktop widths, or
+// with the entity switcher shown).
+function clippingAncestor(element: HTMLElement) {
+  for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') return node
+  }
+  return null
+}
+
+function isClippedBy(rect: DOMRect, container: HTMLElement) {
+  const box = container.getBoundingClientRect()
+  return rect.left < box.left || rect.right > box.right || rect.top < box.top || rect.bottom > box.bottom
+}
+
+// Scroll only the clipping container, by adjusting its scroll offsets directly.
+// scrollIntoView would also be free to scroll the window, and for elements in
+// a fixed layer browsers disagree on whether it does.
+function revealWithinClippingAncestor(element: HTMLElement) {
+  const container = clippingAncestor(element)
+  if (!container) return
+  const rect = element.getBoundingClientRect()
+  const box = container.getBoundingClientRect()
+  if (rect.left < box.left) container.scrollLeft -= Math.ceil(box.left - rect.left)
+  else if (rect.right > box.right) container.scrollLeft += Math.ceil(rect.right - box.right)
+  if (rect.top < box.top) container.scrollTop -= Math.ceil(box.top - rect.top)
+  else if (rect.bottom > box.bottom) container.scrollTop += Math.ceil(rect.bottom - box.bottom)
+}
+
+// Bring a below-the-fold target to the middle of the screen. Nav items live in
+// fixed bars and are always on screen, so the page is left alone and only the
+// bar's own clipped strip is scrolled, if needed.
+function scrollTargetIntoView(element: HTMLElement) {
+  if (isInFixedLayer(element)) {
+    revealWithinClippingAncestor(element)
+    return
+  }
+  const rect = element.getBoundingClientRect()
+  if (rect.top >= CHROME_CLEARANCE && rect.bottom <= window.innerHeight - CHROME_CLEARANCE) return
+  element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+}
+
+interface Size {
+  width: number
+  height: number
+}
+
+interface Geometry {
+  element: HTMLElement | null
+  target: SpotlightRect | null
+  bubble: Size
+  viewport: Size
+}
+
+// Sub-pixel jitter is not worth a re-render
+const GEOMETRY_EPSILON = 0.5
+
+function numbersClose(a: number, b: number) {
+  return Math.abs(a - b) <= GEOMETRY_EPSILON
+}
+
+function sameGeometry(a: Geometry | null, b: Geometry) {
+  if (!a || a.element !== b.element) return false
+  if (!numbersClose(a.bubble.width, b.bubble.width) || !numbersClose(a.bubble.height, b.bubble.height)) return false
+  if (!numbersClose(a.viewport.width, b.viewport.width) || !numbersClose(a.viewport.height, b.viewport.height)) return false
+  if (!a.target || !b.target) return a.target === b.target
+  return (
+    numbersClose(a.target.top, b.target.top) &&
+    numbersClose(a.target.left, b.target.left) &&
+    numbersClose(a.target.width, b.target.width) &&
+    numbersClose(a.target.height, b.target.height)
+  )
+}
 
 export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0)
-  const [targetElement, setTargetElement] = useState<HTMLElement | null>(null)
+  // Tagged with its step, so a target found for one step is never shown for another
+  const [resolved, setResolved] = useState<{ step: number; element: HTMLElement } | null>(null)
+  const targetElement = resolved?.step === currentStep ? resolved.element : null
   const navigate = useNavigate()
   const [completeOnboarding] = useCompleteOnboardingMutation()
 
-  // Disable scrolling and prevent body scroll when onboarding is active
+  // Stop the user scrolling while the tour is active. overflow:hidden on the
+  // root still allows programmatic scrolling, which the tour needs to bring
+  // below-the-fold cards into view (body position:fixed did not).
   useEffect(() => {
-    // Disable body scroll
-    document.body.style.overflow = 'hidden'
-    document.body.style.position = 'fixed'
-    document.body.style.width = '100%'
-    
+    const root = document.documentElement
+    const previousOverflow = root.style.overflow
+    root.style.overflow = 'hidden'
+
+    // The bubble's body text is the one region allowed to scroll, so long
+    // copy stays readable on short screens.
+    const inBubbleScroll = (e: Event) =>
+      e.target instanceof Element && e.target.closest('[data-onboarding-scroll]') !== null
+
     // Prevent keyboard navigation
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Scrolling keys work inside the focused body text region
+      if (inBubbleScroll(e)) return
       // Allow only Tab, Enter, Escape for navigation
       if (!['Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault()
@@ -44,12 +146,14 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     
     // Prevent scroll events
     const handleWheel = (e: WheelEvent) => {
+      if (inBubbleScroll(e)) return
       e.preventDefault()
       e.stopPropagation()
     }
     
     // Prevent touch scroll
     const handleTouchMove = (e: TouchEvent) => {
+      if (inBubbleScroll(e)) return
       e.preventDefault()
       e.stopPropagation()
     }
@@ -59,10 +163,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
     
     return () => {
-      // Re-enable scrolling when component unmounts
-      document.body.style.overflow = ''
-      document.body.style.position = ''
-      document.body.style.width = ''
+      root.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
       window.removeEventListener('wheel', handleWheel, { capture: true })
       window.removeEventListener('touchmove', handleTouchMove, { capture: true })
@@ -74,28 +175,28 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       id: 1,
       title: 'Welcome to Your Dashboard',
       description: 'This is your home overview where you can see all your financial information at a glance.',
-      targetSelector: 'nav .hidden.sm\\:flex a[href="/"]',
+      targetSelector: '[data-onboarding="nav-home"]',
       navigateTo: '/',
     },
     {
       id: 2,
       title: 'Manage Your Accounts',
       description: 'Track all your accounts - cash, savings, checking, and credit cards - in one place.',
-      targetSelector: 'nav a[href="/accounts"]',
+      targetSelector: '[data-onboarding="nav-accounts"]',
       navigateTo: '/accounts',
     },
     {
       id: 3,
       title: 'Record Transactions',
       description: 'Add and categorize your income and expenses to keep track of your spending.',
-      targetSelector: 'nav a[href="/transactions"]',
+      targetSelector: '[data-onboarding="nav-transactions"]',
       navigateTo: '/transactions',
     },
     {
       id: 4,
       title: 'Set Financial Goals',
       description: 'Create budgets, savings goals, and track your progress toward financial milestones.',
-      targetSelector: 'nav a[href="/allocations"]',
+      targetSelector: '[data-onboarding="nav-allocations"]',
       navigateTo: '/allocations',
     },
     {
@@ -130,51 +231,54 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
   useEffect(() => {
     const step = steps[currentStep]
-    if (!step) return
-
-    // Navigate to the appropriate page if needed
-    if (step.navigateTo) {
+    if (step?.navigateTo) {
       navigate({ to: step.navigateTo as '/' })
     }
-
-    // Wait for navigation and DOM update, then find target element
-    const timer = setTimeout(() => {
-      let element: HTMLElement | null = null
-
-      if (step.targetSelector) {
-        // For step 1, we need to find the Dashboard link specifically (not the logo)
-        if (step.id === 1) {
-          // Find all links with href="/" and get the one that contains "Dashboard" text
-          const allLinks = document.querySelectorAll('nav a[href="/"]')
-          element = Array.from(allLinks).find((link) => 
-            link.textContent?.includes('Dashboard')
-          ) as HTMLElement | null
-        } else {
-          element = document.querySelector(step.targetSelector) as HTMLElement
-        }
-      }
-
-      setTargetElement(element)
-      
-      // Auto-scroll the element into view, accounting for the bottom onboarding panel
-      if (element) {
-        // Calculate the bottom panel height (approximately 200px for the onboarding panel)
-        const bottomPanelHeight = 250
-        const elementRect = element.getBoundingClientRect()
-        const elementTop = elementRect.top + window.scrollY
-        const elementHeight = elementRect.height
-        const windowHeight = window.innerHeight
-        const scrollPosition = elementTop - (windowHeight / 2) + (elementHeight / 2) + (bottomPanelHeight / 2)
-        
-        window.scrollTo({
-          top: Math.max(0, scrollPosition),
-          behavior: 'smooth',
-        })
-      }
-    }, 500)
-
-    return () => clearTimeout(timer)
   }, [currentStep, navigate, steps])
+
+  // Find the step's target, waiting for it if the page has not rendered it yet
+  // (route change, dashboard still loading). Re-runs when the target is lost.
+  useEffect(() => {
+    if (targetElement) return
+    const step = steps[currentStep]
+    if (!step) return
+
+    let done = false
+    const attempt = () => {
+      if (done) return
+      const element = resolveOnboardingTarget(step.targetSelector)
+      if (!element) return
+      stop()
+      setResolved({ step: currentStep, element })
+      scrollTargetIntoView(element)
+    }
+    const observer = new MutationObserver((records) => {
+      // The tour's own re-renders (bubble and highlight moving) cannot reveal a target
+      const external = records.some(
+        (record) => !(record.target instanceof Element && record.target.closest('[data-onboarding-overlay]')),
+      )
+      if (external) attempt()
+    })
+    const stop = () => {
+      done = true
+      observer.disconnect()
+      window.removeEventListener('resize', attempt)
+    }
+
+    // Attributes as well as childList: a target can be revealed by a class or
+    // style change (a breakpoint-hidden container, a collapsed section) without
+    // any node being added.
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden'],
+    })
+    window.addEventListener('resize', attempt)
+    attempt()
+
+    return stop
+  }, [currentStep, targetElement, steps])
 
   const handleNext = () => {
     if (currentStep < TOTAL_STEPS - 1) {
@@ -210,69 +314,67 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
   }
 
-  // Calculate bubble position based on target element
-  const [bubblePosition, setBubblePosition] = useState<{ top: number; left: number; placement: 'top' | 'bottom' | 'left' | 'right' } | null>(null)
+  // Track the target, the bubble and the viewport every frame while a step is
+  // active, so the highlight follows layout shifts (cards loading, smooth
+  // scroll, resize). State only changes when something actually moved.
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  // Whether the body text overflows; only then is it a (keyboard) scroll region
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const lastBodyScrollable = useRef(false)
+  const [bodyScrollable, setBodyScrollable] = useState(false)
+  const titleId = useId()
+  const lastGeometry = useRef<Geometry | null>(null)
+  const [geometry, setGeometry] = useState<Geometry | null>(null)
 
-  useEffect(() => {
-    if (targetElement) {
-      const updateBubblePosition = () => {
+  useLayoutEffect(() => {
+    let frame = 0
+    let lastRescroll = 0
+    const targetIsFixed = targetElement ? isInFixedLayer(targetElement) : true
+    const clipper = targetElement && targetIsFixed ? clippingAncestor(targetElement) : null
+    const measure = () => {
+      let target: SpotlightRect | null = null
+      if (targetElement) {
         const rect = targetElement.getBoundingClientRect()
-        const scrollY = window.scrollY
-        const scrollX = window.scrollX
-        
-        // Determine best placement (prefer bottom, then top, then right, then left)
-        const spaceBelow = window.innerHeight - rect.bottom
-        const spaceAbove = rect.top
-        const spaceRight = window.innerWidth - rect.right
-        
-        const bubbleWidth = 320
-        const bubbleHeight = 200
-        const offset = 20
-        
-        let top = 0
-        let left = 0
-        let placement: 'top' | 'bottom' | 'left' | 'right' = 'bottom'
-        
-        if (spaceBelow >= bubbleHeight + offset) {
-          // Place below
-          top = rect.bottom + scrollY + offset
-          left = rect.left + scrollX + (rect.width / 2) - (bubbleWidth / 2)
-          placement = 'bottom'
-        } else if (spaceAbove >= bubbleHeight + offset) {
-          // Place above
-          top = rect.top + scrollY - bubbleHeight - offset
-          left = rect.left + scrollX + (rect.width / 2) - (bubbleWidth / 2)
-          placement = 'top'
-        } else if (spaceRight >= bubbleWidth + offset) {
-          // Place to the right
-          top = rect.top + scrollY + (rect.height / 2) - (bubbleHeight / 2)
-          left = rect.right + scrollX + offset
-          placement = 'right'
+        if (!targetElement.isConnected || rect.width === 0 || rect.height === 0) {
+          // The target went away (re-render, route change): look for it again
+          setResolved(null)
         } else {
-          // Place to the left
-          top = rect.top + scrollY + (rect.height / 2) - (bubbleHeight / 2)
-          left = rect.left + scrollX - bubbleWidth - offset
-          placement = 'left'
+          target = { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+          // Content above the target grew after it was scrolled to (a card
+          // finishing its own load) and pushed it off screen, or a nav link sits
+          // under its strip's clip edge. The user cannot scroll during the
+          // tour, so bring it back.
+          const hidden = targetIsFixed
+            ? clipper !== null && isClippedBy(rect, clipper)
+            : rect.bottom <= CHROME_CLEARANCE || rect.top >= window.innerHeight - CHROME_CLEARANCE
+          const now = performance.now()
+          if (hidden && now - lastRescroll >= RESCROLL_INTERVAL_MS) {
+            lastRescroll = now
+            scrollTargetIntoView(targetElement)
+          }
         }
-        
-        // Keep bubble within viewport bounds
-        left = Math.max(20, Math.min(left, window.innerWidth - bubbleWidth - 20))
-        top = Math.max(20, Math.min(top, document.documentElement.scrollHeight - bubbleHeight - 20))
-        
-        setBubblePosition({ top, left, placement })
       }
-      
-      updateBubblePosition()
-      window.addEventListener('resize', updateBubblePosition)
-      window.addEventListener('scroll', updateBubblePosition, true)
-      
-      return () => {
-        window.removeEventListener('resize', updateBubblePosition)
-        window.removeEventListener('scroll', updateBubblePosition, true)
+      const bubble = bubbleRef.current
+      const next: Geometry = {
+        element: target ? targetElement : null,
+        target,
+        bubble: bubble ? { width: bubble.offsetWidth, height: bubble.offsetHeight } : BUBBLE_FALLBACK_SIZE,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
       }
-    } else {
-      setBubblePosition(null)
+      if (!sameGeometry(lastGeometry.current, next)) {
+        lastGeometry.current = next
+        setGeometry(next)
+      }
+      const body = bodyRef.current
+      const scrollable = !!body && body.scrollHeight > body.clientHeight + 1
+      if (scrollable !== lastBodyScrollable.current) {
+        lastBodyScrollable.current = scrollable
+        setBodyScrollable(scrollable)
+      }
+      frame = requestAnimationFrame(measure)
     }
+    measure()
+    return () => cancelAnimationFrame(frame)
   }, [targetElement])
 
   const currentStepData = steps[currentStep]
@@ -281,76 +383,102 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     return null
   }
 
+  const targetRect =
+    targetElement && geometry?.element === targetElement ? geometry.target : null
+  const bubbleLayout = placeBubble(
+    targetRect && {
+      top: targetRect.top - HIGHLIGHT_PADDING,
+      left: targetRect.left - HIGHLIGHT_PADDING,
+      width: targetRect.width + HIGHLIGHT_PADDING * 2,
+      height: targetRect.height + HIGHLIGHT_PADDING * 2,
+    },
+    geometry?.bubble ?? BUBBLE_FALLBACK_SIZE,
+    geometry?.viewport ?? { width: window.innerWidth, height: window.innerHeight },
+  )
+
   return (
-    <SpotlightOverlay
-      targetSelector={currentStepData.targetSelector}
-      targetElement={targetElement}
-      padding={12}
-      borderRadius={8}
-    >
-      {bubblePosition && (
-        <div 
-          className="absolute z-[10000] bg-surface border border-line pointer-events-auto w-80 transition-all duration-300"
-          style={{
-            top: `${bubblePosition.top}px`,
-            left: `${bubblePosition.left}px`,
-          }}
-          data-onboarding-controls
-        >
-          <div className="p-4">
-            {/* Progress indicator */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-body">
-                  Step {currentStep + 1} of {TOTAL_STEPS}
-                </span>
-                <button
-                  onClick={handleSkip}
-                  className="text-xs text-muted hover:text-body transition-colors"
-                >
-                  Skip
-                </button>
-              </div>
-              <div className="w-full bg-sunken rounded-full h-1.5">
-                <div
-                  className="bg-ink h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${((currentStep + 1) / TOTAL_STEPS) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-
-            {/* Step content */}
-            <div className="mb-4">
-              <h3 className="text-base font-semibold text-ink mb-1.5">
-                {currentStepData.title}
-              </h3>
-              <p className="text-sm text-body">{currentStepData.description}</p>
-            </div>
-
-            {/* Navigation buttons */}
-            <div className="flex items-center justify-between gap-3">
+    <SpotlightOverlay rect={targetRect} padding={HIGHLIGHT_PADDING} borderRadius={8}>
+      {/* Always rendered, even before the target is found, so the tour can
+          never strand the user behind the overlay without controls. */}
+      <div
+        ref={bubbleRef}
+        className="absolute z-[10000] flex flex-col bg-surface border border-line pointer-events-auto w-80 max-w-[calc(100vw-2rem)]"
+        style={{
+          top: `${bubbleLayout.top}px`,
+          left: `${bubbleLayout.left}px`,
+          // Never taller than the viewport, so the controls cannot be clipped;
+          // the measured (capped) height is what placeBubble positions.
+          maxHeight: `${(geometry?.viewport.height ?? window.innerHeight) - BUBBLE_VIEWPORT_MARGIN * 2}px`,
+        }}
+        data-onboarding-controls
+      >
+        <div className="flex min-h-0 flex-col p-4">
+          {/* Progress indicator */}
+          <div className="mb-3 shrink-0">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-body">
+                Step {currentStep + 1} of {TOTAL_STEPS}
+              </span>
               <button
-                onClick={handlePrevious}
-                disabled={currentStep === 0}
-                className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={handleSkip}
+                className="text-xs text-muted hover:text-body transition-colors"
               >
-                Previous
+                Skip
               </button>
-              <button
-                onClick={handleNext}
-                className="px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
-              >
-                {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
-              </button>
+            </div>
+            <div className="w-full bg-sunken rounded-full h-1.5">
+              <div
+                className="bg-ink h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${((currentStep + 1) / TOTAL_STEPS) * 100}%` }}
+              ></div>
             </div>
           </div>
-          
-          {/* Arrow pointing to the highlighted element */}
+
+          {/* Step content — the only part that scrolls when space is short */}
           <div
-            className={`absolute w-0 h-0 border-8 ${ bubblePosition.placement === 'bottom' ? 'border-b-white border-t-transparent border-l-transparent border-r-transparent -top-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'top' ? 'border-t-white border-b-transparent border-l-transparent border-r-transparent -bottom-4 left-1/2 -translate-x-1/2' : bubblePosition.placement === 'right' ? 'border-r-white border-l-transparent border-t-transparent border-b-transparent -left-4 top-1/2 -translate-y-1/2' : 'border-l-white border-r-transparent border-t-transparent border-b-transparent -right-4 top-1/2 -translate-y-1/2' }`}
-          />
+            ref={bodyRef}
+            className="mb-4 min-h-0 overflow-y-auto overscroll-contain focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+            data-onboarding-scroll
+            {...(bodyScrollable
+              ? { tabIndex: 0, role: 'region', 'aria-labelledby': titleId }
+              : {})}
+          >
+            <h3 id={titleId} className="text-base font-semibold text-ink mb-1.5">
+              {currentStepData.title}
+            </h3>
+            <p className="text-sm text-body">{currentStepData.description}</p>
+          </div>
+
+          {/* Navigation buttons */}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+            <button
+              onClick={handlePrevious}
+              disabled={currentStep === 0}
+              className="px-3 py-1.5 text-sm text-body bg-sunken hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <button
+              onClick={handleNext}
+              className="ml-auto px-4 py-1.5 text-sm bg-ink text-paper hover:bg-ink transition-colors font-medium"
+            >
+              {currentStep === TOTAL_STEPS - 1 ? 'Get Started' : 'Next'}
+            </button>
+          </div>
         </div>
-      )}
+        
+        {/* Arrow pointing to the highlighted element */}
+        {bubbleLayout.placement !== 'center' && (
+          <div
+            className={`absolute w-0 h-0 border-8 ${ bubbleLayout.placement === 'bottom' ? 'border-b-surface border-t-transparent border-l-transparent border-r-transparent -top-4 -translate-x-1/2' : bubbleLayout.placement === 'top' ? 'border-t-surface border-b-transparent border-l-transparent border-r-transparent -bottom-4 -translate-x-1/2' : bubbleLayout.placement === 'right' ? 'border-r-surface border-l-transparent border-t-transparent border-b-transparent -left-4 -translate-y-1/2' : 'border-l-surface border-r-transparent border-t-transparent border-b-transparent -right-4 -translate-y-1/2' }`}
+            style={
+              bubbleLayout.placement === 'top' || bubbleLayout.placement === 'bottom'
+                ? { left: bubbleLayout.arrowOffset }
+                : { top: bubbleLayout.arrowOffset }
+            }
+          />
+        )}
+      </div>
     </SpotlightOverlay>
   )
 }
