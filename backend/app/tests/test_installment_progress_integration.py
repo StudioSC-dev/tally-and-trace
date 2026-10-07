@@ -360,3 +360,23 @@ def test_update_to_zero_remaining_requires_inactive(client, db):
         assert client.put(url, json={"is_active": True}, headers=headers).status_code == 422
     finally:
         _cleanup(db, entry_id)
+
+
+def test_offset_updates(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=1, remaining=5,
+        next_occurrence=datetime(2026, 8, 1), name="Offset update installment",
+    )
+    try:
+        url = f"{API}/budget-entries/{entry_id}"
+        resp = client.put(url, json={"occurrences_paid_offset": 3}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["occurrences_paid"] == 3
+        assert client.put(url, json={"occurrences_paid_offset": None}, headers=headers).status_code == 422
+        resp = client.put(url, json={"name": "x"}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["occurrences_paid_offset"] == 3
+        assert resp.json()["occurrences_paid"] == 3
+    finally:
+        _cleanup(db, entry_id)
