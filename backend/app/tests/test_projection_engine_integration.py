@@ -178,3 +178,109 @@ def test_timeline_reports_overflow_use_without_moving_closings(db, user, client)
     assert closings == {"Savings A": 1000.0, "Checking B": -200.0}
     assert body["unassigned_closing"] == 0.0
     assert body["closing_balance"] == 800.0
+
+
+# ---------------------------------------------------------------------------
+# Monthly projection on the shared event engine
+# ---------------------------------------------------------------------------
+
+def test_monthly_projection_respects_end_date_and_max_occurrences(db, user):
+    """A finished or capped installment stops producing events month to month."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_cashflow
+
+    _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    # Fully paid installment: 0 occurrences remaining.
+    _entry(db, user, "Finished installment", BudgetEntryType.EXPENSE, "500.00",
+           datetime(2026, 8, 15), end_mode="after_occurrences", max_occurrences=0)
+    # One payment remaining.
+    _entry(db, user, "Last installment", BudgetEntryType.EXPENSE, "300.00",
+           datetime(2026, 8, 15), end_mode="after_occurrences", max_occurrences=1)
+    # Ends after September.
+    _entry(db, user, "Ending subscription", BudgetEntryType.EXPENSE, "100.00",
+           datetime(2026, 8, 20), end_mode="on_date", end_date=datetime(2026, 9, 30))
+
+    periods = project_cashflow(db, user.id, months=4, reference=datetime(2026, 8, 1))
+
+    assert [p["expenses"] for p in periods] == [400.0, 100.0, 0.0, 0.0]
+    assert periods[-1]["closing_balance"] == 9500.0
+
+
+def test_monthly_projection_does_not_count_unposted_card_charges_as_cash(db, user):
+    """The charge leaves cash when the statement is paid, not on the purchase date."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21)
+    card.payment_account_id = checking.id
+    db.commit()
+    # Charged 10 Aug -> closes on the 24 Aug statement -> due 14 Sep.
+    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 8, 10),
+         description="Card charge")
+
+    aug, sep = project_cashflow(db, user.id, months=2, reference=datetime(2026, 8, 1))
+
+    assert aug["unposted_expenses"] == 0.0
+    assert aug["statement_payables"] == 0.0
+    assert aug["closing_balance"] == 50000.0
+    assert sep["unposted_expenses"] == 0.0
+    assert sep["statement_payables"] == 12000.0
+    assert sep["closing_balance"] == 38000.0
+    assert sep["by_account"] == [
+        {"account_id": checking.id, "account_name": "Checking B", "closing_balance": 38000.0}
+    ]
+
+
+def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency, TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "20000.00")
+    checking_b = _account(db, user, "Checking B", AccountType.CHECKING, "3000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking_b.id)
+    _entry(db, user, "Salary", BudgetEntryType.INCOME, "40000.00", datetime(2026, 8, 15),
+           account=checking_b, cadence=RecurrenceFrequency.SEMI_MONTHLY,
+           semi_monthly_day_1=15, semi_monthly_day_2=30)
+    _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "25000.00", datetime(2026, 8, 5),
+           account=checking_b, overflow_account_id=savings_a.id)
+    _entry(db, user, "Loose expense", BudgetEntryType.EXPENSE, "1200.00", datetime(2026, 8, 12),
+           cadence=RecurrenceFrequency.WEEKLY)
+    _txn(db, user, card, TransactionType.DEBIT, "8000.00", datetime(2026, 7, 30), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "2500.00", datetime(2026, 8, 20))
+    _txn(db, user, checking_b, TransactionType.DEBIT, "999.99", datetime(2026, 8, 18))
+    _txn(db, user, savings_a, TransactionType.TRANSFER, "6000.00", datetime(2026, 9, 3),
+         transfer_fee=Decimal("25.00"),
+         transfer_from_account_id=savings_a.id, transfer_to_account_id=checking_b.id)
+
+    reference = datetime(2026, 8, 10)
+    periods = project_cashflow(db, user.id, months=2, reference=reference)
+    window_end = datetime.fromisoformat(periods[-1]["period_end"])
+    days = (window_end - reference).days
+    timeline = project_running_balance(db, user.id, days=days, reference=reference)
+
+    # Like windows: same start, same end.
+    assert datetime.fromisoformat(periods[0]["period_start"]).date() == timeline["window_start"]
+    assert window_end.date() == timeline["window_end"]
+    assert periods[0]["opening_balance"] == float(timeline["opening_balance"])
+    assert periods[-1]["closing_balance"] == float(timeline["closing_balance"])
+    # Per-account month-end closings agree too, and sum to the pooled closing.
+    assert periods[-1]["by_account"] == [
+        {"account_id": a["account_id"], "account_name": a["account_name"],
+         "closing_balance": float(a["closing_balance"])}
+        for a in timeline["by_account"]
+    ]
+    assert round(
+        sum(a["closing_balance"] for a in periods[-1]["by_account"])
+        + periods[-1]["unassigned_closing"], 2,
+    ) == periods[-1]["closing_balance"]
+    # The window really did contain each kind of event.
+    sources = {e["source"] for e in timeline["events"]}
+    assert sources == {"budget_entry", "transaction", "statement"}

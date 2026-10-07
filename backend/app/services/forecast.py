@@ -96,86 +96,92 @@ def project_cashflow(
     reference: Optional[datetime] = None,
 ) -> List[dict]:
     """
-    Generate a month-by-month cash-flow projection.
+    Generate a month-by-month cash-flow projection from the dated events
+    (``collect_events``), so it agrees with the running-balance timeline.
+
+    The window starts TODAY (the same ``start`` as the timeline: opening balances
+    are as of now), so the first period runs from today to the 1st of next month
+    and later periods are whole calendar months.
 
     Returns a list of dicts with keys:
       period_label, period_start, period_end,
-      opening_balance, income, expenses, unposted_expenses,
-      net, closing_balance
+      opening_balance, income, expenses, unposted_expenses, statement_payables,
+      net, closing_balance, by_account, unassigned_closing, overflow_moves
+
+    ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
+    net unposted cash transactions (debits - credits + transfer fees);
+    ``statement_payables`` are credit-card statements due in the period.
+    ``by_account`` is each projection-cash account's month-end closing, excluding
+    virtual overflow pulls (reported in ``overflow_moves``).
     """
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
-    # Start of current month
-    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = start.replace(day=1)
+    boundaries = [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
+    end = boundaries[-1]
 
-    accounts = get_account_balances(db, user_id, entity_id)
-    # Only projection-cash accounts count (see is_projection_cash).
-    # (This is an advisory monthly projection, so float is fine here.)
-    opening = sum(float(a.balance) for a in accounts if is_projection_cash(a))
+    accounts, opening_by_account, account_names = _projection_accounts(db, user_id, entity_id)
+    opening = sum(opening_by_account.values(), Decimal("0"))
 
-    # Active budget entries for the entity/user
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
-        BudgetEntry.is_active.is_(True),
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    cash_events = [e for e in events if e["counts_as_cash"]]
+    routing = _route_legs(
+        opening_by_account, cash_events, account_names,
+        checkpoints=[b.date() for b in boundaries[1:]],
     )
-    budget_entries = be_query.all()
 
-    # Unposted transactions (confirmed upcoming expenses)
-    txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
-        Transaction.is_posted.is_(False),
-    )
-    unposted_txns = txn_query.all()
+    def f(x: Decimal) -> float:
+        return round(float(x), 2)
 
     timeline = []
-    for _ in range(months):
-        period_end = _add_months(period_start, 1)
+    for i in range(months):
+        period_start, period_end = boundaries[i], boundaries[i + 1]
+        in_period = [e for e in cash_events if period_start <= _naive(e["date"]) < period_end]
 
-        income: float = 0.0
-        expenses: float = 0.0
+        def total(source: str, sign: int = 0) -> Decimal:
+            amounts = (e["amount"] for e in in_period if e["source"] == source)
+            if sign > 0:
+                amounts = (a for a in amounts if a > 0)
+            elif sign < 0:
+                amounts = (a for a in amounts if a < 0)
+            return sum(amounts, Decimal("0"))
 
-        for entry in budget_entries:
-            # Walk occurrences within the period
-            occ = entry.next_occurrence.replace(tzinfo=None) if entry.next_occurrence.tzinfo else entry.next_occurrence
-            # If the first occurrence already passed use it as starting point
-            while occ < period_start:
-                occ = _next_occurrence(occ, entry.cadence)
-
-            while period_start <= occ < period_end:
-                if entry.entry_type == BudgetEntryType.INCOME:
-                    income += float(entry.amount)
-                else:
-                    expenses += float(entry.amount)
-                occ = _next_occurrence(occ, entry.cadence)
-
-        # Unposted transactions within the period
-        unposted_period: float = 0.0
-        for txn in unposted_txns:
-            txn_date = txn.transaction_date.replace(tzinfo=None) if txn.transaction_date.tzinfo else txn.transaction_date
-            if period_start <= txn_date < period_end:
-                from app.models.transaction import TransactionType
-                if txn.transaction_type == TransactionType.DEBIT:
-                    unposted_period += float(txn.amount)
-                elif txn.transaction_type == TransactionType.CREDIT:
-                    unposted_period -= float(txn.amount)
-
-        net = income - expenses - unposted_period
+        income = total("budget_entry", 1)
+        expenses = -total("budget_entry", -1)
+        unposted = -total("transaction")
+        statements = -total("statement")
+        net = sum((e["amount"] for e in in_period), Decimal("0"))
         closing = opening + net
 
+        snapshot = routing["closings"][i]
         timeline.append({
             "period_label": period_start.strftime("%B %Y"),
             "period_start": period_start.isoformat(),
             "period_end": period_end.isoformat(),
-            "opening_balance": round(opening, 2),
-            "income": round(income, 2),
-            "expenses": round(expenses, 2),
-            "unposted_expenses": round(unposted_period, 2),
-            "net": round(net, 2),
-            "closing_balance": round(closing, 2),
+            "opening_balance": f(opening),
+            "income": f(income),
+            "expenses": f(expenses),
+            "unposted_expenses": f(unposted),
+            "statement_payables": f(statements),
+            "net": f(net),
+            "closing_balance": f(closing),
+            "by_account": [
+                {
+                    "account_id": a["account_id"],
+                    "account_name": a["account_name"],
+                    "closing_balance": f(a["closing_balance"]),
+                }
+                for a in account_closings(snapshot, opening_by_account, account_names)
+            ],
+            "unassigned_closing": f(snapshot["unassigned"]),
+            "overflow_moves": serialize_overflow_moves([
+                m for m in routing["overflow_moves"]
+                if period_start.date() <= m["date"] < period_end.date()
+            ]),
         })
 
         opening = closing
-        period_start = period_end
 
     return timeline
 
