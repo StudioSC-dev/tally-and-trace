@@ -166,3 +166,245 @@ def test_open_ended_entry_has_no_paid_count(client, db):
     finally:
         db.query(BudgetEntry).filter(BudgetEntry.id == entry_id).delete()
         db.commit()
+
+
+def _create_installment(client, headers, *, offset, remaining, next_occurrence, name):
+    accounts = client.get(f"{API}/accounts/", headers=headers, params={"limit": 1000}).json()["items"]
+    funding = next(a for a in accounts if a["account_type"] != "credit")
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense",
+            "name": name,
+            "amount": 1000.00,
+            "cadence": "monthly",
+            "next_occurrence": next_occurrence.isoformat(),
+            "end_mode": "after_occurrences",
+            "max_occurrences": remaining,
+            "occurrences_paid_offset": offset,
+            "account_id": funding["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def _cleanup(db, entry_id):
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    db.query(Transaction).filter(Transaction.budget_entry_id == entry_id).delete()
+    db.query(BudgetEntry).filter(BudgetEntry.id == entry_id).delete()
+    db.commit()
+
+
+def test_offset_plus_one_materialisation_gives_five_of_six(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=4, remaining=2,
+        next_occurrence=datetime(2026, 8, 1), name="Offset installment 4+1",
+    )
+    try:
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+        resp = client.post(f"{API}/budget-entries/{entry_id}/materialize", json={}, headers=headers)
+        assert resp.status_code in (200, 201), resp.text
+        entry = _fetch(client, headers, entry_id)
+        assert entry["occurrences_paid"] == 5
+        assert entry["max_occurrences"] == 1          # remaining -> total 5 + 1 = 6
+        assert entry["occurrences_paid_offset"] == 4
+        assert entry["is_active"] is True
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_offset_installment_reaches_six_of_six_and_goes_inactive(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Offset installment 5+1",
+    )
+    try:
+        resp = client.post(f"{API}/budget-entries/{entry_id}/materialize", json={}, headers=headers)
+        assert resp.status_code in (200, 201), resp.text
+        resp = client.get(
+            f"{API}/budget-entries/", headers=headers, params={"limit": 200, "is_active": False}
+        )
+        entry = next(e for e in resp.json()["items"] if e["id"] == entry_id)
+        assert entry["occurrences_paid"] == 6
+        assert entry["max_occurrences"] == 0
+        assert entry["is_active"] is False
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_offset_installment_projects_only_remaining_occurrences(client, db):
+    """Imported charges carry no budget_entry_id, so projection must not re-emit them.
+
+    Offset 4 of 6, next_occurrence already after the last imported line, 2 remaining:
+    the timeline shows exactly those 2 future charges and nothing else for this entry.
+    """
+    headers = _auth(client)
+    name = "Offset installment projection"
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=10)
+    entry_id = _create_installment(
+        client, headers, offset=4, remaining=2, next_occurrence=start, name=name,
+    )
+    try:
+        r = client.get(f"{API}/forecast/timeline", headers=headers, params={"days": 365})
+        assert r.status_code == 200, r.text
+        mine = [e for e in r.json()["events"] if name in e.get("name", "")]
+        assert len(mine) == 2, mine
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_negative_offset_is_rejected(client):
+    headers = _auth(client)
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": "Bad offset", "amount": 10,
+            "cadence": "monthly", "next_occurrence": datetime(2026, 8, 1).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": 2,
+            "occurrences_paid_offset": -1,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_detail_create_and_update_return_installment_progress(client, db):
+    """Every endpoint that returns an entry must carry occurrences_paid, not just the list."""
+    headers = _auth(client)
+    accounts = client.get(f"{API}/accounts/", headers=headers, params={"limit": 1000}).json()["items"]
+    funding = next(a for a in accounts if a["account_type"] != "credit")
+    resp = client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": "Progress everywhere", "amount": 1000.00,
+            "cadence": "monthly", "next_occurrence": datetime(2026, 8, 1).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": 2,
+            "occurrences_paid_offset": 4, "account_id": funding["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201, resp.text
+    entry_id = resp.json()["id"]
+    try:
+        assert resp.json()["occurrences_paid"] == 4
+        detail = client.get(f"{API}/budget-entries/{entry_id}", headers=headers)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["occurrences_paid"] == 4
+        updated = client.put(
+            f"{API}/budget-entries/{entry_id}", json={"description": "touched"}, headers=headers
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["occurrences_paid"] == 4
+        assert _fetch(client, headers, entry_id)["occurrences_paid"] == 4
+    finally:
+        _cleanup(db, entry_id)
+
+
+def _post_installment(client, headers, *, remaining, active, name):
+    return client.post(
+        f"{API}/budget-entries/",
+        json={
+            "entry_type": "expense", "name": name, "amount": 1000.00,
+            "cadence": "monthly",
+            "next_occurrence": (datetime.now() + timedelta(days=10)).isoformat(),
+            "end_mode": "after_occurrences", "max_occurrences": remaining,
+            "occurrences_paid_offset": 6, "is_active": active,
+        },
+        headers=headers,
+    )
+
+
+def test_completed_installment_with_zero_remaining_can_be_created_inactive(client, db):
+    headers = _auth(client)
+    name = "Completed installment zero remaining"
+    resp = _post_installment(client, headers, remaining=0, active=False, name=name)
+    assert resp.status_code == 201, resp.text
+    entry_id = resp.json()["id"]
+    try:
+        assert resp.json()["occurrences_paid"] == 6
+        assert resp.json()["max_occurrences"] == 0
+        r = client.get(f"{API}/forecast/timeline", headers=headers, params={"days": 365})
+        assert r.status_code == 200, r.text
+        assert not [e for e in r.json()["events"] if name in e.get("name", "")]
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_zero_remaining_active_installment_is_rejected(client):
+    headers = _auth(client)
+    resp = _post_installment(client, headers, remaining=0, active=True, name="Active zero remaining")
+    assert resp.status_code == 422, resp.text
+
+
+def test_update_to_zero_remaining_requires_inactive(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Update to zero remaining",
+    )
+    try:
+        url = f"{API}/budget-entries/{entry_id}"
+        assert client.put(url, json={"max_occurrences": 0}, headers=headers).status_code == 422
+        resp = client.put(url, json={"max_occurrences": 0, "is_active": False}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["max_occurrences"] == 0
+        assert resp.json()["occurrences_paid"] == 5
+        # Reactivating a completed installment without giving it occurrences is rejected.
+        assert client.put(url, json={"is_active": True}, headers=headers).status_code == 422
+    finally:
+        _cleanup(db, entry_id)
+
+
+def test_null_is_active_cannot_bypass_zero_remaining_guard(client, db):
+    headers = _auth(client)
+    done_id = _post_installment(
+        client, headers, remaining=0, active=False, name="Null is_active completed"
+    ).json()["id"]
+    open_id = _create_installment(
+        client, headers, offset=5, remaining=1,
+        next_occurrence=datetime(2026, 8, 1), name="Null is_active with zero remaining",
+    )
+    try:
+        done_before = _fetch(client, headers, done_id)
+        resp = client.put(f"{API}/budget-entries/{done_id}", json={"is_active": None}, headers=headers)
+        assert resp.status_code == 422, resp.text
+        assert _fetch(client, headers, done_id) == done_before
+
+        open_before = _fetch(client, headers, open_id)
+        resp = client.put(
+            f"{API}/budget-entries/{open_id}",
+            json={"max_occurrences": 0, "is_active": None},
+            headers=headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert _fetch(client, headers, open_id) == open_before
+    finally:
+        _cleanup(db, done_id)
+        _cleanup(db, open_id)
+
+
+def test_offset_updates(client, db):
+    headers = _auth(client)
+    entry_id = _create_installment(
+        client, headers, offset=1, remaining=5,
+        next_occurrence=datetime(2026, 8, 1), name="Offset update installment",
+    )
+    try:
+        url = f"{API}/budget-entries/{entry_id}"
+        resp = client.put(url, json={"occurrences_paid_offset": 3}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["occurrences_paid"] == 3
+        assert client.put(url, json={"occurrences_paid_offset": None}, headers=headers).status_code == 422
+        resp = client.put(url, json={"name": "x"}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["occurrences_paid_offset"] == 3
+        assert resp.json()["occurrences_paid"] == 3
+    finally:
+        _cleanup(db, entry_id)

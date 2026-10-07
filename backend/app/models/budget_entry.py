@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     ForeignKey,
+    text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -55,6 +56,12 @@ class BudgetEntry(Base):
     end_mode = Column(String(20), nullable=False, default="indefinite")
     end_date = Column(DateTime, nullable=True)
     max_occurrences = Column(Integer, nullable=True)
+    # Installments only: charges already paid before this entry existed (e.g. imported
+    # from a spreadsheet) that have no linked transaction. Added to the linked-transaction
+    # count so "n of m" reads the real paid count without fabricating historical rows.
+    occurrences_paid_offset = Column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
 
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # UC1: secondary funding source — payments draw from account_id first, overflow here.

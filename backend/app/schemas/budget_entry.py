@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from app.models.budget_entry import BudgetEntryType
 from app.models.transaction import RecurrenceFrequency
 from app.models.user import CurrencyType
@@ -27,11 +27,29 @@ class BudgetEntryBase(BaseModel):
     is_active: bool = True
     description: Optional[str] = Field(None, max_length=500)
     end_date: Optional[datetime] = None
-    max_occurrences: Optional[int] = Field(None, ge=1, le=360)
+    max_occurrences: Optional[int] = Field(None, ge=0, le=360)
+    # Installments paid before import with no linked transaction; counts toward "n of m".
+    occurrences_paid_offset: int = Field(0, ge=0, le=360)
+
+
+ZERO_REMAINING_MESSAGE = (
+    "max_occurrences of 0 is only allowed for inactive 'after_occurrences' entries"
+)
+
+
+def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_active: Optional[bool]) -> bool:
+    """0 remaining means a completed installment: only valid when inactive."""
+    if max_occurrences != 0:
+        return True
+    return end_mode == "after_occurrences" and is_active is False
 
 
 class BudgetEntryCreate(BudgetEntryBase):
-    pass
+    @model_validator(mode="after")
+    def _zero_remaining_only_when_completed(self):
+        if not zero_remaining_allowed(self.end_mode, self.max_occurrences, self.is_active):
+            raise ValueError(ZERO_REMAINING_MESSAGE)
+        return self
 
 
 class BudgetEntryUpdate(BaseModel):
@@ -54,18 +72,22 @@ class BudgetEntryUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     end_mode: Optional[Literal["indefinite", "on_date", "after_occurrences"]] = None
     end_date: Optional[datetime] = None
-    max_occurrences: Optional[int] = Field(None, ge=1, le=360)
+    max_occurrences: Optional[int] = Field(None, ge=0, le=360)
+    occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
+
+    @field_validator("occurrences_paid_offset")
+    @classmethod
+    def _offset_not_null(cls, v):
+        # Omit the field to leave it unchanged; an explicit null would violate NOT NULL.
+        if v is None:
+            raise ValueError("occurrences_paid_offset cannot be null")
+        return v
 
 
 class BudgetEntryResponse(BudgetEntryBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    # Input requires ge=1 (you can't create a 0-occurrence installment), but the
-    # stored value legitimately reaches 0 as materialisation counts it down, so the
-    # response must allow 0 — otherwise the list endpoint 500s once an installment is
-    # fully paid.
-    max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     # Installments only ("n of m"): occurrences materialised so far, counted from the
     # linked transactions. None for open-ended entries, where the notion doesn't apply.
     occurrences_paid: Optional[int] = None
