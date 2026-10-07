@@ -227,6 +227,10 @@ def build_statement_payables(
     (see ``allocate_payments``); a cycle still owing something and due in
     ``[start, end)`` becomes a payable for the remainder.
 
+    A cycle still owing something whose due date is before ``start`` is overdue:
+    like an overdue unposted transaction, it is emitted dated ``start`` with
+    ``overdue`` True and its due date as ``original_date``.
+
     Returns timeline events shaped like the ones ``build_timeline`` /
     ``route_accounts`` already consume (negative amount = outflow).
     """
@@ -240,10 +244,13 @@ def build_statement_payables(
         balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
         remaining = allocate_payments(balances, [amount for _, amount in payments])
         for cycle, balance, owed in zip(cycles, balances, remaining):
-            if owed <= 0 or cycle["due"] < start:
+            if owed <= 0:
                 continue  # nothing owed -> nothing to pay
+            overdue = {}
+            if cycle["due"] < start:
+                overdue = {"overdue": True, "original_date": cycle["due"]}
             events.append({
-                "date": cycle["due"],
+                "date": start if overdue else cycle["due"],
                 "name": f"{card.name} statement",
                 "amount": -owed,
                 "type": "expense",
@@ -253,6 +260,7 @@ def build_statement_payables(
                 "overflow_account_id": card.payment_overflow_account_id,
                 "statement_close": cycle["close"],
                 "statement_balance": balance,
+                **overdue,
             })
     return events
 

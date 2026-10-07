@@ -829,6 +829,30 @@ def test_card_payment_edit_and_delete_reprice_the_statement(db, user, client, ca
     assert timeline() == [("2026-08-14", "Card C statement", Decimal("-12000.00"))]
 
 
+def test_unpaid_statement_due_before_the_window_is_overdue_on_the_start_in_every_view(
+        db, user, card_setup):
+    """14 Aug statement, partly paid (posted) 4,000, viewed on 20 Aug: 8,000 overdue today."""
+    from app.services.forecast import (
+        get_payables, get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    checking, card = card_setup
+    checking.balance = Decimal("46000.00")
+    db.commit()
+    _pay_card(db, user, checking, card, "4000.00", datetime(2026, 8, 14), is_posted=True)
+
+    reference = datetime(2026, 8, 20, 9)
+    r = project_running_balance(db, user.id, days=12, reference=reference)
+    assert _cash_events(r) == [("2026-08-20", "Card C statement", Decimal("-8000.00"))]
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["statement_payables"] == 8000.0
+    assert aug["closing_balance"] == 38000.0 == float(r["closing_balance"])
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=10, reference=reference)] == [("2026-08-20", 8000.0)]
+    assert [(i["due_date"], i["source"], float(i["amount"])) for i in get_upcoming_items(
+        db, user.id, days=10, reference=reference)] == [("2026-08-20", "statement", 8000.0)]
+
+
 # ---------------------------------------------------------------------------
 # Upcoming items on the shared event engine
 # ---------------------------------------------------------------------------

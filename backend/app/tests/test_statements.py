@@ -349,3 +349,34 @@ def test_allocate_payments_oldest_first():
         [Decimal("100"), Decimal("0"), Decimal("-50"), Decimal("200")],
         [Decimal("150"), Decimal("30")],
     ) == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("120")]
+
+
+# ---------------------------------------------------------------------------
+# Overdue statements
+# ---------------------------------------------------------------------------
+
+def test_unpaid_statement_due_before_the_window_is_overdue_on_the_window_start():
+    start = datetime(2026, 8, 20)
+    events = build_statement_payables([_card()], {1: [_txn(10, "12000.00")]}, start, SEP)
+    assert [(e["date"], e["amount"], e["overdue"], e["original_date"]) for e in events] == [
+        (start, Decimal("-12000.00"), True, datetime(2026, 8, 14)),
+    ]
+
+
+def test_partly_paid_overdue_statement_carries_the_remainder():
+    start = datetime(2026, 8, 20)
+    rows = [_txn(10, "12000.00"), _pay(10, "9000.00", month=8)]
+    events = build_statement_payables([_card()], {1: rows}, start, SEP)
+    assert [(e["date"], e["amount"], e["overdue"]) for e in events] == [
+        (start, Decimal("-3000.00"), True),
+    ]
+
+
+def test_paid_statement_due_before_the_window_is_not_overdue():
+    rows = [_txn(10, "12000.00"), _pay(14, "12000.00", month=8)]
+    assert build_statement_payables([_card()], {1: rows}, datetime(2026, 8, 20), SEP) == []
+
+
+def test_in_window_statement_is_not_marked_overdue():
+    (ev,) = build_statement_payables([_card()], {1: [_txn(10, "12000.00")]}, AUG, SEP)
+    assert "overdue" not in ev and "original_date" not in ev

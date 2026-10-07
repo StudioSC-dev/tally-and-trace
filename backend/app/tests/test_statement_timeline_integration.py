@@ -161,9 +161,38 @@ def test_statement_payable_is_routed_to_its_payment_account(db, scenario):
     assert shortfalls[0]["short_amount"] == pytest.approx(7000.00)  # 12,000 - 5,000
 
 
-def test_statement_is_absent_once_the_due_date_passes(db, scenario):
-    """A window starting after the due date must not re-bill an old statement."""
+def test_unpaid_statement_past_its_due_date_is_overdue_on_the_window_start(db, scenario):
+    """Nothing paid the 14 Aug statement, so on 15 Aug it is still owed, today."""
+    from app.services.forecast import collect_events
+
     result = _timeline(db, scenario, reference=datetime(2026, 8, 15))
 
     statements = [e for e in result["events"] if e["source"] == "statement"]
-    assert all(e["date"] > datetime(2026, 8, 14).date() for e in statements)
+    assert [(e["date"], e["amount"]) for e in statements] == [
+        (datetime(2026, 8, 15).date(), pytest.approx(-12000.00)),
+    ]
+    (ev,) = [e for e in collect_events(db, datetime(2026, 8, 15), datetime(2026, 9, 1),
+                                       user_id=scenario["user"].id)
+             if e["source"] == "statement"]
+    assert ev["overdue"] is True
+    assert ev["original_date"] == datetime(2026, 8, 14)
+
+
+def test_paid_statement_is_absent_once_the_due_date_passes(db, scenario):
+    """A window starting after the due date must not re-bill a paid statement."""
+    from decimal import Decimal
+
+    from app.models.transaction import Transaction, TransactionType
+
+    db.add(Transaction(
+        user_id=scenario["user"].id, account_id=scenario["checking"].id,
+        amount=Decimal("12000.00"), transaction_type=TransactionType.TRANSFER,
+        transfer_from_account_id=scenario["checking"].id,
+        transfer_to_account_id=scenario["card"].id,
+        transaction_date=datetime(2026, 8, 13), is_posted=True,
+    ))
+    db.commit()
+
+    result = _timeline(db, scenario, reference=datetime(2026, 8, 15))
+
+    assert [e for e in result["events"] if e["source"] == "statement"] == []
