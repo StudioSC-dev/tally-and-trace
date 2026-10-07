@@ -335,3 +335,19 @@ def test_a_september_charge_does_not_pin_unset_or_stale_budgets_to_september(cli
 
     _charge(client, october, OCT_DAY, amount=80.0)
     _assert_october(db, october, Decimal("80.00"))
+
+
+def test_a_utc_plus_8_local_today_row_on_the_1st_rolls_the_period_and_counts(client, db, october, now_is):
+    """04:00 on 1 Nov in UTC+8 is 20:00 on 31 Oct UTC; the frontend sends the date as 2026-11-01T00:00Z."""
+    now_is(datetime(2026, 10, 31, 20, 0))
+    txn_id = _charge(client, october, datetime(2026, 11, 1, tzinfo=timezone.utc))
+    state = _state(db, october)
+    expected = (NOV_START, DEC_START, Decimal("120.00"))
+    assert state[october["explicit_id"]] == expected
+    assert state[october["matched_id"]] == expected
+
+    _delete(client, october, txn_id)
+    state = _state(db, october)
+    expected = (NOV_START, DEC_START, Decimal("0.00"))
+    assert state[october["explicit_id"]] == expected
+    assert state[october["matched_id"]] == expected

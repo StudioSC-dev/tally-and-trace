@@ -75,7 +75,7 @@ def test_a_reference_before_the_period_is_historical(now_is, frequency, start, e
 def test_a_reference_beyond_the_current_period_is_future(now_is, frequency, start, end, next_end, reference):
     now_is(NOW)
     allocation = _allocation(end, next_end, frequency)
-    assert _ensure_budget_period(allocation, next_end + timedelta(hours=1)) is False
+    assert _ensure_budget_period(allocation, next_end + timedelta(days=1)) is False  # beyond the 14h tolerance
     assert _snapshot(allocation) == (end, next_end, SPENT)
 
 
@@ -178,3 +178,44 @@ def test_offset_references_are_classified_in_utc(now_is, reference, inside):
     allocation = _allocation(datetime(2026, 10, 1), datetime(2026, 11, 1))
     assert _ensure_budget_period(allocation, reference) is inside
     assert _snapshot(allocation) == (datetime(2026, 10, 1), datetime(2026, 11, 1), SPENT)
+
+
+# A UTC+8 user's local-today row arrives as midnight UTC of their date, which is already
+# in the next UTC period during the hours before a boundary.
+@pytest.mark.parametrize("frequency,start,end,next_end,reference", FREQUENCIES)
+def test_a_row_at_the_next_period_start_just_before_the_boundary_advances_and_counts(
+    now_is, frequency, start, end, next_end, reference
+):
+    now_is(end - timedelta(hours=2))
+    allocation = _allocation(start, end, frequency)
+    assert _ensure_budget_period(allocation, end) is True
+    assert _snapshot(allocation) == (end, next_end, Decimal("0"))
+
+
+@pytest.mark.parametrize("frequency,start,end,next_end,reference", FREQUENCIES)
+def test_a_row_beyond_the_utc_offset_tolerance_is_future(now_is, frequency, start, end, next_end, reference):
+    now = end - timedelta(hours=2)
+    now_is(now)
+    allocation = _allocation(start, end, frequency)
+    assert _ensure_budget_period(allocation, now + timedelta(hours=15)) is False
+    assert _snapshot(allocation) == (start, end, SPENT)
+
+
+def test_a_row_exactly_at_the_utc_offset_tolerance_counts(now_is):
+    now = datetime(2026, 10, 31, 10, 0)
+    now_is(now)
+    allocation = _allocation(datetime(2026, 10, 1), datetime(2026, 11, 1))
+    assert _ensure_budget_period(allocation, now + timedelta(hours=14)) is True
+    assert _snapshot(allocation) == (datetime(2026, 11, 1), datetime(2026, 12, 1), Decimal("0"))
+
+
+@pytest.mark.parametrize("frequency,start,end,next_end,reference", FREQUENCIES)
+def test_a_period_advanced_early_accepts_its_rows_and_treats_the_utc_current_period_as_historical(
+    now_is, frequency, start, end, next_end, reference
+):
+    now_is(end - timedelta(hours=2))
+    allocation = _allocation(end, next_end, frequency)
+    assert _ensure_budget_period(allocation, end + timedelta(hours=1)) is True
+    assert _snapshot(allocation) == (end, next_end, SPENT)
+    assert _ensure_budget_period(allocation, end - timedelta(hours=3)) is False
+    assert _snapshot(allocation) == (end, next_end, SPENT)

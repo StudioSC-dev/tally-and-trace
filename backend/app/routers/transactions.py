@@ -28,6 +28,9 @@ from app.core.config import settings
 
 router = APIRouter()
 
+# Largest UTC offset in use (UTC+14): how far ahead of UTC a user's local "today" can reach.
+_MAX_UTC_OFFSET = timedelta(hours=14)
+
 
 def _D(value) -> Decimal:
     """Normalise a money value (float from a schema, Decimal from the ORM, or None) to Decimal."""
@@ -92,14 +95,23 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     ``period_start``) is advanced to it with ``current_amount`` reset, as a normal roll
     does. That initialisation or roll is persisted even when the triggering row is then
     excluded, so an out-of-period row leaves the budget on the current period with a
-    zero total rather than pinning it to the row's period. The period is never rewound:
-    a stored period that has not started yet is left alone. ``reference`` counts only if
-    it falls inside the active period; earlier (historical) and later (future) rows are
+    zero total rather than pinning it to the row's period.
+
+    Users east of UTC send day-precision dates as midnight UTC of their local date, which
+    can already be in the next UTC period. So a row at or after ``period_end`` but no
+    later than now + ``_MAX_UTC_OFFSET`` (the horizon) advances the period to the one
+    containing the row, with the same reset, and counts; rows still in the UTC period
+    containing now are then historical, as for any earlier period. A period that starts
+    within the horizon is treated as started; one that starts beyond it has not, so it
+    is left alone and its rows are excluded. The period is never rewound. ``reference``
+    counts only if it falls inside the resulting period and that period has started;
+    earlier (historical) rows and rows beyond the horizon in a later period (future) are
     excluded.
     """
     frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
     normalized_reference = _normalize_reference(reference)
     now = naive_utc_now()
+    horizon = now + _MAX_UTC_OFFSET
 
     period_start = allocation.period_start
     period_end = allocation.period_end
@@ -122,12 +134,17 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
         period_end = _compute_period_end(period_start, frequency)
         period_changed = True
 
+    while period_end <= normalized_reference <= horizon:
+        period_start = period_end
+        period_end = _compute_period_end(period_start, frequency)
+        period_changed = True
+
     if period_changed:
         allocation.current_amount = Decimal("0")
         allocation.period_start = period_start
         allocation.period_end = period_end
 
-    if normalized_reference < period_start or normalized_reference >= period_end or period_start > now:
+    if normalized_reference < period_start or normalized_reference >= period_end or period_start > horizon:
         return False
 
     allocation.period_start = period_start
