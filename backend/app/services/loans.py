@@ -40,10 +40,14 @@ Matching payments to due dates, in this order (``build_loan_payables``):
 
 1. POSTED scheduled payments settle due dates as above (oldest open first), so
    a settled date is no longer projected.
-2. One-off PLANNED payments cover what is left, also oldest open due date
-   first: every UNPOSTED transfer into the loan that is not a prepayment (a
-   planned or partial scheduled payment, a plain transfer), whatever its date
-   or entity. So a planned catch-up pays the overdue due date.
+2. One-off PLANNED payments cover what is left: every UNPOSTED transfer into
+   the loan that is not a prepayment (a planned or partial scheduled payment,
+   a plain transfer), whatever its entity. Taken in date order, each pays the
+   oldest open due date it can reach (``cover_planned``): a due date on or
+   after ``PLANNED_LOOKBACK`` (31 days) before the payment's own date, so a
+   catch-up a few days or weeks late pays the overdue due date, while one
+   planned months ahead covers only the due dates around its date and the
+   earlier ones stay projected (overdue at the window start once past).
 3. Projected RECURRING occurrences (each occurrence of a recurring transfer
    entry into the loan) cover what is left after that, each from its OWN due
    date (``own_due_index``: the due date nearest its calendar date, a tie going
@@ -57,7 +61,9 @@ a payable is removed. Prepayments never cover one.
 The result for a due date inside a window is the same for every window with
 the same start: posted and planned payments are loaded whatever their date and
 fill the due dates in order, so a longer window only adds due dates after the
-others; a recurring occurrence never reaches a due date earlier than its own
+others (each planned payment reaches every due date in a shorter window before
+the ones a longer window adds, so what it leaves for the next payment inside
+the shorter window is the same); a recurring occurrence never reaches a due date earlier than its own
 and is at most half a month past it, and occurrences are projected
 ``COVER_HORIZON`` past the window end. (Recurring occurrences keep the
 own-due-date rule for this reason: filled oldest first, an occurrence past a
@@ -86,6 +92,9 @@ _MAX_ROWS = 600
 # a payment belongs to its nearest due date, so it is never more than half a
 # month after the due date it covers.
 COVER_HORIZON = timedelta(days=31)
+# How far before its own date a one-off planned payment may reach back to cover
+# an open due date (one month at most; see ``cover_planned``).
+PLANNED_LOOKBACK = timedelta(days=31)
 
 
 class LoanError(ValueError):
@@ -160,6 +169,30 @@ def fill_oldest_first(amounts: List[Decimal], cash: Decimal) -> List[Decimal]:
         paid = min(max(cash, _ZERO), amount)
         cash -= paid
         remaining.append(amount - paid)
+    return remaining
+
+
+def cover_planned(dues: List[Tuple[date, Decimal]],
+                  payments: List[Tuple[date, Decimal]]) -> List[Decimal]:
+    """What each due date still owes after the one-off planned ``payments``.
+
+    ``dues`` are ``(due date, amount owed)`` in date order; ``payments``
+    ``(date, cash)``. The payments are taken in date order, and each pays the
+    open due dates oldest first, from the first one on or after its date less
+    ``PLANNED_LOOKBACK`` (an earlier due date is out of its reach), forward to
+    the last. Cash left after the last due date pays nothing.
+    """
+    remaining = [amount for _, amount in dues]
+    for day, cash in sorted(payments):
+        reach = day - PLANNED_LOOKBACK
+        for i, (due, _) in enumerate(dues):
+            if cash <= 0:
+                break
+            if due < reach:
+                continue
+            paid = min(cash, remaining[i])
+            remaining[i] -= paid
+            cash -= paid
     return remaining
 
 
@@ -561,7 +594,8 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
 
     A due date owes its payment less what the planned payments cover (see the
     module docstring): first the loan's unposted non-prepayment transfers
-    (``planned_covers``), oldest open due date first, then
+    (``planned_covers``), each from the oldest open due date within
+    ``PLANNED_LOOKBACK`` of its date (``cover_planned``), then
     ``projected_by_loan``, ``{loan_id: [(date, cash)]}``, the recurring transfer
     occurrences into each loan up to ``end`` plus ``COVER_HORIZON``, each from
     its own due date forward (``allocate_to_due_dates``). A due date before
@@ -581,8 +615,8 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
         dates = due_dates(db, loan, end)
         if not dates:
             continue
-        planned = sum((cash for _, cash in planned_covers(db, loan)), _ZERO)
-        after_planned = fill_oldest_first([amount for _, _, amount in dates], planned)
+        after_planned = cover_planned([(due, amount) for _, due, amount in dates],
+                                      planned_covers(db, loan))
         dues = allocate_to_due_dates(
             loan.loan_first_payment_date,
             [(step, left) for (step, _, _), left in zip(dates, after_planned)],

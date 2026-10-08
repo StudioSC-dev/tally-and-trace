@@ -973,16 +973,17 @@ def test_a_late_payment_settles_the_oldest_open_due_date_first(db, user):
 def test_a_planned_catch_up_covers_the_overdue_due_date_in_any_window(db, user):
     bank = _bank(db, user)
     loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
-    # Dated nearest Nov 4, but Sep 4 is the oldest open due date: it pays that.
-    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 20))
+    # Dated nearest Oct 4, but Sep 4 is the oldest open due date within a month
+    # of it: it pays that.
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 2))
 
     short = _loan_events(db, user, datetime(2026, 10, 31))
     long_ = _loan_events(db, user, datetime(2026, 11, 30))
     assert [(e["date"], e.get("overdue")) for e in short] == [(datetime(2026, 10, 4), None)]
     assert [(e["date"], e.get("overdue")) for e in long_] == [
         (datetime(2026, 10, 4), None), (datetime(2026, 11, 4), None)]
-    assert _cash_out(db, user, 30) == [("2026-10-04", "loan", Decimal("-8000.00")),
-                                       ("2026-10-20", "transaction", Decimal("-8000.00"))]
+    assert _cash_out(db, user, 30) == [("2026-10-02", "transaction", Decimal("-8000.00")),
+                                       ("2026-10-04", "loan", Decimal("-8000.00"))]
 
 
 def test_a_reduce_term_part_payment_and_a_planned_cover_leave_cash_once(db, user):
@@ -1004,7 +1005,10 @@ def test_a_reduce_term_part_payment_and_a_planned_cover_leave_cash_once(db, user
                  for e in collect_events(db, start, datetime(2026, 12, 1), user_id=user.id)
                  if e["counts_as_cash"] and e["amount"] < 0)
     # 16,000 owed for Oct 4 and Nov 4, 4,000 of it already paid: 12,000 leaves.
-    assert out == [("2026-11-05", "loan", Decimal("-8000.00")),
+    # The Nov 20 payment cannot reach back to Oct 4 (more than a month), so it
+    # covers half of Nov 4: 4,000 of each is still projected.
+    assert out == [("2026-11-05", "loan", Decimal("-4000.00")),
+                   ("2026-11-05", "loan", Decimal("-4000.00")),
                    ("2026-11-20", "transaction", Decimal("-4000.00"))]
 
 
@@ -1144,3 +1148,46 @@ def test_a_metadata_edit_of_a_legacy_transfer_into_a_loan_keeps_its_money(db, us
     other = _put(db, user, other, amount=8000)
     assert (Decimal(str(other.amount)), Decimal(str(other.transfer_fee))) == (
         Decimal("7590.00"), Decimal("410.00"))
+
+
+def test_a_payment_planned_next_year_leaves_this_months_due_date_projected(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _transfer(db, user, bank, loan, "8000", datetime(2027, 10, 4))
+
+    for end in (datetime(2026, 10, 31), datetime(2026, 12, 31), datetime(2027, 3, 1)):
+        events = _loan_events(db, user, end)
+        assert events[0]["date"] == datetime(2026, 10, 4), end
+        assert all(e["amount"] == Decimal("-8000.00") for e in events), end
+    assert _payables(db, user) == [("2026-10-04", "loan", 8000.0, bank.id)]
+
+    # Within a month of its date it covers the oldest open due date it reaches:
+    # the last one, Sep 4, 2027 (30 days before); the 11 before it stay due.
+    from app.services.loans import due_date
+
+    events = _loan_events(db, user, datetime(2027, 10, 5))
+    assert [e["loan_due_date"] for e in events] == [
+        due_date(date(2026, 10, 4), k) for k in range(11)]
+
+
+def test_a_planned_payment_a_few_days_late_still_covers_its_due_date(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 8))
+
+    for end in (datetime(2026, 10, 6), datetime(2026, 11, 1), datetime(2026, 12, 1)):
+        assert date(2026, 10, 4) not in {e["loan_due_date"] for e in _loan_events(db, user, end)}
+    assert _payables(db, user, days=10) == [("2026-10-08", "transaction", 8000.0, bank.id)]
+
+
+def test_a_planned_payment_cannot_reach_a_due_date_more_than_a_month_back(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
+    # Oct 20 is 46 days after Sep 4: it covers Oct 4, and Sep 4 stays overdue.
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 20))
+
+    for end in (datetime(2026, 10, 31), datetime(2026, 11, 30)):
+        events = _loan_events(db, user, end)
+        assert [(e["date"], e.get("overdue"), e["loan_due_date"]) for e in events][:1] == [
+            (REF, True, date(2026, 9, 4))], end
+        assert date(2026, 10, 4) not in {e["loan_due_date"] for e in events}, end
