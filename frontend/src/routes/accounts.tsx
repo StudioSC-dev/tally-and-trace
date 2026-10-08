@@ -704,7 +704,17 @@ export function AccountsPage() {
                 <label className="label">Account Currency</label>
                 <select
                   value={formData.currency}
-                  onChange={(e) => setFormData({ ...formData, currency: e.target.value as CurrencyCode })}
+                  onChange={(e) => {
+                    const currency = e.target.value as CurrencyCode
+                    const payer = accounts.find((a) => a.id === formData.payment_account_id)
+                    // A loan's paying account must be in the loan's currency.
+                    const clearPayer = formData.account_type === 'loan' && !!payer && payer.currency !== currency
+                    setFormData({
+                      ...formData,
+                      currency,
+                      payment_account_id: clearPayer ? undefined : formData.payment_account_id,
+                    })
+                  }}
                   className="select-field focus-ring"
                 >
                   {currencyOptions.map((currency) => (
@@ -1015,13 +1025,15 @@ export function AccountsPage() {
                       className="select-field focus-ring"
                     >
                       <option value="">Not set</option>
-                      {fundingAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
+                      {fundingAccounts
+                        .filter((a) => a.currency === formData.currency)
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
                     </select>
                     <p className="mt-1 text-xs text-muted">
-                      The account each payment is expected to leave in the forecast. Without it (or a payment
-                      amount) the loan adds no payable.
+                      The account each payment is expected to leave in the forecast, in the loan's currency.
+                      Without it (or a payment amount) the loan adds no payable.
                     </p>
                   </div>
                 </fieldset>
