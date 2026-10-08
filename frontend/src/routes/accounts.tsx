@@ -660,6 +660,7 @@ export function AccountsPage() {
                     setShowCreditSettings(false)
                   }}
                   className="select-field focus-ring"
+                  disabled={editingAccount?.account_type === 'loan'}
                 >
                   <option value="checking">🏦 Checking</option>
                   <option value="savings">💰 Savings</option>
@@ -668,6 +669,9 @@ export function AccountsPage() {
                   <option value="e_wallet">📱 E-Wallet</option>
                   <option value="loan">🏠 Loan</option>
                 </select>
+                {editingAccount?.account_type === 'loan' && (
+                  <p className="mt-1 text-xs text-muted">A loan account keeps its type.</p>
+                )}
               </div>
               
               {formData.account_type !== 'credit' && formData.account_type !== 'loan' && (
