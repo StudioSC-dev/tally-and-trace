@@ -307,6 +307,11 @@ def get_payables(
     and spending-wallet top-ups for their amount + fee: topping a wallet up is
     the spending). Other transfers between your own accounts are not payables;
     card charges reach cash via their statement payable instead.
+
+    A planned payment into a loan dated up to ``PLANNED_LOOKBACK`` (31 days)
+    after the window end can still cover a due date inside the window (see
+    services/loans.py), so that due date is not listed, while the payment
+    itself falls outside the window and is not listed either.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
