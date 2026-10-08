@@ -277,3 +277,25 @@ def test_snapshot_shows_wallet_balances_but_does_not_count_them(client, db, user
     flags = {a["name"]: a["is_spending_wallet"] for a in snap["balances"]["by_account"]}
     assert flags == {"Bank": False, "GCash": True}
     assert snap["available_cash"] == 10000.0
+
+
+def test_disposable_income_expenses_top_ups_once_and_ignores_other_transfers(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    secb = _account(db, user, "SecB", AccountType.SAVINGS, "20000.00")
+    bdo = _account(db, user, "BDO", AccountType.CHECKING, "0.00")
+    wallet = _wallet(db, user)
+    _entry(db, user, "Salary", BudgetEntryType.INCOME, "50000.00", REF, account=secb)
+    _entry(db, user, "BDO loan", BudgetEntryType.EXPENSE, "8000.00", REF, account=bdo)
+    _entry(db, user, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", REF,
+           account=secb, transfer_to_account_id=bdo.id)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=secb, transfer_to_account_id=wallet.id)
+    _entry(db, user, "Parking", BudgetEntryType.EXPENSE, "500.00", REF, account=wallet)
+
+    result = get_disposable_income(db, user.id)
+    # Loan 8,000 + top-up 2,000; the SecB->BDO move and wallet parking are not expenses.
+    assert result == {"monthly_income": 50000.0, "monthly_expenses": 10000.0,
+                      "monthly_disposable": 40000.0}

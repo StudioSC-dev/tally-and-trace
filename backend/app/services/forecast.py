@@ -303,20 +303,38 @@ def get_disposable_income(
     """
     Compute monthly net disposable income:
     total monthly income - total monthly expenses (normalised from each cadence).
+
+    Spending wallets are expensed when topped up, as in the period summary: a
+    recurring transfer into a wallet from a non-wallet account is an expense,
+    any other recurring transfer is not (it moves your own money), and expense
+    entries funded from a wallet are not counted again.
     """
     be_query = db.query(BudgetEntry).filter(
         scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
+    entries = be_query.all()
+    referenced = {
+        acc_id for e in entries
+        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id is not None
+    }
+    wallet_ids = {
+        a.id for a in db.query(Account).filter(Account.id.in_(referenced)).all()
+        if is_spending_wallet(a)
+    } if referenced else set()
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0
 
-    for entry in be_query.all():
+    for entry in entries:
         monthly = _monthly_equivalent(entry.amount, entry.cadence)
+        if entry.transfer_to_account_id is not None:
+            if entry.transfer_to_account_id in wallet_ids and entry.account_id not in wallet_ids:
+                monthly_expenses += monthly
+            continue
         if entry.entry_type == BudgetEntryType.INCOME:
             monthly_income += monthly
-        else:
+        elif entry.account_id not in wallet_ids:
             monthly_expenses += monthly
 
     disposable = monthly_income - monthly_expenses
