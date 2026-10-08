@@ -643,3 +643,66 @@ def test_delete_after_a_payment_restores_balances_exactly(client, people):
                          headers=me["headers"]).status_code == 200
     assert _balance(client, me, bank["id"]) == Decimal("1000.33")
     assert _balance(client, me, loan["id"]) == Decimal("-500.07")
+
+
+# --- editing a loan payment through the generic transactions API --------------
+
+def _put(client, who, txn_id, **body):
+    return client.put(f"{API}/transactions/{txn_id}", json=body, headers=who["headers"])
+
+
+@pytest.mark.parametrize("change", ["to_other_loan", "from_other_bank", "type_debit"])
+def test_a_loan_payment_cannot_be_retargeted(client, people, change):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    other_bank = _bank(client, me, name="Other bank", balance=10_000)
+    loan = _loan(client, me, balance=-1_000, payment_account_id=bank["id"])
+    other_loan = _loan(client, me, name="Other loan", loan_kind="home", balance=-1_000)
+    paid = _pay(client, me, loan["id"], principal=400, interest=10).json()
+
+    body = {
+        "to_other_loan": {"transfer_to_account_id": other_loan["id"]},
+        "from_other_bank": {"account_id": other_bank["id"],
+                            "transfer_from_account_id": other_bank["id"]},
+        "type_debit": {"transaction_type": "debit"},
+    }[change]
+    r = _put(client, me, paid["id"], **body)
+    assert r.status_code == 400 and "re-record" in r.text, r.text
+    for acc, expected in ((bank, "9590.00"), (other_bank, "10000.00"), (loan, "-600.00"),
+                          (other_loan, "-1000.00")):
+        assert _balance(client, me, acc["id"]) == Decimal(expected)
+
+    # Restating the same accounts is not a change.
+    r = _put(client, me, paid["id"], transaction_type="transfer", account_id=bank["id"],
+             transfer_from_account_id=bank["id"], transfer_to_account_id=loan["id"])
+    assert r.status_code == 200, r.text
+
+
+def test_a_loan_payment_edit_is_revalidated_against_the_loan(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000, payment_account_id=bank["id"])
+    paid = _pay(client, me, loan["id"], principal=400, interest=10).json()
+
+    # Owed before this payment is 1,000: principal above that is refused.
+    for body in ({"amount": 1_000.01}, {"transfer_fee": 0.005}, {"amount": 0.005},
+                 {"amount": 0, "transfer_fee": 0}, {"amount": None}):
+        r = _put(client, me, paid["id"], **body)
+        assert r.status_code == 400, (body, r.text)
+        assert _balance(client, me, bank["id"]) == Decimal("9590.00")
+        assert _balance(client, me, loan["id"]) == Decimal("-600.00")
+
+    # An unposted payment re-posted with too much principal is refused too.
+    assert _put(client, me, paid["id"], is_posted=False).status_code == 200
+    assert _put(client, me, paid["id"], is_posted=True, amount=1_500).status_code == 400
+    assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
+
+    r = _put(client, me, paid["id"], is_posted=True, amount=1_000, transfer_fee=12.5,
+             transaction_date="2026-03-05T00:00:00")
+    assert r.status_code == 200, r.text
+    assert r.json()["loan_payment_kind"] == "scheduled"
+    assert _balance(client, me, bank["id"]) == Decimal("8987.50")
+    assert _balance(client, me, loan["id"]) == Decimal("0.00")
+    s = _schedule(client, me, loan["id"]).json()
+    assert s["payments_made"] == 1
+    assert (s["payments"][0]["principal"], s["payments"][0]["interest"]) == (1_000, 12.5)

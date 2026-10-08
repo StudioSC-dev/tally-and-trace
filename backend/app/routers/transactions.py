@@ -15,6 +15,7 @@ from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
+from app.services import loans as loan_svc
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -170,6 +171,38 @@ def _balance_account_ids(transaction_type, account_id, transfer_from_id, transfe
     else:
         ids = [account_id]
     return [i for i in ids if i is not None]
+
+
+LOAN_PAYMENT_FIXED_FIELDS = (
+    "transaction_type", "account_id", "transfer_from_account_id", "transfer_to_account_id",
+)
+
+
+def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) -> None:
+    """Keep the loan endpoints' rules on a loan payment edited through this API.
+
+    Its type and accounts are fixed (so a prepayment can never land on a fixed
+    loan); an amount, fee or posted change is re-checked against the loan with
+    the payment's old effect reversed.
+    """
+    for field in LOAN_PAYMENT_FIXED_FIELDS:
+        if field in requested and requested[field] != getattr(txn, field):
+            raise HTTPException(
+                status_code=400,
+                detail="A loan payment's type and accounts cannot be changed; "
+                       "delete and re-record the loan payment instead",
+            )
+    loan = db.query(Account).filter(Account.id == txn.transfer_to_account_id).first()
+    try:
+        loan_svc.check_edited_payment(
+            loan,
+            old_principal=txn.amount,
+            old_posted=bool(txn.is_posted),
+            principal=requested.get("amount", txn.amount),
+            interest=requested.get("transfer_fee", txn.transfer_fee),
+        )
+    except loan_svc.LoanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
@@ -458,6 +491,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     else:
         _require_account(db, current_user, requested.get(
             "account_id", db_transaction.account_id), "Account not found")
+    if db_transaction.loan_payment_kind:
+        _validate_loan_payment_edit(db, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
