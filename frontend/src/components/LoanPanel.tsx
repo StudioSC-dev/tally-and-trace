@@ -74,6 +74,11 @@ export function LoanActions({
   onRecorded?: () => void
 }) {
   const { data: schedule } = useGetLoanScheduleQuery(account.id)
+  // A loan is paid only from an account in its own currency (the API refuses others).
+  const eligibleFunding = fundingAccounts.filter((a) => a.currency === account.currency)
+  const defaultFunding = eligibleFunding.some((a) => a.id === account.payment_account_id)
+    ? account.payment_account_id ?? undefined
+    : undefined
   const [recordPayment, { isLoading: isPaying }] = useRecordLoanPaymentMutation()
   const [recordPrepayment, { isLoading: isPrepaying }] = useRecordLoanPrepaymentMutation()
   const [mode, setMode] = useState<Mode>(null)
@@ -82,7 +87,7 @@ export function LoanActions({
     amount: '',
     principal: '',
     interest: '',
-    from_account_id: account.payment_account_id ?? undefined as number | undefined,
+    from_account_id: defaultFunding as number | undefined,
     date: todayInput(),
     is_posted: true,
   })
@@ -95,7 +100,7 @@ export function LoanActions({
       amount: '',
       principal: '',
       interest: '',
-      from_account_id: account.payment_account_id ?? undefined,
+      from_account_id: defaultFunding,
       date: todayInput(),
       is_posted: true,
     })
@@ -226,7 +231,7 @@ export function LoanActions({
               required
             >
               <option value="">Select account</option>
-              {fundingAccounts.map((a) => (
+              {eligibleFunding.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
