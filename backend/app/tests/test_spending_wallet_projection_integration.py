@@ -450,3 +450,23 @@ def test_top_ups_are_payables_so_timeline_monthly_and_payables_agree(db, user):
     assert timeline["closing_balance"] == Decimal("10000.00") - paid == Decimal("6490.00")
     assert month["closing_balance"] == float(timeline["closing_balance"])
     assert month["expenses"] + month["unposted_expenses"] == float(paid)
+
+
+def test_disposable_income_offsets_top_ups_with_money_returned_from_wallets(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    bank = _account(db, user, "Bank", AccountType.SAVINGS, "20000.00")
+    wallet = _wallet(db, user)
+    cash = _account(db, user, "Cash", AccountType.CASH, "0", is_spending_wallet=True)
+    _entry(db, user, "Salary", BudgetEntryType.INCOME, "50000.00", REF, account=bank)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id)
+    _entry(db, user, "GCash back to bank", BudgetEntryType.EXPENSE, "500.00", REF,
+           account=wallet, transfer_to_account_id=bank.id)
+    _entry(db, user, "GCash to cash", BudgetEntryType.EXPENSE, "300.00", REF,
+           account=wallet, transfer_to_account_id=cash.id)  # wallet to wallet: neutral
+
+    assert get_disposable_income(db, user.id) == {
+        "monthly_income": 50000.0, "monthly_expenses": 1500.0, "monthly_disposable": 48500.0}
