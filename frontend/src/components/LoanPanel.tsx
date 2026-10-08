@@ -152,7 +152,7 @@ export function LoanActions({
         <button
           type="button"
           onClick={() => open('prepayment')}
-          disabled={isFixed}
+          disabled={!schedule || isFixed}
           title={isFixed ? 'A fixed loan follows the bank’s schedule: no extra principal' : undefined}
           className="btn-secondary focus-ring disabled:opacity-50"
         >
