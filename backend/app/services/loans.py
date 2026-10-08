@@ -551,6 +551,12 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
     its own due date forward (``allocate_to_due_dates``). A due date before
     ``start`` is overdue: emitted on ``start`` with ``overdue`` True and its due
     date as ``original_date``.
+
+    Each event names the paying account as ``funding_account_id``; the caller
+    decides whether that leg is cash (``forecast.collect_events``). Its handling
+    of a spending wallet as the paying account (a non-cash leg) is defensive:
+    routing rejects a wallet as a loan's ``payment_account_id``, and an account
+    a loan is paid from cannot be made a wallet (routers/accounts.py).
     """
     events: List[dict] = []
     for loan in loans:
