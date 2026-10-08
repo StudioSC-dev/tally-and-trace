@@ -294,8 +294,7 @@ def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account)
 
 
 def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, *,
-                        currency, principal, interest, posted: bool,
-                        old_principal=0, old_posted: bool = False) -> dict:
+                        currency, principal, interest, posted: bool) -> dict:
     """The fields that make a transfer into ``loan`` a scheduled loan payment.
 
     Money paid into a loan through this API (a plain transfer, a transfer edited
@@ -310,9 +309,11 @@ def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, 
     loan may not): the source is in the loan's currency, the row is in that
     currency too (``currency``, when the caller gave one), principal and
     interest are whole cents and move some money, and a posted payment's
-    principal fits what is owed once the row's old effect on the loan
-    (``old_principal``, if ``old_posted``) is reversed. The loan and source
-    account are locked first, as the endpoint does. Nothing is written.
+    principal fits what is owed. The row is new to this loan (a new transfer,
+    or an edit that newly points a row at it), so it has no old effect on the
+    loan to reverse and what is owed is the loan's balance as it stands, for
+    the split as for the check. The loan and source account are locked first,
+    as the endpoint does. Nothing is written.
 
     With ``interest`` None (the caller gave no fee) the amount is split as the
     loan-payment endpoint proposes (``loan_svc.split_payment``): interest a
@@ -329,7 +330,7 @@ def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, 
         if interest is None and principal is not None:
             principal, interest = loan_svc.split_payment(loan, principal)
         principal, interest = loan_svc.check_edited_payment(
-            loan, old_principal=old_principal, old_posted=old_posted, posted=posted,
+            loan, old_principal=0, old_posted=False, posted=posted,
             principal=principal, interest=interest)
     except loan_svc.LoanError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
