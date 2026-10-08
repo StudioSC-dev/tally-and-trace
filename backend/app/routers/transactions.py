@@ -306,6 +306,11 @@ def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, 
     principal fits what is owed once the row's old effect on the loan
     (``old_principal``, if ``old_posted``) is reversed. The loan and source
     account are locked first, as the endpoint does. Nothing is written.
+
+    With ``interest`` None (the caller gave no fee) the amount is split as the
+    loan-payment endpoint proposes (``loan_svc.split_payment``): interest a
+    month at the loan rate, principal the rest, the cash moved unchanged. A
+    fee the caller gave is its own split and is kept.
     """
     funding = _loan_payment_source(db, user, source_id, loan)
     _lock(db, loan, funding)
@@ -314,6 +319,8 @@ def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, 
                             detail="A loan payment's currency must match the loan's currency")
     try:
         loan_svc.check_currency(loan, funding)
+        if interest is None and principal is not None:
+            principal, interest = loan_svc.split_payment(loan, principal)
         principal, interest = loan_svc.check_edited_payment(
             loan, old_principal=old_principal, old_posted=old_posted, posted=posted,
             principal=principal, interest=interest)
@@ -329,7 +336,9 @@ def _stamp_loan_payment(db: Session, user: User, transaction: TransactionCreate,
     transaction_data.update(_loan_payment_stamp(
         db, user, loan, source.id,
         currency=transaction.currency if "currency" in transaction.model_fields_set else None,
-        principal=transaction.amount, interest=transaction.transfer_fee,
+        principal=transaction.amount,
+        interest=(transaction.transfer_fee
+                  if "transfer_fee" in transaction.model_fields_set else None),
         posted=transaction.is_posted))
 
 
@@ -342,7 +351,9 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     into a transfer into a loan gets the same classification and checks as a
     new one, validated against the loan with the row's old effect on it
     reversed, before anything is changed. Without it the posted row would not
-    settle its due date and the payable would be charged again.
+    settle its due date and the payable would be charged again. With no fee in
+    the request and none on the row, the amount is split into principal and
+    interest as for a new payment without a fee.
     """
     if txn.loan_payment_kind:
         return {}
@@ -361,7 +372,8 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
         db, user, loan, source_id,
         currency=requested.get("currency"),
         principal=requested.get("amount", txn.amount),
-        interest=requested.get("transfer_fee", txn.transfer_fee),
+        interest=(requested["transfer_fee"] if requested.get("transfer_fee") is not None
+                  else txn.transfer_fee or None),
         posted=bool(requested.get("is_posted", txn.is_posted)),
         old_principal=txn.amount if was_into_loan else 0,
         old_posted=bool(txn.is_posted) and was_into_loan)
@@ -602,9 +614,11 @@ def create_transaction(
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
         primary_account.balance = _D(primary_account.balance) - _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.TRANSFER and transaction.is_posted:
-        primary_account.balance = _D(primary_account.balance) - (_D(transaction.amount) + _D(transaction.transfer_fee))
+        # The stored split: a loan payment's may differ from the request's.
+        principal, fee = transaction_data["amount"], transaction_data["transfer_fee"]
+        primary_account.balance = _D(primary_account.balance) - (_D(principal) + _D(fee))
         if destination_account:
-            destination_account.balance = _D(destination_account.balance) + _D(transaction.amount)
+            destination_account.balance = _D(destination_account.balance) + _D(principal)
 
     if transaction.is_posted:
         delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)

@@ -193,6 +193,19 @@ def propose_split(loan, total: Optional[Decimal] = None, principal: Optional[Dec
     return min(payment - interest, owed(loan)), interest
 
 
+def split_payment(loan, total) -> Tuple[Decimal, Decimal]:
+    """``(principal, interest)`` of a scheduled payment of ``total`` cash, given no split.
+
+    Interest is ``propose_split``'s (a month at the loan rate on the owed
+    amount), capped at ``total``; principal is the rest, so the cash moved is
+    exactly ``total``. Used for a transfer into a loan recorded without a fee.
+    """
+    total = cents(total)
+    _, interest = propose_split(loan, total=total)
+    interest = min(max(interest, _ZERO), max(total, _ZERO))
+    return total - interest, interest
+
+
 def amortize(balance: Decimal, annual_rate, payment: Decimal, first_due: date) -> Optional[List[dict]]:
     """Monthly rows paying ``balance`` down at ``payment``; None if it never repays."""
     rate = _monthly_rate(annual_rate)

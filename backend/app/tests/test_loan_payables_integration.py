@@ -882,3 +882,62 @@ def test_a_recurring_loan_payment_in_another_currency_is_rejected_at_save(db, us
             update_budget_entry(entry.id, BudgetEntryUpdate(**change), db=db, current_user=user)
         assert exc.value.status_code == 400 and "currency" in exc.value.detail, change
         db.rollback()
+
+
+def _balances(db, *accounts):
+    for a in accounts:
+        db.refresh(a)
+    return tuple(Decimal(str(a.balance)) for a in accounts)
+
+
+def test_a_materialised_loan_payment_without_a_fee_is_split_into_principal_and_interest(db, user):
+    from app.routers.budget_entries import materialize_budget_entry
+    from app.schemas.budget_entry import BudgetEntryMaterialize
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)  # 6% on 90,000: 450 interest this month
+    entry = _entry(db, user, bank, loan, "8000", datetime(2026, 10, 4))
+
+    txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(), db=db, current_user=user)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7550.00"), Decimal("450.00"))
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82450.00"))
+    s = _schedule(db, loan)
+    assert (s["payments_made"], s["owed"]) == (1, 82450.0)
+
+    # A fee given with it is the caller's split, kept as is.
+    txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(transfer_fee=100),
+                                   db=db, current_user=user)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("8000.00"), Decimal("100.00"))
+
+
+def test_a_generic_loan_payment_without_a_fee_is_split_and_an_explicit_fee_is_kept(db, user):
+    from app.models.account import AccountType
+    from app.routers.transactions import create_transaction
+    from app.schemas.transaction import TransactionCreate
+
+    bank = _bank(db, user)
+    savings = _account(db, user, "Savings", AccountType.SAVINGS, "0")
+    loan = _loan(db, user, bank)
+
+    txn = create_transaction(
+        transaction=TransactionCreate(
+            account_id=bank.id, transfer_from_account_id=bank.id, transfer_to_account_id=loan.id,
+            transaction_type="transfer", amount=8000, transaction_date=datetime(2026, 10, 4)),
+        db=db, current_user=user, active_entity=None)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7550.00"), Decimal("450.00"))
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82450.00"))
+
+    txn = _post(db, user, bank, loan, "8000", datetime(2026, 11, 4), fee="0")
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("8000.00"), Decimal("0.00"))
+
+    # An edit that lands a fee-less transfer in the loan is split the same way.
+    moved = _post(db, user, bank, savings, "8000", datetime(2026, 12, 4), posted=False)
+    moved = _put(db, user, moved, transfer_to_account_id=loan.id)
+    db.refresh(loan)
+    interest = (-Decimal(str(loan.balance)) * Decimal("0.005")).quantize(Decimal("0.01"))
+    assert (Decimal(str(moved.amount)), Decimal(str(moved.transfer_fee))) == (
+        Decimal("8000.00") - interest, interest)

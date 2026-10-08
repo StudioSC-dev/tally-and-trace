@@ -430,8 +430,11 @@ def materialize_budget_entry(
         transfer_fields = {
             "transfer_from_account_id": entry.account_id,
             "transfer_to_account_id": entry.transfer_to_account_id,
-            "transfer_fee": payload.transfer_fee,
         }
+        if "transfer_fee" in payload.model_fields_set:
+            # Left out otherwise, so a loan payment is split into principal and
+            # interest (``_loan_payment_stamp``); any other transfer has no fee.
+            transfer_fields["transfer_fee"] = payload.transfer_fee
     else:
         txn_type = (
             TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
