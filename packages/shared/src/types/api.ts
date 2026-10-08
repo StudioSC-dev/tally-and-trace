@@ -49,6 +49,78 @@ export interface Account {
   updated_at?: string
 }
 
+// ─── Loan payments and schedule ──────────────────────────────────────────────
+
+/** POST /accounts/{id}/loan-payment. Money values have at most 2 decimals. */
+export interface LoanPaymentRequest {
+  /** Defaults to the loan's `payment_account_id`. */
+  from_account_id?: number
+  /** Total payment; with one of principal/interest the other is the difference. */
+  amount?: number
+  principal?: number
+  interest?: number
+  /** ISO datetime; defaults to now. */
+  transaction_date?: string
+  /** Defaults to true. */
+  is_posted?: boolean
+  description?: string
+}
+
+/** POST /accounts/{id}/loan-prepayment (extra principal; `reduce_term` loans only). */
+export interface LoanPrepaymentRequest {
+  from_account_id?: number
+  amount: number
+  transaction_date?: string
+  is_posted?: boolean
+  description?: string
+}
+
+export interface LoanScheduleSplit {
+  principal: number
+  interest: number
+}
+
+export interface LoanSchedulePayment {
+  transaction_id: number
+  /** ISO datetime. */
+  date: string
+  kind: LoanPaymentKind | null
+  principal: number
+  interest: number
+}
+
+export interface LoanScheduleRow {
+  /** Payment number in the loan's term. */
+  number: number
+  /** ISO date. */
+  due_date: string
+  payment: number | null
+  /** Null on a `fixed` loan: the bank's split is not known in advance. */
+  principal: number | null
+  interest: number | null
+  balance_after: number | null
+}
+
+/** GET /accounts/{id}/loan-schedule. */
+export interface LoanSchedule {
+  account_id: number
+  name: string
+  loan_kind: LoanKind | null
+  amortization: LoanAmortization
+  /** What is still owed (= -balance, never below zero). */
+  owed: number
+  annual_rate: number | null
+  payment_amount: number | null
+  term_months: number | null
+  first_payment_date: string | null
+  payments_made: number
+  payments_left: number | null
+  next_due_date: string | null
+  proposed_split: LoanScheduleSplit | null
+  payments: LoanSchedulePayment[]
+  upcoming: LoanScheduleRow[]
+}
+
 // ─── Category ───────────────────────────────────────────────────────────────
 
 export type CategoryKind = 'income' | 'expense' | 'transfer'
@@ -369,8 +441,10 @@ export interface CashflowTimelineEvent {
   /**
    * Where the event came from. `statement` is a credit card's derived payable for
    * one billing cycle — its `source_id` is the CARD's account id, not a transaction.
+   * `loan` is a loan's payable for one due date — its `source_id` is the LOAN's
+   * account id, and the outflow sits on the loan's paying account.
    */
-  source: 'budget_entry' | 'transaction' | 'statement'
+  source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
   running_balance: number
 }
