@@ -1062,3 +1062,16 @@ def test_a_loan_paid_from_another_entitys_account_leaves_cash_only_in_that_entit
         db.query(Account).filter(Account.entity_id.in_([owner.id, payer.id])).delete()
         db.query(Entity).filter(Entity.id.in_([owner.id, payer.id])).delete()
         db.commit()
+
+
+# --- round-3 audit fixes -------------------------------------------------------
+
+def test_a_fully_paid_fixed_loan_lists_no_payments_left_or_next_due_date(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    loan.balance = Decimal("0")
+    db.commit()
+
+    s = _schedule(db, loan)
+    assert (s["payments_left"], s["next_due_date"], s["upcoming"]) == (0, None, [])
+    assert _loan_events(db, user, datetime(2027, 12, 1)) == []

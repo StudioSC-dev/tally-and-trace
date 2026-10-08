@@ -351,10 +351,11 @@ def scheduled_dues(loan, state: dict) -> Optional[List[dict]]:
     what is left. Otherwise, and for a ``reduce_term`` loan that
     never repays at its payment, each due date owes what ``settle_posted`` left of
     it (no split), up to ``loan_term_months``; with no term the loan is
-    open-ended (None), and its due dates run on while money is owed.
+    open-ended (None), and its due dates run on while money is owed. A loan
+    with nothing owed has no due dates left ([]), whatever the payments made.
     """
     first = loan.loan_first_payment_date
-    if first is None:
+    if first is None or owed(loan) <= 0:
         return []
     open_ = state["open"]
 
@@ -383,7 +384,8 @@ def build_schedule(db: Session, loan: Account) -> dict:
     upcoming rows, or None for an open-ended loan (no term, and for
     ``reduce_term`` one that never repays at its payment). A loan without a
     first payment date has no upcoming rows; its payments left are the term
-    minus the payments made.
+    minus the payments made. A loan with nothing owed has no payments left and
+    no next due date.
     """
     payments = _payments_into(db, loan)
     state = settle_posted(loan, payments)
@@ -403,6 +405,9 @@ def build_schedule(db: Session, loan: Account) -> dict:
         # No due dates to list, but the term still says how many payments are left.
         term = loan.loan_term_months
         payments_left = max(term - state["made"], 0) if term is not None else None
+    next_due = state["next_due"]
+    if balance <= 0:
+        payments_left, next_due = 0, None
 
     def money(x):
         return float(x) if isinstance(x, Decimal) else x
@@ -421,7 +426,7 @@ def build_schedule(db: Session, loan: Account) -> dict:
         "first_payment_date": first,
         "payments_made": state["made"],
         "payments_left": payments_left,
-        "next_due_date": state["next_due"],
+        "next_due_date": next_due,
         "proposed_split": proposed,
         "payments": [{
             "transaction_id": t.id,

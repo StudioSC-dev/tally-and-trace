@@ -131,3 +131,12 @@ def test_reduce_term_rows_split_a_part_paid_due_date_interest_first():
     assert rows[1]["payment"] == Decimal("7700.00")
     assert rows[1]["interest"] == Decimal("0.00")  # 211.25 due, already paid
     assert sum(r["principal"] for r in rows) == Decimal("50000.00")
+
+
+def test_a_fully_paid_loan_has_no_due_dates_left():
+    loan = SimpleNamespace(loan_first_payment_date=date(2026, 10, 4), loan_kind="auto",
+                           loan_amortization="fixed", loan_payment_amount=Decimal("8000"),
+                           loan_annual_rate=Decimal("6"), loan_term_months=12,
+                           balance=Decimal("0"))
+    state = {"open": [(step, Decimal("8000.00")) for step in range(12)]}
+    assert scheduled_dues(loan, state) == []
