@@ -43,6 +43,41 @@ def _validate_payment_routing(db: Session, current_user: User, data: dict, accou
                 status_code=400,
                 detail=f"{field} must be a funding account, not a credit card",
             )
+        if target.is_spending_wallet:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field} must be a funding account, not a spending wallet",
+            )
+
+
+def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account] = None) -> None:
+    """Reject a spending-wallet flag that would leave a wallet funding something.
+
+    A wallet is not projection cash, so it cannot be a credit card (whose balance is
+    owed, not held), nor a funding account other routing draws on: a card's
+    statement payment or overflow account, or a budget entry's overflow account.
+    """
+    from app.models.budget_entry import BudgetEntry
+
+    is_wallet = data.get("is_spending_wallet", account.is_spending_wallet if account else False)
+    if not is_wallet:
+        return
+    account_type = data.get("account_type", account.account_type if account else None)
+    if account_type == AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="A credit card cannot be a spending wallet")
+    if account is None or account.is_spending_wallet:
+        return
+    routed = db.query(Account.id).filter(
+        or_(Account.payment_account_id == account.id,
+            Account.payment_overflow_account_id == account.id),
+    ).first()
+    overflow = db.query(BudgetEntry.id).filter(BudgetEntry.overflow_account_id == account.id).first()
+    if routed or overflow:
+        raise HTTPException(
+            status_code=400,
+            detail="This account funds a card payment or overflow routing; "
+                   "remove that routing before marking it a spending wallet",
+        )
 
 
 @router.get("/", response_model=AccountListResponse)
@@ -96,6 +131,7 @@ def create_account(
         validate_entity_ownership(db, current_user, account_data.get("entity_id"))
 
     _validate_payment_routing(db, current_user, account_data)
+    _validate_spending_wallet(db, account_data)
 
     db_account = Account(**account_data, user_id=current_user.id)
     db.add(db_account)
@@ -117,6 +153,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     if "entity_id" in update_data:
         validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
+    _validate_spending_wallet(db, update_data, db_account)
     for field, value in update_data.items():
         setattr(db_account, field, value)
 

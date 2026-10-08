@@ -108,6 +108,25 @@ def _ensure_related_resources(
             raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
+def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int]) -> None:
+    """An overflow account is a funding source: accessible, and not a spending wallet.
+
+    A wallet is not projection cash, so routing cannot pull an uncovered payment
+    from it. Access is checked first so the wallet rule never describes an
+    account the caller cannot see.
+    """
+    if not overflow_account_id:
+        return
+    account = db.query(Account).filter(Account.id == overflow_account_id).first()
+    if not account or not can_access_record(db, user, account):
+        raise HTTPException(status_code=404, detail="Overflow account not found")
+    if account.is_spending_wallet:
+        raise HTTPException(
+            status_code=400,
+            detail="overflow_account_id must be a funding account, not a spending wallet",
+        )
+
+
 @router.get("/", response_model=BudgetEntryListResponse)
 def list_budget_entries(
     db: Session = Depends(get_db),
@@ -178,6 +197,7 @@ def create_budget_entry(
         category_id=entry_in.category_id,
         allocation_id=entry_in.allocation_id,
     )
+    _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
 
     entry_data = entry_in.dict()
     if entry_data.get("entity_id") is None and active_entity is not None:
@@ -213,6 +233,8 @@ def update_budget_entry(
         category_id=prospective_data.get("category_id", entry.category_id),
         allocation_id=prospective_data.get("allocation_id", entry.allocation_id),
     )
+    if "overflow_account_id" in prospective_data:
+        _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"])
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
 
