@@ -678,3 +678,12 @@ def test_reduce_term_loan_that_never_repays_falls_back_to_its_term_everywhere(db
     assert s["payments_left"] == len(s["upcoming"]) == 12
     events = _loan_events(db, user, datetime(2028, 6, 1))
     assert [e["loan_due_date"] for e in events] == [r["due_date"] for r in s["upcoming"]]
+
+
+def test_a_loan_without_a_first_payment_date_counts_payments_left_from_its_term(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=None, loan_payments_made_offset=2)
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], s["payments_left"], s["upcoming"]) == (2, 10, [])
+    assert _loan_events(db, user, END) == []

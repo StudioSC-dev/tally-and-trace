@@ -334,7 +334,9 @@ def build_schedule(db: Session, loan: Account) -> dict:
     ``payments_made`` / ``next_due_date`` come from ``settle_posted`` and the
     upcoming rows from ``scheduled_dues``; ``payments_left`` is the number of
     upcoming rows, or None for an open-ended loan (no term, and for
-    ``reduce_term`` one that never repays at its payment).
+    ``reduce_term`` one that never repays at its payment). A loan without a
+    first payment date has no upcoming rows; its payments left are the term
+    minus the payments made.
     """
     payments = _payments_into(db, loan)
     state = settle_posted(loan, payments)
@@ -350,6 +352,10 @@ def build_schedule(db: Session, loan: Account) -> dict:
     dues = scheduled_dues(loan, state)
     payments_left = len(dues) if dues is not None else None
     upcoming = [{k: v for k, v in r.items() if k != "step"} for r in dues or []]
+    if first is None:
+        # No due dates to list, but the term still says how many payments are left.
+        term = loan.loan_term_months
+        payments_left = max(term - state["made"], 0) if term is not None else None
 
     def money(x):
         return float(x) if isinstance(x, Decimal) else x
