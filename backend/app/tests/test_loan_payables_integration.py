@@ -687,3 +687,89 @@ def test_a_loan_without_a_first_payment_date_counts_payments_left_from_its_term(
     s = _schedule(db, loan)
     assert (s["payments_made"], s["payments_left"], s["upcoming"]) == (2, 10, [])
     assert _loan_events(db, user, END) == []
+
+
+# --- round-2 audit fixes -------------------------------------------------------
+
+def _put(db, user, txn, **changes):
+    """An edit through the generic PUT /transactions path."""
+    from app.routers.transactions import update_transaction
+    from app.schemas.transaction import TransactionUpdate
+
+    return update_transaction(txn.id, TransactionUpdate(**changes), db=db, current_user=user)
+
+
+def _assert_paid_once_then_november(db, user, loan, bank):
+    """Oct 4 is settled by the posted payment; only Nov 4 is still projected."""
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    assert [e["date"] for e in _loan_events(db, user, END)] == [datetime(2026, 11, 4)]
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("34000.00")  # 42,000 - Nov 4
+    assert [(e["date"].isoformat(), e["source"]) for e in timeline["events"]] == [
+        ("2026-11-04", "loan")]
+    months = project_cashflow(db, user.id, months=2, reference=REF)
+    assert [m["net"] for m in months] == [0.0, -8000.0]
+    assert months[-1]["closing_balance"] == float(timeline["closing_balance"])
+    assert [(p["due_date"], p["source"], p["account_id"])
+            for p in get_payables(db, user.id, days=61, reference=REF)] == [
+        ("2026-11-04", "loan", bank.id)]
+
+
+def test_an_unposted_transfer_retargeted_into_a_loan_settles_its_due_date_once_posted(db, user):
+    from app.models.account import AccountType
+
+    bank = _bank(db, user)
+    savings = _account(db, user, "Savings", AccountType.SAVINGS, "0")
+    loan = _loan(db, user, bank)
+    txn = _post(db, user, bank, savings, "8000", datetime(2026, 10, 4), posted=False)
+    assert txn.loan_payment_kind is None
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan.id, amount=7550, transfer_fee=450)
+    assert txn.loan_payment_kind == "scheduled"
+    txn = _put(db, user, txn, is_posted=True)
+    assert txn.loan_payment_kind == "scheduled" and txn.is_posted
+    db.refresh(bank)
+    db.refresh(loan)
+    assert (Decimal(str(bank.balance)), Decimal(str(loan.balance))) == (
+        Decimal("42000.00"), Decimal("-82450.00"))
+    _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_a_posted_transfer_retargeted_into_a_loan_settles_its_due_date(db, user):
+    from app.models.account import AccountType
+
+    bank = _bank(db, user)
+    savings = _account(db, user, "Savings", AccountType.SAVINGS, "0")
+    loan = _loan(db, user, bank)
+    txn = _post(db, user, bank, savings, "8000", datetime(2026, 10, 4))
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan.id, amount=7550, transfer_fee=450)
+    assert txn.loan_payment_kind == "scheduled" and txn.is_posted
+    db.refresh(savings)
+    db.refresh(loan)
+    assert (Decimal(str(savings.balance)), Decimal(str(loan.balance))) == (
+        Decimal("0.00"), Decimal("-82450.00"))
+    _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_a_transfer_retargeted_into_a_loan_is_validated_before_any_change(db, user):
+    from fastapi import HTTPException
+    from app.models.account import AccountType
+
+    bank = _bank(db, user, balance="200000")
+    savings = _account(db, user, "Savings", AccountType.SAVINGS, "0")
+    loan = _loan(db, user, bank)
+    txn = _post(db, user, bank, savings, "95000", datetime(2026, 10, 4))
+
+    with pytest.raises(HTTPException) as exc:
+        _put(db, user, txn, transfer_to_account_id=loan.id)
+    assert exc.value.status_code == 400 and "owed" in exc.value.detail
+    db.rollback()
+    for account, balance in ((bank, "105000.00"), (savings, "95000.00"), (loan, "-90000.00")):
+        db.refresh(account)
+        assert Decimal(str(account.balance)) == Decimal(balance), account.name
+    db.refresh(txn)
+    assert (txn.transfer_to_account_id, txn.loan_payment_kind) == (savings.id, None)
