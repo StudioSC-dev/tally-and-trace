@@ -587,3 +587,60 @@ def test_cover_excess_spills_forward_never_backward(db, user):
     assert [(e["date"], e["amount"]) for e in events] == [
         (datetime(2026, 10, 4), Decimal("-8000.00")),
         (datetime(2026, 12, 4), Decimal("-4000.00"))]
+
+
+def test_posted_partial_payment_leaves_its_remainder_projected(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _post(db, user, bank, loan, "3550", datetime(2026, 10, 4), fee="450")
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], s["payments_left"], str(s["next_due_date"])) == (
+        0, 12, "2026-10-04")
+    assert s["upcoming"][0]["payment"] == 4000.0
+    events = _loan_events(db, user, END)
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 10, 4), Decimal("-4000.00")),
+        (datetime(2026, 11, 4), Decimal("-8000.00"))]
+
+    _post(db, user, bank, loan, "3600", datetime(2026, 10, 5), fee="400")
+    s = _schedule(db, loan)
+    assert (s["payments_made"], s["payments_left"], str(s["next_due_date"])) == (
+        1, 11, "2026-11-04")
+    assert [e["date"] for e in _loan_events(db, user, END)] == [datetime(2026, 11, 4)]
+
+
+def test_posted_partial_payment_before_the_window_leaves_an_overdue_remainder(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
+    _post(db, user, bank, loan, "5000", datetime(2026, 9, 4))
+
+    events = _loan_events(db, user, datetime(2026, 10, 10))
+    assert [(e["date"], e.get("overdue"), e["amount"]) for e in events] == [
+        (REF, True, Decimal("-3000.00")), (datetime(2026, 10, 4), None, Decimal("-8000.00"))]
+
+
+def test_reduce_term_part_payment_leaves_only_the_rest_of_that_payment(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home",
+                 loan_annual_rate=Decimal("0"), loan_term_months=None)
+    _post(db, user, bank, loan, "4000", datetime(2026, 10, 4))
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (0, "2026-10-04")
+    amounts = [-e["amount"] for e in _loan_events(db, user, datetime(2028, 6, 1))]
+    assert amounts == [Decimal("4000.00")] + [Decimal("8000.00")] * 10 + [Decimal("2000.00")]
+    assert sum(amounts) == Decimal("86000.00")  # what is still owed, at 0%
+    assert s["payments_left"] == len(s["upcoming"]) == 12
+
+
+def test_reduce_term_loan_that_never_repays_falls_back_to_its_term_everywhere(db, user):
+    bank = _bank(db, user)
+    # 6% on 90,000 is 450 a month: a 400 payment never repays it.
+    loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home",
+                 loan_payment_amount=Decimal("400"), loan_term_months=12)
+
+    s = _schedule(db, loan)
+    assert s["payments_left"] == len(s["upcoming"]) == 12
+    events = _loan_events(db, user, datetime(2028, 6, 1))
+    assert [e["loan_due_date"] for e in events] == [r["due_date"] for r in s["upcoming"]]

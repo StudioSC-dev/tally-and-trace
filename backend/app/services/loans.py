@@ -9,28 +9,35 @@ principal. ``loan_payment_kind`` marks it ``scheduled`` or ``prepayment``.
 Two amortisation modes:
 
 - ``fixed``: the bank's schedule. Payments left = ``loan_term_months`` minus the
-  scheduled payments made (``loan_payments_made_offset`` + every posted
-  scheduled payment into the loan, whatever its date). Each payment's split is
-  the bank's figure, so upcoming rows carry no split. Prepayments are refused.
+  payments made. Each payment's split is the bank's figure, so upcoming rows
+  carry no split. Prepayments are refused.
 - ``reduce_term``: a prepayment shortens the term. Upcoming rows are an
   amortisation preview from the owed amount at the loan's rate and payment.
 
-The next due date is ``loan_first_payment_date`` stepped one month per scheduled
-payment made, in both modes.
+Payments made (``settle_posted``) are counted by amount: the due dates from
+``loan_payments_made_offset`` on (the offset counts the due dates fully paid
+before the loan was tracked here) each owe ``loan_payment_amount``, and the
+posted scheduled payments pay them with their cash (principal + interest),
+each its own due date first (see below). A due date is made once fully paid;
+a part payment leaves the rest of that due date owed, so it stays the next due
+date (overdue once past) until it is paid in full. Payments made = the offset +
+the due dates made; the next due date is the earliest one not made.
 
-Projection (``build_loan_payables``): each due date from the next one on, while
+Projection (``build_loan_payables``): each due date not yet made, while
 payments are left, is a payable on the paying account (``payment_account_id``)
-of ``loan_payment_amount``, or for ``reduce_term`` of that due date's
-amortisation-preview payment (so the last one is only what is left). A loan
-with no paying account, no payment amount, no first payment date or nothing
-owed has none. Payments left come from the
-amortisation preview for ``reduce_term`` (``loan_term_months`` when the loan
-never repays) and from ``loan_term_months`` minus the payments made for
-``fixed``; a fixed loan with no term is open-ended while money is owed.
+of what it still owes: ``loan_payment_amount`` (less any part payment), or for
+``reduce_term`` that due date's amortisation-preview payment (so the last one
+is only what is left). A loan with no paying account, no payment amount, no
+first payment date or nothing owed has none. Payments left come from the
+amortisation preview for ``reduce_term`` and from ``loan_term_months`` minus the
+payments made for ``fixed``; a ``reduce_term`` loan that never repays at its
+payment falls back to ``loan_term_months`` in the schedule and the projection
+alike, and a loan with no term to fall back on is open-ended while money is
+owed (no ``payments_left``).
 
-Matching payments to due dates: a POSTED scheduled payment is already counted in
-``payments_made``, so it moved ``next_due_date`` past its date and that date is no
-longer projected. A planned payment covers the payables instead: an UNPOSTED
+Matching payments to due dates: a POSTED scheduled payment settles due dates as
+above, so a settled date is no longer projected. A planned payment covers the
+payables instead: an UNPOSTED
 transfer into the loan that is not a prepayment (a planned or partial scheduled
 payment, a plain transfer), whatever its date or entity, and each projected
 occurrence of a recurring transfer entry into the loan. It is itself a cash leg
@@ -223,23 +230,116 @@ def _payments_into(db: Session, loan) -> List[Transaction]:
     )
 
 
-def payments_made(loan, payments: List[Transaction]) -> int:
-    """Scheduled payments made: the offset plus every posted scheduled payment into the loan.
+def settle_posted(loan, payments: List[Transaction]) -> dict:
+    """Which due dates the posted scheduled payments settle, by amount.
 
-    Not filtered by date: a payment made before its due date (an early
-    auto-debit, or a UTC timestamp that is the next day in Manila) still counts.
+    The due dates are the steps from ``loan_payments_made_offset`` on (earlier
+    ones were paid before the loan was tracked here), up to the term for a
+    ``fixed`` loan. Each owes ``loan_payment_amount``; every posted scheduled
+    payment pays its own due date with its cash (principal + interest) and
+    spills any excess forward (``allocate_to_due_dates``). A due date counts as
+    made once fully paid; one only partly paid keeps the rest owed. Once nothing
+    is owed on the loan, a due date that received any payment counts as made
+    (the last payment can be smaller than the others).
+
+    Returns ``made`` (the offset plus the due dates made), ``open`` (``(step,
+    still owed)`` of every due date not made, in order) and ``next_due``. A loan
+    without a payment amount cannot be settled by amount: each posted scheduled
+    payment then counts as one payment made, oldest due date first, and
+    ``open`` lists the steps after them with nothing known owed (``None``).
     """
-    recorded = sum(1 for t in payments if t.loan_payment_kind == SCHEDULED)
-    return (loan.loan_payments_made_offset or 0) + recorded
+    offset = loan.loan_payments_made_offset or 0
+    first = loan.loan_first_payment_date
+    scheduled = [t for t in payments if t.loan_payment_kind == SCHEDULED]
+    term = loan.loan_term_months
+    fixed_term = term if amortization_of(loan) == FIXED and term is not None else None
+    limit = max(fixed_term, offset) if fixed_term is not None else offset + _MAX_ROWS
+
+    if first is None or loan.loan_payment_amount is None:
+        made = offset + len(scheduled)
+        steps = range(made, max(term, made) if term is not None else made + _MAX_ROWS)
+        return {"made": made, "open": [(step, None) for step in steps],
+                "next_due": due_date(first, made) if first else None}
+
+    payment = _money(loan.loan_payment_amount)
+    dues = [(step, payment) for step in range(offset, limit)]
+    remaining = allocate_to_due_dates(first, dues, [
+        (t.transaction_date.date(), _money(t.amount) + _money(t.transfer_fee or 0))
+        for t in scheduled])
+    paid_off = owed(loan) <= 0
+    open_ = [(step, left) for (step, _), left in zip(dues, remaining)
+             if left > 0 and not (paid_off and left < payment)]
+    made = offset + len(dues) - len(open_)
+    next_due = due_date(first, open_[0][0] if open_ else made)
+    return {"made": made, "open": open_, "next_due": next_due}
+
+
+def _reduce_term_rows(balance: Decimal, annual_rate, payment: Decimal,
+                      paid: Decimal) -> Optional[List[dict]]:
+    """The amortisation preview from ``balance``, given ``paid`` already toward the next payment.
+
+    Without a part payment it is ``amortize``. With one, the next payment is only
+    what is left of it: the month's interest less what was paid (interest is paid
+    first), and principal for the rest of the payment; the preview carries on from
+    the balance after it. Due dates are filled in by the caller.
+    """
+    if paid <= 0:
+        return amortize(balance, annual_rate, payment, date.min)
+    interest = max(_money(balance * _monthly_rate(annual_rate)) - paid, _ZERO)
+    principal = min(max(payment - paid - interest, _ZERO), balance)
+    rest = amortize(balance - principal, annual_rate, payment, date.min)
+    if rest is None:
+        return None
+    return [{"payment": principal + interest, "principal": principal, "interest": interest,
+             "balance_after": balance - principal}, *rest]
+
+
+def scheduled_dues(loan, state: dict) -> Optional[List[dict]]:
+    """The loan's remaining due dates and what each still owes; None when open-ended.
+
+    Each row is ``{number, step, due_date, payment, principal, interest,
+    balance_after}`` over the due dates ``settle_posted`` left open. A
+    ``reduce_term`` loan with a payment amount takes its amounts from the
+    amortisation preview of the owed amount (``_reduce_term_rows``), so the last
+    payment is only what is left. Otherwise, and for a ``reduce_term`` loan that
+    never repays at its payment, each due date owes what ``settle_posted`` left of
+    it (no split), up to ``loan_term_months``; with no term the loan is
+    open-ended (None), and its due dates run on while money is owed.
+    """
+    first = loan.loan_first_payment_date
+    if first is None:
+        return []
+    open_ = state["open"]
+
+    def row(step, payment, principal=None, interest=None, balance_after=None):
+        return {"number": step + 1, "step": step, "due_date": due_date(first, step),
+                "payment": payment, "principal": principal, "interest": interest,
+                "balance_after": balance_after}
+
+    if amortization_of(loan) == REDUCE_TERM and loan.loan_payment_amount is not None:
+        payment = _money(loan.loan_payment_amount)
+        paid = payment - open_[0][1] if open_ else _ZERO
+        rows = _reduce_term_rows(owed(loan), loan.loan_annual_rate, payment, paid)
+        if rows is not None and len(rows) <= len(open_):
+            return [row(open_[i][0], r["payment"], r["principal"], r["interest"],
+                        r["balance_after"]) for i, r in enumerate(rows)]
+    if loan.loan_term_months is None:
+        return None
+    return [row(step, left) for step, left in open_ if step < loan.loan_term_months]
 
 
 def build_schedule(db: Session, loan: Account) -> dict:
-    """The loan's state and upcoming payments, computed from its terms and recorded payments."""
+    """The loan's state and upcoming payments, computed from its terms and recorded payments.
+
+    ``payments_made`` / ``next_due_date`` come from ``settle_posted`` and the
+    upcoming rows from ``scheduled_dues``; ``payments_left`` is the number of
+    upcoming rows, or None for an open-ended loan (no term, and for
+    ``reduce_term`` one that never repays at its payment).
+    """
     payments = _payments_into(db, loan)
-    made = payments_made(loan, payments)
+    state = settle_posted(loan, payments)
     mode = amortization_of(loan)
     first = loan.loan_first_payment_date
-    next_due = due_date(first, made) if first else None
     balance = owed(loan)
 
     proposed = None
@@ -247,26 +347,9 @@ def build_schedule(db: Session, loan: Account) -> dict:
         principal, interest = propose_split(loan)
         proposed = {"principal": float(principal), "interest": float(interest)}
 
-    upcoming: List[dict] = []
-    payments_left: Optional[int] = None
-    if mode == REDUCE_TERM and loan.loan_payment_amount is not None and next_due:
-        rows = amortize(balance, loan.loan_annual_rate, loan.loan_payment_amount, next_due)
-        if rows is not None:
-            upcoming = [{**r, "number": made + r["number"]} for r in rows]
-            payments_left = len(rows)
-    elif loan.loan_term_months is not None:
-        payments_left = max(loan.loan_term_months - made, 0)
-        if next_due:
-            payment = (float(loan.loan_payment_amount)
-                       if loan.loan_payment_amount is not None else None)
-            upcoming = [{
-                "number": made + i + 1,
-                "due_date": due_date(first, made + i),
-                "payment": payment,
-                "principal": None,
-                "interest": None,
-                "balance_after": None,
-            } for i in range(payments_left)]
+    dues = scheduled_dues(loan, state)
+    payments_left = len(dues) if dues is not None else None
+    upcoming = [{k: v for k, v in r.items() if k != "step"} for r in dues or []]
 
     def money(x):
         return float(x) if isinstance(x, Decimal) else x
@@ -283,9 +366,9 @@ def build_schedule(db: Session, loan: Account) -> dict:
                            if loan.loan_payment_amount is not None else None),
         "term_months": loan.loan_term_months,
         "first_payment_date": first,
-        "payments_made": made,
+        "payments_made": state["made"],
         "payments_left": payments_left,
-        "next_due_date": next_due,
+        "next_due_date": state["next_due"],
         "proposed_split": proposed,
         "payments": [{
             "transaction_id": t.id,
@@ -366,35 +449,21 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
 
 
 def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date, Decimal]]:
-    """``(step, due date, payment)`` of the loan's remaining scheduled payments before ``end``.
+    """``(step, due date, still owed)`` of the loan's open due dates before ``end``.
 
-    ``step`` counts monthly steps from the first payment date.
-
-    A ``reduce_term`` loan's payments are its amortisation rows (the last one is
-    smaller); otherwise each is ``loan_payment_amount``.
+    ``step`` counts monthly steps from the first payment date. What each owes
+    comes from ``scheduled_dues``; an open-ended loan's due dates each owe what
+    ``settle_posted`` left of them. Empty while nothing is owed, or without a
+    first payment date or payment amount.
     """
     first = loan.loan_first_payment_date
     if first is None or owed(loan) <= 0 or loan.loan_payment_amount is None:
         return []
-    made = payments_made(loan, _payments_into(db, loan))
-    next_due = due_date(first, made)
-    payment = _money(loan.loan_payment_amount)
-    amounts: Optional[List[Decimal]] = None
-    if amortization_of(loan) == REDUCE_TERM:
-        rows = amortize(owed(loan), loan.loan_annual_rate, payment, next_due)
-        if rows is not None:
-            amounts = [r["payment"] for r in rows]
-    if amounts is None and loan.loan_term_months is not None:
-        amounts = [payment] * max(loan.loan_term_months - made, 0)
-
-    dates: List[Tuple[int, date, Decimal]] = []
-    while (amounts is None or len(dates) < len(amounts)) and len(dates) < _MAX_ROWS:
-        step = made + len(dates)
-        due = due_date(first, step)
-        if datetime(due.year, due.month, due.day) >= end:
-            break
-        dates.append((step, due, payment if amounts is None else amounts[len(dates)]))
-    return dates
+    state = settle_posted(loan, _payments_into(db, loan))
+    dues = scheduled_dues(loan, state)
+    rows = ([(r["step"], r["due_date"], r["payment"]) for r in dues] if dues is not None
+            else [(step, due_date(first, step), left) for step, left in state["open"]])
+    return [r for r in rows if datetime(r[1].year, r[1].month, r[1].day) < end]
 
 
 def planned_covers(db: Session, loan: Account) -> List[Tuple[date, Decimal]]:
