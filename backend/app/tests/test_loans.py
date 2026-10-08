@@ -9,6 +9,7 @@ from app.models.transaction import TransactionType
 from app.routers.transactions import summarize_period
 from app.services.loans import (
     LoanError, amortize, cents, default_amortization, due_date, propose_split, scheduled_dues,
+    split_payment,
 )
 
 BANK, GCASH, LOAN = 1, 2, 3
@@ -140,3 +141,13 @@ def test_a_fully_paid_loan_has_no_due_dates_left():
                            balance=Decimal("0"))
     state = {"open": [(step, Decimal("8000.00")) for step in range(12)]}
     assert scheduled_dues(loan, state) == []
+
+
+def test_a_payment_above_what_is_owed_plus_interest_is_refused_not_split():
+    # 1,000 owed at 12%: 10 interest this month, so 1,010 is the final payment.
+    loan = SimpleNamespace(balance=Decimal("-1000"), loan_annual_rate=Decimal("12"),
+                           loan_payment_amount=Decimal("5000"))
+    assert split_payment(loan, Decimal("1010")) == (Decimal("1000.00"), Decimal("10.00"))
+    assert split_payment(loan, Decimal("600")) == (Decimal("590.00"), Decimal("10.00"))
+    with pytest.raises(LoanError, match="final payment"):
+        split_payment(loan, Decimal("5000"))

@@ -412,7 +412,11 @@ def materialize_budget_entry(
     (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in
     routers/transactions.py: the loan-payment endpoint's rules, except that a
     spending wallet may fund it), so it settles that due date instead of
-    leaving it projected after the money left the source.
+    leaving it projected after the money left the source. Without a
+    ``transfer_fee`` its amount is split into principal and interest; when the
+    entry's amount is more than the loan owes plus a month's interest (the
+    final, smaller payment) it is refused with a 400 asking for the final
+    ``amount`` (``loan_svc.split_payment``).
     """
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate

@@ -217,10 +217,21 @@ def split_payment(loan, total) -> Tuple[Decimal, Decimal]:
     Interest is ``propose_split``'s (a month at the loan rate on the owed
     amount), capped at ``total``; principal is the rest, so the cash moved is
     exactly ``total``. Used for a transfer into a loan recorded without a fee.
+
+    Principal never exceeds what is owed (as in ``propose_split``). A ``total``
+    above what is owed plus that interest (a recurring payment's usual amount
+    on the final, smaller payment) cannot be split without inventing interest,
+    so it is refused: the caller enters the final payment amount, or gives the
+    principal as the amount and the interest as the fee.
     """
     total = cents(total)
     _, interest = propose_split(loan, total=total)
     interest = min(max(interest, _ZERO), max(total, _ZERO))
+    if total - interest > owed(loan):
+        raise LoanError(
+            f"This payment ({total}) is more than what is owed ({owed(loan)}) plus this "
+            f"month's interest ({interest}): enter the final payment amount, or give the "
+            "principal as the amount and the interest as the fee")
     return total - interest, interest
 
 

@@ -1075,3 +1075,27 @@ def test_a_fully_paid_fixed_loan_lists_no_payments_left_or_next_due_date(db, use
     s = _schedule(db, loan)
     assert (s["payments_left"], s["next_due_date"], s["upcoming"]) == (0, None, [])
     assert _loan_events(db, user, datetime(2027, 12, 1)) == []
+
+
+def test_a_final_recurring_payment_above_what_is_owed_asks_for_the_final_amount(db, user):
+    from fastapi import HTTPException
+    from app.routers.budget_entries import materialize_budget_entry
+    from app.schemas.budget_entry import BudgetEntryMaterialize
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    loan.balance = Decimal("-2000")  # 6%: 10 interest this month, 2,010 to close it
+    db.commit()
+    entry = _entry(db, user, bank, loan, "8000", datetime(2026, 10, 4))
+
+    with pytest.raises(HTTPException) as exc:
+        materialize_budget_entry(entry.id, BudgetEntryMaterialize(), db=db, current_user=user)
+    assert exc.value.status_code == 400 and "final payment" in exc.value.detail
+    db.rollback()
+    assert _balances(db, bank, loan) == (Decimal("50000.00"), Decimal("-2000.00"))
+
+    txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(amount=2010),
+                                   db=db, current_user=user)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("2000.00"), Decimal("10.00"))
+    assert _balances(db, bank, loan) == (Decimal("47990.00"), Decimal("0.00"))
