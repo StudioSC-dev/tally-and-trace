@@ -16,7 +16,7 @@ from app.core.entity_context import (
     validate_entity_ownership,
 )
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.allocation import Allocation
 from app.models.entity import Entity
@@ -127,6 +127,39 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
         )
 
 
+def _validate_transfer_destination(
+    db: Session, user: User, account_id: Optional[int], transfer_to_account_id: Optional[int]
+) -> None:
+    """A recurring transfer moves money between two accessible non-credit accounts.
+
+    The destination may be any account the caller can reference (bank, wallet,
+    loan) except a credit card: card payments are netted by statements, and a
+    projected one would need a statement cycle to land on. The source must be set
+    and not a credit card either (a recurring cash advance is out of scope), so
+    transfer entries never become statement charges.
+    """
+    if not transfer_to_account_id:
+        return
+    destination = db.query(Account).filter(Account.id == transfer_to_account_id).first()
+    if not destination or not can_access_record(db, user, destination):
+        raise HTTPException(status_code=404, detail="Transfer destination account not found")
+    if destination.account_type == AccountType.CREDIT:
+        raise HTTPException(
+            status_code=400, detail="A recurring transfer cannot be paid into a credit card"
+        )
+    if not account_id:
+        raise HTTPException(status_code=400, detail="A recurring transfer needs a source account")
+    if account_id == transfer_to_account_id:
+        raise HTTPException(
+            status_code=400, detail="Transfer source and destination must be different"
+        )
+    source = db.query(Account).filter(Account.id == account_id).first()
+    if source is not None and source.account_type == AccountType.CREDIT:
+        raise HTTPException(
+            status_code=400, detail="A recurring transfer cannot be funded from a credit card"
+        )
+
+
 @router.get("/", response_model=BudgetEntryListResponse)
 def list_budget_entries(
     db: Session = Depends(get_db),
@@ -198,6 +231,9 @@ def create_budget_entry(
         allocation_id=entry_in.allocation_id,
     )
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
+    _validate_transfer_destination(
+        db, current_user, entry_in.account_id, entry_in.transfer_to_account_id
+    )
 
     entry_data = entry_in.dict()
     if entry_data.get("entity_id") is None and active_entity is not None:
@@ -235,6 +271,12 @@ def update_budget_entry(
     )
     if "overflow_account_id" in prospective_data:
         _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"])
+    _validate_transfer_destination(
+        db,
+        current_user,
+        prospective_data.get("account_id", entry.account_id),
+        prospective_data.get("transfer_to_account_id", entry.transfer_to_account_id),
+    )
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
 
@@ -316,9 +358,20 @@ def materialize_budget_entry(
 
     occurrence_date = payload.transaction_date or entry.next_occurrence
     amount = payload.amount if payload.amount is not None else entry.amount
-    txn_type = (
-        TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
-    )
+    if entry.transfer_to_account_id:
+        # A recurring transfer posts as a transfer: -(amount + fee) on the source,
+        # +amount on the destination, like any other transfer transaction.
+        txn_type = TransactionType.TRANSFER
+        transfer_fields = {
+            "transfer_from_account_id": entry.account_id,
+            "transfer_to_account_id": entry.transfer_to_account_id,
+            "transfer_fee": payload.transfer_fee,
+        }
+    else:
+        txn_type = (
+            TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
+        )
+        transfer_fields = {}
 
     txn_create = TransactionCreate(
         account_id=entry.account_id,
@@ -332,6 +385,7 @@ def materialize_budget_entry(
         budget_entry_id=entry.id,
         description=entry.name,
         is_posted=True,
+        **transfer_fields,
     )
     db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user, active_entity=None)
 
