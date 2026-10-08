@@ -813,7 +813,8 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
 
     target, body = {
         "funding_currency": (bank, {"currency": "USD"}),
-        "funding_credit_card": (bank, {"account_type": "credit"}),
+        # Billed: a card left without a cycle cannot fund a pending loan payment.
+        "funding_credit_card": (bank, {"account_type": "credit", "billing_cycle_start": 15}),
         "funding_spending_wallet": (bank, {"is_spending_wallet": True}),
         "loan_not_a_loan": (loan, {"account_type": "savings", **{f: None for f in (
             "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
@@ -1020,3 +1021,58 @@ def test_a_loans_paying_account_cannot_change_out_from_under_its_routing(client,
     assert r.status_code == 200, r.text
     r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
     assert r.status_code == 200, r.text
+
+
+def _pending_card_payment(client, who, card, loan, **extra):
+    r = client.post(f"{API}/transactions/", headers=who["headers"], json={
+        "account_id": card["id"], "transaction_type": "transfer", "amount": 400,
+        "transfer_fee": 10, "is_posted": False,
+        "transfer_from_account_id": card["id"], "transfer_to_account_id": loan["id"],
+        "transaction_date": "2026-10-04T00:00:00", **extra})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_card_funding_a_pending_loan_payment_keeps_its_billing_cycle(client, people):
+    me = people()
+    card = _bank(client, me, name="Card", account_type="credit", balance=0,
+                 billing_cycle_start=15)
+    loan = _loan(client, me, balance=-1_000)
+    pending = _pending_card_payment(client, me, card, loan)
+
+    def put_card(**body):
+        return client.put(f"{API}/accounts/{card['id']}", json=body, headers=me["headers"])
+
+    r = put_card(billing_cycle_start=None)
+    assert r.status_code == 400 and "loan payment" in r.text and "billing cycle" in r.text, r.text
+    assert client.get(f"{API}/accounts/{card['id']}",
+                      headers=me["headers"]).json()["billing_cycle_start"] == 15
+    assert put_card(name="Renamed card").status_code == 200
+    # A due day alone still resolves a cycle; dropping that too does not.
+    assert put_card(billing_cycle_start=None, due_date=20).status_code == 200
+    assert put_card(due_date=None).status_code == 400
+
+    # Once the payment is posted, the card's settings are its own again.
+    assert _put(client, me, pending["id"], is_posted=True).status_code == 200
+    r = put_card(due_date=None)
+    assert r.status_code == 200, r.text
+
+
+def test_a_card_funding_a_hidden_loan_keeps_its_billing_cycle_without_naming_the_loan(
+        client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    card = _bank(client, owner, name="Entity card", account_type="credit", balance=0,
+                 billing_cycle_start=15, entity_id=entity_id)
+    private_loan = _loan(client, owner, name="Owner Private Loan", balance=-1_000)
+    _pending_card_payment(client, owner, card, private_loan, entity_id=entity_id)
+
+    r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
+                   headers=member_h["headers"])
+    assert r.status_code == 400 and "billing cycle" in r.text, r.text
+    assert "loan" not in r.json()["detail"].lower()
+    r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
+                   headers=owner["headers"])
+    assert r.status_code == 400 and "loan payment" in r.text, r.text
+

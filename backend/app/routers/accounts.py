@@ -13,15 +13,17 @@ from app.core.entity_context import (
 )
 from app.models.account import Account, AccountType
 from app.models.entity import Entity
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.transaction import TransactionResponse
 from app.services import loans as loan_svc
+from app.services.statements import resolve_cycle_fields
 from app.core.time import naive_utc_now, utc_now
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 router = APIRouter()
 
@@ -106,6 +108,47 @@ def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account
             detail="This account funds a card payment or overflow routing; "
                    "remove that routing before marking it a spending wallet",
         )
+
+
+def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
+                                 account: Account) -> None:
+    """Keep a card that funds a pending payment into a loan billable.
+
+    A transfer into a loan from a credit card is cash only through the card's
+    statements, so a card without billing cycle settings may not fund one
+    (``_loan_payment_source`` in routers/transactions.py). An update that would
+    leave a card with no resolvable cycle (``resolve_cycle_fields``) while an
+    unposted transfer into a loan is funded from it is refused: that payment
+    would otherwise vanish from projected outflows. When the caller cannot
+    access one of those loans, the message does not mention the loan.
+    """
+    if not any(f in data for f in ("account_type", "billing_cycle_start", "due_date")):
+        return
+    if data.get("account_type", account.account_type) != AccountType.CREDIT:
+        return
+    resolved = SimpleNamespace(**{
+        f: data.get(f, getattr(account, f))
+        for f in ("billing_cycle_start", "due_date", "days_until_due_date")})
+    if resolve_cycle_fields(resolved) is not None:
+        return
+    loans = db.query(Account).join(
+        Transaction, Transaction.transfer_to_account_id == Account.id,
+    ).filter(
+        Account.account_type == AccountType.LOAN,
+        Transaction.transaction_type == TransactionType.TRANSFER,
+        Transaction.transfer_from_account_id == account.id,
+        Transaction.is_posted.is_(False),
+    ).all()
+    if not loans:
+        return
+    if any(not can_access_record(db, current_user, loan) for loan in loans):
+        detail = ("This card funds a pending payment that needs its billing cycle settings; "
+                  "keep a statement close or due day until that payment is posted or removed")
+    else:
+        detail = ("This card funds a pending loan payment, which needs its billing cycle "
+                  "settings; keep a statement close or due day until that payment is posted "
+                  "or removed")
+    raise HTTPException(status_code=400, detail=detail)
 
 
 def _validate_loan_payer(db: Session, data: dict, account: Account) -> None:
@@ -284,6 +327,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
         validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
     _validate_loan_payer(db, update_data, db_account)
+    _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
     for field, value in update_data.items():
