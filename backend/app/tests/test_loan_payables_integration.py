@@ -1099,3 +1099,28 @@ def test_a_final_recurring_payment_above_what_is_owed_asks_for_the_final_amount(
     assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
         Decimal("2000.00"), Decimal("10.00"))
     assert _balances(db, bank, loan) == (Decimal("47990.00"), Decimal("0.00"))
+
+
+def test_an_unbilled_card_cannot_fund_a_transfer_into_a_loan(db, user):
+    from fastapi import HTTPException
+    from app.models.account import AccountType
+    from app.models.transaction import Transaction
+
+    bank = _bank(db, user)
+    unbilled = _account(db, user, "Card", AccountType.CREDIT, "0")  # no billing cycle
+    loan = _loan(db, user, bank)
+
+    for posted in (True, False):
+        with pytest.raises(HTTPException) as exc:
+            _post(db, user, unbilled, loan, "7550", datetime(2026, 10, 4), fee="450",
+                  posted=posted)
+        assert exc.value.status_code == 400 and "billing cycle" in exc.value.detail, posted
+        db.rollback()
+    assert db.query(Transaction).filter(Transaction.user_id == user.id).count() == 0
+    assert _balances(db, unbilled, loan) == (Decimal("0.00"), Decimal("-90000.00"))
+
+    # Billed, the same card may fund it (its statement bills the payment).
+    unbilled.billing_cycle_start = 15
+    db.commit()
+    txn = _post(db, user, unbilled, loan, "7550", datetime(2026, 10, 4), fee="450")
+    assert txn.loan_payment_kind == "scheduled"

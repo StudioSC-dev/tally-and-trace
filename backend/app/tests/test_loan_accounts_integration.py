@@ -835,7 +835,8 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
     assert r.json()["is_posted"] is False
 
 
-@pytest.mark.parametrize("body", [{"account_type": "credit"}, {"is_spending_wallet": True}])
+@pytest.mark.parametrize("body", [{"account_type": "credit", "billing_cycle_start": 15},
+                                  {"is_spending_wallet": True}])
 def test_a_pending_scheduled_payment_from_a_card_or_wallet_can_be_posted(client, people, body):
     me = people()
     bank = _bank(client, me, balance=10_000)

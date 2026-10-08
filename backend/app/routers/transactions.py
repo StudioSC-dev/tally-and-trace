@@ -16,6 +16,7 @@ from app.schemas.transaction import TransactionCreate, TransactionResponse, Tran
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
+from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
 from app.models.entity import Entity
@@ -271,7 +272,9 @@ def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account)
     another loan: a credit card or a spending wallet may fund it, as either may
     fund any other transfer (the forecast bills a card-funded payment on the
     card's statement and treats a wallet-funded one as moving no projection
-    cash). The loan endpoints keep their stricter funding rules
+    cash). A card without billing cycle settings may not: no statement bills
+    it, so a payment from it would settle the loan without any cash ever
+    leaving. The loan endpoints keep their stricter funding rules
     (``_funding_account``).
     """
     if source_id == loan.id:
@@ -283,6 +286,10 @@ def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account)
     if source.account_type == AccountType.LOAN:
         raise HTTPException(status_code=400,
                             detail="A loan cannot be paid from another loan")
+    if source.account_type == AccountType.CREDIT and resolve_cycle_fields(source) is None:
+        raise HTTPException(status_code=400,
+                            detail="A credit card pays a loan only once it has billing cycle "
+                                   "settings (a statement close or due day); set them first")
     return source
 
 
