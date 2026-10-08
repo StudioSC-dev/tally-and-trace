@@ -129,3 +129,49 @@ def test_synthetic_rows_add_into_same_named_user_categories():
     assert result["total_income"] == Decimal("120")
     assert result["total_expenses"] == Decimal("1139")
     _assert_invariant(result)
+
+
+FOOD = 20
+SALARY = 21
+INCOME_CATEGORIES = {**CATEGORIES, FOOD: "Food", SALARY: "Salary"}
+
+
+def _net(result):
+    return result["total_income"] - result["total_expenses"]
+
+
+def test_income_into_a_wallet_then_spent_on_food_nets_to_zero():
+    result = summarize_period(
+        [_credit(GCASH, "5000", SALARY), _debit(GCASH, "5000", FOOD)],
+        WALLETS, INCOME_CATEGORIES, SCOPE,
+    )
+    assert result["total_income"] == Decimal("5000")
+    assert result["total_expenses"] == Decimal("5000")
+    assert _net(result) == Decimal("0")
+    assert _expenses_by_row(result) == {"Salary": Decimal("0"), "Food": Decimal("5000")}
+    _assert_invariant(result)
+
+
+def test_income_into_a_wallet_then_moved_to_the_bank_is_counted_once():
+    result = summarize_period(
+        [_credit(GCASH, "5000", SALARY), _transfer(GCASH, BANK, "5000")],
+        WALLETS, INCOME_CATEGORIES, SCOPE,
+    )
+    assert result["total_income"] == Decimal("5000")
+    assert result["total_expenses"] == Decimal("0")
+    assert _net(result) == Decimal("5000")
+    assert _expenses_by_row(result) == {
+        "Salary": Decimal("0"),
+        "Unallocated wallet spend": Decimal("5000"),
+        "Returned from wallets": Decimal("-5000"),
+    }
+    _assert_invariant(result)
+
+
+def test_income_left_in_a_wallet_is_unallocated_wallet_spend():
+    result = summarize_period([_credit(GCASH, "5000", SALARY)], WALLETS, INCOME_CATEGORIES, SCOPE)
+    assert result["total_income"] == Decimal("5000")
+    assert result["total_expenses"] == Decimal("5000")
+    assert _expenses_by_row(result) == {
+        "Salary": Decimal("0"), "Unallocated wallet spend": Decimal("5000")}
+    _assert_invariant(result)

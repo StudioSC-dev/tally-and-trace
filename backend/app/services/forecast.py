@@ -326,7 +326,9 @@ def get_disposable_income(
     recurring transfer out of a wallet into a non-wallet account (money returned,
     unspent) offsets it, any other recurring transfer is not an expense (it moves
     your own money), and expense entries funded from a wallet are not counted
-    again.
+    again. A recurring income entry paid into a wallet is income and also an
+    implicit top-up, so the same amount counts as expense: moving it on to a
+    non-wallet account then nets it back out instead of counting it twice.
     """
     be_query = db.query(BudgetEntry).filter(
         scope_criterion(BudgetEntry, user_id, entity_id),
@@ -357,6 +359,8 @@ def get_disposable_income(
             continue
         if entry.entry_type == BudgetEntryType.INCOME:
             monthly_income += monthly
+            if entry.account_id in wallet_ids:
+                monthly_expenses += monthly  # income into a wallet is a top-up
         elif entry.account_id not in wallet_ids:
             monthly_expenses += monthly
 

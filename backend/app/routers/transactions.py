@@ -646,16 +646,23 @@ def summarize_period(
 
     Spending wallets (cash on hand, e-wallets) are expensed when topped up, so:
 
-    - expense = non-wallet debits + cash-to-wallet transfers (amount + fee) + the
-      fee on every other transfer funded from a non-wallet account - money moved
-      out of a wallet, unspent, into one of the caller's non-wallet accounts
-      (e.g. GCash to a credit card payment, or back to a bank). Each fee is
+    - expense = non-wallet debits + cash-to-wallet transfers (amount + fee) +
+      income received into a wallet + the fee on every other transfer funded from
+      a non-wallet account - money moved out of a wallet, unspent, into one of the
+      caller's non-wallet accounts (e.g. GCash to a credit card payment, or back to
+      a bank). Each fee is
       counted once, and a transfer's amount is otherwise not an expense, so a
       card purchase of 1,000 paid from a wallet topped up for it is 1,000, not
       2,000;
     - debits from a wallet are not in the expense total but are shown under their
       category, and fees on transfers funded from a wallet (already expensed at
       top-up) are shown in category detail but not in the total;
+    - income received into a wallet (a credit on a wallet account) is income and
+      also an implicit top-up: it is added to the expense total and to
+      "Unallocated wallet spend", so spending it from the wallet is categorised
+      without being counted twice, and moving it on to a non-wallet account nets
+      it back to zero through "Returned from wallets" (5,000 into GCash then moved
+      to the bank: income 5,000, expense 0, net 5,000);
     - an "Unallocated wallet spend" row holds top-up amounts not yet accounted
       for by wallet debits and wallet-funded fees. Returned money is not wallet
       spend, so it never reduces this row; it is shown on its own, negative,
@@ -692,6 +699,10 @@ def summarize_period(
         if t.transaction_type == TransactionType.CREDIT:
             total_income += amount
             row(category(t.category_id))["income"] += amount
+            if t.account_id in wallet_ids:
+                # Income received into a wallet is also an implicit top-up.
+                total_expenses += amount
+                unallocated_wallet += amount
         elif t.transaction_type == TransactionType.DEBIT:
             row(category(t.category_id))["expenses"] += amount
             if t.account_id in wallet_ids:

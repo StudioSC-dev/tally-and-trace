@@ -305,3 +305,53 @@ def test_invariant_holds_as_returns_are_created_edited_and_deleted(client, heade
         assert r.status_code == 200, r.text
         _summary(client, headers)
     assert _summary(client, headers) == (Decimal("0"), {})
+
+
+def _credit(client, headers, account, amount, category=None):
+    r = client.post(f"{API}/transactions/", headers=headers, json={
+        "account_id": account, "amount": amount, "transaction_type": "credit",
+        "transaction_date": WHEN, "category_id": category})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def _net(client, headers):
+    r = client.get(f"{API}/transactions/summary/period", headers=headers, params=PERIOD)
+    assert r.status_code == 200, r.text
+    s = r.json()["summary"]
+    return Decimal(str(s["total_income"])), Decimal(str(s["net_flow"]))
+
+
+def test_income_into_a_wallet_counts_once_as_it_is_created_edited_and_deleted(client, headers):
+    bank = _account(client, headers, "Bank", "savings")
+    gcash = _account(client, headers, "GCash", "e_wallet", wallet=True)
+    food = _category(client, headers, "Food")
+
+    pay = _credit(client, headers, gcash, 5000)
+    back = _transfer(client, headers, gcash, bank, 5000)
+    total, rows = _summary(client, headers)
+    assert total == Decimal("0")
+    assert rows == {"Uncategorized": Decimal("0"), "Unallocated wallet spend": Decimal("5000"),
+                    "Returned from wallets": Decimal("-5000")}
+    assert _net(client, headers) == (Decimal("5000"), Decimal("5000"))
+
+    spend = _debit(client, headers, gcash, 1200, food)
+    for txn_id, change, expected_total, expected_net in (
+        (back, {"amount": 3000}, Decimal("2000"), Decimal("3000")),  # 2,000 stays in GCash
+        (pay, {"amount": 6000}, Decimal("3000"), Decimal("3000")),
+        (pay, {"account_id": bank}, Decimal("-3000"), Decimal("9000")),  # no longer a top-up
+        (pay, {"account_id": gcash}, Decimal("3000"), Decimal("3000")),
+    ):
+        r = client.put(f"{API}/transactions/{txn_id}", headers=headers, json=change)
+        assert r.status_code == 200, r.text
+        assert _summary(client, headers)[0] == expected_total
+        assert _net(client, headers)[1] == expected_net
+    _, rows = _summary(client, headers)
+    assert rows["Food"] == Decimal("1200")
+    assert rows["Unallocated wallet spend"] == Decimal("6000") - 1200
+
+    for txn_id in (spend, back, pay):
+        r = client.delete(f"{API}/transactions/{txn_id}", headers=headers)
+        assert r.status_code == 200, r.text
+        _summary(client, headers)
+    assert _summary(client, headers) == (Decimal("0"), {})

@@ -470,3 +470,18 @@ def test_disposable_income_offsets_top_ups_with_money_returned_from_wallets(db, 
 
     assert get_disposable_income(db, user.id) == {
         "monthly_income": 50000.0, "monthly_expenses": 1500.0, "monthly_disposable": 48500.0}
+
+
+def test_disposable_income_counts_income_paid_into_a_wallet_once(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    bank = _account(db, user, "Bank", AccountType.SAVINGS, "0.00")
+    wallet = _wallet(db, user)
+    _entry(db, user, "Freelance", BudgetEntryType.INCOME, "5000.00", REF, account=wallet)
+    _entry(db, user, "GCash to bank", BudgetEntryType.EXPENSE, "5000.00", REF,
+           account=wallet, transfer_to_account_id=bank.id)
+
+    assert get_disposable_income(db, user.id) == {
+        "monthly_income": 5000.0, "monthly_expenses": 0.0, "monthly_disposable": 5000.0}
