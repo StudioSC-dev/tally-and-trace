@@ -157,8 +157,9 @@ def _validate_loan_payer(db: Session, current_user: User, data: dict, account: A
     A loan's ``payment_account_id`` is checked when it is routed: a funding
     account (``_funding_account``: not a credit card, a loan or a spending
     wallet) in the loan's currency. An update to that account must not break
-    either rule afterwards, or the loan would be projected from an account that
-    can no longer pay it; the loan has to be re-routed first. When the caller
+    either rule afterwards, nor deactivate it (``is_active`` False, as the
+    soft delete does), or the loan would be projected from an account that can
+    no longer pay it; the loan has to be re-routed first. When the caller
     cannot access one of those loans, the message does not mention the loan.
     """
     loans = db.query(Account).filter(
@@ -174,14 +175,21 @@ def _validate_loan_payer(db: Session, current_user: User, data: dict, account: A
                   and (account_type in (AccountType.CREDIT, AccountType.LOAN) or wallet))
     currency_mismatch = ("currency" in data
                          and any(loan.currency != data["currency"] for loan in loans))
-    if not (ineligible or currency_mismatch):
+    deactivated = data.get("is_active") is False and account.is_active
+    if not (ineligible or currency_mismatch or deactivated):
         return
     if any(not can_access_record(db, current_user, loan) for loan in loans):
         raise HTTPException(
             status_code=400,
             detail="This account is the payment account of an account you cannot access, "
-                   "so it must stay a funding account in the same currency; "
+                   "so it must stay an active funding account in the same currency; "
                    "that account's payment account has to change first",
+        )
+    if deactivated:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan; re-route the loan's payment account "
+                   "before deactivating it",
         )
     if ineligible:
         raise HTTPException(
@@ -352,6 +360,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Soft delete an account (mark as inactive)"""
     db_account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    _validate_loan_payer(db, current_user, {"is_active": False}, db_account)
 
     db_account.is_active = False
     db_account.updated_at = utc_now()
