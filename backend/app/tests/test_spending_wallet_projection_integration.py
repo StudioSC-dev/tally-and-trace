@@ -485,3 +485,41 @@ def test_disposable_income_counts_income_paid_into_a_wallet_once(db, user):
 
     assert get_disposable_income(db, user.id) == {
         "monthly_income": 5000.0, "monthly_expenses": 0.0, "monthly_disposable": 5000.0}
+
+
+def test_disposable_income_does_not_offset_money_sent_to_another_entitys_account(
+        db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    a, b = entities
+    bank = _account(db, user, "A Bank", AccountType.SAVINGS, "0.00", entity_id=a.id)
+    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True, entity_id=a.id)
+    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id, entity_id=a.id)
+    # Leaving entity A's scope: still A's wallet spend, not money returned.
+    _entry(db, user, "GCash to B", BudgetEntryType.EXPENSE, "500.00", REF,
+           account=wallet, transfer_to_account_id=theirs.id, entity_id=a.id)
+
+    assert get_disposable_income(db, user.id, a.id) == {
+        "monthly_income": 0.0, "monthly_expenses": 2000.0, "monthly_disposable": -2000.0}
+
+
+def test_disposable_income_does_not_expense_a_top_up_funded_from_another_entity(
+        db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    a, b = entities
+    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True, entity_id=a.id)
+    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
+    _entry(db, user, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=theirs, transfer_to_account_id=wallet.id, entity_id=a.id)
+
+    assert get_disposable_income(db, user.id, a.id) == {
+        "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}

@@ -323,10 +323,12 @@ def get_disposable_income(
 
     Spending wallets are expensed when topped up, as in the period summary: a
     recurring transfer into a wallet from a non-wallet account is an expense, a
-    recurring transfer out of a wallet into a non-wallet account (money returned,
-    unspent) offsets it, any other recurring transfer is not an expense (it moves
-    your own money), and expense entries funded from a wallet are not counted
-    again. A recurring income entry paid into a wallet is income and also an
+    recurring transfer out of a wallet into one of the caller's non-wallet
+    accounts (money returned, unspent) offsets it, any other recurring transfer
+    is not an expense (it moves your own money), and expense entries funded from
+    a wallet are not counted again. As in the summary, a recurring transfer
+    counts only when its source account is in the caller's scope, and money
+    leaving a wallet for an account outside the scope stays wallet spend. A recurring income entry paid into a wallet is income and also an
     implicit top-up, so the same amount counts as expense: moving it on to a
     non-wallet account then nets it back out instead of counting it twice.
     """
@@ -343,6 +345,14 @@ def get_disposable_income(
         a.id for a in db.query(Account).filter(Account.id.in_(referenced)).all()
         if is_spending_wallet(a)
     } if referenced else set()
+    # The caller's accounts in this scope (inactive ones included), as in the
+    # period summary: a top-up counts only when its source is one of them, and a
+    # return only when both the wallet and the destination are.
+    scope_ids = {
+        a.id for a in db.query(Account.id).filter(
+            scope_criterion(Account, user_id, entity_id)
+        ).all()
+    }
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0
@@ -352,9 +362,11 @@ def get_disposable_income(
         if entry.transfer_to_account_id is not None:
             to_wallet = entry.transfer_to_account_id in wallet_ids
             from_wallet = entry.account_id in wallet_ids
+            if entry.account_id not in scope_ids:
+                continue  # inbound from outside the caller's scope
             if to_wallet and not from_wallet:
                 monthly_expenses += monthly
-            elif from_wallet and not to_wallet:
+            elif from_wallet and not to_wallet and entry.transfer_to_account_id in scope_ids:
                 monthly_expenses -= monthly
             continue
         if entry.entry_type == BudgetEntryType.INCOME:
