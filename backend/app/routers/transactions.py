@@ -8,6 +8,7 @@ from app.core.entity_context import (
     can_access_record,
     get_accessible_or_404,
     get_active_entity,
+    scope_criterion,
     validate_entity_ownership,
 )
 from app.models.transaction import Transaction, TransactionType
@@ -632,8 +633,15 @@ TRANSFER_FEES = "Transfer fees"
 UNALLOCATED_WALLET_SPEND = "Unallocated wallet spend"
 
 
-def summarize_period(transactions, wallet_ids: Set[int], category_names: dict) -> dict:
+def summarize_period(
+    transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int]
+) -> dict:
     """Income, expense and per-category totals for posted transactions.
+
+    ``scope_ids`` are the caller's in-scope accounts. A transfer counts only when
+    its source is one of them: a transfer in from an account outside the scope
+    (e.g. an entity co-member topping up the caller's wallet) is not the caller's
+    spending, so neither its amount nor its fee is expensed.
 
     Spending wallets (cash on hand, e-wallets) are expensed when topped up, so:
 
@@ -675,8 +683,11 @@ def summarize_period(transactions, wallet_ids: Set[int], category_names: dict) -
             else:
                 total_expenses += amount
         elif t.transaction_type == TransactionType.TRANSFER:
+            source = t.transfer_from_account_id or t.account_id
+            if source not in scope_ids:
+                continue  # inbound from outside the caller's scope
             fee = _D(t.transfer_fee)
-            from_wallet = (t.transfer_from_account_id or t.account_id) in wallet_ids
+            from_wallet = source in wallet_ids
             to_wallet = t.transfer_to_account_id in wallet_ids
             if fee:
                 row(TRANSFER_FEES)["expenses"] += fee
@@ -712,17 +723,20 @@ def get_transaction_summary(
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date <= end_date,
     )
+    # The caller's accounts in this scope (inactive ones included: this is history).
+    scope_ids = {
+        a.id for a in db.query(Account.id).filter(
+            scope_criterion(Account, current_user.id, active_entity.id if active_entity else None)
+        ).all()
+    }
     if active_entity is not None:
         query = query.filter(Transaction.entity_id == active_entity.id)
     else:
-        user_account_ids = [
-            a.id for a in db.query(Account.id).filter(Account.user_id == current_user.id).all()
-        ]
         query = query.filter(
             or_(
-                Transaction.account_id.in_(user_account_ids),
-                Transaction.transfer_from_account_id.in_(user_account_ids),
-                Transaction.transfer_to_account_id.in_(user_account_ids)
+                Transaction.account_id.in_(scope_ids),
+                Transaction.transfer_from_account_id.in_(scope_ids),
+                Transaction.transfer_to_account_id.in_(scope_ids)
             )
         )
     
@@ -746,7 +760,7 @@ def get_transaction_summary(
         c.id: c.name for c in db.query(Category).filter(Category.id.in_(category_ids)).all()
     } if category_ids else {}
 
-    summary = summarize_period(transactions, wallet_ids, category_names)
+    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses

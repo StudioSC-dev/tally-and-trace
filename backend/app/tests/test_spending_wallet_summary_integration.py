@@ -175,3 +175,76 @@ def test_invariant_holds_after_create_edit_and_delete(client, headers):
         assert r.status_code == 200, r.text
         _summary(client, headers)
     assert _summary(client, headers) == (Decimal("0"), {})
+
+
+@pytest.fixture
+def co_member(client):
+    """A caller (logged in) and a co-member of a shared entity; all removed afterwards."""
+    from app.core.auth import get_password_hash
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
+    from app.models.transaction import Transaction
+    from app.models.user import User
+
+    db = SessionLocal()
+    users = []
+    for label in ("caller", "member"):
+        u = User(email=f"wsum-{label}-{os.urandom(4).hex()}@example.com",
+                 password_hash=get_password_hash("password123"),
+                 first_name="Wallet", last_name=label, is_verified=True)
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+        users.append(u)
+    caller, member = users
+    entity = Entity(name=f"Shared {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+    db.add(entity)
+    db.commit()
+    db.refresh(entity)
+    for u, role in ((caller, MemberRole.OWNER), (member, MemberRole.MEMBER)):
+        db.add(EntityMembership(entity_id=entity.id, user_id=u.id, role=role))
+    db.commit()
+    login = client.post(f"{API}/auth/login",
+                        json={"email": caller.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+
+    yield {"db": db, "caller": caller, "member": member, "entity": entity,
+           "headers": {"Authorization": f"Bearer {login.json()['access_token']}"}}
+
+    db.rollback()
+    ids = [caller.id, member.id]
+    db.query(Transaction).filter(Transaction.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(EntityMembership).filter(EntityMembership.entity_id == entity.id).delete()
+    db.query(Entity).filter(Entity.id == entity.id).delete()
+    db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    db.close()
+
+
+def test_co_member_transfers_in_are_not_the_callers_expense(client, co_member):
+    from datetime import datetime
+
+    from app.models.account import Account, AccountType
+    from app.models.transaction import Transaction, TransactionType
+
+    db, caller, member, entity = (co_member[k] for k in ("db", "caller", "member", "entity"))
+    gcash = Account(user_id=caller.id, entity_id=entity.id, name="GCash",
+                    account_type=AccountType.E_WALLET, balance=0, is_spending_wallet=True)
+    bank = Account(user_id=caller.id, entity_id=entity.id, name="Bank",
+                   account_type=AccountType.SAVINGS, balance=0)
+    theirs = Account(user_id=member.id, name="Their bank", account_type=AccountType.SAVINGS,
+                     balance=10000)
+    db.add_all([gcash, bank, theirs])
+    db.commit()
+    for dst, amount, fee in ((gcash, 1000, 0), (bank, 3000, 25)):
+        db.add(Transaction(user_id=member.id, account_id=theirs.id, amount=amount,
+                           transaction_type=TransactionType.TRANSFER,
+                           transfer_from_account_id=theirs.id, transfer_to_account_id=dst.id,
+                           transfer_fee=fee, transaction_date=datetime(2026, 9, 15),
+                           is_posted=True))
+    db.commit()
+
+    total, rows = _summary(client, co_member["headers"])
+    assert total == Decimal("0") and rows == {}

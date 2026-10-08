@@ -7,6 +7,7 @@ from app.routers.transactions import summarize_period
 
 BANK, GCASH, CASH, CHECKING = 1, 2, 3, 4
 WALLETS = {GCASH, CASH}
+SCOPE = {BANK, GCASH, CASH, CHECKING}
 PARKING = 10
 CATEGORIES = {PARKING: "Parking"}
 
@@ -35,7 +36,7 @@ def _assert_invariant(result):
 def test_top_up_with_fee_plus_wallet_parking_expenses_2010():
     result = summarize_period(
         [_transfer(BANK, GCASH, "2000", "10"), _debit(GCASH, "500", PARKING)],
-        WALLETS, CATEGORIES,
+        WALLETS, CATEGORIES, SCOPE,
     )
     assert result["total_expenses"] == Decimal("2010")
     assert _expenses_by_row(result) == {
@@ -49,7 +50,7 @@ def test_top_up_with_fee_plus_wallet_parking_expenses_2010():
 def test_fee_on_a_wallet_to_wallet_transfer_is_not_expensed_again():
     result = summarize_period(
         [_transfer(BANK, GCASH, "1000", "5"), _transfer(GCASH, CASH, "300", "15")],
-        WALLETS, CATEGORIES,
+        WALLETS, CATEGORIES, SCOPE,
     )
     # Only the top-up (plus its fee) is the expense; the GCash fee is detail.
     assert result["total_expenses"] == Decimal("1005")
@@ -63,7 +64,7 @@ def test_fee_on_a_wallet_to_wallet_transfer_is_not_expensed_again():
 def test_fees_on_other_transfers_count_once_and_amounts_do_not():
     result = summarize_period(
         [_transfer(BANK, CHECKING, "5000", "25"), _debit(BANK, "120"), _debit(CHECKING, "80", PARKING)],
-        WALLETS, CATEGORIES,
+        WALLETS, CATEGORIES, SCOPE,
     )
     assert result["total_expenses"] == Decimal("225")
     assert _expenses_by_row(result) == {
@@ -75,15 +76,27 @@ def test_fees_on_other_transfers_count_once_and_amounts_do_not():
 
 
 def test_a_categorised_transfer_still_shows_its_fee_as_a_transfer_fee():
-    result = summarize_period([_transfer(BANK, GCASH, "100", "2", PARKING)], WALLETS, CATEGORIES)
+    result = summarize_period([_transfer(BANK, GCASH, "100", "2", PARKING)], WALLETS, CATEGORIES, SCOPE)
     assert _expenses_by_row(result) == {
         "Transfer fees": Decimal("2"), "Unallocated wallet spend": Decimal("100")}
     _assert_invariant(result)
 
 
 def test_wallet_spending_without_a_top_up_shows_a_negative_unallocated_row():
-    result = summarize_period([_debit(CASH, "300", PARKING)], WALLETS, CATEGORIES)
+    result = summarize_period([_debit(CASH, "300", PARKING)], WALLETS, CATEGORIES, SCOPE)
     assert result["total_expenses"] == Decimal("0")
     assert _expenses_by_row(result) == {
         "Parking": Decimal("300"), "Unallocated wallet spend": Decimal("-300")}
     _assert_invariant(result)
+
+
+OTHER = 99  # an account outside the caller's scope (e.g. an entity co-member's)
+
+
+def test_inbound_transfers_from_outside_the_scope_are_not_expense():
+    result = summarize_period(
+        [_transfer(OTHER, GCASH, "1000", "5"), _transfer(OTHER, BANK, "3000", "20")],
+        WALLETS, CATEGORIES, SCOPE,
+    )
+    assert result["total_expenses"] == Decimal("0")
+    assert result["category_breakdown"] == {}
