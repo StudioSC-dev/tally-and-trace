@@ -17,6 +17,22 @@ Two amortisation modes:
 
 The next due date is ``loan_first_payment_date`` stepped one month per scheduled
 payment made, in both modes.
+
+Projection (``build_loan_payables``): each due date from the next one on, while
+payments are left, is a payable of ``loan_payment_amount`` on the paying account
+(``payment_account_id``). A loan with no paying account, no payment amount, no
+first payment date or nothing owed has none. Payments left come from the
+amortisation preview for ``reduce_term`` (``loan_term_months`` when the loan
+never repays) and from ``loan_term_months`` minus the payments made for
+``fixed``; a fixed loan with no term is open-ended while money is owed.
+
+Matching payments to due dates: a POSTED scheduled payment is already counted in
+``payments_made``, so it moved ``next_due_date`` past its date and that date is no
+longer projected. An UNPOSTED transfer into the loan that is not a prepayment (a
+planned or partial scheduled payment, a plain transfer, a recurring transfer
+entry) is itself a cash leg on its source account, so it covers the payables:
+its cash (amount + interest fee) is consumed once, oldest due date first, and
+only the covered part of a payable is removed. Prepayments never cover one.
 """
 from calendar import monthrange
 from datetime import date, datetime
@@ -292,3 +308,69 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
         funding.balance = _money(funding.balance) - (principal + interest)
         loan.balance = _money(loan.balance) + principal
     return txn
+
+
+def due_dates(db: Session, loan: Account, end: datetime) -> List[date]:
+    """Due dates of the loan's remaining scheduled payments that fall before ``end``."""
+    first = loan.loan_first_payment_date
+    if first is None or owed(loan) <= 0:
+        return []
+    made = payments_made(loan, _payments_into(db, loan))
+    next_due = due_date(first, made)
+    left: Optional[int] = None
+    if amortization_of(loan) == REDUCE_TERM and loan.loan_payment_amount is not None:
+        rows = amortize(owed(loan), loan.loan_annual_rate, loan.loan_payment_amount, next_due)
+        if rows is not None:
+            left = len(rows)
+    if left is None and loan.loan_term_months is not None:
+        left = max(loan.loan_term_months - made, 0)
+
+    dates: List[date] = []
+    while (left is None or len(dates) < left) and len(dates) < _MAX_ROWS:
+        due = due_date(first, made + len(dates))
+        if datetime(due.year, due.month, due.day) >= end:
+            break
+        dates.append(due)
+    return dates
+
+
+def build_loan_payables(db: Session, loans: List[Account], start: datetime, end: datetime,
+                        cover_by_loan: dict) -> List[dict]:
+    """Dated payable events for the loans' due dates before ``end``.
+
+    ``cover_by_loan`` is ``{loan_id: [(date, cash)]}``: the unposted, non-prepayment
+    transfers into each loan (see the module docstring). They are consumed oldest
+    due date first, so a due date owes the payment amount less what they cover.
+    A due date before ``start`` is overdue: emitted on ``start`` with ``overdue``
+    True and its due date as ``original_date``.
+    """
+    from app.services.statements import allocate_payments
+
+    events: List[dict] = []
+    for loan in loans:
+        if loan.payment_account_id is None or loan.loan_payment_amount is None:
+            continue
+        dates = due_dates(db, loan, end)
+        if not dates:
+            continue
+        payment = _money(loan.loan_payment_amount)
+        covers = [cash for _, cash in sorted(cover_by_loan.get(loan.id, []),
+                                             key=lambda c: c[0])]
+        for due, remaining in zip(dates, allocate_payments([payment] * len(dates), covers)):
+            if remaining <= 0:
+                continue
+            when = datetime(due.year, due.month, due.day)
+            overdue = {"overdue": True, "original_date": when} if when < start else {}
+            events.append({
+                "date": start if overdue else when,
+                "name": f"{loan.name} payment",
+                "amount": -remaining,
+                "type": "expense",
+                "source": "loan",
+                "source_id": loan.id,
+                "funding_account_id": loan.payment_account_id,
+                "overflow_account_id": None,
+                "loan_due_date": due,
+                **overdue,
+            })
+    return events

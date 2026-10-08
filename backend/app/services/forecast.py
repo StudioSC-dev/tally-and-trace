@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
 from app.core.time import naive_utc_now
+from app.services.loans import PREPAYMENT, build_loan_payables
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
 )
@@ -622,6 +623,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     billed_ids: Optional[set] = None,
                     wallet_ids: frozenset = frozenset(),
                     known_wallet_ids: frozenset = frozenset(),
+                    loan_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -686,6 +688,12 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         extra = {**extra, "card_payment": True}
     if src_cash and dst in (known_wallet_ids | wallet_ids):
         extra = {**extra, "top_up": True}
+    if dst in loan_ids:
+        # Marks a payment into a loan; the loan has no leg (it is not projection
+        # cash). Unless it is a prepayment it covers the loan's payables
+        # (see loans.build_loan_payables).
+        extra = {**extra, "loan_id": dst,
+                 "loan_prepayment": getattr(txn, "loan_payment_kind", None) == PREPAYMENT}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -711,8 +719,10 @@ def collect_events(
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
-    Sources: active budget-entry occurrences, unposted transactions, and one dated
-    payable per credit-card statement cycle due in the window. Occurrences of a
+    Sources: active budget-entry occurrences, unposted transactions, one dated
+    payable per credit-card statement cycle due in the window, and one per loan due
+    date (``source`` "loan", on the loan's paying account; a planned non-prepayment
+    transfer into the loan covers it, see services/loans.py). Occurrences of a
     budget entry scheduled on a credit card are charges on that card's statement,
     not cash events (see ``_card_entry_charges``). A card without cycle settings
     has no statements, so occurrences scheduled on it stay cash events and
@@ -760,6 +770,8 @@ def collect_events(
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
+    loans = [a for a in accounts if a.account_type == AccountType.LOAN]
+    loan_ids = frozenset(a.id for a in loans)
     # In-scope wallets: their legs are kept (never as cash).
     scoped_wallet_ids = frozenset(a.id for a in accounts if is_spending_wallet(a))
     # Cards whose statements are modelled; the rest keep their charges as cash.
@@ -812,6 +824,7 @@ def collect_events(
           for acc in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)),
         *(acc for a in accounts if a.id in billed_ids
           for acc in (a.payment_account_id, a.payment_overflow_account_id)),
+        *(a.payment_account_id for a in loans),
     ))
 
     # Transactions already materialised from a recurring transfer entry, by day:
@@ -850,7 +863,7 @@ def collect_events(
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
-                    source="budget_entry",
+                    loan_ids=loan_ids, source="budget_entry",
                     overflow_account_id=overflow_id,
                 ))
             continue
@@ -886,7 +899,8 @@ def collect_events(
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
-                                          known_wallet_ids=wallet_ids, **overdue))
+                                          known_wallet_ids=wallet_ids, loan_ids=loan_ids,
+                                          **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -928,6 +942,30 @@ def collect_events(
             source_id=p["source_id"],
             face_amount=-p["amount"],
             legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
+                       cash=p["funding_account_id"] not in wallet_ids)],
+            **extra,
+        ))
+
+    # Each loan contributes a dated payable per due date, less what the planned
+    # (unposted, non-prepayment) payments into it cover (see services/loans.py).
+    covers: dict = {}
+    for e in events:
+        if e.get("loan_id") is not None and not e["loan_prepayment"]:
+            covers.setdefault(e["loan_id"], []).append(
+                (_naive(e["date"]).date(), e["face_amount"] + e["transfer_fee"]))
+    for p in build_loan_payables(db, loans, start, end, covers):
+        extra = {k: v for k, v in p.items() if k not in {
+            "date", "name", "amount", "type", "source", "source_id",
+            "funding_account_id", "overflow_account_id",
+        }}
+        events.append(_event(
+            date=p["date"],
+            name=p["name"],
+            type=p["type"],
+            source=p["source"],
+            source_id=p["source_id"],
+            face_amount=-p["amount"],
+            legs=[_leg(p["funding_account_id"], p["amount"], None,
                        cash=p["funding_account_id"] not in wallet_ids)],
             **extra,
         ))
