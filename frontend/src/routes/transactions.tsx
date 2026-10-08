@@ -122,7 +122,9 @@ type TransactionFormState = {
   original_amount?: number
   original_currency?: CurrencyCode
   exchange_rate?: number
-  transfer_fee: number
+  // Undefined while the field is blank: a payment into a loan then leaves the
+  // principal/interest split to the server.
+  transfer_fee?: number
   description: string
   transaction_type: Transaction['transaction_type']
   transaction_date: string
@@ -165,7 +167,7 @@ export function TransactionsPage() {
     original_amount: undefined,
     original_currency: undefined,
     exchange_rate: undefined,
-    transfer_fee: 0,
+    transfer_fee: undefined,
     description: '',
     transaction_type: 'debit',
     transaction_date: new Date().toISOString().split('T')[0],
@@ -541,6 +543,9 @@ export function TransactionsPage() {
     () => accounts.find((account) => account.id === formData.transfer_to_account_id),
     [accounts, formData.transfer_to_account_id]
   )
+  // A transfer into a loan is a loan payment: its fee is the interest.
+  const transferIntoLoan =
+    formData.transaction_type === 'transfer' && destinationFormAccount?.account_type === 'loan'
 
   // Account-type-aware nudge toward the correct dual-perspective framing.
   const contextHint = useMemo<{ text: string; suggestTransfer: boolean } | null>(() => {
@@ -634,7 +639,7 @@ export function TransactionsPage() {
         budget_entry_id: nextBudgetEntryId,
         category_id: nextCategoryId,
         allocation_id: nextType === 'transfer' ? undefined : prev.allocation_id,
-        transfer_fee: nextType === 'transfer' ? prev.transfer_fee : 0,
+        transfer_fee: nextType === 'transfer' ? prev.transfer_fee : undefined,
         transfer_from_account_id:
           nextType === 'transfer' ? prev.account_id || prev.transfer_from_account_id : undefined,
         transfer_to_account_id:
@@ -715,7 +720,14 @@ export function TransactionsPage() {
             ? new Date().toISOString()
             : undefined,
         is_posted: formData.is_posted,
-        transfer_fee: formData.transaction_type === 'transfer' ? formData.transfer_fee || 0 : 0,
+        // Blank interest on a loan payment is left out, so the server splits the
+        // amount into principal and interest; any other transfer defaults to 0.
+        transfer_fee:
+          formData.transaction_type !== 'transfer'
+            ? 0
+            : transferIntoLoan && formData.transfer_fee === undefined
+            ? undefined
+            : formData.transfer_fee ?? 0,
         transfer_from_account_id:
           formData.transaction_type === 'transfer'
             ? formData.transfer_from_account_id ?? formData.account_id
@@ -1927,7 +1939,7 @@ export function TransactionsPage() {
               
               {formData.transaction_type === 'transfer' && (
               <div>
-                  <label className="label">Transfer Fee</label>
+                  <label className="label">{transferIntoLoan ? 'Interest' : 'Transfer Fee'}</label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                       {formCurrencySymbol}
@@ -1936,12 +1948,12 @@ export function TransactionsPage() {
                   type="number"
                   step="0.01"
                   min="0"
-                      value={formData.transfer_fee || ''}
+                      value={formData.transfer_fee ?? ''}
                       onChange={(e) => {
                         const value = parseFloat(e.target.value)
                         setFormData((prev) => ({
                           ...prev,
-                          transfer_fee: Number.isNaN(value) ? 0 : value,
+                          transfer_fee: Number.isNaN(value) ? undefined : value,
                         }))
                       }}
                       className="input-field pl-7 focus-ring"
@@ -1949,7 +1961,9 @@ export function TransactionsPage() {
                 />
               </div>
                   <p className="mt-1 text-xs text-muted">
-                    Automatically deducted from the source account. Default is 0.
+                    {transferIntoLoan
+                      ? "The interest part of this payment. Leave blank to split the amount at the loan's rate."
+                      : 'Automatically deducted from the source account. Default is 0.'}
                   </p>
                 </div>
               )}
