@@ -512,3 +512,98 @@ def test_entity_membership_governs_loan_access(client, people):
         assert _pay(client, who, loan["id"], principal=100, interest=0).status_code in (403, 404)
         assert _prepay(client, who, loan["id"], amount=50).status_code in (403, 404)
     assert _balance(client, owner, loan["id"]) == Decimal("-999850.00")
+
+
+def _shared_loan_paid_from_a_private_bank(client, people):
+    """A shared-entity loan paid from the owner's private bank, and a co-member's bank."""
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    in_entity = {"X-Entity-Id": str(entity_id)}
+    member_h = {**member, "headers": {**member["headers"], **in_entity}}
+
+    private = _bank(client, owner, name="Owner private", balance=100_000)
+    member_bank = _bank(client, member_h, name="Entity bank", entity_id=entity_id)
+    loan = _loan(client, owner, entity_id=entity_id, balance=-500_000,
+                 payment_account_id=private["id"])
+    paid = _pay(client, owner, loan["id"], principal=20_000, interest=8_000,
+                transaction_date="2026-10-04T00:00:00")
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["entity_id"] == entity_id
+    return owner, member_h, private, member_bank, loan, paid.json()
+
+
+def test_a_co_member_cannot_delete_a_payment_funded_from_a_private_account(client, people):
+    owner, member, private, _, loan, paid = _shared_loan_paid_from_a_private_bank(client, people)
+
+    # The co-member sees the entity's row, but not the account it moves.
+    assert client.get(f"{API}/transactions/{paid['id']}",
+                      headers=member["headers"]).status_code == 200
+    r = client.delete(f"{API}/transactions/{paid['id']}", headers=member["headers"])
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Transaction not found"
+    assert _balance(client, owner, private["id"]) == Decimal("72000.00")
+    assert _balance(client, owner, loan["id"]) == Decimal("-480000.00")
+
+    r = client.delete(f"{API}/transactions/{paid['id']}", headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    assert _balance(client, owner, private["id"]) == Decimal("100000.00")
+    assert _balance(client, owner, loan["id"]) == Decimal("-500000.00")
+
+
+@pytest.mark.parametrize("change", ["amount", "retarget"])
+def test_a_co_member_cannot_edit_a_payment_funded_from_a_private_account(
+        client, people, change):
+    owner, member, private, member_bank, loan, paid = _shared_loan_paid_from_a_private_bank(
+        client, people)
+
+    body = ({"amount": 19_000} if change == "amount" else
+            {"account_id": member_bank["id"], "transfer_from_account_id": member_bank["id"]})
+    r = client.put(f"{API}/transactions/{paid['id']}", json=body, headers=member["headers"])
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Transaction not found"
+    assert _balance(client, owner, private["id"]) == Decimal("72000.00")
+    assert _balance(client, owner, loan["id"]) == Decimal("-480000.00")
+    assert _balance(client, member, member_bank["id"]) == Decimal("500000.00")
+
+    # The owner, who can reach the private bank, still can.
+    r = client.put(f"{API}/transactions/{paid['id']}", json={"amount": 19_000},
+                   headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    assert _balance(client, owner, private["id"]) == Decimal("73000.00")
+    assert _balance(client, owner, loan["id"]) == Decimal("-481000.00")
+
+
+def test_an_edit_cannot_move_a_transaction_onto_an_inaccessible_account(client, people):
+    owner, stranger = people(), people()
+    bank = _bank(client, owner, balance=1_000)
+    stranger_bank = _bank(client, stranger, balance=1_000)
+    r = client.post(f"{API}/transactions/", headers=owner["headers"], json={
+        "account_id": bank["id"], "transaction_type": "debit", "amount": 100,
+        "transaction_date": "2026-10-05T00:00:00"})
+    assert r.status_code == 200, r.text
+
+    r = client.put(f"{API}/transactions/{r.json()['id']}", headers=owner["headers"],
+                   json={"account_id": stranger_bank["id"]})
+    assert r.status_code == 404, r.text
+    assert _balance(client, owner, bank["id"]) == Decimal("900.00")
+    assert _balance(client, stranger, stranger_bank["id"]) == Decimal("1000.00")
+
+
+def test_a_co_member_still_edits_and_deletes_an_in_scope_transaction(client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    bank = _bank(client, owner, balance=1_000, entity_id=entity_id)
+    r = client.post(f"{API}/transactions/", headers=owner["headers"], json={
+        "account_id": bank["id"], "transaction_type": "debit", "amount": 100,
+        "entity_id": entity_id, "transaction_date": "2026-10-05T00:00:00"})
+    assert r.status_code == 200, r.text
+    txn_id = r.json()["id"]
+
+    r = client.put(f"{API}/transactions/{txn_id}", json={"amount": 150},
+                   headers=member_h["headers"])
+    assert r.status_code == 200, r.text
+    assert _balance(client, owner, bank["id"]) == Decimal("850.00")
+    r = client.delete(f"{API}/transactions/{txn_id}", headers=member_h["headers"])
+    assert r.status_code == 200, r.text
+    assert _balance(client, owner, bank["id"]) == Decimal("1000.00")

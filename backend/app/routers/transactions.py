@@ -154,6 +154,24 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     return True
 
 
+def _require_account(db: Session, user: User, account_id: Optional[int], detail: str) -> None:
+    """404 with ``detail`` unless the caller may use the account (a None id is skipped)."""
+    if account_id is None:
+        return
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account or not can_access_record(db, user, account):
+        raise HTTPException(status_code=404, detail=detail)
+
+
+def _balance_account_ids(transaction_type, account_id, transfer_from_id, transfer_to_id) -> List[int]:
+    """The accounts whose balances a transaction of this shape moves."""
+    if transaction_type == TransactionType.TRANSFER:
+        ids = [transfer_from_id, transfer_to_id]
+    else:
+        ids = [account_id]
+    return [i for i in ids if i is not None]
+
+
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
     if transaction_type == TransactionType.DEBIT:
         return amount
@@ -417,8 +435,29 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
 
     # Validate before any balance reversal or write.
-    if "entity_id" in transaction_update.dict(exclude_unset=True):
+    requested = transaction_update.dict(exclude_unset=True)
+    if "entity_id" in requested:
         validate_entity_ownership(db, current_user, transaction_update.entity_id)
+
+    # Every account the edit touches must be the caller's to use: the ones it
+    # reverses (a shared row can move a co-member's private account, which is
+    # reported as the row not being found) and the ones it lands on.
+    for acc_id in _balance_account_ids(
+        db_transaction.transaction_type, db_transaction.account_id,
+        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
+    ):
+        _require_account(db, current_user, acc_id, "Transaction not found")
+    new_type = requested.get("transaction_type", db_transaction.transaction_type)
+    if new_type == TransactionType.TRANSFER:
+        _require_account(db, current_user, requested.get(
+            "transfer_from_account_id", db_transaction.transfer_from_account_id),
+            "Source account not found")
+        _require_account(db, current_user, requested.get(
+            "transfer_to_account_id", db_transaction.transfer_to_account_id),
+            "Destination account not found")
+    else:
+        _require_account(db, current_user, requested.get(
+            "account_id", db_transaction.account_id), "Account not found")
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
@@ -558,6 +597,13 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Delete a transaction and update account balance"""
     db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
+    # A shared row can move a co-member's private account: refuse unless the
+    # caller may use every account it touches (reported as not found).
+    for acc_id in _balance_account_ids(
+        db_transaction.transaction_type, db_transaction.account_id,
+        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
+    ):
+        _require_account(db, current_user, acc_id, "Transaction not found")
     
     # Update account balances if posted
     if db_transaction.is_posted:
