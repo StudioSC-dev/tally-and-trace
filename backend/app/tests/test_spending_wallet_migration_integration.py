@@ -34,12 +34,13 @@ def _db_reachable() -> bool:
         return False
 
 
-def test_alembic_has_a_single_head_which_is_m2():
+def test_m2_follows_the_m1_head_on_the_single_chain():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [M2]
+    (head,) = script.get_heads()
+    assert M2 in {rev.revision for rev in script.walk_revisions(head=head)}
     assert script.get_revision(M2).down_revision == M1_HEAD
 
 
@@ -120,7 +121,7 @@ def test_m2_applies_fresh_and_from_m1_head_backfills_and_downgrades(scratch_url)
 
         # From the M1 head with existing rows: backfill by account type, skipping
         # routing targets.
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", M2)
         with engine.connect() as c:
             flags = dict(c.execute(text("SELECT name, is_spending_wallet FROM accounts")).all())
             assert flags == {"Cash": True, "GCash": True, "Bank": False,

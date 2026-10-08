@@ -67,6 +67,8 @@ class TransactionUpdate(BaseModel):
 
 class TransactionResponse(TransactionBase):
     id: int
+    # Set only by the loan endpoints (scheduled / prepayment); read-only here.
+    loan_payment_kind: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     

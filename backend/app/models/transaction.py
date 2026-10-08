@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean
+from sqlalchemy import CheckConstraint, Column, Integer, String, Numeric, DateTime, Text, ForeignKey, Enum, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -27,7 +27,13 @@ def _enum_values(enum_cls):
 
 class Transaction(Base):
     __tablename__ = "transactions"
-    
+    __table_args__ = (
+        CheckConstraint(
+            "loan_payment_kind IS NULL OR loan_payment_kind IN ('scheduled', 'prepayment')",
+            name="ck_transactions_loan_payment_kind",
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
@@ -52,6 +58,9 @@ class Transaction(Base):
     is_posted = Column(Boolean, default=True)
     transfer_from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     transfer_to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Loan payments only (a transfer into a loan): set by the loan endpoints to
+    # tell scheduled payments from prepayments; null on every other row.
+    loan_payment_kind = Column(String(16), nullable=True)
     
     # Transaction dates
     transaction_date = Column(DateTime, nullable=False)

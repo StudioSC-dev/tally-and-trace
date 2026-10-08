@@ -2,7 +2,11 @@ import type { CurrencyCode } from '../utils/currency'
 
 // ─── Account ────────────────────────────────────────────────────────────────
 
-export type AccountType = 'cash' | 'e_wallet' | 'savings' | 'checking' | 'credit'
+export type AccountType = 'cash' | 'e_wallet' | 'savings' | 'checking' | 'credit' | 'loan'
+export type LoanKind = 'personal' | 'auto' | 'home'
+/** `fixed`: the bank's schedule. `reduce_term`: a prepayment shortens the term. */
+export type LoanAmortization = 'fixed' | 'reduce_term'
+export type LoanPaymentKind = 'scheduled' | 'prepayment'
 
 export interface Account {
   id: number
@@ -18,7 +22,7 @@ export interface Account {
   billing_cycle_start?: number
   /** Days from statement close to payment due. Defaults to 21. */
   days_until_due_date?: number
-  /** Credit cards: account the statement payment is funded from. */
+  /** Credit cards: account the statement payment is funded from. Loans: account payments are funded from. */
   payment_account_id?: number | null
   /** Credit cards: account the statement payment spills to when the primary can't cover it. */
   payment_overflow_account_id?: number | null
@@ -27,6 +31,18 @@ export interface Account {
    * in available cash or projections. Topping it up is the expense.
    */
   is_spending_wallet: boolean
+  /** Loans only (balance is negative while owed; owed = -balance). */
+  loan_kind?: LoanKind | null
+  /** Loans: nominal annual rate in percent (6.5 = 6.5%). */
+  loan_annual_rate?: number | null
+  loan_term_months?: number | null
+  loan_payment_amount?: number | null
+  /** Loans: ISO date (YYYY-MM-DD) of payment #1. */
+  loan_first_payment_date?: string | null
+  /** Loans: defaults to `reduce_term` for home loans, `fixed` otherwise. */
+  loan_amortization?: LoanAmortization | null
+  /** Loans: scheduled payments made before the loan was tracked here. */
+  loan_payments_made_offset?: number | null
   entity_id: number
   is_active: boolean
   created_at: string
@@ -161,9 +177,12 @@ export interface Transaction {
   is_reconciled: boolean
   is_recurring: boolean
   recurrence_frequency?: RecurrenceFrequency
+  /** Loan payments: interest (the amount is principal). */
   transfer_fee: number
   transfer_from_account_id?: number
   transfer_to_account_id?: number
+  /** Set by the loan payment / prepayment endpoints; null on other transactions. */
+  loan_payment_kind?: LoanPaymentKind | null
   created_at: string
   updated_at?: string
 }

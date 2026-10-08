@@ -13,8 +13,10 @@ from app.core.entity_context import (
 )
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
+from app.services import loans as loan_svc
+from app.routers.accounts import _funding_account, _loan_or_404
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -152,6 +154,107 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     allocation.period_start = period_start
     allocation.period_end = period_end
     return True
+
+
+def _require_account(db: Session, user: User, account_id: Optional[int], detail: str) -> None:
+    """404 with ``detail`` unless the caller may use the account (a None id is skipped)."""
+    if account_id is None:
+        return
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account or not can_access_record(db, user, account):
+        raise HTTPException(status_code=404, detail=detail)
+
+
+def _balance_account_ids(transaction_type, account_id, transfer_from_id, transfer_to_id) -> List[int]:
+    """The accounts whose balances a transaction of this shape moves."""
+    if transaction_type == TransactionType.TRANSFER:
+        ids = [transfer_from_id, transfer_to_id]
+    else:
+        ids = [account_id]
+    return [i for i in ids if i is not None]
+
+
+LOAN_PAYMENT_FIXED_FIELDS = (
+    "transaction_type", "account_id", "transfer_from_account_id", "transfer_to_account_id",
+    "currency",
+)
+
+
+def _money_changed(requested: dict, field: str, current, *, none_is_zero: bool = False) -> bool:
+    """Whether ``field`` is in the request with a value other than ``current``."""
+    if field not in requested:
+        return False
+    new = requested[field]
+    if none_is_zero:
+        new, current = new or 0, current or 0
+    if new is None or current is None:
+        return new is not current
+    return Decimal(str(new)) != Decimal(str(current))
+
+
+def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, requested: dict) -> None:
+    """Keep the loan endpoints' rules on a loan payment edited through this API.
+
+    Its type, accounts and currency are fixed (so a prepayment can never land
+    on a fixed loan). The money checks run only when the amount or fee changes, or the
+    payment is posted: the result is re-checked against the loan with the
+    payment's old effect reversed, and its principal is held to what is owed
+    only if the edited row is posted, so a pending payment above the current
+    owed amount can still be edited but not posted. A prepayment keeps the
+    prepayment endpoint's rules: no interest, and it is not posted (or its
+    amount changed while posted) once the loan is ``fixed``.
+
+    Posting the row, or changing its money while it is posted, also re-runs the
+    endpoints' account checks against the accounts as they are now: the
+    destination is still a loan, the funding account is still one the caller
+    may use to fund it, and the two share a currency.
+    """
+    for field in LOAN_PAYMENT_FIXED_FIELDS:
+        if field in requested and requested[field] != getattr(txn, field):
+            raise HTTPException(
+                status_code=400,
+                detail="A loan payment's type, accounts and currency cannot be changed; "
+                       "delete and re-record the loan payment instead",
+            )
+    loan = db.query(Account).filter(Account.id == txn.transfer_to_account_id).first()
+    old_posted = bool(txn.is_posted)
+    posted = bool(requested.get("is_posted", old_posted))
+    amount_changed = _money_changed(requested, "amount", txn.amount)
+    fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
+    if posted and (not old_posted or amount_changed or fee_changed):
+        loan = _loan_or_404(db, user, txn.transfer_to_account_id)
+        funding = _funding_account(
+            db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        try:
+            loan_svc.check_currency(loan, funding)
+        except loan_svc.LoanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if txn.loan_payment_kind == loan_svc.PREPAYMENT:
+        interest = requested.get("transfer_fee", txn.transfer_fee)
+        if interest is not None and Decimal(str(interest)) != 0:
+            raise HTTPException(
+                status_code=400,
+                detail="A prepayment is extra principal and carries no interest",
+            )
+        if (posted and (not old_posted or amount_changed)
+                and loan_svc.amortization_of(loan) == loan_svc.FIXED):
+            raise HTTPException(
+                status_code=400,
+                detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
+            )
+    if not (amount_changed or fee_changed or (posted and not old_posted)):
+        return
+    try:
+        loan_svc.check_edited_payment(
+            loan,
+            old_principal=txn.amount,
+            old_posted=old_posted,
+            posted=posted,
+            principal=requested.get("amount", txn.amount),
+            interest=requested.get("transfer_fee", txn.transfer_fee),
+        )
+    except loan_svc.LoanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
@@ -417,8 +520,31 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
 
     # Validate before any balance reversal or write.
-    if "entity_id" in transaction_update.dict(exclude_unset=True):
+    requested = transaction_update.dict(exclude_unset=True)
+    if "entity_id" in requested:
         validate_entity_ownership(db, current_user, transaction_update.entity_id)
+
+    # Every account the edit touches must be the caller's to use: the ones it
+    # reverses (a shared row can move a co-member's private account, which is
+    # reported as the row not being found) and the ones it lands on.
+    for acc_id in _balance_account_ids(
+        db_transaction.transaction_type, db_transaction.account_id,
+        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
+    ):
+        _require_account(db, current_user, acc_id, "Transaction not found")
+    new_type = requested.get("transaction_type", db_transaction.transaction_type)
+    if new_type == TransactionType.TRANSFER:
+        _require_account(db, current_user, requested.get(
+            "transfer_from_account_id", db_transaction.transfer_from_account_id),
+            "Source account not found")
+        _require_account(db, current_user, requested.get(
+            "transfer_to_account_id", db_transaction.transfer_to_account_id),
+            "Destination account not found")
+    else:
+        _require_account(db, current_user, requested.get(
+            "account_id", db_transaction.account_id), "Account not found")
+    if db_transaction.loan_payment_kind:
+        _validate_loan_payment_edit(db, current_user, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
@@ -558,6 +684,13 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Delete a transaction and update account balance"""
     db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
+    # A shared row can move a co-member's private account: refuse unless the
+    # caller may use every account it touches (reported as not found).
+    for acc_id in _balance_account_ids(
+        db_transaction.transaction_type, db_transaction.account_id,
+        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
+    ):
+        _require_account(db, current_user, acc_id, "Transaction not found")
     
     # Update account balances if posted
     if db_transaction.is_posted:
@@ -632,10 +765,12 @@ UNCATEGORIZED = "Uncategorized"
 TRANSFER_FEES = "Transfer fees"
 UNALLOCATED_WALLET_SPEND = "Unallocated wallet spend"
 RETURNED_FROM_WALLETS = "Returned from wallets"
+LOAN_INTEREST_PREFIX = "Interest: "
 
 
 def summarize_period(
-    transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int]
+    transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
+    loan_names: Optional[dict] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
 
@@ -672,15 +807,21 @@ def summarize_period(
 
     Transfer fees are shown on a "Transfer fees" row: a transfer's own category
     (e.g. a savings contribution) describes the amount moved, not spending.
+    A loan payment is a transfer into the loan whose amount is principal (moving
+    your own money against a debt, so not an expense) and whose fee is interest;
+    for a destination in ``loan_names`` ({account id: name}) that fee is shown on
+    an "Interest: <loan name>" row instead, counted exactly as any other fee.
     Income is every credit. Rows without a category are grouped as "Uncategorized".
 
     The breakdown is keyed by name, as it always has been (two categories with
     one name already share a row). A synthetic row ("Uncategorized", "Transfer
-    fees", "Unallocated wallet spend", "Returned from wallets") whose name a
-    user category also uses is added into that row, never written over it, so
-    no amount is lost and the expense column still sums to ``total_expenses``.
+    fees", "Interest: <loan name>", "Unallocated wallet spend", "Returned from
+    wallets") whose name a user category also uses is added into that row,
+    never written over it, so no amount is lost and the expense column still
+    sums to ``total_expenses``.
     """
     zero = Decimal("0")
+    loan_names = loan_names or {}
     total_income = zero
     total_expenses = zero
     unallocated_wallet = zero
@@ -717,7 +858,9 @@ def summarize_period(
             from_wallet = source in wallet_ids
             to_wallet = destination in wallet_ids
             if fee:
-                row(TRANSFER_FEES)["expenses"] += fee
+                fee_row = (f"{LOAN_INTEREST_PREFIX}{loan_names[destination]}"
+                           if destination in loan_names else TRANSFER_FEES)
+                row(fee_row)["expenses"] += fee
             if from_wallet:
                 unallocated_wallet -= fee
                 if destination in scope_ids and not to_wallet:
@@ -789,16 +932,19 @@ def get_transaction_summary(
         for acc_id in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)
         if acc_id is not None
     }
-    wallet_ids = {
-        a.id for a in db.query(Account).filter(Account.id.in_(account_ids)).all()
-        if is_spending_wallet(a)
-    } if account_ids else set()
+    referenced = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+    wallet_ids = {a.id for a in referenced if is_spending_wallet(a)}
+    # Loans the caller can see get their own interest row (others stay "Transfer fees").
+    loan_names = {
+        a.id: a.name for a in referenced
+        if a.account_type == AccountType.LOAN and can_access_record(db, current_user, a)
+    }
     category_ids = {t.category_id for t in transactions if t.category_id}
     category_names = {
         c.id: c.name for c in db.query(Category).filter(Category.id.in_(category_ids)).all()
     } if category_ids else {}
 
-    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids)
+    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses
