@@ -360,7 +360,10 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     reversed, before anything is changed. Without it the posted row would not
     settle its due date and the payable would be charged again. With no fee in
     the request and none on the row, the amount is split into principal and
-    interest as for a new payment without a fee.
+    interest as for a new payment without a fee, except for a row already into
+    the loan (a legacy unmarked payment) edited without ``amount`` or
+    ``transfer_fee``: it is stamped and validated with its amount and fee as
+    they are, so a metadata-only edit never moves a balance.
     """
     if txn.loan_payment_kind:
         return {}
@@ -375,12 +378,17 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
         return {}  # rejected below as a transfer without a source
     was_into_loan = (txn.transaction_type == TransactionType.TRANSFER
                      and txn.transfer_to_account_id == loan.id)
+    if was_into_loan and "amount" not in requested and "transfer_fee" not in requested:
+        interest = txn.transfer_fee or 0  # metadata-only: keep the stored split
+    elif requested.get("transfer_fee") is not None:
+        interest = requested["transfer_fee"]
+    else:
+        interest = txn.transfer_fee or None
     return _loan_payment_stamp(
         db, user, loan, source_id,
         currency=requested.get("currency"),
         principal=requested.get("amount", txn.amount),
-        interest=(requested["transfer_fee"] if requested.get("transfer_fee") is not None
-                  else txn.transfer_fee or None),
+        interest=interest,
         posted=bool(requested.get("is_posted", txn.is_posted)),
         old_principal=txn.amount if was_into_loan else 0,
         old_posted=bool(txn.is_posted) and was_into_loan)

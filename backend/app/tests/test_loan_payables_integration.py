@@ -1124,3 +1124,23 @@ def test_an_unbilled_card_cannot_fund_a_transfer_into_a_loan(db, user):
     db.commit()
     txn = _post(db, user, unbilled, loan, "7550", datetime(2026, 10, 4), fee="450")
     assert txn.loan_payment_kind == "scheduled"
+
+
+def test_a_metadata_edit_of_a_legacy_transfer_into_a_loan_keeps_its_money(db, user):
+    bank = _bank(db, user, balance="42000")
+    loan = _loan(db, user, bank)
+    loan.balance = Decimal("-82000")  # the legacy 8,000 already applied, no fee
+    db.commit()
+    txn = _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 4), posted=True, kind=None)
+
+    txn = _put(db, user, txn, description="October payment")
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("8000.00"), Decimal("0.00"))
+    assert (txn.loan_payment_kind, txn.description) == ("scheduled", "October payment")
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82000.00"))
+
+    # An edit that gives the amount is split as a new fee-less payment would be.
+    other = _transfer(db, user, bank, loan, "8000", datetime(2026, 11, 4), kind=None)
+    other = _put(db, user, other, amount=8000)
+    assert (Decimal(str(other.amount)), Decimal(str(other.transfer_fee))) == (
+        Decimal("7590.00"), Decimal("410.00"))
