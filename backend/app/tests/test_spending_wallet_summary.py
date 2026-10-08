@@ -100,3 +100,32 @@ def test_inbound_transfers_from_outside_the_scope_are_not_expense():
     )
     assert result["total_expenses"] == Decimal("0")
     assert result["category_breakdown"] == {}
+
+
+def _credit(account, amount, category=None):
+    return SimpleNamespace(transaction_type=TransactionType.CREDIT, account_id=account,
+                           amount=Decimal(amount), category_id=category, transfer_fee=Decimal("0"),
+                           transfer_from_account_id=None, transfer_to_account_id=None)
+
+
+def test_synthetic_rows_add_into_same_named_user_categories():
+    clash = {11: "Unallocated wallet spend", 12: "Transfer fees", 13: "Uncategorized"}
+    result = summarize_period(
+        [
+            _debit(BANK, "100", 11),             # expense in a user category named like a synthetic row
+            _credit(BANK, "50", 11),             # income in it too
+            _debit(BANK, "30", 12),
+            _credit(BANK, "70", 13),
+            _debit(BANK, "5"),                   # no category: "Uncategorized"
+            _transfer(BANK, GCASH, "1000", "4"),
+        ],
+        WALLETS, clash, SCOPE,
+    )
+    breakdown = result["category_breakdown"]
+    assert breakdown["Unallocated wallet spend"] == {"income": Decimal("50"),
+                                                     "expenses": Decimal("1100")}
+    assert breakdown["Transfer fees"] == {"income": Decimal("0"), "expenses": Decimal("34")}
+    assert breakdown["Uncategorized"] == {"income": Decimal("70"), "expenses": Decimal("5")}
+    assert result["total_income"] == Decimal("120")
+    assert result["total_expenses"] == Decimal("1139")
+    _assert_invariant(result)

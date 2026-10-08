@@ -658,6 +658,12 @@ def summarize_period(
     Transfer fees are shown on a "Transfer fees" row: a transfer's own category
     (e.g. a savings contribution) describes the amount moved, not spending.
     Income is every credit. Rows without a category are grouped as "Uncategorized".
+
+    The breakdown is keyed by name, as it always has been (two categories with
+    one name already share a row). A synthetic row ("Uncategorized", "Transfer
+    fees", "Unallocated wallet spend") whose name a user category also uses is
+    added into that row, never written over it, so no amount is lost and the
+    expense column still sums to ``total_expenses``.
     """
     zero = Decimal("0")
     total_income = zero
@@ -700,7 +706,7 @@ def summarize_period(
                 total_expenses += fee
 
     if unallocated_wallet:
-        breakdown[UNALLOCATED_WALLET_SPEND] = {"income": zero, "expenses": unallocated_wallet}
+        row(UNALLOCATED_WALLET_SPEND)["expenses"] += unallocated_wallet
 
     return {
         "total_income": total_income,
