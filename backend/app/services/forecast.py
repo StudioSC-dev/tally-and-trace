@@ -764,6 +764,11 @@ def collect_events(
     inactive is still a wallet. A statement payable funded from a wallet has a
     non-cash funding leg: the wallet's money left projection cash when it was
     topped up, so paying the card from it must not take cash out a second time.
+    A loan payable's leg is on the loan's paying account and routed like a
+    transfer leg: cash only when that account is a scoped projection-cash
+    account, non-cash on a scoped wallet, and absent when the account is outside
+    the scope; a loan outside the scope paid from a scoped account is projected
+    too, so the payment leaves cash once, in the paying account's projection.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on both accounts. Like unposted
     transfers, recurring transfers into or out of a scoped account are collected
@@ -979,10 +984,25 @@ def collect_events(
     # They are found by the loan alone, so an entry stored under another entity
     # (paid from its own bank) still covers this loan; such an entry moves no cash
     # here, since its source account is outside this projection.
+    #
+    # The payable is paid from the loan's paying account, so it is routed like
+    # a transfer leg: it moves cash only in a projection that holds that account
+    # as projection cash. An in-scope loan paid from an account outside the
+    # scope keeps the event with no leg (listed, no cash), and an active loan
+    # outside the scope paid from an in-scope account is projected here too, so
+    # its cash leaves the paying account's projection exactly once.
+    payable_loans = loans + ([
+        a for a in db.query(Account).filter(
+            Account.account_type == AccountType.LOAN,
+            Account.is_active.is_(True),
+            Account.payment_account_id.in_(scoped_ids),
+        ).all() if a.id not in loan_ids
+    ] if scoped_ids else [])
+    payable_loan_ids = [a.id for a in payable_loans]
     loan_entries = db.query(BudgetEntry).filter(
-        BudgetEntry.transfer_to_account_id.in_(loan_ids),
+        BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
         BudgetEntry.is_active.is_(True),
-    ).all() if loan_ids else []
+    ).all() if payable_loan_ids else []
     linked_covers = Counter(
         (entry_id, _naive(when).date())
         for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
@@ -997,11 +1017,12 @@ def collect_events(
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
                 (occ.date(), _money(entry.amount)))
-    for p in build_loan_payables(db, loans, start, end, projected_covers):
+    for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
+        payer = p["funding_account_id"]
         events.append(_event(
             date=p["date"],
             name=p["name"],
@@ -1009,8 +1030,10 @@ def collect_events(
             source=p["source"],
             source_id=p["source_id"],
             face_amount=-p["amount"],
-            legs=[_leg(p["funding_account_id"], p["amount"], None,
-                       cash=p["funding_account_id"] not in wallet_ids)],
+            # Cash only on a scoped projection-cash account; a scoped wallet's leg
+            # is kept as non-cash, and an account outside the scope has no leg.
+            legs=([_leg(payer, p["amount"], None, cash=payer in cash_ids)]
+                  if payer in scoped_ids else []),
             **extra,
         ))
 

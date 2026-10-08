@@ -1006,3 +1006,59 @@ def test_a_reduce_term_part_payment_and_a_planned_cover_leave_cash_once(db, user
     # 16,000 owed for Oct 4 and Nov 4, 4,000 of it already paid: 12,000 leaves.
     assert out == [("2026-11-05", "loan", Decimal("-8000.00")),
                    ("2026-11-20", "transaction", Decimal("-4000.00"))]
+
+
+def test_a_loan_paid_from_another_entitys_account_leaves_cash_only_in_that_entity(db, user):
+    from app.models.account import Account, AccountType
+    from app.models.entity import Entity, EntityType
+    from app.services.forecast import (
+        collect_events, get_payables, project_cashflow, project_running_balance,
+    )
+
+    owner, payer = (Entity(name=f"Biz {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+                    for _ in range(2))
+    db.add_all([owner, payer])
+    db.commit()
+    try:
+        _account(db, user, "Owner bank", AccountType.CHECKING, "1000", entity_id=owner.id)
+        payer_bank = _account(db, user, "Payer bank", AccountType.CHECKING, "50000",
+                              entity_id=payer.id)
+        loan = _loan(db, user, payer_bank, entity_id=owner.id)
+
+        # The loan's own entity lists the due date but pays nothing from it.
+        timeline = project_running_balance(db, user.id, owner.id, days=30, reference=REF)
+        assert timeline["events"] == []
+        assert timeline["closing_balance"] == Decimal("1000.00")
+        assert timeline["unassigned_closing"] == Decimal("0")
+        assert _closings(timeline) == {"Owner bank": Decimal("1000.00")}
+        month = project_cashflow(db, user.id, owner.id, months=1, reference=REF)[0]
+        assert (month["net"], month["closing_balance"], month["unassigned_closing"]) == (
+            0.0, 1000.0, 0.0)
+        assert get_payables(db, user.id, owner.id, days=30, reference=REF) == []
+        listed = [e for e in collect_events(db, REF, datetime(2026, 11, 1), user_id=user.id,
+                                            entity_id=owner.id) if e["source"] == "loan"]
+        assert [(e["source_id"], e["counts_as_cash"], e["legs"]) for e in listed] == [
+            (loan.id, False, [])]
+
+        # The paying account's entity pays it, once.
+        timeline = project_running_balance(db, user.id, payer.id, days=30, reference=REF)
+        assert [(e["source"], e["amount"]) for e in timeline["events"]] == [
+            ("loan", Decimal("-8000.00"))]
+        assert timeline["closing_balance"] == Decimal("42000.00")
+        assert timeline["unassigned_closing"] == Decimal("0")
+        assert _closings(timeline) == {"Payer bank": Decimal("42000.00")}
+        month = project_cashflow(db, user.id, payer.id, months=1, reference=REF)[0]
+        assert (month["net"], month["closing_balance"], month["unassigned_closing"]) == (
+            -8000.0, 42000.0, 0.0)
+        assert [(p["source"], p["amount"], p["account_id"]) for p in get_payables(
+            db, user.id, payer.id, days=30, reference=REF)] == [("loan", 8000.0, payer_bank.id)]
+
+        # Unscoped, both accounts are in view: still once.
+        timeline = project_running_balance(db, user.id, days=30, reference=REF)
+        assert timeline["closing_balance"] == Decimal("43000.00")
+        assert [e["source"] for e in timeline["events"]] == ["loan"]
+    finally:
+        db.query(Account).filter(Account.user_id == user.id).update({"payment_account_id": None})
+        db.query(Account).filter(Account.entity_id.in_([owner.id, payer.id])).delete()
+        db.query(Entity).filter(Entity.id.in_([owner.id, payer.id])).delete()
+        db.commit()
