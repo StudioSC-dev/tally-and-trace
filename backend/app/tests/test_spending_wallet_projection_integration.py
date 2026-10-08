@@ -523,3 +523,43 @@ def test_disposable_income_does_not_expense_a_top_up_funded_from_another_entity(
 
     assert get_disposable_income(db, user.id, a.id) == {
         "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
+
+
+def test_recurring_transfers_materialised_without_advancing_move_money_once(client, db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    bank = _account(db, user, "Bank", AccountType.SAVINGS, "10000.00")
+    checking = _account(db, user, "Checking", AccountType.CHECKING, "0.00")
+    gcash = _wallet(db, user, "GCash")
+    top_up = _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "1000.00",
+                    datetime(2026, 11, 2), account=bank, transfer_to_account_id=gcash.id)
+    move = _entry(db, user, "Bank to checking", BudgetEntryType.EXPENSE, "3000.00",
+                  datetime(2026, 11, 3), account=bank, transfer_to_account_id=checking.id)
+
+    def views():
+        timeline = project_running_balance(db, user.id, days=30, reference=REF)
+        month = project_cashflow(db, user.id, months=1, reference=REF)[0]
+        payables = get_payables(db, user.id, days=30, reference=REF)
+        return (timeline["closing_balance"], _closings(timeline), month["closing_balance"],
+                {a["account_name"]: a["closing_balance"] for a in month["by_account"]},
+                [(p["name"], p["amount"]) for p in payables])
+
+    expected = (Decimal("9000.00"), {"Bank": Decimal("6000.00"), "Checking": Decimal("3000.00")},
+                9000.0, {"Bank": 6000.0, "Checking": 3000.0}, [("Load GCash", 1000.0)])
+    assert views() == expected
+
+    login = client.post("/api/v1/auth/login",
+                        json={"email": user.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    for entry in (top_up, move):
+        r = client.post(f"/api/v1/budget-entries/{entry.id}/materialize", headers=auth,
+                        json={"advance": False})
+        assert r.status_code == 201, r.text
+    db.expire_all()
+
+    # The posted transfers already moved the balances; their occurrences are not
+    # projected again, so every view closes where it did before.
+    assert views() == (expected[0], expected[1], expected[2], expected[3], [])

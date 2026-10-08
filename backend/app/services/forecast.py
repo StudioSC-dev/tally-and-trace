@@ -724,6 +724,10 @@ def collect_events(
     occurrence is a transfer event with legs on both accounts. Like unposted
     transfers, recurring transfers into or out of a scoped account are collected
     even when the entry belongs to another scope, keeping only the in-scope legs.
+    An occurrence already materialised is suppressed: a transaction with this
+    ``budget_entry_id`` dated the same calendar day stands in for it (each
+    transaction suppresses at most one occurrence), so a ``materialize`` with
+    ``advance=False`` does not move the money twice.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -795,6 +799,16 @@ def collect_events(
           for acc in (a.payment_account_id, a.payment_overflow_account_id)),
     ))
 
+    # Transactions already materialised from a recurring transfer entry, by day:
+    # each stands in for one occurrence on its calendar day (as in
+    # _card_entry_charges), since the posted transfer has already moved the balance.
+    transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
+    linked = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
+    ) if transfer_entry_ids else Counter()
+
     card_entries = []
     for entry in entries:
         if entry.transfer_to_account_id is not None:
@@ -804,6 +818,10 @@ def collect_events(
             if not entry_in_scope(entry) and overflow_id not in cash_ids:
                 overflow_id = None
             for occ in iter_occurrences(entry, start, end):
+                key = (entry.id, occ.date())
+                if linked[key]:
+                    linked[key] -= 1
+                    continue  # already materialised (e.g. advance=False)
                 events.append(_transfer_event(
                     SimpleNamespace(
                         id=entry.id,
