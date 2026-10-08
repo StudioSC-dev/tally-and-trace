@@ -1048,7 +1048,7 @@ export function AccountsPage() {
                     setIsCreateModalOpen(false)
                     setEditingAccount(null)
                     setFormData(blankForm(defaultCurrency))
-                  setAmortizationTouched(false)
+                    setAmortizationTouched(false)
                   }}
                   className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"
                 >
