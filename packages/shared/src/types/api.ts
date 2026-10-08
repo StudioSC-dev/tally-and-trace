@@ -41,7 +41,13 @@ export interface Account {
   loan_first_payment_date?: string | null
   /** Loans: defaults to `reduce_term` for home loans, `fixed` otherwise. */
   loan_amortization?: LoanAmortization | null
-  /** Loans: scheduled payments made before the loan was tracked here. */
+  /**
+   * Loans: scheduled payments made before the loan was tracked here. Later due dates
+   * are settled by the posted `scheduled` payments' combined amount (principal +
+   * interest), oldest first; legacy transfers (`loan_payment_kind` null) never count.
+   * Lower it when a legacy transfer is moved out of the loan and back in (that stamps
+   * it, so it is counted again).
+   */
   loan_payments_made_offset?: number | null
   entity_id: number
   is_active: boolean
@@ -253,7 +259,13 @@ export interface Transaction {
   transfer_fee: number
   transfer_from_account_id?: number
   transfer_to_account_id?: number
-  /** Set by the loan payment / prepayment endpoints; null on other transactions. */
+  /**
+   * Set on every transfer into a loan recorded through the API (the loan payment and
+   * prepayment endpoints, a generic create, a materialised recurring entry, an edit
+   * that retargets a row into a loan, posting a legacy planned row). Null on other
+   * transactions and on legacy transfers into a loan, which an otherwise unchanged
+   * edit leaves null; a posted legacy transfer into a loan cannot be unposted.
+   */
   loan_payment_kind?: LoanPaymentKind | null
   created_at: string
   updated_at?: string
@@ -442,8 +454,9 @@ export interface CashflowTimelineEvent {
    * Where the event came from. `statement` is a credit card's derived payable for
    * one billing cycle — its `source_id` is the CARD's account id, not a transaction.
    * `loan` is a loan's payable for one due date — its `source_id` is the LOAN's
-   * account id, or null when the caller cannot access the loan (then the event
-   * is a neutral "Loan payment"), and the outflow sits on the loan's paying account.
+   * account id, and the outflow sits on the loan's paying account. Any event paying
+   * a loan the caller cannot access (`loan`, `transaction` or `budget_entry`) has a
+   * null `source_id` and is a neutral "Loan payment".
    */
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
