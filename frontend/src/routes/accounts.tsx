@@ -213,7 +213,15 @@ export function AccountsPage() {
     e.preventDefault()
     try {
       if (editingAccount) {
-        await updateAccount({ id: editingAccount.id, data: formData }).unwrap()
+        // A cleared selector is undefined, which JSON drops; send null so "None" saves.
+        await updateAccount({
+          id: editingAccount.id,
+          data: {
+            ...formData,
+            payment_account_id: formData.payment_account_id ?? null,
+            payment_overflow_account_id: formData.payment_overflow_account_id ?? null,
+          },
+        }).unwrap()
         setEditingAccount(null)
       } else {
         await createAccount(formData).unwrap()

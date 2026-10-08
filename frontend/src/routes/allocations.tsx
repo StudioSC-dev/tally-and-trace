@@ -783,7 +783,8 @@ export function AllocationsPage() {
           amount: subscriptionForm.amount,
           currency: subscriptionForm.currency,
           account_id: subscriptionForm.account_id,
-          overflow_account_id: subscriptionForm.overflow_account_id || undefined,
+          // null clears the overflow account on edit; omitted on create.
+          overflow_account_id: subscriptionForm.overflow_account_id || (editingBudgetEntry ? null : undefined),
           // null clears a destination on edit; omitted on create. Only expenses carry one.
           transfer_to_account_id:
             (subscriptionForm.entry_type === 'expense' && subscriptionForm.transfer_to_account_id) ||
