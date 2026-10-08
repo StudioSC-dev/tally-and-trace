@@ -857,7 +857,6 @@ def collect_events(
         for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
         .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
     ) if transfer_entry_ids else Counter()
-    linked_covers = Counter(linked)
 
     card_entries = []
     for entry in entries:
@@ -972,10 +971,20 @@ def collect_events(
     # payments into it cover (see services/loans.py). Recurring transfers into a
     # loan are projected past the window end, as a payment late for a due date in
     # the window still covers it; one already materialised is skipped, as above.
+    # They are found by the loan alone, so an entry stored under another entity
+    # (paid from its own bank) still covers this loan; such an entry moves no cash
+    # here, since its source account is outside this projection.
+    loan_entries = db.query(BudgetEntry).filter(
+        BudgetEntry.transfer_to_account_id.in_(loan_ids),
+        BudgetEntry.is_active.is_(True),
+    ).all() if loan_ids else []
+    linked_covers = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_([e.id for e in loan_entries]))
+    ) if loan_entries else Counter()
     projected_covers: dict = {}
-    for entry in entries:
-        if entry.transfer_to_account_id not in loan_ids:
-            continue
+    for entry in loan_entries:
         for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
             key = (entry.id, occ.date())
             if linked_covers[key]:

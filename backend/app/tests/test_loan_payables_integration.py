@@ -620,6 +620,40 @@ def test_posted_partial_payment_before_the_window_leaves_an_overdue_remainder(db
         (REF, True, Decimal("-3000.00")), (datetime(2026, 10, 4), None, Decimal("-8000.00"))]
 
 
+def test_a_planned_payment_from_another_entity_covers_the_loan(db, user):
+    from app.models.account import Account, AccountType
+    from app.models.entity import Entity, EntityType
+    from app.services.forecast import collect_events
+
+    entity = Entity(name=f"Biz {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+    db.add(entity)
+    db.commit()
+    try:
+        biz_bank = _account(db, user, "Biz bank", AccountType.CHECKING, "50000",
+                            entity_id=entity.id)
+        biz_loan = _loan(db, user, biz_bank, entity_id=entity.id)
+        personal = _bank(db, user, name="Personal")
+        _transfer(db, user, personal, biz_loan, "8000", datetime(2026, 10, 4))  # stored personal
+        _recurring(db, user, personal, biz_loan, "8000", datetime(2026, 11, 4))
+
+        events = collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id,
+                                entity_id=entity.id)
+        assert [e for e in events if e["source"] == "loan"] == []
+        # The paying legs belong to the personal scope, not this one.
+        assert all(leg["account_id"] != personal.id for e in events for leg in e["legs"])
+    finally:
+        from app.models.budget_entry import BudgetEntry
+        from app.models.transaction import Transaction
+
+        db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+        db.query(BudgetEntry).filter(BudgetEntry.user_id == user.id).delete()
+        db.query(Account).filter(Account.entity_id == entity.id).update(
+            {"payment_account_id": None})
+        db.query(Account).filter(Account.entity_id == entity.id).delete()
+        db.query(Entity).filter(Entity.id == entity.id).delete()
+        db.commit()
+
+
 def test_reduce_term_part_payment_leaves_only_the_rest_of_that_payment(db, user):
     bank = _bank(db, user)
     loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home",
