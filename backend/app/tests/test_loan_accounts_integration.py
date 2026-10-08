@@ -804,6 +804,7 @@ def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client
     tx = other.begin()
     result = {}
     try:
+        holder_pid = other.execute(text("SELECT pg_backend_pid()")).scalar()
         other.execute(text("SELECT id FROM accounts WHERE id = :id FOR UPDATE"),
                       {"id": loan["id"]})
         other.execute(text("UPDATE accounts SET balance = -300 WHERE id = :id"),
@@ -818,8 +819,9 @@ def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client
         with engine.connect() as probe:
             while True:
                 waiting = probe.execute(text(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                    "AND wait_event_type = 'Lock'")).scalar()
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE pg_blocking_pids(pid) @> ARRAY[CAST(:holder AS integer)]"),
+                    {"holder": holder_pid}).scalar()
                 if waiting or not worker.is_alive() or time.monotonic() > deadline:
                     break
                 time.sleep(0.05)
