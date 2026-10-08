@@ -28,6 +28,14 @@ type LoanAmortization = NonNullable<Account['loan_amortization']>
 /** Home loans shorten their term on extra principal; the others follow the bank's schedule. */
 const defaultAmortization = (kind: LoanKind): LoanAmortization => (kind === 'home' ? 'reduce_term' : 'fixed')
 
+/** Today as YYYY-MM-DD in local time, to compare with a date input's value. */
+const todayInput = (): string => {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 const blankForm = (currency: CurrencyCode) => ({
   name: '',
   account_type: 'checking' as Account['account_type'],
@@ -989,6 +997,14 @@ export function AccountsPage() {
                     <p className="mt-1 text-xs text-muted">
                       Scheduled payments made before this loan was tracked here. Payments recorded here are counted on top.
                     </p>
+                    {formData.loan_payments_made_offset === undefined &&
+                      !!formData.loan_first_payment_date &&
+                      formData.loan_first_payment_date < todayInput() && (
+                        <p className="mt-1 text-xs text-warn">
+                          The first payment date is in the past: with no payments already made, every due date
+                          from then until today will show as overdue.
+                        </p>
+                      )}
                   </div>
 
                   <div>
