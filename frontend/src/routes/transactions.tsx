@@ -91,6 +91,22 @@ const getMonthEnd = (date: Date) => new Date(date.getFullYear(), date.getMonth()
 
 const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()
 
+// A loan payment stores its principal as the amount and its interest as the fee;
+// the form and the posting flow work with the whole payment, in whole cents.
+const toPrincipal = (total: number, interest?: number | null) =>
+  Math.round((total - (interest ?? 0)) * 100) / 100
+
+const toTotal = (principal: number, interest?: number | null) =>
+  Math.round((principal + (interest ?? 0)) * 100) / 100
+
+// Whether the stored row is already a transfer into the account (an edit of it
+// is never split by the server, see routers/transactions.py).
+const paysLoan = (transaction: Transaction | null, accountId: number | undefined) =>
+  transaction !== null &&
+  accountId !== undefined &&
+  transaction.transaction_type === 'transfer' &&
+  transaction.transfer_to_account_id === accountId
+
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
@@ -546,6 +562,10 @@ export function TransactionsPage() {
   // A transfer into a loan is a loan payment: its fee is the interest.
   const transferIntoLoan =
     formData.transaction_type === 'transfer' && destinationFormAccount?.account_type === 'loan'
+  const isLoanPayment = (transaction: Transaction) =>
+    transaction.transaction_type === 'transfer' &&
+    accounts.find((account) => account.id === transaction.transfer_to_account_id)?.account_type ===
+      'loan'
 
   // Account-type-aware nudge toward the correct dual-perspective framing.
   const contextHint = useMemo<{ text: string; suggestTransfer: boolean } | null>(() => {
@@ -706,9 +726,33 @@ export function TransactionsPage() {
         actualAmount = projectedAmount
       }
 
+      // For a transfer into a loan the amount entered is the whole payment; the
+      // stored amount is its principal, so interest is taken out of it. Blank
+      // interest on a row newly paying the loan is left out so the server splits
+      // the amount; on a row already paying it the server never splits, so blank
+      // is sent as 0 and the payment stays the amount entered.
+      let principal = actualAmount
+      let transferFee: number | undefined =
+        formData.transaction_type === 'transfer' ? formData.transfer_fee ?? 0 : 0
+      if (transferIntoLoan) {
+        if (formData.transfer_fee === undefined) {
+          transferFee = paysLoan(editingTransaction, formData.transfer_to_account_id)
+            ? 0
+            : undefined
+        } else {
+          if (actualAmount !== undefined) {
+            if (formData.transfer_fee > actualAmount) {
+              alert('The interest cannot be more than the payment amount.')
+              return
+            }
+            principal = toPrincipal(actualAmount, formData.transfer_fee)
+          }
+        }
+      }
+
       const payload: Record<string, unknown> = {
         account_id: formData.account_id,
-        amount: actualAmount,
+        amount: principal,
         currency: accountCurrency,
         description: formData.description,
         transaction_type: formData.transaction_type,
@@ -720,14 +764,7 @@ export function TransactionsPage() {
             ? new Date().toISOString()
             : undefined,
         is_posted: formData.is_posted,
-        // Blank interest on a loan payment is left out, so the server splits the
-        // amount into principal and interest; any other transfer defaults to 0.
-        transfer_fee:
-          formData.transaction_type !== 'transfer'
-            ? 0
-            : transferIntoLoan && formData.transfer_fee === undefined
-            ? undefined
-            : formData.transfer_fee ?? 0,
+        transfer_fee: transferFee,
         transfer_from_account_id:
           formData.transaction_type === 'transfer'
             ? formData.transfer_from_account_id ?? formData.account_id
@@ -779,15 +816,20 @@ export function TransactionsPage() {
 
   const handleEdit = (transaction: Transaction) => {
     setEditingTransaction(transaction)
+    // A loan payment's form amount is the whole payment (principal + interest).
+    const intoLoan = isLoanPayment(transaction)
+    const total = intoLoan
+      ? toTotal(transaction.amount, transaction.transfer_fee)
+      : transaction.amount
     setFormData(
       createInitialFormState({
       account_id: transaction.account_id,
         category_id: transaction.category_id ?? undefined,
         allocation_id: transaction.allocation_id ?? undefined,
         budget_entry_id: transaction.budget_entry_id ?? undefined,
-      amount: transaction.amount,
+      amount: total,
         currency: (transaction.currency as CurrencyCode) || fallbackCurrency,
-        projected_amount: transaction.projected_amount ?? undefined,
+        projected_amount: transaction.projected_amount ?? (intoLoan ? total : undefined),
         projected_currency:
           (transaction.projected_currency as CurrencyCode) ||
           (transaction.currency as CurrencyCode) ||
@@ -832,10 +874,14 @@ export function TransactionsPage() {
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
     const timestamp = new Date().toISOString()
+    // A loan payment's posted amount is the whole payment; its interest is kept.
+    const amount = isLoanPayment(transaction)
+      ? toPrincipal(actualAmount, transaction.transfer_fee)
+      : actualAmount
     const payload: Record<string, unknown> = {
       is_posted: true,
       posting_date: timestamp,
-      amount: actualAmount,
+      amount,
       currency: accountCurrency,
       exchange_rate: exchangeRate,
     }
@@ -844,7 +890,7 @@ export function TransactionsPage() {
       ...transaction,
       is_posted: true,
       posting_date: timestamp,
-      amount: actualAmount,
+      amount,
       currency: accountCurrency,
       exchange_rate: exchangeRate,
     }
@@ -859,7 +905,11 @@ export function TransactionsPage() {
     const payload: Record<string, unknown> = {
       is_posted: false,
       posting_date: undefined,
-      amount: transaction.projected_amount ?? transaction.amount,
+      // A loan payment's projected amount is the whole payment; its interest is kept.
+      amount:
+        transaction.projected_amount != null && isLoanPayment(transaction)
+          ? toPrincipal(transaction.projected_amount, transaction.transfer_fee)
+          : transaction.projected_amount ?? transaction.amount,
       currency: accountCurrency,
       exchange_rate: undefined,
     }
@@ -880,7 +930,13 @@ export function TransactionsPage() {
   const handleInitPostingForm = (transaction: Transaction) => {
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
-    const projectedAmount = transaction.projected_amount ?? transaction.amount ?? null
+    // A loan payment is posted for its whole amount (principal + interest).
+    const projectedAmount =
+      transaction.projected_amount ??
+      (isLoanPayment(transaction)
+        ? toTotal(transaction.amount, transaction.transfer_fee)
+        : transaction.amount) ??
+      null
     const projectedCurrency =
       (transaction.projected_currency as CurrencyCode) ??
       (transaction.currency as CurrencyCode) ??
@@ -1795,6 +1851,14 @@ export function TransactionsPage() {
                             setFormData((prev) => ({
                               ...prev,
                               transfer_to_account_id: isSelected ? undefined : account.id,
+                              // Newly paying a loan: the fee becomes the interest, left
+                              // blank so the server splits the amount at the loan's rate.
+                              transfer_fee:
+                                !isSelected &&
+                                account.account_type === 'loan' &&
+                                !paysLoan(editingTransaction, account.id)
+                                  ? undefined
+                                  : prev.transfer_fee,
                             }))
                           }
                           className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
