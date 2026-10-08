@@ -1452,3 +1452,93 @@ def test_unposting_a_legacy_posted_transfer_into_a_loan_is_refused(db, user):
     assert (txn.loan_payment_kind, txn.is_posted) == (None, True)
     assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82000.00"))
     assert _schedule(db, loan)["payments_made"] == 1  # the offset only
+
+
+def _fee15_transfer_to_savings(db, user):
+    """A posted 8,000 bank -> savings transfer with a stored fee of 15, and a loan."""
+    from app.models.account import AccountType
+
+    bank = _bank(db, user)
+    savings = _account(db, user, "Savings", AccountType.SAVINGS, "0")
+    loan = _loan(db, user, bank)  # 6% on 90,000: 450 interest this month
+    txn = _post(db, user, bank, savings, "8000", datetime(2026, 10, 4), fee="15")
+    assert _balances(db, bank, savings) == (Decimal("41985.00"), Decimal("8000.00"))
+    return bank, savings, loan, txn
+
+
+@pytest.mark.parametrize("changes", [{"amount": 8000}, {"amount": 8000, "transfer_fee": None}],
+                         ids=["no_fee", "null_fee"])
+def test_a_transfer_retargeted_into_a_loan_without_a_fee_does_not_reuse_its_old_fee(
+        db, user, changes):
+    bank, savings, loan, txn = _fee15_transfer_to_savings(db, user)
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan.id, **changes)
+    assert txn.loan_payment_kind == "scheduled"
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7550.00"), Decimal("450.00"))
+    # The old 8,015 is reversed and the 8,000 sent is taken once.
+    assert _balances(db, bank, savings, loan) == (
+        Decimal("42000.00"), Decimal("0.00"), Decimal("-82450.00"))
+    _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_a_transfer_retargeted_into_a_loan_with_no_amount_splits_the_cash_it_moves(db, user):
+    from app.services.forecast import project_running_balance
+
+    bank, savings, loan, txn = _fee15_transfer_to_savings(db, user)
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan.id)
+    assert txn.loan_payment_kind == "scheduled"
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7565.00"), Decimal("450.00"))
+    assert _balances(db, bank, savings, loan) == (
+        Decimal("41985.00"), Decimal("0.00"), Decimal("-82435.00"))
+    # 8,015 pays Oct 4 and 15 of Nov 4.
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    assert [(e["date"], e["amount"]) for e in _loan_events(db, user, END)] == [
+        (datetime(2026, 11, 4), Decimal("-7985.00"))]
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("34000.00")
+
+
+@pytest.mark.parametrize("changes", [{"amount": 8450}, {}], ids=["amount_sent", "no_amount"])
+def test_a_legacy_transfer_moved_to_another_loan_is_split_against_that_loan(db, user, changes):
+    from app.services.forecast import project_running_balance
+
+    bank = _bank(db, user, balance="41550")  # the legacy 8,000 + 450 already left
+    loan_a = _loan(db, user, bank, loan_payments_made_offset=1)
+    loan_a.balance = Decimal("-82000")
+    loan_b = _loan(db, user, bank, loan_annual_rate=Decimal("12"),
+                   loan_payment_amount=Decimal("8450"))
+    loan_b.balance = Decimal("-60000")  # 12% on 60,000: 600 interest this month
+    db.commit()
+    txn = _transfer(db, user, bank, loan_a, "8000", datetime(2026, 10, 4), posted=True,
+                    fee="450", kind=None)
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan_b.id, **changes)
+    assert (txn.loan_payment_kind, txn.transfer_to_account_id) == ("scheduled", loan_b.id)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7850.00"), Decimal("600.00"))
+    # The 8,450 is reversed and taken again: the source is debited 8,450 once.
+    assert _balances(db, bank, loan_a, loan_b) == (
+        Decimal("41550.00"), Decimal("-90000.00"), Decimal("-52150.00"))
+    s = _schedule(db, loan_b)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    assert _schedule(db, loan_a)["payments_made"] == 1  # the offset only
+    assert sorted((e["date"], e["amount"]) for e in _loan_events(db, user, END)) == [
+        (datetime(2026, 11, 4), Decimal("-8450.00")), (datetime(2026, 11, 4), Decimal("-8000.00"))]
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("25100.00")  # 41,550 - 8,450 - 8,000
+
+
+def test_a_transfer_retargeted_into_a_loan_keeps_an_explicit_fee(db, user):
+    bank, savings, loan, txn = _fee15_transfer_to_savings(db, user)
+
+    txn = _put(db, user, txn, transfer_to_account_id=loan.id, amount=7900, transfer_fee=100)
+    assert txn.loan_payment_kind == "scheduled"
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7900.00"), Decimal("100.00"))
+    assert _balances(db, bank, savings, loan) == (
+        Decimal("42000.00"), Decimal("0.00"), Decimal("-82100.00"))
+    _assert_paid_once_then_november(db, user, loan, bank)

@@ -359,9 +359,11 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     same classification and checks as a new one, before anything is changed.
     Without it the posted row would not settle its due date and the payable
     would be charged again. The row has no old effect on that loan, so it is
-    validated against the loan as it stands. With no fee in the request and
-    none on the row, the amount is split into principal and interest as for a
-    new payment without a fee.
+    validated against the loan as it stands. With no fee in the request
+    (missing or null), the row's stored fee is not reused as interest: the
+    request's amount, else the cash the row already moves (its amount plus a
+    transfer's fee), is split into principal and interest as for a new payment
+    without a fee. A fee the request gives is its own split and is kept.
 
     A row that was already a transfer into that same loan (a legacy unmarked
     payment) is stamped only when the edit posts it
@@ -384,14 +386,19 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     if (txn.transaction_type == TransactionType.TRANSFER
             and txn.transfer_to_account_id == loan.id):
         return _stamp_posted_legacy_loan_payment(db, user, txn, requested, loan, source_id)
-    if requested.get("transfer_fee") is not None:
-        interest = requested["transfer_fee"]
-    else:
-        interest = txn.transfer_fee or None
+    interest = requested.get("transfer_fee")
+    principal = requested.get("amount")
+    if interest is None and principal is None:
+        # The total to split is the cash the row already moves.
+        principal = _D(txn.amount)
+        if txn.transaction_type == TransactionType.TRANSFER:
+            principal += _D(txn.transfer_fee or 0)
+    elif principal is None:
+        principal = txn.amount
     return _loan_payment_stamp(
         db, user, loan, source_id,
         currency=requested.get("currency"),
-        principal=requested.get("amount", txn.amount),
+        principal=principal,
         interest=interest,
         posted=bool(requested.get("is_posted", txn.is_posted)))
 
