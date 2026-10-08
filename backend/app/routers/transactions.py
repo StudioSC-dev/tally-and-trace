@@ -13,7 +13,7 @@ from app.core.entity_context import (
 )
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.models.category import Category
 from app.models.entity import Entity
@@ -632,10 +632,12 @@ UNCATEGORIZED = "Uncategorized"
 TRANSFER_FEES = "Transfer fees"
 UNALLOCATED_WALLET_SPEND = "Unallocated wallet spend"
 RETURNED_FROM_WALLETS = "Returned from wallets"
+LOAN_INTEREST_PREFIX = "Interest: "
 
 
 def summarize_period(
-    transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int]
+    transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
+    loan_names: Optional[dict] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
 
@@ -672,6 +674,10 @@ def summarize_period(
 
     Transfer fees are shown on a "Transfer fees" row: a transfer's own category
     (e.g. a savings contribution) describes the amount moved, not spending.
+    A loan payment is a transfer into the loan whose amount is principal (moving
+    your own money against a debt, so not an expense) and whose fee is interest;
+    for a destination in ``loan_names`` ({account id: name}) that fee is shown on
+    an "Interest: <loan name>" row instead, counted exactly as any other fee.
     Income is every credit. Rows without a category are grouped as "Uncategorized".
 
     The breakdown is keyed by name, as it always has been (two categories with
@@ -681,6 +687,7 @@ def summarize_period(
     no amount is lost and the expense column still sums to ``total_expenses``.
     """
     zero = Decimal("0")
+    loan_names = loan_names or {}
     total_income = zero
     total_expenses = zero
     unallocated_wallet = zero
@@ -717,7 +724,9 @@ def summarize_period(
             from_wallet = source in wallet_ids
             to_wallet = destination in wallet_ids
             if fee:
-                row(TRANSFER_FEES)["expenses"] += fee
+                fee_row = (f"{LOAN_INTEREST_PREFIX}{loan_names[destination]}"
+                           if destination in loan_names else TRANSFER_FEES)
+                row(fee_row)["expenses"] += fee
             if from_wallet:
                 unallocated_wallet -= fee
                 if destination in scope_ids and not to_wallet:
@@ -789,16 +798,19 @@ def get_transaction_summary(
         for acc_id in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)
         if acc_id is not None
     }
-    wallet_ids = {
-        a.id for a in db.query(Account).filter(Account.id.in_(account_ids)).all()
-        if is_spending_wallet(a)
-    } if account_ids else set()
+    referenced = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
+    wallet_ids = {a.id for a in referenced if is_spending_wallet(a)}
+    # Loans the caller can see get their own interest row (others stay "Transfer fees").
+    loan_names = {
+        a.id: a.name for a in referenced
+        if a.account_type == AccountType.LOAN and can_access_record(db, current_user, a)
+    }
     category_ids = {t.category_id for t in transactions if t.category_id}
     category_names = {
         c.id: c.name for c in db.query(Category).filter(Category.id.in_(category_ids)).all()
     } if category_ids else {}
 
-    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids)
+    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses

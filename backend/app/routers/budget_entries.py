@@ -109,11 +109,11 @@ def _ensure_related_resources(
 
 
 def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int]) -> None:
-    """An overflow account is a funding source: accessible, and not a spending wallet.
+    """An overflow account is a funding source: accessible, not a wallet or a loan.
 
-    A wallet is not projection cash, so routing cannot pull an uncovered payment
-    from it. Access is checked first so the wallet rule never describes an
-    account the caller cannot see.
+    Neither a wallet nor a loan is projection cash, so routing cannot pull an
+    uncovered payment from one. Access is checked first so the type rules never
+    describe an account the caller cannot see.
     """
     if not overflow_account_id:
         return
@@ -124,6 +124,30 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
         raise HTTPException(
             status_code=400,
             detail="overflow_account_id must be a funding account, not a spending wallet",
+        )
+    if account.account_type == AccountType.LOAN:
+        raise HTTPException(
+            status_code=400,
+            detail="overflow_account_id must be a funding account, not a loan",
+        )
+
+
+def _validate_entry_account(db: Session, account_id: Optional[int]) -> None:
+    """An entry is paid from (or into) its account, so that cannot be a loan.
+
+    A loan holds no cash: paying a bill or a recurring transfer out of one would
+    count owed money as cash in the projection. Paying INTO a loan is a
+    recurring transfer with the loan as ``transfer_to_account_id``. Run after
+    ``_ensure_related_resources``, which checks access.
+    """
+    if not account_id:
+        return
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if account is not None and account.account_type == AccountType.LOAN:
+        raise HTTPException(
+            status_code=400,
+            detail="A budget entry cannot be paid from a loan; "
+                   "use a recurring transfer into the loan instead",
         )
 
 
@@ -241,6 +265,7 @@ def create_budget_entry(
         category_id=entry_in.category_id,
         allocation_id=entry_in.allocation_id,
     )
+    _validate_entry_account(db, entry_in.account_id)
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
     _validate_transfer_destination(
         db, current_user, entry_in.account_id, entry_in.transfer_to_account_id,
@@ -281,6 +306,8 @@ def update_budget_entry(
         category_id=prospective_data.get("category_id", entry.category_id),
         allocation_id=prospective_data.get("allocation_id", entry.allocation_id),
     )
+    if "account_id" in prospective_data:
+        _validate_entry_account(db, prospective_data["account_id"])
     if "overflow_account_id" in prospective_data:
         _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"])
     _validate_transfer_destination(
