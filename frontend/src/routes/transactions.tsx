@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import type { Transaction, BudgetEntry } from '../store/api'
+import type { Account, Transaction, BudgetEntry } from '../store/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 
@@ -106,6 +106,23 @@ const paysLoan = (transaction: Transaction | null, accountId: number | undefined
   accountId !== undefined &&
   transaction.transaction_type === 'transfer' &&
   transaction.transfer_to_account_id === accountId
+
+// Whether a row is a loan payment: `loan` / `not_loan`, `pending` while its
+// destination is being looked up, `unavailable` when that lookup found nothing.
+type LoanPaymentStatus = 'loan' | 'not_loan' | 'pending' | 'unavailable'
+
+const DESTINATION_UNAVAILABLE =
+  "This transfer's destination account can't be found, so it is read-only here."
+
+// The API's reason for a refused request (e.g. a loan payment rule), or ''.
+const apiErrorMessage = (error: unknown) => {
+  const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
+  return typeof detail === 'string'
+    ? detail
+    : Array.isArray(detail)
+      ? detail.map((item) => (item as { msg?: string })?.msg).filter(Boolean).join('; ')
+      : ''
+}
 
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -384,6 +401,11 @@ export function TransactionsPage() {
   const [deleteTransaction] = useDeleteTransactionMutation()
 
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
+  // Destinations looked up by id because they are not in `accounts` (inactive,
+  // or past its first 100); null when the lookup found no such account.
+  const [triggerAccount] = useLazyGetAccountQuery()
+  const [resolvedDestinations, setResolvedDestinations] = useState<Record<number, Account | null>>({})
+  const destinationLookups = useRef(new Set<number>())
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
   const budgetEntries = useMemo(() => budgetEntriesData?.items ?? [], [budgetEntriesData])
   const limit = 10
@@ -559,13 +581,75 @@ export function TransactionsPage() {
     () => accounts.find((account) => account.id === formData.transfer_to_account_id),
     [accounts, formData.transfer_to_account_id]
   )
-  // A transfer into a loan is a loan payment: its fee is the interest.
+  // A stored row is a loan payment when the server marked it one; an unmarked
+  // (legacy) transfer is one when its destination is a loan, looked up by id
+  // when it is not in `accounts`.
+  const loanPaymentStatus = useCallback(
+    (transaction: Transaction): LoanPaymentStatus => {
+      if (transaction.loan_payment_kind) {
+        return 'loan'
+      }
+      const destinationId = transaction.transfer_to_account_id
+      if (transaction.transaction_type !== 'transfer' || destinationId == null) {
+        return 'not_loan'
+      }
+      const destination =
+        accounts.find((account) => account.id === destinationId) ?? resolvedDestinations[destinationId]
+      if (destination === null) {
+        return 'unavailable'
+      }
+      if (destination === undefined) {
+        return 'pending'
+      }
+      return destination.account_type === 'loan' ? 'loan' : 'not_loan'
+    },
+    [accounts, resolvedDestinations]
+  )
+  const isLoanPayment = (transaction: Transaction) => loanPaymentStatus(transaction) === 'loan'
+  // Editing, posting or reverting a row waits until it is classified; a row
+  // whose destination can't be found is read-only.
+  const actionLoanStatus: LoanPaymentStatus = actionTransaction
+    ? loanPaymentStatus(actionTransaction)
+    : 'not_loan'
+  const actionLocked = actionLoanStatus === 'pending' || actionLoanStatus === 'unavailable'
+
+  useEffect(() => {
+    if (!accountsData) {
+      return
+    }
+    for (const transaction of [actionTransaction, editingTransaction]) {
+      const destinationId = transaction?.transfer_to_account_id
+      if (!transaction || destinationId == null || loanPaymentStatus(transaction) !== 'pending') {
+        continue
+      }
+      if (destinationLookups.current.has(destinationId)) {
+        continue
+      }
+      destinationLookups.current.add(destinationId)
+      triggerAccount(destinationId, true)
+        .unwrap()
+        .then((account) => {
+          setResolvedDestinations((prev) => ({ ...prev, [destinationId]: account }))
+        })
+        .catch((error: unknown) => {
+          if ((error as { status?: unknown } | undefined)?.status === 404) {
+            setResolvedDestinations((prev) => ({ ...prev, [destinationId]: null }))
+          }
+        })
+        .finally(() => {
+          destinationLookups.current.delete(destinationId)
+        })
+    }
+  }, [accountsData, actionTransaction, editingTransaction, loanPaymentStatus, triggerAccount])
+
+  // A transfer into a loan is a loan payment: its fee is the interest. The
+  // stored destination of the row being edited is classified like the row.
   const transferIntoLoan =
-    formData.transaction_type === 'transfer' && destinationFormAccount?.account_type === 'loan'
-  const isLoanPayment = (transaction: Transaction) =>
-    transaction.transaction_type === 'transfer' &&
-    accounts.find((account) => account.id === transaction.transfer_to_account_id)?.account_type ===
-      'loan'
+    formData.transaction_type === 'transfer' &&
+    (destinationFormAccount?.account_type === 'loan' ||
+      (editingTransaction !== null &&
+        formData.transfer_to_account_id === editingTransaction.transfer_to_account_id &&
+        isLoanPayment(editingTransaction)))
 
   // Account-type-aware nudge toward the correct dual-perspective framing.
   const contextHint = useMemo<{ text: string; suggestTransfer: boolean } | null>(() => {
@@ -691,6 +775,14 @@ export function TransactionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
+      alert('Still checking this transfer\'s destination account. Try again in a moment.')
+      return
+    }
+    if (editingTransaction && loanPaymentStatus(editingTransaction) === 'unavailable') {
+      alert(DESTINATION_UNAVAILABLE)
+      return
+    }
     try {
       if (!formData.account_id) {
         alert('Please select an account for this transaction.')
@@ -804,13 +896,7 @@ export function TransactionsPage() {
     } catch (error) {
       console.error('Error saving transaction:', error)
       // Show the API's reason (e.g. a loan payment rule) instead of failing silently.
-      const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
-      const message = typeof detail === 'string'
-        ? detail
-        : Array.isArray(detail)
-          ? detail.map((item) => (item as { msg?: string })?.msg).filter(Boolean).join('; ')
-          : ''
-      alert(message || 'Could not save the transaction. Please try again.')
+      alert(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
     }
   }
 
@@ -913,7 +999,13 @@ export function TransactionsPage() {
       currency: accountCurrency,
       exchange_rate: undefined,
     }
-    await updateTransaction({ id: transaction.id, data: payload }).unwrap()
+    try {
+      await updateTransaction({ id: transaction.id, data: payload }).unwrap()
+    } catch (error) {
+      console.error('Error reverting transaction:', error)
+      alert(apiErrorMessage(error) || 'Could not mark the transaction as planned. Please try again.')
+      return
+    }
     const updatedTransaction: Transaction = {
       ...transaction,
       is_posted: false,
@@ -1628,11 +1720,18 @@ export function TransactionsPage() {
             </div>
 
             <div className="mt-6 space-y-4">
+              {actionLoanStatus === 'pending' && (
+                <p className="text-sm text-muted">Checking this transfer&apos;s destination account…</p>
+              )}
+              {actionLoanStatus === 'unavailable' && (
+                <p className="text-sm text-warn">{DESTINATION_UNAVAILABLE}</p>
+              )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {actionTransaction.is_posted ? (
                   <button
                     onClick={() => handleRevertPostedFromModal(actionTransaction)}
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-warn hover:bg-sunken"
+                    disabled={actionLocked}
+                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-warn hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1642,7 +1741,8 @@ export function TransactionsPage() {
                 ) : (
                   <button
                     onClick={() => handleInitPostingForm(actionTransaction)}
-                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-ok hover:bg-sunken"
+                    disabled={actionLocked}
+                    className="flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors duration-200 text-ok hover:bg-sunken disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1652,7 +1752,8 @@ export function TransactionsPage() {
                 )}
                 <button
                   onClick={() => openEditFromModal(actionTransaction)}
-                  className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink"
+                  disabled={actionLocked}
+                  className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -1733,7 +1834,8 @@ export function TransactionsPage() {
                     <button
                       type="button"
                       onClick={handleSavePostingForm}
-                      className="btn-primary focus-ring"
+                      disabled={actionLocked}
+                      className="btn-primary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Save Posted Amount
                     </button>

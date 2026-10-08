@@ -306,6 +306,7 @@ export const {
   useGetAccountsQuery,
   useLazyGetAccountsQuery,
   useGetAccountQuery,
+  useLazyGetAccountQuery,
   useCreateAccountMutation,
   useUpdateAccountMutation,
   useDeleteAccountMutation,
