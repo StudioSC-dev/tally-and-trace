@@ -156,3 +156,33 @@ def test_transfer_entry_materialises_as_a_transfer(client, headers, made):
 
     after = client.get(f"{API}/budget-entries/{entry.json()['id']}", headers=headers).json()
     assert after["next_occurrence"].startswith("2026-12-01")
+
+
+def test_only_an_expense_entry_can_be_a_transfer(client, headers, made):
+    secb = _account(client, headers, made, "SecB Probe", "savings", 10000)
+    loan = _account(client, headers, made, "BDO Loan Probe", "checking")
+
+    r = _entry(client, headers, made, entry_type="income", account_id=secb["id"],
+               transfer_to_account_id=loan["id"])
+    assert r.status_code == 400, r.text
+
+    # On edit, the merged entry is checked: neither switching a transfer to income
+    # nor adding a destination to an income entry is accepted.
+    transfer = _entry(client, headers, made, account_id=secb["id"],
+                      transfer_to_account_id=loan["id"])
+    assert transfer.status_code == 201, transfer.text
+    r = client.put(f"{API}/budget-entries/{transfer.json()['id']}",
+                   json={"entry_type": "income"}, headers=headers)
+    assert r.status_code == 400, r.text
+
+    income = _entry(client, headers, made, entry_type="income", account_id=secb["id"])
+    assert income.status_code == 201, income.text
+    r = client.put(f"{API}/budget-entries/{income.json()['id']}",
+                   json={"transfer_to_account_id": loan["id"]}, headers=headers)
+    assert r.status_code == 400, r.text
+
+    # Clearing the destination while switching to income is fine.
+    r = client.put(f"{API}/budget-entries/{transfer.json()['id']}",
+                   json={"entry_type": "income", "transfer_to_account_id": None}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["entry_type"] == "income" and r.json()["transfer_to_account_id"] is None

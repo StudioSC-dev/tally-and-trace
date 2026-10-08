@@ -128,9 +128,16 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
 
 
 def _validate_transfer_destination(
-    db: Session, user: User, account_id: Optional[int], transfer_to_account_id: Optional[int]
+    db: Session,
+    user: User,
+    account_id: Optional[int],
+    transfer_to_account_id: Optional[int],
+    entry_type: BudgetEntryType,
 ) -> None:
     """A recurring transfer moves money between two accessible non-credit accounts.
+
+    Only an expense entry can be one: an income entry with a destination would
+    still materialise as a transfer, so it is rejected rather than ignored.
 
     The destination may be any account the caller can reference (bank, wallet,
     loan) except a credit card: card payments are netted by statements, and a
@@ -140,6 +147,10 @@ def _validate_transfer_destination(
     """
     if not transfer_to_account_id:
         return
+    if entry_type != BudgetEntryType.EXPENSE:
+        raise HTTPException(
+            status_code=400, detail="Only an expense entry can be a recurring transfer"
+        )
     destination = db.query(Account).filter(Account.id == transfer_to_account_id).first()
     if not destination or not can_access_record(db, user, destination):
         raise HTTPException(status_code=404, detail="Transfer destination account not found")
@@ -232,7 +243,8 @@ def create_budget_entry(
     )
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
     _validate_transfer_destination(
-        db, current_user, entry_in.account_id, entry_in.transfer_to_account_id
+        db, current_user, entry_in.account_id, entry_in.transfer_to_account_id,
+        entry_in.entry_type,
     )
 
     entry_data = entry_in.dict()
@@ -276,6 +288,7 @@ def update_budget_entry(
         current_user,
         prospective_data.get("account_id", entry.account_id),
         prospective_data.get("transfer_to_account_id", entry.transfer_to_account_id),
+        prospective_data.get("entry_type") or entry.entry_type,
     )
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
