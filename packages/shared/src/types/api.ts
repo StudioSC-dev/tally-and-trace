@@ -22,6 +22,11 @@ export interface Account {
   payment_account_id?: number | null
   /** Credit cards: account the statement payment spills to when the primary can't cover it. */
   payment_overflow_account_id?: number | null
+  /**
+   * Spending wallet (cash on hand, e-wallet): the balance is shown but not counted
+   * in available cash or projections. Topping it up is the expense.
+   */
+  is_spending_wallet: boolean
   entity_id: number
   is_active: boolean
   created_at: string
@@ -118,6 +123,8 @@ export interface BudgetEntry {
   account_id?: number
   /** UC1: secondary funding source — payments draw from account_id first, overflow here. */
   overflow_account_id?: number
+  /** Recurring transfer: occurrences move money from account_id to this non-credit account. */
+  transfer_to_account_id?: number | null
   category_id?: number
   allocation_id?: number
   is_autopay: boolean
