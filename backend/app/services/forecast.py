@@ -165,6 +165,11 @@ def project_cashflow(
     ``statement_payables`` is cash paid to credit cards in the period: statement
     payables due (net of payments) plus planned card payments, including those
     payments' transfer fees.
+    Loan payables (``source`` "loan": a due date's payment not covered by a
+    planned payment, see services/loans.py) are in ``net`` and the closing
+    balances only, not in any of the columns above; a planned payment into a
+    loan stays in its source's column (``unposted_expenses`` for a transaction,
+    ``expenses`` for a recurring transfer entry).
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     """
@@ -259,8 +264,8 @@ def get_upcoming_items(
 ) -> List[dict]:
     """
     Return every dated event from ``collect_events`` within the next N days
-    (budget-entry occurrences, unposted transactions and credit-card statement
-    payables), sorted by date. ``amount`` is the unsigned amount as entered.
+    (budget-entry occurrences, unposted transactions, credit-card statement
+    payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
     events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id)
