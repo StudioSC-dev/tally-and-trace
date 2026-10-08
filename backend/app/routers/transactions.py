@@ -13,6 +13,7 @@ from app.core.entity_context import (
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account
+from app.services.forecast import is_spending_wallet
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -626,6 +627,77 @@ async def upload_receipt(
     
     return {"message": "Receipt uploaded successfully", "file_url": db_transaction.receipt_url}
 
+UNCATEGORIZED = "Uncategorized"
+TRANSFER_FEES = "Transfer fees"
+UNALLOCATED_WALLET_SPEND = "Unallocated wallet spend"
+
+
+def summarize_period(transactions, wallet_ids: Set[int], category_names: dict) -> dict:
+    """Income, expense and per-category totals for posted transactions.
+
+    Spending wallets (cash on hand, e-wallets) are expensed when topped up, so:
+
+    - expense = non-wallet debits + cash-to-wallet transfers (amount + fee) + the
+      fee on every other transfer funded from a non-wallet account; each fee is
+      counted once, and a transfer's amount is otherwise not an expense;
+    - debits from a wallet are not in the expense total but are shown under their
+      category, and fees on transfers funded from a wallet (already expensed at
+      top-up) are shown in category detail but not in the total;
+    - an "Unallocated wallet spend" row holds top-up amounts not yet accounted
+      for by wallet debits and wallet-funded fees, so the expense column of
+      ``category_breakdown`` always sums to ``total_expenses``.
+
+    Transfer fees are shown on a "Transfer fees" row: a transfer's own category
+    (e.g. a savings contribution) describes the amount moved, not spending.
+    Income is every credit. Rows without a category are grouped as "Uncategorized".
+    """
+    zero = Decimal("0")
+    total_income = zero
+    total_expenses = zero
+    unallocated_wallet = zero
+    breakdown: dict = {}
+
+    def row(name: str) -> dict:
+        return breakdown.setdefault(name, {"income": zero, "expenses": zero})
+
+    def category(category_id: Optional[int]) -> str:
+        return category_names.get(category_id, UNCATEGORIZED) if category_id else UNCATEGORIZED
+
+    for t in transactions:
+        amount = _D(t.amount)
+        if t.transaction_type == TransactionType.CREDIT:
+            total_income += amount
+            row(category(t.category_id))["income"] += amount
+        elif t.transaction_type == TransactionType.DEBIT:
+            row(category(t.category_id))["expenses"] += amount
+            if t.account_id in wallet_ids:
+                unallocated_wallet -= amount
+            else:
+                total_expenses += amount
+        elif t.transaction_type == TransactionType.TRANSFER:
+            fee = _D(t.transfer_fee)
+            from_wallet = (t.transfer_from_account_id or t.account_id) in wallet_ids
+            to_wallet = t.transfer_to_account_id in wallet_ids
+            if fee:
+                row(TRANSFER_FEES)["expenses"] += fee
+            if from_wallet:
+                unallocated_wallet -= fee
+            elif to_wallet:
+                total_expenses += amount + fee
+                unallocated_wallet += amount
+            else:
+                total_expenses += fee
+
+    if unallocated_wallet:
+        breakdown[UNALLOCATED_WALLET_SPEND] = {"income": zero, "expenses": unallocated_wallet}
+
+    return {
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "category_breakdown": breakdown,
+    }
+
+
 @router.get("/summary/period")
 def get_transaction_summary(
     db: Session = Depends(get_db),
@@ -658,27 +730,28 @@ def get_transaction_summary(
         query = query.filter(Transaction.account_id == account_id)
     
     transactions = [t for t in query.all() if t.is_posted]
-    
-    total_income = sum(t.amount for t in transactions if t.transaction_type == TransactionType.CREDIT)
-    total_expenses = sum(t.amount for t in transactions if t.transaction_type == TransactionType.DEBIT)
+
+    account_ids = {
+        acc_id
+        for t in transactions
+        for acc_id in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)
+        if acc_id is not None
+    }
+    wallet_ids = {
+        a.id for a in db.query(Account).filter(Account.id.in_(account_ids)).all()
+        if is_spending_wallet(a)
+    } if account_ids else set()
+    category_ids = {t.category_id for t in transactions if t.category_id}
+    category_names = {
+        c.id: c.name for c in db.query(Category).filter(Category.id.in_(category_ids)).all()
+    } if category_ids else {}
+
+    summary = summarize_period(transactions, wallet_ids, category_names)
+    total_income = summary["total_income"]
+    total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses
-    
-    # Group by category
-    category_summary = {}
-    for transaction in transactions:
-        if transaction.transaction_type == TransactionType.TRANSFER:
-            continue
-        if transaction.category_id:
-            category = db.query(Category).filter(Category.id == transaction.category_id).first()
-            category_name = category.name if category else "Uncategorized"
-            if category_name not in category_summary:
-                category_summary[category_name] = {"income": 0, "expenses": 0}
-            
-            if transaction.transaction_type == TransactionType.CREDIT:
-                category_summary[category_name]["income"] += transaction.amount
-            else:
-                category_summary[category_name]["expenses"] += transaction.amount
-    
+    category_summary = summary["category_breakdown"]
+
     return {
         "period": {
             "start_date": start_date,
