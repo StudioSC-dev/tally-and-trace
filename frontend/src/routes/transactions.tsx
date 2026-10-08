@@ -754,6 +754,14 @@ export function TransactionsPage() {
       await loadTransactions(true)
     } catch (error) {
       console.error('Error saving transaction:', error)
+      // Show the API's reason (e.g. a loan payment rule) instead of failing silently.
+      const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
+      const message = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((item) => (item as { msg?: string })?.msg).filter(Boolean).join('; ')
+          : ''
+      alert(message || 'Could not save the transaction. Please try again.')
     }
   }
 
