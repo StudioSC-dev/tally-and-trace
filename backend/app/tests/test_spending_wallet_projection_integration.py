@@ -422,3 +422,31 @@ def test_cross_entity_recurring_transfer_keeps_each_views_in_scope_leg(db, user,
     assert [(e["name"], e["amount"]) for e in view_a["events"]] == [
         ("SecB to BDO", Decimal("-8000.00"))]
     assert _closings(view_a) == {"SecB": Decimal("12000.00")}
+
+
+def test_top_ups_are_payables_so_timeline_monthly_and_payables_agree(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    bank = _account(db, user, "Bank", AccountType.SAVINGS, "10000.00")
+    checking = _account(db, user, "Checking", AccountType.CHECKING, "0.00")
+    gcash = _wallet(db, user, "GCash")
+    cash = _account(db, user, "Cash", AccountType.CASH, "0", is_spending_wallet=True)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "1000.00", datetime(2026, 11, 2),
+           account=bank, transfer_to_account_id=gcash.id)
+    _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "2000.00", datetime(2026, 11, 10),
+           account=bank)
+    _transfer(db, user, bank, cash, "500.00", datetime(2026, 11, 5), fee="10.00")
+    _transfer(db, user, bank, checking, "3000.00", datetime(2026, 11, 7))  # internal: not a payable
+
+    payables = get_payables(db, user.id, days=29, reference=REF)
+    assert [(p["name"], p["amount"], p["account_id"]) for p in payables] == [
+        ("Load GCash", 1000.0, bank.id), ("Move", 510.0, bank.id), ("Rent", 2000.0, bank.id)]
+
+    timeline = project_running_balance(db, user.id, days=30, reference=REF)
+    month = project_cashflow(db, user.id, months=1, reference=REF)[0]
+    paid = Decimal(str(sum(p["amount"] for p in payables)))
+    assert timeline["closing_balance"] == Decimal("10000.00") - paid == Decimal("6490.00")
+    assert month["closing_balance"] == float(timeline["closing_balance"])
+    assert month["expenses"] + month["unposted_expenses"] == float(paid)

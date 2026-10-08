@@ -279,9 +279,10 @@ def get_payables(
     """Cash outflows due within the next N days, with the account each draws on.
 
     Same window and events as ``get_upcoming_items``, restricted to events that
-    take cash out of the pool (bills, unposted debits, card statements and planned
-    card payments). Other transfers between your own accounts are not payables;
-    card charges reach cash via their statement payable instead.
+    take cash out of the pool (bills, unposted debits, card statements, planned
+    card payments, and spending-wallet top-ups for their amount + fee: topping a
+    wallet up is the spending). Other transfers between your own accounts are not
+    payables; card charges reach cash via their statement payable instead.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -292,7 +293,8 @@ def get_payables(
     for e in sorted(events, key=_event_sort_key):
         if not e["counts_as_cash"] or e["amount"] >= 0:
             continue
-        if e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment"):
+        if (e["type"] == TransactionType.TRANSFER.value
+                and not e.get("card_payment") and not e.get("top_up")):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -582,6 +584,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     date: Optional[datetime] = None, *,
                     billed_ids: Optional[set] = None,
                     wallet_ids: frozenset = frozenset(),
+                    known_wallet_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -599,6 +602,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     A spending wallet's leg is never cash, so a top-up (cash to wallet) costs the
     source amount + fee, and money moved from a wallet back to a cash account adds
     the amount to it; a transfer between two wallets moves no projection cash.
+    ``known_wallet_ids`` are every wallet the caller has classified, in scope or
+    not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
+    so a payable), even when the wallet itself has no leg here.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -633,14 +639,16 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids | wallet_ids
     via_unbilled = src in unbilled or dst in unbilled
+    src_cash = src in cash_ids and not via_unbilled
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), overflow_account_id,
-                         cash=src in cash_ids and not via_unbilled))
+        legs.append(_leg(src, -(amount + fee), overflow_account_id, cash=src_cash))
     if dst in scoped:
         legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
     if dst in billed_ids:
         extra = {**extra, "card_payment": True}
+    if src_cash and dst in (known_wallet_ids | wallet_ids):
+        extra = {**extra, "top_up": True}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -786,7 +794,8 @@ def collect_events(
                         description=entry.name,
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
-                    wallet_ids=scoped_wallet_ids, source="budget_entry",
+                    wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
+                    source="budget_entry",
                     overflow_account_id=overflow_id,
                 ))
             continue
@@ -822,7 +831,7 @@ def collect_events(
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
-                                          **overdue))
+                                          known_wallet_ids=wallet_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
