@@ -3,8 +3,10 @@
 Runs alembic in a subprocess against a throwaway database created on the same
 server as ``DATABASE_URL``: a fresh database upgrades to head, downgrades to the
 merged M1 head, and upgrades again from it with existing cash, e-wallet and bank
-accounts, which must backfill ``is_spending_wallet`` by account type. Skips
-without a database; the single-head check needs none.
+accounts, which must backfill ``is_spending_wallet`` by account type, except
+cash / e-wallet accounts a routing rule draws on (card statement payment or
+overflow, budget entry overflow), which stay non-wallets. Skips without a
+database; the single-head check needs none.
 """
 import os
 import subprocess
@@ -94,19 +96,37 @@ def test_m2_applies_fresh_and_from_m1_head_backfills_and_downgrades(scratch_url)
                 "INSERT INTO users (email, password_hash, first_name, last_name) "
                 "VALUES ('m2@example.com', 'x', 'M', 'Two') RETURNING id"
             )).scalar_one()
+            ids = {}
             for name, kind in (("Cash", "cash"), ("GCash", "e_wallet"),
-                               ("Bank", "savings"), ("Chk", "checking"), ("Card", "credit")):
-                c.execute(text(
+                               ("Bank", "savings"), ("Chk", "checking"), ("Card", "credit"),
+                               ("PayCash", "cash"), ("OverGCash", "e_wallet"),
+                               ("EntryCash", "cash")):
+                ids[name] = c.execute(text(
                     "INSERT INTO accounts (user_id, name, account_type, balance, currency) "
-                    "VALUES (:u, :n, CAST(:t AS accounttype), 0, 'PHP')"
-                ), {"u": user_id, "n": name, "t": kind})
+                    "VALUES (:u, :n, CAST(:t AS accounttype), 0, 'PHP') RETURNING id"
+                ), {"u": user_id, "n": name, "t": kind}).scalar_one()
+            # Pre-existing routing onto a cash and an e-wallet account.
+            c.execute(text(
+                "UPDATE accounts SET payment_account_id = :p, payment_overflow_account_id = :o "
+                "WHERE id = :card"
+            ), {"p": ids["PayCash"], "o": ids["OverGCash"], "card": ids["Card"]})
+            c.execute(text(
+                "INSERT INTO budget_entries (user_id, entry_type, name, amount, currency, "
+                "cadence, next_occurrence, account_id, overflow_account_id, is_autopay, "
+                "is_active, lead_time_days, end_mode) "
+                "VALUES (:u, 'expense', 'Rent', 100, 'PHP', 'monthly', '2026-11-01', "
+                ":a, :o, false, true, 0, 'indefinite')"
+            ), {"u": user_id, "a": ids["Bank"], "o": ids["EntryCash"]})
 
-        # From the M1 head with existing rows: backfill by account type.
+        # From the M1 head with existing rows: backfill by account type, skipping
+        # routing targets.
         _alembic(scratch_url, "upgrade", "head")
         with engine.connect() as c:
             flags = dict(c.execute(text("SELECT name, is_spending_wallet FROM accounts")).all())
             assert flags == {"Cash": True, "GCash": True, "Bank": False,
-                             "Chk": False, "Card": False}
+                             "Chk": False, "Card": False,
+                             # Routing targets stay funding accounts.
+                             "PayCash": False, "OverGCash": False, "EntryCash": False}
             current = c.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
             assert current == M2
     finally:

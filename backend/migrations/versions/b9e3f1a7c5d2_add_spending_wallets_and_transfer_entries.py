@@ -3,7 +3,10 @@
 ``accounts.is_spending_wallet`` marks accounts (cash on hand, e-wallets) whose
 balance is shown but not counted as projection cash: topping one up is the
 expense, and spending from it is categorised without being counted twice.
-Existing cash and e_wallet accounts backfill to true; every other account
+Existing cash and e_wallet accounts backfill to true, except those a routing
+rule draws on (a card's ``payment_account_id`` / ``payment_overflow_account_id``
+or a budget entry's ``overflow_account_id``): a wallet cannot fund routing, so
+those stay false until the user re-routes and flips them. Every other account
 backfills to false via the server default.
 
 ``budget_entries.transfer_to_account_id`` makes an entry a recurring transfer:
@@ -36,7 +39,14 @@ def upgrade() -> None:
     )
     op.execute(
         "UPDATE accounts SET is_spending_wallet = true "
-        "WHERE account_type IN ('cash', 'e_wallet')"
+        "WHERE account_type IN ('cash', 'e_wallet') "
+        "AND id NOT IN ("
+        "  SELECT payment_account_id FROM accounts WHERE payment_account_id IS NOT NULL"
+        "  UNION SELECT payment_overflow_account_id FROM accounts"
+        "    WHERE payment_overflow_account_id IS NOT NULL"
+        "  UNION SELECT overflow_account_id FROM budget_entries"
+        "    WHERE overflow_account_id IS NOT NULL"
+        ")"
     )
 
     op.add_column(
