@@ -983,3 +983,26 @@ def test_a_planned_catch_up_covers_the_overdue_due_date_in_any_window(db, user):
         (datetime(2026, 10, 4), None), (datetime(2026, 11, 4), None)]
     assert _cash_out(db, user, 30) == [("2026-10-04", "loan", Decimal("-8000.00")),
                                        ("2026-10-20", "transaction", Decimal("-8000.00"))]
+
+
+def test_a_reduce_term_part_payment_and_a_planned_cover_leave_cash_once(db, user):
+    from app.services.forecast import collect_events
+
+    bank = _bank(db, user)
+    # 90,000 at 0%, 8,000 a month: Oct 4 unpaid, 4,000 posted on Nov 4 and 4,000 planned.
+    loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home",
+                 loan_annual_rate=Decimal("0"), loan_term_months=None)
+    _post(db, user, bank, loan, "4000", datetime(2026, 11, 4))
+    _transfer(db, user, bank, loan, "4000", datetime(2026, 11, 20))
+
+    s = _schedule(db, loan)
+    assert [r["payment"] for r in s["upcoming"][:3]] == [4000.0, 8000.0, 8000.0]
+    assert sum(r["payment"] for r in s["upcoming"]) == s["owed"] == 86000.0
+
+    start = datetime(2026, 11, 5)
+    out = sorted((e["date"].date().isoformat(), e["source"], e["amount"])
+                 for e in collect_events(db, start, datetime(2026, 12, 1), user_id=user.id)
+                 if e["counts_as_cash"] and e["amount"] < 0)
+    # 16,000 owed for Oct 4 and Nov 4, 4,000 of it already paid: 12,000 leaves.
+    assert out == [("2026-11-05", "loan", Decimal("-8000.00")),
+                   ("2026-11-20", "transaction", Decimal("-4000.00"))]

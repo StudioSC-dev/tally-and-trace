@@ -306,23 +306,38 @@ def settle_posted(loan, payments: List[Transaction]) -> dict:
 
 
 def _reduce_term_rows(balance: Decimal, annual_rate, payment: Decimal,
-                      paid: Decimal) -> Optional[List[dict]]:
-    """The amortisation preview from ``balance``, given ``paid`` already toward the next payment.
+                      paid: List[Decimal]) -> Optional[List[dict]]:
+    """The amortisation preview from ``balance``, given ``paid[i]`` already toward payment ``i``.
 
-    Without a part payment it is ``amortize``. With one, the next payment is only
-    what is left of it: the month's interest less what was paid (interest is paid
-    first), and principal for the rest of the payment; the preview carries on from
-    the balance after it. Due dates are filled in by the caller.
+    ``paid`` holds what each remaining due date has already received (zero for
+    one not paid at all). A payment with nothing paid toward it is ``amortize``'s:
+    a month's interest on the balance and principal for the rest. One part paid
+    owes only what is left of it: the month's interest less what was paid
+    (interest is paid first), and principal for the rest of the payment, capped
+    at the balance. ``balance`` is what is owed now, after the part payments'
+    principal, so the rows' principal adds up to it. None if the loan never
+    repays at ``payment``. Due dates are filled in by the caller.
     """
-    if paid <= 0:
-        return amortize(balance, annual_rate, payment, date.min)
-    interest = max(_money(balance * _monthly_rate(annual_rate)) - paid, _ZERO)
-    principal = min(max(payment - paid - interest, _ZERO), balance)
-    rest = amortize(balance - principal, annual_rate, payment, date.min)
-    if rest is None:
-        return None
-    return [{"payment": principal + interest, "principal": principal, "interest": interest,
-             "balance_after": balance - principal}, *rest]
+    rate = _monthly_rate(annual_rate)
+    payment = _money(payment)
+    remaining = _money(balance)
+    rows: List[dict] = []
+    while remaining > 0:
+        if len(rows) >= _MAX_ROWS:
+            return None
+        already = paid[len(rows)] if len(rows) < len(paid) else _ZERO
+        interest = _money(remaining * rate)
+        if already > 0:
+            interest = max(interest - already, _ZERO)
+            principal = min(max(payment - already - interest, _ZERO), remaining)
+        else:
+            principal = min(payment - interest, remaining)
+            if principal <= 0:
+                return None
+        remaining -= principal
+        rows.append({"payment": principal + interest, "principal": principal,
+                     "interest": interest, "balance_after": remaining})
+    return rows
 
 
 def scheduled_dues(loan, state: dict) -> Optional[List[dict]]:
@@ -331,8 +346,9 @@ def scheduled_dues(loan, state: dict) -> Optional[List[dict]]:
     Each row is ``{number, step, due_date, payment, principal, interest,
     balance_after}`` over the due dates ``settle_posted`` left open. A
     ``reduce_term`` loan with a payment amount takes its amounts from the
-    amortisation preview of the owed amount (``_reduce_term_rows``), so the last
-    payment is only what is left. Otherwise, and for a ``reduce_term`` loan that
+    amortisation preview of the owed amount (``_reduce_term_rows``), keeping
+    what each open due date has already been paid, so the last payment is only
+    what is left. Otherwise, and for a ``reduce_term`` loan that
     never repays at its payment, each due date owes what ``settle_posted`` left of
     it (no split), up to ``loan_term_months``; with no term the loan is
     open-ended (None), and its due dates run on while money is owed.
@@ -349,7 +365,7 @@ def scheduled_dues(loan, state: dict) -> Optional[List[dict]]:
 
     if amortization_of(loan) == REDUCE_TERM and loan.loan_payment_amount is not None:
         payment = _money(loan.loan_payment_amount)
-        paid = payment - open_[0][1] if open_ else _ZERO
+        paid = [payment - left for _, left in open_]
         rows = _reduce_term_rows(owed(loan), loan.loan_annual_rate, payment, paid)
         if rows is not None and len(rows) <= len(open_):
             return [row(open_[i][0], r["payment"], r["principal"], r["interest"],
