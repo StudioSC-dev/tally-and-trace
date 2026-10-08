@@ -521,3 +521,14 @@ def test_planned_prepayment_is_a_payable_and_does_not_cover_the_due_date(db, use
     payables = get_payables(db, user.id, days=30, reference=REF)
     assert [(p["due_date"], p["source"], p["amount"]) for p in payables] == [
         ("2026-10-04", "loan", 8000.0), ("2026-10-10", "transaction", 20000.0)]
+
+
+def test_reduce_term_payables_use_each_amortisation_payment(db, user):
+    bank = _bank(db, user)
+    _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home",
+          loan_annual_rate=Decimal("0"), loan_term_months=None)
+
+    events = _loan_events(db, user, datetime(2028, 6, 1))
+    amounts = [-e["amount"] for e in events]
+    assert amounts == [Decimal("8000.00")] * 11 + [Decimal("2000.00")]
+    assert sum(amounts) == Decimal("90000.00")
