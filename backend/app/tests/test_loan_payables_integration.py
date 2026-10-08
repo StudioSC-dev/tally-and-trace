@@ -1380,3 +1380,75 @@ def test_a_payment_into_a_loan_the_caller_cannot_access_is_a_neutral_payment(db,
         db.query(Entity).filter(Entity.id.in_([owner_biz.id, payer_biz.id])).delete()
         db.query(User).filter(User.id == member.id).delete()
         db.commit()
+
+
+# --- round-5 audit fixes -------------------------------------------------------
+
+def test_posting_a_legacy_planned_transfer_into_a_loan_settles_its_due_date(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    txn = _transfer(db, user, bank, loan, "7550", datetime(2026, 10, 4), fee="450", kind=None)
+
+    txn = _put(db, user, txn, is_posted=True)
+    assert (txn.loan_payment_kind, txn.is_posted) == ("scheduled", True)
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7550.00"), Decimal("450.00"))
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82450.00"))
+    # Oct 4 is paid once: no re-projected payable, the next due date is Nov 4.
+    _assert_paid_once_then_november(db, user, loan, bank)
+
+
+@pytest.mark.parametrize("changes", [{}, {"transfer_fee": None}], ids=["no_fee", "null_fee"])
+def test_posting_a_legacy_planned_transfer_with_no_fee_is_not_split(db, user, changes):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    txn = _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 4), fee="0", kind=None)
+
+    txn = _put(db, user, txn, is_posted=True, **changes)
+    assert txn.loan_payment_kind == "scheduled"
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("8000.00"), Decimal("0.00"))
+    # The source is debited the stored amount, once.
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82000.00"))
+    _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_posting_a_legacy_planned_transfer_keeps_a_changed_amount(db, user):
+    from app.services.forecast import project_running_balance
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    txn = _transfer(db, user, bank, loan, "7550", datetime(2026, 10, 4), fee="450", kind=None)
+
+    txn = _put(db, user, txn, is_posted=True, amount=7000)
+    assert txn.loan_payment_kind == "scheduled"
+    assert (Decimal(str(txn.amount)), Decimal(str(txn.transfer_fee))) == (
+        Decimal("7000.00"), Decimal("450.00"))
+    assert _balances(db, bank, loan) == (Decimal("42550.00"), Decimal("-83000.00"))
+    # 7,450 of Oct 4's 8,000 is paid: the 550 rest stays projected, then Nov 4.
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (0, "2026-10-04")
+    assert [(e["date"], e["amount"]) for e in _loan_events(db, user, END)] == [
+        (datetime(2026, 10, 4), Decimal("-550.00")), (datetime(2026, 11, 4), Decimal("-8000.00"))]
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("34000.00")
+
+
+def test_unposting_a_legacy_posted_transfer_into_a_loan_is_refused(db, user):
+    from fastapi import HTTPException
+
+    bank = _bank(db, user, balance="42000")
+    loan = _loan(db, user, bank, loan_payments_made_offset=1)
+    loan.balance = Decimal("-82000")  # the legacy 8,000 already applied, no fee
+    db.commit()
+    txn = _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 4), posted=True, kind=None)
+
+    with pytest.raises(HTTPException) as exc:
+        _put(db, user, txn, is_posted=False)
+    assert exc.value.status_code == 400
+    assert "editing" in exc.value.detail and "delet" not in exc.value.detail
+    db.rollback()
+    db.refresh(txn)
+    assert (txn.loan_payment_kind, txn.is_posted) == (None, True)
+    assert _balances(db, bank, loan) == (Decimal("42000.00"), Decimal("-82000.00"))
+    assert _schedule(db, loan)["payments_made"] == 1  # the offset only

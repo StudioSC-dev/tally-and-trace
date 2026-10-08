@@ -363,10 +363,11 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     none on the row, the amount is split into principal and interest as for a
     new payment without a fee.
 
-    An edit never stamps a row that was already a transfer into that same loan
-    (a legacy unmarked payment, whatever the edit changes): it stays unmarked,
-    so it is edited as a plain transfer and, like every legacy row, never
-    counts toward ``payments_made`` (its payment is in
+    A row that was already a transfer into that same loan (a legacy unmarked
+    payment) is stamped only when the edit posts it
+    (``_stamp_posted_legacy_loan_payment``); unposting it is refused. Any other
+    edit leaves it unmarked, so it is edited as a plain transfer and, like
+    every legacy row, never counts toward ``payments_made`` (its payment is in
     ``loan_payments_made_offset``). Stamping it would count it a second time.
     """
     if txn.loan_payment_kind:
@@ -382,7 +383,7 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
         return {}  # rejected below as a transfer without a source
     if (txn.transaction_type == TransactionType.TRANSFER
             and txn.transfer_to_account_id == loan.id):
-        return {}  # a legacy unmarked payment stays unmarked
+        return _stamp_posted_legacy_loan_payment(db, user, txn, requested, loan, source_id)
     if requested.get("transfer_fee") is not None:
         interest = requested["transfer_fee"]
     else:
@@ -393,6 +394,45 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
         principal=requested.get("amount", txn.amount),
         interest=interest,
         posted=bool(requested.get("is_posted", txn.is_posted)))
+
+
+def _stamp_posted_legacy_loan_payment(db: Session, user: User, txn: Transaction,
+                                      requested: dict, loan: Account, source_id: int) -> dict:
+    """The stamp for posting a legacy unmarked planned payment into ``loan``, or {}.
+
+    Posting it makes it a scheduled payment (as a new one is), so it settles
+    its due date instead of leaving that due date projected again. It is
+    validated as a new payment with the amount and fee the request gives,
+    else the stored ones (an explicit ``transfer_fee`` of null keeps the
+    stored fee). It is never re-split: a stored fee of 0 stays 0.
+
+    Unposting a legacy posted payment is refused: its payment is already in
+    ``loan_payments_made_offset``, so the planned row would then cover a due
+    date that was already paid. Any other edit leaves the row unmarked.
+    """
+    if txn.is_posted:
+        if "is_posted" in requested and not requested["is_posted"]:
+            raise HTTPException(
+                status_code=400,
+                detail="A posted loan payment recorded before payment tracking cannot be "
+                       "unposted: it is already counted in the loan's payments made. "
+                       "Correct it by editing the posted payment instead",
+            )
+        return {}
+    if not requested.get("is_posted"):
+        return {}
+    principal = requested.get("amount")
+    if principal is None:
+        principal = txn.amount
+    interest = requested.get("transfer_fee")
+    if interest is None:
+        interest = txn.transfer_fee if txn.transfer_fee is not None else 0
+    return _loan_payment_stamp(
+        db, user, loan, source_id,
+        currency=requested.get("currency"),
+        principal=principal,
+        interest=interest,
+        posted=True)
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
