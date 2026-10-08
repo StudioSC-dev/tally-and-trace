@@ -442,7 +442,8 @@ export interface CashflowTimelineEvent {
    * Where the event came from. `statement` is a credit card's derived payable for
    * one billing cycle — its `source_id` is the CARD's account id, not a transaction.
    * `loan` is a loan's payable for one due date — its `source_id` is the LOAN's
-   * account id, and the outflow sits on the loan's paying account.
+   * account id, or null when the caller cannot access the loan (then the event
+   * is a neutral "Loan payment"), and the outflow sits on the loan's paying account.
    */
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
