@@ -1191,3 +1191,86 @@ def test_a_planned_payment_cannot_reach_a_due_date_more_than_a_month_back(db, us
         assert [(e["date"], e.get("overdue"), e["loan_due_date"]) for e in events][:1] == [
             (REF, True, date(2026, 9, 4))], end
         assert date(2026, 10, 4) not in {e["loan_due_date"] for e in events}, end
+
+
+def test_a_loan_the_caller_cannot_access_is_a_neutral_payment_on_its_paying_account(db, user):
+    import json
+    from app.core.auth import get_password_hash
+    from app.models.account import Account, AccountType
+    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
+    from app.models.user import User
+    from app.services.forecast import (
+        collect_events, get_payables, get_upcoming_items, project_cashflow,
+        project_running_balance, serialize_timeline,
+    )
+
+    member = User(email=f"loanpay-{os.urandom(4).hex()}@example.com",
+                  password_hash=get_password_hash("password123"),
+                  first_name="Co", last_name="Member", is_verified=True)
+    owner_biz, payer_biz = (Entity(name=f"Biz {os.urandom(3).hex()}",
+                                   entity_type=EntityType.BUSINESS) for _ in range(2))
+    db.add_all([member, owner_biz, payer_biz])
+    db.commit()
+    try:
+        db.add_all([
+            EntityMembership(entity_id=owner_biz.id, user_id=user.id, role=MemberRole.OWNER),
+            EntityMembership(entity_id=payer_biz.id, user_id=user.id, role=MemberRole.OWNER),
+            EntityMembership(entity_id=payer_biz.id, user_id=member.id, role=MemberRole.MEMBER),
+        ])
+        db.commit()
+        payer_bank = _account(db, user, "Payer bank", AccountType.CHECKING, "1000",
+                              entity_id=payer_biz.id)
+        loan = _loan(db, user, payer_bank, entity_id=owner_biz.id)
+        loan.name = "Secret car loan"
+        db.commit()
+
+        def views(who):
+            kw = dict(user_id=who.id, entity_id=payer_biz.id)
+            events = [e for e in collect_events(db, REF, datetime(2026, 11, 1), **kw)
+                      if e["source"] == "loan"]
+            timeline = serialize_timeline(project_running_balance(
+                db, who.id, payer_biz.id, days=30, reference=REF))
+            months = project_cashflow(db, who.id, payer_biz.id, months=1, reference=REF)
+            upcoming = get_upcoming_items(db, who.id, payer_biz.id, days=30, reference=REF)
+            payables = get_payables(db, who.id, payer_biz.id, days=30, reference=REF)
+            return events, timeline, months, upcoming, payables
+
+        # The co-member pays it from the shared account, once, with no loan detail.
+        events, timeline, months, upcoming, payables = views(member)
+        assert [(e["name"], e["source_id"], e["amount"], e["date"]) for e in events] == [
+            ("Loan payment", None, Decimal("-8000.00"), datetime(2026, 10, 4))]
+        assert "loan_due_date" not in events[0]
+        assert [(e["name"], e["source_id"], e["amount"]) for e in timeline["events"]] == [
+            ("Loan payment", None, -8000.0)]
+        assert [s["name"] for s in timeline["account_shortfalls"]] == ["Loan payment"]
+        assert timeline["closing_balance"] == -7000.0
+        assert [(a["account_name"], a["closing_balance"]) for a in timeline["by_account"]] == [
+            ("Payer bank", -7000.0)]
+        assert (months[0]["net"], months[0]["closing_balance"]) == (-8000.0, -7000.0)
+        assert [(i["name"], i["source_id"]) for i in upcoming] == [("Loan payment", None)]
+        assert [(p["name"], p["source_id"], p["amount"], p["account_id"]) for p in payables] == [
+            ("Loan payment", None, 8000.0, payer_bank.id)]
+        dumped = json.dumps([[{k: v for k, v in e.items() if k != "legs"} for e in events],
+                             timeline, months, upcoming, payables], default=str)
+        assert "Secret car loan" not in dumped
+        assert f'"source_id": {loan.id}' not in dumped
+
+        # The owner, who can open the loan, sees it in full.
+        events, timeline, _, upcoming, payables = views(user)
+        assert [(e["name"], e["source_id"], e["loan_due_date"]) for e in events] == [
+            ("Secret car loan payment", loan.id, date(2026, 10, 4))]
+        assert [(e["name"], e["source_id"]) for e in timeline["events"]] == [
+            ("Secret car loan payment", loan.id)]
+        assert [(i["name"], i["source_id"]) for i in upcoming] == [
+            ("Secret car loan payment", loan.id)]
+        assert [(p["name"], p["source_id"]) for p in payables] == [
+            ("Secret car loan payment", loan.id)]
+    finally:
+        db.rollback()
+        db.query(Account).filter(Account.user_id == user.id).update({"payment_account_id": None})
+        db.query(Account).filter(Account.entity_id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(EntityMembership).filter(
+            EntityMembership.entity_id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(Entity).filter(Entity.id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(User).filter(User.id == member.id).delete()
+        db.commit()

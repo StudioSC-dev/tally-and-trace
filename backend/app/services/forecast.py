@@ -17,7 +17,7 @@ from typing import Iterator, List, Optional, Sequence
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.entity_context import scope_criterion
+from app.core.entity_context import can_access_record, scope_criterion
 from app.core.time import naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables
 from app.services.statements import (
@@ -27,6 +27,7 @@ from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.models.transaction import RecurrenceFrequency
+from app.models.user import User
 
 
 # ---------------------------------------------------------------------------
@@ -769,6 +770,9 @@ def collect_events(
     account, non-cash on a scoped wallet, and absent when the account is outside
     the scope; a loan outside the scope paid from a scoped account is projected
     too, so the payment leaves cash once, in the paying account's projection.
+    When the caller cannot access such a loan (``can_access_record``), its
+    payable is a neutral "Loan payment": amounts and dates only, with no loan
+    name, ``source_id`` or ``loan_due_date``.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on both accounts. Like unposted
     transfers, recurring transfers into or out of a scoped account are collected
@@ -990,7 +994,9 @@ def collect_events(
     # as projection cash. An in-scope loan paid from an account outside the
     # scope keeps the event with no leg (listed, no cash), and an active loan
     # outside the scope paid from an in-scope account is projected here too, so
-    # its cash leaves the paying account's projection exactly once.
+    # its cash leaves the paying account's projection exactly once. A loan the
+    # caller cannot access is shown as a neutral payment (no name, id or due
+    # date), so projecting it never discloses the loan.
     payable_loans = loans + ([
         a for a in db.query(Account).filter(
             Account.account_type == AccountType.LOAN,
@@ -1017,18 +1023,22 @@ def collect_events(
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
                 (occ.date(), _money(entry.amount)))
+    caller = db.get(User, user_id) if len(payable_loans) > len(loans) else None
+    hidden_loan_ids = {a.id for a in payable_loans[len(loans):]
+                       if caller is None or not can_access_record(db, caller, a)}
     for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
+        hidden = p["source_id"] in hidden_loan_ids
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
-        }}
+        } and not (hidden and k not in ("overdue", "original_date"))}
         payer = p["funding_account_id"]
         events.append(_event(
             date=p["date"],
-            name=p["name"],
+            name="Loan payment" if hidden else p["name"],
             type=p["type"],
             source=p["source"],
-            source_id=p["source_id"],
+            source_id=None if hidden else p["source_id"],
             face_amount=-p["amount"],
             # Cash only on a scoped projection-cash account; a scoped wallet's leg
             # is kept as non-cash, and an account outside the scope has no leg.
