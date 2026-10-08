@@ -168,3 +168,27 @@ def test_an_account_that_funds_routing_cannot_become_a_wallet(client, headers, m
                   overflow_account_id=other["id"]).status_code == 201
     r = client.put(f"{API}/accounts/{other['id']}", json={"is_spending_wallet": True}, headers=headers)
     assert r.status_code == 400
+
+
+def test_explicit_null_clears_routing_fields_on_edit(client, headers, made):
+    bank = _account(client, headers, made, name="Bank Probe", account_type="savings").json()
+    spare = _account(client, headers, made, name="Spare Probe", account_type="checking").json()
+    card = _card(client, headers, made, payment_account_id=bank["id"],
+                 payment_overflow_account_id=spare["id"]).json()
+    entry = _entry(client, headers, made, account_id=bank["id"],
+                   overflow_account_id=spare["id"]).json()
+
+    r = client.put(f"{API}/accounts/{card['id']}", headers=headers,
+                   json={"payment_account_id": None, "payment_overflow_account_id": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["payment_account_id"] is None
+    assert r.json()["payment_overflow_account_id"] is None
+
+    r = client.put(f"{API}/budget-entries/{entry['id']}", headers=headers,
+                   json={"overflow_account_id": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["overflow_account_id"] is None
+
+    # Omitting a field leaves it unchanged.
+    r = client.put(f"{API}/budget-entries/{entry['id']}", headers=headers, json={"name": "Renamed"})
+    assert r.status_code == 200 and r.json()["account_id"] == bank["id"]
