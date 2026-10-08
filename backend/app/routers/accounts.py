@@ -114,6 +114,8 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     db_account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
 
     update_data = account_update.dict(exclude_unset=True)
+    if "entity_id" in update_data:
+        validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
     for field, value in update_data.items():
         setattr(db_account, field, value)
