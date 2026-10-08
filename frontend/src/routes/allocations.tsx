@@ -1826,7 +1826,7 @@ export function AllocationsPage() {
                     className="mt-1 block w-full border border-line px-3 py-2"
                   >
                     <option value={0}>None</option>
-                    {accounts.filter((a) => a.id !== subscriptionForm.account_id && !a.is_spending_wallet).map((account) => (
+                    {accounts.filter((a) => a.id !== subscriptionForm.account_id && a.account_type !== 'loan' && !a.is_spending_wallet).map((account) => (
                       <option key={account.id} value={account.id}>{account.name}</option>
                     ))}
                   </select>
