@@ -183,7 +183,9 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
 
     Its type and accounts are fixed (so a prepayment can never land on a fixed
     loan); an amount, fee or posted change is re-checked against the loan with
-    the payment's old effect reversed.
+    the payment's old effect reversed. A prepayment keeps the prepayment
+    endpoint's rules: no interest, and it is not posted (or its amount changed
+    while posted) once the loan is ``fixed``.
     """
     for field in LOAN_PAYMENT_FIXED_FIELDS:
         if field in requested and requested[field] != getattr(txn, field):
@@ -193,6 +195,24 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
                        "delete and re-record the loan payment instead",
             )
     loan = db.query(Account).filter(Account.id == txn.transfer_to_account_id).first()
+    if txn.loan_payment_kind == loan_svc.PREPAYMENT:
+        interest = requested.get("transfer_fee", txn.transfer_fee)
+        if interest is not None and Decimal(str(interest)) != 0:
+            raise HTTPException(
+                status_code=400,
+                detail="A prepayment is extra principal and carries no interest",
+            )
+        old_posted = bool(txn.is_posted)
+        posted = bool(requested.get("is_posted", old_posted))
+        amount_changed = ("amount" in requested and (
+            requested["amount"] is None or txn.amount is None
+            or Decimal(str(requested["amount"])) != Decimal(str(txn.amount))))
+        if (posted and (not old_posted or amount_changed)
+                and loan_svc.amortization_of(loan) == loan_svc.FIXED):
+            raise HTTPException(
+                status_code=400,
+                detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
+            )
     try:
         loan_svc.check_edited_payment(
             loan,

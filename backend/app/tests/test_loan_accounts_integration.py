@@ -723,6 +723,34 @@ def test_a_loan_payment_edit_is_revalidated_against_the_loan(client, people):
     assert (s["payments"][0]["principal"], s["payments"][0]["interest"]) == (1_000, 12.5)
 
 
+def test_a_pending_prepayment_cannot_be_posted_once_the_loan_is_fixed(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=bank["id"])
+    pending = _prepay(client, me, loan["id"], amount=200, is_posted=False)
+    assert pending.status_code == 200, pending.text
+
+    r = client.put(f"{API}/accounts/{loan['id']}", json={"loan_amortization": "fixed"},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    r = _put(client, me, pending.json()["id"], is_posted=True)
+    assert r.status_code == 400 and "fixed" in r.text, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("10000.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
+
+
+def test_a_prepayment_edit_cannot_add_interest(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=bank["id"])
+    paid = _prepay(client, me, loan["id"], amount=200).json()
+
+    r = _put(client, me, paid["id"], transfer_fee=5)
+    assert r.status_code == 400, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9800.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-800.00")
+
+
 def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
     me = people()
     usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
