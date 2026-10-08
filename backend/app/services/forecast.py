@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
 from app.core.time import naive_utc_now
-from app.services.loans import PREPAYMENT, build_loan_payables
+from app.services.loans import COVER_HORIZON, build_loan_payables
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
 )
@@ -704,12 +704,6 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         extra = {**extra, "card_payment": True}
     if src_cash and dst in (known_wallet_ids | wallet_ids):
         extra = {**extra, "top_up": True}
-    if dst in loan_ids:
-        # Marks a payment into a loan; the loan has no leg (it is not projection
-        # cash). Unless it is a prepayment it covers the loan's payables
-        # (see loans.build_loan_payables).
-        extra = {**extra, "loan_id": dst,
-                 "loan_prepayment": getattr(txn, "loan_payment_kind", None) == PREPAYMENT}
     if src_cash and dst in (known_loan_ids | loan_ids):
         # Paying a loan from cash is spending (principal and interest), so a payable.
         extra = {**extra, "loan_payment": True}
@@ -741,7 +735,8 @@ def collect_events(
     Sources: active budget-entry occurrences, unposted transactions, one dated
     payable per credit-card statement cycle due in the window, and one per loan due
     date (``source`` "loan", on the loan's paying account; a planned non-prepayment
-    transfer into the loan covers it, see services/loans.py). Occurrences of a
+    transfer into the loan, or a recurring transfer occurrence into it, covers
+    its own due date, see services/loans.py). Occurrences of a
     budget entry scheduled on a credit card are charges on that card's statement,
     not cash events (see ``_card_entry_charges``). A card without cycle settings
     has no statements, so occurrences scheduled on it stay cash events and
@@ -862,6 +857,7 @@ def collect_events(
         for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
         .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
     ) if transfer_entry_ids else Counter()
+    linked_covers = Counter(linked)
 
     card_entries = []
     for entry in entries:
@@ -973,13 +969,21 @@ def collect_events(
         ))
 
     # Each loan contributes a dated payable per due date, less what the planned
-    # (unposted, non-prepayment) payments into it cover (see services/loans.py).
-    covers: dict = {}
-    for e in events:
-        if e.get("loan_id") is not None and not e["loan_prepayment"]:
-            covers.setdefault(e["loan_id"], []).append(
-                (_naive(e["date"]).date(), e["face_amount"] + e["transfer_fee"]))
-    for p in build_loan_payables(db, loans, start, end, covers):
+    # payments into it cover (see services/loans.py). Recurring transfers into a
+    # loan are projected past the window end, as a payment late for a due date in
+    # the window still covers it; one already materialised is skipped, as above.
+    projected_covers: dict = {}
+    for entry in entries:
+        if entry.transfer_to_account_id not in loan_ids:
+            continue
+        for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
+            key = (entry.id, occ.date())
+            if linked_covers[key]:
+                linked_covers[key] -= 1
+                continue
+            projected_covers.setdefault(entry.transfer_to_account_id, []).append(
+                (occ.date(), _money(entry.amount)))
+    for p in build_loan_payables(db, loans, start, end, projected_covers):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",

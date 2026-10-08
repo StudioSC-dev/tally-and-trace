@@ -532,3 +532,58 @@ def test_reduce_term_payables_use_each_amortisation_payment(db, user):
     amounts = [-e["amount"] for e in events]
     assert amounts == [Decimal("8000.00")] * 11 + [Decimal("2000.00")]
     assert sum(amounts) == Decimal("90000.00")
+
+
+def test_a_cover_applies_to_its_own_due_date_whatever_the_window(db, user):
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    bank = _bank(db, user, balance="10000")
+    loan = _loan(db, user, bank)
+    # Nov 4 is planned, Oct 4 is not: Oct 4 stays due in every window.
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 11, 4))
+
+    short, long_ = _cash_out(db, user, 30), _cash_out(db, user, 60)
+    assert short == [("2026-10-04", "loan", Decimal("-8000.00"))]
+    assert [m for m in long_ if m[0] <= "2026-10-31"] == short
+    assert long_ == [("2026-10-04", "loan", Decimal("-8000.00")),
+                     ("2026-11-04", "transaction", Decimal("-8000.00"))]
+
+    one, two, three = (project_cashflow(db, user.id, months=n, reference=REF) for n in (1, 2, 3))
+    assert one[0] == two[0] == three[0]
+    assert two[1] == three[1]
+    t30 = project_running_balance(db, user.id, days=30, reference=REF)
+    t60 = project_running_balance(db, user.id, days=60, reference=REF)
+    assert t30["shortfalls"] == [s for s in t60["shortfalls"] if s["date"] <= date(2026, 10, 31)]
+    assert [s["date"] for s in t60["shortfalls"]] == [date(2026, 11, 4)]
+
+
+def test_an_early_or_late_cover_belongs_to_the_nearest_due_date(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 1))   # 3 days early: Oct 4
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 11, 9))   # 5 days late: Nov 4
+
+    for days in (2, 30, 36, 45, 60):  # 36: Nov 4 is inside, the Nov 9 cover is not
+        assert [m for m in _cash_out(db, user, days) if m[1] == "loan"] == [], days
+    assert [e["date"] for e in _loan_events(db, user, datetime(2027, 1, 1))] == [
+        datetime(2026, 12, 4)]
+
+
+def test_a_late_recurring_cover_after_the_window_still_covers_its_due_date(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _recurring(db, user, bank, loan, "8000", datetime(2026, 10, 6))
+
+    for days in (3, 30, 60):
+        assert [m for m in _cash_out(db, user, days) if m[1] == "loan"] == [], days
+
+
+def test_cover_excess_spills_forward_never_backward(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    _transfer(db, user, bank, loan, "12000", datetime(2026, 11, 4))  # Nov 4 + 4,000 of Dec 4
+
+    events = _loan_events(db, user, datetime(2027, 1, 1))
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 10, 4), Decimal("-8000.00")),
+        (datetime(2026, 12, 4), Decimal("-4000.00"))]

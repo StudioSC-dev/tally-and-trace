@@ -21,22 +21,35 @@ payment made, in both modes.
 Projection (``build_loan_payables``): each due date from the next one on, while
 payments are left, is a payable on the paying account (``payment_account_id``)
 of ``loan_payment_amount``, or for ``reduce_term`` of that due date's
-amortisation-preview payment (so the last one is only what is left). A loan with no paying account, no payment amount, no
-first payment date or nothing owed has none. Payments left come from the
+amortisation-preview payment (so the last one is only what is left). A loan
+with no paying account, no payment amount, no first payment date or nothing
+owed has none. Payments left come from the
 amortisation preview for ``reduce_term`` (``loan_term_months`` when the loan
 never repays) and from ``loan_term_months`` minus the payments made for
 ``fixed``; a fixed loan with no term is open-ended while money is owed.
 
 Matching payments to due dates: a POSTED scheduled payment is already counted in
 ``payments_made``, so it moved ``next_due_date`` past its date and that date is no
-longer projected. An UNPOSTED transfer into the loan that is not a prepayment (a
-planned or partial scheduled payment, a plain transfer, a recurring transfer
-entry) is itself a cash leg on its source account, so it covers the payables:
-its cash (amount + interest fee) is consumed once, oldest due date first, and
+longer projected. A planned payment covers the payables instead: an UNPOSTED
+transfer into the loan that is not a prepayment (a planned or partial scheduled
+payment, a plain transfer), whatever its date or entity, and each projected
+occurrence of a recurring transfer entry into the loan. It is itself a cash leg
+on its source account, so its cash (amount + interest fee) is consumed once and
 only the covered part of a payable is removed. Prepayments never cover one.
+
+Each payment belongs to its OWN due date (``own_due_index``): the due date
+nearest its calendar date, a tie going to the earlier one, and the first due
+date for a payment made before it. So a payment a few days early or late covers
+the due date it was meant for. It pays its own due date first, and any excess
+spills forward to the following due dates, never back to an earlier one; a
+payment whose own due date is already settled spills to the next one owed.
+Because a payment never reaches a due date earlier than its own, and is at most
+half a month past it, a payable inside a window is the same for every window
+with the same start: the planned transactions are loaded whatever their date,
+and recurring occurrences are projected ``COVER_HORIZON`` past the window end.
 """
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Optional, Tuple
 
@@ -54,6 +67,10 @@ _CENTS = Decimal("0.01")
 _ZERO = Decimal("0")
 # Upper bound on preview rows (50 years of monthly payments).
 _MAX_ROWS = 600
+# How far past a window's end recurring payments are projected to find covers:
+# a payment belongs to its nearest due date, so it is never more than half a
+# month after the due date it covers.
+COVER_HORIZON = timedelta(days=31)
 
 
 class LoanError(ValueError):
@@ -104,6 +121,43 @@ def due_date(first: date, n: int) -> date:
     index = first.month - 1 + n
     year, month = first.year + index // 12, index % 12 + 1
     return date(year, month, min(first.day, monthrange(year, month)[1]))
+
+
+def own_due_index(first: date, day: date) -> int:
+    """The due date a payment dated ``day`` belongs to, as a step from ``first``.
+
+    The nearest due date, a tie going to the earlier one; ``first`` itself for a
+    payment made on or before it.
+    """
+    if day <= first:
+        return 0
+    k = (day.year - first.year) * 12 + day.month - first.month
+    if due_date(first, k) > day:
+        k -= 1
+    before, after = due_date(first, k), due_date(first, k + 1)
+    return k + 1 if (after - day) < (day - before) else k
+
+
+def allocate_to_due_dates(first: date, dues: List[Tuple[int, Decimal]],
+                          payments: List[Tuple[date, Decimal]]) -> List[Decimal]:
+    """What each due date still owes after ``payments``.
+
+    ``dues`` are ``(step from first, amount owed)`` in step order; ``payments``
+    ``(date, cash)``. Each payment is consumed once: from its own due date
+    (``own_due_index``), or the first due date in ``dues`` after it when that one
+    is not listed, forward only. Cash left after the last due date pays nothing.
+    """
+    pending = sorted((own_due_index(first, day), cash) for day, cash in payments)
+    remaining: List[Decimal] = []
+    carry, j = _ZERO, 0
+    for index, amount in dues:
+        while j < len(pending) and pending[j][0] <= index:
+            carry += pending[j][1]
+            j += 1
+        paid = min(carry, amount)
+        carry -= paid
+        remaining.append(amount - paid)
+    return remaining
 
 
 def propose_split(loan, total: Optional[Decimal] = None, principal: Optional[Decimal] = None,
@@ -311,8 +365,10 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
     return txn
 
 
-def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[date, Decimal]]:
-    """``(due date, payment)`` of the loan's remaining scheduled payments before ``end``.
+def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date, Decimal]]:
+    """``(step, due date, payment)`` of the loan's remaining scheduled payments before ``end``.
+
+    ``step`` counts monthly steps from the first payment date.
 
     A ``reduce_term`` loan's payments are its amortisation rows (the last one is
     smaller); otherwise each is ``loan_payment_amount``.
@@ -331,27 +387,47 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[date, Dec
     if amounts is None and loan.loan_term_months is not None:
         amounts = [payment] * max(loan.loan_term_months - made, 0)
 
-    dates: List[Tuple[date, Decimal]] = []
+    dates: List[Tuple[int, date, Decimal]] = []
     while (amounts is None or len(dates) < len(amounts)) and len(dates) < _MAX_ROWS:
-        due = due_date(first, made + len(dates))
+        step = made + len(dates)
+        due = due_date(first, step)
         if datetime(due.year, due.month, due.day) >= end:
             break
-        dates.append((due, payment if amounts is None else amounts[len(dates)]))
+        dates.append((step, due, payment if amounts is None else amounts[len(dates)]))
     return dates
 
 
+def planned_covers(db: Session, loan: Account) -> List[Tuple[date, Decimal]]:
+    """``(date, cash)`` of every unposted non-prepayment transfer into the loan.
+
+    Loaded by the loan alone, whatever the row's date or entity, so a payable
+    does not depend on the window, and a payment stored under another entity
+    still covers this loan's due date.
+    """
+    rows = (
+        db.query(Transaction)
+        .filter(
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            Transaction.transfer_to_account_id == loan.id,
+            Transaction.is_posted.is_(False),
+        )
+        .all()
+    )
+    return [(t.transaction_date.date(), _money(t.amount) + _money(t.transfer_fee or 0))
+            for t in rows if t.loan_payment_kind != PREPAYMENT]
+
+
 def build_loan_payables(db: Session, loans: List[Account], start: datetime, end: datetime,
-                        cover_by_loan: dict) -> List[dict]:
+                        projected_by_loan: dict) -> List[dict]:
     """Dated payable events for the loans' due dates before ``end``.
 
-    ``cover_by_loan`` is ``{loan_id: [(date, cash)]}``: the unposted, non-prepayment
-    transfers into each loan (see the module docstring). They are consumed oldest
-    due date first, so a due date owes the payment amount less what they cover.
-    A due date before ``start`` is overdue: emitted on ``start`` with ``overdue``
-    True and its due date as ``original_date``.
+    A due date owes its payment less what the planned payments cover (see the
+    module docstring): the loan's unposted non-prepayment transfers
+    (``planned_covers``) and ``projected_by_loan``, ``{loan_id: [(date, cash)]}``,
+    the recurring transfer occurrences into each loan up to ``end`` plus
+    ``COVER_HORIZON``. A due date before ``start`` is overdue: emitted on
+    ``start`` with ``overdue`` True and its due date as ``original_date``.
     """
-    from app.services.statements import allocate_payments
-
     events: List[dict] = []
     for loan in loans:
         if loan.payment_account_id is None or loan.loan_payment_amount is None:
@@ -359,10 +435,10 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
         dates = due_dates(db, loan, end)
         if not dates:
             continue
-        covers = [cash for _, cash in sorted(cover_by_loan.get(loan.id, []),
-                                             key=lambda c: c[0])]
-        dues = allocate_payments([amount for _, amount in dates], covers)
-        for (due, _), remaining in zip(dates, dues):
+        covers = planned_covers(db, loan) + list(projected_by_loan.get(loan.id, []))
+        dues = allocate_to_due_dates(loan.loan_first_payment_date,
+                                     [(step, amount) for step, _, amount in dates], covers)
+        for (_, due, _), remaining in zip(dates, dues):
             if remaining <= 0:
                 continue
             when = datetime(due.year, due.month, due.day)
