@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, Boolean, ForeignKey, Enum, text
+from sqlalchemy import (
+    CheckConstraint, Column, Integer, String, Numeric, Date, DateTime, Text, Boolean,
+    ForeignKey, Enum, text,
+)
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -11,6 +14,11 @@ class AccountType(str, enum.Enum):
     SAVINGS = "savings"
     CHECKING = "checking"
     CREDIT = "credit"
+    LOAN = "loan"
+
+
+LOAN_KINDS = ("personal", "auto", "home")
+LOAN_AMORTIZATIONS = ("fixed", "reduce_term")
 
 def _enum_values(enum_cls):
     return [member.value for member in enum_cls]
@@ -18,7 +26,17 @@ def _enum_values(enum_cls):
 
 class Account(Base):
     __tablename__ = "accounts"
-    
+    __table_args__ = (
+        CheckConstraint(
+            "loan_kind IS NULL OR loan_kind IN ('personal', 'auto', 'home')",
+            name="ck_accounts_loan_kind",
+        ),
+        CheckConstraint(
+            "loan_amortization IS NULL OR loan_amortization IN ('fixed', 'reduce_term')",
+            name="ck_accounts_loan_amortization",
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     name = Column(String(100), nullable=False, index=True)
@@ -39,7 +57,8 @@ class Account(Base):
     # Where this card's statement payment is funded from. Mirrors the UC1
     # primary -> overflow routing on budget_entries: the statement draws on
     # payment_account_id first, and anything it can't cover spills to
-    # payment_overflow_account_id. Credit cards only; null on other account types.
+    # payment_overflow_account_id. A loan reuses payment_account_id as the account
+    # its payments are funded from. Null on other account types.
     payment_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     payment_overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     
@@ -52,6 +71,21 @@ class Account(Base):
     is_spending_wallet = Column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+
+    # Loan terms (loan accounts only; null elsewhere). A loan's balance is
+    # negative while money is owed. Payments are transfers into the loan:
+    # principal as the amount, interest as the transfer fee. The loan's
+    # payment_account_id is where its payments are funded from by default.
+    loan_kind = Column(String(16), nullable=True)  # personal / auto / home
+    loan_annual_rate = Column(Numeric(7, 4), nullable=True)  # percent, e.g. 6.5
+    loan_term_months = Column(Integer, nullable=True)
+    loan_payment_amount = Column(Numeric(15, 2), nullable=True)
+    loan_first_payment_date = Column(Date, nullable=True)
+    # fixed: the bank's schedule (payments left are counted); reduce_term: a
+    # prepayment shortens the term.
+    loan_amortization = Column(String(16), nullable=True)
+    # Scheduled payments made before the loan was tracked here.
+    loan_payments_made_offset = Column(Integer, nullable=True)
 
     # Account status
     is_active = Column(Boolean, default=True)
