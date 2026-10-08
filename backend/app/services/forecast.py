@@ -332,8 +332,26 @@ def get_disposable_income(
     implicit top-up, so the same amount counts as expense: moving it on to a
     non-wallet account then nets it back out instead of counting it twice.
     """
+    # The caller's accounts in this scope (inactive ones included), as in the
+    # period summary: a top-up counts only when its source is one of them, and a
+    # return only when both the wallet and the destination are.
+    scope_ids = {
+        a.id for a in db.query(Account.id).filter(
+            scope_criterion(Account, user_id, entity_id)
+        ).all()
+    }
+    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
+    if scope_ids:
+        # Recurring transfers touching an in-scope account, wherever the entry lives.
+        entry_scope = or_(entry_scope, and_(
+            BudgetEntry.transfer_to_account_id.isnot(None),
+            or_(
+                BudgetEntry.transfer_to_account_id.in_(scope_ids),
+                BudgetEntry.account_id.in_(scope_ids),
+            ),
+        ))
     be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
+        entry_scope,
         BudgetEntry.is_active.is_(True),
     )
     entries = be_query.all()
@@ -345,14 +363,6 @@ def get_disposable_income(
         a.id for a in db.query(Account).filter(Account.id.in_(referenced)).all()
         if is_spending_wallet(a)
     } if referenced else set()
-    # The caller's accounts in this scope (inactive ones included), as in the
-    # period summary: a top-up counts only when its source is one of them, and a
-    # return only when both the wallet and the destination are.
-    scope_ids = {
-        a.id for a in db.query(Account.id).filter(
-            scope_criterion(Account, user_id, entity_id)
-        ).all()
-    }
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0

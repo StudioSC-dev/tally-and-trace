@@ -525,6 +525,60 @@ def test_disposable_income_does_not_expense_a_top_up_funded_from_another_entity(
         "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
 
 
+def test_disposable_income_expenses_a_top_up_it_funds_into_another_entitys_wallet(
+        db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    a, b = entities
+    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True, entity_id=a.id)
+    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
+    # Stored under A, funded from B's bank: B's money leaves B's scope.
+    _entry(db, user, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=theirs, transfer_to_account_id=wallet.id, entity_id=a.id)
+
+    assert get_disposable_income(db, user.id, b.id) == {
+        "monthly_income": 0.0, "monthly_expenses": 1000.0, "monthly_disposable": -1000.0}
+
+
+def test_disposable_income_offsets_a_return_stored_under_another_entity(db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    a, b = entities
+    bank = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
+    wallet = _account(db, user, "B GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True, entity_id=b.id)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id, entity_id=b.id)
+    _entry(db, user, "GCash back to bank", BudgetEntryType.EXPENSE, "500.00", REF,
+           account=wallet, transfer_to_account_id=bank.id, entity_id=a.id)
+
+    assert get_disposable_income(db, user.id, b.id) == {
+        "monthly_income": 0.0, "monthly_expenses": 1500.0, "monthly_disposable": -1500.0}
+
+
+def test_disposable_income_ignores_another_entitys_transfer_between_its_own_accounts(
+        db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import get_disposable_income
+
+    a, b = entities
+    _account(db, user, "A Bank", AccountType.SAVINGS, "0.00", entity_id=a.id)
+    bank = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
+    wallet = _account(db, user, "B GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True, entity_id=b.id)
+    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id, entity_id=b.id)
+
+    assert get_disposable_income(db, user.id, a.id) == {
+        "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
+
+
 def test_recurring_transfers_materialised_without_advancing_move_money_once(client, db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
