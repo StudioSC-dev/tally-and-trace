@@ -331,6 +331,18 @@ def _loan_funding(db: Session, current_user: User, loan: Account,
     return _funding_account(db, current_user, target_id, "from_account_id", loan.id)
 
 
+def _lock(db: Session, *accounts: Account) -> None:
+    """``SELECT ... FOR UPDATE`` each account, in ascending id order, refreshing it.
+
+    Owed amounts, splits and balances are then computed from rows no concurrent
+    payment can change until this one commits. A fixed lock order keeps two
+    payments over the same pair of accounts from deadlocking.
+    """
+    for account in sorted(accounts, key=lambda a: a.id):
+        (db.query(Account).filter(Account.id == account.id)
+         .with_for_update().populate_existing().one())
+
+
 def _when(value: Optional[datetime]) -> datetime:
     """Naive UTC, as transaction_date is stored."""
     if value is None:
@@ -376,6 +388,7 @@ def record_loan_payment(
     """
     loan = _loan_or_404(db, current_user, account_id)
     funding = _loan_funding(db, current_user, loan, payment.from_account_id)
+    _lock(db, loan, funding)
     total, principal, interest = (
         _cents(payment.amount), _cents(payment.principal), _cents(payment.interest))
     if None not in (total, principal, interest) and principal + interest != total:
@@ -403,6 +416,13 @@ def record_loan_prepayment(
             detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
         )
     funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
+    _lock(db, loan, funding)
+    if loan_svc.amortization_of(loan) == loan_svc.FIXED:  # re-read under the lock
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
+        )
     return _record(db, current_user, loan, funding, _cents(prepayment.amount), Decimal("0"),
                    loan_svc.PREPAYMENT, prepayment)
 

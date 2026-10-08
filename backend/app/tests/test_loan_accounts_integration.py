@@ -720,3 +720,59 @@ def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, peopl
     assert _balance(client, me, usd["id"]) == Decimal("10000.00")
     assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
     assert _schedule(client, me, loan["id"]).json()["payments"] == []
+
+
+# --- concurrency -------------------------------------------------------------
+
+def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client, people):
+    """Owed is read from the locked loan row, not a stale snapshot.
+
+    Another transaction holds the loan row and pays 700 of the 1,000 owed. A
+    500-principal payment arriving meanwhile must wait for it and then be refused
+    (300 left). Reading the loan without FOR UPDATE would see 1,000 owed, accept
+    the payment and overwrite the other one's balance.
+    """
+    import threading
+    import time
+
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000, payment_account_id=bank["id"])
+
+    engine = create_engine(os.environ["DATABASE_URL"])
+    other = engine.connect()
+    tx = other.begin()
+    result = {}
+    try:
+        other.execute(text("SELECT id FROM accounts WHERE id = :id FOR UPDATE"),
+                      {"id": loan["id"]})
+        other.execute(text("UPDATE accounts SET balance = -300 WHERE id = :id"),
+                      {"id": loan["id"]})
+
+        def pay():
+            result["response"] = _pay(client, me, loan["id"], principal=500, interest=0)
+
+        worker = threading.Thread(target=pay)
+        worker.start()
+        deadline = time.monotonic() + 10
+        with engine.connect() as probe:
+            while True:
+                waiting = probe.execute(text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                    "AND wait_event_type = 'Lock'")).scalar()
+                if waiting or not worker.is_alive() or time.monotonic() > deadline:
+                    break
+                time.sleep(0.05)
+        assert waiting, "the payment did not wait on the locked loan row"
+        tx.commit()
+    finally:
+        if tx.is_active:
+            tx.rollback()
+        other.close()
+    worker.join(10)
+    engine.dispose()
+
+    r = result["response"]
+    assert r.status_code == 400 and "owed" in r.text, r.text
+    assert _balance(client, me, loan["id"]) == Decimal("-300.00")
+    assert _balance(client, me, bank["id"]) == Decimal("10000.00")
