@@ -16,6 +16,7 @@ from app.schemas.transaction import TransactionCreate, TransactionResponse, Tran
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
+from app.routers.accounts import _funding_account, _loan_or_404
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -190,7 +191,7 @@ def _money_changed(requested: dict, field: str, current, *, none_is_zero: bool =
     return Decimal(str(new)) != Decimal(str(current))
 
 
-def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) -> None:
+def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, requested: dict) -> None:
     """Keep the loan endpoints' rules on a loan payment edited through this API.
 
     Its type and accounts are fixed (so a prepayment can never land on a fixed
@@ -201,6 +202,11 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
     owed amount can still be edited but not posted. A prepayment keeps the
     prepayment endpoint's rules: no interest, and it is not posted (or its
     amount changed while posted) once the loan is ``fixed``.
+
+    Posting the row, or changing its money while it is posted, also re-runs the
+    endpoints' account checks against the accounts as they are now: the
+    destination is still a loan, the funding account is still one the caller
+    may use to fund it, and the two share a currency.
     """
     for field in LOAN_PAYMENT_FIXED_FIELDS:
         if field in requested and requested[field] != getattr(txn, field):
@@ -214,6 +220,14 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
     posted = bool(requested.get("is_posted", old_posted))
     amount_changed = _money_changed(requested, "amount", txn.amount)
     fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
+    if posted and (not old_posted or amount_changed or fee_changed):
+        loan = _loan_or_404(db, user, txn.transfer_to_account_id)
+        funding = _funding_account(
+            db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        try:
+            loan_svc.check_currency(loan, funding)
+        except loan_svc.LoanError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if txn.loan_payment_kind == loan_svc.PREPAYMENT:
         interest = requested.get("transfer_fee", txn.transfer_fee)
         if interest is not None and Decimal(str(interest)) != 0:
@@ -529,7 +543,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         _require_account(db, current_user, requested.get(
             "account_id", db_transaction.account_id), "Account not found")
     if db_transaction.loan_payment_kind:
-        _validate_loan_payment_edit(db, db_transaction, requested)
+        _validate_loan_payment_edit(db, current_user, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount

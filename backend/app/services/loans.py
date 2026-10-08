@@ -250,13 +250,18 @@ def check_edited_payment(loan, *, old_principal, old_posted: bool, posted: bool,
     return principal, interest
 
 
+def check_currency(loan, funding) -> None:
+    """A loan is paid only from an account in its own currency."""
+    if funding.currency != loan.currency:
+        raise LoanError("The funding account's currency must match the loan's currency")
+
+
 def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account,
                    principal: Decimal, interest: Decimal, kind: str,
                    when: datetime, is_posted: bool, description: Optional[str]) -> Transaction:
     """Add the transfer funding -> loan and apply it to both balances (not committed)."""
     principal, interest = cents(principal), cents(interest)
-    if funding.currency != loan.currency:
-        raise LoanError("The funding account's currency must match the loan's currency")
+    check_currency(loan, funding)
     if principal < 0 or interest < 0:
         raise LoanError("Principal and interest cannot be negative")
     if principal + interest <= 0:

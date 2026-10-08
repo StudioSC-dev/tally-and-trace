@@ -768,6 +768,69 @@ def test_a_prepayment_edit_cannot_add_interest(client, people):
     assert _balance(client, me, loan["id"]) == Decimal("-800.00")
 
 
+@pytest.mark.parametrize("change, expected", [
+    ("funding_currency", "currency"),
+    ("funding_credit_card", "not a credit card"),
+    ("funding_spending_wallet", "not a spending wallet"),
+    ("loan_not_a_loan", "Account is not a loan"),
+])
+def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
+        client, people, change, expected):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000)
+    pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
+                   principal=400, interest=10, is_posted=False)
+    assert pending.status_code == 200, pending.text
+    txn_id = pending.json()["id"]
+
+    target, body = {
+        "funding_currency": (bank, {"currency": "USD"}),
+        "funding_credit_card": (bank, {"account_type": "credit"}),
+        "funding_spending_wallet": (bank, {"is_spending_wallet": True}),
+        "loan_not_a_loan": (loan, {"account_type": "savings", **{f: None for f in (
+            "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
+            "loan_first_payment_date", "loan_amortization")}}),
+    }[change]
+    r = client.put(f"{API}/accounts/{target['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    for edit in ({"is_posted": True}, {"is_posted": True, "amount": 300}):
+        r = _put(client, me, txn_id, **edit)
+        assert r.status_code == 400 and expected in r.text, (edit, r.text)
+        assert _balance(client, me, bank["id"]) == Decimal("10000.00")
+        assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
+
+    # Metadata-only edits are still allowed.
+    r = _put(client, me, txn_id, description="still pending")
+    assert r.status_code == 200, r.text
+    assert r.json()["description"] == "still pending"
+    assert r.json()["is_posted"] is False
+
+
+def test_a_money_edit_on_a_posted_payment_rechecks_the_funding_account(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000)
+    paid = _pay(client, me, loan["id"], from_account_id=bank["id"], principal=400, interest=10)
+    assert paid.status_code == 200, paid.text
+
+    r = client.put(f"{API}/accounts/{bank['id']}", json={"currency": "USD"},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    r = _put(client, me, paid.json()["id"], amount=300)
+    assert r.status_code == 400 and "currency" in r.text, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9590.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-600.00")
+
+    # Metadata edits and unposting stay allowed.
+    assert _put(client, me, paid.json()["id"], description="x").status_code == 200
+    r = _put(client, me, paid.json()["id"], is_posted=False)
+    assert r.status_code == 200, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("10000.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
+
+
 def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
     me = people()
     usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
