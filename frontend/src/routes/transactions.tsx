@@ -642,6 +642,29 @@ export function TransactionsPage() {
     }
   }, [accountsData, actionTransaction, editingTransaction, loanPaymentStatus, triggerAccount])
 
+  // The fee once `account` is picked as the destination of the form's transfer.
+  const destinationTransferFee = (account: Account, fee: number | undefined) => {
+    // Back to the row's stored destination: its stored fee again.
+    if (paysLoan(editingTransaction, account.id)) {
+      return editingTransaction?.transfer_fee ?? 0
+    }
+    // Newly paying a loan: the fee becomes the interest, left blank so the
+    // server splits the amount at the loan's rate.
+    if (account.account_type === 'loan') {
+      return undefined
+    }
+    // A legacy (unmarked) loan payment moved to a non-loan account: the amount
+    // stays the whole payment and nothing else leaves the source.
+    if (
+      editingTransaction !== null &&
+      !editingTransaction.loan_payment_kind &&
+      isLoanPayment(editingTransaction)
+    ) {
+      return 0
+    }
+    return fee
+  }
+
   // A transfer into a loan is a loan payment: its fee is the interest. The
   // stored destination of the row being edited is classified like the row.
   const transferIntoLoan =
@@ -1953,14 +1976,9 @@ export function TransactionsPage() {
                             setFormData((prev) => ({
                               ...prev,
                               transfer_to_account_id: isSelected ? undefined : account.id,
-                              // Newly paying a loan: the fee becomes the interest, left
-                              // blank so the server splits the amount at the loan's rate.
-                              transfer_fee:
-                                !isSelected &&
-                                account.account_type === 'loan' &&
-                                !paysLoan(editingTransaction, account.id)
-                                  ? undefined
-                                  : prev.transfer_fee,
+                              transfer_fee: isSelected
+                                ? prev.transfer_fee
+                                : destinationTransferFee(account, prev.transfer_fee),
                             }))
                           }
                           className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
