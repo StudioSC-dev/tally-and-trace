@@ -631,6 +631,7 @@ async def upload_receipt(
 UNCATEGORIZED = "Uncategorized"
 TRANSFER_FEES = "Transfer fees"
 UNALLOCATED_WALLET_SPEND = "Unallocated wallet spend"
+RETURNED_FROM_WALLETS = "Returned from wallets"
 
 
 def summarize_period(
@@ -646,14 +647,22 @@ def summarize_period(
     Spending wallets (cash on hand, e-wallets) are expensed when topped up, so:
 
     - expense = non-wallet debits + cash-to-wallet transfers (amount + fee) + the
-      fee on every other transfer funded from a non-wallet account; each fee is
-      counted once, and a transfer's amount is otherwise not an expense;
+      fee on every other transfer funded from a non-wallet account - money moved
+      out of a wallet, unspent, into one of the caller's non-wallet accounts
+      (e.g. GCash to a credit card payment, or back to a bank). Each fee is
+      counted once, and a transfer's amount is otherwise not an expense, so a
+      card purchase of 1,000 paid from a wallet topped up for it is 1,000, not
+      2,000;
     - debits from a wallet are not in the expense total but are shown under their
       category, and fees on transfers funded from a wallet (already expensed at
       top-up) are shown in category detail but not in the total;
     - an "Unallocated wallet spend" row holds top-up amounts not yet accounted
-      for by wallet debits and wallet-funded fees, so the expense column of
-      ``category_breakdown`` always sums to ``total_expenses``.
+      for by wallet debits and wallet-funded fees. Returned money is not wallet
+      spend, so it never reduces this row; it is shown on its own, negative,
+      "Returned from wallets" row instead. Together they keep the expense column
+      of ``category_breakdown`` summing to ``total_expenses``;
+    - a transfer between two wallets moves no expense, and money leaving a
+      wallet for an account outside the caller's scope stays wallet spend.
 
     Transfer fees are shown on a "Transfer fees" row: a transfer's own category
     (e.g. a savings contribution) describes the amount moved, not spending.
@@ -661,14 +670,15 @@ def summarize_period(
 
     The breakdown is keyed by name, as it always has been (two categories with
     one name already share a row). A synthetic row ("Uncategorized", "Transfer
-    fees", "Unallocated wallet spend") whose name a user category also uses is
-    added into that row, never written over it, so no amount is lost and the
-    expense column still sums to ``total_expenses``.
+    fees", "Unallocated wallet spend", "Returned from wallets") whose name a
+    user category also uses is added into that row, never written over it, so
+    no amount is lost and the expense column still sums to ``total_expenses``.
     """
     zero = Decimal("0")
     total_income = zero
     total_expenses = zero
     unallocated_wallet = zero
+    returned = zero
     breakdown: dict = {}
 
     def row(name: str) -> dict:
@@ -693,12 +703,16 @@ def summarize_period(
             if source not in scope_ids:
                 continue  # inbound from outside the caller's scope
             fee = _D(t.transfer_fee)
+            destination = t.transfer_to_account_id
             from_wallet = source in wallet_ids
-            to_wallet = t.transfer_to_account_id in wallet_ids
+            to_wallet = destination in wallet_ids
             if fee:
                 row(TRANSFER_FEES)["expenses"] += fee
             if from_wallet:
                 unallocated_wallet -= fee
+                if destination in scope_ids and not to_wallet:
+                    total_expenses -= amount
+                    returned += amount
             elif to_wallet:
                 total_expenses += amount + fee
                 unallocated_wallet += amount
@@ -707,6 +721,8 @@ def summarize_period(
 
     if unallocated_wallet:
         row(UNALLOCATED_WALLET_SPEND)["expenses"] += unallocated_wallet
+    if returned:
+        row(RETURNED_FROM_WALLETS)["expenses"] -= returned
 
     return {
         "total_income": total_income,

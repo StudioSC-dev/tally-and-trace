@@ -1,8 +1,8 @@
 """Period summary with spending wallets, through the transactions API.
 
 The acceptance scenarios, plus the invariant that the category rows (including
-"Unallocated wallet spend") sum to the expense total after every create, edit
-and delete. Uses a throwaway user. Skips without a database.
+"Unallocated wallet spend" and "Returned from wallets") sum to the expense total
+after every create, edit and delete. Uses a throwaway user. Skips without a database.
 """
 import os
 from decimal import Decimal
@@ -150,8 +150,10 @@ def test_invariant_holds_after_create_edit_and_delete(client, headers):
         _transfer(client, headers, bank, checking, 3000, fee=20),
     ]
     total, rows = _summary(client, headers)
-    assert total == Decimal("250") + 40 + 1512 + 20
+    # The 200 GCash -> Bank return offsets the top-up; it is not wallet spend.
+    assert total == Decimal("250") + 40 + 1512 + 20 - 200
     assert rows["Unallocated wallet spend"] == Decimal("1500") - 600 - 8
+    assert rows["Returned from wallets"] == Decimal("-200")
 
     # Edit: amounts, fees, and moving a debit between a bank and a wallet.
     edits = [
@@ -166,8 +168,9 @@ def test_invariant_holds_after_create_edit_and_delete(client, headers):
         assert r.status_code == 200, r.text
         _summary(client, headers)
     total, _ = _summary(client, headers)
-    # Bank 40 + top-up 1,530 + second top-up 3,020; the wallet debits are not counted.
-    assert total == Decimal("40") + 1530 + 3020
+    # Bank 40 + top-up 1,530 + second top-up 3,020 - the 200 returned to the bank;
+    # the wallet debits are not counted.
+    assert total == Decimal("40") + 1530 + 3020 - 200
 
     # Delete, one by one, back to nothing.
     for txn_id in ids:
@@ -248,3 +251,57 @@ def test_co_member_transfers_in_are_not_the_callers_expense(client, co_member):
 
     total, rows = _summary(client, co_member["headers"])
     assert total == Decimal("0") and rows == {}
+
+
+def test_card_purchase_paid_from_a_topped_up_wallet_is_expensed_once(client, headers):
+    bank = _account(client, headers, "Bank", "savings")
+    gcash = _account(client, headers, "GCash", "e_wallet", wallet=True)
+    card = _account(client, headers, "Card", "credit")
+    food = _category(client, headers, "Food")
+    _debit(client, headers, card, 1000, food)
+    _transfer(client, headers, bank, gcash, 1000)
+    _transfer(client, headers, gcash, card, 1000)  # the card payment, from the wallet
+
+    total, rows = _summary(client, headers)
+    assert total == Decimal("1000")
+    assert rows == {"Food": Decimal("1000"), "Unallocated wallet spend": Decimal("1000"),
+                    "Returned from wallets": Decimal("-1000")}
+
+
+def test_money_returned_from_a_wallet_to_the_bank_reduces_expense(client, headers):
+    bank = _account(client, headers, "Bank", "savings")
+    gcash = _account(client, headers, "GCash", "e_wallet", wallet=True)
+    _transfer(client, headers, bank, gcash, 1000)
+    _transfer(client, headers, gcash, bank, 200, fee=5)
+
+    total, rows = _summary(client, headers)
+    assert total == Decimal("800")
+    # The 5 fee stays wallet detail (shown, out of the total, taken from unallocated).
+    assert rows == {"Transfer fees": Decimal("5"), "Unallocated wallet spend": Decimal("995"),
+                    "Returned from wallets": Decimal("-200")}
+
+
+def test_invariant_holds_as_returns_are_created_edited_and_deleted(client, headers):
+    bank = _account(client, headers, "Bank", "savings")
+    gcash = _account(client, headers, "GCash", "e_wallet", wallet=True)
+    cash = _account(client, headers, "Cash", "cash", wallet=True)
+    card = _account(client, headers, "Card", "credit")
+    top_up = _transfer(client, headers, bank, gcash, 1500, fee=10)
+    pay_card = _transfer(client, headers, gcash, card, 700)
+    back = _transfer(client, headers, gcash, bank, 300, fee=3)
+    assert _summary(client, headers)[0] == Decimal("1510") - 700 - 300
+
+    for txn_id, change, expected in (
+        (back, {"amount": 400}, Decimal("1510") - 700 - 400),
+        (pay_card, {"transfer_to_account_id": cash}, Decimal("1510") - 400),  # wallet to wallet
+        (back, {"transfer_fee": 0}, Decimal("1510") - 400),
+    ):
+        r = client.put(f"{API}/transactions/{txn_id}", headers=headers, json=change)
+        assert r.status_code == 200, r.text
+        assert _summary(client, headers)[0] == expected
+
+    for txn_id in (back, pay_card, top_up):
+        r = client.delete(f"{API}/transactions/{txn_id}", headers=headers)
+        assert r.status_code == 200, r.text
+        _summary(client, headers)
+    assert _summary(client, headers) == (Decimal("0"), {})
