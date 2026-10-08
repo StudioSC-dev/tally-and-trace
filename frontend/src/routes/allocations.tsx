@@ -784,8 +784,10 @@ export function AllocationsPage() {
           currency: subscriptionForm.currency,
           account_id: subscriptionForm.account_id,
           overflow_account_id: subscriptionForm.overflow_account_id || undefined,
-          // null clears a destination on edit; omitted on create.
-          transfer_to_account_id: subscriptionForm.transfer_to_account_id || (editingBudgetEntry ? null : undefined),
+          // null clears a destination on edit; omitted on create. Only expenses carry one.
+          transfer_to_account_id:
+            (subscriptionForm.entry_type === 'expense' && subscriptionForm.transfer_to_account_id) ||
+            (editingBudgetEntry ? null : undefined),
           category_id: subscriptionForm.category_id || undefined,
           allocation_id: subscriptionForm.allocation_id ?? undefined,
           cadence: subscriptionForm.cadence,
@@ -1758,7 +1760,14 @@ export function AllocationsPage() {
                           <button
                             type="button"
                             key={type}
-                            onClick={() => setSubscriptionForm((prev) => ({ ...prev, entry_type: type }))}
+                            onClick={() =>
+                              setSubscriptionForm((prev) => ({
+                                ...prev,
+                                entry_type: type,
+                                // Only an expense can be a recurring transfer; the picker hides for income.
+                                transfer_to_account_id: type === 'expense' ? prev.transfer_to_account_id : undefined,
+                              }))
+                            }
                             className={`px-3 py-1 text-sm font-semibold transition ${ isActive ? 'bg-ink text-paper' : 'text-body hover:bg-sunken' }`}
                           >
                             {type === 'expense' ? 'Expense' : 'Income'}
