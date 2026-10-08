@@ -37,6 +37,9 @@ def get_snapshot(
     - 3-month cash-flow forecast
     - Goal progress
     - Top 3 wishlist items with readiness advisory
+    - Available cash (projection-cash accounts only; card balances are owed)
+    - Per-account month-end closings over the forecast window
+    - Payables (cash outflows) due in the next 30 days
     """
     # Was an unvalidated entity_id query param; get_active_entity verifies membership.
     entity_id = active_entity.id if active_entity else None
@@ -127,6 +130,23 @@ def get_snapshot(
             "affordable_by": affordable_by,
         })
 
+    # -----------------------------------------------------------------------
+    # 7. Available cash, per-account closings, payables
+    # -----------------------------------------------------------------------
+    available_cash = forecast_svc.get_available_cash(accounts)
+    account_closings = [
+        {
+            "period_label": p["period_label"],
+            "period_start": p["period_start"],
+            "period_end": p["period_end"],
+            "by_account": p["by_account"],
+            "unassigned_closing": p["unassigned_closing"],
+            "overflow_moves": p["overflow_moves"],
+        }
+        for p in forecast_3m
+    ]
+    payables = forecast_svc.get_payables(db, current_user.id, entity_id, days=30)
+
     return {
         "balances": {
             "total": round(total_balance, 2),
@@ -137,4 +157,7 @@ def get_snapshot(
         "forecast_next_3_months": forecast_3m,
         "goals_progress": goals_progress,
         "wishlist_next_up": wishlist_next_up,
+        "available_cash": round(float(available_cash), 2),
+        "account_closings": account_closings,
+        "payables": payables,
     }

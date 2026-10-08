@@ -10,8 +10,9 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Sequence
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
@@ -70,6 +71,15 @@ def _monthly_equivalent(amount: float, cadence: RecurrenceFrequency) -> float:
 # Public API
 # ---------------------------------------------------------------------------
 
+def is_projection_cash(account) -> bool:
+    """True when an account's balance is money on hand for projection purposes.
+
+    Credit-card balances are money owed, not cash: card spending reaches cash only
+    when the statement is paid (modelled as dated statement payables).
+    """
+    return account.account_type != AccountType.CREDIT
+
+
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
@@ -87,88 +97,103 @@ def project_cashflow(
     reference: Optional[datetime] = None,
 ) -> List[dict]:
     """
-    Generate a month-by-month cash-flow projection.
+    Generate a month-by-month cash-flow projection from the dated events
+    (``collect_events``), so it agrees with the running-balance timeline.
+
+    The window starts TODAY (the same ``start`` as the timeline: opening balances
+    are as of now), so the first period runs from today to the 1st of next month
+    and later periods are whole calendar months.
 
     Returns a list of dicts with keys:
       period_label, period_start, period_end,
-      opening_balance, income, expenses, unposted_expenses,
-      net, closing_balance
+      opening_balance, income, expenses, unposted_expenses, statement_payables,
+      net, closing_balance, by_account, unassigned_closing, overflow_moves
+
+    ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
+    net unposted cash transactions (debits - credits + transfer fees, plus transfer
+    amounts crossing the scope boundary);
+    ``statement_payables`` are credit-card statements due in the period.
+    ``by_account`` is each projection-cash account's month-end closing, excluding
+    virtual overflow pulls (reported in ``overflow_moves``).
     """
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
-    # Start of current month
-    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = start.replace(day=1)
+    boundaries = [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
+    end = boundaries[-1]
 
-    accounts = get_account_balances(db, user_id, entity_id)
-    # Exclude credit-card accounts — their balance is money owed, not cash on hand.
-    # (This is an advisory monthly projection, so float is fine here.)
-    opening = sum(float(a.balance) for a in accounts if a.account_type != AccountType.CREDIT)
+    accounts, opening_by_account, account_names = _projection_accounts(db, user_id, entity_id)
+    opening = sum(opening_by_account.values(), Decimal("0"))
 
-    # Active budget entries for the entity/user
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
-        BudgetEntry.is_active.is_(True),
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    cash_events = [e for e in events if e["counts_as_cash"]]
+    routing = _route_legs(
+        opening_by_account, cash_events, account_names,
+        checkpoints=[b.date() for b in boundaries[1:]],
     )
-    budget_entries = be_query.all()
 
-    # Unposted transactions (confirmed upcoming expenses)
-    txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
-        Transaction.is_posted.is_(False),
-    )
-    unposted_txns = txn_query.all()
+    def f(x: Decimal) -> float:
+        return round(float(x), 2)
 
     timeline = []
-    for _ in range(months):
-        period_end = _add_months(period_start, 1)
+    for i in range(months):
+        period_start, period_end = boundaries[i], boundaries[i + 1]
+        in_period = [e for e in cash_events if period_start <= _naive(e["date"]) < period_end]
 
-        income: float = 0.0
-        expenses: float = 0.0
+        def total(source: str, sign: int = 0) -> Decimal:
+            amounts = (e["amount"] for e in in_period if e["source"] == source)
+            if sign > 0:
+                amounts = (a for a in amounts if a > 0)
+            elif sign < 0:
+                amounts = (a for a in amounts if a < 0)
+            return sum(amounts, Decimal("0"))
 
-        for entry in budget_entries:
-            # Walk occurrences within the period
-            occ = entry.next_occurrence.replace(tzinfo=None) if entry.next_occurrence.tzinfo else entry.next_occurrence
-            # If the first occurrence already passed use it as starting point
-            while occ < period_start:
-                occ = _next_occurrence(occ, entry.cadence)
-
-            while period_start <= occ < period_end:
-                if entry.entry_type == BudgetEntryType.INCOME:
-                    income += float(entry.amount)
-                else:
-                    expenses += float(entry.amount)
-                occ = _next_occurrence(occ, entry.cadence)
-
-        # Unposted transactions within the period
-        unposted_period: float = 0.0
-        for txn in unposted_txns:
-            txn_date = txn.transaction_date.replace(tzinfo=None) if txn.transaction_date.tzinfo else txn.transaction_date
-            if period_start <= txn_date < period_end:
-                from app.models.transaction import TransactionType
-                if txn.transaction_type == TransactionType.DEBIT:
-                    unposted_period += float(txn.amount)
-                elif txn.transaction_type == TransactionType.CREDIT:
-                    unposted_period -= float(txn.amount)
-
-        net = income - expenses - unposted_period
+        income = total("budget_entry", 1)
+        expenses = -total("budget_entry", -1)
+        unposted = -total("transaction")
+        statements = -total("statement")
+        net = sum((e["amount"] for e in in_period), Decimal("0"))
         closing = opening + net
 
+        snapshot = routing["closings"][i]
         timeline.append({
             "period_label": period_start.strftime("%B %Y"),
             "period_start": period_start.isoformat(),
             "period_end": period_end.isoformat(),
-            "opening_balance": round(opening, 2),
-            "income": round(income, 2),
-            "expenses": round(expenses, 2),
-            "unposted_expenses": round(unposted_period, 2),
-            "net": round(net, 2),
-            "closing_balance": round(closing, 2),
+            "opening_balance": f(opening),
+            "income": f(income),
+            "expenses": f(expenses),
+            "unposted_expenses": f(unposted),
+            "statement_payables": f(statements),
+            "net": f(net),
+            "closing_balance": f(closing),
+            "by_account": [
+                {
+                    "account_id": a["account_id"],
+                    "account_name": a["account_name"],
+                    "closing_balance": f(a["closing_balance"]),
+                }
+                for a in account_closings(snapshot, opening_by_account, account_names)
+            ],
+            "unassigned_closing": f(snapshot["unassigned"]),
+            "overflow_moves": serialize_overflow_moves([
+                m for m in routing["overflow_moves"]
+                if period_start.date() <= m["date"] < period_end.date()
+            ]),
         })
 
         opening = closing
-        period_start = period_end
 
     return timeline
+
+
+def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
+    """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
+    # Naive: compared against the naive next_occurrence / transaction_date columns.
+    now = reference or naive_utc_now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=days + 1)
 
 
 def get_upcoming_items(
@@ -179,56 +204,70 @@ def get_upcoming_items(
     reference: Optional[datetime] = None,
 ) -> List[dict]:
     """
-    Return all scheduled income/expense occurrences and unposted transactions
-    within the next N days, sorted by date.
+    Return every dated event from ``collect_events`` within the next N days
+    (budget-entry occurrences, unposted transactions and credit-card statement
+    payables), sorted by date. ``amount`` is the unsigned amount as entered.
     """
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
-    cutoff = now + timedelta(days=days)
+    start, end = _upcoming_window(days, reference)
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id)
 
-    items: List[dict] = []
-
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
-        BudgetEntry.is_active.is_(True),
-    )
-
-    for entry in be_query.all():
-        occ = entry.next_occurrence.replace(tzinfo=None) if entry.next_occurrence.tzinfo else entry.next_occurrence
-        # Walk forward occurrences within the window
-        counter = 0
-        while occ <= cutoff and counter < 100:
-            if occ >= now:
-                items.append({
-                    "name": entry.name,
-                    "amount": entry.amount,
-                    "due_date": occ.date().isoformat(),
-                    "entry_type": entry.entry_type.value,
-                    "source": "budget_entry",
-                    "source_id": entry.id,
-                })
-            occ = _next_occurrence(occ, entry.cadence)
-            counter += 1
-
-    txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
-        Transaction.is_posted.is_(False),
-        Transaction.transaction_date >= now,
-        Transaction.transaction_date <= cutoff,
-    )
-
-    for txn in txn_query.all():
-        items.append({
-            "name": txn.description or "Unposted transaction",
-            "amount": txn.amount,
-            "due_date": txn.transaction_date.date().isoformat(),
-            "entry_type": txn.transaction_type.value,
-            "source": "transaction",
-            "source_id": txn.id,
-        })
-
+    items = [
+        {
+            "name": e["name"],
+            "amount": e["face_amount"],
+            "due_date": _naive(e["date"]).date().isoformat(),
+            "entry_type": e["type"],
+            "source": e["source"],
+            "source_id": e["source_id"],
+        }
+        for e in events
+    ]
     items.sort(key=lambda x: x["due_date"])
     return items
+
+
+def get_available_cash(accounts) -> Decimal:
+    """Pooled projection cash: the sum of projection-cash account balances."""
+    return sum((_money(a.balance) for a in accounts if is_projection_cash(a)), Decimal("0"))
+
+
+def get_payables(
+    db: Session,
+    user_id: int,
+    entity_id: Optional[int] = None,
+    days: int = 30,
+    reference: Optional[datetime] = None,
+) -> List[dict]:
+    """Cash outflows due within the next N days, with the account each draws on.
+
+    Same window and events as ``get_upcoming_items``, restricted to events that
+    take cash out of the pool (bills, unposted debits, card statements). Transfers
+    between your own accounts are not payables; card charges reach cash via their
+    statement payable instead.
+    """
+    start, end = _upcoming_window(days, reference)
+    accounts = get_account_balances(db, user_id, entity_id)
+    names = {a.id: a.name for a in accounts}
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+
+    payables = []
+    for e in sorted(events, key=_event_sort_key):
+        if not e["counts_as_cash"] or e["amount"] >= 0 or e["type"] == TransactionType.TRANSFER.value:
+            continue
+        acc = e["funding_account_id"]
+        ov = e["overflow_account_id"]
+        payables.append({
+            "due_date": _naive(e["date"]).date().isoformat(),
+            "name": e["name"],
+            "amount": round(float(-e["amount"]), 2),
+            "source": e["source"],
+            "source_id": e["source_id"],
+            "account_id": acc,
+            "account_name": names.get(acc),
+            "overflow_account_id": ov,
+            "overflow_account_name": names.get(ov),
+        })
+    return payables
 
 
 def get_disposable_income(
@@ -355,7 +394,8 @@ def build_timeline(opening, events: List[dict]) -> dict:
 
     ``events`` items: ``{date, name, amount, type, source, source_id}`` where
     ``amount`` is signed (positive = inflow, negative = outflow). Same-day ties
-    put OUTFLOWS before inflows — the conservative assumption for solvency.
+    use ``_event_sort_key`` (transfers, then outflows, then inflows), the same
+    order per-account routing uses, so the two views agree on shortfalls.
 
     Returns opening/closing balances, the per-event running balance, the trough
     (lowest balance + its date, ``None`` date meaning the opening is the low), and
@@ -363,18 +403,13 @@ def build_timeline(opening, events: List[dict]) -> dict:
     """
     opening = _money(opening)
 
-    def _key(e):
-        d = e["date"]
-        d = d.date() if isinstance(d, datetime) else d
-        return (d, 0 if _money(e["amount"]) < 0 else 1)
-
     running = opening
     lowest = opening
     trough_date: Optional[date] = None
     out_events: List[dict] = []
     shortfalls: List[dict] = []
 
-    for e in sorted(events, key=_key):
+    for e in sorted(events, key=_event_sort_key):
         amt = _money(e["amount"])
         running = (running + amt).quantize(_CENTS)
         d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
@@ -404,55 +439,394 @@ def build_timeline(opening, events: List[dict]) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Unified dated-event engine
+#
+# collect_events is the single source of dated events for every forward-looking
+# view (running-balance timeline, monthly cash-flow, upcoming items). Each event
+# carries per-account LEGS: the signed amount it moves on each account it touches.
+#
+#   leg = {"account_id", "amount", "overflow_account_id", "cash"}
+#
+# ``cash`` says whether the leg counts toward pooled projection cash. The event's
+# ``amount`` is the sum of its cash legs (its effect on the pooled total), and
+# ``counts_as_cash`` is False when it moves no projection cash at all (e.g. a
+# charge on a credit card, which reaches cash via the statement payable instead).
+# ``face_amount`` is the unsigned amount as entered, for listings.
+#
+# ``funding_account_id`` / ``overflow_account_id`` mirror the primary leg so older
+# event consumers keep working.
+# ---------------------------------------------------------------------------
+
+def _leg(account_id, amount, overflow_account_id=None, cash: bool = True) -> dict:
+    return {
+        "account_id": account_id,
+        "amount": _money(amount),
+        "overflow_account_id": overflow_account_id,
+        "cash": cash,
+    }
+
+
+def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict],
+           counts_as_cash: Optional[bool] = None, **extra) -> dict:
+    cash_legs = [leg for leg in legs if leg["cash"]]
+    primary = legs[0] if legs else {}
+    if counts_as_cash is None:
+        counts_as_cash = bool(cash_legs)
+    ev = {
+        "date": date,
+        "name": name,
+        "amount": sum((leg["amount"] for leg in cash_legs), Decimal("0")),
+        "type": type,
+        "source": source,
+        "source_id": source_id,
+        "face_amount": _money(face_amount),
+        "legs": legs,
+        "counts_as_cash": counts_as_cash,
+        "funding_account_id": primary.get("account_id"),
+        "overflow_account_id": primary.get("overflow_account_id"),
+    }
+    ev.update(extra)
+    return ev
+
+
+def _legs_of(e: dict) -> List[dict]:
+    """An event's legs; events built without legs get one from funding_account_id."""
+    legs = e.get("legs")
+    if legs is not None:
+        return legs
+    return [{
+        "account_id": e.get("funding_account_id"),
+        "amount": e["amount"],
+        "overflow_account_id": e.get("overflow_account_id"),
+        "cash": True,
+    }]
+
+
+def _event_sort_key(e: dict):
+    """Date order; same-day ties run transfers, then outflows, then inflows.
+
+    Transfers go first so money moved between your own accounts funds that day's
+    payables; outflows before inflows is the conservative solvency assumption.
+    """
+    d = e["date"]
+    d = d.date() if isinstance(d, datetime) else d
+    if e.get("type") == TransactionType.TRANSFER.value:
+        rank = 0
+    elif _money(e["amount"]) < 0:
+        rank = 1
+    else:
+        rank = 2
+    return (d, rank)
+
+
+def _transfer_event(txn, cash_ids: set, card_ids: set,
+                    date: Optional[datetime] = None, **extra) -> dict:
+    """A transfer: -(amount + fee) on the source, +amount on the destination.
+
+    Legs are kept only for accounts in the projection's scope (``cash_ids`` and
+    ``card_ids``); an account outside it (another entity's, or an inactive one) is
+    never exposed. A leg is cash when its account is a projection-cash account, so:
+
+    - between two projection-cash accounts the pooled total moves only by the fee,
+      while each account's balance moves by its own leg;
+    - out of the pool to an outside account costs the pool amount + fee;
+    - into the pool from an outside account adds the amount.
+
+    A transfer INTO a credit card (a card payment) is listed with its legs but does
+    not count as cash yet: the card's statement payable already models that cash
+    leaving, and allocating payments against statements is a follow-up. Counting
+    both would double-count the payment.
+
+    A transfer FROM a credit card (a cash advance or balance transfer) is treated
+    the same way: statements ignore transfers, so nothing would ever repay the
+    cash it adds. Neither kind has a cash leg until statements net transfers.
+    """
+    src = txn.transfer_from_account_id or txn.account_id
+    dst = txn.transfer_to_account_id
+    amount = Decimal(str(txn.amount))
+    fee = Decimal(str(txn.transfer_fee or 0))
+    scoped = cash_ids | card_ids
+    via_card = src in card_ids or dst in card_ids
+    legs = []
+    if src in scoped:
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_card))
+    if dst in scoped:
+        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_card))
+    return _event(
+        date=date or _naive(txn.transaction_date),
+        name=txn.description or "Unposted transfer",
+        type=txn.transaction_type.value,
+        source="transaction",
+        source_id=txn.id,
+        face_amount=amount,
+        legs=legs,
+        counts_as_cash=False if via_card else None,
+        transfer_fee=_money(fee),
+        **extra,
+    )
+
+
+def collect_events(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    *,
+    user_id: int,
+    entity_id: Optional[int] = None,
+    accounts: Optional[list] = None,
+) -> List[dict]:
+    """Every dated event in ``[start, end)``, each with per-account legs.
+
+    Sources: active budget-entry occurrences, unposted transactions, and one dated
+    payable per credit-card statement cycle due in the window. Events that move no
+    projection cash are included (``counts_as_cash`` False) so listings can show
+    them; cash views must filter on ``counts_as_cash``.
+
+    A transaction leg is cash only when its account is one of the scoped
+    projection-cash accounts. Unposted transfers into or out of any scoped account
+    (projection-cash or credit card) are collected even when the transaction row
+    belongs to another scope (a cross-entity transfer), but only their in-scope
+    legs are kept, and a transfer touching a card is never cash (see
+    ``_transfer_event``).
+
+    Balances change only when a transaction is posted, so an unposted transaction
+    dated before ``start`` is a pending movement not yet in the opening balance: it
+    is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
+    Overdue charges on a credit card are skipped (they reach cash through their
+    statements); a non-transfer row's card involvement comes from ``account_id``
+    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are listed like in-window ones, as non-cash
+    events: statements ignore transfers, so listing them counts nothing twice.
+    """
+    start = _naive(start)
+    end = _naive(end)
+    if accounts is None:
+        accounts = get_account_balances(db, user_id, entity_id)
+    cash_ids = {a.id for a in accounts if is_projection_cash(a)}
+    card_ids = {a.id for a in accounts if not is_projection_cash(a)}
+
+    events: List[dict] = []
+
+    be_query = db.query(BudgetEntry).filter(
+        scope_criterion(BudgetEntry, user_id, entity_id),
+        BudgetEntry.is_active.is_(True),
+    )
+    for entry in be_query.all():
+        sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
+        for occ in iter_occurrences(entry, start, end):
+            events.append(_event(
+                date=occ,
+                name=entry.name,
+                type=entry.entry_type.value,
+                source="budget_entry",
+                source_id=entry.id,
+                face_amount=entry.amount,
+                legs=[_leg(entry.account_id, sign * Decimal(str(entry.amount)),
+                           entry.overflow_account_id)],
+            ))
+
+    in_scope = scope_criterion(Transaction, user_id, entity_id)
+    scoped_ids = cash_ids | card_ids
+    if scoped_ids:
+        in_scope = or_(in_scope, and_(
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            or_(
+                Transaction.transfer_to_account_id.in_(scoped_ids),
+                Transaction.transfer_from_account_id.in_(scoped_ids),
+            ),
+        ))
+    txn_query = db.query(Transaction).filter(
+        in_scope,
+        Transaction.is_posted.is_(False),
+        Transaction.transaction_date < end,
+    )
+    for txn in txn_query.all():
+        when = _naive(txn.transaction_date)
+        overdue: dict = {}
+        if when < start:
+            # Only a transfer's transfer_* fields are meaningful: a row edited from a
+            # transfer into a debit/credit may still carry stale ones.
+            if txn.transaction_type != TransactionType.TRANSFER and txn.account_id in card_ids:
+                continue
+            when, overdue = start, {"overdue": True, "original_date": when}
+        if txn.transaction_type == TransactionType.TRANSFER:
+            events.append(_transfer_event(txn, cash_ids, card_ids, date=when, **overdue))
+            continue
+        if txn.transaction_type == TransactionType.CREDIT:
+            amt = Decimal(str(txn.amount))       # inflow
+        elif txn.transaction_type == TransactionType.DEBIT:
+            amt = -Decimal(str(txn.amount))      # outflow
+        else:
+            continue
+        # A charge on a credit card is NOT a cash outflow on its purchase date — the
+        # cash leaves when that card's statement is paid, which is modelled as a
+        # dated statement payable below. Its leg is therefore non-cash.
+        events.append(_event(
+            date=when,
+            name=txn.description or "Unposted transaction",
+            type=txn.transaction_type.value,
+            source="transaction",
+            source_id=txn.id,
+            face_amount=txn.amount,
+            legs=[_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)],
+            **overdue,
+        ))
+
+    # Each credit card contributes one dated payable per billing cycle due in the
+    # window, derived from its own transactions (see services/statements.py).
+    for p in get_statement_payables(db, user_id, entity_id, start, end):
+        extra = {k: v for k, v in p.items() if k not in {
+            "date", "name", "amount", "type", "source", "source_id",
+            "funding_account_id", "overflow_account_id",
+        }}
+        events.append(_event(
+            date=p["date"],
+            name=p["name"],
+            type=p["type"],
+            source=p["source"],
+            source_id=p["source_id"],
+            face_amount=-p["amount"],
+            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"])],
+            **extra,
+        ))
+
+    return events
+
+
+def _route_legs(
+    opening_by_account: dict,
+    events: List[dict],
+    account_names: dict,
+    checkpoints: Sequence[date] = (),
+) -> dict:
+    """Walk events' cash legs per account with primary → overflow routing.
+
+    Keeps two books:
+
+    - the ROUTING book applies legs plus the virtual overflow pulls, and is what
+      account shortfalls are judged against;
+    - the SCHEDULED book applies legs only. Per-account closings come from it, so
+      an overflow pull (a "would have to move money" signal, not a planned
+      transfer) never shows up as a balance change. Overflow use is reported
+      separately in ``overflow_moves``.
+
+    ``checkpoints`` are dates (e.g. month starts); ``closings[i]`` is the scheduled
+    book just before the first event on/after ``checkpoints[i]``, and
+    ``final`` is the book after every event. Each closing reports the opening
+    accounts in ``by_account``; cash legs on any other account (or none) land in
+    ``unassigned``, so ``sum(by_account) + unassigned`` is always the pooled total.
+    """
+    routed = {aid: _money(bal) for aid, bal in opening_by_account.items()}
+    scheduled = dict(routed)
+    tracked = set(opening_by_account)
+    unassigned = Decimal("0")
+    shortfalls: List[dict] = []
+    overflow_moves: List[dict] = []
+    pending = sorted(checkpoints)
+    closings: List[dict] = []
+
+    def _snapshot() -> dict:
+        extra = sum((v for k, v in scheduled.items() if k not in tracked), Decimal("0"))
+        return {
+            "by_account": {aid: scheduled[aid] for aid in opening_by_account},
+            "unassigned": unassigned + extra,
+        }
+
+    for e in sorted(events, key=_event_sort_key):
+        if not e.get("counts_as_cash", True):
+            continue
+        d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
+        while pending and d >= pending[0]:
+            closings.append(_snapshot())
+            pending.pop(0)
+        for leg in _legs_of(e):
+            if not leg.get("cash", True):
+                continue
+            acc = leg.get("account_id")
+            amt = _money(leg["amount"])
+            if acc is None:
+                unassigned += amt
+                continue
+            scheduled[acc] = scheduled.get(acc, Decimal("0")) + amt
+            routed[acc] = routed.get(acc, Decimal("0")) + amt
+            if amt >= 0:  # inflow into the account
+                continue
+
+            overflow_used = Decimal("0")
+            ov = leg.get("overflow_account_id")
+            if routed[acc] < 0 and ov is not None:
+                need = -routed[acc]
+                ov_avail = routed.get(ov, Decimal("0"))
+                transfer = min(need, ov_avail) if ov_avail > 0 else Decimal("0")
+                routed[acc] += transfer
+                routed[ov] = ov_avail - transfer
+                overflow_used = transfer
+                if transfer > 0:
+                    overflow_moves.append({
+                        "date": d,
+                        "name": e.get("name"),
+                        "from_account_id": ov,
+                        "from_account_name": account_names.get(ov),
+                        "to_account_id": acc,
+                        "to_account_name": account_names.get(acc),
+                        "amount": transfer,
+                    })
+            if routed[acc] < 0:
+                shortfalls.append({
+                    "date": d,
+                    "name": e.get("name"),
+                    "account_id": acc,
+                    "account_name": account_names.get(acc),
+                    "short_amount": -routed[acc],
+                    "overflow_used": overflow_used,
+                })
+
+    while pending:
+        closings.append(_snapshot())
+        pending.pop(0)
+
+    return {
+        "shortfalls": shortfalls,
+        "overflow_moves": overflow_moves,
+        "closings": closings,
+        "final": _snapshot(),
+    }
+
+
+def account_closings(snapshot: dict, opening_by_account: dict, account_names: dict) -> List[dict]:
+    """Shape a routing snapshot as ``[{account_id, account_name, opening_balance, closing_balance}]``."""
+    return [
+        {
+            "account_id": aid,
+            "account_name": account_names.get(aid),
+            "opening_balance": _money(opening_by_account[aid]),
+            "closing_balance": snapshot["by_account"][aid],
+        }
+        for aid in opening_by_account
+    ]
+
+
 def route_accounts(opening_by_account: dict, events: List[dict], account_names: dict) -> List[dict]:
     """Per-account funding projection with primary → overflow routing (UC1).
 
-    Walks the same events as the aggregate timeline, but tracks each funding
-    account separately. A payable draws down its ``funding_account_id``; if that
-    would go negative, the shortfall is pulled from ``overflow_account_id`` when
+    Walks the same events as the aggregate timeline, but tracks each account's
+    legs separately. An outflow leg draws down its account; if that would go
+    negative, the shortfall is pulled from the leg's ``overflow_account_id`` when
     set. Anything still uncovered is reported as an **account shortfall** — the
     account you intended to pay from can't cover this bill (even with overflow),
     so you'd have to move money in. Returns the shortfalls, date-ordered.
     """
-    balances = {aid: _money(bal) for aid, bal in opening_by_account.items()}
-    shortfalls: List[dict] = []
+    return _route_legs(opening_by_account, events, account_names)["shortfalls"]
 
-    def _key(e):
-        d = e["date"]
-        d = d.date() if isinstance(d, datetime) else d
-        return (d, 0 if _money(e["amount"]) < 0 else 1)
 
-    for e in sorted(events, key=_key):
-        acc = e.get("funding_account_id")
-        if acc is None:
-            continue
-        amt = _money(e["amount"])
-        d = e["date"].date() if isinstance(e["date"], datetime) else e["date"]
-        if amt >= 0:  # inflow into the account
-            balances[acc] = balances.get(acc, Decimal("0")) + amt
-            continue
-
-        balances[acc] = balances.get(acc, Decimal("0")) + amt  # amt is negative
-        overflow_used = Decimal("0")
-        ov = e.get("overflow_account_id")
-        if balances[acc] < 0 and ov is not None:
-            need = -balances[acc]
-            ov_avail = balances.get(ov, Decimal("0"))
-            transfer = min(need, ov_avail) if ov_avail > 0 else Decimal("0")
-            balances[acc] += transfer
-            balances[ov] = ov_avail - transfer
-            overflow_used = transfer
-        if balances[acc] < 0:
-            shortfalls.append({
-                "date": d,
-                "name": e.get("name"),
-                "account_id": acc,
-                "account_name": account_names.get(acc),
-                "short_amount": -balances[acc],
-                "overflow_used": overflow_used,
-            })
-
-    return shortfalls
+def _projection_accounts(db: Session, user_id: int, entity_id: Optional[int]):
+    """Accounts in scope, plus the projection-cash opening balance per account."""
+    accounts = get_account_balances(db, user_id, entity_id)
+    opening_by_account = {
+        a.id: Decimal(str(a.balance)) for a in accounts if is_projection_cash(a)
+    }
+    account_names = {a.id: a.name for a in accounts}
+    return accounts, opening_by_account, account_names
 
 
 def project_running_balance(
@@ -468,74 +842,39 @@ def project_running_balance(
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=days)
 
-    accounts = get_account_balances(db, user_id, entity_id)
-    # Available cash EXCLUDES credit-card accounts — those balances are money owed,
-    # not money on hand. (Card payments show up as payable events instead.)
-    asset_accounts = [a for a in accounts if a.account_type != AccountType.CREDIT]
-    credit_account_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
-    opening = sum((Decimal(str(a.balance)) for a in asset_accounts), Decimal("0"))
-    opening_by_account = {a.id: Decimal(str(a.balance)) for a in asset_accounts}
-    account_names = {a.id: a.name for a in accounts}
+    # Available cash is projection-cash accounts only (see is_projection_cash).
+    accounts, opening_by_account, account_names = _projection_accounts(db, user_id, entity_id)
+    opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events: List[dict] = []
+    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    cash_events = [e for e in events if e["counts_as_cash"]]
 
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
-        BudgetEntry.is_active.is_(True),
-    )
-    for entry in be_query.all():
-        sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
-        for occ in iter_occurrences(entry, start, end):
-            events.append({
-                "date": occ,
-                "name": entry.name,
-                "amount": sign * Decimal(str(entry.amount)),
-                "type": entry.entry_type.value,
-                "source": "budget_entry",
-                "source_id": entry.id,
-                "funding_account_id": entry.account_id,
-                "overflow_account_id": entry.overflow_account_id,
-            })
-
-    txn_query = db.query(Transaction).filter(
-        scope_criterion(Transaction, user_id, entity_id),
-        Transaction.is_posted.is_(False),
-        Transaction.transaction_date >= start,
-        Transaction.transaction_date < end,
-    )
-    for txn in txn_query.all():
-        # A charge on a credit card is NOT a cash outflow on its purchase date — the
-        # cash leaves when that card's statement is paid. Those cards are modelled as
-        # dated statement payables below; counting the charge here as well would both
-        # double-count it and date it wrongly (pessimistic, weeks early).
-        if txn.account_id in credit_account_ids:
-            continue
-        if txn.transaction_type == TransactionType.CREDIT:
-            amt = Decimal(str(txn.amount))       # inflow
-        elif txn.transaction_type == TransactionType.DEBIT:
-            amt = -Decimal(str(txn.amount))      # outflow
-        else:
-            continue  # transfers don't change total available cash (account-aware routing is a follow-up)
-        events.append({
-            "date": _naive(txn.transaction_date),
-            "name": txn.description or "Unposted transaction",
-            "amount": amt,
-            "type": txn.transaction_type.value,
-            "source": "transaction",
-            "source_id": txn.id,
-            "funding_account_id": txn.account_id,
-            "overflow_account_id": None,
-        })
-
-    # Each credit card contributes one dated payable per billing cycle due in the
-    # window, derived from its own transactions (see services/statements.py).
-    events.extend(get_statement_payables(db, user_id, entity_id, start, end))
-
-    result = build_timeline(opening, events)
-    result["account_shortfalls"] = route_accounts(opening_by_account, events, account_names)
+    result = build_timeline(opening, cash_events)
+    routing = _route_legs(opening_by_account, cash_events, account_names)
+    result["account_shortfalls"] = routing["shortfalls"]
+    # Per-account closings at window end exclude virtual overflow pulls; those
+    # are reported separately so the closings stay a plain sum of scheduled legs.
+    result["by_account"] = account_closings(routing["final"], opening_by_account, account_names)
+    result["unassigned_closing"] = routing["final"]["unassigned"]
+    result["overflow_moves"] = routing["overflow_moves"]
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
+
+
+def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
+    return [
+        {
+            "date": m["date"].isoformat(),
+            "name": m["name"],
+            "from_account_id": m["from_account_id"],
+            "from_account_name": m["from_account_name"],
+            "to_account_id": m["to_account_id"],
+            "to_account_name": m["to_account_name"],
+            "amount": float(m["amount"]),
+        }
+        for m in moves
+    ]
 
 
 def serialize_timeline(result: dict) -> dict:
@@ -569,6 +908,17 @@ def serialize_timeline(result: dict) -> dict:
             }
             for s in result.get("account_shortfalls", [])
         ],
+        "by_account": [
+            {
+                "account_id": a["account_id"],
+                "account_name": a["account_name"],
+                "opening_balance": f(a["opening_balance"]),
+                "closing_balance": f(a["closing_balance"]),
+            }
+            for a in result.get("by_account", [])
+        ],
+        "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
+        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
         "events": [
             {
                 "date": iso(e["date"]),
