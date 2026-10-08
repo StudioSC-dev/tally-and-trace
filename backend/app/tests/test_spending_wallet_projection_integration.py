@@ -396,3 +396,29 @@ def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
     assert r["account_shortfalls"] == []
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
     assert get_payables(db, user.id, days=30, reference=REF) == []
+
+
+def test_cross_entity_recurring_transfer_keeps_each_views_in_scope_leg(db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    a, b = entities
+    secb = _account(db, user, "SecB", AccountType.SAVINGS, "20000.00", entity_id=a.id)
+    bdo = _account(db, user, "BDO", AccountType.CHECKING, "0.00", entity_id=b.id)
+    _entry(db, user, "BDO loan", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 4),
+           account=bdo, entity_id=b.id)
+    # The transfer entry belongs to entity A but pays into entity B's account.
+    _entry(db, user, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 1),
+           account=secb, transfer_to_account_id=bdo.id, entity_id=a.id)
+
+    view_b = project_running_balance(db, user.id, b.id, days=30, reference=REF)
+    assert view_b["account_shortfalls"] == []
+    assert [(e["name"], e["amount"]) for e in view_b["events"]] == [
+        ("SecB to BDO", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
+    assert _closings(view_b) == {"BDO": Decimal("0.00")}
+
+    view_a = project_running_balance(db, user.id, a.id, days=30, reference=REF)
+    assert [(e["name"], e["amount"]) for e in view_a["events"]] == [
+        ("SecB to BDO", Decimal("-8000.00"))]
+    assert _closings(view_a) == {"SecB": Decimal("12000.00")}

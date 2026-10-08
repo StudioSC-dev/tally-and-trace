@@ -691,7 +691,9 @@ def collect_events(
     non-cash funding leg: the wallet's money left projection cash when it was
     topped up, so paying the card from it must not take cash out a second time.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
-    occurrence is a transfer event with legs on both accounts.
+    occurrence is a transfer event with legs on both accounts. Like unposted
+    transfers, recurring transfers into or out of a scoped account are collected
+    even when the entry belongs to another scope, keeping only the in-scope legs.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -718,8 +720,24 @@ def collect_events(
 
     events: List[dict] = []
 
+    def entry_in_scope(entry) -> bool:
+        # Mirrors scope_criterion(BudgetEntry, user_id, entity_id).
+        if entity_id is not None:
+            return entry.entity_id == entity_id
+        return entry.user_id == user_id
+
+    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
+    if scoped_ids:
+        # Recurring transfers touching an in-scope account, wherever the entry lives.
+        entry_scope = or_(entry_scope, and_(
+            BudgetEntry.transfer_to_account_id.isnot(None),
+            or_(
+                BudgetEntry.transfer_to_account_id.in_(scoped_ids),
+                BudgetEntry.account_id.in_(scoped_ids),
+            ),
+        ))
     entries = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
+        entry_scope,
         BudgetEntry.is_active.is_(True),
     ).all()
 
@@ -750,6 +768,11 @@ def collect_events(
     card_entries = []
     for entry in entries:
         if entry.transfer_to_account_id is not None:
+            # Another scope's entry keeps only its in-scope legs (see _transfer_event),
+            # and its overflow routing only when that account is in scope too.
+            overflow_id = entry.overflow_account_id
+            if not entry_in_scope(entry) and overflow_id not in cash_ids:
+                overflow_id = None
             for occ in iter_occurrences(entry, start, end):
                 events.append(_transfer_event(
                     SimpleNamespace(
@@ -764,7 +787,7 @@ def collect_events(
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
                     wallet_ids=scoped_wallet_ids, source="budget_entry",
-                    overflow_account_id=entry.overflow_account_id,
+                    overflow_account_id=overflow_id,
                 ))
             continue
         if entry.account_id in wallet_ids:
