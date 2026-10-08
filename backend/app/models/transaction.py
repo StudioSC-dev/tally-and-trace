@@ -58,8 +58,12 @@ class Transaction(Base):
     is_posted = Column(Boolean, default=True)
     transfer_from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     transfer_to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
-    # Loan payments only (a transfer into a loan): set by the loan endpoints to
-    # tell scheduled payments from prepayments; null on every other row.
+    # Loan payments only (a transfer into a loan): "scheduled" or "prepayment".
+    # Set on every transfer into a loan recorded through the API: the loan
+    # payment and prepayment endpoints, a generic create, a materialised
+    # recurring entry, an edit that retargets a row into a loan, and posting a
+    # legacy planned row. Null on every other row and on legacy rows, which an
+    # otherwise unchanged edit leaves null (unposting a posted one is refused).
     loan_payment_kind = Column(String(16), nullable=True)
     
     # Transaction dates

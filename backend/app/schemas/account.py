@@ -9,10 +9,13 @@ LoanAmortization = Literal["fixed", "reduce_term"]
 
 
 LOAN_PAYMENTS_MADE_OFFSET_DESCRIPTION = (
-    "Scheduled payments made before the loan was tracked here. Every posted "
-    "transaction with loan_payment_kind 'scheduled' (any transfer into the loan "
-    "except a prepayment) is counted on top of it, so back-filled history must "
-    "reduce this offset; otherwise it is counted twice."
+    "Scheduled payments made before the loan was tracked here. The due dates "
+    "after them are settled by the combined amount (principal + interest) of the "
+    "posted transactions with loan_payment_kind 'scheduled', oldest first. Legacy "
+    "transfers (loan_payment_kind null) never count: their payments belong in this "
+    "offset. Back-filled history recorded as scheduled payments, or a legacy "
+    "transfer moved out of the loan and back in (which stamps it), is counted "
+    "again, so this offset must be lowered for it."
 )
 
 

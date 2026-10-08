@@ -371,6 +371,10 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     edit leaves it unmarked, so it is edited as a plain transfer and, like
     every legacy row, never counts toward ``payments_made`` (its payment is in
     ``loan_payments_made_offset``). Stamping it would count it a second time.
+    So every transfer into a loan recorded through the API carries a kind,
+    except a legacy row an otherwise unchanged edit leaves as it is. A legacy
+    row moved out of its loan and back in is a retargeting edit, so it is
+    stamped and counted again: the loan's offset must then be lowered.
     """
     if txn.loan_payment_kind:
         return {}
