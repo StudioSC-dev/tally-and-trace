@@ -205,9 +205,12 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
     amount changed while posted) once the loan is ``fixed``.
 
     Posting the row, or changing its money while it is posted, also re-runs the
-    endpoints' account checks against the accounts as they are now: the
-    destination is still a loan, the funding account is still one the caller
-    may use to fund it, and the two share a currency.
+    account checks against the accounts as they are now: the destination is
+    still a loan, the funding account is still one the caller may use to fund
+    it, and the two share a currency. A scheduled payment is held to the rule
+    for a transfer into a loan (``_loan_payment_source``: a card or a spending
+    wallet may fund it); a prepayment to the prepayment endpoint's
+    (``_funding_account``).
     """
     for field in LOAN_PAYMENT_FIXED_FIELDS:
         if field in requested and requested[field] != getattr(txn, field):
@@ -223,8 +226,11 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
     fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
     if posted and (not old_posted or amount_changed or fee_changed):
         loan = _loan_or_404(db, user, txn.transfer_to_account_id)
-        funding = _funding_account(
-            db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        if txn.loan_payment_kind == loan_svc.PREPAYMENT:
+            funding = _funding_account(
+                db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        else:
+            funding = _loan_payment_source(db, user, txn.transfer_from_account_id, loan)
         try:
             loan_svc.check_currency(loan, funding)
         except loan_svc.LoanError as exc:
@@ -257,6 +263,29 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account) -> Account:
+    """The account a transfer into ``loan`` comes from, if it may pay it through this API.
+
+    Access is checked first (404). A generic or recurring transfer into a loan
+    may come from any account the caller can use except the loan itself or
+    another loan: a credit card or a spending wallet may fund it, as either may
+    fund any other transfer (the forecast bills a card-funded payment on the
+    card's statement and treats a wallet-funded one as moving no projection
+    cash). The loan endpoints keep their stricter funding rules
+    (``_funding_account``).
+    """
+    if source_id == loan.id:
+        raise HTTPException(status_code=400,
+                            detail="transfer_from_account_id cannot be the account itself")
+    source = db.query(Account).filter(Account.id == source_id).first()
+    if not source or not can_access_record(db, user, source):
+        raise HTTPException(status_code=404, detail="Source account not found")
+    if source.account_type == AccountType.LOAN:
+        raise HTTPException(status_code=400,
+                            detail="A loan cannot be paid from another loan")
+    return source
+
+
 def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, *,
                         currency, principal, interest, posted: bool,
                         old_principal=0, old_posted: bool = False) -> dict:
@@ -269,15 +298,16 @@ def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, 
     rules apply to it afterwards. Extra principal is recorded only through the
     loan-prepayment endpoint.
 
-    The checks are the loan-payment endpoint's: the source must be a funding
-    account (not a card, wallet or loan), in the loan's currency, the row is in
-    that currency too (``currency``, when the caller gave one), principal and
+    The checks are the loan-payment endpoint's except for the source's type
+    (``_loan_payment_source``: a card or a spending wallet may fund it, another
+    loan may not): the source is in the loan's currency, the row is in that
+    currency too (``currency``, when the caller gave one), principal and
     interest are whole cents and move some money, and a posted payment's
     principal fits what is owed once the row's old effect on the loan
-    (``old_principal``, if ``old_posted``) is reversed. The loan and funding
+    (``old_principal``, if ``old_posted``) is reversed. The loan and source
     account are locked first, as the endpoint does. Nothing is written.
     """
-    funding = _funding_account(db, user, source_id, "transfer_from_account_id", loan.id)
+    funding = _loan_payment_source(db, user, source_id, loan)
     _lock(db, loan, funding)
     if currency is not None and currency != loan.currency:
         raise HTTPException(status_code=400,

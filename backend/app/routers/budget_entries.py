@@ -157,6 +157,7 @@ def _validate_transfer_destination(
     account_id: Optional[int],
     transfer_to_account_id: Optional[int],
     entry_type: BudgetEntryType,
+    currency=None,
 ) -> None:
     """A recurring transfer moves money between two accessible non-credit accounts.
 
@@ -168,6 +169,12 @@ def _validate_transfer_destination(
     projected one would need a statement cycle to land on. The source must be set
     and not a credit card either (a recurring cash advance is out of scope), so
     transfer entries never become statement charges.
+
+    A transfer into a loan materialises as a scheduled loan payment, which must
+    be in the loan's currency from an account in it (``_loan_payment_stamp`` in
+    routers/transactions.py). The same rule is checked here, so an entry that
+    could never be marked paid is refused when it is saved: the source account
+    and the entry's ``currency`` must both match the loan's.
     """
     if not transfer_to_account_id:
         return
@@ -193,6 +200,17 @@ def _validate_transfer_destination(
         raise HTTPException(
             status_code=400, detail="A recurring transfer cannot be funded from a credit card"
         )
+    if destination.account_type == AccountType.LOAN:
+        if source is not None and source.currency != destination.currency:
+            raise HTTPException(
+                status_code=400,
+                detail="A loan is paid from an account in its own currency",
+            )
+        if currency is not None and currency != destination.currency:
+            raise HTTPException(
+                status_code=400,
+                detail="A recurring loan payment's currency must match the loan's currency",
+            )
 
 
 @router.get("/", response_model=BudgetEntryListResponse)
@@ -269,7 +287,7 @@ def create_budget_entry(
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
     _validate_transfer_destination(
         db, current_user, entry_in.account_id, entry_in.transfer_to_account_id,
-        entry_in.entry_type,
+        entry_in.entry_type, entry_in.currency,
     )
 
     entry_data = entry_in.dict()
@@ -316,6 +334,7 @@ def update_budget_entry(
         prospective_data.get("account_id", entry.account_id),
         prospective_data.get("transfer_to_account_id", entry.transfer_to_account_id),
         prospective_data.get("entry_type") or entry.entry_type,
+        prospective_data.get("currency") or entry.currency,
     )
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
@@ -390,9 +409,10 @@ def materialize_budget_entry(
     False the occurrence is still projected alongside the transaction.
 
     A recurring transfer into a loan posts as a scheduled loan payment
-    (``loan_payment_kind`` "scheduled", under the loan-payment endpoint's rules,
-    see ``_stamp_loan_payment`` in routers/transactions.py), so it settles that
-    due date instead of leaving it projected after the bank was debited.
+    (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in
+    routers/transactions.py: the loan-payment endpoint's rules, except that a
+    spending wallet may fund it), so it settles that due date instead of
+    leaving it projected after the money left the source.
     """
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate

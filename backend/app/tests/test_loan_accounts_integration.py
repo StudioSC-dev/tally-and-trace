@@ -798,9 +798,16 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
         client, people, change, expected):
     me = people()
     bank = _bank(client, me, balance=10_000)
-    loan = _loan(client, me, balance=-1_000)
-    pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
-                   principal=400, interest=10, is_posted=False)
+    loan = _loan(client, me, balance=-1_000, loan_kind="home")  # reduce_term: prepayable
+    if change in ("funding_credit_card", "funding_spending_wallet"):
+        # A scheduled payment may be funded from a card or a wallet once it is
+        # an ordinary transfer (see the next test); a prepayment keeps the
+        # prepayment endpoint's funding rules.
+        pending = _prepay(client, me, loan["id"], from_account_id=bank["id"], amount=410,
+                          is_posted=False)
+    else:
+        pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
+                       principal=400, interest=10, is_posted=False)
     assert pending.status_code == 200, pending.text
     txn_id = pending.json()["id"]
 
@@ -826,6 +833,23 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
     assert r.status_code == 200, r.text
     assert r.json()["description"] == "still pending"
     assert r.json()["is_posted"] is False
+
+
+@pytest.mark.parametrize("body", [{"account_type": "credit"}, {"is_spending_wallet": True}])
+def test_a_pending_scheduled_payment_from_a_card_or_wallet_can_be_posted(client, people, body):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000)
+    pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
+                   principal=400, interest=10, is_posted=False)
+    assert pending.status_code == 200, pending.text
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    r = _put(client, me, pending.json()["id"], is_posted=True)
+    assert r.status_code == 200, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9590.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-600.00")
 
 
 def test_a_money_edit_on_a_posted_payment_rechecks_the_funding_account(client, people):

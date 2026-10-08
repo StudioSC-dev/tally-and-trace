@@ -489,11 +489,11 @@ def test_generic_transfer_into_a_loan_keeps_the_loan_endpoint_rules(db, user):
 
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
-    card = _account(db, user, "Card", AccountType.CREDIT, "0")
-    wallet = _account(db, user, "GCash", AccountType.E_WALLET, "1000", is_spending_wallet=True)
+    other_loan = _loan(db, user, bank)
     usd = _account(db, user, "USD", AccountType.SAVINGS, "1000", currency=CurrencyType.USD)
 
-    for src, amount in ((card, "100"), (wallet, "100"), (usd, "100"), (bank, "90000.01")):
+    # A card or a wallet may fund it (see the tests below); a loan may not.
+    for src, amount in ((other_loan, "100"), (usd, "100"), (bank, "90000.01")):
         with pytest.raises(HTTPException) as exc:
             _post(db, user, src, loan, amount, datetime(2026, 10, 4))
         assert exc.value.status_code == 400, (src.name, exc.value.detail)
@@ -773,3 +773,112 @@ def test_a_transfer_retargeted_into_a_loan_is_validated_before_any_change(db, us
         assert Decimal(str(account.balance)) == Decimal(balance), account.name
     db.refresh(txn)
     assert (txn.transfer_to_account_id, txn.loan_payment_kind) == (savings.id, None)
+
+
+def _entry(db, user, src, dst, amount, first, **kw):
+    """A recurring transfer entry through the POST /budget-entries path."""
+    from app.routers.budget_entries import create_budget_entry
+    from app.schemas.budget_entry import BudgetEntryCreate
+
+    return create_budget_entry(
+        BudgetEntryCreate(name="Pay car loan", entry_type="expense", amount=float(amount),
+                          next_occurrence=first, account_id=src.id,
+                          transfer_to_account_id=dst.id, **kw),
+        db=db, current_user=user, active_entity=None)
+
+
+def test_a_wallet_funded_recurring_loan_payment_covers_and_settles_its_due_date(db, user):
+    from app.models.account import AccountType
+    from app.routers.budget_entries import materialize_budget_entry
+    from app.schemas.budget_entry import BudgetEntryMaterialize
+    from app.services.forecast import collect_events, get_payables, project_running_balance
+
+    bank = _bank(db, user)
+    wallet = _account(db, user, "GCash", AccountType.E_WALLET, "10000", is_spending_wallet=True)
+    loan = _loan(db, user, bank)
+    entry = _entry(db, user, wallet, loan, "8000", datetime(2026, 10, 4))
+
+    # The occurrence covers Oct 4; its wallet leg moves no projection cash.
+    assert _loan_events(db, user, datetime(2026, 11, 1)) == []
+    occ = [e for e in collect_events(db, REF, datetime(2026, 11, 1), user_id=user.id)
+           if e["source"] == "budget_entry"]
+    assert len(occ) == 1 and occ[0]["counts_as_cash"] is False
+    assert [(leg["account_id"], leg["cash"]) for leg in occ[0]["legs"]] == [(wallet.id, False)]
+    timeline = project_running_balance(db, user.id, days=30, reference=REF)
+    assert timeline["closing_balance"] == Decimal("50000.00") and timeline["events"] == []
+    assert get_payables(db, user.id, days=30, reference=REF) == []
+
+    txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(), db=db, current_user=user)
+    assert (txn.loan_payment_kind, txn.is_posted, txn.transfer_from_account_id) == (
+        "scheduled", True, wallet.id)
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    db.refresh(wallet)
+    assert Decimal(str(wallet.balance)) == Decimal("2000.00")
+    assert _loan_events(db, user, END) == []  # Nov 4: the next occurrence covers it
+
+
+def test_a_card_funded_transfer_into_a_loan_settles_its_due_date_once(db, user):
+    from app.models.account import AccountType
+    from app.services.forecast import get_payables, project_running_balance
+
+    bank = _bank(db, user)
+    card = _account(db, user, "Card", AccountType.CREDIT, "0", billing_cycle_start=15,
+                    days_until_due_date=20, payment_account_id=bank.id)
+    loan = _loan(db, user, bank)
+    txn = _post(db, user, card, loan, "7550", datetime(2026, 10, 4), fee="450")
+    assert txn.loan_payment_kind == "scheduled"
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    # The card's Oct 15 statement bills the 8,000 (due Nov 4); the loan's Oct 4
+    # due date is not charged again, only Nov 4.
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert sorted((e["date"].isoformat(), e["source"], e["amount"])
+                  for e in timeline["events"]) == [
+        ("2026-11-04", "loan", Decimal("-8000.00")),
+        ("2026-11-04", "statement", Decimal("-8000.00"))]
+    assert timeline["closing_balance"] == Decimal("34000.00")
+    assert sorted((p["due_date"], p["source"], p["amount"])
+                  for p in get_payables(db, user.id, days=61, reference=REF)) == [
+        ("2026-11-04", "loan", 8000.0), ("2026-11-04", "statement", 8000.0)]
+
+
+def test_a_planned_card_funded_transfer_covers_the_loan_due_date(db, user):
+    from app.models.account import AccountType
+
+    bank = _bank(db, user)
+    card = _account(db, user, "Card", AccountType.CREDIT, "0", billing_cycle_start=15,
+                    days_until_due_date=20, payment_account_id=bank.id)
+    loan = _loan(db, user, bank)
+    _post(db, user, card, loan, "7550", datetime(2026, 10, 4), fee="450", posted=False)
+
+    assert _loan_events(db, user, datetime(2026, 11, 1)) == []
+    assert [m for m in _cash_out(db, user, 30)] == []  # billed on the card, paid Nov 4
+
+
+def test_a_recurring_loan_payment_in_another_currency_is_rejected_at_save(db, user):
+    from fastapi import HTTPException
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntry
+    from app.models.user import CurrencyType
+    from app.routers.budget_entries import update_budget_entry
+    from app.schemas.budget_entry import BudgetEntryUpdate
+
+    bank = _bank(db, user)
+    usd = _account(db, user, "USD", AccountType.SAVINGS, "1000", currency=CurrencyType.USD)
+    loan = _loan(db, user, bank)
+
+    for src, kw in ((usd, {"currency": "USD"}), (usd, {}), (bank, {"currency": "USD"})):
+        with pytest.raises(HTTPException) as exc:
+            _entry(db, user, src, loan, "8000", datetime(2026, 10, 4), **kw)
+        assert exc.value.status_code == 400 and "currency" in exc.value.detail, (src.name, kw)
+        db.rollback()
+    assert db.query(BudgetEntry).filter(BudgetEntry.user_id == user.id).count() == 0
+
+    entry = _entry(db, user, bank, loan, "8000", datetime(2026, 10, 4))
+    for change in ({"currency": "USD"}, {"account_id": usd.id}):
+        with pytest.raises(HTTPException) as exc:
+            update_budget_entry(entry.id, BudgetEntryUpdate(**change), db=db, current_user=user)
+        assert exc.value.status_code == 400 and "currency" in exc.value.detail, change
+        db.rollback()
