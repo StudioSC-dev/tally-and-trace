@@ -80,8 +80,21 @@ def is_projection_cash(account) -> bool:
 
     Credit-card balances are money owed, not cash: card spending reaches cash only
     when the statement is paid (modelled as dated statement payables).
+
+    Spending wallets (cash on hand, e-wallets) are not projection cash either:
+    their balance is shown, but topping one up is where the money leaves the
+    projection (see ``_transfer_event``), and spending from it is not counted again.
     """
-    return account.account_type != AccountType.CREDIT
+    if account.account_type == AccountType.CREDIT:
+        return False
+    return not getattr(account, "is_spending_wallet", False)
+
+
+def is_spending_wallet(account) -> bool:
+    """A non-credit account flagged as a spending wallet."""
+    return account.account_type != AccountType.CREDIT and bool(
+        getattr(account, "is_spending_wallet", False)
+    )
 
 
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
@@ -534,17 +547,29 @@ def _event_sort_key(e: dict):
 
 def _transfer_event(txn, cash_ids: set, card_ids: set,
                     date: Optional[datetime] = None, *,
-                    billed_ids: Optional[set] = None, **extra) -> dict:
+                    billed_ids: Optional[set] = None,
+                    wallet_ids: frozenset = frozenset(),
+                    source: str = "transaction",
+                    overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
-    Legs are kept only for accounts in the projection's scope (``cash_ids`` and
-    ``card_ids``); an account outside it (another entity's, or an inactive one) is
-    never exposed. A leg is cash when its account is a projection-cash account, so:
+    Legs are kept only for accounts in the projection's scope (``cash_ids``,
+    ``card_ids`` and ``wallet_ids``); an account outside it (another entity's, or
+    an inactive one) is never exposed. A leg is cash when its account is a
+    projection-cash account, so:
 
     - between two projection-cash accounts the pooled total moves only by the fee,
       while each account's balance moves by its own leg;
     - out of the pool to an outside account costs the pool amount + fee;
     - into the pool from an outside account adds the amount.
+
+    A spending wallet's leg is never cash, so a top-up (cash to wallet) costs the
+    source amount + fee, and money moved from a wallet back to a cash account adds
+    the amount to it; a transfer between two wallets moves no projection cash.
+
+    ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
+    reuse this: its occurrences are transfers whose source leg routes to the
+    entry's overflow account like any other payment from that account.
 
     A transfer INTO a credit card (a card payment) is cash on the paying account:
     statements net payments (services/statements.py), so the statement payable
@@ -573,11 +598,12 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
-    scoped = cash_ids | card_ids
+    scoped = cash_ids | card_ids | wallet_ids
     via_unbilled = src in unbilled or dst in unbilled
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_unbilled))
+        legs.append(_leg(src, -(amount + fee), overflow_account_id,
+                         cash=src in cash_ids and not via_unbilled))
     if dst in scoped:
         legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
     if dst in billed_ids:
@@ -586,7 +612,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
-        source="transaction",
+        source=source,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
@@ -623,6 +649,13 @@ def collect_events(
     legs are kept; a card's own leg is never cash, while the other side of a card
     payment or cash advance is (see ``_transfer_event``).
 
+    Spending wallets are not projection cash. Transfers into or out of one keep
+    their legs (the wallet's never cash, see ``_transfer_event``); a wallet's other
+    unposted transactions and budget entries funded from a wallet (other than
+    recurring transfers) are skipped. A budget entry with ``transfer_to_account_id``
+    is a recurring transfer: each occurrence is a transfer event with legs on both
+    accounts.
+
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
@@ -638,7 +671,8 @@ def collect_events(
     if accounts is None:
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
-    card_ids = {a.id for a in accounts if not is_projection_cash(a)}
+    card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
+    wallet_ids = frozenset(a.id for a in accounts if is_spending_wallet(a))
     # Cards whose statements are modelled; the rest keep their charges as cash.
     billed_ids = {a.id for a in accounts
                   if a.id in card_ids and resolve_cycle_fields(a) is not None}
@@ -651,6 +685,26 @@ def collect_events(
     )
     card_entries = []
     for entry in be_query.all():
+        if entry.transfer_to_account_id is not None:
+            for occ in iter_occurrences(entry, start, end):
+                events.append(_transfer_event(
+                    SimpleNamespace(
+                        id=entry.id,
+                        account_id=entry.account_id,
+                        transfer_from_account_id=entry.account_id,
+                        transfer_to_account_id=entry.transfer_to_account_id,
+                        amount=entry.amount,
+                        transfer_fee=0,
+                        transaction_type=TransactionType.TRANSFER,
+                        description=entry.name,
+                    ),
+                    cash_ids, card_ids, date=occ, billed_ids=billed_ids,
+                    wallet_ids=wallet_ids, source="budget_entry",
+                    overflow_account_id=entry.overflow_account_id,
+                ))
+            continue
+        if entry.account_id in wallet_ids:
+            continue  # wallet-funded: spending from a wallet is not projection cash
         if entry.account_id in billed_ids:
             card_entries.append(entry)
             continue
@@ -668,7 +722,7 @@ def collect_events(
             ))
 
     in_scope = scope_criterion(Transaction, user_id, entity_id)
-    scoped_ids = cash_ids | card_ids
+    scoped_ids = cash_ids | card_ids | wallet_ids
     if scoped_ids:
         in_scope = or_(in_scope, and_(
             Transaction.transaction_type == TransactionType.TRANSFER,
@@ -683,6 +737,8 @@ def collect_events(
         Transaction.transaction_date < end,
     )
     for txn in txn_query.all():
+        if txn.transaction_type != TransactionType.TRANSFER and txn.account_id in wallet_ids:
+            continue  # wallet spending/income is not projection cash
         when = _naive(txn.transaction_date)
         overdue: dict = {}
         if when < start:
@@ -693,7 +749,8 @@ def collect_events(
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
-                                          billed_ids=billed_ids, **overdue))
+                                          billed_ids=billed_ids, wallet_ids=wallet_ids,
+                                          **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow

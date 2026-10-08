@@ -50,7 +50,14 @@ def get_snapshot(
     accounts = forecast_svc.get_account_balances(db, current_user.id, entity_id)
     total_balance = sum(a.balance for a in accounts)
     by_account = [
-        {"id": a.id, "name": a.name, "balance": a.balance, "currency": a.currency.value}
+        {
+            "id": a.id,
+            "name": a.name,
+            "balance": a.balance,
+            "currency": a.currency.value,
+            # Shown, but not counted in available cash or projections.
+            "is_spending_wallet": forecast_svc.is_spending_wallet(a),
+        }
         for a in accounts
     ]
 
