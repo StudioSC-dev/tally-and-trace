@@ -151,14 +151,15 @@ def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
     raise HTTPException(status_code=400, detail=detail)
 
 
-def _validate_loan_payer(db: Session, data: dict, account: Account) -> None:
+def _validate_loan_payer(db: Session, current_user: User, data: dict, account: Account) -> None:
     """Keep an account that pays an active loan eligible to pay it.
 
     A loan's ``payment_account_id`` is checked when it is routed: a funding
     account (``_funding_account``: not a credit card, a loan or a spending
     wallet) in the loan's currency. An update to that account must not break
     either rule afterwards, or the loan would be projected from an account that
-    can no longer pay it; the loan has to be re-routed first.
+    can no longer pay it; the loan has to be re-routed first. When the caller
+    cannot access one of those loans, the message does not mention the loan.
     """
     loans = db.query(Account).filter(
         Account.account_type == AccountType.LOAN,
@@ -173,6 +174,15 @@ def _validate_loan_payer(db: Session, data: dict, account: Account) -> None:
                   and (account_type in (AccountType.CREDIT, AccountType.LOAN) or wallet))
     currency_mismatch = ("currency" in data
                          and any(loan.currency != data["currency"] for loan in loans))
+    if not (ineligible or currency_mismatch):
+        return
+    if any(not can_access_record(db, current_user, loan) for loan in loans):
+        raise HTTPException(
+            status_code=400,
+            detail="This account is the payment account of an account you cannot access, "
+                   "so it must stay a funding account in the same currency; "
+                   "that account's payment account has to change first",
+        )
     if ineligible:
         raise HTTPException(
             status_code=400,
@@ -326,7 +336,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     if "entity_id" in update_data:
         validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
-    _validate_loan_payer(db, update_data, db_account)
+    _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)

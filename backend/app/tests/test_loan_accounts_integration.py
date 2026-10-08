@@ -1076,3 +1076,22 @@ def test_a_card_funding_a_hidden_loan_keeps_its_billing_cycle_without_naming_the
                    headers=owner["headers"])
     assert r.status_code == 400 and "loan payment" in r.text, r.text
 
+
+def test_a_paying_account_change_refused_for_a_hidden_loan_does_not_name_the_loan(
+        client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    bank = _bank(client, owner, name="Entity bank", entity_id=entity_id)
+    _loan(client, owner, name="Owner Private Loan", payment_account_id=bank["id"])
+
+    for body in ({"currency": "USD"}, {"is_spending_wallet": True}):
+        r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=member_h["headers"])
+        assert r.status_code == 400, (body, r.text)
+        assert "loan" not in r.json()["detail"].lower(), body
+    # The owner, who can see the loan, is told which routing to change.
+    r = client.put(f"{API}/accounts/{bank['id']}", json={"currency": "USD"},
+                   headers=owner["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    r = client.get(f"{API}/accounts/{bank['id']}", headers=owner["headers"])
+    assert (r.json()["currency"], r.json()["is_spending_wallet"]) == ("PHP", False)
