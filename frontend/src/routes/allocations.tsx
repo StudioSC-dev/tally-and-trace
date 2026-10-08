@@ -661,15 +661,31 @@ export function AllocationsPage() {
 
   const handleSubscriptionAccountChange = (accountId: number) => {
     const account = accountsById.get(accountId)
+    setSubscriptionForm((prev) => {
+      const destination = prev.transfer_to_account_id ? accountsById.get(prev.transfer_to_account_id) : undefined
+      // A loan is paid only from an account in its own currency.
+      const loanInOtherCurrency =
+        destination?.account_type === 'loan' && !!account && destination.currency !== account.currency
+      return {
+        ...prev,
+        account_id: accountId,
+        currency: (account?.currency as CurrencyCode) || prev.currency,
+        // A transfer can't come from a card or go to its own source.
+        transfer_to_account_id:
+          account?.account_type === 'credit' || prev.transfer_to_account_id === accountId || loanInOtherCurrency
+            ? undefined
+            : prev.transfer_to_account_id,
+      }
+    })
+  }
+
+  const handleSubscriptionTransferToChange = (accountId: number | undefined) => {
+    const destination = accountId ? accountsById.get(accountId) : undefined
     setSubscriptionForm((prev) => ({
       ...prev,
-      account_id: accountId,
-      currency: (account?.currency as CurrencyCode) || prev.currency,
-      // A transfer can't come from a card or go to its own source.
-      transfer_to_account_id:
-        account?.account_type === 'credit' || prev.transfer_to_account_id === accountId
-          ? undefined
-          : prev.transfer_to_account_id,
+      transfer_to_account_id: accountId,
+      // A recurring loan payment is in the loan's currency.
+      currency: destination?.account_type === 'loan' ? (destination.currency as CurrencyCode) : prev.currency,
     }))
   }
 
@@ -1788,7 +1804,16 @@ export function AllocationsPage() {
                   required
                 >
                         <option value={0}>Select account</option>
-                        {accounts.filter((account) => account.account_type !== 'loan').map((account) => (
+                        {accounts
+                          .filter((account) => account.account_type !== 'loan')
+                          .filter((account) => {
+                            // Paying a loan: only accounts in the loan's currency.
+                            const destination = subscriptionForm.transfer_to_account_id
+                              ? accountsById.get(subscriptionForm.transfer_to_account_id)
+                              : undefined
+                            return destination?.account_type !== 'loan' || account.currency === destination.currency
+                          })
+                          .map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.name}
                     </option>
@@ -1839,20 +1864,26 @@ export function AllocationsPage() {
                   <label className="block text-sm font-medium text-body">Transfer to (optional)</label>
                   <select
                     value={subscriptionForm.transfer_to_account_id ?? 0}
-                    onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, transfer_to_account_id: parseInt(e.target.value) || undefined }))}
+                    onChange={(e) => handleSubscriptionTransferToChange(parseInt(e.target.value) || undefined)}
                     className="mt-1 block w-full border border-line px-3 py-2"
                     disabled={accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'}
                   >
                     <option value={0}>None (a payment)</option>
                     {accounts
                       .filter((a) => a.account_type !== 'credit' && a.id !== subscriptionForm.account_id)
+                      .filter((a) => {
+                        // A loan is paid only from an account in its own currency.
+                        const source = accountsById.get(subscriptionForm.account_id)
+                        return a.account_type !== 'loan' || !source || a.currency === source.currency
+                      })
                       .map((account) => (
                         <option key={account.id} value={account.id}>{account.name}</option>
                       ))}
                   </select>
                   <p className="mt-1 text-xs text-muted">
                     Makes this a recurring transfer from the account above, e.g. moving money to the account a loan is
-                    paid from. Not available from or to a credit card.
+                    paid from. Not available from or to a credit card. A loan is listed only when the account above is
+                    in its currency.
                   </p>
                 </div>
               )}
@@ -1868,6 +1899,11 @@ export function AllocationsPage() {
                         }))
                       }
                       className="mt-1 block w-full border border-line px-3 py-2"
+                      // A recurring loan payment is in the loan's currency.
+                      disabled={
+                        !!subscriptionForm.transfer_to_account_id &&
+                        accountsById.get(subscriptionForm.transfer_to_account_id)?.account_type === 'loan'
+                      }
                     >
                       {currencyOptions.map((code) => (
                         <option key={code} value={code}>
