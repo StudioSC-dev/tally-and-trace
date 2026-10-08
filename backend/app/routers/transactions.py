@@ -800,9 +800,10 @@ def summarize_period(
 
     The breakdown is keyed by name, as it always has been (two categories with
     one name already share a row). A synthetic row ("Uncategorized", "Transfer
-    fees", "Unallocated wallet spend", "Returned from wallets") whose name a
-    user category also uses is added into that row, never written over it, so
-    no amount is lost and the expense column still sums to ``total_expenses``.
+    fees", "Interest: <loan name>", "Unallocated wallet spend", "Returned from
+    wallets") whose name a user category also uses is added into that row,
+    never written over it, so no amount is lost and the expense column still
+    sums to ``total_expenses``.
     """
     zero = Decimal("0")
     loan_names = loan_names or {}

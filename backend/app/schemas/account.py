@@ -8,6 +8,14 @@ LoanKind = Literal["personal", "auto", "home"]
 LoanAmortization = Literal["fixed", "reduce_term"]
 
 
+LOAN_PAYMENTS_MADE_OFFSET_DESCRIPTION = (
+    "Scheduled payments made before the loan was tracked here. Every posted "
+    "transaction with loan_payment_kind 'scheduled' is counted on top of it, so "
+    "back-filled history must either reduce this offset or be recorded without "
+    "loan_payment_kind; otherwise it is counted twice."
+)
+
+
 class AccountBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     account_type: AccountType
@@ -35,8 +43,8 @@ class AccountBase(BaseModel):
     loan_first_payment_date: Optional[date] = None
     # Defaults by kind when omitted: home -> reduce_term, auto/personal -> fixed.
     loan_amortization: Optional[LoanAmortization] = None
-    # Scheduled payments made before the loan was tracked here.
-    loan_payments_made_offset: Optional[int] = Field(None, ge=0)
+    loan_payments_made_offset: Optional[int] = Field(
+        None, ge=0, description=LOAN_PAYMENTS_MADE_OFFSET_DESCRIPTION)
 
 class AccountCreate(AccountBase):
     is_active: bool = True
@@ -61,7 +69,8 @@ class AccountUpdate(BaseModel):
     loan_payment_amount: Optional[float] = Field(None, gt=0)
     loan_first_payment_date: Optional[date] = None
     loan_amortization: Optional[LoanAmortization] = None
-    loan_payments_made_offset: Optional[int] = Field(None, ge=0)
+    loan_payments_made_offset: Optional[int] = Field(
+        None, ge=0, description=LOAN_PAYMENTS_MADE_OFFSET_DESCRIPTION)
     is_active: Optional[bool] = None
 
     @field_validator("is_spending_wallet")
