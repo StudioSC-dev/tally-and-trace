@@ -9,6 +9,18 @@ export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
 })
 
+/** Marks a spending wallet: its balance is shown but not counted in available cash. */
+function NotCountedTag() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-1 text-xs text-muted"
+      title="Spending wallet: shown, but not counted in available cash or projections"
+    >
+      Not counted
+    </span>
+  )
+}
+
 export function AccountsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
@@ -31,6 +43,7 @@ export function AccountsPage() {
     days_until_due_date: 21,
     payment_account_id: undefined as number | undefined,
     payment_overflow_account_id: undefined as number | undefined,
+    is_spending_wallet: false,
     is_active: true,
   })
   const [showCreditSettings, setShowCreditSettings] = useState(false)
@@ -49,10 +62,10 @@ export function AccountsPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
 
-  // Only non-credit accounts can fund a statement, and a card can't pay itself.
-  // Mirrors the backend validation in routers/accounts.py::_validate_payment_routing.
+  // Only non-credit, non-wallet accounts can fund a statement, and a card can't pay
+  // itself. Mirrors the backend validation in routers/accounts.py::_validate_payment_routing.
   const fundingAccounts = accounts.filter(
-    (a) => a.account_type !== 'credit' && a.is_active && a.id !== editingAccount?.id,
+    (a) => a.account_type !== 'credit' && !a.is_spending_wallet && a.is_active && a.id !== editingAccount?.id,
   )
 
   // Spell out the cycle the backend will derive, so "closes 24th, +21 days" doesn't
@@ -217,6 +230,7 @@ export function AccountsPage() {
         days_until_due_date: 21,
         payment_account_id: undefined,
         payment_overflow_account_id: undefined,
+        is_spending_wallet: false,
         is_active: true,
       })
       setIsCreateModalOpen(false)
@@ -240,6 +254,7 @@ export function AccountsPage() {
       days_until_due_date: account.days_until_due_date ?? 21,
       payment_account_id: account.payment_account_id ?? undefined,
       payment_overflow_account_id: account.payment_overflow_account_id ?? undefined,
+      is_spending_wallet: account.is_spending_wallet,
       is_active: account.is_active,
     })
     setShowCreditSettings(false)
@@ -362,6 +377,7 @@ export function AccountsPage() {
                       <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                         Currency: {account.currency}
                       </span>
+                      {account.is_spending_wallet && <NotCountedTag />}
                       {account.account_type === 'credit' && account.credit_limit !== undefined && (
                         <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
                           Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
@@ -425,6 +441,11 @@ export function AccountsPage() {
               <div>
                 <h2 className="text-xl font-semibold text-ink">{actionAccount.name}</h2>
                 <p className="text-sm text-muted capitalize">{actionAccount.account_type.replace('_', ' ')}</p>
+                {actionAccount.is_spending_wallet && (
+                  <div className="mt-2">
+                    <NotCountedTag />
+                  </div>
+                )}
               </div>
                 <button
                 onClick={closeActionModal}
@@ -528,6 +549,7 @@ export function AccountsPage() {
                     days_until_due_date: 21,
                     payment_account_id: undefined,
                     payment_overflow_account_id: undefined,
+                    is_spending_wallet: false,
                     is_active: true,
                   })
                   setShowCreditSettings(false)
@@ -559,7 +581,14 @@ export function AccountsPage() {
                   value={formData.account_type}
                   onChange={(e) => {
                     const nextType = e.target.value as Account['account_type']
-                    setFormData({ ...formData, account_type: nextType })
+                    // New cash / e-wallet accounts start as spending wallets; a card never is one.
+                    const isSpendingWallet =
+                      nextType === 'credit'
+                        ? false
+                        : editingAccount
+                        ? formData.is_spending_wallet
+                        : nextType === 'cash' || nextType === 'e_wallet'
+                    setFormData({ ...formData, account_type: nextType, is_spending_wallet: isSpendingWallet })
                     setShowCreditSettings(false)
                   }}
                   className="select-field focus-ring"
@@ -572,6 +601,24 @@ export function AccountsPage() {
                 </select>
               </div>
               
+              {formData.account_type !== 'credit' && (
+                <div>
+                  <label className="inline-flex items-center gap-2 text-sm text-body cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="border-line text-ink"
+                      checked={formData.is_spending_wallet}
+                      onChange={(e) => setFormData({ ...formData, is_spending_wallet: e.target.checked })}
+                    />
+                    <span>Spending wallet</span>
+                  </label>
+                  <p className="mt-1 text-xs text-muted">
+                    Cash on hand or an e-wallet: its balance is shown but not counted in available cash or
+                    projections. Topping it up counts as the expense.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="label">Account Currency</label>
                 <select
@@ -802,6 +849,7 @@ export function AccountsPage() {
                     days_until_due_date: 21,
                     payment_account_id: undefined,
                     payment_overflow_account_id: undefined,
+                    is_spending_wallet: false,
                     is_active: true,
                     })
                   }}
