@@ -768,6 +768,25 @@ def test_a_prepayment_edit_cannot_add_interest(client, people):
     assert _balance(client, me, loan["id"]) == Decimal("-800.00")
 
 
+def test_a_loan_payment_currency_cannot_be_changed(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000)
+    paid = _pay(client, me, loan["id"], from_account_id=bank["id"], principal=400, interest=10)
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["currency"] == "PHP"
+
+    r = _put(client, me, paid.json()["id"], currency="USD")
+    assert r.status_code == 400 and "re-record" in r.text, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9590.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-600.00")
+
+    # Restating the same currency is not a change.
+    r = _put(client, me, paid.json()["id"], currency="PHP")
+    assert r.status_code == 200, r.text
+    assert r.json()["currency"] == "PHP"
+
+
 @pytest.mark.parametrize("change, expected", [
     ("funding_currency", "currency"),
     ("funding_credit_card", "not a credit card"),

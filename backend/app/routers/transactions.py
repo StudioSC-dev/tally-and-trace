@@ -176,6 +176,7 @@ def _balance_account_ids(transaction_type, account_id, transfer_from_id, transfe
 
 LOAN_PAYMENT_FIXED_FIELDS = (
     "transaction_type", "account_id", "transfer_from_account_id", "transfer_to_account_id",
+    "currency",
 )
 
 
@@ -194,8 +195,8 @@ def _money_changed(requested: dict, field: str, current, *, none_is_zero: bool =
 def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, requested: dict) -> None:
     """Keep the loan endpoints' rules on a loan payment edited through this API.
 
-    Its type and accounts are fixed (so a prepayment can never land on a fixed
-    loan). The money checks run only when the amount or fee changes, or the
+    Its type, accounts and currency are fixed (so a prepayment can never land
+    on a fixed loan). The money checks run only when the amount or fee changes, or the
     payment is posted: the result is re-checked against the loan with the
     payment's old effect reversed, and its principal is held to what is owed
     only if the edited row is posted, so a pending payment above the current
@@ -212,7 +213,7 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
         if field in requested and requested[field] != getattr(txn, field):
             raise HTTPException(
                 status_code=400,
-                detail="A loan payment's type and accounts cannot be changed; "
+                detail="A loan payment's type, accounts and currency cannot be changed; "
                        "delete and re-record the loan payment instead",
             )
     loan = db.query(Account).filter(Account.id == txn.transfer_to_account_id).first()
