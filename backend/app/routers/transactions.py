@@ -178,14 +178,29 @@ LOAN_PAYMENT_FIXED_FIELDS = (
 )
 
 
+def _money_changed(requested: dict, field: str, current, *, none_is_zero: bool = False) -> bool:
+    """Whether ``field`` is in the request with a value other than ``current``."""
+    if field not in requested:
+        return False
+    new = requested[field]
+    if none_is_zero:
+        new, current = new or 0, current or 0
+    if new is None or current is None:
+        return new is not current
+    return Decimal(str(new)) != Decimal(str(current))
+
+
 def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) -> None:
     """Keep the loan endpoints' rules on a loan payment edited through this API.
 
     Its type and accounts are fixed (so a prepayment can never land on a fixed
-    loan); an amount, fee or posted change is re-checked against the loan with
-    the payment's old effect reversed. A prepayment keeps the prepayment
-    endpoint's rules: no interest, and it is not posted (or its amount changed
-    while posted) once the loan is ``fixed``.
+    loan). The money checks run only when the amount or fee changes, or the
+    payment is posted: the result is re-checked against the loan with the
+    payment's old effect reversed, and its principal is held to what is owed
+    only if the edited row is posted, so a pending payment above the current
+    owed amount can still be edited but not posted. A prepayment keeps the
+    prepayment endpoint's rules: no interest, and it is not posted (or its
+    amount changed while posted) once the loan is ``fixed``.
     """
     for field in LOAN_PAYMENT_FIXED_FIELDS:
         if field in requested and requested[field] != getattr(txn, field):
@@ -195,6 +210,10 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
                        "delete and re-record the loan payment instead",
             )
     loan = db.query(Account).filter(Account.id == txn.transfer_to_account_id).first()
+    old_posted = bool(txn.is_posted)
+    posted = bool(requested.get("is_posted", old_posted))
+    amount_changed = _money_changed(requested, "amount", txn.amount)
+    fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
     if txn.loan_payment_kind == loan_svc.PREPAYMENT:
         interest = requested.get("transfer_fee", txn.transfer_fee)
         if interest is not None and Decimal(str(interest)) != 0:
@@ -202,22 +221,20 @@ def _validate_loan_payment_edit(db: Session, txn: Transaction, requested: dict) 
                 status_code=400,
                 detail="A prepayment is extra principal and carries no interest",
             )
-        old_posted = bool(txn.is_posted)
-        posted = bool(requested.get("is_posted", old_posted))
-        amount_changed = ("amount" in requested and (
-            requested["amount"] is None or txn.amount is None
-            or Decimal(str(requested["amount"])) != Decimal(str(txn.amount))))
         if (posted and (not old_posted or amount_changed)
                 and loan_svc.amortization_of(loan) == loan_svc.FIXED):
             raise HTTPException(
                 status_code=400,
                 detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
             )
+    if not (amount_changed or fee_changed or (posted and not old_posted)):
+        return
     try:
         loan_svc.check_edited_payment(
             loan,
             old_principal=txn.amount,
-            old_posted=bool(txn.is_posted),
+            old_posted=old_posted,
+            posted=posted,
             principal=requested.get("amount", txn.amount),
             interest=requested.get("transfer_fee", txn.transfer_fee),
         )

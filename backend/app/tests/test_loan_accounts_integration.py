@@ -723,6 +723,23 @@ def test_a_loan_payment_edit_is_revalidated_against_the_loan(client, people):
     assert (s["payments"][0]["principal"], s["payments"][0]["interest"]) == (1_000, 12.5)
 
 
+def test_a_pending_payment_above_owed_can_be_edited_but_not_posted(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000, payment_account_id=bank["id"])
+    pending = _pay(client, me, loan["id"], principal=800, interest=0, is_posted=False)
+    assert pending.status_code == 200, pending.text
+    assert _pay(client, me, loan["id"], principal=300, interest=0).status_code == 200
+
+    r = _put(client, me, pending.json()["id"], description="x")
+    assert r.status_code == 200, r.text
+    assert r.json()["description"] == "x"
+    r = _put(client, me, pending.json()["id"], is_posted=True)
+    assert r.status_code == 400 and "owed" in r.text, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9700.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-700.00")
+
+
 def test_a_pending_prepayment_cannot_be_posted_once_the_loan_is_fixed(client, people):
     me = people()
     bank = _bank(client, me, balance=10_000)

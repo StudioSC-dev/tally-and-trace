@@ -227,12 +227,13 @@ def build_schedule(db: Session, loan: Account) -> dict:
     }
 
 
-def check_edited_payment(loan, *, old_principal, old_posted: bool,
+def check_edited_payment(loan, *, old_principal, old_posted: bool, posted: bool,
                          principal, interest) -> Tuple[Decimal, Decimal]:
     """Re-validate an edited loan payment against the loan with its old effect reversed.
 
     ``(principal, interest)`` in whole cents, once each is non-negative, together
-    they move some money, and the principal fits what is owed before this payment.
+    they move some money, and (when the edited payment is ``posted``) the
+    principal fits what is owed before this payment.
     """
     if principal is None:
         raise LoanError("A loan payment needs an amount (its principal)")
@@ -241,6 +242,8 @@ def check_edited_payment(loan, *, old_principal, old_posted: bool,
         raise LoanError("Principal and interest cannot be negative")
     if principal + interest <= 0:
         raise LoanError("A loan payment must move some money")
+    if not posted:
+        return principal, interest
     balance = _money(loan.balance or 0) - (_money(old_principal) if old_posted else _ZERO)
     if principal > max(-balance, _ZERO):
         raise LoanError("Principal exceeds what is owed on the loan")
