@@ -791,3 +791,28 @@ def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client
     assert r.status_code == 400 and "owed" in r.text, r.text
     assert _balance(client, me, loan["id"]) == Decimal("-300.00")
     assert _balance(client, me, bank["id"]) == Decimal("10000.00")
+
+
+def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    bank = _bank(client, owner, name="Entity bank", entity_id=entity_id)
+    private_loan = _loan(client, owner, name="Owner Private Loan")
+
+    r = client.post(f"{API}/transactions/", headers=owner["headers"], json={
+        "account_id": bank["id"], "transaction_type": "transfer", "amount": 1_000,
+        "transfer_fee": 50, "entity_id": entity_id,
+        "transfer_from_account_id": bank["id"], "transfer_to_account_id": private_loan["id"],
+        "transaction_date": "2026-10-05T00:00:00"})
+    assert r.status_code == 200, r.text
+
+    s = _summary(client, member_h)
+    rows = s["category_breakdown"]
+    assert Decimal(str(rows["Transfer fees"]["expenses"])) == Decimal("50")
+    assert not any(name.startswith("Interest: ") for name in rows), rows
+    _assert_rows_sum(s)
+
+    # The owner, who can see the loan, gets its interest row.
+    rows = _summary(client, owner)["category_breakdown"]
+    assert Decimal(str(rows["Interest: Owner Private Loan"]["expenses"])) == Decimal("50")
