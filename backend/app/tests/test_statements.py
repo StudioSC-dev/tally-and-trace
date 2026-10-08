@@ -4,15 +4,16 @@ The headline case is the owner's real shape: a card closing on the 24th with a
 21-day grace period, whose SOA line items sum to the statement balance, paid from
 the biweekly payroll account with the main checking account as overflow.
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
 
 from app.models.transaction import TransactionType
 from app.services.statements import (
+    allocate_payments,
     build_statement_payables,
-    iter_statement_cycles,
+    iter_cycles_from,
     resolve_cycle_fields,
     statement_balance,
 )
@@ -37,6 +38,18 @@ def _txn(day, amount, kind=TransactionType.DEBIT, month=7, year=2026):
         transaction_date=datetime(year, month, day),
         amount=Decimal(str(amount)),
         transaction_type=kind,
+    )
+
+
+def _pay(day, amount, month=7, year=2026, card_id=1, from_account=10):
+    """A transfer from a bank account into the card: a card payment."""
+    return SimpleNamespace(
+        transaction_date=datetime(year, month, day),
+        amount=Decimal(str(amount)),
+        transaction_type=TransactionType.TRANSFER,
+        account_id=from_account,
+        transfer_from_account_id=from_account,
+        transfer_to_account_id=card_id,
     )
 
 
@@ -73,7 +86,7 @@ def test_card_with_no_cycle_fields_is_unmodellable():
 
 def test_unmodellable_card_yields_no_cycles():
     card = _card(billing_cycle_start=None, due_date=None)
-    assert list(iter_statement_cycles(card, datetime(2026, 8, 1), datetime(2026, 10, 1))) == []
+    assert list(iter_cycles_from(card, date(2026, 7, 1), datetime(2026, 10, 1))) == []
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +95,7 @@ def test_unmodellable_card_yields_no_cycles():
 
 def test_cycle_window_and_due_date_for_the_worked_example():
     """Close 24 Jul -> due 14 Aug, covering charges from 25 Jun to 24 Jul."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 8, 31)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 31)))
     assert len(cycles) == 1
     cycle = cycles[0]
     assert cycle["close"] == datetime(2026, 7, 24)
@@ -90,20 +103,20 @@ def test_cycle_window_and_due_date_for_the_worked_example():
     assert cycle["window_start"] == datetime(2026, 6, 24)
 
 
-def test_statement_closed_before_the_window_but_due_inside_it_is_included():
-    """The cash still leaves in the window -- this is the case a naive walk drops."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 10), datetime(2026, 8, 20)))
-    assert [c["due"] for c in cycles] == [datetime(2026, 8, 14)]
+def test_walk_starts_at_the_cycle_containing_the_first_day():
+    """A first line item after the close day belongs to the next month's cycle."""
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 25), datetime(2026, 10, 1)))
+    assert [c["close"] for c in cycles] == [datetime(2026, 8, 24)]
 
 
 def test_due_date_on_the_window_end_is_excluded():
     """Window is half-open [start, end), consistent with the rest of the engine."""
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 8, 14)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 14)))
     assert cycles == []
 
 
 def test_multiple_cycles_across_a_longer_window():
-    cycles = list(iter_statement_cycles(_card(), datetime(2026, 8, 1), datetime(2026, 11, 1)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 11, 1)))
     assert [c["due"] for c in cycles] == [
         datetime(2026, 8, 14),
         datetime(2026, 9, 14),
@@ -114,7 +127,7 @@ def test_multiple_cycles_across_a_longer_window():
 def test_close_day_clamps_to_short_months():
     """Day 31 must not explode on February."""
     card = _card(billing_cycle_start=31, days_until_due_date=21)
-    cycles = list(iter_statement_cycles(card, datetime(2027, 3, 1), datetime(2027, 3, 31)))
+    cycles = list(iter_cycles_from(card, date(2027, 2, 1), datetime(2027, 3, 31)))
     assert cycles[0]["close"] == datetime(2027, 2, 28)
 
 
@@ -147,14 +160,40 @@ def test_window_is_exclusive_at_start_and_inclusive_at_close():
     assert statement_balance(on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("999.00")
 
 
+def test_midday_charge_on_the_closing_day_belongs_to_that_statement():
+    """Close is midnight of the 24th, but the whole 24th is inside the statement."""
+    noon_on_close = [_txn(24, "12000.00")]
+    noon_on_close[0].transaction_date = datetime(2026, 7, 24, 12)
+    assert statement_balance(noon_on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("12000.00")
+    # ...and therefore NOT in the next one.
+    assert statement_balance(noon_on_close, datetime(2026, 7, 24), datetime(2026, 8, 24)) == Decimal("0")
+
+
+def test_midday_charge_on_the_previous_closing_day_belongs_to_the_previous_statement():
+    noon_on_prev_close = [_txn(24, "500.00", month=6)]
+    noon_on_prev_close[0].transaction_date = datetime(2026, 6, 24, 12)
+    assert statement_balance(noon_on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("0")
+    assert statement_balance(noon_on_prev_close, datetime(2026, 5, 24), datetime(2026, 6, 24)) == Decimal("500.00")
+
+
+def test_midday_closing_day_charge_is_payable_on_that_statements_due_date():
+    """Repro: 12,000 at noon on 24 Jul is due 14 Aug, not 14 Sep."""
+    txns = {1: [_txn(24, "12000.00")]}
+    txns[1][0].transaction_date = datetime(2026, 7, 24, 12)
+    events = build_statement_payables([_card()], txns, datetime(2026, 8, 1), datetime(2026, 10, 1))
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
 def test_refunds_reduce_the_balance():
     txns = [_txn(5, "1000.00"), _txn(10, "250.00", kind=TransactionType.CREDIT)]
     assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("750.00")
 
 
-def test_transfers_are_ignored():
-    """The cash side of a card payment is modelled on the paying account."""
-    txns = [_txn(5, "1000.00"), _txn(10, "1000.00", kind=TransactionType.TRANSFER)]
+def test_transfers_are_not_line_items():
+    """A payment is netted against statements by allocation, not summed as a line."""
+    txns = [_txn(5, "1000.00"), _pay(10, "1000.00")]
     assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("1000.00")
 
 
@@ -218,3 +257,328 @@ def test_multiple_cards_each_get_their_own_payable():
     assert by_name["Metrobank CC statement"]["amount"] == Decimal("-1000.00")
     assert by_name["BPI CC statement"]["date"] == datetime(2026, 8, 25)  # 5 Aug + 20d
     assert by_name["BPI CC statement"]["amount"] == Decimal("-2000.00")
+
+
+# ---------------------------------------------------------------------------
+# Payments netted against statements
+#
+# The card closes on the 24th, due 21 days later: the 10 Jul charge is on the
+# 24 Jul statement, due 14 Aug.
+# ---------------------------------------------------------------------------
+
+AUG, SEP = datetime(2026, 8, 1), datetime(2026, 9, 1)
+
+
+def _owed(rows, start=AUG, end=SEP):
+    return [(e["date"], e["amount"]) for e in build_statement_payables([_card()], {1: rows}, start, end)]
+
+
+def test_full_payment_leaves_no_payable():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "12000.00", month=8)]) == []
+
+
+def test_partial_payment_leaves_the_remainder():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "5000.00", month=8)]) == [
+        (datetime(2026, 8, 14), Decimal("-7000.00")),
+    ]
+
+
+def test_early_payment_after_close_nets_the_statement():
+    assert _owed([_txn(10, "12000.00"), _pay(26, "12000.00")]) == []
+
+
+def test_payment_before_close_nets_the_statement_it_is_dated_in():
+    """Paid 20 Jul, before the 24 Jul close: still pays that statement."""
+    assert _owed([_txn(10, "12000.00"), _pay(20, "12000.00")]) == []
+
+
+def test_late_full_payment_nets_the_statement():
+    """Paid 20 Aug, after the 14 Aug due date: the statement is still paid."""
+    assert _owed([_txn(10, "12000.00"), _pay(20, "12000.00", month=8)]) == []
+
+
+def test_late_partial_payment_leaves_the_remainder():
+    assert _owed([_txn(10, "12000.00"), _pay(20, "4000.00", month=8)]) == [
+        (datetime(2026, 8, 14), Decimal("-8000.00")),
+    ]
+
+
+def test_payment_outside_the_window_still_nets_its_statement():
+    """A payment dated after the window end is an allocation, not a window event."""
+    assert _owed([_txn(10, "12000.00"), _pay(5, "12000.00", month=10)]) == []
+
+
+def test_incoming_bank_transfer_is_a_payment_via_transfer_to_account_id():
+    """The row's account_id is the bank account; only transfer_to names the card."""
+    pay = _pay(10, "3000.00", month=8, from_account=99)
+    assert pay.account_id == 99
+    assert _owed([_txn(10, "12000.00"), pay]) == [(datetime(2026, 8, 14), Decimal("-9000.00"))]
+
+
+def test_transfer_into_another_card_does_not_pay_this_one():
+    assert _owed([_txn(10, "12000.00"), _pay(10, "12000.00", month=8, card_id=2)]) == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+def test_each_payment_is_consumed_once_oldest_outstanding_statement_first():
+    """1,500 paid after two statements of 1,000 (Jul) and 2,000 (Aug) clears July
+    and leaves 1,500 on August; it is not applied to August in full as well."""
+    rows = [_txn(10, "1000.00"), _txn(10, "2000.00", month=8), _pay(1, "1500.00", month=9)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-1500.00")),
+    ]
+
+
+def test_overpayment_carries_to_the_next_statement():
+    rows = [_txn(10, "1000.00"), _txn(10, "2000.00", month=8), _pay(10, "1800.00", month=8)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-1200.00")),
+    ]
+
+
+def test_payment_dated_in_the_window_settles_an_older_unpaid_statement_first():
+    """June's 500 (due 15 Jul, before the window) is still owed; an August payment of
+    500 settles it, so July's statement stays owed in full."""
+    rows = [_txn(10, "500.00", month=6), _txn(10, "12000.00"), _pay(10, "500.00", month=8)]
+    assert _owed(rows) == [(datetime(2026, 8, 14), Decimal("-12000.00"))]
+
+
+def test_allocate_payments_oldest_first():
+    """The -50 statement's credit pays like a payment: 150 + 30 + 50 against 300."""
+    assert allocate_payments(
+        [Decimal("100"), Decimal("0"), Decimal("-50"), Decimal("200")],
+        [Decimal("150"), Decimal("30")],
+    ) == [Decimal("0"), Decimal("0"), Decimal("0"), Decimal("70")]
+
+
+def test_net_credit_statement_carries_to_the_next_statement():
+    """July nets -400 (refund beyond its charges): August's 1,000 owes 600."""
+    rows = [_txn(5, "100.00"), _txn(10, "500.00", kind=TransactionType.CREDIT),
+            _txn(10, "1000.00", month=8)]
+    assert _owed(rows, start=AUG, end=datetime(2026, 10, 1)) == [
+        (datetime(2026, 9, 14), Decimal("-600.00")),
+    ]
+
+
+def test_net_credit_statement_pays_an_older_outstanding_statement_first():
+    """June's 500 is unpaid; July's -200 credit leaves 300 of it overdue on 1 Aug."""
+    rows = [_txn(10, "500.00", month=6), _txn(10, "200.00", kind=TransactionType.CREDIT)]
+    assert _owed(rows) == [(AUG, Decimal("-300.00"))]
+
+
+# ---------------------------------------------------------------------------
+# Overdue statements
+# ---------------------------------------------------------------------------
+
+def test_unpaid_statement_due_before_the_window_is_overdue_on_the_window_start():
+    start = datetime(2026, 8, 20)
+    events = build_statement_payables([_card()], {1: [_txn(10, "12000.00")]}, start, SEP)
+    assert [(e["date"], e["amount"], e["overdue"], e["original_date"]) for e in events] == [
+        (start, Decimal("-12000.00"), True, datetime(2026, 8, 14)),
+    ]
+
+
+def test_partly_paid_overdue_statement_carries_the_remainder():
+    start = datetime(2026, 8, 20)
+    rows = [_txn(10, "12000.00"), _pay(10, "9000.00", month=8)]
+    events = build_statement_payables([_card()], {1: rows}, start, SEP)
+    assert [(e["date"], e["amount"], e["overdue"]) for e in events] == [
+        (start, Decimal("-3000.00"), True),
+    ]
+
+
+def test_paid_statement_due_before_the_window_is_not_overdue():
+    rows = [_txn(10, "12000.00"), _pay(14, "12000.00", month=8)]
+    assert build_statement_payables([_card()], {1: rows}, datetime(2026, 8, 20), SEP) == []
+
+
+def test_in_window_statement_is_not_marked_overdue():
+    (ev,) = build_statement_payables([_card()], {1: [_txn(10, "12000.00")]}, AUG, SEP)
+    assert "overdue" not in ev and "original_date" not in ev
+
+
+# ---------------------------------------------------------------------------
+# Cash advances
+# ---------------------------------------------------------------------------
+
+def test_cash_advance_is_billed_with_its_fee_on_the_statement_containing_it():
+    advance = _pay(10, "3000.00", from_account=1, card_id=10)
+    advance.transfer_fee = Decimal("50.00")
+    assert _owed([advance]) == [(datetime(2026, 8, 14), Decimal("-3050.00"))]
+
+
+def test_balance_transfer_charges_the_source_card_and_pays_the_destination():
+    move = _pay(10, "2000.00", from_account=1, card_id=2)
+    other = _card(id=2, name="BPI CC")
+    events = build_statement_payables(
+        [_card(), other],
+        {1: [move], 2: [_txn(5, "2000.00"), move]},
+        AUG, SEP,
+    )
+    assert [(e["name"], e["amount"]) for e in events] == [
+        ("Metrobank CC statement", Decimal("-2000.00")),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Payments from a card without statements
+# ---------------------------------------------------------------------------
+
+def _from_unbilled_card(posted=False):
+    """12,000 charged on card 1, then 'paid' by a transfer from card 2, which has
+    no cycle settings and so no statement that would ever bill the transfer."""
+    unbilled = _card(id=2, name="Store card", billing_cycle_start=None, due_date=None)
+    move = _pay(10, "12000.00", month=8, from_account=2)
+    move.is_posted = posted
+    return unbilled, [_txn(10, "12000.00"), move]
+
+
+def test_payment_from_a_card_without_statements_does_not_net_the_billed_card():
+    unbilled, rows = _from_unbilled_card()
+    events = build_statement_payables([_card(), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
+    assert [(e["name"], e["date"], e["amount"]) for e in events] == [
+        ("Metrobank CC statement", datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+def test_posted_payment_from_a_card_without_statements_does_not_net_the_billed_card():
+    unbilled, rows = _from_unbilled_card(posted=True)
+    events = build_statement_payables([_card(), unbilled], {1: rows, 2: rows[1:]}, AUG, SEP)
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+def test_payment_from_an_unbilled_card_outside_the_cards_list_does_not_net():
+    """The source card is another entity's (or inactive), so it is not in ``cards``:
+    the caller names it as unbilled from the account itself."""
+    _, rows = _from_unbilled_card()
+    events = build_statement_payables([_card()], {1: rows}, AUG, SEP,
+                                      unbilled_sources=frozenset({2}))
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 8, 14), Decimal("-12000.00")),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Window independence
+#
+# A net-credit cycle due after the window still pays older statements, so a
+# payable inside a window must not depend on how far the window reaches.
+# ---------------------------------------------------------------------------
+
+def test_refund_in_a_cycle_due_after_the_window_still_pays_the_older_statement():
+    """1,000 charged 10 Jul, refunded 28 Jul (the 24 Aug statement, due 14 Sep):
+    the 14 Aug statement is settled even in a window ending before 14 Sep."""
+    rows = [_txn(10, "1000.00"), _txn(28, "1000.00", kind=TransactionType.CREDIT)]
+    assert build_statement_payables([_card()], {1: rows}, AUG, SEP) == []
+    assert build_statement_payables([_card()], {1: rows}, AUG, datetime(2026, 10, 1)) == []
+
+
+def _payables(rows, end, projected=(), start=AUG):
+    """Payables for a window whose caller projected the occurrences dated before ``end``."""
+    projected = [row for row in projected if row.transaction_date < end]
+    return [(e["date"], e["amount"], e.get("overdue", False))
+            for e in build_statement_payables([_card()], {1: rows}, start, end,
+                                              projected_by_card={1: projected})]
+
+
+def _assert_window_independent(by_end):
+    ends = sorted(by_end)
+    for i, short in enumerate(ends):
+        for long in ends[i + 1:]:
+            assert [e for e in by_end[long] if e[0] < short] == by_end[short], (short, long)
+
+
+def test_projected_charge_after_the_window_does_not_reopen_a_settled_statement():
+    """July's 1,000 is refunded on 28 Aug (24 Sep statement), so July is settled. A
+    projected 500 on 5 Sep is billed on its own cycle (due 15 Oct); it does not eat
+    the refund that settled July and so leave 500 owed on 14 Aug."""
+    rows = [_txn(10, "1000.00"), _txn(28, "1000.00", kind=TransactionType.CREDIT, month=8)]
+    projected = [_txn(5, "500.00", month=9)]
+    ends = [SEP, datetime(2026, 10, 1), datetime(2026, 11, 1)]
+    by_end = {end: _payables(rows, end, projected) for end in ends}
+    _assert_window_independent(by_end)
+    assert by_end[SEP] == []
+    assert by_end[datetime(2026, 11, 1)] == [(datetime(2026, 10, 15), Decimal("-500.00"), False)]
+
+
+def test_projected_credit_after_a_due_date_does_not_pay_that_statement():
+    """A 500 income scheduled on the card for 5 Sep comes after July's 14 Aug due
+    date, so July's 1,000 is owed in full in every window."""
+    rows = [_txn(10, "1000.00")]
+    projected = [_txn(5, "500.00", kind=TransactionType.CREDIT, month=9)]
+    ends = [SEP, datetime(2026, 10, 1), datetime(2026, 11, 1)]
+    by_end = {end: _payables(rows, end, projected) for end in ends}
+    _assert_window_independent(by_end)
+    assert by_end[datetime(2026, 11, 1)] == [(datetime(2026, 8, 14), Decimal("-1000.00"), False)]
+
+
+def _advance(day, amount, fee, month):
+    row = _pay(day, amount, month=month, from_account=1, card_id=10)
+    row.transfer_fee = Decimal(fee)
+    return row
+
+
+WINDOW_SCENARIO = [
+    _txn(10, "5000.00"),                                     # 24 Jul statement
+    _pay(20, "1000.00"),                                     # early, before the close
+    _txn(28, "1000.00", kind=TransactionType.CREDIT),        # refund, 24 Aug statement
+    _advance(5, "2000.00", "50.00", month=8),                # cash advance, 24 Aug
+    _pay(20, "500.00", month=8),                             # late for the 14 Aug due date
+    _txn(2, "3000.00", kind=TransactionType.CREDIT, month=9),  # net-credit 24 Sep cycle
+    _txn(5, "400.00", month=10),                             # 24 Oct statement, due 14 Nov
+    _pay(10, "700.00", month=11),                # planned, after the last statement's 14 Nov due date
+]
+
+
+# Budget-entry occurrences on the card, on either side of each window end.
+WINDOW_PROJECTED = [
+    _txn(20, "600.00", month=8),                              # 24 Aug statement
+    _txn(30, "200.00", kind=TransactionType.CREDIT, month=8),  # before the 14 Sep due date
+    _txn(3, "300.00", month=9),                               # 24 Sep statement
+    _txn(28, "900.00", kind=TransactionType.CREDIT, month=9),  # before the 15 Oct due date
+    _txn(2, "250.00", month=10),                              # 24 Oct statement
+    _txn(30, "30.00", kind=TransactionType.CREDIT, month=10),  # before the 14 Nov due date
+    _txn(3, "150.00", month=11),                              # 24 Nov statement, due 15 Dec
+]
+
+WINDOW_ENDS = [SEP, datetime(2026, 10, 1), datetime(2026, 11, 1), datetime(2026, 12, 1)]
+
+
+def _window_events(end):
+    return _payables(WINDOW_SCENARIO, end)
+
+
+def test_payables_inside_a_window_do_not_depend_on_its_length():
+    by_end = {end: _window_events(end) for end in WINDOW_ENDS}
+    _assert_window_independent(by_end)
+    # 5,000 + 1,050 charged, 3,000 + 1,000 credited, 2,200 paid: the 24 Jul
+    # statement is settled and 850 of the 24 Aug one is left, due 14 Sep.
+    assert by_end[datetime(2026, 12, 1)] == [
+        (datetime(2026, 9, 14), Decimal("-850.00"), False),
+        (datetime(2026, 11, 14), Decimal("-400.00"), False),
+    ]
+
+
+def test_window_independence_holds_with_projected_occurrences():
+    by_end = {end: _payables(WINDOW_SCENARIO, end, WINDOW_PROJECTED) for end in WINDOW_ENDS}
+    _assert_window_independent(by_end)
+    # Recorded rows settle as above (850 left on 24 Aug, 400 on 24 Oct). Then the
+    # projected charges: 24 Aug 1,450, 24 Sep 300, 24 Oct 650, 24 Nov 150. The 200
+    # credit pays 24 Aug down to 1,250; the 900 clears 24 Sep and leaves 50 on
+    # 24 Oct; the 30 leaves 20 there.
+    assert by_end[datetime(2026, 12, 1)] == [
+        (datetime(2026, 9, 14), Decimal("-1250.00"), False),
+        (datetime(2026, 11, 14), Decimal("-20.00"), False),
+    ]
+
+
+def test_window_independence_holds_for_overdue_statements():
+    """Starting after the 14 Aug due date, the overdue amount is window-independent."""
+    start = datetime(2026, 8, 20)
+    for projected in ((), WINDOW_PROJECTED):
+        short = _payables(WINDOW_SCENARIO, SEP, projected, start=start)
+        long = _payables(WINDOW_SCENARIO, datetime(2026, 12, 1), projected, start=start)
+        assert short == [e for e in long if e[0] < SEP]

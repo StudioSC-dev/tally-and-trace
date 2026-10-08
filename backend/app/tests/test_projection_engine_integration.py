@@ -315,9 +315,8 @@ def test_cross_scope_transfer_touching_an_in_scope_card_is_listed_but_not_cash(
     assert get_payables(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1)) == []
 
 
-@pytest.mark.parametrize("direction", ["into_card", "from_card"])
-def test_overdue_card_transfer_is_listed_at_the_window_start_but_not_cash(db, user, direction):
-    """Same as an in-window card transfer: listed, non-cash. Statements ignore transfers."""
+def test_overdue_cash_advance_is_cash_on_the_window_start_and_billed_on_its_statement(db, user):
+    """Like an in-window advance: cash arrives at the start; the card bills it later."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
     from app.services.forecast import (
@@ -328,24 +327,28 @@ def test_overdue_card_transfer_is_listed_at_the_window_start_but_not_cash(db, us
     card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
-    src, dst = (checking, card) if direction == "into_card" else (card, checking)
     yesterday = datetime(2026, 8, 9, 14)
-    _txn(db, user, src, TransactionType.TRANSFER, "300.00", yesterday,
-         description="Overdue card move",
-         transfer_from_account_id=src.id, transfer_to_account_id=dst.id)
+    _txn(db, user, card, TransactionType.TRANSFER, "300.00", yesterday,
+         transfer_fee=Decimal("5.00"), description="Overdue cash advance",
+         transfer_from_account_id=card.id, transfer_to_account_id=checking.id)
 
     start = datetime(2026, 8, 10)
     events = collect_events(db, start, datetime(2026, 9, 1), user_id=user.id)
-    assert [(e["name"], e["date"], e.get("overdue"), e.get("original_date"), e["counts_as_cash"])
-            for e in events] == [("Overdue card move", start, True, yesterday, False)]
+    assert [(e["name"], e["date"], e.get("overdue"), e.get("original_date"), e["amount"])
+            for e in events] == [("Overdue cash advance", start, True, yesterday, Decimal("300.00"))]
 
     reference = datetime(2026, 8, 10, 9)
-    r = project_running_balance(db, user.id, days=22, reference=reference)
-    assert r["events"] == []
-    assert r["closing_balance"] == Decimal("1000.00")
-    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
-    assert aug["closing_balance"] == 1000.0
-    assert aug["statement_payables"] == 0.0
+    aug, sep = project_cashflow(db, user.id, months=2, reference=reference)
+    assert aug["closing_balance"] == 1300.0
+    # Charged 9 Aug -> 24 Aug statement -> due 14 Sep: advance + fee.
+    assert sep["statement_payables"] == 305.0
+    assert sep["closing_balance"] == 995.0
+    days = (datetime(2026, 10, 1) - reference).days + 1
+    r = project_running_balance(db, user.id, days=days, reference=reference)
+    assert [(e["date"].isoformat(), e["amount"]) for e in r["events"]] == [
+        ("2026-08-10", Decimal("300.00")), ("2026-09-14", Decimal("-305.00")),
+    ]
+    assert float(r["closing_balance"]) == sep["closing_balance"]
     assert get_payables(db, user.id, days=30, reference=reference) == []
 
 
@@ -452,8 +455,29 @@ def test_monthly_projection_does_not_count_unposted_card_charges_as_cash(db, use
     ]
 
 
-def test_monthly_projection_does_not_count_a_card_cash_advance_as_cash(db, user):
-    """Nothing repays the advance until statements net transfers, so it adds no cash."""
+def test_monthly_projection_bills_a_midday_closing_day_charge_on_that_statement(db, user):
+    """12,000 at noon on the 24 Jul closing day is due 14 Aug, so August closes at 38,000."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 24, 12),
+         description="Card charge")
+
+    aug, sep = project_cashflow(db, user.id, months=2, reference=datetime(2026, 8, 1))
+
+    assert aug["statement_payables"] == 12000.0
+    assert aug["closing_balance"] == 38000.0
+    assert sep["statement_payables"] == 0.0
+    assert sep["closing_balance"] == 38000.0
+
+
+def test_card_cash_advance_is_cash_now_and_repaid_through_its_statement(db, user):
+    """3,000 in on 5 Aug; 3,050 (advance + fee) out on the 14 Sep statement."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
     from app.services.forecast import get_payables, project_cashflow, project_running_balance
@@ -466,14 +490,22 @@ def test_monthly_projection_does_not_count_a_card_cash_advance_as_cash(db, user)
          transfer_fee=Decimal("50.00"), description="Cash advance",
          transfer_from_account_id=card.id, transfer_to_account_id=checking.id)
 
-    (aug,) = project_cashflow(db, user.id, months=1, reference=datetime(2026, 8, 1))
-    assert aug["closing_balance"] == 1000.0
+    aug, sep = project_cashflow(db, user.id, months=2, reference=datetime(2026, 8, 1))
+    assert aug["closing_balance"] == 4000.0
+    assert aug["unposted_expenses"] == -3000.0
     assert aug["by_account"] == [
-        {"account_id": checking.id, "account_name": "Checking B", "closing_balance": 1000.0}
+        {"account_id": checking.id, "account_name": "Checking B", "closing_balance": 4000.0}
     ]
-    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
-    assert r["closing_balance"] == Decimal("1000.00")
-    assert r["events"] == []
+    assert sep["statement_payables"] == 3050.0
+    assert sep["closing_balance"] == 950.0
+
+    r = project_running_balance(db, user.id, days=61, reference=datetime(2026, 8, 1))
+    assert [(e["date"].isoformat(), e["name"], e["amount"]) for e in r["events"]] == [
+        ("2026-08-05", "Cash advance", Decimal("3000.00")),
+        ("2026-09-14", "Card C statement", Decimal("-3050.00")),
+    ]
+    assert float(r["closing_balance"]) == sep["closing_balance"]
+    # An inflow is not a payable.
     assert get_payables(db, user.id, days=30, reference=datetime(2026, 8, 1)) == []
 
 
@@ -618,6 +650,571 @@ def test_timeline_closing_equals_monthly_end_balance_over_the_same_window(db, us
 
 
 # ---------------------------------------------------------------------------
+# Card payments netted against statements
+#
+# Card C closes on the 24th with a 21-day grace period, paid from Checking B.
+# A 12,000 charge on 10 Jul is on the 24 Jul statement, due 14 Aug.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def card_setup(db, user):
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    # A card's stored balance is negative while owed; this one matches the charge.
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-12000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 10),
+         description="Card charge", is_posted=True)
+    return checking, card
+
+
+def _pay_card(db, user, checking, card, amount, when, **kw):
+    from app.models.transaction import TransactionType
+
+    return _txn(db, user, checking, TransactionType.TRANSFER, amount, when,
+                description="Card payment", transfer_from_account_id=checking.id,
+                transfer_to_account_id=card.id, **kw)
+
+
+def _cash_events(r):
+    return [(e["date"].isoformat(), e["name"], e["amount"]) for e in r["events"]]
+
+
+@pytest.mark.parametrize("amount,owed", [("12000.00", None), ("5000.00", "-7000.00")])
+def test_posted_card_payment_nets_its_statement(db, user, card_setup, amount, owed):
+    """A posted payment is already out of Checking's balance; only the rest is owed."""
+    from app.services.forecast import project_running_balance
+
+    checking, card = card_setup
+    checking.balance = Decimal("50000.00") - Decimal(amount)
+    card.balance = Decimal("-12000.00") + Decimal(amount)
+    db.commit()
+    _pay_card(db, user, checking, card, amount, datetime(2026, 7, 30), is_posted=True)
+
+    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    expected = [] if owed is None else [("2026-08-14", "Card C statement", Decimal(owed))]
+    assert _cash_events(r) == expected
+    assert r["closing_balance"] == Decimal("38000.00")
+
+
+@pytest.mark.parametrize("amount,owed", [("12000.00", None), ("5000.00", "-7000.00")])
+def test_planned_card_payment_is_the_cash_and_nets_the_statement(db, user, card_setup, amount, owed):
+    """The 12,000 leaves Checking exactly once: as the payment plus any remainder."""
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking, card = card_setup
+    _pay_card(db, user, checking, card, amount, datetime(2026, 8, 12))
+
+    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    expected = [("2026-08-12", "Card payment", -Decimal(amount))]
+    if owed is not None:
+        expected.append(("2026-08-14", "Card C statement", Decimal(owed)))
+    assert _cash_events(r) == expected
+    assert r["closing_balance"] == Decimal("38000.00")
+    assert r["account_shortfalls"] == []
+
+    (aug,) = project_cashflow(db, user.id, months=1, reference=datetime(2026, 8, 1))
+    assert aug["statement_payables"] == 12000.0
+    assert aug["unposted_expenses"] == 0.0
+    assert aug["closing_balance"] == 38000.0
+
+    payables = get_payables(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    assert [(p["due_date"], p["name"], p["amount"], p["account_id"]) for p in payables] == [
+        (d, n, float(-a), checking.id) for d, n, a in expected
+    ]
+
+
+def test_planned_card_payment_outside_the_window_nets_its_statement(db, user, card_setup):
+    """Paid late on 5 Sep: August owes nothing; the cash leaves on 5 Sep, once."""
+    from app.services.forecast import project_running_balance
+
+    checking, card = card_setup
+    _pay_card(db, user, checking, card, "12000.00", datetime(2026, 9, 5))
+
+    aug = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    assert _cash_events(aug) == []
+    assert aug["closing_balance"] == Decimal("50000.00")
+
+    longer = project_running_balance(db, user.id, days=40, reference=datetime(2026, 8, 1))
+    assert _cash_events(longer) == [("2026-09-05", "Card payment", Decimal("-12000.00"))]
+    assert longer["closing_balance"] == Decimal("38000.00")
+
+
+def test_overdue_planned_card_payment_stays_in_cash_and_nets_its_statement(db, user, card_setup):
+    """Planned for 9 Aug, not yet posted on 10 Aug: still cash, on the window start."""
+    from app.services.forecast import collect_events, project_cashflow, project_running_balance
+
+    checking, card = card_setup
+    yesterday = datetime(2026, 8, 9, 14)
+    _pay_card(db, user, checking, card, "12000.00", yesterday)
+
+    start = datetime(2026, 8, 10)
+    events = collect_events(db, start, datetime(2026, 9, 1), user_id=user.id)
+    assert [(e["name"], e["date"], e.get("overdue"), e.get("original_date"), e["amount"])
+            for e in events] == [("Card payment", start, True, yesterday, Decimal("-12000.00"))]
+
+    reference = datetime(2026, 8, 10, 9)
+    r = project_running_balance(db, user.id, days=22, reference=reference)
+    assert _cash_events(r) == [("2026-08-10", "Card payment", Decimal("-12000.00"))]
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["closing_balance"] == 38000.0 == float(r["closing_balance"])
+
+
+def test_overdue_planned_payment_of_a_statement_due_before_the_window_stays_in_cash(
+        db, user, card_setup):
+    """June's statement (due 15 Jul) planned-paid 14 Jul, never posted: the cash is
+    still pending on 10 Aug, and the payment does not also net July's statement."""
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_running_balance
+
+    checking, card = card_setup
+    card.balance = Decimal("-15000.00")
+    db.commit()
+    _txn(db, user, card, TransactionType.DEBIT, "3000.00", datetime(2026, 6, 10), is_posted=True)
+    _pay_card(db, user, checking, card, "3000.00", datetime(2026, 7, 14))
+
+    r = project_running_balance(db, user.id, days=22, reference=datetime(2026, 8, 10, 9))
+    assert _cash_events(r) == [
+        ("2026-08-10", "Card payment", Decimal("-3000.00")),
+        ("2026-08-14", "Card C statement", Decimal("-12000.00")),
+    ]
+
+
+def test_cross_entity_bank_transfer_into_the_card_nets_its_statement(db, user, entities):
+    """The row and its source live in another entity; only transfer_to names the card."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_running_balance
+
+    ent_a, ent_b = entities
+    outside = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00", entity_id=ent_a.id)
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00",
+                        entity_id=ent_b.id)
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-8000.00", entity_id=ent_b.id,
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 10),
+         entity_id=ent_b.id, is_posted=True)
+    _txn(db, user, outside, TransactionType.TRANSFER, "4000.00", datetime(2026, 7, 30),
+         entity_id=ent_a.id, is_posted=True,
+         transfer_from_account_id=outside.id, transfer_to_account_id=card.id)
+
+    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-8000.00"))]
+
+
+def test_card_payment_edit_and_delete_reprice_the_statement(db, user, client, card_setup):
+    from app.services.forecast import project_running_balance
+
+    checking, card = card_setup
+    login = client.post("/api/v1/auth/login",
+                        json={"email": user.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    created = client.post("/api/v1/transactions/", headers=auth, json={
+        "account_id": checking.id, "amount": 12000, "transaction_type": "transfer",
+        "transfer_from_account_id": checking.id, "transfer_to_account_id": card.id,
+        "transaction_date": "2026-08-12T00:00:00", "description": "Card payment",
+        "is_posted": False,
+    })
+    assert created.status_code == 200, created.text
+    txn_id = created.json()["id"]
+
+    def timeline():
+        db.expire_all()
+        r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+        assert r["closing_balance"] == Decimal("38000.00")
+        return _cash_events(r)
+
+    assert timeline() == [("2026-08-12", "Card payment", Decimal("-12000.00"))]
+
+    edited = client.put(f"/api/v1/transactions/{txn_id}", headers=auth, json={"amount": 5000})
+    assert edited.status_code == 200, edited.text
+    assert timeline() == [
+        ("2026-08-12", "Card payment", Decimal("-5000.00")),
+        ("2026-08-14", "Card C statement", Decimal("-7000.00")),
+    ]
+
+    deleted = client.delete(f"/api/v1/transactions/{txn_id}", headers=auth)
+    assert deleted.status_code == 200, deleted.text
+    assert timeline() == [("2026-08-14", "Card C statement", Decimal("-12000.00"))]
+
+
+def test_unpaid_statement_due_before_the_window_is_overdue_on_the_start_in_every_view(
+        db, user, card_setup):
+    """14 Aug statement, partly paid (posted) 4,000, viewed on 20 Aug: 8,000 overdue today."""
+    from app.services.forecast import (
+        get_payables, get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    checking, card = card_setup
+    checking.balance = Decimal("46000.00")
+    card.balance = Decimal("-8000.00")
+    db.commit()
+    _pay_card(db, user, checking, card, "4000.00", datetime(2026, 8, 14), is_posted=True)
+
+    reference = datetime(2026, 8, 20, 9)
+    r = project_running_balance(db, user.id, days=12, reference=reference)
+    assert _cash_events(r) == [("2026-08-20", "Card C statement", Decimal("-8000.00"))]
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["statement_payables"] == 8000.0
+    assert aug["closing_balance"] == 38000.0 == float(r["closing_balance"])
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=10, reference=reference)] == [("2026-08-20", 8000.0)]
+    assert [(i["due_date"], i["source"], float(i["amount"])) for i in get_upcoming_items(
+        db, user.id, days=10, reference=reference)] == [("2026-08-20", "statement", 8000.0)]
+
+
+# ---------------------------------------------------------------------------
+# Budget entries scheduled on a credit card
+# ---------------------------------------------------------------------------
+
+def _card_installment(db, user, card, **kw):
+    """2,000 a month on the card from 1 Aug, three payments left."""
+    from app.models.budget_entry import BudgetEntryType
+
+    return _entry(db, user, "Card installment", BudgetEntryType.EXPENSE, "2000.00",
+                  datetime(2026, 8, 1), account=card,
+                  end_mode="after_occurrences", max_occurrences=3, **kw)
+
+
+def test_card_installment_is_paid_exactly_once_inside_the_right_statement(db, user):
+    """1 Aug charge -> 24 Aug statement -> 14 Sep; 1 Sep -> 15 Oct; 1 Oct -> 14 Nov."""
+    from app.models.account import AccountType
+    from app.services.forecast import (
+        get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _card_installment(db, user, card)
+
+    reference = datetime(2026, 8, 1)
+    periods = project_cashflow(db, user.id, months=4, reference=reference)
+    assert [p["expenses"] for p in periods] == [0.0, 0.0, 0.0, 0.0]
+    assert [p["statement_payables"] for p in periods] == [0.0, 2000.0, 2000.0, 2000.0]
+    assert periods[-1]["closing_balance"] == 4000.0
+
+    days = (datetime.fromisoformat(periods[-1]["period_end"]) - reference).days
+    r = project_running_balance(db, user.id, days=days, reference=reference)
+    assert _cash_events(r) == [
+        ("2026-09-14", "Card C statement", Decimal("-2000.00")),
+        ("2026-10-15", "Card C statement", Decimal("-2000.00")),
+        ("2026-11-14", "Card C statement", Decimal("-2000.00")),
+    ]
+    # Funded from the card's payment account: no shortfall on the card itself.
+    assert r["account_shortfalls"] == []
+    assert r["unassigned_closing"] == Decimal("0")
+    assert float(r["closing_balance"]) == periods[-1]["closing_balance"]
+
+    # Listed on its own date (non-cash), like an unposted card charge.
+    items = get_upcoming_items(db, user.id, days=10, reference=reference)
+    assert [(i["due_date"], i["name"], i["source"]) for i in items] == [
+        ("2026-08-01", "Card installment", "budget_entry"),
+    ]
+
+
+def test_card_installment_statement_is_routed_to_the_payment_account(db, user):
+    from app.models.account import AccountType
+    from app.services.forecast import project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "500.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _card_installment(db, user, card)
+
+    r = project_running_balance(db, user.id, days=45, reference=datetime(2026, 8, 1))
+    assert [(s["date"].isoformat(), s["name"], s["account_name"], s["short_amount"])
+            for s in r["account_shortfalls"]] == [
+        ("2026-09-14", "Card C statement", "Checking B", Decimal("1500.00")),
+    ]
+
+
+def test_card_installment_occurrence_with_a_linked_transaction_is_suppressed(db, user, client):
+    """Materialised without advancing: the transaction stands in for that occurrence."""
+    from app.models.account import AccountType
+    from app.services.forecast import collect_events, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    entry = _card_installment(db, user, card)
+
+    login = client.post("/api/v1/auth/login",
+                        json={"email": user.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    posted = client.post(f"/api/v1/budget-entries/{entry.id}/materialize", headers=auth,
+                         json={"advance": False})
+    assert posted.status_code == 201, posted.text
+
+    db.expire_all()
+    r = project_running_balance(db, user.id, days=45, reference=datetime(2026, 8, 1))
+    # 2,000 on the 14 Sep statement: the transaction, not the transaction + occurrence.
+    assert _cash_events(r) == [("2026-09-14", "Card C statement", Decimal("-2000.00"))]
+    listed = [e for e in collect_events(db, datetime(2026, 8, 1), datetime(2026, 9, 2),
+                                        user_id=user.id) if e["source"] == "budget_entry"]
+    assert [e["date"] for e in listed] == [datetime(2026, 9, 1)]
+
+
+def test_card_installment_dated_before_the_window_is_still_billed(db, user):
+    """next_occurrence 20 Jul, not yet materialised: it is on the 24 Jul statement."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _entry(db, user, "Card installment", BudgetEntryType.EXPENSE, "2000.00",
+           datetime(2026, 7, 20), account=card, end_mode="after_occurrences", max_occurrences=1)
+
+    r = project_running_balance(db, user.id, days=30, reference=datetime(2026, 8, 1))
+    assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-2000.00"))]
+
+
+def test_lapsed_card_schedule_does_not_backfill_overdue_statements(db, user):
+    """A monthly card subscription whose next_occurrence was left on 3 Mar. Viewed on
+    1 Aug, March to June are on statements due before the window (the last on
+    15 Jul) and are dropped; 3 Jul is on the 24 Jul statement, due 14 Aug, so it is
+    still billed, and 3 Aug lands on the 24 Aug statement, due 14 Sep."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import collect_events, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _entry(db, user, "Card subscription", BudgetEntryType.EXPENSE, "300.00",
+           datetime(2026, 3, 3), account=card)
+
+    r = project_running_balance(db, user.id, days=45, reference=datetime(2026, 8, 1))
+    assert _cash_events(r) == [
+        ("2026-08-14", "Card C statement", Decimal("-300.00")),
+        ("2026-09-14", "Card C statement", Decimal("-300.00")),
+    ]
+    assert r["closing_balance"] == Decimal("9400.00")
+    events = collect_events(db, datetime(2026, 8, 1), datetime(2026, 9, 15), user_id=user.id)
+    assert not [e for e in events if e.get("overdue")]
+
+
+def _statements_by_window(db, user, days_list):
+    from app.services.forecast import project_running_balance
+
+    reference = datetime(2026, 8, 1)
+    return {
+        days: _cash_events(project_running_balance(db, user.id, days=days, reference=reference))
+        for days in days_list
+    }
+
+
+def _assert_earlier_payables_agree(by_days):
+    """Windows of 31/61/92 days from 1 Aug end on 1 Sep, 1 Oct and 1 Nov."""
+    ends = {31: "2026-09-01", 61: "2026-10-01", 92: "2026-11-01"}
+    for short in by_days:
+        for long in by_days:
+            if long > short:
+                assert [e for e in by_days[long] if e[0] < ends[short]] == by_days[short]
+
+
+@pytest.mark.parametrize("entry_type,expected", [
+    # The 5 Sep expense is billed on its own 24 Sep statement, due 15 Oct.
+    ("expense", [("2026-10-15", "Card C statement", Decimal("-500.00"))]),
+    # The 5 Sep income comes after July's 14 Aug due date and does not pay it.
+    ("income", [("2026-08-14", "Card C statement", Decimal("-1000.00"))]),
+])
+def test_scheduled_card_occurrence_after_the_window_keeps_earlier_payables(
+        db, user, entry_type, expected):
+    """1,000 charged 10 Jul (14 Aug statement). For the expense case a recorded refund
+    on 28 Aug settles July; a projected occurrence on 5 Sep must not change what
+    the recorded rows paid, however long the window."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-1000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 7, 10), is_posted=True)
+    if entry_type == "expense":
+        _txn(db, user, card, TransactionType.CREDIT, "1000.00", datetime(2026, 8, 28))
+    kind = BudgetEntryType.EXPENSE if entry_type == "expense" else BudgetEntryType.INCOME
+    _entry(db, user, "Card schedule", kind, "500.00", datetime(2026, 9, 5), account=card,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    by_days = _statements_by_window(db, user, [31, 61, 92])
+    _assert_earlier_payables_agree(by_days)
+    assert by_days[92] == expected
+
+
+def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfers_non_cash(
+        db, user):
+    """No statements are modelled for it: its schedule is cash on its own date, and
+    neither an advance from it nor a payment into it moves projection cash."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
+                    payment_account_id=checking.id)
+    _entry(db, user, "Card subscription", BudgetEntryType.EXPENSE, "2000.00",
+           datetime(2026, 8, 5), account=card, end_mode="after_occurrences", max_occurrences=1)
+    _txn(db, user, card, TransactionType.TRANSFER, "500.00", datetime(2026, 8, 10),
+         transfer_fee=Decimal("10.00"), description="Cash advance",
+         transfer_from_account_id=card.id, transfer_to_account_id=checking.id)
+    _pay_card(db, user, checking, card, "700.00", datetime(2026, 8, 12))
+    _txn(db, user, card, TransactionType.DEBIT, "300.00", datetime(2026, 8, 15))
+
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, days=31, reference=reference)
+    assert _cash_events(r) == [("2026-08-05", "Card subscription", Decimal("-2000.00"))]
+    assert r["closing_balance"] == Decimal("8000.00")
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert (aug["expenses"], aug["unposted_expenses"], aug["statement_payables"]) == (
+        2000.0, 0.0, 0.0)
+    assert aug["closing_balance"] == 8000.0 == float(r["closing_balance"])
+
+
+def _billed_card_paid_from_an_unbilled_card(db, user, card_entity=None, source_entity=None,
+                                           source_active=True):
+    """1,000 charged on billed Card C (24 Jul statement, due 14 Aug), then 'paid' on
+    5 Aug by a transfer from Card D, which has no cycle settings."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+
+    ids = {"entity_id": card_entity.id} if card_entity else {}
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00", **ids)
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-1000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id, **ids)
+    source = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
+                      is_active=source_active,
+                      **({"entity_id": source_entity.id} if source_entity else {}))
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 7, 10),
+         is_posted=True, **ids)
+    _txn(db, user, source, TransactionType.TRANSFER, "1000.00", datetime(2026, 8, 5),
+         description="Pay C from D", transfer_from_account_id=source.id,
+         transfer_to_account_id=card.id,
+         **({"entity_id": source_entity.id} if source_entity else {}))
+    return checking, card
+
+
+def _assert_billed_debt_is_still_paid_in_cash(db, user, entity_id):
+    from app.services.forecast import get_payables, project_running_balance
+
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, entity_id, days=30, reference=reference)
+    assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-1000.00"))]
+    assert r["closing_balance"] == Decimal("9000.00")
+    assert [(p["due_date"], p["name"], p["amount"]) for p in get_payables(
+        db, user.id, entity_id, days=30, reference=reference)] == [
+        ("2026-08-14", "Card C statement", 1000.0),
+    ]
+
+
+def test_payment_from_another_entitys_unbilled_card_does_not_net_the_statement(
+        db, user, entities):
+    ent_a, ent_b = entities
+    _billed_card_paid_from_an_unbilled_card(db, user, card_entity=ent_b, source_entity=ent_a)
+    _assert_billed_debt_is_still_paid_in_cash(db, user, ent_b.id)
+
+
+def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):
+    _billed_card_paid_from_an_unbilled_card(db, user, source_active=False)
+    _assert_billed_debt_is_still_paid_in_cash(db, user, None)
+
+
+def test_refund_beyond_its_statement_reduces_the_next_payable_in_every_view(db, user):
+    """July nets -400 (100 charge, 500 refund); August's 1,000 statement owes 600.
+    Card spending of 600 net leaves cash exactly once, on 14 Sep."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "400.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "100.00", datetime(2026, 7, 5), is_posted=True)
+    _txn(db, user, card, TransactionType.CREDIT, "500.00", datetime(2026, 7, 10), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 8, 10))
+
+    reference = datetime(2026, 8, 1)
+    periods = project_cashflow(db, user.id, months=2, reference=reference)
+    assert [p["statement_payables"] for p in periods] == [0.0, 600.0]
+    r = project_running_balance(db, user.id, days=61, reference=reference)
+    assert _cash_events(r) == [("2026-09-14", "Card C statement", Decimal("-600.00"))]
+    assert periods[-1]["closing_balance"] == 9400.0 == float(r["closing_balance"])
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=60, reference=reference)] == [("2026-09-14", 600.0)]
+
+
+def test_timeline_closing_equals_monthly_end_balance_with_card_payments_and_schedules(db, user):
+    """Overdue statement, planned payment, cash advance and a card schedule together."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    savings_a = _account(db, user, "Savings A", AccountType.SAVINGS, "20000.00")
+    checking_b = _account(db, user, "Checking B", AccountType.CHECKING, "3000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-4000.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking_b.id,
+                    payment_overflow_account_id=savings_a.id)
+    _entry(db, user, "Salary", BudgetEntryType.INCOME, "15000.00", datetime(2026, 8, 30),
+           account=checking_b)
+    # 24 Jun..24 Jul statement, due 14 Aug, 1,000 paid: 4,000 overdue on 20 Aug.
+    _txn(db, user, card, TransactionType.DEBIT, "5000.00", datetime(2026, 7, 10), is_posted=True)
+    _pay_card(db, user, checking_b, card, "1000.00", datetime(2026, 8, 1), is_posted=True)
+    # 24 Aug statement (due 14 Sep): a charge, a cash advance and the schedule.
+    _txn(db, user, card, TransactionType.DEBIT, "2500.00", datetime(2026, 8, 22))
+    _txn(db, user, card, TransactionType.TRANSFER, "1000.00", datetime(2026, 8, 21),
+         transfer_fee=Decimal("30.00"), description="Cash advance",
+         transfer_from_account_id=card.id, transfer_to_account_id=checking_b.id)
+    _entry(db, user, "Card installment", BudgetEntryType.EXPENSE, "700.00",
+           datetime(2026, 8, 23), account=card)
+    # Planned partial payment of that statement.
+    _pay_card(db, user, checking_b, card, "2000.00", datetime(2026, 9, 10))
+
+    reference = datetime(2026, 8, 20, 8)
+    periods = project_cashflow(db, user.id, months=3, reference=reference)
+    window_end = datetime.fromisoformat(periods[-1]["period_end"])
+    days = (window_end - reference.replace(hour=0)).days
+    timeline = project_running_balance(db, user.id, days=days, reference=reference)
+
+    assert window_end.date() == timeline["window_end"]
+    assert periods[-1]["closing_balance"] == float(timeline["closing_balance"])
+    assert periods[-1]["by_account"] == [
+        {"account_id": a["account_id"], "account_name": a["account_name"],
+         "closing_balance": float(a["closing_balance"])}
+        for a in timeline["by_account"]
+    ]
+    # Each card peso leaves cash once. The 10 Sep planned 2,000 pays the oldest
+    # outstanding statement first (July's 4,000 left), so 2,000 is overdue today;
+    # Sep: the 2,000 payment + the 24 Aug statement in full (2,500 + 1,030 + 700);
+    # Oct: 700 (23 Sep schedule, due 15 Oct).
+    assert [p["statement_payables"] for p in periods] == [2000.0, 6230.0, 700.0]
+    assert _cash_events(timeline)[:2] == [
+        ("2026-08-20", "Card C statement", Decimal("-2000.00")),
+        ("2026-08-21", "Cash advance", Decimal("1000.00")),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Upcoming items on the shared event engine
 # ---------------------------------------------------------------------------
 
@@ -705,3 +1302,38 @@ def test_snapshot_returns_available_cash_closings_and_payables(db, user, client)
     assert final == {"Checking B": 3800.0, "Savings A": 1000.0}  # no card, no overflow pull
     assert closings[-1]["unassigned_closing"] == 0.0
     assert all(c["overflow_moves"] == [] for c in closings)
+
+
+def test_planned_payment_pays_the_oldest_unpaid_statement_and_each_peso_leaves_once(db, user):
+    """July's 3,000 statement has no recorded payment, so it is owed. The planned
+    10 Sep payment of 500 pays it down oldest first (2,500 left, due 14 Aug), and
+    the 28 Jul 500 on the next statement is still payable on 14 Sep: 3,500 of cash
+    in all, the same in the timeline and the monthly view."""
+    from app.models.account import AccountType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, user, "Card C", AccountType.CREDIT, "-3500.00",
+                    billing_cycle_start=24, days_until_due_date=21,
+                    payment_account_id=checking.id)
+    _txn(db, user, card, TransactionType.DEBIT, "3000.00", datetime(2026, 7, 10), is_posted=True)
+    _txn(db, user, card, TransactionType.DEBIT, "500.00", datetime(2026, 7, 28), is_posted=True)
+    _pay_card(db, user, checking, card, "500.00", datetime(2026, 9, 10))
+
+    reference = datetime(2026, 8, 1)
+    periods = project_cashflow(db, user.id, months=2, reference=reference)
+    window_end = datetime.fromisoformat(periods[-1]["period_end"])
+    r = project_running_balance(db, user.id, days=(window_end - reference).days,
+                                reference=reference)
+    assert _cash_events(r) == [
+        ("2026-08-14", "Card C statement", Decimal("-2500.00")),
+        ("2026-09-10", "Card payment", Decimal("-500.00")),
+        ("2026-09-14", "Card C statement", Decimal("-500.00")),
+    ]
+    assert r["closing_balance"] == Decimal("46500.00")
+    assert [p["statement_payables"] for p in periods] == [2500.0, 1000.0]
+    assert periods[-1]["closing_balance"] == 46500.0
+    assert [(p["due_date"], p["amount"]) for p in get_payables(
+        db, user.id, days=60, reference=reference)] == [
+        ("2026-08-14", 2500.0), ("2026-09-10", 500.0), ("2026-09-14", 500.0)]

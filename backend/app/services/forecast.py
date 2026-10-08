@@ -8,8 +8,10 @@ unposted transactions, this service generates a forward-looking timeline.
 from __future__ import annotations
 
 from calendar import monthrange
+from collections import Counter
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
 from sqlalchemy import and_, or_
@@ -17,7 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.core.entity_context import scope_criterion
 from app.core.time import naive_utc_now
-from app.services.statements import get_statement_payables
+from app.services.statements import (
+    get_statement_payables, resolve_cycle_fields, statement_due_date,
+)
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
@@ -111,8 +115,12 @@ def project_cashflow(
 
     ``income`` / ``expenses`` are budget-entry occurrences; ``unposted_expenses`` is
     net unposted cash transactions (debits - credits + transfer fees, plus transfer
-    amounts crossing the scope boundary);
-    ``statement_payables`` are credit-card statements due in the period.
+    amounts crossing the scope boundary), excluding card payments. A card cash
+    advance is cash coming in, so it shows here as a NEGATIVE amount, while its
+    repayment (advance plus fee) lands later in ``statement_payables``;
+    ``statement_payables`` is cash paid to credit cards in the period: statement
+    payables due (net of payments) plus planned card payments, including those
+    payments' transfer fees.
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     """
@@ -151,8 +159,10 @@ def project_cashflow(
 
         income = total("budget_entry", 1)
         expenses = -total("budget_entry", -1)
-        unposted = -total("transaction")
-        statements = -total("statement")
+        card_payments = sum(
+            (e["amount"] for e in in_period if e.get("card_payment")), Decimal("0"))
+        unposted = -(total("transaction") - card_payments)
+        statements = -(total("statement") + card_payments)
         net = sum((e["amount"] for e in in_period), Decimal("0"))
         closing = opening + net
 
@@ -241,9 +251,9 @@ def get_payables(
     """Cash outflows due within the next N days, with the account each draws on.
 
     Same window and events as ``get_upcoming_items``, restricted to events that
-    take cash out of the pool (bills, unposted debits, card statements). Transfers
-    between your own accounts are not payables; card charges reach cash via their
-    statement payable instead.
+    take cash out of the pool (bills, unposted debits, card statements and planned
+    card payments). Other transfers between your own accounts are not payables;
+    card charges reach cash via their statement payable instead.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -252,7 +262,9 @@ def get_payables(
 
     payables = []
     for e in sorted(events, key=_event_sort_key):
-        if not e["counts_as_cash"] or e["amount"] >= 0 or e["type"] == TransactionType.TRANSFER.value:
+        if not e["counts_as_cash"] or e["amount"] >= 0:
+            continue
+        if e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment"):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -521,7 +533,8 @@ def _event_sort_key(e: dict):
 
 
 def _transfer_event(txn, cash_ids: set, card_ids: set,
-                    date: Optional[datetime] = None, **extra) -> dict:
+                    date: Optional[datetime] = None, *,
+                    billed_ids: Optional[set] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
     Legs are kept only for accounts in the projection's scope (``cash_ids`` and
@@ -533,26 +546,42 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     - out of the pool to an outside account costs the pool amount + fee;
     - into the pool from an outside account adds the amount.
 
-    A transfer INTO a credit card (a card payment) is listed with its legs but does
-    not count as cash yet: the card's statement payable already models that cash
-    leaving, and allocating payments against statements is a follow-up. Counting
-    both would double-count the payment.
+    A transfer INTO a credit card (a card payment) is cash on the paying account:
+    statements net payments (services/statements.py), so the statement payable
+    only carries what the payments leave unpaid, and the payment itself is where
+    the rest of the cash leaves. The card's leg is never cash. Such an event is
+    marked ``card_payment``.
 
-    A transfer FROM a credit card (a cash advance or balance transfer) is treated
-    the same way: statements ignore transfers, so nothing would ever repay the
-    cash it adds. Neither kind has a cash leg until statements net transfers.
+    A transfer FROM a credit card (a cash advance) is cash coming in on the
+    receiving account: statements bill the advance plus its fee as a charge on the
+    card, so the statement payable repays it later.
+
+    Both rules need the card's statements to be modelled. ``billed_ids`` are the
+    cards that have them (cycle settings; default: every card). A transfer
+    touching a card without cycle settings moves no projection cash at all: no
+    statement bills an advance from it or is netted by a payment into it, so
+    counting either side would leave cash that nothing balances. A payment into
+    a billed card from such a card outside the scope (another entity's, or an
+    inactive one) agrees: its source has no leg here, so it moves no cash, and
+    statements decide "unbilled" from the source account itself, so it does not
+    net the statement either; that debt is paid in cash on its due date.
     """
+    if billed_ids is None:
+        billed_ids = card_ids
+    unbilled = card_ids - billed_ids
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
     scoped = cash_ids | card_ids
-    via_card = src in card_ids or dst in card_ids
+    via_unbilled = src in unbilled or dst in unbilled
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_card))
+        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_unbilled))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_card))
+        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
+    if dst in billed_ids:
+        extra = {**extra, "card_payment": True}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -561,7 +590,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
-        counts_as_cash=False if via_card else None,
+        counts_as_cash=False if via_unbilled else None,
         transfer_fee=_money(fee),
         **extra,
     )
@@ -579,7 +608,11 @@ def collect_events(
     """Every dated event in ``[start, end)``, each with per-account legs.
 
     Sources: active budget-entry occurrences, unposted transactions, and one dated
-    payable per credit-card statement cycle due in the window. Events that move no
+    payable per credit-card statement cycle due in the window. Occurrences of a
+    budget entry scheduled on a credit card are charges on that card's statement,
+    not cash events (see ``_card_entry_charges``). A card without cycle settings
+    has no statements, so occurrences scheduled on it stay cash events and
+    transfers touching it move no cash (see ``_transfer_event``). Events that move no
     projection cash are included (``counts_as_cash`` False) so listings can show
     them; cash views must filter on ``counts_as_cash``.
 
@@ -587,16 +620,18 @@ def collect_events(
     projection-cash accounts. Unposted transfers into or out of any scoped account
     (projection-cash or credit card) are collected even when the transaction row
     belongs to another scope (a cross-entity transfer), but only their in-scope
-    legs are kept, and a transfer touching a card is never cash (see
-    ``_transfer_event``).
+    legs are kept; a card's own leg is never cash, while the other side of a card
+    payment or cash advance is (see ``_transfer_event``).
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
     Overdue charges on a credit card are skipped (they reach cash through their
     statements); a non-transfer row's card involvement comes from ``account_id``
-    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are listed like in-window ones, as non-cash
-    events: statements ignore transfers, so listing them counts nothing twice.
+    alone, never from leftover ``transfer_*`` fields. Overdue card transfers are
+    handled like in-window ones: an overdue card payment is still cash leaving at
+    ``start`` (its statement is netted by it, so the cash appears only here), and
+    an overdue cash advance is cash arriving at ``start`` (its statement bills it).
     """
     start = _naive(start)
     end = _naive(end)
@@ -604,6 +639,9 @@ def collect_events(
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if not is_projection_cash(a)}
+    # Cards whose statements are modelled; the rest keep their charges as cash.
+    billed_ids = {a.id for a in accounts
+                  if a.id in card_ids and resolve_cycle_fields(a) is not None}
 
     events: List[dict] = []
 
@@ -611,7 +649,11 @@ def collect_events(
         scope_criterion(BudgetEntry, user_id, entity_id),
         BudgetEntry.is_active.is_(True),
     )
+    card_entries = []
     for entry in be_query.all():
+        if entry.account_id in billed_ids:
+            card_entries.append(entry)
+            continue
         sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
         for occ in iter_occurrences(entry, start, end):
             events.append(_event(
@@ -650,7 +692,8 @@ def collect_events(
                 continue
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
-            events.append(_transfer_event(txn, cash_ids, card_ids, date=when, **overdue))
+            events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
+                                          billed_ids=billed_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -672,9 +715,14 @@ def collect_events(
             **overdue,
         ))
 
+    cards = {a.id: a for a in accounts if a.id in billed_ids}
+    projected_charges = _card_entry_charges(db, card_entries, cards, start, end, events)
+
     # Each credit card contributes one dated payable per billing cycle due in the
-    # window, derived from its own transactions (see services/statements.py).
-    for p in get_statement_payables(db, user_id, entity_id, start, end):
+    # window, derived from its own transactions (see services/statements.py) and
+    # the projected charges of budget entries scheduled on it.
+    for p in get_statement_payables(db, user_id, entity_id, start, end,
+                                    projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
@@ -691,6 +739,71 @@ def collect_events(
         ))
 
     return events
+
+
+def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
+                        end: datetime, events: List[dict]) -> dict:
+    """Projected statement charges for budget entries scheduled on a credit card.
+
+    A card-backed occurrence is not a cash event: it is a charge on the card, so it
+    is billed on the statement cycle containing its date and reaches cash inside
+    that statement's payable, funded from the card's ``payment_account_id``.
+    ``cards`` maps each entry's ``account_id`` to its card.
+
+    Occurrences are taken from ``next_occurrence`` onward (not just from ``start``),
+    but one dated before ``start`` is billed only while its statement is not yet
+    due: due on or after ``start``, it is still an unbilled charge on that cycle.
+    A lapsed occurrence whose statement fell due before ``start`` is dropped, as a
+    cash entry's occurrences before ``start`` are: nothing advances
+    ``next_occurrence`` except materialising, so billing every occurrence since a
+    stale one would invent overdue statements nobody recorded.
+
+    An occurrence whose linked transaction already exists is suppressed: a
+    transaction with this ``budget_entry_id`` dated the same calendar day stands in
+    for it (each transaction suppresses at most one occurrence), since that
+    transaction is itself a line item on the card. This is what keeps a
+    ``materialize`` with ``advance=False`` from billing twice. Matching is by day
+    only: materialising with a custom ``transaction_date`` on another day and
+    ``advance=False`` suppresses nothing, so that occurrence is still billed too.
+
+    In-window occurrences are appended to ``events`` as non-cash listings, like
+    unposted card charges. Returns ``{card_id: [line items]}``.
+    """
+    if not entries:
+        return {}
+    linked = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_([e.id for e in entries]))
+    )
+    charges: dict = {}
+    for entry in entries:
+        income = entry.entry_type == BudgetEntryType.INCOME
+        amount = Decimal(str(entry.amount))
+        card = cards[entry.account_id]
+        for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue
+            if occ < start and statement_due_date(card, occ.date()) < start:
+                continue  # lapsed: its statement fell due before the window
+            charges.setdefault(entry.account_id, []).append(SimpleNamespace(
+                transaction_date=occ,
+                amount=amount,
+                transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
+            ))
+            if occ >= start:
+                events.append(_event(
+                    date=occ,
+                    name=entry.name,
+                    type=entry.entry_type.value,
+                    source="budget_entry",
+                    source_id=entry.id,
+                    face_amount=entry.amount,
+                    legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
+                ))
+    return charges
 
 
 def _route_legs(

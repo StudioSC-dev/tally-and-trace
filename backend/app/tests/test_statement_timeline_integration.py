@@ -161,9 +161,122 @@ def test_statement_payable_is_routed_to_its_payment_account(db, scenario):
     assert shortfalls[0]["short_amount"] == pytest.approx(7000.00)  # 12,000 - 5,000
 
 
-def test_statement_is_absent_once_the_due_date_passes(db, scenario):
-    """A window starting after the due date must not re-bill an old statement."""
+def test_unpaid_statement_past_its_due_date_is_overdue_on_the_window_start(db, scenario):
+    """Nothing paid the 14 Aug statement, so on 15 Aug it is still owed, today."""
+    from app.services.forecast import collect_events
+
     result = _timeline(db, scenario, reference=datetime(2026, 8, 15))
 
     statements = [e for e in result["events"] if e["source"] == "statement"]
-    assert all(e["date"] > datetime(2026, 8, 14).date() for e in statements)
+    assert [(e["date"], e["amount"]) for e in statements] == [
+        (datetime(2026, 8, 15).date(), pytest.approx(-12000.00)),
+    ]
+    (ev,) = [e for e in collect_events(db, datetime(2026, 8, 15), datetime(2026, 9, 1),
+                                       user_id=scenario["user"].id)
+             if e["source"] == "statement"]
+    assert ev["overdue"] is True
+    assert ev["original_date"] == datetime(2026, 8, 14)
+
+
+def test_paid_statement_is_absent_once_the_due_date_passes(db, scenario):
+    """A window starting after the due date must not re-bill a paid statement."""
+    from decimal import Decimal
+
+    from app.models.transaction import Transaction, TransactionType
+
+    db.add(Transaction(
+        user_id=scenario["user"].id, account_id=scenario["checking"].id,
+        amount=Decimal("12000.00"), transaction_type=TransactionType.TRANSFER,
+        transfer_from_account_id=scenario["checking"].id,
+        transfer_to_account_id=scenario["card"].id,
+        transaction_date=datetime(2026, 8, 13), is_posted=True,
+    ))
+    # Posting moves both stored balances, as routers/transactions.py does.
+    scenario["checking"].balance = Decimal("38000.00")
+    scenario["card"].balance = Decimal("12000.00")
+    db.commit()
+
+    result = _timeline(db, scenario, reference=datetime(2026, 8, 15))
+
+    assert [e for e in result["events"] if e["source"] == "statement"] == []
+
+
+@pytest.fixture
+def refunded_scenario(db):
+    """1,000 charged on 10 Jul and refunded on 28 Jul, both posted.
+
+    The refund falls in the next cycle (24 Aug statement, due 14 Sep), and the
+    stored card balance is 0, consistent with the posted rows: nothing is owed.
+    """
+    from decimal import Decimal
+
+    from app.core.auth import get_password_hash
+    from app.models.account import Account, AccountType
+    from app.models.transaction import Transaction, TransactionType
+    from app.models.user import User
+
+    user = User(
+        email=f"stmt-{os.urandom(4).hex()}@example.com",
+        password_hash=get_password_hash("password123"),
+        first_name="Stmt",
+        last_name="Refund",
+        is_verified=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    checking = Account(
+        user_id=user.id, name="Checking", account_type=AccountType.CHECKING,
+        balance=Decimal("10000.00"),
+    )
+    card = Account(
+        user_id=user.id, name="Refund CC", account_type=AccountType.CREDIT,
+        balance=Decimal("0.00"), billing_cycle_start=24, days_until_due_date=21,
+    )
+    db.add_all([checking, card])
+    db.commit()
+    db.refresh(checking)
+    db.refresh(card)
+    card.payment_account_id = checking.id
+    db.add_all([
+        Transaction(
+            user_id=user.id, account_id=card.id, amount=Decimal("1000.00"),
+            transaction_type=TransactionType.DEBIT, description="Card charge",
+            transaction_date=datetime(2026, 7, 10), is_posted=True,
+        ),
+        Transaction(
+            user_id=user.id, account_id=card.id, amount=Decimal("1000.00"),
+            transaction_type=TransactionType.CREDIT, description="Card refund",
+            transaction_date=datetime(2026, 7, 28), is_posted=True,
+        ),
+    ])
+    db.commit()
+
+    yield {"user": user, "checking": checking, "card": card}
+
+    db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+    db.query(Account).filter(Account.user_id == user.id).update(
+        {"payment_account_id": None, "payment_overflow_account_id": None}
+    )
+    db.commit()
+    db.query(Account).filter(Account.user_id == user.id).delete()
+    db.query(User).filter(User.id == user.id).delete()
+    db.commit()
+
+
+@pytest.mark.parametrize("days", [30, 60, 90])
+def test_refund_in_a_later_cycle_bills_nothing_in_any_window(db, refunded_scenario, days):
+    """The refund settles the 14 Aug statement however far the window reaches."""
+    from app.services.forecast import get_payables, project_running_balance
+
+    user_id = refunded_scenario["user"].id
+    result = project_running_balance(db, user_id=user_id, days=days,
+                                     reference=datetime(2026, 8, 1))
+    assert [e for e in result["events"] if e["source"] == "statement"] == []
+    assert result["closing_balance"] == pytest.approx(10000.00)
+    (checking,) = [a for a in result["by_account"] if a["account_name"] == "Checking"]
+    assert checking["closing_balance"] == pytest.approx(10000.00)
+
+    payables = get_payables(db, user_id=user_id, days=days, reference=datetime(2026, 8, 1))
+    assert [p for p in payables if p["source"] == "statement"] == []

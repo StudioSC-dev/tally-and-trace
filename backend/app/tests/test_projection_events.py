@@ -3,6 +3,8 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.account import AccountType
 from app.models.transaction import TransactionType
 from app.services.forecast import (
@@ -87,19 +89,44 @@ def test_payable_without_the_transfer_is_short():
     assert sf[0]["short_amount"] == Decimal("4000.00")
 
 
-def test_transfer_into_a_card_is_listed_but_not_cash():
-    """The card's statement payable already models that cash; don't count it twice."""
-    ev = _transfer_event(_txn_transfer(5, 3000, 0, CHECKING_B, CARD_C), CASH, CARDS)
+def test_card_payment_is_cash_on_the_paying_account_only():
+    """Statements net payments, so the payment is where that cash leaves."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 15, CHECKING_B, CARD_C), CASH, CARDS)
+    assert ev["counts_as_cash"] is True
+    assert ev["card_payment"] is True
+    assert ev["legs"] == [
+        _leg(CHECKING_B, Decimal("-3015"), cash=True),
+        _leg(CARD_C, Decimal("3000"), cash=False),
+    ]
+    assert ev["amount"] == Decimal("-3015.00")
+
+
+def test_card_payment_from_outside_the_scope_moves_no_pool_cash():
+    ev = _transfer_event(_txn_transfer(5, 3000, 0, OUTSIDE, CARD_C), CASH, CARDS)
     assert ev["counts_as_cash"] is False
-    assert ev["legs"][1] == _leg(CARD_C, Decimal("3000"), cash=False)
+    assert ev["legs"] == [_leg(CARD_C, Decimal("3000"), cash=False)]
 
 
-def test_transfer_from_a_card_is_listed_but_not_cash():
-    """A cash advance is repaid through the card, which statements don't model yet."""
+def test_cash_advance_is_cash_on_the_receiving_account_only():
+    """The card's statement bills amount + fee, so the inflow is repaid later."""
     ev = _transfer_event(_txn_transfer(5, 3000, 50, CARD_C, CHECKING_B), CASH, CARDS)
+    assert ev["counts_as_cash"] is True
+    assert "card_payment" not in ev
+    assert ev["legs"] == [
+        _leg(CARD_C, Decimal("-3050"), cash=False),
+        _leg(CHECKING_B, Decimal("3000"), cash=True),
+    ]
+    assert ev["amount"] == Decimal("3000.00")
+
+
+@pytest.mark.parametrize("src,dst", [(CHECKING_B, CARD_C), (CARD_C, CHECKING_B)])
+def test_transfer_touching_a_card_without_statements_moves_no_cash(src, dst):
+    """No statement nets a payment into it or bills an advance from it."""
+    ev = _transfer_event(_txn_transfer(5, 3000, 50, src, dst), CASH, CARDS, billed_ids=set())
     assert ev["counts_as_cash"] is False
-    assert [leg["cash"] for leg in ev["legs"]] == [False, False]
     assert ev["amount"] == Decimal("0")
+    assert "card_payment" not in ev
+    assert [leg["cash"] for leg in ev["legs"]] == [False, False]
 
 
 def test_transfer_out_of_scope_costs_the_pool_amount_and_fee():
