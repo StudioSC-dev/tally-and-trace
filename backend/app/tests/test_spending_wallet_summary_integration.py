@@ -355,3 +355,113 @@ def test_income_into_a_wallet_counts_once_as_it_is_created_edited_and_deleted(cl
         assert r.status_code == 200, r.text
         _summary(client, headers)
     assert _summary(client, headers) == (Decimal("0"), {})
+
+
+@pytest.fixture
+def two_entities(client):
+    """A logged-in caller owning entities A and B; all removed afterwards."""
+    from app.core.auth import get_password_hash
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
+    from app.models.transaction import Transaction
+    from app.models.user import User
+
+    db = SessionLocal()
+    u = User(email=f"wsum-ent-{os.urandom(4).hex()}@example.com",
+             password_hash=get_password_hash("password123"),
+             first_name="Wallet", last_name="Entities", is_verified=True)
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    made = []
+    for label in ("A", "B"):
+        e = Entity(name=f"Wallet {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+        db.add(e)
+        db.commit()
+        db.refresh(e)
+        db.add(EntityMembership(entity_id=e.id, user_id=u.id, role=MemberRole.OWNER))
+        db.commit()
+        made.append(e)
+    login = client.post(f"{API}/auth/login", json={"email": u.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+
+    yield {"db": db, "user": u, "entities": made,
+           "headers": {"Authorization": f"Bearer {login.json()['access_token']}"}}
+
+    db.rollback()
+    ids = [e.id for e in made]
+    db.query(Transaction).filter(Transaction.user_id == u.id).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id == u.id).delete(synchronize_session=False)
+    db.query(EntityMembership).filter(EntityMembership.entity_id.in_(ids)).delete(
+        synchronize_session=False)
+    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
+    db.query(User).filter(User.id == u.id).delete()
+    db.commit()
+    db.close()
+
+
+def test_entity_summaries_count_top_ups_by_source_not_by_row_tag(client, two_entities):
+    from app.models.account import Account, AccountType
+
+    db, user, (a, b) = (two_entities[k] for k in ("db", "user", "entities"))
+    headers = two_entities["headers"]
+    bank_a = Account(user_id=user.id, entity_id=a.id, name="A Bank",
+                     account_type=AccountType.SAVINGS, balance=10000)
+    bank_b = Account(user_id=user.id, entity_id=b.id, name="B Bank",
+                     account_type=AccountType.SAVINGS, balance=10000)
+    wallet_b = Account(user_id=user.id, entity_id=b.id, name="B GCash",
+                       account_type=AccountType.E_WALLET, balance=0, is_spending_wallet=True)
+    db.add_all([bank_a, bank_b, wallet_b])
+    db.commit()
+
+    def view(entity):
+        return _summary(client, {**headers, "X-Entity-Id": str(entity.id)})
+
+    def transfer(src, dst, amount, fee, tag):
+        r = client.post(f"{API}/transactions/", headers=headers, json={
+            "account_id": src.id, "transfer_from_account_id": src.id,
+            "transfer_to_account_id": dst.id, "amount": amount, "transfer_fee": fee,
+            "transaction_type": "transfer", "transaction_date": WHEN, "entity_id": tag.id})
+        assert r.status_code == 200, r.text
+        return r.json()["id"]
+
+    # B's own spending stays out of A's summary.
+    r = client.post(f"{API}/transactions/", headers=headers, json={
+        "account_id": bank_b.id, "amount": 70, "transaction_type": "debit",
+        "transaction_date": WHEN, "entity_id": b.id})
+    assert r.status_code == 200, r.text
+    b_debit = r.json()["id"]
+
+    # A's bank tops up B's wallet, but the row is tagged with entity B.
+    a_top_up = transfer(bank_a, wallet_b, 1000, 10, b)
+    # B's bank tops up B's wallet, but the row is tagged with entity A.
+    b_top_up = transfer(bank_b, wallet_b, 300, 0, a)
+
+    assert view(a) == (Decimal("1010"), {"Transfer fees": Decimal("10"),
+                                         "Unallocated wallet spend": Decimal("1000")})
+    assert view(b) == (Decimal("370"), {"Uncategorized": Decimal("70"),
+                                        "Unallocated wallet spend": Decimal("300")})
+
+    for txn_id, change, expected_a, expected_b in (
+        (a_top_up, {"amount": 2000}, Decimal("2010"), Decimal("370")),
+        (a_top_up, {"transfer_fee": 0}, Decimal("2000"), Decimal("370")),
+        (a_top_up, {"transfer_from_account_id": bank_b.id}, Decimal("0"), Decimal("2370")),
+        (a_top_up, {"transfer_from_account_id": bank_a.id}, Decimal("2000"), Decimal("370")),
+        (b_top_up, {"amount": 500}, Decimal("2000"), Decimal("570")),
+    ):
+        r = client.put(f"{API}/transactions/{txn_id}", headers=headers, json=change)
+        assert r.status_code == 200, r.text
+        assert view(a)[0] == expected_a
+        assert view(b)[0] == expected_b
+
+    for txn_id, expected_a, expected_b in (
+        (a_top_up, Decimal("0"), Decimal("570")),
+        (b_top_up, Decimal("0"), Decimal("70")),
+        (b_debit, Decimal("0"), Decimal("0")),
+    ):
+        r = client.delete(f"{API}/transactions/{txn_id}", headers=headers)
+        assert r.status_code == 200, r.text
+        assert view(a)[0] == expected_a
+        assert view(b)[0] == expected_b
+    assert view(a) == (Decimal("0"), {}) and view(b) == (Decimal("0"), {})

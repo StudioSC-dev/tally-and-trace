@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -762,16 +762,22 @@ def get_transaction_summary(
             scope_criterion(Account, current_user.id, active_entity.id if active_entity else None)
         ).all()
     }
+    touches_scope = or_(
+        Transaction.account_id.in_(scope_ids),
+        Transaction.transfer_from_account_id.in_(scope_ids),
+        Transaction.transfer_to_account_id.in_(scope_ids)
+    )
     if active_entity is not None:
-        query = query.filter(Transaction.entity_id == active_entity.id)
+        # The entity's own rows, plus transfers into or out of its accounts however
+        # the row is tagged (e.g. a top-up from this entity's bank into another
+        # entity's wallet, recorded under the other entity). summarize_period's
+        # source-scope guard decides what such a transfer counts for.
+        query = query.filter(or_(
+            Transaction.entity_id == active_entity.id,
+            and_(Transaction.transaction_type == TransactionType.TRANSFER, touches_scope),
+        ))
     else:
-        query = query.filter(
-            or_(
-                Transaction.account_id.in_(scope_ids),
-                Transaction.transfer_from_account_id.in_(scope_ids),
-                Transaction.transfer_to_account_id.in_(scope_ids)
-            )
-        )
+        query = query.filter(touches_scope)
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)
