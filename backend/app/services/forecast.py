@@ -117,6 +117,17 @@ def wallet_ids_of(db: Session, account_ids) -> frozenset:
     )
 
 
+def _loan_ids_of(db: Session, account_ids) -> frozenset:
+    """The loans among ``account_ids``, judged from the accounts themselves (any scope)."""
+    ids = {i for i in account_ids if i is not None}
+    if not ids:
+        return frozenset()
+    return frozenset(
+        a.id for a in db.query(Account.id).filter(
+            Account.id.in_(ids), Account.account_type == AccountType.LOAN)
+    )
+
+
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
@@ -285,9 +296,11 @@ def get_payables(
 
     Same window and events as ``get_upcoming_items``, restricted to events that
     take cash out of the pool (bills, unposted debits, card statements, planned
-    card payments, and spending-wallet top-ups for their amount + fee: topping a
-    wallet up is the spending). Other transfers between your own accounts are not
-    payables; card charges reach cash via their statement payable instead.
+    card payments, loan payables on due dates, planned payments into a loan
+    from cash (scheduled payments and prepayments, for principal + interest),
+    and spending-wallet top-ups for their amount + fee: topping a wallet up is
+    the spending). Other transfers between your own accounts are not payables;
+    card charges reach cash via their statement payable instead.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -298,8 +311,8 @@ def get_payables(
     for e in sorted(events, key=_event_sort_key):
         if not e["counts_as_cash"] or e["amount"] >= 0:
             continue
-        if (e["type"] == TransactionType.TRANSFER.value
-                and not e.get("card_payment") and not e.get("top_up")):
+        if (e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment")
+                and not e.get("top_up") and not e.get("loan_payment")):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -624,6 +637,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     wallet_ids: frozenset = frozenset(),
                     known_wallet_ids: frozenset = frozenset(),
                     loan_ids: frozenset = frozenset(),
+                    known_loan_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -643,7 +657,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     the amount to it; a transfer between two wallets moves no projection cash.
     ``known_wallet_ids`` are every wallet the caller has classified, in scope or
     not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
-    so a payable), even when the wallet itself has no leg here.
+    so a payable), even when the wallet itself has no leg here. Likewise a
+    cash-funded transfer into a loan (``loan_ids`` in scope, ``known_loan_ids``
+    any other the caller references) is marked ``loan_payment``.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -694,6 +710,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         # (see loans.build_loan_payables).
         extra = {**extra, "loan_id": dst,
                  "loan_prepayment": getattr(txn, "loan_payment_kind", None) == PREPAYMENT}
+    if src_cash and dst in (known_loan_ids | loan_ids):
+        # Paying a loan from cash is spending (principal and interest), so a payable.
+        extra = {**extra, "loan_payment": True}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
@@ -827,6 +846,13 @@ def collect_events(
         *(a.payment_account_id for a in loans),
     ))
 
+    # Every loan any transfer references, in scope or not (loan payments are payables).
+    known_loan_ids = loan_ids | _loan_ids_of(db, (
+        *(e.transfer_to_account_id for e in entries),
+        *(t.transfer_to_account_id for t in txns
+          if t.transaction_type == TransactionType.TRANSFER),
+    ))
+
     # Transactions already materialised from a recurring transfer entry, by day:
     # each stands in for one occurrence on its calendar day (as in
     # _card_entry_charges), since the posted transfer has already moved the balance.
@@ -863,7 +889,7 @@ def collect_events(
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
-                    loan_ids=loan_ids, source="budget_entry",
+                    loan_ids=loan_ids, known_loan_ids=known_loan_ids, source="budget_entry",
                     overflow_account_id=overflow_id,
                 ))
             continue
@@ -900,7 +926,7 @@ def collect_events(
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
                                           known_wallet_ids=wallet_ids, loan_ids=loan_ids,
-                                          **overdue))
+                                          known_loan_ids=known_loan_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow

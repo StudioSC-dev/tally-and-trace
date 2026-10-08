@@ -125,6 +125,13 @@ def _loan_events(db, user, end=END):
     return [e for e in collect_events(db, REF, end, user_id=user.id) if e["source"] == "loan"]
 
 
+def _payables(db, user, days=30):
+    from app.services.forecast import get_payables
+
+    return [(p["due_date"], p["source"], p["amount"], p["account_id"])
+            for p in get_payables(db, user.id, days=days, reference=REF)]
+
+
 def _closings(timeline):
     return {a["account_name"]: a["closing_balance"] for a in timeline["by_account"]}
 
@@ -217,6 +224,7 @@ def test_unposted_scheduled_payment_replaces_that_dates_payable(db, user):
     timeline = project_running_balance(db, user.id, days=30, reference=REF)
     assert timeline["closing_balance"] == Decimal("42000.00")  # once, via the transfer
     assert [e["source"] for e in timeline["events"]] == ["transaction"]
+    assert _payables(db, user) == [("2026-10-04", "transaction", 8000.0, bank.id)]
 
 
 def test_partial_planned_payment_suppresses_only_its_covered_amount(db, user):
@@ -230,6 +238,8 @@ def test_partial_planned_payment_suppresses_only_its_covered_amount(db, user):
     assert [e["amount"] for e in events] == [Decimal("-4000.00")]
     timeline = project_running_balance(db, user.id, days=30, reference=REF)
     assert timeline["closing_balance"] == Decimal("42000.00")  # 4,000 + 4,000 out
+    assert _payables(db, user) == [("2026-10-04", "transaction", 4000.0, bank.id),
+                                   ("2026-10-04", "loan", 4000.0, bank.id)]
 
 
 def test_planned_payment_is_applied_to_the_oldest_due_date_first(db, user):
@@ -256,6 +266,7 @@ def test_unposted_unmarked_transfer_into_the_loan_replaces_the_payable(db, user)
     _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 4), kind=None)
 
     assert _loan_events(db, user, datetime(2026, 11, 1)) == []
+    assert _payables(db, user) == [("2026-10-04", "transaction", 8000.0, bank.id)]
 
 
 def test_recurring_transfer_into_the_loan_replaces_the_payable(db, user):
@@ -271,6 +282,8 @@ def test_recurring_transfer_into_the_loan_replaces_the_payable(db, user):
     db.commit()
 
     assert _loan_events(db, user, END) == []
+    assert _payables(db, user, days=61) == [("2026-10-04", "budget_entry", 8000.0, bank.id),
+                                            ("2026-11-04", "budget_entry", 8000.0, bank.id)]
 
 
 def test_posted_scheduled_payment_advances_the_due_date(db, user):
@@ -419,7 +432,7 @@ def test_materialised_recurring_loan_transfer_counts_once_and_advances_the_sched
     from app.routers.budget_entries import materialize_budget_entry
     from app.schemas.budget_entry import BudgetEntryMaterialize
     from app.services.forecast import (
-        get_upcoming_items, project_cashflow, project_running_balance,
+        get_payables, get_upcoming_items, project_cashflow, project_running_balance,
     )
 
     bank = _bank(db, user)
@@ -443,6 +456,9 @@ def test_materialised_recurring_loan_transfer_counts_once_and_advances_the_sched
     assert months[-1]["closing_balance"] == float(timeline["closing_balance"])
     upcoming = get_upcoming_items(db, user.id, days=61, reference=REF)
     assert [(i["due_date"], i["source"]) for i in upcoming] == [("2026-11-04", "budget_entry")]
+    payables = get_payables(db, user.id, days=61, reference=REF)
+    assert [(p["due_date"], p["source"], p["amount"]) for p in payables] == [
+        ("2026-11-04", "budget_entry", 8000.0)]
 
 
 def test_generic_transfer_into_a_loan_is_a_scheduled_payment(db, user):
@@ -493,3 +509,15 @@ def test_generic_transfer_into_a_loan_keeps_the_loan_endpoint_rules(db, user):
         update_transaction(txn.id, TransactionUpdate(transfer_to_account_id=bank.id),
                            db=db, current_user=user)
     assert exc.value.status_code == 400
+
+
+def test_planned_prepayment_is_a_payable_and_does_not_cover_the_due_date(db, user):
+    from app.services.forecast import get_payables
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home")
+    _transfer(db, user, bank, loan, "20000", datetime(2026, 10, 10), kind="prepayment")
+
+    payables = get_payables(db, user.id, days=30, reference=REF)
+    assert [(p["due_date"], p["source"], p["amount"]) for p in payables] == [
+        ("2026-10-04", "loan", 8000.0), ("2026-10-10", "transaction", 20000.0)]
