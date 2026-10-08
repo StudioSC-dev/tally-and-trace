@@ -388,6 +388,11 @@ def materialize_budget_entry(
     calendar day (see ``_card_entry_charges`` in services/forecast.py). A custom
     ``transaction_date`` on another day suppresses nothing, so with ``advance``
     False the occurrence is still projected alongside the transaction.
+
+    A recurring transfer into a loan posts as a scheduled loan payment
+    (``loan_payment_kind`` "scheduled", under the loan-payment endpoint's rules,
+    see ``_stamp_loan_payment`` in routers/transactions.py), so it settles that
+    due date instead of leaving it projected after the bank was debited.
     """
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate

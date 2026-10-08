@@ -366,3 +366,130 @@ def test_loan_payables_follow_the_entity_scope(db, user):
         db.query(Account).filter(Account.entity_id == entity.id).delete()
         db.query(Entity).filter(Entity.id == entity.id).delete()
         db.commit()
+
+
+# --- round-1 audit fixes -------------------------------------------------------
+
+def _post(db, user, src, dst, amount, when, *, fee="0", posted=True):
+    """A transfer through the generic POST /transactions path."""
+    from app.routers.transactions import create_transaction
+    from app.schemas.transaction import TransactionCreate
+
+    return create_transaction(
+        transaction=TransactionCreate(
+            account_id=src.id, transfer_from_account_id=src.id, transfer_to_account_id=dst.id,
+            transaction_type="transfer", amount=float(amount), transfer_fee=float(fee),
+            transaction_date=when, is_posted=posted, currency=dst.currency),
+        db=db, current_user=user, active_entity=None)
+
+
+def _schedule(db, loan):
+    from app.services.loans import build_schedule
+
+    db.refresh(loan)
+    return build_schedule(db, loan)
+
+
+def _recurring(db, user, src, dst, amount, first, **kw):
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency
+
+    entry = BudgetEntry(user_id=user.id, name="Pay car loan", entry_type=BudgetEntryType.EXPENSE,
+                        amount=Decimal(amount), cadence=RecurrenceFrequency.MONTHLY,
+                        next_occurrence=first, account_id=src.id,
+                        transfer_to_account_id=dst.id, **kw)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+def _cash_out(db, user, days):
+    """Every negative cash movement in the window, as (day, source, amount)."""
+    from datetime import timedelta
+    from app.services.forecast import collect_events
+
+    end = REF + timedelta(days=days + 1)
+    return sorted((e["date"].date().isoformat(), e["source"], e["amount"])
+                  for e in collect_events(db, REF, end, user_id=user.id)
+                  if e["counts_as_cash"] and e["amount"] < 0)
+
+
+def test_materialised_recurring_loan_transfer_counts_once_and_advances_the_schedule(db, user):
+    from app.routers.budget_entries import materialize_budget_entry
+    from app.schemas.budget_entry import BudgetEntryMaterialize
+    from app.services.forecast import (
+        get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    entry = _recurring(db, user, bank, loan, "8000", datetime(2026, 10, 4))
+
+    txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(), db=db, current_user=user)
+    assert txn.loan_payment_kind == "scheduled" and txn.is_posted
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+
+    # Oct 4 was paid by the materialised transfer; Nov 4 by the next occurrence.
+    assert _loan_events(db, user, END) == []
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("34000.00")  # 50,000 - 8,000 - 8,000
+    assert [(e["date"].isoformat(), e["amount"]) for e in timeline["events"]] == [
+        ("2026-11-04", Decimal("-8000.00"))]
+    months = project_cashflow(db, user.id, months=2, reference=REF)
+    assert [m["net"] for m in months] == [0.0, -8000.0]
+    assert months[-1]["closing_balance"] == float(timeline["closing_balance"])
+    upcoming = get_upcoming_items(db, user.id, days=61, reference=REF)
+    assert [(i["due_date"], i["source"]) for i in upcoming] == [("2026-11-04", "budget_entry")]
+
+
+def test_generic_transfer_into_a_loan_is_a_scheduled_payment(db, user):
+    from app.services.forecast import get_payables, project_running_balance
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    txn = _post(db, user, bank, loan, "5500", datetime(2026, 10, 4), fee="2500")
+    assert txn.loan_payment_kind == "scheduled"
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
+    assert [e["date"] for e in _loan_events(db, user, END)] == [datetime(2026, 11, 4)]
+    timeline = project_running_balance(db, user.id, days=61, reference=REF)
+    assert timeline["closing_balance"] == Decimal("34000.00")
+    assert [(p["due_date"], p["source"]) for p in get_payables(db, user.id, days=61,
+                                                                 reference=REF)] == [
+        ("2026-11-04", "loan")]
+
+
+def test_generic_transfer_into_a_loan_keeps_the_loan_endpoint_rules(db, user):
+    from fastapi import HTTPException
+    from app.models.account import AccountType
+    from app.models.transaction import Transaction
+    from app.models.user import CurrencyType
+    from app.routers.transactions import update_transaction
+    from app.schemas.transaction import TransactionUpdate
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank)
+    card = _account(db, user, "Card", AccountType.CREDIT, "0")
+    wallet = _account(db, user, "GCash", AccountType.E_WALLET, "1000", is_spending_wallet=True)
+    usd = _account(db, user, "USD", AccountType.SAVINGS, "1000", currency=CurrencyType.USD)
+
+    for src, amount in ((card, "100"), (wallet, "100"), (usd, "100"), (bank, "90000.01")):
+        with pytest.raises(HTTPException) as exc:
+            _post(db, user, src, loan, amount, datetime(2026, 10, 4))
+        assert exc.value.status_code == 400, (src.name, exc.value.detail)
+        db.rollback()
+    assert db.query(Transaction).filter(Transaction.user_id == user.id).count() == 0
+    db.refresh(loan)
+    assert Decimal(str(loan.balance)) == Decimal("-90000.00")
+
+    # A pending payment above what is owed is allowed until it is posted, as on
+    # the loan endpoint; once created it follows the loan-payment edit rules.
+    txn = _post(db, user, bank, loan, "100", datetime(2026, 10, 4), posted=False)
+    with pytest.raises(HTTPException) as exc:
+        update_transaction(txn.id, TransactionUpdate(transfer_to_account_id=bank.id),
+                           db=db, current_user=user)
+    assert exc.value.status_code == 400

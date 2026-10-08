@@ -16,7 +16,7 @@ from app.schemas.transaction import TransactionCreate, TransactionResponse, Tran
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
-from app.routers.accounts import _funding_account, _loan_or_404
+from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -257,6 +257,38 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _stamp_loan_payment(db: Session, user: User, transaction: TransactionCreate,
+                        transaction_data: dict, source: Account, loan: Account) -> None:
+    """Make a transfer into a loan a scheduled loan payment, under the loan endpoint's rules.
+
+    Money paid into a loan through this API (a plain transfer, or a recurring
+    transfer entry being materialised) is a scheduled payment: it is stamped
+    ``loan_payment_kind`` "scheduled", so once posted it settles its due date
+    (services/loans.py) and the loan-payment edit rules apply to it afterwards.
+    Extra principal is recorded only through the loan-prepayment endpoint.
+
+    The checks are the loan-payment endpoint's: the source must be a funding
+    account (not a card, wallet or loan), in the loan's currency, the row is in
+    that currency too, principal and interest are whole cents and move some
+    money, and a posted payment's principal fits what is owed. The loan and
+    funding account are locked first, as the endpoint does.
+    """
+    funding = _funding_account(db, user, source.id, "transfer_from_account_id", loan.id)
+    _lock(db, loan, funding)
+    if "currency" in transaction.model_fields_set and transaction.currency != loan.currency:
+        raise HTTPException(status_code=400,
+                            detail="A loan payment's currency must match the loan's currency")
+    try:
+        loan_svc.check_currency(loan, funding)
+        principal, interest = loan_svc.check_edited_payment(
+            loan, old_principal=0, old_posted=False, posted=transaction.is_posted,
+            principal=transaction.amount, interest=transaction.transfer_fee)
+    except loan_svc.LoanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    transaction_data.update(amount=principal, transfer_fee=interest, currency=loan.currency,
+                            loan_payment_kind=loan_svc.SCHEDULED)
+
+
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
     if transaction_type == TransactionType.DEBIT:
         return amount
@@ -461,6 +493,9 @@ def create_transaction(
         ).first()
         if not destination_account or not can_access_record(db, current_user, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
+        if destination_account.account_type == AccountType.LOAN:
+            _stamp_loan_payment(db, current_user, transaction, transaction_data,
+                                primary_account, destination_account)
         
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = destination_account.currency

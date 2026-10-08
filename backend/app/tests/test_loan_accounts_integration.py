@@ -337,13 +337,14 @@ def test_payment_kind_is_set_by_each_endpoint_and_persisted(client, people, db):
         row = db.query(Transaction).filter(Transaction.id == txn["id"]).one()
         assert row.loan_payment_kind == kind
 
-    # The generic transactions API cannot set it.
+    # The generic transactions API cannot choose it: a transfer into a loan made
+    # there is always a scheduled payment (extra principal has its own endpoint).
     r = client.post(f"{API}/transactions/", headers=me["headers"], json={
         "account_id": bank["id"], "transaction_type": "transfer", "amount": 10,
         "transfer_from_account_id": bank["id"], "transfer_to_account_id": loan["id"],
-        "transaction_date": "2026-10-05T00:00:00", "loan_payment_kind": "scheduled",
+        "transaction_date": "2026-10-05T00:00:00", "loan_payment_kind": "prepayment",
     })
-    assert r.status_code == 200 and r.json()["loan_payment_kind"] is None
+    assert r.status_code == 200 and r.json()["loan_payment_kind"] == "scheduled"
 
 
 # --- invariants: balances and the period summary ------------------------------

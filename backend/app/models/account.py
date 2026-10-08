@@ -85,9 +85,9 @@ class Account(Base):
     # prepayment shortens the term.
     loan_amortization = Column(String(16), nullable=True)
     # Scheduled payments made before the loan was tracked here. Every posted
-    # transaction with a loan_payment_kind of "scheduled" is counted on top, so
-    # back-filled history must either reduce this offset or be recorded without
-    # a loan_payment_kind; otherwise it is counted twice.
+    # transaction with a loan_payment_kind of "scheduled" (any transfer into the
+    # loan except a prepayment) is counted on top, so back-filled history must
+    # reduce this offset; otherwise it is counted twice.
     loan_payments_made_offset = Column(Integer, nullable=True)
 
     # Account status
