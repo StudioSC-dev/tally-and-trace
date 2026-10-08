@@ -351,19 +351,22 @@ def _stamp_loan_payment(db: Session, user: User, transaction: TransactionCreate,
 
 def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
                                    requested: dict) -> dict:
-    """The stamp for an edit that leaves an unmarked row a transfer into a loan, or {}.
+    """The stamp for an edit that newly points an unmarked row at a loan, or {}.
 
-    A row with no ``loan_payment_kind`` (a transfer to another account, a debit
-    or credit, or a legacy unmarked transfer into the loan) that the edit turns
-    into a transfer into a loan gets the same classification and checks as a
-    new one, validated against the loan with the row's old effect on it
-    reversed, before anything is changed. Without it the posted row would not
-    settle its due date and the payable would be charged again. With no fee in
-    the request and none on the row, the amount is split into principal and
-    interest as for a new payment without a fee, except for a row already into
-    the loan (a legacy unmarked payment) edited without ``amount`` or
-    ``transfer_fee``: it is stamped and validated with its amount and fee as
-    they are, so a metadata-only edit never moves a balance.
+    A row with no ``loan_payment_kind`` (a transfer to another account, or a
+    debit or credit) that the edit turns into a transfer into a loan gets the
+    same classification and checks as a new one, before anything is changed.
+    Without it the posted row would not settle its due date and the payable
+    would be charged again. The row has no old effect on that loan, so it is
+    validated against the loan as it stands. With no fee in the request and
+    none on the row, the amount is split into principal and interest as for a
+    new payment without a fee.
+
+    An edit never stamps a row that was already a transfer into that same loan
+    (a legacy unmarked payment, whatever the edit changes): it stays unmarked,
+    so it is edited as a plain transfer and, like every legacy row, never
+    counts toward ``payments_made`` (its payment is in
+    ``loan_payments_made_offset``). Stamping it would count it a second time.
     """
     if txn.loan_payment_kind:
         return {}
@@ -376,11 +379,10 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
     source_id = requested.get("transfer_from_account_id", txn.transfer_from_account_id)
     if source_id is None:
         return {}  # rejected below as a transfer without a source
-    was_into_loan = (txn.transaction_type == TransactionType.TRANSFER
-                     and txn.transfer_to_account_id == loan.id)
-    if was_into_loan and "amount" not in requested and "transfer_fee" not in requested:
-        interest = txn.transfer_fee or 0  # metadata-only: keep the stored split
-    elif requested.get("transfer_fee") is not None:
+    if (txn.transaction_type == TransactionType.TRANSFER
+            and txn.transfer_to_account_id == loan.id):
+        return {}  # a legacy unmarked payment stays unmarked
+    if requested.get("transfer_fee") is not None:
         interest = requested["transfer_fee"]
     else:
         interest = txn.transfer_fee or None
@@ -389,9 +391,7 @@ def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
         currency=requested.get("currency"),
         principal=requested.get("amount", txn.amount),
         interest=interest,
-        posted=bool(requested.get("is_posted", txn.is_posted)),
-        old_principal=txn.amount if was_into_loan else 0,
-        old_posted=bool(txn.is_posted) and was_into_loan)
+        posted=bool(requested.get("is_posted", txn.is_posted)))
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
