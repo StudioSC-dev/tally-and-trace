@@ -253,6 +253,8 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
                    when: datetime, is_posted: bool, description: Optional[str]) -> Transaction:
     """Add the transfer funding -> loan and apply it to both balances (not committed)."""
     principal, interest = cents(principal), cents(interest)
+    if funding.currency != loan.currency:
+        raise LoanError("The funding account's currency must match the loan's currency")
     if principal < 0 or interest < 0:
         raise LoanError("Principal and interest cannot be negative")
     if principal + interest <= 0:

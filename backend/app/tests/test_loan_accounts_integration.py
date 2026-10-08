@@ -706,3 +706,17 @@ def test_a_loan_payment_edit_is_revalidated_against_the_loan(client, people):
     s = _schedule(client, me, loan["id"]).json()
     assert s["payments_made"] == 1
     assert (s["payments"][0]["principal"], s["payments"][0]["interest"]) == (1_000, 12.5)
+
+
+def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
+    me = people()
+    usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
+    loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=usd["id"])
+
+    r = _pay(client, me, loan["id"], principal=100, interest=10)
+    assert r.status_code == 400 and "currency" in r.text, r.text
+    r = _prepay(client, me, loan["id"], amount=100)
+    assert r.status_code == 400 and "currency" in r.text, r.text
+    assert _balance(client, me, usd["id"]) == Decimal("10000.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
+    assert _schedule(client, me, loan["id"]).json()["payments"] == []
