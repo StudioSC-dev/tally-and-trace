@@ -687,7 +687,10 @@ def collect_events(
     unposted transactions and budget entries funded from a wallet (other than
     recurring transfers) are skipped. Whether an account is a wallet is read from
     the account itself (``wallet_ids_of``), so a wallet outside the scope or
-    inactive is still a wallet. A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
+    inactive is still a wallet. A statement payable funded from a wallet has a
+    non-cash funding leg: the wallet's money left projection cash when it was
+    topped up, so paying the card from it must not take cash out a second time.
+    A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on both accounts.
 
     Balances change only when a transaction is posted, so an unposted transaction
@@ -740,6 +743,8 @@ def collect_events(
         *(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id)),
         *(acc for t in txns
           for acc in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)),
+        *(acc for a in accounts if a.id in billed_ids
+          for acc in (a.payment_account_id, a.payment_overflow_account_id)),
     ))
 
     card_entries = []
@@ -835,7 +840,8 @@ def collect_events(
             source=p["source"],
             source_id=p["source_id"],
             face_amount=-p["amount"],
-            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"])],
+            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
+                       cash=p["funding_account_id"] not in wallet_ids)],
             **extra,
         ))
 

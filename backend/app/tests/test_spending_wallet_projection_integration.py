@@ -368,3 +368,31 @@ def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, u
     r = project_running_balance(db, user.id, biz.id, days=30, reference=REF)
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
 
+
+def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
+    from app.models.account import AccountType
+    from app.models.transaction import Transaction, TransactionType
+    from app.services.forecast import collect_events, get_payables, project_running_balance
+
+    _account(db, user, "Bank", AccountType.SAVINGS, "5000.00")
+    wallet = _wallet(db, user, "Cash", "3000.00")
+    card = _account(db, user, "Card", AccountType.CREDIT, "0.00",
+                    billing_cycle_start=24, days_until_due_date=21)
+    # Pre-migration routing onto an account that is now a wallet (the API refuses it).
+    card.payment_account_id = wallet.id
+    db.commit()
+    # Billed on the 24 Oct statement, due 14 Nov.
+    db.add(Transaction(user_id=user.id, account_id=card.id, amount=Decimal("1200.00"),
+                       transaction_type=TransactionType.DEBIT,
+                       transaction_date=datetime(2026, 10, 10), is_posted=False))
+    db.commit()
+
+    events = collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id)
+    stmt = next(e for e in events if e["source"] == "statement")
+    assert stmt["legs"][0]["account_id"] == wallet.id and stmt["legs"][0]["cash"] is False
+    assert stmt["counts_as_cash"] is False
+
+    r = project_running_balance(db, user.id, days=30, reference=REF)
+    assert r["account_shortfalls"] == []
+    assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
+    assert get_payables(db, user.id, days=30, reference=REF) == []
