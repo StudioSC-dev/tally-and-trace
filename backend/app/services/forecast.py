@@ -81,18 +81,22 @@ def is_projection_cash(account) -> bool:
     Credit-card balances are money owed, not cash: card spending reaches cash only
     when the statement is paid (modelled as dated statement payables).
 
+    Loan balances are money owed too (a liability): a payment into a loan is cash
+    leaving the paying account (see ``_transfer_event``), and the loan's own
+    balance never counts as cash.
+
     Spending wallets (cash on hand, e-wallets) are not projection cash either:
     their balance is shown, but topping one up is where the money leaves the
     projection (see ``_transfer_event``), and spending from it is not counted again.
     """
-    if account.account_type == AccountType.CREDIT:
+    if account.account_type in (AccountType.CREDIT, AccountType.LOAN):
         return False
     return not getattr(account, "is_spending_wallet", False)
 
 
 def is_spending_wallet(account) -> bool:
-    """A non-credit account flagged as a spending wallet."""
-    return account.account_type != AccountType.CREDIT and bool(
+    """A non-credit, non-loan account flagged as a spending wallet."""
+    return account.account_type not in (AccountType.CREDIT, AccountType.LOAN) and bool(
         getattr(account, "is_spending_wallet", False)
     )
 
