@@ -299,3 +299,72 @@ def test_disposable_income_expenses_top_ups_once_and_ignores_other_transfers(db,
     # Loan 8,000 + top-up 2,000; the SecB->BDO move and wallet parking are not expenses.
     assert result == {"monthly_income": 50000.0, "monthly_expenses": 10000.0,
                       "monthly_disposable": 40000.0}
+
+
+@pytest.fixture
+def entities(db):
+    """Two throwaway entities; rows tagged to them are removed afterwards."""
+    from app.models.account import Account
+    from app.models.budget_entry import BudgetEntry
+    from app.models.entity import Entity, EntityType
+    from app.models.transaction import Transaction
+
+    made = []
+    for label in ("A", "B"):
+        e = Entity(name=f"Wallet {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
+        db.add(e)
+        db.commit()
+        db.refresh(e)
+        made.append(e)
+
+    yield made
+
+    db.rollback()
+    ids = [e.id for e in made]
+    db.query(Transaction).filter(Transaction.entity_id.in_(ids)).delete(synchronize_session=False)
+    db.query(BudgetEntry).filter(BudgetEntry.entity_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Account).filter(Account.entity_id.in_(ids)).update(
+        {"payment_account_id": None, "payment_overflow_account_id": None},
+        synchronize_session=False)
+    db.commit()
+    db.query(Account).filter(Account.entity_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+
+
+def test_entry_and_transactions_on_an_inactive_wallet_are_still_wallet_spending(db, user):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import Transaction, TransactionType
+    from app.services.forecast import collect_events, project_running_balance
+
+    _account(db, user, "Bank", AccountType.SAVINGS, "5000.00")
+    wallet = _account(db, user, "Old GCash", AccountType.E_WALLET, "800.00",
+                      is_spending_wallet=True, is_active=False)
+    _entry(db, user, "Parking", BudgetEntryType.EXPENSE, "500.00", datetime(2026, 11, 3),
+           account=wallet)
+    db.add(Transaction(user_id=user.id, account_id=wallet.id, amount=Decimal("250.00"),
+                       transaction_type=TransactionType.DEBIT,
+                       transaction_date=datetime(2026, 11, 5), is_posted=False))
+    db.commit()
+
+    assert collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id) == []
+    r = project_running_balance(db, user.id, days=30, reference=REF)
+    assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
+
+
+def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, user, entities):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import collect_events, project_running_balance
+
+    biz = entities[0]
+    _account(db, user, "Biz Bank", AccountType.SAVINGS, "5000.00", entity_id=biz.id)
+    personal_wallet = _wallet(db, user, "Personal GCash", "800.00")  # no entity: out of scope
+    _entry(db, user, "Parking", BudgetEntryType.EXPENSE, "500.00", datetime(2026, 11, 3),
+           account=personal_wallet, entity_id=biz.id)
+
+    assert collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id, entity_id=biz.id) == []
+    r = project_running_balance(db, user.id, biz.id, days=30, reference=REF)
+    assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
+
