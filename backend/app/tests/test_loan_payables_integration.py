@@ -534,18 +534,19 @@ def test_reduce_term_payables_use_each_amortisation_payment(db, user):
     assert sum(amounts) == Decimal("90000.00")
 
 
-def test_a_cover_applies_to_its_own_due_date_whatever_the_window(db, user):
+def test_a_planned_payment_covers_the_oldest_open_due_date_whatever_the_window(db, user):
     from app.services.forecast import project_cashflow, project_running_balance
 
     bank = _bank(db, user, balance="10000")
     loan = _loan(db, user, bank)
-    # Nov 4 is planned, Oct 4 is not: Oct 4 stays due in every window.
+    # One planned payment, dated Nov 4: it pays the oldest open due date, Oct 4,
+    # in every window, and Nov 4 stays due.
     _transfer(db, user, bank, loan, "8000", datetime(2026, 11, 4))
 
     short, long_ = _cash_out(db, user, 30), _cash_out(db, user, 60)
-    assert short == [("2026-10-04", "loan", Decimal("-8000.00"))]
+    assert short == []
     assert [m for m in long_ if m[0] <= "2026-10-31"] == short
-    assert long_ == [("2026-10-04", "loan", Decimal("-8000.00")),
+    assert long_ == [("2026-11-04", "loan", Decimal("-8000.00")),
                      ("2026-11-04", "transaction", Decimal("-8000.00"))]
 
     one, two, three = (project_cashflow(db, user.id, months=n, reference=REF) for n in (1, 2, 3))
@@ -557,16 +558,14 @@ def test_a_cover_applies_to_its_own_due_date_whatever_the_window(db, user):
     assert [s["date"] for s in t60["shortfalls"]] == [date(2026, 11, 4)]
 
 
-def test_an_early_or_late_cover_belongs_to_the_nearest_due_date(db, user):
+def test_early_recurring_payments_cover_their_own_due_dates(db, user):
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
-    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 1))   # 3 days early: Oct 4
-    _transfer(db, user, bank, loan, "8000", datetime(2026, 11, 9))   # 5 days late: Nov 4
+    _recurring(db, user, bank, loan, "8000", datetime(2026, 10, 1))  # 3 days early each month
 
-    for days in (2, 30, 36, 45, 60):  # 36: Nov 4 is inside, the Nov 9 cover is not
+    for days in (2, 30, 36, 45, 60):
         assert [m for m in _cash_out(db, user, days) if m[1] == "loan"] == [], days
-    assert [e["date"] for e in _loan_events(db, user, datetime(2027, 1, 1))] == [
-        datetime(2026, 12, 4)]
+    assert _loan_events(db, user, datetime(2027, 1, 1)) == []
 
 
 def test_a_late_recurring_cover_after_the_window_still_covers_its_due_date(db, user):
@@ -578,15 +577,28 @@ def test_a_late_recurring_cover_after_the_window_still_covers_its_due_date(db, u
         assert [m for m in _cash_out(db, user, days) if m[1] == "loan"] == [], days
 
 
-def test_cover_excess_spills_forward_never_backward(db, user):
+def test_planned_payment_excess_fills_the_next_due_date(db, user):
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
-    _transfer(db, user, bank, loan, "12000", datetime(2026, 11, 4))  # Nov 4 + 4,000 of Dec 4
+    _transfer(db, user, bank, loan, "12000", datetime(2026, 11, 4))  # Oct 4 + 4,000 of Nov 4
 
     events = _loan_events(db, user, datetime(2027, 1, 1))
     assert [(e["date"], e["amount"]) for e in events] == [
-        (datetime(2026, 10, 4), Decimal("-8000.00")),
-        (datetime(2026, 12, 4), Decimal("-4000.00"))]
+        (datetime(2026, 11, 4), Decimal("-4000.00")),
+        (datetime(2026, 12, 4), Decimal("-8000.00"))]
+
+
+def test_recurring_cover_excess_spills_forward_never_backward(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
+    _recurring(db, user, bank, loan, "12000", datetime(2026, 11, 4), max_occurrences=1,
+               end_mode="after_occurrences")
+
+    events = _loan_events(db, user, datetime(2027, 1, 1))
+    assert [(e["date"], e.get("overdue"), e["amount"]) for e in events] == [
+        (REF, True, Decimal("-8000.00")),                 # Sep 4: never reached back to
+        (datetime(2026, 10, 4), None, Decimal("-8000.00")),
+        (datetime(2026, 12, 4), None, Decimal("-4000.00"))]
 
 
 def test_posted_partial_payment_leaves_its_remainder_projected(db, user):
@@ -941,3 +953,33 @@ def test_a_generic_loan_payment_without_a_fee_is_split_and_an_explicit_fee_is_ke
     interest = (-Decimal(str(loan.balance)) * Decimal("0.005")).quantize(Decimal("0.01"))
     assert (Decimal(str(moved.amount)), Decimal(str(moved.transfer_fee))) == (
         Decimal("8000.00") - interest, interest)
+
+
+def test_a_late_payment_settles_the_oldest_open_due_date_first(db, user):
+    from app.services.forecast import collect_events
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
+    _post(db, user, bank, loan, "7550", datetime(2026, 10, 10), fee="450")  # September's, late
+    _post(db, user, bank, loan, "7550", datetime(2026, 10, 4), fee="450")   # October's, on time
+
+    s = _schedule(db, loan)
+    assert (s["payments_made"], str(s["next_due_date"])) == (2, "2026-11-04")
+    events = [e for e in collect_events(db, datetime(2026, 10, 15), datetime(2026, 12, 1),
+                                        user_id=user.id) if e["source"] == "loan"]
+    assert [(e["date"], e.get("overdue")) for e in events] == [(datetime(2026, 11, 4), None)]
+
+
+def test_a_planned_catch_up_covers_the_overdue_due_date_in_any_window(db, user):
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, loan_first_payment_date=date(2026, 9, 4))
+    # Dated nearest Nov 4, but Sep 4 is the oldest open due date: it pays that.
+    _transfer(db, user, bank, loan, "8000", datetime(2026, 10, 20))
+
+    short = _loan_events(db, user, datetime(2026, 10, 31))
+    long_ = _loan_events(db, user, datetime(2026, 11, 30))
+    assert [(e["date"], e.get("overdue")) for e in short] == [(datetime(2026, 10, 4), None)]
+    assert [(e["date"], e.get("overdue")) for e in long_] == [
+        (datetime(2026, 10, 4), None), (datetime(2026, 11, 4), None)]
+    assert _cash_out(db, user, 30) == [("2026-10-04", "loan", Decimal("-8000.00")),
+                                       ("2026-10-20", "transaction", Decimal("-8000.00"))]

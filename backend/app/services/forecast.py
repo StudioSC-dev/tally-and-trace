@@ -740,8 +740,8 @@ def collect_events(
     Sources: active budget-entry occurrences, unposted transactions, one dated
     payable per credit-card statement cycle due in the window, and one per loan due
     date (``source`` "loan", on the loan's paying account; a planned non-prepayment
-    transfer into the loan, or a recurring transfer occurrence into it, covers
-    its own due date, see services/loans.py). Occurrences of a
+    transfer into the loan covers the oldest open due date, a recurring transfer
+    occurrence into it its own due date, see services/loans.py). Occurrences of a
     budget entry scheduled on a credit card are charges on that card's statement,
     not cash events (see ``_card_entry_charges``). A card without cycle settings
     has no statements, so occurrences scheduled on it stay cash events and

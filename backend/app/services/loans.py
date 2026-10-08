@@ -18,10 +18,11 @@ Payments made (``settle_posted``) are counted by amount: the due dates from
 ``loan_payments_made_offset`` on (the offset counts the due dates fully paid
 before the loan was tracked here) each owe ``loan_payment_amount``, and the
 posted scheduled payments pay them with their cash (principal + interest),
-each its own due date first (see below). A due date is made once fully paid;
-a part payment leaves the rest of that due date owed, so it stays the next due
-date (overdue once past) until it is paid in full. Payments made = the offset +
-the due dates made; the next due date is the earliest one not made.
+oldest open due date first, whatever each payment's date (as card statements
+are settled oldest first). A due date is made once fully paid; a part payment
+leaves the rest of that due date owed, so it stays the next due date (overdue
+once past) until it is paid in full. Payments made = the offset + the due
+dates made; the next due date is the earliest one not made.
 
 Projection (``build_loan_payables``): each due date not yet made, while
 payments are left, is a payable on the paying account (``payment_account_id``)
@@ -35,25 +36,32 @@ payment falls back to ``loan_term_months`` in the schedule and the projection
 alike, and a loan with no term to fall back on is open-ended while money is
 owed (no ``payments_left``).
 
-Matching payments to due dates: a POSTED scheduled payment settles due dates as
-above, so a settled date is no longer projected. A planned payment covers the
-payables instead: an UNPOSTED
-transfer into the loan that is not a prepayment (a planned or partial scheduled
-payment, a plain transfer), whatever its date or entity, and each projected
-occurrence of a recurring transfer entry into the loan. It is itself a cash leg
-on its source account, so its cash (amount + interest fee) is consumed once and
-only the covered part of a payable is removed. Prepayments never cover one.
+Matching payments to due dates, in this order (``build_loan_payables``):
 
-Each payment belongs to its OWN due date (``own_due_index``): the due date
-nearest its calendar date, a tie going to the earlier one, and the first due
-date for a payment made before it. So a payment a few days early or late covers
-the due date it was meant for. It pays its own due date first, and any excess
-spills forward to the following due dates, never back to an earlier one; a
-payment whose own due date is already settled spills to the next one owed.
-Because a payment never reaches a due date earlier than its own, and is at most
-half a month past it, a payable inside a window is the same for every window
-with the same start: the planned transactions are loaded whatever their date,
-and recurring occurrences are projected ``COVER_HORIZON`` past the window end.
+1. POSTED scheduled payments settle due dates as above (oldest open first), so
+   a settled date is no longer projected.
+2. One-off PLANNED payments cover what is left, also oldest open due date
+   first: every UNPOSTED transfer into the loan that is not a prepayment (a
+   planned or partial scheduled payment, a plain transfer), whatever its date
+   or entity. So a planned catch-up pays the overdue due date.
+3. Projected RECURRING occurrences (each occurrence of a recurring transfer
+   entry into the loan) cover what is left after that, each from its OWN due
+   date (``own_due_index``: the due date nearest its calendar date, a tie going
+   to the earlier one, the first due date for one made before it), spilling any
+   excess forward to the following due dates, never back to an earlier one.
+
+A planned or recurring payment is itself a cash leg on its source account, so
+its cash (amount + interest fee) is consumed once and only the covered part of
+a payable is removed. Prepayments never cover one.
+
+The result for a due date inside a window is the same for every window with
+the same start: posted and planned payments are loaded whatever their date and
+fill the due dates in order, so a longer window only adds due dates after the
+others; a recurring occurrence never reaches a due date earlier than its own
+and is at most half a month past it, and occurrences are projected
+``COVER_HORIZON`` past the window end. (Recurring occurrences keep the
+own-due-date rule for this reason: filled oldest first, an occurrence past a
+short window's horizon would change an earlier due date in a longer window.)
 """
 from calendar import monthrange
 from datetime import date, datetime, timedelta
@@ -143,6 +151,16 @@ def own_due_index(first: date, day: date) -> int:
         k -= 1
     before, after = due_date(first, k), due_date(first, k + 1)
     return k + 1 if (after - day) < (day - before) else k
+
+
+def fill_oldest_first(amounts: List[Decimal], cash: Decimal) -> List[Decimal]:
+    """What each amount still owes after ``cash`` pays them in order, oldest first."""
+    remaining: List[Decimal] = []
+    for amount in amounts:
+        paid = min(max(cash, _ZERO), amount)
+        cash -= paid
+        remaining.append(amount - paid)
+    return remaining
 
 
 def allocate_to_due_dates(first: date, dues: List[Tuple[int, Decimal]],
@@ -248,10 +266,10 @@ def settle_posted(loan, payments: List[Transaction]) -> dict:
 
     The due dates are the steps from ``loan_payments_made_offset`` on (earlier
     ones were paid before the loan was tracked here), up to the term for a
-    ``fixed`` loan. Each owes ``loan_payment_amount``; every posted scheduled
-    payment pays its own due date with its cash (principal + interest) and
-    spills any excess forward (``allocate_to_due_dates``). A due date counts as
-    made once fully paid; one only partly paid keeps the rest owed. Once nothing
+    ``fixed`` loan. Each owes ``loan_payment_amount``; the posted scheduled
+    payments' cash (principal + interest) pays them oldest first
+    (``fill_oldest_first``), whatever each payment's date, so a late payment
+    pays the overdue due date. A due date counts as made once fully paid; one only partly paid keeps the rest owed. Once nothing
     is owed on the loan, a due date that received any payment counts as made
     (the last payment can be smaller than the others).
 
@@ -276,9 +294,9 @@ def settle_posted(loan, payments: List[Transaction]) -> dict:
 
     payment = _money(loan.loan_payment_amount)
     dues = [(step, payment) for step in range(offset, limit)]
-    remaining = allocate_to_due_dates(first, dues, [
-        (t.transaction_date.date(), _money(t.amount) + _money(t.transfer_fee or 0))
-        for t in scheduled])
+    remaining = fill_oldest_first(
+        [payment] * len(dues),
+        sum((_money(t.amount) + _money(t.transfer_fee or 0) for t in scheduled), _ZERO))
     paid_off = owed(loan) <= 0
     open_ = [(step, left) for (step, _), left in zip(dues, remaining)
              if left > 0 and not (paid_off and left < payment)]
@@ -510,11 +528,13 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
     """Dated payable events for the loans' due dates before ``end``.
 
     A due date owes its payment less what the planned payments cover (see the
-    module docstring): the loan's unposted non-prepayment transfers
-    (``planned_covers``) and ``projected_by_loan``, ``{loan_id: [(date, cash)]}``,
-    the recurring transfer occurrences into each loan up to ``end`` plus
-    ``COVER_HORIZON``. A due date before ``start`` is overdue: emitted on
-    ``start`` with ``overdue`` True and its due date as ``original_date``.
+    module docstring): first the loan's unposted non-prepayment transfers
+    (``planned_covers``), oldest open due date first, then
+    ``projected_by_loan``, ``{loan_id: [(date, cash)]}``, the recurring transfer
+    occurrences into each loan up to ``end`` plus ``COVER_HORIZON``, each from
+    its own due date forward (``allocate_to_due_dates``). A due date before
+    ``start`` is overdue: emitted on ``start`` with ``overdue`` True and its due
+    date as ``original_date``.
     """
     events: List[dict] = []
     for loan in loans:
@@ -523,9 +543,12 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
         dates = due_dates(db, loan, end)
         if not dates:
             continue
-        covers = planned_covers(db, loan) + list(projected_by_loan.get(loan.id, []))
-        dues = allocate_to_due_dates(loan.loan_first_payment_date,
-                                     [(step, amount) for step, _, amount in dates], covers)
+        planned = sum((cash for _, cash in planned_covers(db, loan)), _ZERO)
+        after_planned = fill_oldest_first([amount for _, _, amount in dates], planned)
+        dues = allocate_to_due_dates(
+            loan.loan_first_payment_date,
+            [(step, left) for (step, _, _), left in zip(dates, after_planned)],
+            list(projected_by_loan.get(loan.id, [])))
         for (_, due, _), remaining in zip(dates, dues):
             if remaining <= 0:
                 continue
