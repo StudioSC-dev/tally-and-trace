@@ -644,6 +644,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     known_wallet_ids: frozenset = frozenset(),
                     loan_ids: frozenset = frozenset(),
                     known_loan_ids: frozenset = frozenset(),
+                    hidden_loan_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -665,7 +666,10 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
     so a payable), even when the wallet itself has no leg here. Likewise a
     cash-funded transfer into a loan (``loan_ids`` in scope, ``known_loan_ids``
-    any other the caller references) is marked ``loan_payment``.
+    any other the caller references) is marked ``loan_payment``. A transfer
+    into a loan the caller cannot access (``hidden_loan_ids``) is a neutral
+    "Loan payment": no description, ``source_id`` or ``transfer_fee`` (the
+    interest), only its amounts, date and in-scope legs.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -713,16 +717,18 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     if src_cash and dst in (known_loan_ids | loan_ids):
         # Paying a loan from cash is spending (principal and interest), so a payable.
         extra = {**extra, "loan_payment": True}
+    hidden = dst in hidden_loan_ids
+    if not hidden:
+        extra = {**extra, "transfer_fee": _money(fee)}
     return _event(
         date=date or _naive(txn.transaction_date),
-        name=txn.description or "Unposted transfer",
+        name="Loan payment" if hidden else txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
         source=source,
-        source_id=txn.id,
+        source_id=None if hidden else txn.id,
         face_amount=amount,
         legs=legs,
         counts_as_cash=False if via_unbilled else None,
-        transfer_fee=_money(fee),
         **extra,
     )
 
@@ -772,7 +778,9 @@ def collect_events(
     too, so the payment leaves cash once, in the paying account's projection.
     When the caller cannot access such a loan (``can_access_record``), its
     payable is a neutral "Loan payment": amounts and dates only, with no loan
-    name, ``source_id`` or ``loan_due_date``.
+    name, ``source_id`` or ``loan_due_date``. The same holds for a planned or
+    recurring transfer into a loan the caller cannot access (see
+    ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on both accounts. Like unposted
     transfers, recurring transfers into or out of a scoped account are collected
@@ -862,6 +870,27 @@ def collect_events(
           if t.transaction_type == TransactionType.TRANSFER),
     ))
 
+    # Active loans outside the scope paid from an in-scope account: their
+    # payables are projected here too (see below).
+    outside_payable_loans = [
+        a for a in db.query(Account).filter(
+            Account.account_type == AccountType.LOAN,
+            Account.is_active.is_(True),
+            Account.payment_account_id.in_(scoped_ids),
+        ).all() if a.id not in loan_ids
+    ] if scoped_ids else []
+    # Loans outside the scope the caller cannot access: every event paying one
+    # (derived payable, planned or recurring transfer) is a neutral "Loan payment".
+    outside_loans = {a.id: a for a in outside_payable_loans}
+    missing = known_loan_ids - loan_ids - set(outside_loans)
+    if missing:
+        outside_loans.update(
+            (a.id, a) for a in db.query(Account).filter(Account.id.in_(missing)).all())
+    caller = db.get(User, user_id) if outside_loans else None
+    hidden_loan_ids = frozenset(
+        lid for lid, a in outside_loans.items()
+        if caller is None or not can_access_record(db, caller, a))
+
     # Transactions already materialised from a recurring transfer entry, by day:
     # each stands in for one occurrence on its calendar day (as in
     # _card_entry_charges), since the posted transfer has already moved the balance.
@@ -898,7 +927,8 @@ def collect_events(
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
-                    loan_ids=loan_ids, known_loan_ids=known_loan_ids, source="budget_entry",
+                    loan_ids=loan_ids, known_loan_ids=known_loan_ids,
+                    hidden_loan_ids=hidden_loan_ids, source="budget_entry",
                     overflow_account_id=overflow_id,
                 ))
             continue
@@ -935,7 +965,8 @@ def collect_events(
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
                                           known_wallet_ids=wallet_ids, loan_ids=loan_ids,
-                                          known_loan_ids=known_loan_ids, **overdue))
+                                          known_loan_ids=known_loan_ids,
+                                          hidden_loan_ids=hidden_loan_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -997,13 +1028,7 @@ def collect_events(
     # its cash leaves the paying account's projection exactly once. A loan the
     # caller cannot access is shown as a neutral payment (no name, id or due
     # date), so projecting it never discloses the loan.
-    payable_loans = loans + ([
-        a for a in db.query(Account).filter(
-            Account.account_type == AccountType.LOAN,
-            Account.is_active.is_(True),
-            Account.payment_account_id.in_(scoped_ids),
-        ).all() if a.id not in loan_ids
-    ] if scoped_ids else [])
+    payable_loans = loans + outside_payable_loans
     payable_loan_ids = [a.id for a in payable_loans]
     loan_entries = db.query(BudgetEntry).filter(
         BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
@@ -1023,9 +1048,6 @@ def collect_events(
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
                 (occ.date(), _money(entry.amount)))
-    caller = db.get(User, user_id) if len(payable_loans) > len(loans) else None
-    hidden_loan_ids = {a.id for a in payable_loans[len(loans):]
-                       if caller is None or not can_access_record(db, caller, a)}
     for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
         hidden = p["source_id"] in hidden_loan_ids
         extra = {k: v for k, v in p.items() if k not in {

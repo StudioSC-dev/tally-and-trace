@@ -1274,3 +1274,91 @@ def test_a_loan_the_caller_cannot_access_is_a_neutral_payment_on_its_paying_acco
         db.query(Entity).filter(Entity.id.in_([owner_biz.id, payer_biz.id])).delete()
         db.query(User).filter(User.id == member.id).delete()
         db.commit()
+
+
+@pytest.mark.parametrize("how", ["planned", "recurring"])
+@pytest.mark.parametrize("amount", ["8000", "5000"])
+def test_a_payment_into_a_loan_the_caller_cannot_access_is_a_neutral_payment(db, user, how, amount):
+    import json
+    from app.core.auth import get_password_hash
+    from app.models.account import Account, AccountType
+    from app.models.budget_entry import BudgetEntry
+    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
+    from app.models.transaction import Transaction
+    from app.models.user import User
+    from app.services.forecast import (
+        get_payables, get_upcoming_items, project_running_balance, serialize_timeline,
+    )
+
+    member = User(email=f"loanpay-{os.urandom(4).hex()}@example.com",
+                  password_hash=get_password_hash("password123"),
+                  first_name="Co", last_name="Member", is_verified=True)
+    owner_biz, payer_biz = (Entity(name=f"Biz {os.urandom(3).hex()}",
+                                   entity_type=EntityType.BUSINESS) for _ in range(2))
+    db.add_all([member, owner_biz, payer_biz])
+    db.commit()
+    try:
+        db.add_all([
+            EntityMembership(entity_id=owner_biz.id, user_id=user.id, role=MemberRole.OWNER),
+            EntityMembership(entity_id=payer_biz.id, user_id=user.id, role=MemberRole.OWNER),
+            EntityMembership(entity_id=payer_biz.id, user_id=member.id, role=MemberRole.MEMBER),
+        ])
+        db.commit()
+        payer_bank = _account(db, user, "Payer bank", AccountType.CHECKING, "1000",
+                              entity_id=payer_biz.id)
+        loan = _loan(db, user, payer_bank, entity_id=owner_biz.id)
+        loan.name = "Secret car loan"
+        db.commit()
+        if how == "planned":
+            txn = _transfer(db, user, payer_bank, loan, amount, datetime(2026, 10, 4))
+            txn.description = "Loan payment: Secret car loan"
+            txn.entity_id = owner_biz.id
+            db.commit()
+            paid_id = txn.id
+        else:
+            entry = _recurring(db, user, payer_bank, loan, amount, datetime(2026, 10, 4),
+                               entity_id=owner_biz.id)
+            entry.name = "Pay Secret car loan"
+            db.commit()
+            paid_id = entry.id
+
+        def views(who):
+            timeline = serialize_timeline(project_running_balance(
+                db, who.id, payer_biz.id, days=20, reference=REF))
+            upcoming = get_upcoming_items(db, who.id, payer_biz.id, days=20, reference=REF)
+            payables = get_payables(db, who.id, payer_biz.id, days=20, reference=REF)
+            return timeline, upcoming, payables
+
+        # The payment, plus the remainder of a partial cover, both leave the
+        # paying account as neutral loan payments with no loan detail.
+        rest = 8000 - int(amount)
+        expected = sorted([(-float(amount), "Loan payment", None)]
+                          + ([(-float(rest), "Loan payment", None)] if rest else []))
+        timeline, upcoming, payables = views(member)
+        assert sorted((e["amount"], e["name"], e["source_id"])
+                      for e in timeline["events"]) == expected
+        assert timeline["closing_balance"] == 1000.0 - 8000
+        assert sorted((-float(i["amount"]), i["name"], i["source_id"])
+                      for i in upcoming) == expected
+        assert sorted((-p["amount"], p["name"], p["source_id"]) for p in payables) == expected
+        assert {p["account_id"] for p in payables} == {payer_bank.id}
+        dumped = json.dumps([timeline, upcoming, payables], default=str)
+        assert "Secret car loan" not in dumped
+        assert f'"source_id": {loan.id}' not in dumped
+        assert f'"source_id": {paid_id}' not in dumped
+
+        # The owner, who can open the loan, sees it in full.
+        timeline, upcoming, payables = views(user)
+        assert paid_id in {e["source_id"] for e in timeline["events"]}
+        assert "Secret car loan" in json.dumps([timeline, upcoming, payables], default=str)
+    finally:
+        db.rollback()
+        db.query(Transaction).filter(Transaction.user_id == user.id).delete()
+        db.query(BudgetEntry).filter(BudgetEntry.user_id == user.id).delete()
+        db.query(Account).filter(Account.user_id == user.id).update({"payment_account_id": None})
+        db.query(Account).filter(Account.entity_id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(EntityMembership).filter(
+            EntityMembership.entity_id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(Entity).filter(Entity.id.in_([owner_biz.id, payer_biz.id])).delete()
+        db.query(User).filter(User.id == member.id).delete()
+        db.commit()
