@@ -328,9 +328,10 @@ def get_disposable_income(
     is not an expense (it moves your own money), and expense entries funded from
     a wallet are not counted again. As in the summary, a recurring transfer
     counts only when its source account is in the caller's scope, and money
-    leaving a wallet for an account outside the scope stays wallet spend. A recurring income entry paid into a wallet is income and also an
-    implicit top-up, so the same amount counts as expense: moving it on to a
-    non-wallet account then nets it back out instead of counting it twice.
+    leaving a wallet for an account outside the scope stays wallet spend. A
+    recurring income entry paid into a wallet is income and also an implicit
+    top-up, so the same amount counts as expense: moving it on to a non-wallet
+    account then nets it back out instead of counting it twice.
     """
     # The caller's accounts in this scope (inactive ones included), as in the
     # period summary: a top-up counts only when its source is one of them, and a

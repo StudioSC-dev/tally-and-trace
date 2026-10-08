@@ -649,11 +649,10 @@ def summarize_period(
     - expense = non-wallet debits + cash-to-wallet transfers (amount + fee) +
       income received into a wallet + the fee on every other transfer funded from
       a non-wallet account - money moved out of a wallet, unspent, into one of the
-      caller's non-wallet accounts (e.g. GCash to a credit card payment, or back to
-      a bank). Each fee is
-      counted once, and a transfer's amount is otherwise not an expense, so a
-      card purchase of 1,000 paid from a wallet topped up for it is 1,000, not
-      2,000;
+      caller's non-wallet accounts (e.g. GCash to a credit card payment, or back
+      to a bank). Each fee is counted once, and a transfer's amount is otherwise
+      not an expense, so a card purchase of 1,000 paid from a wallet topped up for
+      it is 1,000, not 2,000;
     - debits from a wallet are not in the expense total but are shown under their
       category, and fees on transfers funded from a wallet (already expensed at
       top-up) are shown in category detail but not in the total;
