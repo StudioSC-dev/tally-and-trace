@@ -9,8 +9,8 @@ principal. ``loan_payment_kind`` marks it ``scheduled`` or ``prepayment``.
 Two amortisation modes:
 
 - ``fixed``: the bank's schedule. Payments left = ``loan_term_months`` minus the
-  scheduled payments made (``loan_payments_made_offset`` + posted scheduled
-  payments recorded since ``loan_first_payment_date``). Each payment's split is
+  scheduled payments made (``loan_payments_made_offset`` + every posted
+  scheduled payment into the loan, whatever its date). Each payment's split is
   the bank's figure, so upcoming rows carry no split. Prepayments are refused.
 - ``reduce_term``: a prepayment shortens the term. Upcoming rows are an
   amortisation preview from the owed amount at the loan's rate and payment.
@@ -153,13 +153,12 @@ def _payments_into(db: Session, loan) -> List[Transaction]:
 
 
 def payments_made(loan, payments: List[Transaction]) -> int:
-    """Scheduled payments made: the offset plus posted ones since the first payment date."""
-    first = loan.loan_first_payment_date
-    recorded = sum(
-        1 for t in payments
-        if t.loan_payment_kind == SCHEDULED
-        and (first is None or t.transaction_date.date() >= first)
-    )
+    """Scheduled payments made: the offset plus every posted scheduled payment into the loan.
+
+    Not filtered by date: a payment made before its due date (an early
+    auto-debit, or a UTC timestamp that is the next day in Manila) still counts.
+    """
+    recorded = sum(1 for t in payments if t.loan_payment_kind == SCHEDULED)
     return (loan.loan_payments_made_offset or 0) + recorded
 
 

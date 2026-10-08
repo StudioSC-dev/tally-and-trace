@@ -218,6 +218,21 @@ def test_fixed_loan_counts_payments_left_from_the_term(client, people):
     assert s["upcoming"][0]["principal"] is None and s["upcoming"][0]["interest"] is None
 
 
+def test_a_first_payment_made_before_its_due_date_counts(client, people):
+    """An early auto-debit (or a UTC timestamp before 08:00 Manila) is still payment #1."""
+    me = people()
+    bank = _bank(client, me)
+    loan = _loan(client, me, payment_account_id=bank["id"])  # first due 2026-03-04
+
+    r = _pay(client, me, loan["id"], principal=20_000, interest=8_239,
+             transaction_date="2026-03-03T23:00:00")
+    assert r.status_code == 200, r.text
+    s = _schedule(client, me, loan["id"]).json()
+    assert s["payments_made"] == 1
+    assert s["payments_left"] == 59
+    assert s["next_due_date"] == "2026-04-04"
+
+
 def test_schedule_is_built_from_the_banks_balance_and_split(client, people):
     me = people()
     bank = _bank(client, me)
