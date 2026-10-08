@@ -607,3 +607,39 @@ def test_a_co_member_still_edits_and_deletes_an_in_scope_transaction(client, peo
     r = client.delete(f"{API}/transactions/{txn_id}", headers=member_h["headers"])
     assert r.status_code == 200, r.text
     assert _balance(client, owner, bank["id"]) == Decimal("1000.00")
+
+
+# --- money values ------------------------------------------------------------
+
+def test_fractional_cents_are_rejected(client, people):
+    me = people()
+    bank = _bank(client, me, balance=1_000)
+    home = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=bank["id"])
+
+    r = _prepay(client, me, home["id"], amount=0.005)
+    assert r.status_code in (400, 422), r.text
+    r = _pay(client, me, home["id"], amount=0.01, principal=0.005, interest=0.005)
+    assert r.status_code in (400, 422), r.text
+    for payload in ({"amount": "NaN"}, {"principal": "Infinity", "interest": 0}):
+        r = _pay(client, me, home["id"], **payload)
+        assert r.status_code in (400, 422), r.text
+    assert _balance(client, me, bank["id"]) == Decimal("1000.00")
+    assert _balance(client, me, home["id"]) == Decimal("-1000.00")
+    assert _schedule(client, me, home["id"]).json()["payments"] == []
+
+
+def test_delete_after_a_payment_restores_balances_exactly(client, people):
+    me = people()
+    bank = _bank(client, me, balance=1_000.33)
+    loan = _loan(client, me, balance=-500.07, payment_account_id=bank["id"])
+
+    r = _pay(client, me, loan["id"], amount=100.30, principal=100.10, interest=0.20)
+    assert r.status_code == 200, r.text
+    assert (r.json()["amount"], r.json()["transfer_fee"]) == (100.10, 0.20)
+    assert _balance(client, me, bank["id"]) == Decimal("900.03")
+    assert _balance(client, me, loan["id"]) == Decimal("-399.97")
+
+    assert client.delete(f"{API}/transactions/{r.json()['id']}",
+                         headers=me["headers"]).status_code == 200
+    assert _balance(client, me, bank["id"]) == Decimal("1000.33")
+    assert _balance(client, me, loan["id"]) == Decimal("-500.07")

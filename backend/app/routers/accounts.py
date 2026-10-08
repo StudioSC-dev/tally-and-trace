@@ -338,8 +338,12 @@ def _when(value: Optional[datetime]) -> datetime:
     return value.astimezone(timezone.utc).replace(tzinfo=None) if value.tzinfo else value
 
 
-def _dec(value: Optional[float]) -> Optional[Decimal]:
-    return Decimal(str(value)) if value is not None else None
+def _cents(value: Optional[Decimal]) -> Optional[Decimal]:
+    """The normalised money value (whole cents) used for every check and write."""
+    try:
+        return loan_svc.cents(value)
+    except loan_svc.LoanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _record(db: Session, current_user: User, loan: Account, funding: Account,
@@ -372,7 +376,8 @@ def record_loan_payment(
     """
     loan = _loan_or_404(db, current_user, account_id)
     funding = _loan_funding(db, current_user, loan, payment.from_account_id)
-    total, principal, interest = _dec(payment.amount), _dec(payment.principal), _dec(payment.interest)
+    total, principal, interest = (
+        _cents(payment.amount), _cents(payment.principal), _cents(payment.interest))
     if None not in (total, principal, interest) and principal + interest != total:
         raise HTTPException(status_code=400, detail="principal + interest must equal amount")
     try:
@@ -398,7 +403,7 @@ def record_loan_prepayment(
             detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
         )
     funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
-    return _record(db, current_user, loan, funding, _dec(prepayment.amount), Decimal("0"),
+    return _record(db, current_user, loan, funding, _cents(prepayment.amount), Decimal("0"),
                    loan_svc.PREPAYMENT, prepayment)
 
 

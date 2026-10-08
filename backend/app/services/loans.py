@@ -47,6 +47,23 @@ def _money(value) -> Decimal:
     return Decimal(str(value)).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
+def cents(value) -> Optional[Decimal]:
+    """``value`` as a Decimal of whole cents; refused if non-finite or finer than a cent.
+
+    None passes through. Every check, the persisted row and the balance
+    arithmetic use this one normalised value.
+    """
+    if value is None:
+        return None
+    amount = Decimal(str(value))
+    if not amount.is_finite():
+        raise LoanError("Money values must be finite numbers")
+    quantized = amount.quantize(_CENTS)
+    if quantized != amount:
+        raise LoanError("Money values can have at most 2 decimal places")
+    return quantized
+
+
 def default_amortization(loan_kind: Optional[str]) -> str:
     """Home loans shorten their term on prepayment by default; others follow the bank."""
     return REDUCE_TERM if loan_kind == "home" else FIXED
@@ -215,6 +232,7 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
                    principal: Decimal, interest: Decimal, kind: str,
                    when: datetime, is_posted: bool, description: Optional[str]) -> Transaction:
     """Add the transfer funding -> loan and apply it to both balances (not committed)."""
+    principal, interest = cents(principal), cents(interest)
     if principal < 0 or interest < 0:
         raise LoanError("Principal and interest cannot be negative")
     if principal + interest <= 0:

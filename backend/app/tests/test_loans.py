@@ -3,9 +3,13 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.transaction import TransactionType
 from app.routers.transactions import summarize_period
-from app.services.loans import amortize, default_amortization, due_date, propose_split
+from app.services.loans import (
+    LoanError, amortize, cents, default_amortization, due_date, propose_split,
+)
 
 BANK, GCASH, LOAN = 1, 2, 3
 
@@ -83,3 +87,12 @@ def test_amortize_pays_off_the_balance_and_a_prepayment_shortens_it():
 
     # A payment that never covers the interest never repays the loan.
     assert amortize(Decimal("100000"), Decimal("36"), Decimal("1000"), date(2026, 11, 4)) is None
+
+
+def test_cents_normalises_whole_cents_and_refuses_finer_or_non_finite_values():
+    assert cents(None) is None
+    assert cents(Decimal("100.1")) == Decimal("100.10")
+    assert cents(28239.05) == Decimal("28239.05")
+    for bad in (Decimal("0.005"), 0.005, Decimal("NaN"), Decimal("Infinity")):
+        with pytest.raises(LoanError):
+            cents(bad)
