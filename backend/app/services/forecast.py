@@ -80,8 +80,36 @@ def is_projection_cash(account) -> bool:
 
     Credit-card balances are money owed, not cash: card spending reaches cash only
     when the statement is paid (modelled as dated statement payables).
+
+    Spending wallets (cash on hand, e-wallets) are not projection cash either:
+    their balance is shown, but topping one up is where the money leaves the
+    projection (see ``_transfer_event``), and spending from it is not counted again.
     """
-    return account.account_type != AccountType.CREDIT
+    if account.account_type == AccountType.CREDIT:
+        return False
+    return not getattr(account, "is_spending_wallet", False)
+
+
+def is_spending_wallet(account) -> bool:
+    """A non-credit account flagged as a spending wallet."""
+    return account.account_type != AccountType.CREDIT and bool(
+        getattr(account, "is_spending_wallet", False)
+    )
+
+
+def wallet_ids_of(db: Session, account_ids) -> frozenset:
+    """The spending wallets among ``account_ids``, judged from the accounts themselves.
+
+    Scope and ``is_active`` decide which legs a projection keeps, never whether an
+    account is a wallet: an entry funded from another entity's wallet, or from an
+    inactive one, is still wallet spending, not projection cash.
+    """
+    ids = {i for i in account_ids if i is not None}
+    if not ids:
+        return frozenset()
+    return frozenset(
+        a.id for a in db.query(Account).filter(Account.id.in_(ids)).all() if is_spending_wallet(a)
+    )
 
 
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
@@ -251,9 +279,10 @@ def get_payables(
     """Cash outflows due within the next N days, with the account each draws on.
 
     Same window and events as ``get_upcoming_items``, restricted to events that
-    take cash out of the pool (bills, unposted debits, card statements and planned
-    card payments). Other transfers between your own accounts are not payables;
-    card charges reach cash via their statement payable instead.
+    take cash out of the pool (bills, unposted debits, card statements, planned
+    card payments, and spending-wallet top-ups for their amount + fee: topping a
+    wallet up is the spending). Other transfers between your own accounts are not
+    payables; card charges reach cash via their statement payable instead.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -264,7 +293,8 @@ def get_payables(
     for e in sorted(events, key=_event_sort_key):
         if not e["counts_as_cash"] or e["amount"] >= 0:
             continue
-        if e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment"):
+        if (e["type"] == TransactionType.TRANSFER.value
+                and not e.get("card_payment") and not e.get("top_up")):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -290,20 +320,71 @@ def get_disposable_income(
     """
     Compute monthly net disposable income:
     total monthly income - total monthly expenses (normalised from each cadence).
+
+    Spending wallets are expensed when topped up, as in the period summary: a
+    recurring transfer into a wallet from a non-wallet account is an expense, a
+    recurring transfer out of a wallet into one of the caller's non-wallet
+    accounts (money returned, unspent) offsets it, any other recurring transfer
+    is not an expense (it moves your own money), and expense entries funded from
+    a wallet are not counted again. As in the summary, a recurring transfer
+    counts only when its source account is in the caller's scope, and money
+    leaving a wallet for an account outside the scope stays wallet spend. A
+    recurring income entry paid into a wallet is income and also an implicit
+    top-up, so the same amount counts as expense: moving it on to a non-wallet
+    account then nets it back out instead of counting it twice.
     """
+    # The caller's accounts in this scope (inactive ones included), as in the
+    # period summary: a top-up counts only when its source is one of them, and a
+    # return only when both the wallet and the destination are.
+    scope_ids = {
+        a.id for a in db.query(Account.id).filter(
+            scope_criterion(Account, user_id, entity_id)
+        ).all()
+    }
+    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
+    if scope_ids:
+        # Recurring transfers touching an in-scope account, wherever the entry lives.
+        entry_scope = or_(entry_scope, and_(
+            BudgetEntry.transfer_to_account_id.isnot(None),
+            or_(
+                BudgetEntry.transfer_to_account_id.in_(scope_ids),
+                BudgetEntry.account_id.in_(scope_ids),
+            ),
+        ))
     be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
+        entry_scope,
         BudgetEntry.is_active.is_(True),
     )
+    entries = be_query.all()
+    referenced = {
+        acc_id for e in entries
+        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id is not None
+    }
+    wallet_ids = {
+        a.id for a in db.query(Account).filter(Account.id.in_(referenced)).all()
+        if is_spending_wallet(a)
+    } if referenced else set()
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0
 
-    for entry in be_query.all():
+    for entry in entries:
         monthly = _monthly_equivalent(entry.amount, entry.cadence)
+        if entry.transfer_to_account_id is not None:
+            to_wallet = entry.transfer_to_account_id in wallet_ids
+            from_wallet = entry.account_id in wallet_ids
+            if entry.account_id not in scope_ids:
+                continue  # inbound from outside the caller's scope
+            if to_wallet and not from_wallet:
+                monthly_expenses += monthly
+            elif from_wallet and not to_wallet and entry.transfer_to_account_id in scope_ids:
+                monthly_expenses -= monthly
+            continue
         if entry.entry_type == BudgetEntryType.INCOME:
             monthly_income += monthly
-        else:
+            if entry.account_id in wallet_ids:
+                monthly_expenses += monthly  # income into a wallet is a top-up
+        elif entry.account_id not in wallet_ids:
             monthly_expenses += monthly
 
     disposable = monthly_income - monthly_expenses
@@ -534,17 +615,33 @@ def _event_sort_key(e: dict):
 
 def _transfer_event(txn, cash_ids: set, card_ids: set,
                     date: Optional[datetime] = None, *,
-                    billed_ids: Optional[set] = None, **extra) -> dict:
+                    billed_ids: Optional[set] = None,
+                    wallet_ids: frozenset = frozenset(),
+                    known_wallet_ids: frozenset = frozenset(),
+                    source: str = "transaction",
+                    overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
-    Legs are kept only for accounts in the projection's scope (``cash_ids`` and
-    ``card_ids``); an account outside it (another entity's, or an inactive one) is
-    never exposed. A leg is cash when its account is a projection-cash account, so:
+    Legs are kept only for accounts in the projection's scope (``cash_ids``,
+    ``card_ids`` and ``wallet_ids``); an account outside it (another entity's, or
+    an inactive one) is never exposed. A leg is cash when its account is a
+    projection-cash account, so:
 
     - between two projection-cash accounts the pooled total moves only by the fee,
       while each account's balance moves by its own leg;
     - out of the pool to an outside account costs the pool amount + fee;
     - into the pool from an outside account adds the amount.
+
+    A spending wallet's leg is never cash, so a top-up (cash to wallet) costs the
+    source amount + fee, and money moved from a wallet back to a cash account adds
+    the amount to it; a transfer between two wallets moves no projection cash.
+    ``known_wallet_ids`` are every wallet the caller has classified, in scope or
+    not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
+    so a payable), even when the wallet itself has no leg here.
+
+    ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
+    reuse this: its occurrences are transfers whose source leg routes to the
+    entry's overflow account like any other payment from that account.
 
     A transfer INTO a credit card (a card payment) is cash on the paying account:
     statements net payments (services/statements.py), so the statement payable
@@ -573,20 +670,23 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
     fee = Decimal(str(txn.transfer_fee or 0))
-    scoped = cash_ids | card_ids
+    scoped = cash_ids | card_ids | wallet_ids
     via_unbilled = src in unbilled or dst in unbilled
+    src_cash = src in cash_ids and not via_unbilled
     legs = []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), cash=src in cash_ids and not via_unbilled))
+        legs.append(_leg(src, -(amount + fee), overflow_account_id, cash=src_cash))
     if dst in scoped:
         legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
     if dst in billed_ids:
         extra = {**extra, "card_payment": True}
+    if src_cash and dst in (known_wallet_ids | wallet_ids):
+        extra = {**extra, "top_up": True}
     return _event(
         date=date or _naive(txn.transaction_date),
         name=txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
-        source="transaction",
+        source=source,
         source_id=txn.id,
         face_amount=amount,
         legs=legs,
@@ -623,6 +723,23 @@ def collect_events(
     legs are kept; a card's own leg is never cash, while the other side of a card
     payment or cash advance is (see ``_transfer_event``).
 
+    Spending wallets are not projection cash. Transfers into or out of one keep
+    their legs (the wallet's never cash, see ``_transfer_event``); a wallet's other
+    unposted transactions and budget entries funded from a wallet (other than
+    recurring transfers) are skipped. Whether an account is a wallet is read from
+    the account itself (``wallet_ids_of``), so a wallet outside the scope or
+    inactive is still a wallet. A statement payable funded from a wallet has a
+    non-cash funding leg: the wallet's money left projection cash when it was
+    topped up, so paying the card from it must not take cash out a second time.
+    A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
+    occurrence is a transfer event with legs on both accounts. Like unposted
+    transfers, recurring transfers into or out of a scoped account are collected
+    even when the entry belongs to another scope, keeping only the in-scope legs.
+    An occurrence already materialised is suppressed: a transaction with this
+    ``budget_entry_id`` dated the same calendar day stands in for it (each
+    transaction suppresses at most one occurrence), so a ``materialize`` with
+    ``advance=False`` does not move the money twice.
+
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
@@ -638,19 +755,103 @@ def collect_events(
     if accounts is None:
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
-    card_ids = {a.id for a in accounts if not is_projection_cash(a)}
+    card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
+    # In-scope wallets: their legs are kept (never as cash).
+    scoped_wallet_ids = frozenset(a.id for a in accounts if is_spending_wallet(a))
     # Cards whose statements are modelled; the rest keep their charges as cash.
     billed_ids = {a.id for a in accounts
                   if a.id in card_ids and resolve_cycle_fields(a) is not None}
+    scoped_ids = cash_ids | card_ids | scoped_wallet_ids
 
     events: List[dict] = []
 
-    be_query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, user_id, entity_id),
+    def entry_in_scope(entry) -> bool:
+        # Mirrors scope_criterion(BudgetEntry, user_id, entity_id).
+        if entity_id is not None:
+            return entry.entity_id == entity_id
+        return entry.user_id == user_id
+
+    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
+    if scoped_ids:
+        # Recurring transfers touching an in-scope account, wherever the entry lives.
+        entry_scope = or_(entry_scope, and_(
+            BudgetEntry.transfer_to_account_id.isnot(None),
+            or_(
+                BudgetEntry.transfer_to_account_id.in_(scoped_ids),
+                BudgetEntry.account_id.in_(scoped_ids),
+            ),
+        ))
+    entries = db.query(BudgetEntry).filter(
+        entry_scope,
         BudgetEntry.is_active.is_(True),
-    )
+    ).all()
+
+    in_scope = scope_criterion(Transaction, user_id, entity_id)
+    if scoped_ids:
+        in_scope = or_(in_scope, and_(
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            or_(
+                Transaction.transfer_to_account_id.in_(scoped_ids),
+                Transaction.transfer_from_account_id.in_(scoped_ids),
+            ),
+        ))
+    txns = db.query(Transaction).filter(
+        in_scope,
+        Transaction.is_posted.is_(False),
+        Transaction.transaction_date < end,
+    ).all()
+
+    # Every wallet any event references, in scope or not.
+    wallet_ids = scoped_wallet_ids | wallet_ids_of(db, (
+        *(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id)),
+        *(acc for t in txns
+          for acc in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)),
+        *(acc for a in accounts if a.id in billed_ids
+          for acc in (a.payment_account_id, a.payment_overflow_account_id)),
+    ))
+
+    # Transactions already materialised from a recurring transfer entry, by day:
+    # each stands in for one occurrence on its calendar day (as in
+    # _card_entry_charges), since the posted transfer has already moved the balance.
+    transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
+    linked = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
+    ) if transfer_entry_ids else Counter()
+
     card_entries = []
-    for entry in be_query.all():
+    for entry in entries:
+        if entry.transfer_to_account_id is not None:
+            # Another scope's entry keeps only its in-scope legs (see _transfer_event),
+            # and its overflow routing only when that account is in scope too.
+            overflow_id = entry.overflow_account_id
+            if not entry_in_scope(entry) and overflow_id not in cash_ids:
+                overflow_id = None
+            for occ in iter_occurrences(entry, start, end):
+                key = (entry.id, occ.date())
+                if linked[key]:
+                    linked[key] -= 1
+                    continue  # already materialised (e.g. advance=False)
+                events.append(_transfer_event(
+                    SimpleNamespace(
+                        id=entry.id,
+                        account_id=entry.account_id,
+                        transfer_from_account_id=entry.account_id,
+                        transfer_to_account_id=entry.transfer_to_account_id,
+                        amount=entry.amount,
+                        transfer_fee=0,
+                        transaction_type=TransactionType.TRANSFER,
+                        description=entry.name,
+                    ),
+                    cash_ids, card_ids, date=occ, billed_ids=billed_ids,
+                    wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
+                    source="budget_entry",
+                    overflow_account_id=overflow_id,
+                ))
+            continue
+        if entry.account_id in wallet_ids:
+            continue  # wallet-funded: spending from a wallet is not projection cash
         if entry.account_id in billed_ids:
             card_entries.append(entry)
             continue
@@ -667,22 +868,9 @@ def collect_events(
                            entry.overflow_account_id)],
             ))
 
-    in_scope = scope_criterion(Transaction, user_id, entity_id)
-    scoped_ids = cash_ids | card_ids
-    if scoped_ids:
-        in_scope = or_(in_scope, and_(
-            Transaction.transaction_type == TransactionType.TRANSFER,
-            or_(
-                Transaction.transfer_to_account_id.in_(scoped_ids),
-                Transaction.transfer_from_account_id.in_(scoped_ids),
-            ),
-        ))
-    txn_query = db.query(Transaction).filter(
-        in_scope,
-        Transaction.is_posted.is_(False),
-        Transaction.transaction_date < end,
-    )
-    for txn in txn_query.all():
+    for txn in txns:
+        if txn.transaction_type != TransactionType.TRANSFER and txn.account_id in wallet_ids:
+            continue  # wallet spending/income is not projection cash
         when = _naive(txn.transaction_date)
         overdue: dict = {}
         if when < start:
@@ -693,7 +881,8 @@ def collect_events(
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
-                                          billed_ids=billed_ids, **overdue))
+                                          billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
+                                          known_wallet_ids=wallet_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -734,7 +923,8 @@ def collect_events(
             source=p["source"],
             source_id=p["source_id"],
             face_amount=-p["amount"],
-            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"])],
+            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
+                       cash=p["funding_account_id"] not in wallet_ids)],
             **extra,
         ))
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.account import AccountType
@@ -20,6 +20,8 @@ class AccountBase(BaseModel):
     # Where the statement payment is funded from (primary -> overflow, as on budget entries).
     payment_account_id: Optional[int] = Field(None, gt=0)
     payment_overflow_account_id: Optional[int] = Field(None, gt=0)
+    # Spending wallet (cash on hand, e-wallet): balance shown, not projection cash.
+    is_spending_wallet: bool = False
 
 class AccountCreate(AccountBase):
     is_active: bool = True
@@ -37,7 +39,16 @@ class AccountUpdate(BaseModel):
     days_until_due_date: Optional[int] = Field(None, ge=1, le=90)
     payment_account_id: Optional[int] = Field(None, gt=0)
     payment_overflow_account_id: Optional[int] = Field(None, gt=0)
+    is_spending_wallet: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @field_validator("is_spending_wallet")
+    @classmethod
+    def _wallet_flag_not_null(cls, v):
+        # Omit the field to leave it unchanged; an explicit null would violate NOT NULL.
+        if v is None:
+            raise ValueError("is_spending_wallet cannot be null")
+        return v
 
 class AccountResponse(AccountBase):
     id: int

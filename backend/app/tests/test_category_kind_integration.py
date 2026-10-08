@@ -123,6 +123,13 @@ def test_categorised_transfer_moves_balances_and_stays_out_of_totals(client):
     # Isolated future window so only our transfer falls in the summary period.
     window = {"start_date": "2035-01-01T00:00:00", "end_date": "2035-01-31T23:59:59"}
 
+    def _summary():
+        body = client.get(f"{API}/transactions/summary/period", headers=h, params=window).json()
+        fees = body["category_breakdown"].get("Transfer fees", {"expenses": 0})["expenses"]
+        return body, Decimal(str(body["summary"]["total_expenses"])), Decimal(str(fees))
+
+    _, expenses_before, fees_before = _summary()
+
     r = client.post(f"{API}/transactions/", headers=h, json={
         "account_id": checking,
         "transaction_type": "transfer",
@@ -144,8 +151,10 @@ def test_categorised_transfer_moves_balances_and_stays_out_of_totals(client):
     assert _balance(client, h, checking) == before_checking - Decimal("1500.00") - Decimal("25.00")
     assert _balance(client, h, savings) == before_savings + Decimal("1500.00")
 
-    # Excluded from income/expense: the contribution is not spending or income.
-    summary = client.get(f"{API}/transactions/summary/period", headers=h, params=window).json()
+    # The contribution is not spending or income; only its fee is an expense,
+    # shown as a transfer fee rather than under the transfer's category.
+    summary, expenses_after, fees_after = _summary()
     assert Decimal(str(summary["summary"]["total_income"])) == Decimal("0")
-    assert Decimal(str(summary["summary"]["total_expenses"])) == Decimal("0")
+    assert expenses_after - expenses_before == Decimal("25.00")
+    assert fees_after - fees_before == Decimal("25.00")
     assert contribution["name"] not in summary["category_breakdown"]

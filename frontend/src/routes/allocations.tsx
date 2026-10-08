@@ -230,6 +230,8 @@ type SubscriptionFormState = {
   currency: CurrencyCode
   account_id: number
   overflow_account_id?: number
+  /** Recurring transfer destination: occurrences move money from account_id here. */
+  transfer_to_account_id?: number
   category_id?: number
   allocation_id?: number
   cadence: BudgetEntry['cadence']
@@ -312,6 +314,7 @@ export function AllocationsPage() {
       amount: 0,
       currency: defaultCurrencyCode,
       account_id: 0,
+      transfer_to_account_id: undefined,
       category_id: undefined,
       allocation_id: undefined,
       cadence: 'monthly',
@@ -623,6 +626,7 @@ export function AllocationsPage() {
           currency: (entry.currency as CurrencyCode) || defaultCurrencyCode,
           account_id: entry.account_id ?? 0,
           overflow_account_id: entry.overflow_account_id ?? undefined,
+          transfer_to_account_id: entry.transfer_to_account_id ?? undefined,
           category_id: entry.category_id ?? undefined,
           allocation_id: entry.allocation_id ?? undefined,
           cadence: entry.cadence,
@@ -661,6 +665,11 @@ export function AllocationsPage() {
       ...prev,
       account_id: accountId,
       currency: (account?.currency as CurrencyCode) || prev.currency,
+      // A transfer can't come from a card or go to its own source.
+      transfer_to_account_id:
+        account?.account_type === 'credit' || prev.transfer_to_account_id === accountId
+          ? undefined
+          : prev.transfer_to_account_id,
     }))
   }
 
@@ -774,7 +783,12 @@ export function AllocationsPage() {
           amount: subscriptionForm.amount,
           currency: subscriptionForm.currency,
           account_id: subscriptionForm.account_id,
-          overflow_account_id: subscriptionForm.overflow_account_id || undefined,
+          // null clears the overflow account on edit; omitted on create.
+          overflow_account_id: subscriptionForm.overflow_account_id || (editingBudgetEntry ? null : undefined),
+          // null clears a destination on edit; omitted on create. Only expenses carry one.
+          transfer_to_account_id:
+            (subscriptionForm.entry_type === 'expense' && subscriptionForm.transfer_to_account_id) ||
+            (editingBudgetEntry ? null : undefined),
           category_id: subscriptionForm.category_id || undefined,
           allocation_id: subscriptionForm.allocation_id ?? undefined,
           cadence: subscriptionForm.cadence,
@@ -1239,6 +1253,7 @@ export function AllocationsPage() {
 
   const renderBudgetEntryCard = (entry: BudgetEntry) => {
     const account = entry.account_id ? accountsById.get(entry.account_id) : undefined
+    const transferTo = entry.transfer_to_account_id ? accountsById.get(entry.transfer_to_account_id) : undefined
     const category = entry.category_id ? categoriesById.get(entry.category_id) : undefined
     const allocation = entry.allocation_id ? allocationsById.get(entry.allocation_id) : undefined
     const cadenceLabel = formatCadenceLabel(entry.cadence)
@@ -1323,6 +1338,11 @@ export function AllocationsPage() {
             {account && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                 Account: {account.name}
+              </span>
+            )}
+            {transferTo && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                Transfer to: {transferTo.name}
               </span>
             )}
             {category && (
@@ -1741,7 +1761,14 @@ export function AllocationsPage() {
                           <button
                             type="button"
                             key={type}
-                            onClick={() => setSubscriptionForm((prev) => ({ ...prev, entry_type: type }))}
+                            onClick={() =>
+                              setSubscriptionForm((prev) => ({
+                                ...prev,
+                                entry_type: type,
+                                // Only an expense can be a recurring transfer; the picker hides for income.
+                                transfer_to_account_id: type === 'expense' ? prev.transfer_to_account_id : undefined,
+                              }))
+                            }
                             className={`px-3 py-1 text-sm font-semibold transition ${ isActive ? 'bg-ink text-paper' : 'text-body hover:bg-sunken' }`}
                           >
                             {type === 'expense' ? 'Expense' : 'Income'}
@@ -1799,11 +1826,34 @@ export function AllocationsPage() {
                     className="mt-1 block w-full border border-line px-3 py-2"
                   >
                     <option value={0}>None</option>
-                    {accounts.filter((a) => a.id !== subscriptionForm.account_id).map((account) => (
+                    {accounts.filter((a) => a.id !== subscriptionForm.account_id && !a.is_spending_wallet).map((account) => (
                       <option key={account.id} value={account.id}>{account.name}</option>
                     ))}
                   </select>
                   <p className="mt-1 text-xs text-muted">If the primary account can't cover a payment, the shortfall is drawn from here.</p>
+                </div>
+              )}
+
+              {subscriptionForm.entry_type === 'expense' && (
+                <div>
+                  <label className="block text-sm font-medium text-body">Transfer to (optional)</label>
+                  <select
+                    value={subscriptionForm.transfer_to_account_id ?? 0}
+                    onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, transfer_to_account_id: parseInt(e.target.value) || undefined }))}
+                    className="mt-1 block w-full border border-line px-3 py-2"
+                    disabled={accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'}
+                  >
+                    <option value={0}>None (a payment)</option>
+                    {accounts
+                      .filter((a) => a.account_type !== 'credit' && a.id !== subscriptionForm.account_id)
+                      .map((account) => (
+                        <option key={account.id} value={account.id}>{account.name}</option>
+                      ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    Makes this a recurring transfer from the account above, e.g. moving money to the account a loan is
+                    paid from. Not available from or to a credit card.
+                  </p>
                 </div>
               )}
 

@@ -66,6 +66,9 @@ class BudgetEntry(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # UC1: secondary funding source — payments draw from account_id first, overflow here.
     overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Recurring transfer: when set, occurrences move money from account_id to this
+    # (non-credit) account and materialise as transfer transactions.
+    transfer_to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     allocation_id = Column(Integer, ForeignKey("allocations.id"), nullable=True)
 
@@ -79,6 +82,7 @@ class BudgetEntry(Base):
     entity = relationship("Entity", back_populates="budget_entries", foreign_keys="BudgetEntry.entity_id")
     account = relationship("Account", back_populates="budget_entries", foreign_keys=[account_id])
     overflow_account = relationship("Account", foreign_keys=[overflow_account_id])
+    transfer_to_account = relationship("Account", foreign_keys=[transfer_to_account_id])
     category = relationship("Category", back_populates="budget_entries")
     allocation = relationship("Allocation", back_populates="budget_entries")
     transactions = relationship(

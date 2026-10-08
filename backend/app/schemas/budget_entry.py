@@ -21,6 +21,8 @@ class BudgetEntryBase(BaseModel):
     end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
     account_id: Optional[int] = Field(None, gt=0)
     overflow_account_id: Optional[int] = Field(None, gt=0)
+    # Recurring transfer: occurrences move money from account_id to this account.
+    transfer_to_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     is_autopay: bool = False
@@ -65,6 +67,7 @@ class BudgetEntryUpdate(BaseModel):
     semi_monthly_day_2: Optional[int] = Field(None, ge=1, le=31)
     account_id: Optional[int] = Field(None, gt=0)
     overflow_account_id: Optional[int] = Field(None, gt=0)
+    transfer_to_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
     is_autopay: Optional[bool] = None
@@ -107,4 +110,5 @@ class BudgetEntryMaterialize(BaseModel):
     transaction_date: Optional[datetime] = None  # defaults to the entry's next_occurrence
     amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
     advance: bool = True                          # advance next_occurrence to the following one
+    transfer_fee: float = Field(0, ge=0)          # transfer entries only: fee charged on the source
 

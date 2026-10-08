@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, Boolean, ForeignKey, Enum, text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -45,6 +45,13 @@ class Account(Base):
     
     # Entity scoping (nullable – existing data retains null until backfilled)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
+
+    # Spending wallet (cash on hand, e-wallets): the balance is shown but is not
+    # projection cash. Topping one up is the expense; spending from it is
+    # categorised without being counted again.
+    is_spending_wallet = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # Account status
     is_active = Column(Boolean, default=True)

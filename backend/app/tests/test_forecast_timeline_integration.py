@@ -48,11 +48,14 @@ def _auth_headers(client):
 def test_timeline_endpoint_shape_and_excludes_credit(client):
     h = _auth_headers(client)
 
-    # Expected opening = sum of NON-credit active account balances (user-scoped).
+    # Expected opening = sum of active account balances that are neither credit
+    # cards nor spending wallets (user-scoped).
     accts = client.get(f"{API}/accounts/", headers=h, params={"limit": 1000}).json()
     items = accts["items"] if isinstance(accts, dict) else accts
     expected_opening = round(
-        sum(a["balance"] for a in items if a["account_type"] != "credit" and a.get("is_active", True)),
+        sum(a["balance"] for a in items
+            if a["account_type"] != "credit" and not a["is_spending_wallet"]
+            and a.get("is_active", True)),
         2,
     )
 
