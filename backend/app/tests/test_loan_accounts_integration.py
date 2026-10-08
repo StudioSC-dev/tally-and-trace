@@ -894,14 +894,17 @@ def test_a_loans_paying_account_must_be_in_the_loans_currency(client, people):
     assert r.status_code == 200, r.text
 
 
-def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
+def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people, db):
+    from app.models.account import Account
+    from app.models.user import CurrencyType
+
     me = people()
     usd = _bank(client, me, name="Bank", balance=10_000)
     loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=usd["id"])
-    # In the loan's currency when it was routed, then moved to another one.
-    r = client.put(f"{API}/accounts/{usd['id']}", json={"currency": "USD"},
-                   headers=me["headers"])
-    assert r.status_code == 200, r.text
+    # In the loan's currency when it was routed, then moved to another one (as
+    # legacy data could be: the account update now refuses it).
+    db.query(Account).filter(Account.id == usd["id"]).update({"currency": CurrencyType.USD})
+    db.commit()
 
     r = _pay(client, me, loan["id"], principal=100, interest=10)
     assert r.status_code == 400 and "currency" in r.text, r.text
@@ -993,3 +996,27 @@ def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, pe
     # The owner, who can see the loan, gets its interest row.
     rows = _summary(client, owner)["category_breakdown"]
     assert Decimal(str(rows["Interest: Owner Private Loan"]["expenses"])) == Decimal("50")
+
+
+@pytest.mark.parametrize("body", [{"currency": "USD"}, {"account_type": "credit"},
+                                  {"is_spending_wallet": True}])
+def test_a_loans_paying_account_cannot_change_out_from_under_its_routing(client, people, body):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    other = _bank(client, me, name="Other bank", balance=10_000)
+    loan = _loan(client, me, payment_account_id=bank["id"])
+
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    r = client.get(f"{API}/accounts/{bank['id']}", headers=me["headers"])
+    assert (r.json()["currency"], r.json()["account_type"], r.json()["is_spending_wallet"]) == (
+        "PHP", "savings", False)
+    assert client.put(f"{API}/accounts/{bank['id']}", json={"name": "Renamed"},
+                      headers=me["headers"]).status_code == 200
+
+    # Once the loan is paid from another account, the change goes through.
+    r = client.put(f"{API}/accounts/{loan['id']}", json={"payment_account_id": other["id"]},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 200, r.text

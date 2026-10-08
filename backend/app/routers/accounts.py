@@ -108,6 +108,42 @@ def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account
         )
 
 
+def _validate_loan_payer(db: Session, data: dict, account: Account) -> None:
+    """Keep an account that pays an active loan eligible to pay it.
+
+    A loan's ``payment_account_id`` is checked when it is routed: a funding
+    account (``_funding_account``: not a credit card, a loan or a spending
+    wallet) in the loan's currency. An update to that account must not break
+    either rule afterwards, or the loan would be projected from an account that
+    can no longer pay it; the loan has to be re-routed first.
+    """
+    loans = db.query(Account).filter(
+        Account.account_type == AccountType.LOAN,
+        Account.is_active.is_(True),
+        Account.payment_account_id == account.id,
+    ).all()
+    if not loans:
+        return
+    account_type = data.get("account_type", account.account_type)
+    wallet = data.get("is_spending_wallet", account.is_spending_wallet)
+    ineligible = (("account_type" in data or "is_spending_wallet" in data)
+                  and (account_type in (AccountType.CREDIT, AccountType.LOAN) or wallet))
+    currency_mismatch = ("currency" in data
+                         and any(loan.currency != data["currency"] for loan in loans))
+    if ineligible:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan, which needs a funding account (not a credit "
+                   "card, loan or spending wallet); re-route the loan's payment account first",
+        )
+    if currency_mismatch:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan in another currency; "
+                   "re-route the loan's payment account first",
+        )
+
+
 LOAN_FIELDS = (
     "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
     "loan_first_payment_date", "loan_amortization", "loan_payments_made_offset",
@@ -247,6 +283,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     if "entity_id" in update_data:
         validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
+    _validate_loan_payer(db, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
     for field, value in update_data.items():
