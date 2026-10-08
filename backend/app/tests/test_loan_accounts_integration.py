@@ -875,10 +875,32 @@ def test_a_money_edit_on_a_posted_payment_rechecks_the_funding_account(client, p
     assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
 
 
+def test_a_loans_paying_account_must_be_in_the_loans_currency(client, people):
+    me = people()
+    php = _bank(client, me, name="PHP bank", balance=10_000)
+    usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
+
+    r = _account(client, me, name="L", account_type="loan", loan_kind="auto", balance=-1,
+                 payment_account_id=usd["id"])
+    assert r.status_code == 400 and "currency" in r.text, r.text
+    loan = _loan(client, me, payment_account_id=php["id"])
+    for body in ({"payment_account_id": usd["id"]}, {"currency": "USD"}):
+        r = client.put(f"{API}/accounts/{loan['id']}", json=body, headers=me["headers"])
+        assert r.status_code == 400 and "currency" in r.text, (body, r.text)
+    r = client.put(f"{API}/accounts/{loan['id']}",
+                   json={"currency": "USD", "payment_account_id": usd["id"]},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+
 def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
     me = people()
-    usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
+    usd = _bank(client, me, name="Bank", balance=10_000)
     loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=usd["id"])
+    # In the loan's currency when it was routed, then moved to another one.
+    r = client.put(f"{API}/accounts/{usd['id']}", json={"currency": "USD"},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
 
     r = _pay(client, me, loan["id"], principal=100, interest=10)
     assert r.status_code == 400 and "currency" in r.text, r.text

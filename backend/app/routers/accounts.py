@@ -122,7 +122,8 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
     Loan terms are rejected on any other account type. An account that routing
     draws on (a card's statement payment or overflow, a loan's payment account,
     a budget entry's account or overflow) cannot become a loan: a loan holds no
-    cash to fund them.
+    cash to fund them. A loan's paying account must be in the loan's currency,
+    as every payment from it is (``loan_svc.check_currency``).
     """
     from app.models.budget_entry import BudgetEntry
 
@@ -145,6 +146,14 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
         )
     if resolved("loan_amortization") is None:
         data["loan_amortization"] = loan_svc.default_amortization(kind)
+    payment_account_id = resolved("payment_account_id")
+    if payment_account_id is not None:
+        payer = db.query(Account).filter(Account.id == payment_account_id).first()
+        if payer is not None and payer.currency != resolved("currency"):
+            raise HTTPException(
+                status_code=400,
+                detail="A loan's payment account must be in the loan's currency",
+            )
 
     if account is None or account.account_type == AccountType.LOAN:
         return
