@@ -64,6 +64,13 @@ class Transaction(Base):
     # legacy planned row. Null on every other row and on legacy rows, which an
     # otherwise unchanged edit leaves null (unposting a posted one is refused).
     loan_payment_kind = Column(String(16), nullable=True)
+    # Who triggered the row when it is not its owner (user_id): an editor
+    # materialising another user's recurring entry. Null otherwise.
+    created_by_actor = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_transactions_created_by_actor_users"),
+        nullable=True,
+    )
     
     # Transaction dates
     transaction_date = Column(DateTime, nullable=False)
@@ -85,7 +92,7 @@ class Transaction(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    user = relationship("User", back_populates="transactions")
+    user = relationship("User", back_populates="transactions", foreign_keys=[user_id])
     account = relationship(
         "Account",
         back_populates="transactions",

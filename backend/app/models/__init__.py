@@ -11,6 +11,7 @@ from app.models.refresh_token import RefreshToken as RefreshToken
 from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPriority as WishlistPriority
 from app.models.demo_state import DemoState as DemoState
 from app.models.tag import Tag as Tag
+from app.models.account_share import AccountShare as AccountShare
 
 # ---------------------------------------------------------------------------
 # User relationships
