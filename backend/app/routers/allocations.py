@@ -161,12 +161,14 @@ def get_allocation_progress(
         from app.models.transaction import Transaction, TransactionType
         from datetime import datetime, timedelta
         
-        # Get transactions for this allocation in the current month
+        # The allocation owner's transactions for it in the current month. Another
+        # user's row naming it is a stale reference and never counts.
         start_of_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
         
         transactions = db.query(Transaction).filter(
             Transaction.allocation_id == allocation_id,
+            Transaction.user_id == allocation.user_id,
             Transaction.transaction_date >= start_of_month,
             Transaction.transaction_date <= end_of_month,
             Transaction.transaction_type == TransactionType.CREDIT
