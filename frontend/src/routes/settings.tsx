@@ -142,7 +142,7 @@ function SettingsPage() {
         <div className="p-4 sm:p-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-ink">Export your data</h2>
-            <p className="text-sm text-muted">Download everything you own as one JSON file, or as a ZIP of CSV files (one per table).</p>
+            <p className="text-sm text-muted">Download everything you own as one JSON file, or as a ZIP of CSV files (one per table). Accounts shared with you and other people's records on your accounts are included with limited details.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => exportData('json')} disabled={downloading !== null} className="text-sm px-2.5 py-1.5 bg-sunken text-body hover:bg-sunken disabled:opacity-50">

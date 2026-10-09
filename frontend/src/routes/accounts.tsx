@@ -9,6 +9,11 @@ import { LoanActions, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
+import { AccountRoleBadge } from '../components/AccountRoleBadge'
+import { ShareDialog } from '../components/ShareDialog'
+import { SharedWithMe } from '../components/SharedWithMe'
+import { StatementsPanel } from '../components/StatementsPanel'
+import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 export const Route = createFileRoute('/accounts')({
@@ -86,6 +91,7 @@ export function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAccount, setActionAccount] = useState<Account | null>(null)
+  const [shareAccount, setShareAccount] = useState<Account | null>(null)
   const [formData, setFormData] = useState(() => blankForm(defaultCurrency))
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
   const [amortizationTouched, setAmortizationTouched] = useState(false)
@@ -122,6 +128,8 @@ export function AccountsPage() {
       a.account_type !== 'loan' &&
       !a.is_spending_wallet &&
       a.is_active &&
+      // Routing never points across owners, so a shared account can't be a target.
+      a.my_role === 'owner' &&
       a.id !== editingAccount?.id,
   )
 
@@ -323,7 +331,7 @@ export function AccountsPage() {
       account_type: account.account_type,
       balance: account.balance,
       description: account.description || '',
-      credit_limit: account.credit_limit,
+      credit_limit: account.credit_limit ?? undefined,
       due_date: account.due_date,
       billing_cycle_start: account.billing_cycle_start,
       currency: (account.currency as CurrencyCode) || defaultCurrency,
@@ -356,6 +364,7 @@ export function AccountsPage() {
         await loadAccountsRef.current(true)
       } catch (error) {
         console.error('Error deleting account:', error)
+        alert(apiErrorMessage(error) || 'Could not delete the account. Please try again.')
       }
     }
   }
@@ -381,6 +390,7 @@ export function AccountsPage() {
       }
     } catch (error) {
       console.error('Error updating account status:', error)
+      alert(apiErrorMessage(error) || 'Could not update the account. Please try again.')
     }
   }
 
@@ -469,8 +479,9 @@ export function AccountsPage() {
                         Currency: {account.currency}
                       </span>
                       {account.is_spending_wallet && <NotCountedTag />}
+                      <AccountRoleBadge account={account} />
                       <TagChips tags={account.tags} />
-                      {account.account_type === 'credit' && account.credit_limit !== undefined && (
+                      {account.account_type === 'credit' && account.credit_limit != null && (
                         <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
                           Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
                         </span>
@@ -519,6 +530,10 @@ export function AccountsPage() {
         </>
       )}
 
+      <SharedWithMe onLeft={() => void loadAccountsRef.current(true)} />
+
+      {shareAccount && <ShareDialog account={shareAccount} onClose={() => setShareAccount(null)} />}
+
       {isActionModalOpen && actionAccount && (
         <div
           className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
@@ -533,9 +548,10 @@ export function AccountsPage() {
               <div>
                 <h2 className="text-xl font-semibold text-ink">{actionAccount.name}</h2>
                 <p className="text-sm text-muted capitalize">{actionAccount.account_type.replace('_', ' ')}</p>
-                {actionAccount.is_spending_wallet && (
-                  <div className="mt-2">
-                    <NotCountedTag />
+                {(actionAccount.is_spending_wallet || actionAccount.my_role !== 'owner') && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {actionAccount.is_spending_wallet && <NotCountedTag />}
+                    <AccountRoleBadge account={actionAccount} />
                   </div>
                 )}
               </div>
@@ -557,7 +573,7 @@ export function AccountsPage() {
                   {formatCurrency(actionAccount.balance, actionAccount.currency as CurrencyCode)}
                 </p>
                 <p className="mt-2 text-sm text-muted">Currency: {actionAccount.currency}</p>
-                {actionAccount.account_type === 'credit' && actionAccount.credit_limit !== undefined && (
+                {actionAccount.account_type === 'credit' && actionAccount.credit_limit != null && (
                   <p className="mt-1 text-sm text-muted">
                     Credit limit {formatCurrency(actionAccount.credit_limit, actionAccount.currency as CurrencyCode)}
                   </p>
@@ -581,21 +597,35 @@ export function AccountsPage() {
             {actionAccount.account_type === 'loan' && (
               <div className="mt-6 space-y-4">
                 <LoanSummary account={actionAccount} />
+                {actionAccount.permissions.can_add_transactions && (
                 <LoanActions
                   key={actionAccount.id}
                   account={actionAccount}
                   fundingAccounts={routingAccounts.filter(
-                    (a) => a.account_type !== 'credit' && a.account_type !== 'loan' && !a.is_spending_wallet && a.is_active,
+                    (a) =>
+                      a.account_type !== 'credit' &&
+                      a.account_type !== 'loan' &&
+                      !a.is_spending_wallet &&
+                      a.is_active &&
+                      a.permissions.can_add_transactions,
                   )}
                   onRecorded={() => {
                     closeActionModal()
                     void loadAccountsRef.current(true)
                   }}
                 />
+                )}
+              </div>
+            )}
+
+            {actionAccount.account_type === 'credit' && (
+              <div className="mt-6">
+                <StatementsPanel account={actionAccount} />
               </div>
             )}
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {actionAccount.permissions.can_edit_settings && (
               <button
                 onClick={() => handleToggleActive(actionAccount)}
                 className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ actionAccount.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
@@ -609,6 +639,8 @@ export function AccountsPage() {
                   />
                 </span>
               </button>
+              )}
+              {actionAccount.permissions.can_edit_settings && (
               <button
                 onClick={() => openEditFromModal(actionAccount)}
                 className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink"
@@ -618,6 +650,17 @@ export function AccountsPage() {
                 </svg>
                 Edit account
               </button>
+              )}
+              {actionAccount.permissions.can_manage_shares && (
+              <button
+                onClick={() => setShareAccount(actionAccount)}
+                className="flex items-center justify-center gap-2 border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-sunken"
+                data-testid="share-account"
+              >
+                Share account
+              </button>
+              )}
+              {actionAccount.permissions.can_edit_settings && (
               <button
                 onClick={() => handleDelete(actionAccount.id)}
                 className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken sm:col-span-2"
@@ -627,6 +670,7 @@ export function AccountsPage() {
                 </svg>
                 Delete account
               </button>
+              )}
             </div>
           </div>
           </div>

@@ -1,7 +1,16 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import type { Account, Transaction, BudgetEntry } from '../store/api'
+import type {
+  Account,
+  Transaction,
+  FullBudgetEntry,
+  FullTransaction,
+  RecordPermissions,
+  SharedFullTransaction,
+} from '../store/api'
+import { isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription } from '@tally-trace/shared'
+import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -104,9 +113,13 @@ const toPrincipal = (total: number, interest?: number | null) =>
 const toTotal = (principal: number, interest?: number | null) =>
   Math.round((principal + (interest ?? 0)) * 100) / 100
 
+// A transaction the caller sees in full or shared-full (never Limited): the only
+// shapes that carry the fields an edit form, a posting or a loan check reads.
+type DetailedTransaction = FullTransaction | SharedFullTransaction
+
 // Whether the stored row is already a transfer into the account (an edit of it
 // is never split by the server, see routers/transactions.py).
-const paysLoan = (transaction: Transaction | null, accountId: number | undefined) =>
+const paysLoan = (transaction: DetailedTransaction | null, accountId: number | undefined) =>
   transaction !== null &&
   accountId !== undefined &&
   transaction.transaction_type === 'transfer' &&
@@ -116,18 +129,16 @@ const paysLoan = (transaction: Transaction | null, accountId: number | undefined
 // destination is being looked up, `unavailable` when that lookup found nothing.
 type LoanPaymentStatus = 'loan' | 'not_loan' | 'pending' | 'unavailable'
 
+const NO_PERMISSIONS: RecordPermissions = {
+  can_edit: false,
+  can_delete: false,
+  can_post: false,
+  can_revert: false,
+  can_tag: false,
+}
+
 const DESTINATION_UNAVAILABLE =
   "This transfer's destination account can't be found, so it is read-only here."
-
-// The API's reason for a refused request (e.g. a loan payment rule), or ''.
-const apiErrorMessage = (error: unknown) => {
-  const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
-  return typeof detail === 'string'
-    ? detail
-    : Array.isArray(detail)
-      ? detail.map((item) => (item as { msg?: string })?.msg).filter(Boolean).join('; ')
-      : ''
-}
 
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -220,7 +231,7 @@ export function TransactionsPage() {
   })
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  const [editingTransaction, setEditingTransaction] = useState<DetailedTransaction | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionTransaction, setActionTransaction] = useState<Transaction | null>(null)
   const [postingFormState, setPostingFormState] = useState<PostingFormState>({
@@ -414,13 +425,21 @@ export function TransactionsPage() {
   const [deleteTransaction] = useDeleteTransactionMutation()
 
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
+  // The form's account pickers offer only accounts the caller may add transactions to
+  // (a viewer's shared account can be read and filtered by, never written to).
+  const writableAccounts = useMemo(
+    () => accounts.filter((account) => account.permissions.can_add_transactions),
+    [accounts]
+  )
   // Destinations looked up by id because they are not in `accounts` (inactive,
   // or past its first 100); null when the lookup found no such account.
   const [triggerAccount] = useLazyGetAccountQuery()
   const [resolvedDestinations, setResolvedDestinations] = useState<Record<number, Account | null>>({})
   const destinationLookups = useRef(new Set<number>())
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
-  const budgetEntries = useMemo(() => budgetEntriesData?.items ?? [], [budgetEntriesData])
+  // Only the caller's own entries can be linked to a transaction: a shared or limited
+  // entry belongs to someone else, whose category and allocation the caller can't use.
+  const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
   const limit = 10
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
@@ -572,11 +591,11 @@ export function TransactionsPage() {
 
   const transferDestinationOptions = useMemo(
     () =>
-      accounts.filter(
+      writableAccounts.filter(
         (account) =>
           account.id !== (formData.transfer_from_account_id ?? formData.account_id) && account.id !== 0
       ),
-    [accounts, formData.account_id, formData.transfer_from_account_id]
+    [writableAccounts, formData.account_id, formData.transfer_from_account_id]
   )
 
   const matchingBudgetEntries = useMemo(() => {
@@ -612,6 +631,10 @@ export function TransactionsPage() {
   // when it is not in `accounts`.
   const loanPaymentStatus = useCallback(
     (transaction: Transaction): LoanPaymentStatus => {
+      // A Limited row can't be edited, posted or reverted, so it is never classified.
+      if (isLimited(transaction)) {
+        return 'not_loan'
+      }
       if (transaction.loan_payment_kind) {
         return 'loan'
       }
@@ -638,13 +661,15 @@ export function TransactionsPage() {
     ? loanPaymentStatus(actionTransaction)
     : 'not_loan'
   const actionLocked = actionLoanStatus === 'pending' || actionLoanStatus === 'unavailable'
+  // Every control follows the row's server-computed flags, never its view kind.
+  const actionPermissions = actionTransaction?.permissions ?? NO_PERMISSIONS
 
   useEffect(() => {
     if (!accountsData) {
       return
     }
     for (const transaction of [actionTransaction, editingTransaction]) {
-      const destinationId = transaction?.transfer_to_account_id
+      const destinationId = transaction && !isLimited(transaction) ? transaction.transfer_to_account_id : undefined
       if (!transaction || destinationId == null || loanPaymentStatus(transaction) !== 'pending') {
         continue
       }
@@ -923,6 +948,14 @@ export function TransactionsPage() {
         projected_currency: projectedCurrency,
       }
 
+      // Someone else's transaction on a shared account keeps its creator's category,
+      // allocation and schedule link: the server refuses an edit that sends them.
+      if (editingTransaction && isSharedFull(editingTransaction)) {
+        delete payload.category_id
+        delete payload.allocation_id
+        delete payload.budget_entry_id
+      }
+
       if (formData.is_posted) {
         if (projectedAmount && projectedAmount > 0) {
           payload.exchange_rate =
@@ -954,6 +987,10 @@ export function TransactionsPage() {
   }
 
   const handleEdit = (transaction: Transaction) => {
+    // A Limited row has no fields to edit.
+    if (isLimited(transaction)) {
+      return
+    }
     setEditingTransaction(transaction)
     // A loan payment's form amount is the whole payment (principal + interest).
     const intoLoan = isLoanPayment(transaction)
@@ -963,9 +1000,10 @@ export function TransactionsPage() {
     setFormData(
       createInitialFormState({
       account_id: transaction.account_id,
-        category_id: transaction.category_id ?? undefined,
-        allocation_id: transaction.allocation_id ?? undefined,
-        budget_entry_id: transaction.budget_entry_id ?? undefined,
+        // A shared-full row has no category, allocation or schedule link to edit.
+        category_id: isOwnerFull(transaction) ? transaction.category_id ?? undefined : undefined,
+        allocation_id: isOwnerFull(transaction) ? transaction.allocation_id ?? undefined : undefined,
+        budget_entry_id: isOwnerFull(transaction) ? transaction.budget_entry_id ?? undefined : undefined,
       amount: total,
         currency: (transaction.currency as CurrencyCode) || fallbackCurrency,
         projected_amount: transaction.projected_amount ?? (intoLoan ? total : undefined),
@@ -1006,11 +1044,15 @@ export function TransactionsPage() {
         await loadTransactionsRef.current(true)
       } catch (error) {
         console.error('Error deleting transaction:', error)
+        alert(apiErrorMessage(error) || 'Could not delete the transaction. Please try again.')
       }
     }
   }
 
   const handleMarkPostedFromModal = async (transaction: Transaction, actualAmount: number, exchangeRate?: number) => {
+    if (isLimited(transaction)) {
+      return
+    }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
     const timestamp = new Date().toISOString()
@@ -1025,21 +1067,17 @@ export function TransactionsPage() {
       currency: accountCurrency,
       exchange_rate: exchangeRate,
     }
-    await updateTransaction({ id: transaction.id, data: payload }).unwrap()
-    const updatedTransaction: Transaction = {
-      ...transaction,
-      is_posted: true,
-      posting_date: timestamp,
-      amount,
-      currency: accountCurrency,
-      exchange_rate: exchangeRate,
-    }
+    // The response carries the row's fresh permissions (posting changes what may be reverted).
+    const updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     setActionTransaction(updatedTransaction)
     setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
     resetPostingFormState()
   }
 
   const handleRevertPostedFromModal = async (transaction: Transaction) => {
+    if (isLimited(transaction)) {
+      return
+    }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
     const payload: Record<string, unknown> = {
@@ -1053,20 +1091,13 @@ export function TransactionsPage() {
       currency: accountCurrency,
       exchange_rate: undefined,
     }
+    let updatedTransaction: Transaction
     try {
-      await updateTransaction({ id: transaction.id, data: payload }).unwrap()
+      updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     } catch (error) {
       console.error('Error reverting transaction:', error)
       alert(apiErrorMessage(error) || 'Could not mark the transaction as planned. Please try again.')
       return
-    }
-    const updatedTransaction: Transaction = {
-      ...transaction,
-      is_posted: false,
-      posting_date: undefined,
-      amount: payload.amount as number,
-      currency: accountCurrency,
-      exchange_rate: undefined,
     }
     setActionTransaction(updatedTransaction)
     setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
@@ -1074,6 +1105,9 @@ export function TransactionsPage() {
   }
 
   const handleInitPostingForm = (transaction: Transaction) => {
+    if (isLimited(transaction)) {
+      return
+    }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
     // A loan payment is posted for its whole amount (principal + interest).
@@ -1132,19 +1166,8 @@ export function TransactionsPage() {
 
   const getTransactionMeta = useCallback(
     (transaction: Transaction) => {
-      const primaryAccount = accounts.find((a) => a.id === transaction.account_id)
-      const fromAccount = transaction.transfer_from_account_id
-        ? accounts.find((a) => a.id === transaction.transfer_from_account_id)
-        : undefined
-      const toAccount = transaction.transfer_to_account_id
-        ? accounts.find((a) => a.id === transaction.transfer_to_account_id)
-        : undefined
       const currencyCode = (transaction.currency as CurrencyCode) || fallbackCurrency
       const amountLabel = formatCurrency(transaction.amount, currencyCode)
-      const projectedLabel =
-        !transaction.is_posted && transaction.projected_amount && transaction.projected_currency
-          ? formatCurrency(transaction.projected_amount, transaction.projected_currency as CurrencyCode)
-          : null
       const transferFeeLabel =
         transaction.transfer_fee && transaction.transfer_fee > 0
           ? formatCurrency(transaction.transfer_fee, currencyCode)
@@ -1161,10 +1184,42 @@ export function TransactionsPage() {
           : transaction.transaction_type === 'debit'
           ? 'text-danger'
           : 'text-ink'
-      const category = transaction.category_id
-        ? categories.find((cat) => cat.id === transaction.category_id)
+
+      // A Limited row names its accounts through references (a hidden one is a neutral
+      // name with no id); every other row looks them up in the caller's account list.
+      if (isLimited(transaction)) {
+        return {
+          accountLabel: transaction.account?.name || 'Account',
+          sourceLabel: transaction.account?.name || 'Source',
+          destinationLabel: transaction.counterpart?.name || 'Destination',
+          categoryName: transaction.category_name,
+          amountLabel,
+          projectedLabel: null,
+          transferFeeLabel,
+          typeBadgeStyles,
+          amountClass,
+          budgetEntry: undefined,
+          scheduleLabel: null,
+        }
+      }
+
+      const primaryAccount = accounts.find((a) => a.id === transaction.account_id)
+      const fromAccount = transaction.transfer_from_account_id
+        ? accounts.find((a) => a.id === transaction.transfer_from_account_id)
         : undefined
-      const budgetEntry = transaction.budget_entry_id
+      const toAccount = transaction.transfer_to_account_id
+        ? accounts.find((a) => a.id === transaction.transfer_to_account_id)
+        : undefined
+      const projectedLabel =
+        !transaction.is_posted && transaction.projected_amount && transaction.projected_currency
+          ? formatCurrency(transaction.projected_amount, transaction.projected_currency as CurrencyCode)
+          : null
+      const categoryName = isSharedFull(transaction)
+        ? transaction.category_name
+        : transaction.category_id
+        ? categories.find((cat) => cat.id === transaction.category_id)?.name ?? null
+        : null
+      const budgetEntry = isOwnerFull(transaction) && transaction.budget_entry_id
         ? budgetEntries.find((entry) => entry.id === transaction.budget_entry_id)
         : undefined
       const scheduleLabel = budgetEntry
@@ -1172,10 +1227,10 @@ export function TransactionsPage() {
         : null
 
       return {
-        primaryAccount,
-        fromAccount,
-        toAccount,
-        category,
+        accountLabel: primaryAccount?.name || 'Account',
+        sourceLabel: fromAccount?.name || primaryAccount?.name || 'Source',
+        destinationLabel: toAccount?.name || 'Destination',
+        categoryName,
         amountLabel,
         projectedLabel,
         transferFeeLabel,
@@ -1192,13 +1247,18 @@ export function TransactionsPage() {
     if (!actionTransaction) {
       return null
     }
+    const date = transactionDate(actionTransaction)
+    // A Limited row has no posting date; its status alone says whether it is posted.
+    const postingDate = isLimited(actionTransaction) ? undefined : actionTransaction.posting_date
     return {
-      transactionDate: formatDateWithOrdinal(new Date(actionTransaction.transaction_date)),
-      transactionRelative: formatRelativeDate(actionTransaction.transaction_date),
-      postingDate: actionTransaction.posting_date
-        ? formatDateWithOrdinal(new Date(actionTransaction.posting_date))
+      transactionDate: formatDateWithOrdinal(new Date(date)),
+      transactionRelative: formatRelativeDate(date),
+      postingDate: postingDate
+        ? formatDateWithOrdinal(new Date(postingDate))
+        : isLimited(actionTransaction) && actionTransaction.is_posted
+        ? 'Posted'
         : 'Pending',
-      postingRelative: actionTransaction.posting_date ? formatRelativeDate(actionTransaction.posting_date) : null,
+      postingRelative: postingDate ? formatRelativeDate(postingDate) : null,
       typeLabel: TRANSACTION_TYPE_LABELS[actionTransaction.transaction_type],
     }
   }, [actionTransaction])
@@ -1214,7 +1274,7 @@ export function TransactionsPage() {
 
   const actionSchedule = actionMeta?.budgetEntry ?? null
 
-  const handleBudgetEntrySelect = useCallback((entry: BudgetEntry | undefined) => {
+  const handleBudgetEntrySelect = useCallback((entry: FullBudgetEntry | undefined) => {
     if (!entry) {
       setFormData((prev) => ({
         ...prev,
@@ -1278,6 +1338,9 @@ export function TransactionsPage() {
     )
   }
 
+  // Nothing to add a transaction to when every account is read-only for the caller.
+  const canAddTransactions = writableAccounts.length > 0
+
   const emptyState = (
     <div className="card p-6 text-center space-y-4">
       <div className="w-16 h-16 mx-auto rounded-full bg-sunken flex items-center justify-center">
@@ -1293,12 +1356,14 @@ export function TransactionsPage() {
             : 'No activity recorded for this month yet. Add your first transaction to get started.'}
         </p>
       </div>
-      <button
-        onClick={() => setIsCreateModalOpen(true)}
-        className="btn-primary focus-ring w-full sm:w-auto mx-auto"
-      >
-        Add Transaction
-      </button>
+      {canAddTransactions && (
+        <button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="btn-primary focus-ring w-full sm:w-auto mx-auto"
+        >
+          Add Transaction
+        </button>
+      )}
     </div>
   )
 
@@ -1306,12 +1371,14 @@ export function TransactionsPage() {
     <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold text-ink">Transactions</h1>
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="btn-primary focus-ring w-full sm:w-auto justify-center"
-        >
-          Add Transaction
-        </button>
+        {canAddTransactions && (
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="btn-primary focus-ring w-full sm:w-auto justify-center"
+          >
+            Add Transaction
+          </button>
+        )}
       </div>
 
       {/* Search and Filters */}
@@ -1512,10 +1579,10 @@ export function TransactionsPage() {
           <div className="grid grid-cols-1 gap-3">
           {orderedTransactions.map((transaction) => {
             const {
-              primaryAccount,
-              fromAccount,
-              toAccount,
-              category,
+              accountLabel,
+              sourceLabel,
+              destinationLabel,
+              categoryName,
               amountLabel,
               projectedLabel,
               transferFeeLabel,
@@ -1523,12 +1590,16 @@ export function TransactionsPage() {
               amountClass,
               scheduleLabel,
             } = getTransactionMeta(transaction)
-            const relativeDate = formatRelativeDate(transaction.transaction_date)
-            const exactDate = formatDateWithOrdinal(new Date(transaction.transaction_date))
-            const postedDate = transaction.posting_date ? formatDateWithOrdinal(new Date(transaction.posting_date)) : null
+            const rowDate = transactionDate(transaction)
+            const relativeDate = formatRelativeDate(rowDate)
+            const exactDate = formatDateWithOrdinal(new Date(rowDate))
+            const postedDate =
+              !isLimited(transaction) && transaction.posting_date
+                ? formatDateWithOrdinal(new Date(transaction.posting_date))
+                : null
             const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
             const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
-            const description = transaction.description?.trim() || 'Untitled transaction'
+            const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
                 
                 return (
               <article
@@ -1559,17 +1630,22 @@ export function TransactionsPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                           </svg>
                           {transaction.transaction_type === 'transfer'
-                            ? `${fromAccount?.name || primaryAccount?.name || 'Source'} → ${toAccount?.name || 'Destination'}`
-                            : primaryAccount?.name || 'Account'}
+                            ? `${sourceLabel} → ${destinationLabel}`
+                            : accountLabel}
                       </span>
                         <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
                           </svg>
                           {transaction.transaction_type === 'transfer'
-                            ? category?.name || 'Transfer'
-                            : category?.name || 'Uncategorized'}
+                            ? categoryName || 'Transfer'
+                            : categoryName || 'Uncategorized'}
                       </span>
+                        {transaction.created_by && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
+                            by {transaction.created_by}
+                          </span>
+                        )}
                         <TagChips tags={transaction.tags} />
                         {scheduleLabel && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
@@ -1599,7 +1675,7 @@ export function TransactionsPage() {
                     </div>
                     <div className="space-y-2 text-right">
                       <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
-                      {transaction.original_amount !== undefined && transaction.original_currency && (
+                      {!isLimited(transaction) && transaction.original_amount != null && transaction.original_currency && (
                         <p className="text-xs text-muted">
                           Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
                         </p>
@@ -1614,7 +1690,7 @@ export function TransactionsPage() {
                         >
                           {transaction.is_posted ? 'Posted' : 'Planned'}
                         </span>
-                        {transaction.is_reconciled && (
+                        {!isLimited(transaction) && transaction.is_reconciled && (
                           <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
                             Reconciled
                           </span>
@@ -1658,7 +1734,7 @@ export function TransactionsPage() {
               <div>
                 <h2 className="text-xl font-semibold text-ink">Transaction Actions</h2>
                 <p className="text-sm text-muted">
-                  {actionTransaction.description || 'No description'}
+                  {transactionDescription(actionTransaction) || 'No description'}
                 </p>
               </div>
                         <button
@@ -1722,18 +1798,24 @@ export function TransactionsPage() {
                       {actionTransaction.is_posted ? 'Posted' : 'Planned'}
                     </dd>
                   </div>
+                  {actionTransaction.created_by && (
+                    <div className="flex justify-between gap-3">
+                      <dt>Created by</dt>
+                      <dd className="text-right">{actionTransaction.created_by}</dd>
+                    </div>
+                  )}
                   {actionTransaction.transaction_type === 'transfer' && (
                     <>
                       <div className="flex justify-between gap-3">
                         <dt>From</dt>
                         <dd className="text-right">
-                          {actionTransferMeta?.fromAccount?.name || actionTransferMeta?.primaryAccount?.name || 'Source account'}
+                          {actionTransferMeta?.sourceLabel || 'Source account'}
                         </dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt>To</dt>
                         <dd className="text-right">
-                          {actionTransferMeta?.toAccount?.name || 'Destination account'}
+                          {actionTransferMeta?.destinationLabel || 'Destination account'}
                         </dd>
                       </div>
                       {actionTransferMeta?.transferFeeLabel && (
@@ -1787,8 +1869,17 @@ export function TransactionsPage() {
               {actionLoanStatus === 'unavailable' && (
                 <p className="text-sm text-warn">{DESTINATION_UNAVAILABLE}</p>
               )}
+              {!actionPermissions.can_post &&
+                !actionPermissions.can_revert &&
+                !actionPermissions.can_edit &&
+                !actionPermissions.can_delete && (
+                  <p className="text-sm text-muted" data-testid="read-only-note">
+                    You can view this transaction but not change it.
+                  </p>
+                )}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {actionTransaction.is_posted ? (
+                  actionPermissions.can_revert && (
                   <button
                     onClick={() => handleRevertPostedFromModal(actionTransaction)}
                     disabled={actionLocked}
@@ -1799,7 +1890,9 @@ export function TransactionsPage() {
                     </svg>
                     Mark as Planned
                   </button>
+                  )
                 ) : (
+                  actionPermissions.can_post && (
                   <button
                     onClick={() => handleInitPostingForm(actionTransaction)}
                     disabled={actionLocked}
@@ -1810,7 +1903,9 @@ export function TransactionsPage() {
                     </svg>
                     Mark as Posted
                   </button>
+                  )
                 )}
+                {actionPermissions.can_edit && (
                 <button
                   onClick={() => openEditFromModal(actionTransaction)}
                   disabled={actionLocked}
@@ -1821,6 +1916,8 @@ export function TransactionsPage() {
                           </svg>
                   Edit Transaction
                         </button>
+                )}
+                {actionPermissions.can_delete && (
                         <button
                   onClick={() => handleDelete(actionTransaction.id)}
                   className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken"
@@ -1830,8 +1927,9 @@ export function TransactionsPage() {
                           </svg>
                   Delete Transaction
                         </button>
+                )}
                       </div>
-              {!actionTransaction.is_posted && postingFormState.visible && (
+              {!actionTransaction.is_posted && actionPermissions.can_post && postingFormState.visible && (
                 <div className="border border-ink p-4 space-y-3">
                   <p className="text-sm font-medium text-ink">
                     {postingFormState.projectedAmount
@@ -1968,7 +2066,7 @@ export function TransactionsPage() {
                   {formData.transaction_type === 'transfer' ? 'From Account' : 'Account'}
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {accounts.map((account) => {
+                  {writableAccounts.map((account) => {
                     const isSelected = formData.account_id === account.id
                     return (
                       <button
@@ -2030,6 +2128,18 @@ export function TransactionsPage() {
                 </div>
               )}
               
+              {editingTransaction && isSharedFull(editingTransaction) ? (
+                <div>
+                  <label className="label">Category</label>
+                  <p className="text-sm text-body" data-testid="shared-category">
+                    {editingTransaction.category_name || 'Uncategorized'}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    The category belongs to {editingTransaction.created_by ?? 'the person who recorded this'} and
+                    can&apos;t be changed here.
+                  </p>
+                </div>
+              ) : (
               <div>
                 <label className="label">
                   {formData.transaction_type === 'transfer' ? 'Contribution category' : 'Category'}
@@ -2072,6 +2182,7 @@ export function TransactionsPage() {
                     : `Showing ${TRANSACTION_TYPE_LABELS[formData.transaction_type].toLowerCase()} categories.`}
                 </p>
               </div>
+              )}
 
               <div>
                 <label className="label">Transaction Type</label>
@@ -2271,12 +2382,14 @@ export function TransactionsPage() {
                 </label>
               </div>
 
-              <TagPicker
-                value={formData.tag_ids}
-                onChange={(tag_ids) => setFormData((prev) => ({ ...prev, tag_ids }))}
-              />
+              {(!editingTransaction || editingTransaction.permissions.can_tag) && (
+                <TagPicker
+                  value={formData.tag_ids}
+                  onChange={(tag_ids) => setFormData((prev) => ({ ...prev, tag_ids }))}
+                />
+              )}
 
-              {formData.transaction_type !== 'transfer' && (
+              {formData.transaction_type !== 'transfer' && !(editingTransaction && isSharedFull(editingTransaction)) && (
                 <div className="space-y-3">
                   <label className="label">Budget Schedule</label>
                   {matchingBudgetEntries.length === 0 ? (

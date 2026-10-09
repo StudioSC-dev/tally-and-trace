@@ -15,7 +15,23 @@ export type {
   RecurrenceFrequency,
   EndMode,
   Transaction,
+  FullTransaction,
+  SharedFullTransaction,
+  LimitedTransaction,
   TransactionType,
+  FullBudgetEntry,
+  SharedFullBudgetEntry,
+  LimitedBudgetEntry,
+  RecordView,
+  RecordPermissions,
+  AccountRole,
+  AccountPermissions,
+  AccountRef,
+  ShareRole,
+  UserMatch,
+  AccountShare,
+  AccountShares,
+  ReceivedShare,
   WishlistItem,
   WishlistItemPriority,
   PaginatedResponse,
@@ -42,6 +58,12 @@ export type {
   LoanPrepaymentRequest,
   LoanSchedule,
   LoanScheduleRow,
+  LimitedLoanSchedule,
+  LoanScheduleResponse,
+  CardStatementsResponse,
+  BalanceHistoryEntry,
+  LimitedEvent,
+  LimitedTimelineEvent,
   Tag,
   TagRef,
   TagCreate,
@@ -67,7 +89,14 @@ import type {
   WishlistPlan,
   LoanPaymentRequest,
   LoanPrepaymentRequest,
-  LoanSchedule,
+  LoanScheduleResponse,
+  CardStatementsResponse,
+  AccountShares,
+  AccountShare,
+  ReceivedShare,
+  ShareCreate,
+  ShareUpdate,
+  UserMatch,
   Tag,
   TagCreate,
   TagUpdate,
@@ -81,7 +110,7 @@ import type {
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
@@ -107,9 +136,15 @@ export const accountingApi = createApi({
       query: (id) => ({ url: `accounts/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Account'],
     }),
-    getLoanSchedule: builder.query<LoanSchedule, number>({
+    // An owner, admin or editor gets the full schedule; a viewer gets the limited one.
+    getLoanSchedule: builder.query<LoanScheduleResponse, number>({
       query: (id) => `accounts/${id}/loan-schedule`,
       providesTags: ['Account'],
+    }),
+    // Credit accounts only (anything else is a 400).
+    getAccountStatements: builder.query<CardStatementsResponse, number>({
+      query: (id) => `accounts/${id}/statements`,
+      providesTags: ['Account', 'Transaction'],
     }),
     recordLoanPayment: builder.mutation<Transaction, { id: number; data: LoanPaymentRequest }>({
       query: ({ id, data }) => ({ url: `accounts/${id}/loan-payment`, method: 'POST', body: data }),
@@ -292,6 +327,46 @@ export const accountingApi = createApi({
       invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
     }),
 
+    // ── Shares ────────────────────────────────────────────────────────────────
+    // Owner or admin only (and never a demo user: those get 403). Any share change
+    // refreshes the shares and the accounts, which carry the role and owner name.
+    getAccountShares: builder.query<AccountShares, number>({
+      query: (accountId) => `accounts/${accountId}/shares`,
+      providesTags: ['Share'],
+    }),
+    createAccountShare: builder.mutation<AccountShare, { accountId: number; data: ShareCreate }>({
+      query: ({ accountId, data }) => ({ url: `accounts/${accountId}/shares`, method: 'POST', body: data }),
+      invalidatesTags: ['Share', 'Account'],
+    }),
+    updateAccountShare: builder.mutation<AccountShare, { accountId: number; shareId: number; data: ShareUpdate }>({
+      query: ({ accountId, shareId, data }) => ({
+        url: `accounts/${accountId}/shares/${shareId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Share', 'Account'],
+    }),
+    deleteAccountShare: builder.mutation<void, { accountId: number; shareId: number }>({
+      query: ({ accountId, shareId }) => ({ url: `accounts/${accountId}/shares/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: ['Share', 'Account'],
+    }),
+    // Shares other people made to the caller.
+    getReceivedShares: builder.query<ReceivedShare[], void>({
+      query: () => 'shares/received',
+      providesTags: ['ReceivedShare'],
+    }),
+    // Leaving drops the account and every record, entry and projection that came through it.
+    leaveShare: builder.mutation<void, number>({
+      query: (shareId) => ({ url: `shares/received/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: ['ReceivedShare', 'Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    // Exact, case-insensitive email match; 404 "No matching user" otherwise; 429 when
+    // the caller looks up too often (10 per 60 seconds).
+    lookupUser: builder.query<UserMatch, string>({
+      query: (email) => ({ url: 'users/lookup', params: { email } }),
+      keepUnusedDataFor: 0,
+    }),
+
     // ── Wishlist ──────────────────────────────────────────────────────────────
     getWishlist: builder.query<WishlistItem[], { is_purchased?: boolean } | void>({
       query: (params) => ({ url: 'wishlist/', params: params ?? {} }),
@@ -327,6 +402,7 @@ export const {
   useDeleteAccountMutation,
   useGetAccountBalanceQuery,
   useGetLoanScheduleQuery,
+  useGetAccountStatementsQuery,
   useRecordLoanPaymentMutation,
   useRecordLoanPrepaymentMutation,
 
@@ -370,6 +446,15 @@ export const {
   useCreateTagMutation,
   useUpdateTagMutation,
   useDeleteTagMutation,
+
+  // Share hooks
+  useGetAccountSharesQuery,
+  useCreateAccountShareMutation,
+  useUpdateAccountShareMutation,
+  useDeleteAccountShareMutation,
+  useGetReceivedSharesQuery,
+  useLeaveShareMutation,
+  useLazyLookupUserQuery,
 
   // Forecast hooks
   useGetForecastTimelineQuery,

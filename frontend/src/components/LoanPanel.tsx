@@ -73,7 +73,9 @@ export function LoanActions({
   fundingAccounts: Account[]
   onRecorded?: () => void
 }) {
-  const { data: schedule } = useGetLoanScheduleQuery(account.id)
+  const { data: scheduleResponse } = useGetLoanScheduleQuery(account.id)
+  // Only an editor or above gets the full schedule; the limited one has no amortisation or split.
+  const schedule = scheduleResponse?.view === 'full' ? scheduleResponse : undefined
   // A loan is paid only from an account in its own currency (the API refuses others).
   const eligibleFunding = fundingAccounts.filter((a) => a.currency === account.currency)
   const defaultFunding = eligibleFunding.some((a) => a.id === account.payment_account_id)
