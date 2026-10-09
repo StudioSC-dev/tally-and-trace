@@ -338,17 +338,19 @@ export const accountingApi = createApi({
       query: ({ accountId, data }) => ({ url: `accounts/${accountId}/shares`, method: 'POST', body: data }),
       invalidatesTags: ['Share', 'Account'],
     }),
+    // Demoting or removing a share deactivates the recurring entries that person kept on
+    // the account and changes how its records read, so these refresh like leaveShare.
     updateAccountShare: builder.mutation<AccountShare, { accountId: number; shareId: number; data: ShareUpdate }>({
       query: ({ accountId, shareId, data }) => ({
         url: `accounts/${accountId}/shares/${shareId}`,
         method: 'PATCH',
         body: data,
       }),
-      invalidatesTags: ['Share', 'Account'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
     }),
     deleteAccountShare: builder.mutation<void, { accountId: number; shareId: number }>({
       query: ({ accountId, shareId }) => ({ url: `accounts/${accountId}/shares/${shareId}`, method: 'DELETE' }),
-      invalidatesTags: ['Share', 'Account'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
     }),
     // Shares other people made to the caller.
     getReceivedShares: builder.query<ReceivedShare[], void>({

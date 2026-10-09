@@ -538,7 +538,17 @@ export function AccountsPage() {
 
       <SharedWithMe onLeft={() => void loadAccountsRef.current(true)} />
 
-      {shareAccount && <ShareDialog account={shareAccount} onClose={() => setShareAccount(null)} />}
+      {shareAccount && (
+        <ShareDialog
+          account={shareAccount}
+          onClose={() => {
+            setShareAccount(null)
+            // The list is a copy of a lazy query: reload it, since a share change can
+            // change what the accounts show.
+            void loadAccountsRef.current(true)
+          }}
+        />
+      )}
 
       {isActionModalOpen && actionAccount && (
         <div
