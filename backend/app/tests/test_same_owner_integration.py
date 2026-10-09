@@ -356,3 +356,58 @@ def test_a_stored_stray_transfer_account_on_a_debit_or_credit_reaches_no_one(
     # The creator, owner of the row's only touched account, may delete it.
     r = client.delete(f"{API}/transactions/{rows[0]['id']}", headers=mine["headers"])
     assert r.status_code == 200, r.text
+
+
+MISSING_ACCOUNT = 2_000_000_000  # no such account
+
+
+@pytest.mark.parametrize("txn_type", ["debit", "credit"])
+@pytest.mark.parametrize("column", ["transfer_from_account_id", "transfer_to_account_id"])
+def test_creating_a_debit_or_credit_drops_its_transfer_accounts(client, world, txn_type, column):
+    mine, theirs = world["mine"], world["theirs"]
+    for target in (theirs["bank"], MISSING_ACCOUNT):
+        for posted, when in ((True, WHEN), (False, _soon())):
+            r = client.post(f"{API}/transactions/", headers=mine["headers"], json={
+                "account_id": mine["bank"], "amount": 77, "transaction_type": txn_type,
+                "transaction_date": when, "is_posted": posted,
+                "description": f"{STRAY} {txn_type}", column: target})
+            assert r.status_code == 200, (target, r.status_code, r.text)
+            body = r.json()
+            assert body["transfer_from_account_id"] is None
+            assert body["transfer_to_account_id"] is None
+    _assert_victim_sees_nothing(client, theirs)
+
+
+@pytest.mark.parametrize("txn_type", ["debit", "credit"])
+@pytest.mark.parametrize("column", ["transfer_from_account_id", "transfer_to_account_id"])
+def test_updating_a_debit_or_credit_drops_its_transfer_accounts(client, world, txn_type, column):
+    mine, theirs = world["mine"], world["theirs"]
+    for target in (theirs["bank"], MISSING_ACCOUNT):
+        for posted, when in ((True, WHEN), (False, _soon())):
+            txn_id = _post(client, mine["headers"], "/transactions/", {
+                "account_id": mine["bank"], "amount": 77, "transaction_type": txn_type,
+                "transaction_date": when, "is_posted": posted,
+                "description": f"{STRAY} {txn_type}"})
+            r = client.put(f"{API}/transactions/{txn_id}", headers=mine["headers"],
+                           json={column: target, "amount": 78})
+            assert r.status_code == 200, (target, r.status_code, r.text)
+            body = r.json()
+            assert body["transfer_from_account_id"] is None
+            assert body["transfer_to_account_id"] is None
+            assert body["amount"] == 78
+    _assert_victim_sees_nothing(client, theirs)
+
+
+@pytest.mark.parametrize("txn_type", ["debit", "credit"])
+def test_editing_a_transfer_into_a_debit_or_credit_clears_its_transfer_accounts(
+        client, world, txn_type):
+    mine = world["mine"]
+    txn_id = _post(client, mine["headers"], "/transactions/",
+                   _transfer(mine["bank"], mine["savings"]))
+    r = client.put(f"{API}/transactions/{txn_id}", headers=mine["headers"],
+                   json={"transaction_type": txn_type})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["account_id"] == mine["bank"]
+    assert body["transfer_from_account_id"] is None
+    assert body["transfer_to_account_id"] is None

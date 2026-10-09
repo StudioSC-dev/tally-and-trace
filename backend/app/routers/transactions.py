@@ -635,6 +635,10 @@ def create_transaction(
         if transaction_data.get("original_currency") is None and transaction.original_amount is not None:
             transaction_data["original_currency"] = destination_account.currency
     else:
+        # Only a transfer has transfer accounts: any a client sends on a debit or
+        # credit is dropped, never stored unchecked (see TRANSFER_ONLY_COLUMNS).
+        transaction_data["transfer_from_account_id"] = None
+        transaction_data["transfer_to_account_id"] = None
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
@@ -780,6 +784,11 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         setattr(db_transaction, field, value)
     for field, value in loan_stamp.items():
         setattr(db_transaction, field, value)
+    if db_transaction.transaction_type != TransactionType.TRANSFER:
+        # A debit or credit keeps no transfer accounts: a sent one is dropped, and
+        # an edit away from a transfer clears the old ones.
+        db_transaction.transfer_from_account_id = None
+        db_transaction.transfer_to_account_id = None
     
     db_transaction.updated_at = utc_now()
     db_transaction.transfer_fee = db_transaction.transfer_fee or 0.0
