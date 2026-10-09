@@ -461,7 +461,7 @@ def materialize_budget_entry(
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
     """
-    from app.routers.transactions import create_transaction
+    from app.routers.transactions import add_transaction
     from app.schemas.transaction import TransactionCreate
 
     entry = get_record_or_404(
@@ -502,7 +502,9 @@ def materialize_budget_entry(
         is_posted=True,
         **transfer_fields,
     )
-    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user)
+    db_txn = add_transaction(db, current_user, txn_create)
+    db.commit()
+    db.refresh(db_txn)
 
     if payload.advance:
         next_occ = _advance_occurrence(entry, entry.next_occurrence)

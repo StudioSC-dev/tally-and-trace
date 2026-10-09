@@ -583,6 +583,18 @@ def create_transaction(
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new transaction and update account balance"""
+    db_transaction = add_transaction(db, current_user, transaction)
+    db.commit()
+    db.refresh(db_transaction)
+    return db_transaction
+
+
+def add_transaction(db: Session, current_user: User, transaction: TransactionCreate) -> Transaction:
+    """Validate and add a new transaction with its balance and budget effects, uncommitted.
+
+    The caller commits, so a caller that writes more in the same change (a
+    materialised recurring entry) commits it all at once.
+    """
     transaction_data = transaction.dict()
     transaction_data["user_id"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
@@ -675,9 +687,8 @@ def create_transaction(
                 category_id=transaction.category_id,
             )
             _apply_budget_delta(budget_allocations, delta, transaction.transaction_date)
-    
-    db.commit()
-    db.refresh(db_transaction)
+
+    db.flush()
     return db_transaction
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
