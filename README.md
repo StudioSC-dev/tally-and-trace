@@ -4,7 +4,7 @@ A **full-stack, type-safe monorepo** for personal and business financial managem
 
 ## Why I Built This
 
-I developed Tally & Trace to solve my own need for a simple, flexible financial tracking tool that would replace my aging Google Sheet tracker. Existing solutions were either too complex, too expensive, or lacked the multi-entity support I needed to manage both personal and business finances in one place. This app represents my ideal balance of functionality and simplicity, built with modern tools and best practices.
+I developed Tally & Trace to solve my own need for a simple, flexible financial tracking tool that would replace my aging Google Sheet tracker. Existing solutions were either too complex, too expensive, or lacked the flexibility I needed to manage personal and business finances in one place. This app represents my ideal balance of functionality and simplicity, built with modern tools and best practices.
 
 I built this with my own use cases (my personal use cases, my wife's, our household's and our potential business ventures) in mind. It might not fit yours right away, but do let me know if you have certain features in mind via seth@studiosc.dev.
 
