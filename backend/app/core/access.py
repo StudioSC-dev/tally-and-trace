@@ -4,10 +4,13 @@ Every router and service resolves access through this module. The rule has a
 single root, ``account_role(user, account)``:
 
 - ``owner`` when the account is the user's (``account.user_id``);
+- ``admin``, ``editor`` or ``viewer`` from the user's ``account_shares`` row;
 - ``none`` otherwise.
 
-Account shares add ``admin``, ``editor`` and ``viewer`` later; nothing outside
-this module should compare ``user_id`` columns to decide access to an account.
+When several apply, the highest wins (``ROLE_RANK``). ``_shared_role`` is the
+one place a role other than the owner's comes from: tag shares add their
+``tag_viewer`` there later. Nothing outside this module should compare
+``user_id`` columns to decide access to an account.
 
 Records that touch accounts (transactions and recurring entries) follow from it:
 
@@ -33,18 +36,25 @@ Failures are 404, never 403: a 403 would confirm the id exists to someone with
 no right to know that.
 """
 
-from typing import Iterable, Optional, Set, Tuple
+from typing import Dict, Iterable, Optional, Set, Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.account import Account
+from app.models.account_share import AccountShare
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType
 
 OWNER = "owner"
+ADMIN = "admin"
+EDITOR = "editor"
+VIEWER = "viewer"
 NONE = "none"
+
+# Highest first: when a user holds several roles on an account, the highest wins.
+ROLE_RANK = {OWNER: 4, ADMIN: 3, EDITOR: 2, VIEWER: 1, NONE: 0}
 
 # Roles held on the account itself or through a direct share.
 DIRECT_ROLES = frozenset({OWNER, "admin", "editor", "viewer"})
@@ -83,13 +93,46 @@ def _uid(user) -> Optional[int]:
     return getattr(user, "id", user)
 
 
+def _highest(*roles: str) -> str:
+    return max(roles, key=ROLE_RANK.__getitem__)
+
+
+def _shared_role(uid, account) -> str:
+    """The role ``uid`` holds on ``account`` through a share, or ``none``.
+
+    Reads the account's ``shares`` (loaded with it). The seam for tag shares:
+    their ``tag_viewer`` role is added here, and nowhere else.
+    """
+    for share in account.shares:
+        if share.user_id == uid:
+            return share.role
+    return NONE
+
+
 def account_role(user, account) -> str:
-    """The caller's role on ``account``: ``owner`` or ``none``."""
+    """The caller's role on ``account``: ``owner``, ``admin``, ``editor``, ``viewer`` or ``none``."""
     if user is None or account is None:
         return NONE
-    if account.user_id == _uid(user):
+    uid = _uid(user)
+    if account.user_id == uid:
         return OWNER
-    return NONE
+    return _highest(NONE, _shared_role(uid, account))
+
+
+def role_map(db: Session, user) -> Dict[int, str]:
+    """``{account id: role}`` for every account the caller holds a role on.
+
+    The bulk form of ``account_role``, by the same rules, in two queries: an
+    account missing from the map is ``none``.
+    """
+    uid = _uid(user)
+    roles: Dict[int, str] = {}
+    for account_id, role in db.query(AccountShare.account_id, AccountShare.role).filter(
+            AccountShare.user_id == uid):
+        roles[account_id] = _highest(roles.get(account_id, NONE), role)
+    for (account_id,) in db.query(Account.id).filter(Account.user_id == uid):
+        roles[account_id] = OWNER
+    return roles
 
 
 def can_view_account(user, account) -> bool:
@@ -100,19 +143,38 @@ def can_edit_account(user, account) -> bool:
     return account_role(user, account) in EDIT_ROLES
 
 
+def _held_criterion(user, roles=DIRECT_ROLES):
+    """Criterion: the caller holds one of ``roles`` on the account (owner or share)."""
+    uid = _uid(user)
+    shared = [r for r in roles if r != OWNER]
+    criteria = []
+    if OWNER in roles:
+        criteria.append(Account.user_id == uid)
+    if shared:
+        criteria.append(Account.id.in_(
+            select(AccountShare.account_id).where(
+                AccountShare.user_id == uid, AccountShare.role.in_(shared))))
+    return or_(*criteria)
+
+
 def viewable_accounts(db: Session, user, *, active_only: bool = False):
-    """Query for the accounts the caller holds any role on."""
-    query = db.query(Account).filter(Account.user_id == _uid(user))
+    """Query for the accounts the caller holds any role on (their own and shared ones)."""
+    query = db.query(Account).filter(_held_criterion(user))
     if active_only:
         query = query.filter(Account.is_active.is_(True))
     return query
 
 
 def viewable_account_ids(db: Session, user, *, active_only: bool = False) -> Set[int]:
-    query = db.query(Account.id).filter(Account.user_id == _uid(user))
+    query = db.query(Account.id).filter(_held_criterion(user))
     if active_only:
         query = query.filter(Account.is_active.is_(True))
     return {row[0] for row in query.all()}
+
+
+def editable_account_ids(db: Session, user) -> Set[int]:
+    """The accounts the caller may add, change or remove records on."""
+    return {row[0] for row in db.query(Account.id).filter(_held_criterion(user, EDIT_ROLES))}
 
 
 def record_account_ids(record) -> Tuple[int, ...]:
