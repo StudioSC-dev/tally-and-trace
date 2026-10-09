@@ -186,8 +186,13 @@ An account's owner can share it with another user as `viewer`, `editor` or
   owner of every account a record touches may also post, revert or delete it.
   Unposted records can be deleted by their creator, or by the owner of an
   account they touch. A record with no account is its creator's alone.
-- **Account settings** (and tagging an account) need owner or admin; shares
-  are managed by the owner or an admin, and only the owner grants admin.
+- **Account settings** (and tagging an account) need owner or admin; deleting
+  or deactivating an account is the owner's alone. Shares are managed by the
+  owner or an admin, and only the owner grants admin. A non-creator can't set
+  or clear a record's category, allocation or recurring entry (400).
+- **Loan terms** (rate, payment amount, term, first payment date, amortisation
+  and the proposed split) are shown to the owner and admins only; an editor's
+  loan schedule keeps the payment rows with those fields null.
 - **Responses** carry `view`: `full` (you created it and can view every account
   it touches), `shared_full` (another editor's record; the creator's category,
   allocation, recurring-entry, receipt and invoice references are dropped and a
@@ -195,12 +200,15 @@ An account's owner can share it with another user as `viewer`, `editor` or
   Every record also carries `permissions` (`can_edit`, `can_delete`,
   `can_post`, `can_revert`, `can_tag`) and `created_by` (a display name such as
   "Alex P."). Accounts carry `my_role`, `owner_name` and `permissions`
-  (`can_edit_settings`, `can_manage_shares`, `can_add_transactions`).
+  (`can_edit_settings`, `can_manage_shares`, `can_add_transactions`,
+  `can_delete`).
 - **Hidden accounts** appear as `{id: null, name}` with "Other account", "Loan
   payment" or "Card payment", and a description is shown only when you can view
   every account the record touches. A payment into a loan or card you can't
   view shows the whole amount and no fee or interest. Search matches displayed
-  text only.
+  text only, and list filters only on accounts you can view (any other id
+  matches nothing) and, for `is_reconciled` and `is_active`, only on records
+  you see in full.
 - **Projections** include shared accounts. Events you can't see in full are
   `limited` (`public_id`, `date`, `original_date`, `overdue`, `display_name`,
   `face_amount`, `cash_delta`, `currency`, `account`, `kind`).
@@ -213,12 +221,12 @@ An account's owner can share it with another user as `viewer`, `editor` or
 - `POST   /accounts/` — Create an account
 - `GET    /accounts/{id}` — Get account details
 - `PUT    /accounts/{id}` — Update an account (owner or admin)
-- `DELETE /accounts/{id}` — Delete an account
+- `DELETE /accounts/{id}` — Delete an account (owner)
 - `GET    /accounts/{id}/balance` — Get account balance
 - `GET    /accounts/{id}/statements` — A card's statements (viewers get a limited form)
 - `GET    /accounts/{id}/loan-schedule` — A loan's schedule (viewers get a limited form)
 - `GET    /accounts/{id}/shares` — The owner and every share (owner or admin)
-- `POST   /accounts/{id}/shares` — Share with a user (`user_id`, `role`)
+- `POST   /accounts/{id}/shares` — Share with a user by exact email (`email`, `role`); resolved and rate-limited like `/users/lookup`, with the same 404 "No matching user"
 - `PATCH  /accounts/{id}/shares/{share_id}` — Change a share's role
 - `DELETE /accounts/{id}/shares/{share_id}` — Remove a share
 
