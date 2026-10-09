@@ -1267,11 +1267,12 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
     """``{(entry id, day): count}`` of transactions materialised from each entry.
 
     Each stands in for one occurrence on its calendar day. Only the entry
-    creator's transactions count: another user's row naming the entry is a
-    stale reference (left by the entity era) and suppresses nothing. So do
-    only transactions on the entry's own account: one recorded on another
-    account (the creator's private one, say) never suppresses an occurrence
-    projected on a shared account.
+    creator's transactions count, on whichever account they were recorded (as
+    before shared accounts, so a user with no shares projects exactly as
+    then): another user's row naming the entry is a stale reference (left by
+    the entity era; the same-owner rule allows no new one) and suppresses
+    nothing, so a transaction in another user's private account never
+    suppresses an occurrence projected on a shared account.
     """
     if not entry_ids:
         return Counter()
@@ -1279,8 +1280,7 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
         db.query(Transaction.budget_entry_id, Transaction.transaction_date)
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
-                Transaction.user_id == BudgetEntry.user_id,
-                Transaction.account_id == BudgetEntry.account_id)
+                Transaction.user_id == BudgetEntry.user_id)
     )
     return Counter((entry_id, _naive(when).date()) for entry_id, when in rows)
 

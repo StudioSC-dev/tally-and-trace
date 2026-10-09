@@ -377,3 +377,50 @@ def test_statement_legs_skip_inactive_funding_and_overflow_accounts(sw_client, s
     closings = {a["account_id"]: a["closing_balance"] for a in result["by_account"]}
     assert closings == {main: Decimal("-500.00")}
     assert result["closing_balance"] == Decimal("-500.00")
+
+
+# --- Occurrence suppression (audit round 1, K) -------------------------------------------
+
+def test_a_hand_linked_transfer_from_another_own_account_still_suppresses(
+        sw_client, sw_db, sw_people):
+    """A user with no shares, as before shared accounts: their own linked row on any
+    of their accounts stands in for the occurrence on its day."""
+    u = sw_people("Una", "Solo")
+    main = sw_post(sw_client, u, "/accounts/", {
+        "name": "Main", "account_type": "checking", "balance": 1_000})["id"]
+    other = sw_post(sw_client, u, "/accounts/", {
+        "name": "Other", "account_type": "checking", "balance": 1_000})["id"]
+    savings = sw_post(sw_client, u, "/accounts/", {
+        "name": "Savings", "account_type": "savings", "balance": 0})["id"]
+    entry = sw_post(sw_client, u, "/budget-entries/", {
+        "name": "Save", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": main,
+        "transfer_to_account_id": savings})["id"]
+    _transfer(sw_client, u, other, savings, 100, "2026-10-25T00:00:00", posted=True,
+              budget_entry_id=entry)
+    dates = sorted(e["date"] for e in _events(sw_db, u) if e["source_id"] == entry)
+    assert dates == [datetime(2026, 11, 25)]
+
+
+def test_another_users_private_row_never_suppresses_a_joint_occurrence(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction, TransactionType
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    pot = sw_post(sw_client, a, "/accounts/", {
+        "name": "Joint savings", "account_type": "savings", "balance": 0})["id"]
+    sw_share(sw_db, pot, b["id"], "editor", a["id"])
+    entry = sw_post(sw_client, a, "/budget-entries/", {
+        "name": "Joint saving", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "transfer_to_account_id": pot})["id"]
+    # A stale link (the API refuses it): the partner's row on their private account.
+    sw_db.add(Transaction(
+        user_id=b["id"], created_by_actor=b["id"], account_id=sw["b_private"],
+        transaction_type=TransactionType.DEBIT, amount=100, transfer_fee=0,
+        currency="PHP", transaction_date=datetime(2026, 10, 25), is_posted=True,
+        is_recurring=False, budget_entry_id=entry, description="Bea"))
+    sw_db.commit()
+    for who in ("a", "b"):
+        dates = sorted(e["date"] for e in _events(sw_db, sw[who])
+                       if e["name"] == "Joint saving")
+        assert dates == [datetime(2026, 10, 25), datetime(2026, 11, 25)], who
