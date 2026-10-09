@@ -325,6 +325,19 @@ def test_materialise_copies_explicit_tags_once(client, db, owner_world):
     assert _names(r.json()) == ["Travel"]
 
 
+def test_materialise_ignores_links_from_other_users_tags(client, db, owner_world):
+    """Only the entry owner's tags are copied, whatever sits in the link table."""
+    w, owner = owner_world, owner_world["owner"]
+    entry = _post(client, owner, "/budget-entries/", {
+        **RESOURCES["entry"][1](w["bank"]), "tag_ids": [w["business"]]})
+    db.execute(text("INSERT INTO budget_entry_tags (tag_id, budget_entry_id) VALUES (:t, :e)"),
+               {"t": w["foreign"], "e": entry["id"]})
+    db.commit()
+    r = client.post(f"{API}/budget-entries/{entry['id']}/materialize", headers=owner["headers"])
+    assert r.status_code == 201, r.text
+    assert _links(db, "transaction", r.json()["id"]) == [w["business"]]
+
+
 def test_a_failed_materialise_copies_no_tags(client, db, owner_world):
     """The copy is in the transaction's own commit: a refused post leaves nothing."""
     w, owner = owner_world, owner_world["owner"]

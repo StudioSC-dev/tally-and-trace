@@ -125,8 +125,11 @@ def copy_explicit_tags(db: Session, entry_id: int, transaction_id: int) -> None:
     """
     db.execute(insert(transaction_tags).from_select(
         ["tag_id", "transaction_id"],
-        select(budget_entry_tags.c.tag_id, literal(transaction_id)).where(
-            budget_entry_tags.c.budget_entry_id == entry_id),
+        select(budget_entry_tags.c.tag_id, literal(transaction_id))
+        .join(Tag, Tag.id == budget_entry_tags.c.tag_id)
+        .join(BudgetEntry, BudgetEntry.id == budget_entry_tags.c.budget_entry_id)
+        .where(budget_entry_tags.c.budget_entry_id == entry_id,
+               Tag.user_id == BudgetEntry.user_id),  # the entry owner's tags only
     ))
 
 
