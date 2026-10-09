@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 ShareRole = Literal["viewer", "editor", "admin"]
 
@@ -16,9 +16,11 @@ class UserMatch(BaseModel):
 
 
 class ShareCreate(BaseModel):
+    """A new share, by the sharee's exact email (resolved like ``/users/lookup``)."""
+
     model_config = ConfigDict(extra="forbid")
 
-    user_id: int
+    email: str = Field(..., min_length=1, max_length=255)
     role: ShareRole
 
 

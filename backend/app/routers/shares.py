@@ -9,6 +9,9 @@
   case-insensitive match. Every other case (no such user, the caller, an
   inactive or demo user) is the same 404 "No matching user". Rate-limited per
   caller (429).
+- A share is created by ``{email, role}``, resolved by that same lookup and
+  counted against the same per-caller limit, never by a raw user id: a user
+  is reachable only by someone who knows their exact email.
 
 Rules: the owner is never a share row and can't be removed. Only the owner
 grants admin, and an admin can't change or remove another admin's share.
@@ -20,7 +23,7 @@ Demo users get 403 on every route here and can't be share targets.
 
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict, List
+from typing import Deque, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, or_
@@ -131,11 +134,13 @@ def list_account_shares(account_id: int, db: Session = Depends(get_db),
                      status_code=status.HTTP_201_CREATED)
 def create_account_share(account_id: int, body: ShareCreate, db: Session = Depends(get_db),
                          current_user: User = Depends(no_demo)):
+    # Every request counts against the picker's limit, whatever it then answers.
+    _check_rate(current_user)
     account = _managed_account(db, current_user, account_id)
     if body.role == ADMIN and account_role(current_user, account) != OWNER:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_GRANT_FORBIDDEN)
-    target = db.query(User).filter(User.id == body.user_id).first()
-    if target is None or not target.is_active or _is_demo(target):
+    target = _match(db, body.email)
+    if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_MATCH)
     if target.id == account.user_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=OWNER_TARGET)
@@ -216,15 +221,27 @@ def _rate_limited(user_id: int) -> bool:
     return False
 
 
+def _check_rate(user: User) -> None:
+    """429 once the caller has used up the picker's limit (lookups and share creation)."""
+    if _rate_limited(user.id):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Too many lookups; try again in a minute")
+
+
+def _match(db: Session, email: str) -> Optional[User]:
+    """The active, non-demo user with exactly this email (case-insensitive), else None."""
+    wanted = email.strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == wanted).first()
+    if user is None or not user.is_active or _is_demo(user):
+        return None
+    return user
+
+
 @users_router.get("/lookup", response_model=UserMatch)
 def lookup_user(email: str = Query(..., min_length=1, max_length=255),
                 db: Session = Depends(get_db), current_user: User = Depends(no_demo)):
-    if _rate_limited(current_user.id):
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                            detail="Too many lookups; try again in a minute")
-    wanted = email.strip().lower()
-    user = db.query(User).filter(func.lower(User.email) == wanted).first()
-    if (user is None or user.id == current_user.id or not user.is_active
-            or _is_demo(user)):
+    _check_rate(current_user)
+    user = _match(db, email)
+    if user is None or user.id == current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_MATCH)
     return {"id": user.id, "display_name": display_name(user) or ""}

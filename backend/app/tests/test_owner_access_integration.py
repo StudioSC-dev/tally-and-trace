@@ -188,7 +188,7 @@ def _id_routes(w):
         ("delete", f"/tags/{w['tag']}", {}),
         ("get", f"/accounts/{w['bank']}/shares", {}),
         ("post", f"/accounts/{w['bank']}/shares",
-         {"json": {"user_id": 1, "role": "viewer"}}),
+         {"json": {"email": "nobody@example.com", "role": "viewer"}}),
         ("patch", f"/accounts/{w['bank']}/shares/{w['bank']}", {"json": {"role": "viewer"}}),
         ("delete", f"/accounts/{w['bank']}/shares/{w['bank']}", {}),
         ("delete", f"/shares/received/{w['bank']}", {}),

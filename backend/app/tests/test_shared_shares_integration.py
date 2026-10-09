@@ -63,7 +63,7 @@ def test_owner_shares_with_a_picked_user_who_then_reads_the_account(sw, sw_clien
     assert r.status_code == 200 and r.json() == {"id": newcomer["id"], "display_name": "Nia N."}
     assert _call(sw_client, newcomer, "get", f"/accounts/{sw['a_private']}").status_code == 404
     r = _call(sw_client, sw["a"], "post", f"/accounts/{sw['a_private']}/shares",
-              json={"user_id": newcomer["id"], "role": "viewer"})
+              json={"email": newcomer["email"], "role": "viewer"})
     assert r.status_code == 201, r.text
     assert r.json()["role"] == "viewer" and r.json()["display_name"] == "Nia N."
     account = _call(sw_client, newcomer, "get", f"/accounts/{sw['a_private']}")
@@ -75,17 +75,17 @@ def test_owner_shares_with_a_picked_user_who_then_reads_the_account(sw, sw_clien
 
 def test_share_creation_conflicts_and_unknown_targets(sw, sw_client, demo):
     path = f"/accounts/{sw['joint']}/shares"
-    dup = _call(sw_client, sw["a"], "post", path, json={"user_id": sw["b"]["id"], "role": "viewer"})
+    dup = _call(sw_client, sw["a"], "post", path, json={"email": sw["b"]["email"], "role": "viewer"})
     assert dup.status_code == 409
-    owner = _call(sw_client, sw["d"], "post", path, json={"user_id": sw["a"]["id"], "role": "viewer"})
+    owner = _call(sw_client, sw["d"], "post", path, json={"email": sw["a"]["email"], "role": "viewer"})
     assert owner.status_code == 409
-    unknown = _call(sw_client, sw["a"], "post", path, json={"user_id": 2_000_000_000,
+    unknown = _call(sw_client, sw["a"], "post", path, json={"email": "nobody@example.com",
                                                             "role": "viewer"})
-    demo_target = _call(sw_client, sw["a"], "post", path, json={"user_id": demo["id"],
+    demo_target = _call(sw_client, sw["a"], "post", path, json={"email": demo["email"],
                                                                 "role": "viewer"})
     assert unknown.status_code == demo_target.status_code == 404
     assert unknown.json() == demo_target.json() == {"detail": "No matching user"}
-    bad_role = _call(sw_client, sw["a"], "post", path, json={"user_id": sw["s"]["id"],
+    bad_role = _call(sw_client, sw["a"], "post", path, json={"email": sw["s"]["email"],
                                                              "role": "owner"})
     assert bad_role.status_code == 422
 
@@ -94,7 +94,7 @@ def test_editors_and_viewers_cannot_change_shares(sw, sw_client):
     base = f"/accounts/{sw['joint']}/shares"
     for who in ("b", "v"):
         assert _call(sw_client, sw[who], "post", base,
-                     json={"user_id": sw["s"]["id"], "role": "viewer"}).status_code == 403
+                     json={"email": sw["s"]["email"], "role": "viewer"}).status_code == 403
         assert _call(sw_client, sw[who], "patch", f"{base}/{sw['shares']['v']}",
                      json={"role": "editor"}).status_code == 403
         assert _call(sw_client, sw[who], "delete",
@@ -105,11 +105,11 @@ def test_editors_and_viewers_cannot_change_shares(sw, sw_client):
 def test_only_the_owner_grants_admin(sw, sw_client, sw_people):
     base = f"/accounts/{sw['joint']}/shares"
     newcomer = sw_people("Nia", "New")
-    r = _call(sw_client, sw["d"], "post", base, json={"user_id": newcomer["id"], "role": "admin"})
+    r = _call(sw_client, sw["d"], "post", base, json={"email": newcomer["email"], "role": "admin"})
     assert r.status_code == 403
     r = _call(sw_client, sw["d"], "patch", f"{base}/{sw['shares']['b']}", json={"role": "admin"})
     assert r.status_code == 403
-    r = _call(sw_client, sw["d"], "post", base, json={"user_id": newcomer["id"], "role": "editor"})
+    r = _call(sw_client, sw["d"], "post", base, json={"email": newcomer["email"], "role": "editor"})
     assert r.status_code == 201
     r = _call(sw_client, sw["a"], "patch", f"{base}/{sw['shares']['b']}", json={"role": "admin"})
     assert r.status_code == 200 and r.json()["role"] == "admin"
@@ -118,7 +118,7 @@ def test_only_the_owner_grants_admin(sw, sw_client, sw_people):
 def test_an_admin_cannot_demote_or_remove_another_admin(sw, sw_client, sw_people):
     base = f"/accounts/{sw['joint']}/shares"
     other = sw_people("Ola", "Admin")
-    second = sw_post(sw_client, sw["a"], base, {"user_id": other["id"], "role": "admin"})["id"]
+    second = sw_post(sw_client, sw["a"], base, {"email": other["email"], "role": "admin"})["id"]
     assert _call(sw_client, sw["d"], "patch", f"{base}/{second}",
                  json={"role": "viewer"}).status_code == 403
     assert _call(sw_client, sw["d"], "delete", f"{base}/{second}").status_code == 403
@@ -271,7 +271,7 @@ def test_demo_users_get_403_on_lookup_and_every_share_route(sw, sw_client, demo)
     routes = [
         ("get", "/users/lookup", {"params": {"email": sw["a"]["email"]}}),
         ("get", f"/accounts/{mine}/shares", {}),
-        ("post", f"/accounts/{mine}/shares", {"json": {"user_id": sw["a"]["id"],
+        ("post", f"/accounts/{mine}/shares", {"json": {"email": sw["a"]["email"],
                                                        "role": "viewer"}}),
         ("patch", f"/accounts/{mine}/shares/1", {"json": {"role": "viewer"}}),
         ("delete", f"/accounts/{mine}/shares/1", {}),
@@ -281,3 +281,60 @@ def test_demo_users_get_403_on_lookup_and_every_share_route(sw, sw_client, demo)
     for method, path, kw in routes:
         r = _call(sw_client, demo, method, path, **kw)
         assert r.status_code == 403, (method, path, r.status_code)
+
+
+# --- Sharing by exact email only (audit round 1, F) --------------------------------------
+
+def test_a_share_cannot_be_created_by_user_id(sw, sw_client, sw_people):
+    newcomer = sw_people("Nia", "New")
+    path = f"/accounts/{sw['a_private']}/shares"
+    for body in ({"user_id": newcomer["id"], "role": "viewer"},
+                 {"user_id": newcomer["id"], "email": newcomer["email"], "role": "viewer"}):
+        r = _call(sw_client, sw["a"], "post", path, json=body)
+        assert r.status_code == 422, r.text
+    assert _call(sw_client, newcomer, "get", f"/accounts/{sw['a_private']}").status_code == 404
+    r = _call(sw_client, sw["a"], "post", path,
+              json={"email": f"  {newcomer['email'].upper()} ", "role": "viewer"})
+    assert r.status_code == 201, r.text
+    assert (r.json()["user_id"], r.json()["display_name"]) == (newcomer["id"], "Nia N.")
+
+
+def test_share_creation_answers_no_match_uniformly(sw, sw_client, sw_db, demo):
+    from app.core.seed import DEMO_PARTNER_EMAIL
+    from app.models.user import User
+
+    sw_db.query(User).filter(User.id == sw["s"]["id"]).update({User.is_active: False})
+    sw_db.commit()
+    path = f"/accounts/{sw['joint']}/shares"
+    b_email = sw["b"]["email"]
+    misses = [b_email[:-1], b_email.split("@")[0], "%", "share-%@example.com",
+              "nobody@example.com", sw_db.get(User, sw["s"]["id"]).email, demo["email"],
+              DEMO_PARTNER_EMAIL]
+    answers = [_call(sw_client, sw["a"], "post", path, json={"email": m, "role": "viewer"})
+               for m in misses]
+    assert {(r.status_code, r.text) for r in answers} == {(404, '{"detail":"No matching user"}')}
+    sw_db.query(User).filter(User.id == sw["s"]["id"]).update({User.is_active: True})
+    sw_db.commit()
+
+
+def test_share_creation_counts_toward_the_lookup_limit(sw, sw_client, sw_people):
+    from app.routers.shares import LOOKUP_LIMIT
+
+    path = f"/accounts/{sw['joint']}/shares"
+    newcomer = sw_people("Nia", "New")
+    for i in range(LOOKUP_LIMIT - 1):
+        assert _call(sw_client, sw["a"], "post", path,
+                     json={"email": f"nobody{i}@example.com", "role": "viewer"}
+                     ).status_code == 404
+    assert _call(sw_client, sw["a"], "get", "/users/lookup",
+                 params={"email": "nobody@example.com"}).status_code == 404
+    # The limit is spent: a real match is refused too, by lookup and by share.
+    assert _call(sw_client, sw["a"], "post", path,
+                 json={"email": newcomer["email"], "role": "viewer"}).status_code == 429
+    assert _call(sw_client, sw["a"], "get", "/users/lookup",
+                 params={"email": newcomer["email"]}).status_code == 429
+    # Every POST counts, even one refused before the lookup.
+    for _ in range(LOOKUP_LIMIT):
+        _call(sw_client, sw["b"], "post", path, json={"email": "x@example.com", "role": "viewer"})
+    assert _call(sw_client, sw["b"], "get", "/users/lookup",
+                 params={"email": newcomer["email"]}).status_code == 429
