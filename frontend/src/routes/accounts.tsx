@@ -96,6 +96,8 @@ export function AccountsPage() {
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
   const [amortizationTouched, setAmortizationTouched] = useState(false)
   const [showCreditSettings, setShowCreditSettings] = useState(false)
+  // Why the last save failed, shown in the form until the next attempt or close.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const [triggerAccounts] = useLazyGetAccountsQuery()
   const beginAccountsRequest = useRequestGeneration()
@@ -284,10 +286,11 @@ export function AccountsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSaveError(null)
     try {
       const isLoan = formData.account_type === 'loan'
       // Loan terms are accepted on loans only: drop them from every other type.
-      const { tag_ids: selectedTagIds, ...payload } = formData
+      const { tag_ids: selectedTagIds, is_active: isActive, ...payload } = formData
       if (!isLoan) {
         for (const field of LOAN_FIELDS) delete payload[field]
       }
@@ -297,6 +300,8 @@ export function AccountsPage() {
           id: editingAccount.id,
           data: {
             ...payload,
+            // Activating or deactivating is the owner's alone: an admin's save leaves it out.
+            ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
             ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
             payment_account_id: formData.payment_account_id ?? null,
             payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
@@ -313,18 +318,19 @@ export function AccountsPage() {
         }).unwrap()
         setEditingAccount(null)
       } else {
-        await createAccount({ ...payload, tag_ids: selectedTagIds }).unwrap()
+        await createAccount({ ...payload, is_active: isActive, tag_ids: selectedTagIds }).unwrap()
       }
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
       setIsCreateModalOpen(false)
       await loadAccountsRef.current(true)
     } catch (error) {
-      console.error('Error saving account:', error)
+      setSaveError(apiErrorMessage(error) || 'Could not save the account. Please try again.')
     }
   }
 
   const handleEdit = (account: Account) => {
+    setSaveError(null)
     setEditingAccount(account)
     setFormData({
       name: account.name,
@@ -625,7 +631,7 @@ export function AccountsPage() {
             )}
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {actionAccount.permissions.can_edit_settings && (
+              {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleToggleActive(actionAccount)}
                 className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ actionAccount.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
@@ -660,7 +666,7 @@ export function AccountsPage() {
                 Share account
               </button>
               )}
-              {actionAccount.permissions.can_edit_settings && (
+              {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleDelete(actionAccount.id)}
                 className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken sm:col-span-2"
@@ -693,6 +699,7 @@ export function AccountsPage() {
                   setFormData(blankForm(defaultCurrency))
                   setAmortizationTouched(false)
                   setShowCreditSettings(false)
+                  setSaveError(null)
                 }}
                 className="text-muted hover:text-body transition-colors duration-200 w-full sm:w-auto"
               >
@@ -1119,6 +1126,7 @@ export function AccountsPage() {
                 </fieldset>
               )}
 
+              {(!editingAccount || editingAccount.permissions.can_delete) && (
               <div className="flex items-center justify-between border border-line bg-surface/50 px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-body">Account status</p>
@@ -1142,6 +1150,13 @@ export function AccountsPage() {
                   </button>
                 </div>
               </div>
+              )}
+
+              {saveError && (
+                <p className="text-sm text-danger" role="alert" data-testid="account-save-error">
+                  {saveError}
+                </p>
+              )}
               
               <div className="flex space-x-3 pt-6 border-t border-line">
                 <button
@@ -1157,6 +1172,7 @@ export function AccountsPage() {
                     setEditingAccount(null)
                     setFormData(blankForm(defaultCurrency))
                     setAmortizationTouched(false)
+                    setSaveError(null)
                   }}
                   className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"
                 >
