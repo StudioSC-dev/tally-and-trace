@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type { Account, Transaction, BudgetEntry } from '../store/api'
-import { useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { TagChips } from '../components/TagChips'
@@ -529,6 +529,7 @@ export function TransactionsPage() {
       isAuthenticated,
     ]
   )
+  const loadTransactionsRef = useLatestRef(loadTransactions)
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
@@ -944,7 +945,7 @@ export function TransactionsPage() {
       }
       resetForm()
       setIsCreateModalOpen(false)
-      await loadTransactions(true)
+      await loadTransactionsRef.current(true)
     } catch (error) {
       console.error('Error saving transaction:', error)
       // Show the API's reason (e.g. a loan payment rule) instead of failing silently.
@@ -1002,7 +1003,7 @@ export function TransactionsPage() {
         if (actionTransaction?.id === transactionId) {
           closeActionModal()
         }
-        await loadTransactions(true)
+        await loadTransactionsRef.current(true)
       } catch (error) {
         console.error('Error deleting transaction:', error)
       }

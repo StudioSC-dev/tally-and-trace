@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Account } from '../store/api'
-import { useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { LoanActions, LoanSummary } from '../components/LoanPanel'
@@ -191,6 +191,7 @@ export function AccountsPage() {
     },
     [triggerAccounts, beginAccountsRequest, isAuthenticated, selectedTag]
   )
+  const loadAccountsRef = useLatestRef(loadAccounts)
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
@@ -309,7 +310,7 @@ export function AccountsPage() {
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
       setIsCreateModalOpen(false)
-      await loadAccounts(true)
+      await loadAccountsRef.current(true)
     } catch (error) {
       console.error('Error saving account:', error)
     }
@@ -352,7 +353,7 @@ export function AccountsPage() {
         if (actionAccount?.id === accountId) {
           closeActionModal()
         }
-        await loadAccounts(true)
+        await loadAccountsRef.current(true)
       } catch (error) {
         console.error('Error deleting account:', error)
       }
@@ -588,7 +589,7 @@ export function AccountsPage() {
                   )}
                   onRecorded={() => {
                     closeActionModal()
-                    void loadAccounts(true)
+                    void loadAccountsRef.current(true)
                   }}
                 />
               </div>

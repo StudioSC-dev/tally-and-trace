@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 /**
  * Guards a loader against stale responses. Call `begin(reset)` as a request
@@ -16,4 +16,18 @@ export function useRequestGeneration() {
     const generation = generationRef.current
     return () => generationRef.current === generation
   }, [])
+}
+
+/**
+ * Returns a ref that always holds the latest value. A handler that awaits a
+ * mutation and then refreshes a list reads the loader from here, so the refresh
+ * runs under the filters now on screen rather than the ones captured when the
+ * handler was created.
+ */
+export function useLatestRef<T>(value: T) {
+  const ref = useRef(value)
+  useEffect(() => {
+    ref.current = value
+  }, [value])
+  return ref
 }

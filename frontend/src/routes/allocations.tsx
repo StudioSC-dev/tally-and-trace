@@ -15,7 +15,7 @@ import type { Allocation, BudgetEntry, Account, Category, WishlistItem } from '.
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
-import { useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { formatCurrency, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { TagChips } from '../components/TagChips'
@@ -532,6 +532,7 @@ export function AllocationsPage() {
       }
     }
   }, [isAuthenticated, triggerBudgetEntries, beginBudgetEntriesRequest, selectedTag])
+  const loadBudgetEntriesRef = useLatestRef(loadBudgetEntries)
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
@@ -764,12 +765,12 @@ export function AllocationsPage() {
         setIsCreateModalOpen(false)
         setEditingBudgetEntry(null)
         setSubscriptionForm(createSubscriptionDefaults())
-        await loadBudgetEntries()
+        await loadBudgetEntriesRef.current()
       } catch (error) {
         console.error('Error deleting budget entry:', error)
       }
     },
-    [createSubscriptionDefaults, deleteBudgetEntry, loadBudgetEntries]
+    [createSubscriptionDefaults, deleteBudgetEntry, loadBudgetEntriesRef]
   )
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -846,7 +847,7 @@ export function AllocationsPage() {
         }
         setSubscriptionForm(createSubscriptionDefaults())
         setIsCreateModalOpen(false)
-        await loadBudgetEntries()
+        await loadBudgetEntriesRef.current()
         return
       }
 
