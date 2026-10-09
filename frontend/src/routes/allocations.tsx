@@ -17,6 +17,10 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { WishlistPanel } from '../components/WishlistPanel'
+import { TagChips } from '../components/TagChips'
+import { TagFilter } from '../components/TagFilter'
+import { TagPicker } from '../components/TagPicker'
+import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -242,6 +246,8 @@ type SubscriptionFormState = {
   end_mode: 'indefinite' | 'on_date' | 'after_occurrences'
   end_date?: string
   max_occurrences?: number
+  // The tags picked in the form; an edit sends them only when they changed.
+  tag_ids: number[]
 }
 
 export const Route = createFileRoute('/allocations')({
@@ -325,6 +331,7 @@ export function AllocationsPage() {
       end_mode: 'indefinite',
       end_date: undefined,
       max_occurrences: undefined,
+      tag_ids: [],
     }),
     [defaultCurrencyCode]
   )
@@ -444,6 +451,7 @@ export function AllocationsPage() {
   const [isRecurringLoading, setIsRecurringLoading] = useState(true)
   const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
   const [recurringExpenses, setRecurringExpenses] = useState<BudgetEntry[]>([])
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
 
   const loadAllocations = useCallback(
     async (reset = false) => {
@@ -502,9 +510,10 @@ export function AllocationsPage() {
     }
     setIsRecurringLoading(true)
     try {
+      const tagParam = selectedTag !== undefined ? { tag: selectedTag } : {}
       const [incomeResult, expenseResult] = await Promise.all([
-        triggerBudgetEntries({ entry_type: 'income', limit: 100 }).unwrap(),
-        triggerBudgetEntries({ entry_type: 'expense', limit: 100 }).unwrap(),
+        triggerBudgetEntries({ entry_type: 'income', limit: 100, ...tagParam }).unwrap(),
+        triggerBudgetEntries({ entry_type: 'expense', limit: 100, ...tagParam }).unwrap(),
       ])
       setRecurringIncome(incomeResult.items)
       setRecurringExpenses(expenseResult.items)
@@ -515,7 +524,7 @@ export function AllocationsPage() {
     } finally {
       setIsRecurringLoading(false)
     }
-  }, [isAuthenticated, triggerBudgetEntries])
+  }, [isAuthenticated, triggerBudgetEntries, selectedTag])
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
@@ -637,6 +646,7 @@ export function AllocationsPage() {
           end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
           end_date: entry.end_date ? toLocalDateTimeInput(entry.end_date) : undefined,
           max_occurrences: entry.max_occurrences ?? undefined,
+          tag_ids: tagIdsOf(entry.tags),
         })
       } else {
         setEditingBudgetEntry(null)
@@ -815,6 +825,10 @@ export function AllocationsPage() {
           end_mode: subscriptionForm.end_mode,
           end_date: endDateIso,
           max_occurrences: maxOccurrences,
+          // An edit sends the tags only when they changed; omitting them keeps them.
+          ...(editingBudgetEntry
+            ? tagIdsIfChanged(subscriptionForm.tag_ids, tagIdsOf(editingBudgetEntry.tags))
+            : { tag_ids: subscriptionForm.tag_ids }),
         }
 
         if (editingBudgetEntry) {
@@ -1384,6 +1398,7 @@ export function AllocationsPage() {
                 Fully paid
               </span>
             )}
+            <TagChips tags={entry.tags} />
           </div>
         </div>
       </article>
@@ -1494,6 +1509,8 @@ export function AllocationsPage() {
           </p>
                 </div>
       </div>
+
+      {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={setSelectedTag} />}
 
       {activeTab === 'subscriptions' &&
         renderRecurringSection(
@@ -2114,6 +2131,11 @@ export function AllocationsPage() {
                         <span>{subscriptionForm.is_autopay ? 'Enabled' : 'Disabled'}</span>
                       </button>
               </div>
+
+                    <TagPicker
+                      value={subscriptionForm.tag_ids}
+                      onChange={(tag_ids) => setSubscriptionForm((prev) => ({ ...prev, tag_ids }))}
+                    />
 
                     <div className="flex items-center justify-between border border-line px-4 py-3">
                       <div>

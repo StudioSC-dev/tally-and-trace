@@ -1,10 +1,14 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
+import { useGetAccountsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Account } from '../store/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { LoanActions, LoanSummary } from '../components/LoanPanel'
+import { TagChips } from '../components/TagChips'
+import { TagFilter } from '../components/TagFilter'
+import { TagPicker } from '../components/TagPicker'
+import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
@@ -57,6 +61,8 @@ const blankForm = (currency: CurrencyCode) => ({
   loan_amortization: undefined as LoanAmortization | undefined,
   loan_payments_made_offset: undefined as number | undefined,
   is_active: true,
+  // The tags picked in the form; an edit sends them only when they changed.
+  tag_ids: [] as number[],
 })
 
 const LOAN_FIELDS = [
@@ -97,11 +103,18 @@ export function AccountsPage() {
   const loadMoreObserver = useRef<IntersectionObserver | null>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  // The list above is narrowed by the tag filter, but payment routing can pick any account.
+  const { data: allAccountsData } = useGetAccountsQuery(
+    { limit: 100 },
+    { skip: !isAuthenticated || selectedTag === undefined },
+  )
+  const routingAccounts = selectedTag === undefined ? accounts : allAccountsData?.items ?? accounts
 
   // Only non-credit, non-loan, non-wallet accounts can fund a statement or a loan payment
   // (a card or loan holds no cash), and an account can't pay itself. Mirrors the backend
   // validation in routers/accounts.py::_validate_payment_routing.
-  const fundingAccounts = accounts.filter(
+  const fundingAccounts = routingAccounts.filter(
     (a) =>
       a.account_type !== 'credit' &&
       a.account_type !== 'loan' &&
@@ -136,6 +149,7 @@ export function AccountsPage() {
       const params = {
         limit,
         offset: nextOffset,
+        ...(selectedTag !== undefined ? { tag: selectedTag } : {}),
       }
 
       try {
@@ -167,7 +181,7 @@ export function AccountsPage() {
         }
       }
     },
-    [triggerAccounts, isAuthenticated]
+    [triggerAccounts, isAuthenticated, selectedTag]
   )
 
   useEffect(() => {
@@ -256,7 +270,7 @@ export function AccountsPage() {
     try {
       const isLoan = formData.account_type === 'loan'
       // Loan terms are accepted on loans only: drop them from every other type.
-      const payload = { ...formData }
+      const { tag_ids: selectedTagIds, ...payload } = formData
       if (!isLoan) {
         for (const field of LOAN_FIELDS) delete payload[field]
       }
@@ -266,6 +280,7 @@ export function AccountsPage() {
           id: editingAccount.id,
           data: {
             ...payload,
+            ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
             payment_account_id: formData.payment_account_id ?? null,
             payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
             ...(isLoan
@@ -281,7 +296,7 @@ export function AccountsPage() {
         }).unwrap()
         setEditingAccount(null)
       } else {
-        await createAccount(payload).unwrap()
+        await createAccount({ ...payload, tag_ids: selectedTagIds }).unwrap()
       }
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
@@ -315,6 +330,7 @@ export function AccountsPage() {
       loan_amortization: account.loan_amortization ?? undefined,
       loan_payments_made_offset: account.loan_payments_made_offset ?? undefined,
       is_active: account.is_active,
+      tag_ids: tagIdsOf(account.tags),
     })
     setAmortizationTouched(true)
     setShowCreditSettings(false)
@@ -388,10 +404,14 @@ export function AccountsPage() {
         </button>
       </div>
 
+      <TagFilter value={selectedTag} onChange={setSelectedTag} />
+
       {/* Accounts List */}
       {orderedAccounts.length === 0 ? (
         <div className="card p-6 text-center text-muted">
-          No accounts yet. Start by adding your first account.
+          {selectedTag === undefined
+            ? 'No accounts yet. Start by adding your first account.'
+            : 'No accounts have this tag.'}
         </div>
       ) : (
         <>
@@ -440,6 +460,7 @@ export function AccountsPage() {
                         Currency: {account.currency}
                       </span>
                       {account.is_spending_wallet && <NotCountedTag />}
+                      <TagChips tags={account.tags} />
                       {account.account_type === 'credit' && account.credit_limit !== undefined && (
                         <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
                           Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
@@ -554,7 +575,7 @@ export function AccountsPage() {
                 <LoanActions
                   key={actionAccount.id}
                   account={actionAccount}
-                  fundingAccounts={accounts.filter(
+                  fundingAccounts={routingAccounts.filter(
                     (a) => a.account_type !== 'credit' && a.account_type !== 'loan' && !a.is_spending_wallet && a.is_active,
                   )}
                   onRecorded={() => {
@@ -706,7 +727,7 @@ export function AccountsPage() {
                   value={formData.currency}
                   onChange={(e) => {
                     const currency = e.target.value as CurrencyCode
-                    const payer = accounts.find((a) => a.id === formData.payment_account_id)
+                    const payer = routingAccounts.find((a) => a.id === formData.payment_account_id)
                     // A loan's paying account must be in the loan's currency.
                     const clearPayer = formData.account_type === 'loan' && !!payer && payer.currency !== currency
                     setFormData({
@@ -748,6 +769,12 @@ export function AccountsPage() {
                 )}
               </div>
               
+              <TagPicker
+                value={formData.tag_ids}
+                onChange={(tag_ids) => setFormData((prev) => ({ ...prev, tag_ids }))}
+                warnHousehold
+              />
+
               <div>
                 <label className="label">Description (Optional)</label>
                 <textarea

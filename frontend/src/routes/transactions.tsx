@@ -4,6 +4,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type { Account, Transaction, BudgetEntry } from '../store/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { TagChips } from '../components/TagChips'
+import { TagFilter } from '../components/TagFilter'
+import { TagPicker } from '../components/TagPicker'
+import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -165,6 +169,8 @@ type TransactionFormState = {
   is_posted: boolean
   transfer_from_account_id?: number
   transfer_to_account_id?: number
+  // The tags picked in the form; an edit sends them only when they changed.
+  tag_ids: number[]
 }
 
 type PostingFormState = {
@@ -208,6 +214,7 @@ export function TransactionsPage() {
     is_posted: true,
     transfer_from_account_id: undefined,
     transfer_to_account_id: undefined,
+    tag_ids: [],
     ...overrides,
   })
 
@@ -229,6 +236,7 @@ export function TransactionsPage() {
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([])
   const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   const resetPostingFormState = useCallback(() => {
     setPostingFormState({
       visible: false,
@@ -265,6 +273,7 @@ export function TransactionsPage() {
     setSelectedAccountIds([])
     setSelectedCategoryIds([])
     setSelectedTypes([])
+    setSelectedTag(undefined)
     setCurrentMonth(freshStart)
     setStartDate(formatDateInput(freshStart))
     setEndDate(formatDateInput(freshEnd))
@@ -281,6 +290,7 @@ export function TransactionsPage() {
           selectedAccountIds.length ||
           selectedCategoryIds.length ||
           selectedTypes.length ||
+          selectedTag !== undefined ||
           isCustomRange ||
           startDate !== defaultMonthStartString ||
           endDate !== defaultMonthEndString
@@ -290,6 +300,7 @@ export function TransactionsPage() {
       selectedAccountIds,
       selectedCategoryIds,
       selectedTypes,
+      selectedTag,
       isCustomRange,
       startDate,
       endDate,
@@ -432,6 +443,7 @@ export function TransactionsPage() {
         start_date?: string
         end_date?: string
         search?: string
+        tag?: number
         limit: number
         offset: number
       } = {
@@ -446,6 +458,9 @@ export function TransactionsPage() {
       }
       if (selectedCategoryIds.length > 0) {
         params.category_ids = selectedCategoryIds
+      }
+      if (selectedTag !== undefined) {
+        params.tag = selectedTag
       }
       if (searchTerm.trim()) {
         params.search = searchTerm.trim()
@@ -496,6 +511,7 @@ export function TransactionsPage() {
       selectedAccountIds,
       selectedTypes,
       selectedCategoryIds,
+      selectedTag,
       searchTerm,
       startDate,
       endDate,
@@ -889,6 +905,10 @@ export function TransactionsPage() {
         category_id: formData.category_id,
         allocation_id: formData.transaction_type === 'transfer' ? undefined : formData.allocation_id,
         budget_entry_id: formData.transaction_type === 'transfer' ? undefined : formData.budget_entry_id,
+        // An edit sends the tags only when they changed; omitting them keeps them.
+        ...(editingTransaction
+          ? tagIdsIfChanged(formData.tag_ids, tagIdsOf(editingTransaction.tags))
+          : { tag_ids: formData.tag_ids }),
         projected_amount: projectedAmount ?? undefined,
         projected_currency: projectedCurrency,
       }
@@ -960,6 +980,7 @@ export function TransactionsPage() {
         transfer_to_account_id: transaction.transaction_type === 'transfer'
           ? transaction.transfer_to_account_id ?? undefined
           : undefined,
+        tag_ids: tagIdsOf(transaction.tags),
       })
     )
     setIsCreateModalOpen(true)
@@ -1437,6 +1458,12 @@ export function TransactionsPage() {
                 })}
           </div>
       </div>
+            <div>
+              <h3 className="text-sm font-semibold text-body">Tag</h3>
+              <div className="mt-2">
+                <TagFilter value={selectedTag} onChange={setSelectedTag} />
+              </div>
+            </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="label">Custom start date</label>
@@ -1533,6 +1560,7 @@ export function TransactionsPage() {
                             ? category?.name || 'Transfer'
                             : category?.name || 'Uncategorized'}
                       </span>
+                        <TagChips tags={transaction.tags} />
                         {scheduleLabel && (
                           <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
                             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2232,6 +2260,11 @@ export function TransactionsPage() {
                   <span>Mark as posted</span>
                 </label>
               </div>
+
+              <TagPicker
+                value={formData.tag_ids}
+                onChange={(tag_ids) => setFormData((prev) => ({ ...prev, tag_ids }))}
+              />
 
               {formData.transaction_type !== 'transfer' && (
                 <div className="space-y-3">

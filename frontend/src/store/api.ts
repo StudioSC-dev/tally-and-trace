@@ -42,6 +42,13 @@ export type {
   LoanPrepaymentRequest,
   LoanSchedule,
   LoanScheduleRow,
+  Tag,
+  TagRef,
+  TagCreate,
+  TagUpdate,
+  AccountInput,
+  BudgetEntryInput,
+  TransactionInput,
 } from '@tally-trace/shared'
 
 import type {
@@ -61,6 +68,12 @@ import type {
   LoanPaymentRequest,
   LoanPrepaymentRequest,
   LoanSchedule,
+  Tag,
+  TagCreate,
+  TagUpdate,
+  AccountInput,
+  BudgetEntryInput,
+  TransactionInput,
 } from '@tally-trace/shared'
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
@@ -68,10 +81,10 @@ import type {
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
-    getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; limit?: number; offset?: number }>({
+    getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
       query: (params) => ({ url: 'accounts/', params }),
       providesTags: ['Account'],
     }),
@@ -79,11 +92,11 @@ export const accountingApi = createApi({
       query: (id) => `accounts/${id}`,
       providesTags: ['Account'],
     }),
-    createAccount: builder.mutation<Account, Partial<Account>>({
+    createAccount: builder.mutation<Account, AccountInput>({
       query: (account) => ({ url: 'accounts/', method: 'POST', body: account }),
       invalidatesTags: ['Account'],
     }),
-    updateAccount: builder.mutation<Account, { id: number; data: Partial<Account> }>({
+    updateAccount: builder.mutation<Account, { id: number; data: AccountInput }>({
       query: ({ id, data }) => ({ url: `accounts/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Account'],
     }),
@@ -164,6 +177,7 @@ export const accountingApi = createApi({
     getBudgetEntries: builder.query<PaginatedResponse<BudgetEntry>, {
       entry_type?: 'income' | 'expense'
       is_active?: boolean
+      tag?: number
       before?: string
       after?: string
       limit?: number
@@ -172,11 +186,11 @@ export const accountingApi = createApi({
       query: (params) => ({ url: 'budget-entries/', params }),
       providesTags: ['BudgetEntry'],
     }),
-    createBudgetEntry: builder.mutation<BudgetEntry, Partial<BudgetEntry>>({
+    createBudgetEntry: builder.mutation<BudgetEntry, BudgetEntryInput>({
       query: (entry) => ({ url: 'budget-entries/', method: 'POST', body: entry }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
     }),
-    updateBudgetEntry: builder.mutation<BudgetEntry, { id: number; data: Partial<BudgetEntry> }>({
+    updateBudgetEntry: builder.mutation<BudgetEntry, { id: number; data: BudgetEntryInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
     }),
@@ -198,6 +212,7 @@ export const accountingApi = createApi({
       start_date?: string
       end_date?: string
       is_reconciled?: boolean
+      tag?: number
       search?: string
       limit?: number
       offset?: number
@@ -211,6 +226,7 @@ export const accountingApi = createApi({
         if (params?.start_date) searchParams.set('start_date', params.start_date)
         if (params?.end_date) searchParams.set('end_date', params.end_date)
         if (typeof params?.is_reconciled === 'boolean') searchParams.set('is_reconciled', String(params.is_reconciled))
+        if (typeof params?.tag === 'number') searchParams.set('tag', String(params.tag))
         if (params?.search) searchParams.set('search', params.search)
         if (typeof params?.limit === 'number') searchParams.set('limit', String(params.limit))
         if (typeof params?.offset === 'number') searchParams.set('offset', String(params.offset))
@@ -222,11 +238,11 @@ export const accountingApi = createApi({
       query: (id) => `transactions/${id}`,
       providesTags: ['Transaction'],
     }),
-    createTransaction: builder.mutation<Transaction, Partial<Transaction>>({
+    createTransaction: builder.mutation<Transaction, TransactionInput>({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
     }),
-    updateTransaction: builder.mutation<Transaction, { id: number; data: Partial<Transaction> }>({
+    updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
     }),
@@ -242,15 +258,35 @@ export const accountingApi = createApi({
       },
       invalidatesTags: ['Transaction'],
     }),
-    getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number }>({
+    getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number; tag?: number }>({
       query: (params) => ({ url: 'transactions/summary/period', params }),
       providesTags: ['Transaction'],
     }),
 
     // ── Forecast ──────────────────────────────────────────────────────────────
-    getForecastTimeline: builder.query<CashflowTimeline, { days?: number } | void>({
+    getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number } | void>({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
       providesTags: ['Account', 'BudgetEntry', 'Transaction'],
+    }),
+
+    // ── Tags ──────────────────────────────────────────────────────────────────
+    // A rename, recolour or delete changes the tags embedded in every record, so those
+    // lists refresh too.
+    getTags: builder.query<Tag[], void>({
+      query: () => 'tags/',
+      providesTags: ['Tag'],
+    }),
+    createTag: builder.mutation<Tag, TagCreate>({
+      query: (body) => ({ url: 'tags/', method: 'POST', body }),
+      invalidatesTags: ['Tag'],
+    }),
+    updateTag: builder.mutation<Tag, { id: number; data: TagUpdate }>({
+      query: ({ id, data }) => ({ url: `tags/${id}`, method: 'PUT', body: data }),
+      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
+    }),
+    deleteTag: builder.mutation<void, number>({
+      query: (id) => ({ url: `tags/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
     }),
 
     // ── Wishlist ──────────────────────────────────────────────────────────────
@@ -325,6 +361,12 @@ export const {
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
   useGetTransactionSummaryQuery,
+
+  // Tag hooks
+  useGetTagsQuery,
+  useCreateTagMutation,
+  useUpdateTagMutation,
+  useDeleteTagMutation,
 
   // Forecast hooks
   useGetForecastTimelineQuery,
