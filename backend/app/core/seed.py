@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
-from app.models import Account, Allocation, BudgetEntry, Category, Transaction, User
+from app.core.tags import LINKS, ensure_household_tag
+from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
 from app.models.account import AccountType
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
 from app.models.budget_entry import BudgetEntryType
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 DEMO_EMAIL = "demo@example.com"
 DEMO_PASSWORD = "password123"
-DEMO_SHAPE_VERSION = 1
+DEMO_SHAPE_VERSION = 2  # 2: tags (STU-231)
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
@@ -70,7 +71,8 @@ def _seed(db: Session) -> None:
         _delete_demo_data(db, user)
     _reset_demo_user(user)
     db.flush()
-    _load_seed_data(db, user)
+    household = ensure_household_tag(db, user)  # kept across reseeds, like the user row
+    _load_seed_data(db, user, household)
 
     if state is None:
         db.add(DemoState(id=1, shape_version=DEMO_SHAPE_VERSION))
@@ -92,9 +94,15 @@ def _reset_demo_user(user: User) -> None:
 
 
 def _delete_demo_data(db: Session, user: User) -> None:
-    """Everything the demo user owns, children first; the user row stays."""
+    """Everything the demo user owns, children first; the user row stays.
+
+    So does the Household system tag, as every user keeps theirs; its links go
+    with the records they tag.
+    """
     for model in (Transaction, BudgetEntry, WishlistItem, Allocation, Category):
         db.query(model).filter(model.user_id == user.id).delete(synchronize_session=False)
+    db.query(Tag).filter(Tag.user_id == user.id, Tag.is_system.is_(False)).delete(
+        synchronize_session=False)
     db.query(Account).filter(Account.user_id == user.id).update(
         {"payment_account_id": None, "payment_overflow_account_id": None},
         synchronize_session=False)
@@ -102,10 +110,22 @@ def _delete_demo_data(db: Session, user: User) -> None:
     db.flush()
 
 
-def _load_seed_data(db: Session, default_user: User) -> None:
-    """The generic demo data in ``constants/seed_data.json``, owned by the demo user."""
+def _load_seed_data(db: Session, default_user: User, household: Tag) -> None:
+    """The generic demo data in ``constants/seed_data.json``, owned by the demo user.
+
+    Records name their tags in a ``tags`` list: Household is the user's system
+    tag, and every other name is one of the top-level ``tags``.
+    """
     with open(_SEED_FILE, "r") as f:
         seed_data = json.load(f)
+
+    tag_ids = {household.name: household.id}
+    for tag_data in seed_data.get("tags", []):
+        tag = Tag(user_id=default_user.id, name=tag_data["name"], color=tag_data.get("color"))
+        db.add(tag)
+        db.flush()
+        tag_ids[tag.name] = tag.id
+    tagged = []  # (record, tag names), linked once every record has its id
 
     # Create accounts associated with the default user
     accounts = []
@@ -120,9 +140,11 @@ def _load_seed_data(db: Session, default_user: User) -> None:
         account_data.setdefault("currency", default_user.default_currency)
         if account_data.get("days_until_due_date") is None:
             account_data["days_until_due_date"] = 21
+        names = account_data.pop("tags", [])
         account = Account(**account_data)
         db.add(account)
         accounts.append(account)
+        tagged.append((account, names))
     db.flush()
 
     # Refresh to get IDs and create mapping
@@ -222,9 +244,11 @@ def _load_seed_data(db: Session, default_user: User) -> None:
             entry_copy["category_id"] = category_id_mapping[entry_copy["category_id"]]
         if entry_copy.get("allocation_id"):
             entry_copy["allocation_id"] = allocation_id_mapping[entry_copy["allocation_id"]]
+        names = entry_copy.pop("tags", [])
         budget_entry = BudgetEntry(**entry_copy)
         db.add(budget_entry)
         budget_entries.append(budget_entry)
+        tagged.append((budget_entry, names))
     if budget_entries:
         db.flush()
         for i, entry in enumerate(budget_entries):
@@ -281,6 +305,14 @@ def _load_seed_data(db: Session, default_user: User) -> None:
         else:
             transaction_data["is_recurring"] = False
             transaction_data["recurrence_frequency"] = None
+        names = transaction_data.pop("tags", [])
         transaction = Transaction(**transaction_data)
         db.add(transaction)
+        tagged.append((transaction, names))
+    db.flush()
+
+    for record, names in tagged:
+        table, column = LINKS[type(record)]
+        for name in names:
+            db.execute(table.insert().values({"tag_id": tag_ids[name], column: record.id}))
     db.flush()

@@ -1,5 +1,6 @@
 import { createApi } from '@reduxjs/toolkit/query/react'
 import { baseQueryWithReauth, beginNewSession } from './baseQuery'
+import { accountingApi } from './api'
 
 // Re-export auth types from shared so existing imports continue to work
 export type {
@@ -40,6 +41,9 @@ export const authApi = createApi({
         try {
           const { data } = await queryFulfilled
           beginNewSession()
+          // A new session must never see the previous user's cached data, and
+          // requests still in flight from that session are aborted by the reset.
+          dispatch(accountingApi.util.resetApiState())
           localStorage.setItem('access_token', data.access_token)
           // The refresh token is NOT stored in JS — it arrives as an httpOnly cookie
           // the browser holds and sends automatically. data.refresh_token is present
@@ -91,6 +95,7 @@ export const authApi = createApi({
         localStorage.removeItem('user')
         // Clear all cached data
         dispatch(authApi.util.resetApiState())
+        dispatch(accountingApi.util.resetApiState())
       },
     }),
 

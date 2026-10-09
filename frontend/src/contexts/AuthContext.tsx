@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useDispatch } from 'react-redux'
 import { authApi, User } from '../store/authApi'
+import { accountingApi } from '../store/api'
 import { beginNewSession, currentSessionGeneration } from '../store/baseQuery'
 import type { AppDispatch } from '../store'
 
@@ -60,6 +61,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             beginNewSession()
             localStorage.removeItem('access_token')
             localStorage.removeItem('user')
+            dispatch(accountingApi.util.resetApiState())
             setUser(null)
           })
           .finally(() => {

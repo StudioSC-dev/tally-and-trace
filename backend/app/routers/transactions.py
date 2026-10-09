@@ -13,6 +13,10 @@ from app.core.access import (
     touches_accounts,
     viewable_account_ids,
 )
+from app.core.tags import (
+    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    replace_own_tags,
+)
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account, AccountType
@@ -535,6 +539,7 @@ def get_transactions(
     end_date: Optional[datetime] = Query(None, description="End date for filtering"),
     is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
     search: Optional[str] = Query(None, description="Search by description"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -565,6 +570,9 @@ def get_transactions(
         query = query.filter(Transaction.is_reconciled == is_reconciled)
     if search:
         query = query.filter(Transaction.description.ilike(f"%{search}%"))
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(Transaction, tag_id))
 
     total = query.count()
     transactions = (
@@ -574,6 +582,7 @@ def get_transactions(
         .all()
     )
     has_more = offset + len(transactions) < total
+    attach_visible_tags(db, current_user, transactions)
     return {"items": transactions, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=TransactionResponse)
@@ -583,7 +592,21 @@ def create_transaction(
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new transaction and update account balance"""
+    db_transaction = add_transaction(db, current_user, transaction)
+    db.commit()
+    db.refresh(db_transaction)
+    return attach_visible_tags(db, current_user, db_transaction)
+
+
+def add_transaction(db: Session, current_user: User, transaction: TransactionCreate) -> Transaction:
+    """Validate and add a new transaction with its balance and budget effects, uncommitted.
+
+    The caller commits, so a caller that writes more in the same change (a
+    materialised recurring entry) commits it all at once.
+    """
     transaction_data = transaction.dict()
+    # The caller's own tags only (404 otherwise); linked once the row exists.
+    tag_ids = own_tag_ids(db, current_user, transaction_data.pop("tag_ids", None) or [])
     transaction_data["user_id"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
@@ -675,16 +698,17 @@ def create_transaction(
                 category_id=transaction.category_id,
             )
             _apply_budget_delta(budget_allocations, delta, transaction.transaction_date)
-    
-    db.commit()
-    db.refresh(db_transaction)
+
+    db.flush()
+    if tag_ids:
+        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     return db_transaction
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    return transaction
+    return attach_visible_tags(db, current_user, transaction)
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -695,6 +719,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
+    # Tags: the caller's own only, on a row they may edit (checked above).
+    tag_ids = requested.pop("tag_ids", None)
+    if tag_ids is not None:
+        tag_ids = own_tag_ids(db, current_user, tag_ids)
 
     # Every account the edit touches must be one the caller may change: the ones
     # it reverses (checked by get_record_or_404, reported as the row not being
@@ -780,6 +808,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
     update_data.pop("is_recurring", None)
     update_data.pop("recurrence_frequency", None)
+    update_data.pop("tag_ids", None)
 
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
@@ -857,10 +886,12 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 category_id=db_transaction.category_id,
             )
             _apply_budget_delta(new_budget_allocations, new_budget_delta, db_transaction.transaction_date)
-    
+
+    if tag_ids is not None:
+        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_transaction)
-    return db_transaction
+    return attach_visible_tags(db, current_user, db_transaction)
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -1080,7 +1111,8 @@ def get_transaction_summary(
     current_user: User = Depends(get_current_active_user),
     start_date: datetime = Query(..., description="Start date for summary"),
     end_date: datetime = Query(..., description="End date for summary"),
-    account_id: Optional[int] = Query(None, description="Filter by account ID")
+    account_id: Optional[int] = Query(None, description="Filter by account ID"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
 ):
     """Get transaction summary for a specific period"""
     query = db.query(Transaction).filter(
@@ -1095,7 +1127,11 @@ def get_transaction_summary(
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)
-    
+    # Only rows carrying the tag effectively; each row counts once.
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(Transaction, tag_id))
+
     transactions = [t for t in query.all() if t.is_posted]
 
     account_ids = {

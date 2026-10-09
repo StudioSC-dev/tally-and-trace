@@ -4,6 +4,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.models.budget_entry import BudgetEntryType
 from app.models.transaction import RecurrenceFrequency
 from app.models.user import CurrencyType
+from app.schemas.tag import (
+    TagIds, TagSummaries, tag_ids_create_field, tag_ids_not_null, tag_ids_update_field,
+    tags_response_field,
+)
 
 
 class BudgetEntryBase(BaseModel):
@@ -46,6 +50,8 @@ def zero_remaining_allowed(end_mode: str, max_occurrences: Optional[int], is_act
 
 
 class BudgetEntryCreate(BudgetEntryBase):
+    tag_ids: TagIds = tag_ids_create_field()
+
     @model_validator(mode="after")
     def _zero_remaining_only_when_completed(self):
         if not zero_remaining_allowed(self.end_mode, self.max_occurrences, self.is_active):
@@ -75,6 +81,12 @@ class BudgetEntryUpdate(BaseModel):
     end_date: Optional[datetime] = None
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
+    tag_ids: Optional[TagIds] = tag_ids_update_field()
+
+    @field_validator("tag_ids")
+    @classmethod
+    def _tag_ids_not_null(cls, v):
+        return tag_ids_not_null(v)
 
     @field_validator("occurrences_paid_offset")
     @classmethod
@@ -92,6 +104,7 @@ class BudgetEntryResponse(BudgetEntryBase):
     # Installments only ("n of m"): occurrences materialised so far, counted from the
     # linked transactions. None for open-ended entries, where the notion doesn't apply.
     occurrences_paid: Optional[int] = None
+    tags: TagSummaries = tags_response_field()
 
     class Config:
         from_attributes = True

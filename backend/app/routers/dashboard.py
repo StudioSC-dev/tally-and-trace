@@ -4,12 +4,15 @@ Returns everything the front-end needs in a single call.
 """
 import math
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.access import owned_criterion
+from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
@@ -25,6 +28,7 @@ SAVINGS_RATE_FACTOR = 0.5
 def get_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
 ):
     """
     Single-call snapshot returning:
@@ -37,7 +41,12 @@ def get_snapshot(
     - Available cash (projection-cash accounts only; card balances are owed)
     - Per-account month-end closings over the forecast window
     - Payables (cash outflows) due in the next 30 days
+
+    With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
+    payables keep only tagged records (see routers/forecast.py); balances,
+    available cash, goals and the wishlist are not tagged and stay whole.
     """
+    tag_id = filter_tag_id(db, current_user, tag)
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
@@ -58,17 +67,17 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 2. Upcoming this month (next 30 days)
     # -----------------------------------------------------------------------
-    upcoming = forecast_svc.get_upcoming_items(db, current_user.id, days=30)
+    upcoming = forecast_svc.get_upcoming_items(db, current_user.id, days=30, tag_id=tag_id)
 
     # -----------------------------------------------------------------------
     # 3. Monthly income/expense summary (disposable income)
     # -----------------------------------------------------------------------
-    disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
+    disposable_data = forecast_svc.get_disposable_income(db, current_user.id, tag_id=tag_id)
 
     # -----------------------------------------------------------------------
     # 4. 3-month cash-flow forecast
     # -----------------------------------------------------------------------
-    forecast_3m = forecast_svc.project_cashflow(db, current_user.id, months=3)
+    forecast_3m = forecast_svc.project_cashflow(db, current_user.id, months=3, tag_id=tag_id)
 
     # -----------------------------------------------------------------------
     # 5. Goals progress
@@ -146,7 +155,7 @@ def get_snapshot(
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.get_payables(db, current_user.id, days=30)
+    payables = forecast_svc.get_payables(db, current_user.id, days=30, tag_id=tag_id)
 
     return {
         "balances": {

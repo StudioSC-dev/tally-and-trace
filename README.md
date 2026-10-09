@@ -77,6 +77,7 @@ tally-and-trace/
 - **Allocations**: Savings goals, budgets, and period-based allocations
 - **Wishlist**: Prioritised wishlist items linked to categories
 - **Category Organisation**: Color-coded categories for transactions and budgets
+- **Tags**: Your own tags on accounts, transactions and budget entries, with a built-in Household tag; a record also carries the tags on the accounts it is booked on, for filtering lists, summaries and projections
 - **Auth & Email**: JWT authentication with email verification and password reset (via Resend)
 - **Shared Package**: `@tally-trace/shared` provides types and utilities consumed by both web and mobile
 - **Type Safety**: Pydantic v2 on the backend, TypeScript everywhere on the frontend
@@ -159,6 +160,20 @@ All endpoints are prefixed with `/api/v1`.
 - `GET  /auth/me` — Get current user
 - `PUT  /auth/me` — Update current user
 
+Accounts, transactions and budget entries take `tag_ids` (your own tag ids) on
+create and update — on update, omit it to keep the tags or send a list to
+replace them — and return `tags` (`id`, `name`, `color`, `is_system`), listing
+only your own tags.
+
+`?tag=<id>` filters by effective tag: a record's own tags plus its owner's tags
+on the accounts it is booked on (`account_id`; `transfer_from_account_id` and
+`transfer_to_account_id` on transfers; a budget entry's `transfer_to_account_id`).
+It applies to `GET /accounts/` (the account's own tags), `GET /transactions/`,
+`GET /transactions/summary/period`, `GET /budget-entries/`, the `/forecast/*`
+views and `GET /dashboard/snapshot`. Projections keep only the tagged events
+from an unfiltered starting balance. A tag id you can't use gets an empty
+result, the same as a tag with no records.
+
 ### Accounts
 - `GET    /accounts/` — List accounts
 - `POST   /accounts/` — Create an account
@@ -195,8 +210,15 @@ All endpoints are prefixed with `/api/v1`.
 - `PUT    /budget-entries/{id}` — Update a budget entry
 - `DELETE /budget-entries/{id}` — Delete a budget entry
 
+### Tags
+- `GET    /tags/` — List your tags (the Household system tag first)
+- `POST   /tags/` — Create a tag (`name`, optional `color` as `#RRGGBB`); names are unique per user, ignoring case
+- `GET    /tags/{id}` — Get a tag
+- `PUT    /tags/{id}` — Rename or recolour a tag; the Household tag can be recoloured but not renamed
+- `DELETE /tags/{id}` — Delete a tag and its links; the Household tag can't be deleted
+
 ### Data export
-- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema)
+- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema), including your tags and their links to your records
 - `GET    /data/export.csv?table=<name>` — Download one table as CSV; without `table`, a ZIP of every table
 
 ### Wishlist
@@ -219,7 +241,7 @@ All endpoints are prefixed with `/api/v1`.
   alembic upgrade head
   ```
 - **Auto-router inclusion**: All files in `app/routers/` are automatically registered.
-- **Demo seeding**: On startup, the demo user (`demo@example.com`) gets the generic data in `app/constants/seed_data.json`. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing or the version differs, only the demo user's data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes.
+- **Demo seeding**: On startup, the demo user (`demo@example.com`) gets the generic data in `app/constants/seed_data.json`. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing or the version differs, only the demo user's data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes. Records name their tags in a `tags` list (Household, or a name from the top-level `tags`); the demo user's Household tag is kept across reseeds.
 - **Type safety**: Pydantic v2 for request/response validation.
 
 ### Frontend (Web)

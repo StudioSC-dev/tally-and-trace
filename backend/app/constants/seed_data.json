@@ -1,4 +1,10 @@
 {
+  "tags": [
+    {
+      "name": "Business",
+      "color": "#2563EB"
+    }
+  ],
   "accounts": [
     {
       "name": "Main Checking Account",
@@ -30,7 +36,8 @@
       "account_type": "CASH",
       "balance": 200.00,
       "description": "Physical cash for small purchases",
-      "currency": "PHP"
+      "currency": "PHP",
+      "tags": ["Household"]
     },
     {
       "name": "PayPal",
@@ -251,7 +258,8 @@
       "category_id": 4,
       "is_autopay": false,
       "description": "Power utility statement due monthly",
-      "end_mode": "indefinite"
+      "end_mode": "indefinite",
+      "tags": ["Household"]
     },
     {
       "name": "Gym Membership",
@@ -294,7 +302,8 @@
       "description": "Grocery shopping at Whole Foods",
       "transaction_type": "DEBIT",
       "transaction_date": "2025-08-25T10:30:00",
-      "is_posted": true
+      "is_posted": true,
+      "tags": ["Household"]
     },
     {
       "account_id": 1,
@@ -304,7 +313,8 @@
       "description": "Gas station fill-up",
       "transaction_type": "DEBIT",
       "transaction_date": "2025-08-29T16:45:00",
-      "is_posted": true
+      "is_posted": true,
+      "tags": ["Business"]
     },
     {
       "account_id": 1,
@@ -344,7 +354,8 @@
       "transaction_type": "DEBIT",
       "transaction_date": "2025-08-21T14:20:00",
       "posting_date": "2025-08-22T00:00:00",
-      "is_posted": true
+      "is_posted": true,
+      "tags": ["Business"]
     },
     {
       "account_id": 1,
@@ -403,7 +414,8 @@
       "projected_amount": 1200.00,
       "projected_currency": "PHP",
       "is_posted": false,
-      "budget_entry_id": 3
+      "budget_entry_id": 3,
+      "tags": ["Household"]
     },
     {
       "account_id": 1,

@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
+import { TagFilter } from '../components/TagFilter'
 
 export const Route = createFileRoute('/forecast')({
   component: ForecastPage,
@@ -23,6 +24,7 @@ function ForecastPage() {
   const navigate = useNavigate()
   const { format } = useCurrency()
   const [days, setDays] = useState<(typeof DAY_OPTIONS)[number]>(60)
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -30,7 +32,7 @@ function ForecastPage() {
     }
   }, [isAuthenticated, authLoading, navigate])
 
-  const { data, isLoading, error } = useGetForecastTimelineQuery({ days }, { skip: !isAuthenticated })
+  const { data, isLoading, error } = useGetForecastTimelineQuery({ days, ...(selectedTag !== undefined ? { tag: selectedTag } : {}) }, { skip: !isAuthenticated })
 
   if (!isAuthenticated) return null
 
@@ -45,6 +47,7 @@ function ForecastPage() {
             Running balance walked in date order — surfaces the trough before payday, not just the month-end total.
           </p>
         </div>
+        <TagFilter value={selectedTag} onChange={setSelectedTag} />
         <div className="flex space-x-1 bg-sunken p-1">
           {DAY_OPTIONS.map((d) => (
             <button

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
+import { TagFilter } from '../components/TagFilter'
 import { generateOccurrences } from '@tally-trace/shared'
 
 const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
@@ -62,6 +63,8 @@ export function Dashboard() {
   }, [isAuthenticated, authLoading, navigate])
 
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month')
+  const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  const tagParam = useMemo(() => (selectedTag !== undefined ? { tag: selectedTag } : {}), [selectedTag])
   const [postingId, setPostingId] = useState<number | null>(null)
   const [materializeEntry] = useMaterializeBudgetEntryMutation()
 
@@ -79,11 +82,11 @@ export function Dashboard() {
   const { data: accountsData, isLoading: accountsLoading, error: accountsError } =
     useGetAccountsQuery({ is_active: true, limit: 1000 }, { skip: !isAuthenticated })
   const { data: transactionsData, isLoading: transactionsLoading, error: transactionsError } =
-    useGetTransactionsQuery({ limit: 1000 }, { skip: !isAuthenticated })
+    useGetTransactionsQuery({ limit: 1000, ...tagParam }, { skip: !isAuthenticated })
   const { data: categoriesData, isLoading: categoriesLoading, error: categoriesError } =
     useGetCategoriesQuery({ is_active: true }, { skip: !isAuthenticated })
   const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
-    useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
+    useGetBudgetEntriesQuery({ is_active: true, limit: 200, ...tagParam }, { skip: !isAuthenticated })
   const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
     useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
 
@@ -430,6 +433,7 @@ export function Dashboard() {
           <h1 className="text-2xl font-bold text-ink">Dashboard</h1>
           <p className="text-sm text-muted mt-1">Your financial overview</p>
         </div>
+        <TagFilter value={selectedTag} onChange={setSelectedTag} />
         <div className="flex space-x-1 bg-sunken p-1">
           {(['week', 'month', 'year'] as const).map((period) => (
             <button
@@ -444,7 +448,7 @@ export function Dashboard() {
       </div>
 
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
-      <CashflowTimelineCard />
+      <CashflowTimelineCard tag={selectedTag} />
 
       {/* Financial Snapshot */}
       <div className="bg-surface border border-line" data-onboarding="financial-snapshot">

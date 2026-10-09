@@ -1,5 +1,44 @@
 import type { CurrencyCode } from '../utils/currency'
 
+// ─── Tag ─────────────────────────────────────────────────────────────────────
+
+/** A tag as it appears on a record (`tags` in account, transaction and entry responses). */
+export interface TagRef {
+  id: number
+  name: string
+  /** `#RRGGBB`, or null when none is set. */
+  color: string | null
+  /** The Household tag: it can be recoloured but not renamed or deleted. */
+  is_system: boolean
+}
+
+/** A tag as the tags endpoints return it. */
+export interface Tag extends TagRef {
+  created_at: string
+}
+
+/** POST /tags/. `name` is 1-50 characters, trimmed, unique per user ignoring case. */
+export interface TagCreate {
+  name: string
+  /** `#RRGGBB`. */
+  color?: string
+}
+
+/** PUT /tags/{id}. Omit a field to leave it unchanged. The system tag cannot be renamed. */
+export interface TagUpdate {
+  name?: string
+  color?: string
+}
+
+/**
+ * `tag_ids` on a create or update body. Create defaults to none. On update, omit it to
+ * keep the record's tags, send a list to replace them, or `[]` to clear them (never
+ * `null`). At most 50.
+ */
+export interface TagIdsInput {
+  tag_ids?: number[]
+}
+
 // ─── Account ────────────────────────────────────────────────────────────────
 
 export type AccountType = 'cash' | 'e_wallet' | 'savings' | 'checking' | 'credit' | 'loan'
@@ -50,9 +89,14 @@ export interface Account {
    */
   loan_payments_made_offset?: number | null
   is_active: boolean
+  /** The caller's tags on the account. */
+  tags: TagRef[]
   created_at: string
   updated_at?: string
 }
+
+/** POST /accounts/ and PUT /accounts/{id}. */
+export type AccountInput = Partial<Omit<Account, 'tags'>> & TagIdsInput
 
 // ─── Loan payments and schedule ──────────────────────────────────────────────
 
@@ -219,9 +263,14 @@ export interface BudgetEntry {
   allocation_id?: number
   is_autopay: boolean
   is_active: boolean
+  /** The entry's own tags (the caller's). */
+  tags: TagRef[]
   created_at: string
   updated_at?: string
 }
+
+/** POST /budget-entries/ and PUT /budget-entries/{id}. */
+export type BudgetEntryInput = Partial<Omit<BudgetEntry, 'tags'>> & TagIdsInput
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
 
@@ -262,9 +311,14 @@ export interface Transaction {
    * edit leaves null; a posted legacy transfer into a loan cannot be unposted.
    */
   loan_payment_kind?: LoanPaymentKind | null
+  /** The transaction's own tags (the caller's). */
+  tags: TagRef[]
   created_at: string
   updated_at?: string
 }
+
+/** POST /transactions/ and PUT /transactions/{id}. */
+export type TransactionInput = Partial<Omit<Transaction, 'tags'>> & TagIdsInput
 
 // ─── Wishlist ────────────────────────────────────────────────────────────────
 

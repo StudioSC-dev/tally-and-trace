@@ -7,6 +7,10 @@ never reaches an export until it is added on purpose.
 
 Owner form (STU-229): with no shares, records by others on the caller's
 accounts exist only as legacy data.
+
+Tags (STU-231): the caller's own tags, and the links from those tags to the
+caller's own accounts, transactions and recurring entries. Another user's tags,
+and links to records not in the export, are never included.
 """
 
 from datetime import date, datetime
@@ -14,7 +18,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict
 
-from sqlalchemy import and_
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
@@ -29,6 +33,7 @@ from app.models.account import Account
 from app.models.allocation import Allocation
 from app.models.budget_entry import BudgetEntry
 from app.models.category import Category
+from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tags
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
@@ -78,6 +83,12 @@ WISHLIST_FIELDS = (
     "target_date", "is_purchased", "purchased_at", "created_at", "updated_at",
 )
 
+TAG_FIELDS = ("id", "name", "color", "is_system", "created_at")
+
+ACCOUNT_TAG_FIELDS = ("tag_id", "account_id")
+TRANSACTION_TAG_FIELDS = ("tag_id", "transaction_id")
+BUDGET_ENTRY_TAG_FIELDS = ("tag_id", "budget_entry_id")
+
 # Records another user created on the caller's accounts: amounts, dates and the
 # caller's own accounts only. No description, category, allocation, recurring
 # entry, receipt or invoice, and no account of anyone else's.
@@ -97,7 +108,8 @@ ACCOUNT_REF_FIELDS = {
 
 TABLES = (
     "accounts", "transactions", "budget_entries", "categories", "allocations",
-    "wishlist_items", "others_transactions", "others_budget_entries",
+    "wishlist_items", "others_transactions", "others_budget_entries", "tags",
+    "account_tags", "transaction_tags", "budget_entry_tags",
 )
 
 
@@ -130,6 +142,20 @@ def _limited(record, fields, owned_ids) -> dict:
     return row
 
 
+def _own_links(db: Session, user: User, table, fields, record_ids) -> list:
+    """Links from the caller's own tags to the given records (their own)."""
+    if not record_ids:
+        return []
+    tag_col, record_col = (table.c[f] for f in fields)
+    rows = db.execute(
+        select(tag_col, record_col)
+        .join(Tag, Tag.id == tag_col)
+        .where(Tag.user_id == user.id, record_col.in_(record_ids))
+        .order_by(record_col, tag_col)
+    ).all()
+    return [dict(zip(fields, row)) for row in rows]
+
+
 def build_export(db: Session, user: User) -> Dict[str, object]:
     """The caller's export, as plain JSON-ready data (see the module docstring)."""
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
@@ -145,13 +171,16 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
             model.user_id != user.id, touches_accounts(model, owned_ids),
         )).order_by(model.id).all()
 
+    transactions, entries = own(Transaction), own(BudgetEntry)
+    tags = db.query(Tag).filter(Tag.user_id == user.id).order_by(Tag.id).all()
+
     return {
         "export_version": EXPORT_VERSION,
         "exported_at": utc_now().isoformat(),
         "user": _row(user, USER_FIELDS),
         "accounts": [_row(a, ACCOUNT_FIELDS) for a in owned],
-        "transactions": [_row(t, TRANSACTION_FIELDS) for t in own(Transaction)],
-        "budget_entries": [_row(e, BUDGET_ENTRY_FIELDS) for e in own(BudgetEntry)],
+        "transactions": [_row(t, TRANSACTION_FIELDS) for t in transactions],
+        "budget_entries": [_row(e, BUDGET_ENTRY_FIELDS) for e in entries],
         "categories": [_row(c, CATEGORY_FIELDS) for c in own(Category)],
         "allocations": [_row(a, ALLOCATION_FIELDS) for a in own(Allocation)],
         "wishlist_items": [_row(w, WISHLIST_FIELDS) for w in own(WishlistItem)],
@@ -159,6 +188,13 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
             _limited(t, LIMITED_TRANSACTION_FIELDS, owned_ids) for t in others(Transaction)],
         "others_budget_entries": [
             _limited(e, LIMITED_BUDGET_ENTRY_FIELDS, owned_ids) for e in others(BudgetEntry)],
+        "tags": [_row(t, TAG_FIELDS) for t in tags],
+        "account_tags": _own_links(
+            db, user, account_tags, ACCOUNT_TAG_FIELDS, [a.id for a in owned]),
+        "transaction_tags": _own_links(
+            db, user, transaction_tags, TRANSACTION_TAG_FIELDS, [t.id for t in transactions]),
+        "budget_entry_tags": _own_links(
+            db, user, budget_entry_tags, BUDGET_ENTRY_TAG_FIELDS, [e.id for e in entries]),
     }
 
 
@@ -171,4 +207,8 @@ TABLE_FIELDS: Dict[str, tuple] = {
     "wishlist_items": WISHLIST_FIELDS,
     "others_transactions": LIMITED_TRANSACTION_FIELDS,
     "others_budget_entries": LIMITED_BUDGET_ENTRY_FIELDS,
+    "tags": TAG_FIELDS,
+    "account_tags": ACCOUNT_TAG_FIELDS,
+    "transaction_tags": TRANSACTION_TAG_FIELDS,
+    "budget_entry_tags": BUDGET_ENTRY_TAG_FIELDS,
 }

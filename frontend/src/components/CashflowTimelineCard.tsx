@@ -10,9 +10,9 @@ const longDate = (iso: string | null) => {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(d)
 }
 
-export function CashflowTimelineCard() {
+export function CashflowTimelineCard({ tag }: { tag?: number }) {
   const { format } = useCurrency()
-  const { data, isLoading, error } = useGetForecastTimelineQuery({ days: 60 })
+  const { data, isLoading, error } = useGetForecastTimelineQuery({ days: 60, ...(tag !== undefined ? { tag } : {}) })
 
   return (
     <div className="bg-surface border border-line" data-onboarding="cashflow-timeline">
