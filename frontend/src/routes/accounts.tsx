@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Account } from '../store/api'
+import { useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { LoanActions, LoanSummary } from '../components/LoanPanel'
@@ -91,6 +92,7 @@ export function AccountsPage() {
   const [showCreditSettings, setShowCreditSettings] = useState(false)
 
   const [triggerAccounts] = useLazyGetAccountsQuery()
+  const beginAccountsRequest = useRequestGeneration()
   const [createAccount] = useCreateAccountMutation()
   const [updateAccount] = useUpdateAccountMutation()
   const [deleteAccount] = useDeleteAccountMutation()
@@ -152,21 +154,25 @@ export function AccountsPage() {
         ...(selectedTag !== undefined ? { tag: selectedTag } : {}),
       }
 
+      const isCurrent = beginAccountsRequest(reset)
       try {
         if (reset) {
           offsetRef.current = 0
           setIsInitialLoading(true)
+          setIsFetchingMore(false)
           setAccounts([])
         } else {
           setIsFetchingMore(true)
         }
 
         const result = await triggerAccounts(params).unwrap()
+        if (!isCurrent()) return
         offsetRef.current = nextOffset + result.items.length
         setAccounts((prev) => (reset ? result.items : [...prev, ...result.items]))
         setTotalAccounts(result.total)
         setHasMoreAccounts(result.has_more)
       } catch (error) {
+        if (!isCurrent()) return
         console.error('Error loading accounts:', error)
         if (reset) {
           setAccounts([])
@@ -174,14 +180,16 @@ export function AccountsPage() {
           setHasMoreAccounts(false)
         }
       } finally {
-        if (reset) {
-          setIsInitialLoading(false)
-        } else {
-          setIsFetchingMore(false)
+        if (isCurrent()) {
+          if (reset) {
+            setIsInitialLoading(false)
+          } else {
+            setIsFetchingMore(false)
+          }
         }
       }
     },
-    [triggerAccounts, isAuthenticated, selectedTag]
+    [triggerAccounts, beginAccountsRequest, isAuthenticated, selectedTag]
   )
 
   useEffect(() => {

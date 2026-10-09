@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type { Account, Transaction, BudgetEntry } from '../store/api'
+import { useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { TagChips } from '../components/TagChips'
@@ -394,6 +395,7 @@ export function TransactionsPage() {
   }, [])
  
   const [triggerTransactions] = useLazyGetTransactionsQuery()
+  const beginTransactionsRequest = useRequestGeneration()
   const { data: accountsData, isLoading: isAccountsLoading } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
@@ -478,21 +480,25 @@ export function TransactionsPage() {
         }
       }
 
+      const isCurrent = beginTransactionsRequest(reset)
       try {
         if (reset) {
           offsetRef.current = 0
           setIsInitialLoading(true)
+          setIsFetchingMore(false)
           setTransactions([])
         } else {
           setIsFetchingMore(true)
         }
 
         const result = await triggerTransactions(params).unwrap()
+        if (!isCurrent()) return
         offsetRef.current = nextOffset + result.items.length
         setTransactions((prev) => (reset ? result.items : [...prev, ...result.items]))
         setTotalTransactions(result.total)
         setHasMoreTransactions(result.has_more)
       } catch (error) {
+        if (!isCurrent()) return
         console.error('Error loading transactions:', error)
         if (reset) {
           setTransactions([])
@@ -500,14 +506,17 @@ export function TransactionsPage() {
           setHasMoreTransactions(false)
         }
       } finally {
-        if (reset) {
-          setIsInitialLoading(false)
-        } else {
-          setIsFetchingMore(false)
+        if (isCurrent()) {
+          if (reset) {
+            setIsInitialLoading(false)
+          } else {
+            setIsFetchingMore(false)
+          }
         }
       }
     },
     [
+      beginTransactionsRequest,
       selectedAccountIds,
       selectedTypes,
       selectedCategoryIds,

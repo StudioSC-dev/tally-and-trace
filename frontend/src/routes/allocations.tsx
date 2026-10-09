@@ -15,6 +15,7 @@ import type { Allocation, BudgetEntry, Account, Category, WishlistItem } from '.
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { useRequestGeneration } from '../hooks/useRequestGeneration'
 import { formatCurrency, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { TagChips } from '../components/TagChips'
@@ -347,6 +348,7 @@ export function AllocationsPage() {
 
   const [triggerAllocations] = useLazyGetAllocationsQuery()
   const [triggerBudgetEntries] = useLazyGetBudgetEntriesQuery()
+  const beginBudgetEntriesRequest = useRequestGeneration()
   const { data: accountsData } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
@@ -508,6 +510,7 @@ export function AllocationsPage() {
     if (!isAuthenticated) {
       return
     }
+    const isCurrent = beginBudgetEntriesRequest(true)
     setIsRecurringLoading(true)
     try {
       const tagParam = selectedTag !== undefined ? { tag: selectedTag } : {}
@@ -515,16 +518,20 @@ export function AllocationsPage() {
         triggerBudgetEntries({ entry_type: 'income', limit: 100, ...tagParam }).unwrap(),
         triggerBudgetEntries({ entry_type: 'expense', limit: 100, ...tagParam }).unwrap(),
       ])
+      if (!isCurrent()) return
       setRecurringIncome(incomeResult.items)
       setRecurringExpenses(expenseResult.items)
     } catch (error) {
+      if (!isCurrent()) return
       console.error('Error loading budget entries:', error)
       setRecurringIncome([])
       setRecurringExpenses([])
     } finally {
-      setIsRecurringLoading(false)
+      if (isCurrent()) {
+        setIsRecurringLoading(false)
+      }
     }
-  }, [isAuthenticated, triggerBudgetEntries, selectedTag])
+  }, [isAuthenticated, triggerBudgetEntries, beginBudgetEntriesRequest, selectedTag])
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
