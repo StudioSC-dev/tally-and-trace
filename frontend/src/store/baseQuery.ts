@@ -36,7 +36,15 @@ export function beginNewSession(): void {
   refreshing = null
 }
 
+/** The current session generation, for callers that must ignore stale results. */
+export function currentSessionGeneration(): number {
+  return sessionGeneration
+}
+
 function clearSession() {
+  // A cleared session is a new (empty) one: late 401s from the old one must not
+  // start another refresh and restore a token.
+  beginNewSession()
   localStorage.removeItem('access_token')
   // 'refresh_token' is a leftover key from the pre-cookie flow; remove it so no
   // stale token lingers in storage after upgrade. The live token is an httpOnly
