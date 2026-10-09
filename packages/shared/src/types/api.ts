@@ -660,6 +660,8 @@ export interface CashFlowProjection {
 
 /** A full upcoming item in the dashboard's older summary shape. */
 export interface UpcomingBill {
+  /** Absent on a full event; lets `isLimitedEvent` narrow the union. */
+  view?: undefined
   type: string
   name: string
   date: string
