@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useDispatch } from 'react-redux'
 import { authApi, User } from '../store/authApi'
+import { beginNewSession } from '../store/baseQuery'
 import type { AppDispatch } from '../store'
 
 interface AuthContextType {
@@ -47,6 +48,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           })
           .catch(() => {
             // Token is invalid, clear everything
+            beginNewSession()
             localStorage.removeItem('access_token')
             localStorage.removeItem('user')
             setUser(null)
@@ -56,6 +58,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           })
       } catch (error) {
         console.error('AuthContext: Error parsing saved user:', error)
+        beginNewSession()
         localStorage.removeItem('access_token')
         localStorage.removeItem('user')
         setUser(null)
