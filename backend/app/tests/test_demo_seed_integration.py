@@ -66,7 +66,7 @@ def seed(monkeypatch):
 def _snapshot(db):
     """The demo user's id, state row and the ids of everything it owns."""
     from app.core.seed import DEMO_EMAIL
-    from app.models import Account, Allocation, BudgetEntry, Category, Transaction, User
+    from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
     from app.models.demo_state import DemoState
 
     db.expire_all()
@@ -77,10 +77,12 @@ def _snapshot(db):
             r.id for r in db.query(model).filter(model.user_id == user.id))
         for model in (Account, Category, Allocation, BudgetEntry, Transaction)
     }
+    tags = {t.name: t.id for t in db.query(Tag).filter(Tag.user_id == user.id)}
     return {
         "user": user.id,
         "state": (state.shape_version, state.seeded_at) if state else None,
         "owned": owned,
+        "tags": tags,
     }
 
 
@@ -95,6 +97,15 @@ def _seed_counts():
         "budget_entries": len(data.get("budget_entries", [])),
         "transactions": len(data["transactions"]),
     }
+
+
+def _seed_tag_names():
+    """The demo user's tags after a reseed: the Household system tag and the seed's."""
+    from app.core.seed import _SEED_FILE
+
+    with open(_SEED_FILE) as f:
+        data = json.load(f)
+    return {"Household", *(t["name"] for t in data.get("tags", []))}
 
 
 def _demo_account(db, user_id):
@@ -144,6 +155,10 @@ def test_a_shape_bump_replaces_the_demo_data(db, seed, monkeypatch):
     assert {table: len(ids) for table, ids in after["owned"].items()} == _seed_counts()
     for table, ids in before["owned"].items():
         assert not set(ids) & set(after["owned"][table]), table
+    assert set(after["tags"]) == _seed_tag_names()
+    assert after["tags"]["Household"] == before["tags"]["Household"]  # kept, like the user
+    for name in set(before["tags"]) - {"Household"}:
+        assert before["tags"][name] not in after["tags"].values(), name
     assert "Edited by a visitor" not in [
         a.name for a in db.query(type(account)).filter(type(account).user_id == after["user"])]
 
@@ -162,6 +177,28 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
     assert after["user"] == before["user"]
     assert not set(before["owned"]["accounts"]) & set(after["owned"]["accounts"])
     assert {table: len(ids) for table, ids in after["owned"].items()} == _seed_counts()
+    assert set(after["tags"]) == _seed_tag_names()
+
+
+def test_the_demo_user_has_its_household_tag_and_a_reseed_drops_visitor_tags(
+        client, db, seed, monkeypatch):
+    from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD
+
+    r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    tags = client.get(f"{API}/tags/", headers=headers).json()
+    assert [t["name"] for t in tags if t["is_system"]] == ["Household"]
+    r = client.post(f"{API}/tags/", headers=headers, json={"name": "Added by a visitor"})
+    assert r.status_code == 201, r.text
+    before = _snapshot(db)
+
+    monkeypatch.setattr(seed, "DEMO_SHAPE_VERSION", seed.DEMO_SHAPE_VERSION + 1)
+    seed.seed_database()
+
+    after = _snapshot(db)
+    assert "Added by a visitor" not in after["tags"]
+    assert after["tags"]["Household"] == before["tags"]["Household"]
+    assert set(after["tags"]) == _seed_tag_names()
 
 
 def test_a_reseed_never_touches_another_user(db, seed, monkeypatch):

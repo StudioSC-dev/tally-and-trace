@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
-from app.models import Account, Allocation, BudgetEntry, Category, Transaction, User
+from app.core.tags import ensure_household_tag
+from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
 from app.models.account import AccountType
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
 from app.models.budget_entry import BudgetEntryType
@@ -70,6 +71,7 @@ def _seed(db: Session) -> None:
         _delete_demo_data(db, user)
     _reset_demo_user(user)
     db.flush()
+    ensure_household_tag(db, user)  # kept across reseeds, like the user row
     _load_seed_data(db, user)
 
     if state is None:
@@ -92,9 +94,15 @@ def _reset_demo_user(user: User) -> None:
 
 
 def _delete_demo_data(db: Session, user: User) -> None:
-    """Everything the demo user owns, children first; the user row stays."""
+    """Everything the demo user owns, children first; the user row stays.
+
+    So does the Household system tag, as every user keeps theirs; its links go
+    with the records they tag.
+    """
     for model in (Transaction, BudgetEntry, WishlistItem, Allocation, Category):
         db.query(model).filter(model.user_id == user.id).delete(synchronize_session=False)
+    db.query(Tag).filter(Tag.user_id == user.id, Tag.is_system.is_(False)).delete(
+        synchronize_session=False)
     db.query(Account).filter(Account.user_id == user.id).update(
         {"payment_account_id": None, "payment_overflow_account_id": None},
         synchronize_session=False)

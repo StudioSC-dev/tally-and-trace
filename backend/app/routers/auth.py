@@ -17,6 +17,7 @@ from app.core.auth import (
     revoke_refresh_token,
     revoke_all_refresh_tokens,
 )
+from app.core.tags import ensure_household_tag
 from app.core.config import settings
 from app.core.time import utc_now
 from app.models.email_token import EmailToken, EmailTokenType
@@ -95,6 +96,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     )
     
     db.add(db_user)
+    db.flush()
+    # Every user has their Household system tag from the start (same transaction).
+    ensure_household_tag(db, db_user)
     db.commit()
     db.refresh(db_user)
     

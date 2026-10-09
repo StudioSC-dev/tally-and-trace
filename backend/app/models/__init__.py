@@ -10,6 +10,12 @@ from app.models.email_token import EmailToken as EmailToken, EmailTokenType as E
 from app.models.refresh_token import RefreshToken as RefreshToken
 from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPriority as WishlistPriority
 from app.models.demo_state import DemoState as DemoState
+from app.models.tag import (
+    Tag as Tag,
+    account_tags,
+    budget_entry_tags,
+    transaction_tags,
+)
 
 # ---------------------------------------------------------------------------
 # User relationships
@@ -85,3 +91,11 @@ Transaction.budget_entry = relationship(
 )
 
 EmailToken.user = relationship("User", back_populates="email_tokens")
+
+# ---------------------------------------------------------------------------
+# Tag links (read-only here: app/core/tags.py writes the link rows, and only
+# the caller's own tags are ever shown, so routers never serialise these)
+# ---------------------------------------------------------------------------
+Account.explicit_tags = relationship("Tag", secondary=account_tags, viewonly=True)
+Transaction.explicit_tags = relationship("Tag", secondary=transaction_tags, viewonly=True)
+BudgetEntry.explicit_tags = relationship("Tag", secondary=budget_entry_tags, viewonly=True)

@@ -48,7 +48,7 @@ def test_drop_entities_follows_the_cleanup_on_the_single_head():
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
     (head,) = script.get_heads()
-    assert head == DROP_ENTITIES
+    assert DROP_ENTITIES in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(DROP_ENTITIES).down_revision == CLEANUP
 
 
@@ -179,7 +179,7 @@ def test_the_entity_schema_is_dropped_and_restored_and_the_rest_is_kept(scratch_
             _assert_entity_schema_present(c)
             user = _seed_entities(c)
 
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", DROP_ENTITIES)
         with engine.connect() as c:
             assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() \
                 == DROP_ENTITIES
@@ -190,7 +190,7 @@ def test_the_entity_schema_is_dropped_and_restored_and_the_rest_is_kept(scratch_
                 assert c.execute(text(f"SELECT count(*) FROM {table} WHERE user_id = :u"),
                                  {"u": user}).scalar_one() == 1
 
-        _alembic(scratch_url, "downgrade", "-1")
+        _alembic(scratch_url, "downgrade", CLEANUP)
         with engine.connect() as c:
             assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() \
                 == CLEANUP
@@ -202,7 +202,7 @@ def test_the_entity_schema_is_dropped_and_restored_and_the_rest_is_kept(scratch_
             assert c.execute(text("SELECT count(*) FROM entities")).scalar_one() == 0
             assert c.execute(text("SELECT count(*) FROM entity_memberships")).scalar_one() == 0
 
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", DROP_ENTITIES)
         with engine.connect() as c:
             _assert_entity_schema_gone(c)
     finally:
