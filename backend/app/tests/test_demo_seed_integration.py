@@ -4,7 +4,8 @@ On startup ``seed_database`` compares the one-row ``demo_state`` table with
 ``DEMO_SHAPE_VERSION``: a missing row or another version replaces the demo
 user's data; otherwise nothing changes and every id stays the same. Only the
 user with the fixed demo email is touched, and a failure logs at error level
-and leaves the database as it was. Skips without a database.
+and leaves the database as it was. Shape 2 (STU-231) tags the demo: Household
+and Business on the records the seed file names. Skips without a database.
 """
 import json
 import logging
@@ -64,8 +65,9 @@ def seed(monkeypatch):
 
 
 def _snapshot(db):
-    """The demo user's id, state row and the ids of everything it owns."""
+    """The demo user's id, state row and the ids of everything it owns, tag links included."""
     from app.core.seed import DEMO_EMAIL
+    from app.core.tags import LINKS
     from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
     from app.models.demo_state import DemoState
 
@@ -78,11 +80,17 @@ def _snapshot(db):
         for model in (Account, Category, Allocation, BudgetEntry, Transaction)
     }
     tags = {t.name: t.id for t in db.query(Tag).filter(Tag.user_id == user.id)}
+    links = {
+        table.name: sorted(tuple(row) for row in db.execute(
+            table.select().where(table.c.tag_id.in_(list(tags.values())))))
+        for table, _column in LINKS.values()
+    }
     return {
         "user": user.id,
         "state": (state.shape_version, state.seeded_at) if state else None,
         "owned": owned,
         "tags": tags,
+        "links": links,
     }
 
 
@@ -106,6 +114,19 @@ def _seed_tag_names():
     with open(_SEED_FILE) as f:
         data = json.load(f)
     return {"Household", *(t["name"] for t in data.get("tags", []))}
+
+
+def _seed_link_counts():
+    """How many records the seed file tags, per link table."""
+    from app.core.seed import _SEED_FILE
+
+    with open(_SEED_FILE) as f:
+        data = json.load(f)
+    return {
+        link: sum(len(r.get("tags", [])) for r in data.get(key, []))
+        for link, key in (("account_tags", "accounts"), ("budget_entry_tags", "budget_entries"),
+                          ("transaction_tags", "transactions"))
+    }
 
 
 def _demo_account(db, user_id):
@@ -156,6 +177,7 @@ def test_a_shape_bump_replaces_the_demo_data(db, seed, monkeypatch):
     for table, ids in before["owned"].items():
         assert not set(ids) & set(after["owned"][table]), table
     assert set(after["tags"]) == _seed_tag_names()
+    assert {link: len(rows) for link, rows in after["links"].items()} == _seed_link_counts()
     assert after["tags"]["Household"] == before["tags"]["Household"]  # kept, like the user
     for name in set(before["tags"]) - {"Household"}:
         assert before["tags"][name] not in after["tags"].values(), name
@@ -178,6 +200,33 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
     assert not set(before["owned"]["accounts"]) & set(after["owned"]["accounts"])
     assert {table: len(ids) for table, ids in after["owned"].items()} == _seed_counts()
     assert set(after["tags"]) == _seed_tag_names()
+    assert {link: len(rows) for link, rows in after["links"].items()} == _seed_link_counts()
+
+
+def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
+    from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD, DEMO_SHAPE_VERSION
+
+    assert DEMO_SHAPE_VERSION == 2
+    seed.seed_database()
+    r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    tags = {t["name"]: t for t in client.get(f"{API}/tags/", headers=headers).json()}
+    assert (tags["Household"]["is_system"], tags["Business"]["is_system"]) == (True, False)
+
+    def tagged(path, field, name):
+        rows = client.get(f"{API}{path}", headers=headers, params={"limit": 100}).json()["items"]
+        return sorted(r[field] for r in rows if name in [t["name"] for t in r["tags"]])
+
+    assert tagged("/transactions/", "description", "Business") == [
+        "Gas station fill-up", "Online purchase - Amazon"]
+    assert tagged("/transactions/", "description", "Household") == [
+        "Grocery shopping at Whole Foods", "Projected September electric bill"]
+    assert tagged("/budget-entries/", "name", "Household") == ["Electric Bill"]
+    assert tagged("/accounts/", "name", "Household") == ["Cash Wallet"]
+    # The Cash Wallet's Household tag reaches the cash it receives.
+    household = client.get(f"{API}/transactions/", headers=headers,
+                           params={"tag": tags["Household"]["id"], "limit": 100}).json()
+    assert "ATM withdrawal for weekend cash" in [t["description"] for t in household["items"]]
 
 
 def test_the_demo_user_has_its_household_tag_and_a_reseed_drops_visitor_tags(
