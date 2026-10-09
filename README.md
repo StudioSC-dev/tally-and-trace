@@ -174,13 +174,58 @@ views and `GET /dashboard/snapshot`. Projections keep only the tagged events
 from an unfiltered starting balance. A tag id you can't use gets an empty
 result, the same as a tag with no records.
 
+### Shared accounts
+
+An account's owner can share it with another user as `viewer`, `editor` or
+`admin` (Drive-style). Roles rank owner > admin > editor > viewer.
+
+- **Reading:** you read a record if you created it or hold any role on an
+  account it touches.
+- **Writing:** you and the record's creator both need an edit role (editor or
+  above) on every account the record touches, before and after the change. The
+  owner of every account a record touches may also post, revert or delete it.
+  Unposted records can be deleted by their creator, or by the owner of an
+  account they touch. A record with no account is its creator's alone.
+- **Account settings** (and tagging an account) need owner or admin; shares
+  are managed by the owner or an admin, and only the owner grants admin.
+- **Responses** carry `view`: `full` (you created it and can view every account
+  it touches), `shared_full` (another editor's record; the creator's category,
+  allocation, recurring-entry, receipt and invoice references are dropped and a
+  read-only `category_name` is added) or `limited` (an explicit allowlist).
+  Every record also carries `permissions` (`can_edit`, `can_delete`,
+  `can_post`, `can_revert`, `can_tag`) and `created_by` (a display name such as
+  "Alex P."). Accounts carry `my_role`, `owner_name` and `permissions`
+  (`can_edit_settings`, `can_manage_shares`, `can_add_transactions`).
+- **Hidden accounts** appear as `{id: null, name}` with "Other account", "Loan
+  payment" or "Card payment", and a description is shown only when you can view
+  every account the record touches. A payment into a loan or card you can't
+  view shows the whole amount and no fee or interest. Search matches displayed
+  text only.
+- **Projections** include shared accounts. Events you can't see in full are
+  `limited` (`public_id`, `date`, `original_date`, `overdue`, `display_name`,
+  `face_amount`, `cash_delta`, `currency`, `account`, `kind`).
+- **Removing, leaving or demoting a share** to viewer deactivates the former
+  sharee's recurring entries on that account; their transactions stay.
+- Demo users can neither share nor be shared with (403).
+
 ### Accounts
-- `GET    /accounts/` — List accounts
+- `GET    /accounts/` — List the accounts you own or that are shared with you
 - `POST   /accounts/` — Create an account
 - `GET    /accounts/{id}` — Get account details
-- `PUT    /accounts/{id}` — Update an account
+- `PUT    /accounts/{id}` — Update an account (owner or admin)
 - `DELETE /accounts/{id}` — Delete an account
 - `GET    /accounts/{id}/balance` — Get account balance
+- `GET    /accounts/{id}/statements` — A card's statements (viewers get a limited form)
+- `GET    /accounts/{id}/loan-schedule` — A loan's schedule (viewers get a limited form)
+- `GET    /accounts/{id}/shares` — The owner and every share (owner or admin)
+- `POST   /accounts/{id}/shares` — Share with a user (`user_id`, `role`)
+- `PATCH  /accounts/{id}/shares/{share_id}` — Change a share's role
+- `DELETE /accounts/{id}/shares/{share_id}` — Remove a share
+
+### Shares and users
+- `GET    /shares/received` — The shares you hold
+- `DELETE /shares/received/{id}` — Leave a share
+- `GET    /users/lookup?email=` — `{id, display_name}` on an exact, case-insensitive email match; anything else is the same 404 "No matching user"; rate-limited
 
 ### Transactions
 - `GET    /transactions/` — List transactions (paginated)
@@ -218,7 +263,7 @@ result, the same as a tag with no records.
 - `DELETE /tags/{id}` — Delete a tag and its links; the Household tag can't be deleted
 
 ### Data export
-- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema), including your tags and their links to your records
+- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema), including your tags and their links to your records; other records you can read (and your own on an account you can no longer view) are exported in their limited form
 - `GET    /data/export.csv?table=<name>` — Download one table as CSV; without `table`, a ZIP of every table
 
 ### Wishlist
@@ -241,7 +286,7 @@ result, the same as a tag with no records.
   alembic upgrade head
   ```
 - **Auto-router inclusion**: All files in `app/routers/` are automatically registered.
-- **Demo seeding**: On startup, the demo user (`demo@example.com`) gets the generic data in `app/constants/seed_data.json`. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing or the version differs, only the demo user's data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes. Records name their tags in a `tags` list (Household, or a name from the top-level `tags`); the demo user's Household tag is kept across reseeds.
+- **Demo seeding**: On startup, the demo user (`demo@example.com`) and the Demo Partner (`demo.partner@example.com`) get the generic data in `app/constants/seed_data.json`, including the demo user's Joint Account shared with the partner as editor. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing, the version differs or a demo user is missing, only the two demo users' data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes. Records name their tags in a `tags` list (Household, or a name from the top-level `tags`); the demo user's Household tag is kept across reseeds.
 - **Type safety**: Pydantic v2 for request/response validation.
 
 ### Frontend (Web)
