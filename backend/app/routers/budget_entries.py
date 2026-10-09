@@ -57,6 +57,9 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     ``occurrences_paid_offset`` is the explicit escape hatch: charges paid before
     import (no linked transaction) are added to the linked count.
 
+    Only the entry creator's transactions count: another user's row naming the
+    entry is a stale reference and pays nothing.
+
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
     meaningless.
@@ -66,7 +69,9 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     if installments:
         rows = (
             db.query(Transaction.budget_entry_id, func.count(Transaction.id))
-            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]))
+            .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]),
+                    Transaction.user_id == BudgetEntry.user_id)
             .group_by(Transaction.budget_entry_id)
             .all()
         )

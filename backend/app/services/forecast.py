@@ -860,11 +860,7 @@ def collect_events(
     # each stands in for one occurrence on its calendar day (as in
     # _card_entry_charges), since the posted transfer has already moved the balance.
     transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
-    linked = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
-    ) if transfer_entry_ids else Counter()
+    linked = _linked_occurrence_days(db, transfer_entry_ids)
 
     card_entries = []
     for entry in entries:
@@ -1005,11 +1001,7 @@ def collect_events(
         BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
         BudgetEntry.is_active.is_(True),
     ).all() if payable_loan_ids else []
-    linked_covers = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_([e.id for e in loan_entries]))
-    ) if loan_entries else Counter()
+    linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
     for entry in loan_entries:
         for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
@@ -1043,6 +1035,24 @@ def collect_events(
     return events
 
 
+def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
+    """``{(entry id, day): count}`` of transactions materialised from each entry.
+
+    Each stands in for one occurrence on its calendar day. Only the entry
+    creator's transactions count: another user's row naming the entry is a
+    stale reference (left by the entity era) and suppresses nothing.
+    """
+    if not entry_ids:
+        return Counter()
+    rows = (
+        db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+        .filter(Transaction.budget_entry_id.in_(entry_ids),
+                Transaction.user_id == BudgetEntry.user_id)
+    )
+    return Counter((entry_id, _naive(when).date()) for entry_id, when in rows)
+
+
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
                         end: datetime, events: List[dict]) -> dict:
     """Projected statement charges for budget entries scheduled on a credit card.
@@ -1061,9 +1071,9 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     stale one would invent overdue statements nobody recorded.
 
     An occurrence whose linked transaction already exists is suppressed: a
-    transaction with this ``budget_entry_id`` dated the same calendar day stands in
-    for it (each transaction suppresses at most one occurrence), since that
-    transaction is itself a line item on the card. This is what keeps a
+    transaction of the entry's creator with this ``budget_entry_id`` dated the same
+    calendar day stands in for it (each transaction suppresses at most one
+    occurrence), since that transaction is itself a line item on the card. This is what keeps a
     ``materialize`` with ``advance=False`` from billing twice. Matching is by day
     only: materialising with a custom ``transaction_date`` on another day and
     ``advance=False`` suppresses nothing, so that occurrence is still billed too.
@@ -1073,11 +1083,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     """
     if not entries:
         return {}
-    linked = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_([e.id for e in entries]))
-    )
+    linked = _linked_occurrence_days(db, [e.id for e in entries])
     charges: dict = {}
     for entry in entries:
         income = entry.entry_type == BudgetEntryType.INCOME

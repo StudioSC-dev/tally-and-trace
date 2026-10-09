@@ -148,3 +148,89 @@ def test_allocation_progress_counts_only_its_owners_credits(client, db, people):
     r = client.get(f"{API}/allocations/{allocation}/progress", headers=a["headers"])
     assert r.status_code == 200, r.text
     assert Decimal(str(r.json()["monthly_progress"])) == Decimal("50")
+
+
+# --- Materialised occurrences --------------------------------------------------
+#
+# A transaction linked to a recurring entry by ``budget_entry_id`` and dated on
+# an occurrence's day stands in for that occurrence. Only the entry creator's
+# transactions do: another user's private row naming the entry suppresses
+# nothing, and isn't counted as a paid installment.
+
+WINDOW = (datetime(2026, 8, 1), datetime(2026, 9, 1))
+OCCURRENCE = datetime(2026, 8, 10)
+
+
+def _entry_events(db, who, entry_id):
+    from app.services.forecast import collect_events
+
+    events = collect_events(db, *WINDOW, user_id=who["id"])
+    return [e for e in events if e["source"] == "budget_entry" and e["source_id"] == entry_id]
+
+
+def _owner_entry_with_stale_link(client, db, people, a, **entry_kw):
+    """A's recurring entry, and another user B's own row naming it on its occurrence day."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency
+
+    b = people()
+    b_bank = _account(db, b, "B bank", AccountType.CHECKING, "0")
+    entry = BudgetEntry(
+        user_id=a["id"], name="A entry", entry_type=BudgetEntryType.EXPENSE,
+        amount=Decimal("100"), currency="PHP", cadence=RecurrenceFrequency.MONTHLY,
+        next_occurrence=OCCURRENCE, **entry_kw)
+    db.add(entry)
+    db.commit()
+    _stale_txn(db, b, b_bank.id, OCCURRENCE, amount="100", budget_entry_id=entry.id,
+               is_posted=False)
+    return a, entry
+
+
+def test_another_users_linked_row_does_not_suppress_a_recurring_transfer(client, db, people):
+    from app.models.account import AccountType
+
+    owner = people()
+    bank = _account(db, owner, "A bank", AccountType.CHECKING, "1000")
+    savings = _account(db, owner, "A savings", AccountType.SAVINGS, "0")
+    a, entry = _owner_entry_with_stale_link(
+        client, db, people, owner, account_id=bank.id, transfer_to_account_id=savings.id)
+    assert len(_entry_events(db, a, entry.id)) == 1
+
+
+def test_another_users_linked_row_does_not_suppress_a_card_charge(client, db, people):
+    from app.models.account import AccountType
+
+    owner = people()
+    bank = _account(db, owner, "A bank", AccountType.CHECKING, "1000")
+    card = _account(db, owner, "A card", AccountType.CREDIT, "0", billing_cycle_start=15,
+                    days_until_due_date=21, payment_account_id=bank.id)
+    a, entry = _owner_entry_with_stale_link(client, db, people, owner, account_id=card.id)
+    assert len(_entry_events(db, a, entry.id)) == 1
+
+
+def test_another_users_linked_row_is_not_a_paid_installment(client, db, people):
+    from app.models.account import AccountType
+
+    owner = people()
+    bank = _account(db, owner, "A bank", AccountType.CHECKING, "1000")
+    a, entry = _owner_entry_with_stale_link(
+        client, db, people, owner, account_id=bank.id, end_mode="after_occurrences",
+        max_occurrences=3)
+    r = client.get(f"{API}/budget-entries/{entry.id}", headers=a["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["occurrences_paid"] == 0
+
+
+def test_the_creators_own_linked_row_still_suppresses_its_occurrence(client, db, people):
+    """The control: a materialised row of the entry's creator stands in for it."""
+    from app.models.account import AccountType
+
+    owner = people()
+    bank = _account(db, owner, "A bank", AccountType.CHECKING, "1000")
+    savings = _account(db, owner, "A savings", AccountType.SAVINGS, "0")
+    a, entry = _owner_entry_with_stale_link(
+        client, db, people, owner, account_id=bank.id, transfer_to_account_id=savings.id)
+    _stale_txn(db, a, bank.id, OCCURRENCE, amount="100", budget_entry_id=entry.id,
+               is_posted=False)
+    assert _entry_events(db, a, entry.id) == []
