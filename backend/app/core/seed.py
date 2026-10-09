@@ -4,8 +4,10 @@ On startup ``seed_database`` compares the one-row ``demo_state`` table with
 ``DEMO_SHAPE_VERSION``. When the row is missing, holds another version, or a
 demo user is missing, both demo users' data is replaced with the current shape
 (the user rows, and so their ids, are kept); otherwise nothing changes, so
-every id stays the same. Only the two demo users, matched by their fixed
-emails, are ever touched. The whole run is one transaction under a Postgres
+every id stays the same, except that a seeded share to the Demo Partner that
+has gone missing is re-added (``_ensure_demo_shares``). Only the two demo
+users, matched by their fixed emails, are ever touched, and registration
+refuses their emails. The whole run is one transaction under a Postgres
 advisory lock, so concurrent workers seed once, and a failure rolls back and
 logs at error level.
 
@@ -74,6 +76,11 @@ def _seed(db: Session) -> None:
     partner = db.query(User).filter(User.email == DEMO_PARTNER_EMAIL).first()
     if (state is not None and state.shape_version == DEMO_SHAPE_VERSION
             and user is not None and partner is not None):
+        if _ensure_demo_shares(db, user, partner):
+            db.commit()
+            logger.info("Demo seed is current (shape %s); restored the demo shares",
+                        DEMO_SHAPE_VERSION)
+            return
         db.rollback()  # releases the lock; nothing changed
         logger.info("Demo seed is current (shape %s); nothing to do", DEMO_SHAPE_VERSION)
         return
@@ -99,6 +106,34 @@ def _seed(db: Session) -> None:
         state.seeded_at = func.now()
     db.commit()
     logger.info("Demo seed replaced the demo user's data (shape %s)", DEMO_SHAPE_VERSION)
+
+
+def _ensure_demo_shares(db: Session, owner: User, partner: User) -> int:
+    """Re-add any seeded share to the Demo Partner that is missing; how many were added.
+
+    The no-op path's check: it reseeds nothing. Each share names an owner
+    account by its 1-based index in the seed file, found by that account's
+    name; one the owner no longer has is skipped.
+    """
+    with open(_SEED_FILE, "r") as f:
+        seed_data = json.load(f)
+    added = 0
+    for share in seed_data.get("shares", []):
+        name = seed_data["accounts"][share["account_id"] - 1]["name"]
+        account = (db.query(Account)
+                   .filter(Account.user_id == owner.id, Account.name == name)
+                   .order_by(Account.id).first())
+        if account is None:
+            continue
+        exists = db.query(AccountShare.id).filter(
+            AccountShare.account_id == account.id, AccountShare.user_id == partner.id).first()
+        if exists is None:
+            db.add(AccountShare(account_id=account.id, user_id=partner.id, role=share["role"],
+                                created_by=owner.id))
+            added += 1
+    if added:
+        db.flush()
+    return added
 
 
 def _reset_demo_user(user: User, last_name: str, *, onboarded: bool) -> None:

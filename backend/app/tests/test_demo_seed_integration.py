@@ -463,3 +463,47 @@ def test_a_missing_demo_partner_is_recreated(client, db, seed):
     after = _partner_snapshot(db)
     assert after["user"] != partner["user"] and len(after["shares"]) == 1
     _login(client, DEMO_PARTNER_EMAIL)
+
+
+# --- Audit round 1, M ---------------------------------------------------------------------
+
+def test_a_current_startup_restores_a_missing_demo_share_without_reseeding(db, seed):
+    from app.models.account_share import AccountShare
+
+    owner_before, partner_before = _snapshot(db), _partner_snapshot(db)
+    [(share_id, joint, role)] = partner_before["shares"]
+    db.query(AccountShare).filter(AccountShare.id == share_id).delete()
+    db.commit()
+    seed.seed_database()
+    owner_after, partner_after = _snapshot(db), _partner_snapshot(db)
+    # Nothing was reseeded: every id and the state row are as they were.
+    assert owner_after == owner_before
+    assert {k: v for k, v in partner_after.items() if k != "shares"} == \
+        {k: v for k, v in partner_before.items() if k != "shares"}
+    [(new_id, account_id, new_role)] = partner_after["shares"]
+    assert (account_id, new_role) == (joint, role) and new_id != share_id
+    # And a further startup changes nothing.
+    seed.seed_database()
+    assert (_snapshot(db), _partner_snapshot(db)) == (owner_after, partner_after)
+
+
+@pytest.mark.parametrize("email", ["demo@example.com", "DEMO@example.com",
+                                   "demo.partner@example.com", "Demo.Partner@Example.com"])
+def test_registration_refuses_the_demo_emails_as_taken(client, db, email):
+    from app.models import User
+
+    taken = client.post(f"{API}/auth/register", json={
+        "email": f"share-{secrets.token_hex(6)}@example.com", "password": "Password123!",
+        "first_name": "Taken", "last_name": "Probe"})
+    assert taken.status_code == 200, taken.text
+    duplicate = client.post(f"{API}/auth/register", json={
+        "email": taken.json()["email"], "password": "Password123!",
+        "first_name": "Again", "last_name": "Probe"})
+    r = client.post(f"{API}/auth/register", json={
+        "email": email, "password": "Password123!", "first_name": "Not", "last_name": "Demo"})
+    assert (r.status_code, r.json()) == (duplicate.status_code, duplicate.json()) == (
+        400, {"detail": "Email already registered"})
+    db.expire_all()
+    assert db.query(User).filter(User.email == email, User.first_name == "Not").count() == 0
+    db.query(User).filter(User.id == taken.json()["id"]).delete()
+    db.commit()

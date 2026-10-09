@@ -17,6 +17,7 @@ from app.core.auth import (
     revoke_refresh_token,
     revoke_all_refresh_tokens,
 )
+from app.core.seed import DEMO_EMAILS
 from app.core.tags import ensure_household_tag
 from app.core.config import settings
 from app.core.time import utc_now
@@ -77,9 +78,10 @@ def _clear_refresh_cookie(response: Response) -> None:
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
-    # Check if user already exists
+    # Check if user already exists. The demo users' fixed emails are reserved
+    # (in any case), answered as any taken email is.
     existing_user = db.query(User).filter(User.email == user.email).first()
-    if existing_user:
+    if existing_user or user.email.strip().lower() in DEMO_EMAILS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
