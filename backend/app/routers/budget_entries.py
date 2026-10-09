@@ -104,6 +104,34 @@ def _ensure_related_resources(
     require_owned_ref(db, Allocation, allocation_id or None, "Allocation not found", user, owner)
 
 
+PROSPECTIVE_ACCOUNT_FIELDS = (
+    ("account_id", "Account not found"),
+    ("transfer_to_account_id", "Transfer destination account not found"),
+    ("overflow_account_id", "Overflow account not found"),
+)
+
+
+def _ensure_prospective_accounts(db: Session, user: User, entry: BudgetEntry,
+                                 prospective_data: dict, owner: User) -> None:
+    """404 unless the edit leaves the entry on accounts both the caller and its creator may change.
+
+    Each touched-account column is read as it will be after the update (sent
+    or stored). With none left, the entry is accountless and only its creator
+    may make that change.
+    """
+    touched = [
+        (prospective_data.get(field, getattr(entry, field)), detail)
+        for field, detail in PROSPECTIVE_ACCOUNT_FIELDS
+    ]
+    touched = [(account_id, detail) for account_id, detail in touched if account_id]
+    if not touched:
+        if entry.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Budget entry not found")
+        return
+    for account_id, detail in touched:
+        require_account(db, user, account_id, detail, owner=owner)
+
+
 def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int],
                                owner: Optional[User] = None) -> None:
     """An overflow account is a funding source: accessible, not a wallet or a loan.
@@ -314,13 +342,19 @@ def update_budget_entry(
         value = prospective_data.get(field, getattr(entry, field))
         return value if value != getattr(entry, field) else None
 
-    # The account is checked as it will be (the write rule); a category or
-    # allocation only when the edit changes it, so a stored legacy reference
-    # never blocks an unrelated edit.
+    # Every account the entry will touch is checked as it will be (the write
+    # rule), whether the edit changes it or not: the caller and the entry's
+    # creator must both be able to change each one. An entry left touching no
+    # account is its creator's alone, so only the creator may make it so;
+    # otherwise the owner of its accounts could turn it into the creator's
+    # accountless entry and move their unassigned cash.
+    _ensure_prospective_accounts(db, current_user, entry, prospective_data, owner)
+    # A category or allocation only when the edit changes it, so a stored
+    # legacy reference never blocks an unrelated edit.
     _ensure_related_resources(
         db=db,
         user=current_user,
-        account_id=prospective_data.get("account_id", entry.account_id),
+        account_id=None,
         category_id=changed("category_id"),
         allocation_id=changed("allocation_id"),
         owner=owner,

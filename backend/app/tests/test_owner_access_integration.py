@@ -332,6 +332,11 @@ def test_entity_headers_and_params_are_ignored(client, world):
 # account its creator can't change), only A may delete it, a receipt is the
 # creator's own field and needs the write rule too (so neither may set it), and
 # A can't materialise B's recurring entry (it is not A's to post from).
+#
+# Every account an edit leaves the row touching is checked, whether the edit
+# changes it or not: A can't clear the account (that would make it B's
+# accountless row, moving B's unassigned cash), and an entry whose only account
+# is an overflow account on A's bank stays as frozen as one paid from it.
 
 LEGACY_MATRIX = [
     ("transaction", "get", "a", 200), ("transaction", "get", "b", 200),
@@ -344,12 +349,17 @@ LEGACY_MATRIX = [
     ("entry", "put", "a", 404), ("entry", "put", "b", 404),
     ("entry", "delete", "a", 204), ("entry", "delete", "b", 404),
     ("entry", "materialize", "a", 404), ("entry", "materialize", "b", 404),
+    ("transaction", "clear-account", "a", 404), ("transaction", "clear-account", "b", 404),
+    ("entry", "clear-account", "a", 404), ("entry", "clear-account", "b", 404),
+    ("overflow_entry", "get", "a", 200), ("overflow_entry", "get", "b", 200),
+    ("overflow_entry", "put", "a", 404), ("overflow_entry", "put", "b", 404),
+    ("overflow_entry", "delete", "a", 204), ("overflow_entry", "delete", "b", 404),
 ]
 
 
 @pytest.fixture
 def legacy(client, db, people):
-    """B's transaction and recurring entry on A's account, as the entity era left them."""
+    """B's transaction and recurring entries on A's account, as the entity era left them."""
     from datetime import datetime
 
     from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -366,9 +376,14 @@ def legacy(client, db, people):
     entry = BudgetEntry(
         user_id=b["id"], account_id=bank, name="Legacy bill", amount=66, currency="PHP",
         entry_type=BudgetEntryType.EXPENSE, next_occurrence=datetime.fromisoformat(WHEN))
-    db.add_all([txn, entry])
+    overflow_entry = BudgetEntry(
+        user_id=b["id"], account_id=None, overflow_account_id=bank, name="Legacy overflow",
+        amount=77, currency="PHP", entry_type=BudgetEntryType.EXPENSE,
+        next_occurrence=datetime.fromisoformat(WHEN))
+    db.add_all([txn, entry, overflow_entry])
     db.commit()
-    return {"a": a, "b": b, "transaction": txn.id, "entry": entry.id}
+    return {"a": a, "b": b, "transaction": txn.id, "entry": entry.id,
+            "overflow_entry": overflow_entry.id}
 
 
 @pytest.mark.parametrize("kind,action,actor,expected", LEGACY_MATRIX)
@@ -385,7 +400,8 @@ def test_a_legacy_cross_owner_row(client, db, legacy, kind, action, actor, expec
         db.expire_all()
         row = db.query(model).filter(model.id == rid).first()
         return None if row is None else (
-            row.amount, row.account_id, getattr(row, "receipt_url", None))
+            row.amount, row.account_id, getattr(row, "overflow_account_id", None),
+            getattr(row, "receipt_url", None))
 
     before = stored()
     if action == "list":
@@ -397,6 +413,9 @@ def test_a_legacy_cross_owner_row(client, db, legacy, kind, action, actor, expec
         r = client.get(f"{API}{base}{rid}", headers=who["headers"])
     elif action == "put":
         r = client.put(f"{API}{base}{rid}", headers=who["headers"], json={"amount": 1})
+    elif action == "clear-account":
+        r = client.put(f"{API}{base}{rid}", headers=who["headers"],
+                       json={"account_id": None, "amount": 1})
     elif action == "delete":
         r = client.delete(f"{API}{base}{rid}", headers=who["headers"])
     elif action == "upload-receipt":
@@ -409,3 +428,24 @@ def test_a_legacy_cross_owner_row(client, db, legacy, kind, action, actor, expec
         assert stored() is None
     else:
         assert stored() == before
+
+
+def test_the_creator_may_still_clear_or_keep_an_overflow_on_their_own_entry(client, people):
+    """The full-set check leaves a user's own entries editable as before."""
+    owner = people()
+    bank = _post(client, owner, "/accounts/", {
+        "name": "Own bank", "account_type": "checking", "balance": 1_000})["id"]
+    paid = _post(client, owner, "/budget-entries/", {
+        "name": "Own bill", "entry_type": "expense", "amount": 10,
+        "next_occurrence": WHEN, "account_id": bank})
+    r = client.put(f"{API}/budget-entries/{paid['id']}", headers=owner["headers"],
+                   json={"account_id": None, "amount": 11})
+    assert r.status_code == 200, r.text
+    assert r.json()["account_id"] is None
+    routed = _post(client, owner, "/budget-entries/", {
+        "name": "Own routed bill", "entry_type": "expense", "amount": 10,
+        "next_occurrence": WHEN, "overflow_account_id": bank})
+    r = client.put(f"{API}/budget-entries/{routed['id']}", headers=owner["headers"],
+                   json={"amount": 12})
+    assert r.status_code == 200, r.text
+    assert r.json()["overflow_account_id"] == bank
