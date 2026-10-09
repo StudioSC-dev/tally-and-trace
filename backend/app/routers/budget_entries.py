@@ -16,7 +16,10 @@ from app.core.access import (
     require_owned_ref,
     viewable_account_ids,
 )
-from app.core.tags import attach_visible_tags, copy_explicit_tags, own_tag_ids, replace_own_tags
+from app.core.tags import (
+    TAG_FILTER_HELP, attach_visible_tags, copy_explicit_tags, effective_tag_criterion,
+    filter_tag_id, own_tag_ids, replace_own_tags,
+)
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
@@ -259,6 +262,7 @@ def list_budget_entries(
     after: Optional[datetime] = Query(
         None, description="Filter entries occurring after this datetime"
     ),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -274,6 +278,9 @@ def list_budget_entries(
         query = query.filter(BudgetEntry.next_occurrence <= before)
     if after is not None:
         query = query.filter(BudgetEntry.next_occurrence >= after)
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
 
     total = query.count()
     entries = (

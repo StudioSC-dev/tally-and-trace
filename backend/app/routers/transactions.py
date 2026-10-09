@@ -13,7 +13,10 @@ from app.core.access import (
     touches_accounts,
     viewable_account_ids,
 )
-from app.core.tags import attach_visible_tags, own_tag_ids, replace_own_tags
+from app.core.tags import (
+    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    replace_own_tags,
+)
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account, AccountType
@@ -536,6 +539,7 @@ def get_transactions(
     end_date: Optional[datetime] = Query(None, description="End date for filtering"),
     is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
     search: Optional[str] = Query(None, description="Search by description"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -566,6 +570,9 @@ def get_transactions(
         query = query.filter(Transaction.is_reconciled == is_reconciled)
     if search:
         query = query.filter(Transaction.description.ilike(f"%{search}%"))
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(Transaction, tag_id))
 
     total = query.count()
     transactions = (
@@ -1104,7 +1111,8 @@ def get_transaction_summary(
     current_user: User = Depends(get_current_active_user),
     start_date: datetime = Query(..., description="Start date for summary"),
     end_date: datetime = Query(..., description="End date for summary"),
-    account_id: Optional[int] = Query(None, description="Filter by account ID")
+    account_id: Optional[int] = Query(None, description="Filter by account ID"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
 ):
     """Get transaction summary for a specific period"""
     query = db.query(Transaction).filter(
@@ -1119,7 +1127,11 @@ def get_transaction_summary(
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)
-    
+    # Only rows carrying the tag effectively; each row counts once.
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(Transaction, tag_id))
+
     transactions = [t for t in query.all() if t.is_posted]
 
     account_ids = {

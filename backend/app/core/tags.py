@@ -15,15 +15,16 @@ never confirms that it exists.
 from typing import Dict, Iterable, List, Optional, Set
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, insert, literal, select
+from sqlalchemy import and_, delete, exists, func, insert, literal, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.access import TRANSFER_ONLY_COLUMNS
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry
 from app.models.tag import (
     HOUSEHOLD_TAG_NAME, Tag, account_tags, budget_entry_tags, transaction_tags,
 )
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 
 TAG_NOT_FOUND = "Tag not found"
 SYSTEM_TAG_LOCKED = "The Household tag is a system tag: it can't be renamed or deleted"
@@ -153,3 +154,78 @@ def attach_visible_tags(db: Session, user, records):
         for record in group:
             record.visible_tags = tags_by_record.get(record.id, [])
     return records
+
+
+# --- Effective tags: filtering and summaries only --------------------------------
+#
+# A record's effective tags are its own tags plus its owner's tags on the
+# accounts it is booked on:
+#
+# - a transaction: ``account_id``, and on a transfer ``transfer_from_account_id``
+#   and ``transfer_to_account_id`` (a debit or credit's stale transfer fields
+#   count for nothing, as in ``access.TRANSFER_ONLY_COLUMNS``);
+# - a recurring entry: ``account_id`` and ``transfer_to_account_id`` (never its
+#   overflow account);
+# - an account: its own tags.
+#
+# They drive ``?tag=`` filters and summaries over records the caller can
+# already read, and nothing else: never access, never descriptions.
+# ``effective_tag_criterion`` is the one definition; every filter uses it.
+
+EFFECTIVE_ACCOUNT_COLUMNS = {
+    Transaction: ("account_id", "transfer_from_account_id", "transfer_to_account_id"),
+    BudgetEntry: ("account_id", "transfer_to_account_id"),
+}
+
+# Stands in for a ``?tag=`` the caller may not use: no tag has id 0, so the
+# filter matches nothing and the response is exactly that of an unknown id.
+NO_TAG = 0
+
+TAG_FILTER_HELP = (
+    "Only records carrying this tag effectively (their own tags plus their owner's "
+    "tags on the accounts they are booked on). A tag you can't use gives an empty "
+    "result, as an unknown id does."
+)
+
+
+def filter_tag_id(db: Session, user, tag_id: Optional[int]) -> Optional[int]:
+    """The tag a ``?tag=`` filter uses: None for no filter, else the id or ``NO_TAG``.
+
+    Only a usable tag (``usable_tag_ids``) filters. Any other id, unknown or
+    another user's, becomes ``NO_TAG``, so it gets an empty result, the same
+    as an unknown id, never a 404 that would confirm it exists.
+    """
+    if tag_id is None:
+        return None
+    return tag_id if tag_id in usable_tag_ids(db, user) else NO_TAG
+
+
+def effective_tag_criterion(model, tag_id: int):
+    """Criterion: the account, transaction or recurring entry carries ``tag_id`` effectively."""
+    if model is Account:
+        return exists().where(account_tags.c.account_id == Account.id,
+                              account_tags.c.tag_id == tag_id)
+    link, column = LINKS[model]
+    explicit = exists().where(link.c[column] == model.id, link.c.tag_id == tag_id)
+    booked_on = []
+    for name in EFFECTIVE_ACCOUNT_COLUMNS[model]:
+        on_account = account_tags.c.account_id == getattr(model, name)
+        if name in TRANSFER_ONLY_COLUMNS[model]:
+            on_account = and_(model.transaction_type == TransactionType.TRANSFER, on_account)
+        booked_on.append(on_account)
+    # The record owner's tag on an account it is booked on.
+    via_account = exists(
+        select(account_tags.c.tag_id)
+        .join(Tag, Tag.id == account_tags.c.tag_id)
+        .where(account_tags.c.tag_id == tag_id, Tag.user_id == model.user_id, or_(*booked_on))
+    )
+    return or_(explicit, via_account)
+
+
+def ids_with_effective_tag(db: Session, model, ids: Iterable[int], tag_id: int) -> Set[int]:
+    """The ids among ``ids`` whose record carries ``tag_id`` effectively."""
+    ids = list({i for i in ids if i is not None})
+    if not ids:
+        return set()
+    return {row[0] for row in db.query(model.id).filter(
+        model.id.in_(ids), effective_tag_criterion(model, tag_id))}

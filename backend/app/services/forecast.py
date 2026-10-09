@@ -20,6 +20,7 @@ from app.core.access import (
     NONE, account_role, can_read_record, readable_criterion, viewable_account_ids,
     viewable_accounts,
 )
+from app.core.tags import effective_tag_criterion, ids_with_effective_tag
 from app.core.time import naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables
 from app.services.statements import (
@@ -140,6 +141,7 @@ def project_cashflow(
     user_id: int,
     months: int = 6,
     reference: Optional[datetime] = None,
+    tag_id: Optional[int] = None,
 ) -> List[dict]:
     """
     Generate a month-by-month cash-flow projection from the dated events
@@ -169,6 +171,7 @@ def project_cashflow(
     ``expenses`` for a recurring transfer entry).
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
+    With ``tag_id`` only the tagged events count (see ``collect_events``).
     """
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
@@ -180,7 +183,7 @@ def project_cashflow(
     accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
     opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
     cash_events = [e for e in events if e["counts_as_cash"]]
     routing = _route_legs(
         opening_by_account, cash_events, account_names,
@@ -257,6 +260,7 @@ def get_upcoming_items(
     user_id: int,
     days: int = 30,
     reference: Optional[datetime] = None,
+    tag_id: Optional[int] = None,
 ) -> List[dict]:
     """
     Return every dated event from ``collect_events`` within the next N days
@@ -264,7 +268,7 @@ def get_upcoming_items(
     payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
-    events = collect_events(db, start, end, user_id=user_id)
+    events = collect_events(db, start, end, user_id=user_id, tag_id=tag_id)
 
     items = [
         {
@@ -291,6 +295,7 @@ def get_payables(
     user_id: int,
     days: int = 30,
     reference: Optional[datetime] = None,
+    tag_id: Optional[int] = None,
 ) -> List[dict]:
     """Cash outflows due within the next N days, with the account each draws on.
 
@@ -310,7 +315,7 @@ def get_payables(
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id)
     names = {a.id: a.name for a in accounts}
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
 
     payables = []
     for e in sorted(events, key=_event_sort_key):
@@ -338,6 +343,7 @@ def get_payables(
 def get_disposable_income(
     db: Session,
     user_id: int,
+    tag_id: Optional[int] = None,
 ) -> dict:
     """
     Compute monthly net disposable income:
@@ -354,6 +360,9 @@ def get_disposable_income(
     recurring income entry paid into a wallet is income and also an implicit
     top-up, so the same amount counts as expense: moving it on to a non-wallet
     account then nets it back out instead of counting it twice.
+
+    With ``tag_id`` only entries carrying that tag effectively count
+    (``app/core/tags.py``), each once.
     """
     # The accounts the caller holds a role on (inactive ones included), as in the
     # period summary: a top-up counts only when its source is one of them, and a
@@ -361,10 +370,13 @@ def get_disposable_income(
     scope_ids = viewable_account_ids(db, user_id)
     # Every entry the caller may read: their own, plus any touching one of those
     # accounts, whoever created it.
-    entries = db.query(BudgetEntry).filter(
+    query = db.query(BudgetEntry).filter(
         readable_criterion(BudgetEntry, user_id, scope_ids),
         BudgetEntry.is_active.is_(True),
-    ).all()
+    )
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
+    entries = query.all()
     referenced = {
         acc_id for e in entries
         for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id is not None
@@ -727,6 +739,7 @@ def collect_events(
     *,
     user_id: int,
     accounts: Optional[list] = None,
+    tag_id: Optional[int] = None,
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
@@ -789,6 +802,12 @@ def collect_events(
     handled like in-window ones: an overdue card payment is still cash leaving at
     ``start`` (its statement is netted by it, so the cash appears only here), and
     an overdue cash advance is cash arriving at ``start`` (its statement bills it).
+
+    With ``tag_id`` (a ``?tag=`` filter, already limited to the caller's usable
+    tags) the projection is built exactly as above and then only the events
+    whose source carries the tag effectively are kept (``_keep_tagged``). The
+    scope does not change: the same accounts, opening balances and legs, so
+    closings are today's balances plus the tagged events alone.
     """
     start = _naive(start)
     end = _naive(end)
@@ -889,7 +908,7 @@ def collect_events(
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
                     loan_ids=loan_ids, known_loan_ids=known_loan_ids,
                     hidden_loan_ids=hidden_loan_ids, source="budget_entry",
-                    overflow_account_id=overflow_id,
+                    overflow_account_id=overflow_id, origin=(BudgetEntry, entry.id),
                 ))
             continue
         if entry.account_id in wallet_ids:
@@ -915,6 +934,7 @@ def collect_events(
                 source_id=entry.id,
                 face_amount=entry.amount,
                 legs=legs,
+                origin=(BudgetEntry, entry.id),
             ))
 
     for txn in txns:
@@ -933,7 +953,8 @@ def collect_events(
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
                                           known_wallet_ids=wallet_ids, loan_ids=loan_ids,
                                           known_loan_ids=known_loan_ids,
-                                          hidden_loan_ids=hidden_loan_ids, **overdue))
+                                          hidden_loan_ids=hidden_loan_ids,
+                                          origin=(Transaction, txn.id), **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -953,6 +974,7 @@ def collect_events(
             face_amount=txn.amount,
             legs=([_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)]
                   if txn.account_id in scoped_ids else []),
+            origin=(Transaction, txn.id),
             **overdue,
         ))
 
@@ -977,6 +999,7 @@ def collect_events(
             face_amount=-p["amount"],
             legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
                        cash=p["funding_account_id"] not in wallet_ids)],
+            origin=(Account, p["source_id"]),  # the card
             **extra,
         ))
 
@@ -1030,10 +1053,32 @@ def collect_events(
             # is kept as non-cash, and an account outside the scope has no leg.
             legs=([_leg(payer, p["amount"], None, cash=payer in cash_ids)]
                   if payer in scoped_ids else []),
+            origin=(Account, p["source_id"]),  # the loan
             **extra,
         ))
 
+    if tag_id is not None:
+        events = _keep_tagged(db, events, tag_id)
+    for e in events:
+        del e["origin"]
     return events
+
+
+def _keep_tagged(db: Session, events: List[dict], tag_id: int) -> List[dict]:
+    """The events whose source carries ``tag_id`` effectively (``app/core/tags.py``).
+
+    A source is the record an event comes from: a transaction or recurring
+    entry by its effective tags, and a card statement or loan due by the card's
+    or loan's own tags, as one whole event. Each event is kept or dropped once,
+    so nothing is counted twice.
+    """
+    ids: dict = {}
+    for e in events:
+        model, record_id = e["origin"]
+        ids.setdefault(model, set()).add(record_id)
+    tagged = {model: ids_with_effective_tag(db, model, record_ids, tag_id)
+              for model, record_ids in ids.items()}
+    return [e for e in events if e["origin"][1] in tagged[e["origin"][0]]]
 
 
 def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
@@ -1111,6 +1156,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
                     source_id=entry.id,
                     face_amount=entry.amount,
                     legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
+                    origin=(BudgetEntry, entry.id),
                 ))
     return charges
 
@@ -1256,8 +1302,12 @@ def project_running_balance(
     user_id: int,
     days: int = 60,
     reference: Optional[datetime] = None,
+    tag_id: Optional[int] = None,
 ) -> dict:
-    """Build the dated running-balance timeline over the next ``days`` days."""
+    """Build the dated running-balance timeline over the next ``days`` days.
+
+    With ``tag_id`` only the tagged events count (see ``collect_events``).
+    """
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1267,7 +1317,7 @@ def project_running_balance(
     accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
     opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
     cash_events = [e for e in events if e["counts_as_cash"]]
 
     result = build_timeline(opening, cash_events)

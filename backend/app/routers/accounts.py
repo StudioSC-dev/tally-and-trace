@@ -16,7 +16,10 @@ from app.core.access import (
     get_account_or_404,
     viewable_accounts,
 )
-from app.core.tags import attach_visible_tags, own_tag_ids, replace_own_tags
+from app.core.tags import (
+    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    replace_own_tags,
+)
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
@@ -288,6 +291,7 @@ def get_accounts(
     current_user: User = Depends(get_current_active_user),
     account_type: Optional[str] = Query(None, description="Filter by account type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -304,7 +308,10 @@ def get_accounts(
     
     if is_active is not None:
         query = query.filter(Account.is_active == is_active)
-    
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(Account, tag_id))
+
     total = query.count()
     accounts = (
         query.order_by(Account.created_at.desc(), Account.id.desc())
