@@ -712,11 +712,12 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         _require_account(db, current_user, requested.get(
             "account_id", db_transaction.account_id), "Account not found", owner)
     # Same-owner rule: a new category, allocation or recurring entry must be both
-    # the caller's and the row owner's.
+    # the caller's and the row owner's. One resubmitted unchanged is not new, so a
+    # stored legacy reference never blocks an unrelated edit.
     for model, field, detail in ((Category, "category_id", "Category not found"),
                                  (Allocation, "allocation_id", "Allocation not found"),
                                  (BudgetEntry, "budget_entry_id", "Budget entry not found")):
-        if field in requested:
+        if field in requested and requested[field] != getattr(db_transaction, field):
             require_owned_ref(db, model, requested[field], detail, current_user, owner)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)

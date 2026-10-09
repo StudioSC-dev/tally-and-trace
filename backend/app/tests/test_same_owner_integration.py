@@ -411,3 +411,42 @@ def test_editing_a_transfer_into_a_debit_or_credit_clears_its_transfer_accounts(
     assert body["account_id"] == mine["bank"]
     assert body["transfer_from_account_id"] is None
     assert body["transfer_to_account_id"] is None
+
+
+# --- Stored legacy references don't block unrelated edits ---------------------
+
+
+@pytest.mark.parametrize("path", ["/transactions/", "/budget-entries/"])
+def test_an_unchanged_legacy_reference_does_not_block_an_edit(client, db, world, path):
+    """A row still pointing at another user's category or allocation (from the
+    entity era) can be edited as long as the edit leaves those references alone;
+    changing one to another user's record is still refused."""
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    mine, theirs = world["mine"], world["theirs"]
+    body = _debit(mine) if path == "/transactions/" else _entry(mine)
+    record_id = _post(client, mine["headers"], path, body)
+    model = Transaction if path == "/transactions/" else BudgetEntry
+    db.query(model).filter(model.id == record_id).update(
+        {"category_id": theirs["category"], "allocation_id": theirs["allocation"]},
+        synchronize_session=False)
+    db.commit()
+
+    for change in ({"amount": 11},
+                   {"amount": 12, "category_id": theirs["category"],
+                    "allocation_id": theirs["allocation"]}):
+        r = client.put(f"{API}{path}{record_id}", json=change, headers=mine["headers"])
+        assert r.status_code == 200, (change, r.text)
+        assert r.json()["amount"] == change["amount"]
+        assert r.json()["category_id"] == theirs["category"]
+
+    other = _post(client, theirs["headers"], "/categories/", {"name": f"Cat {secrets.token_hex(3)}"})
+    r = client.put(f"{API}{path}{record_id}", json={"category_id": other},
+                   headers=mine["headers"])
+    assert r.status_code == 404, r.text
+    # Clearing or replacing it with the caller's own is fine.
+    r = client.put(f"{API}{path}{record_id}", json={"category_id": mine["category"],
+                                                     "allocation_id": None},
+                   headers=mine["headers"])
+    assert r.status_code == 200, r.text

@@ -308,12 +308,21 @@ def update_budget_entry(
         db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
     owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
+
+    def changed(field: str) -> Optional[int]:
+        """The request's new reference, or None when it leaves the stored one."""
+        value = prospective_data.get(field, getattr(entry, field))
+        return value if value != getattr(entry, field) else None
+
+    # The account is checked as it will be (the write rule); a category or
+    # allocation only when the edit changes it, so a stored legacy reference
+    # never blocks an unrelated edit.
     _ensure_related_resources(
         db=db,
         user=current_user,
         account_id=prospective_data.get("account_id", entry.account_id),
-        category_id=prospective_data.get("category_id", entry.category_id),
-        allocation_id=prospective_data.get("allocation_id", entry.allocation_id),
+        category_id=changed("category_id"),
+        allocation_id=changed("allocation_id"),
         owner=owner,
     )
     if "account_id" in prospective_data:
