@@ -16,6 +16,7 @@ from app.core.access import (
     get_account_or_404,
     viewable_accounts,
 )
+from app.core.tags import attach_visible_tags, own_tag_ids, replace_own_tags
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
@@ -312,6 +313,7 @@ def get_accounts(
         .all()
     )
     has_more = offset + len(accounts) < total
+    attach_visible_tags(db, current_user, accounts)
     return {"items": accounts, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=AccountResponse)
@@ -322,6 +324,8 @@ def create_account(
 ):
     """Create a new account"""
     account_data = account.dict()
+    # The caller's own tags only (404 otherwise); linked once the account exists.
+    tag_ids = own_tag_ids(db, current_user, account_data.pop("tag_ids", None) or [])
 
     _validate_payment_routing(db, current_user, account_data)
     _validate_spending_wallet(db, account_data)
@@ -329,14 +333,17 @@ def create_account(
 
     db_account = Account(**account_data, user_id=current_user.id)
     db.add(db_account)
+    db.flush()
+    if tag_ids:
+        replace_own_tags(db, Account, db_account.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_account)
-    return db_account
+    return attach_visible_tags(db, current_user, db_account)
 
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific account by ID"""
-    return get_account_or_404(db, current_user, account_id)
+    return attach_visible_tags(db, current_user, get_account_or_404(db, current_user, account_id))
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -344,6 +351,10 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     db_account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
 
     update_data = account_update.dict(exclude_unset=True)
+    # Tags: the caller's own only, on an account whose settings they may change.
+    tag_ids = update_data.pop("tag_ids", None)
+    if tag_ids is not None:
+        tag_ids = own_tag_ids(db, current_user, tag_ids)
     if "is_active" in update_data and account_role(current_user, db_account) not in OWNER_ROLES:
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_payment_routing(db, current_user, update_data, account_id=account_id,
@@ -356,9 +367,11 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
         setattr(db_account, field, value)
 
     db_account.updated_at = utc_now()
+    if tag_ids is not None:
+        replace_own_tags(db, Account, db_account.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_account)
-    return db_account
+    return attach_visible_tags(db, current_user, db_account)
 
 @router.delete("/{account_id}")
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -487,7 +500,7 @@ def _record(db: Session, current_user: User, loan: Account, funding: Account,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit()
     db.refresh(txn)
-    return txn
+    return attach_visible_tags(db, current_user, txn)
 
 
 @router.post("/{account_id}/loan-payment", response_model=TransactionResponse)

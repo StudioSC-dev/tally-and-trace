@@ -3,6 +3,10 @@ from typing import Literal, Optional, List
 from datetime import date, datetime
 from app.models.account import AccountType
 from app.models.user import CurrencyType
+from app.schemas.tag import (
+    TagIds, TagSummaries, tag_ids_create_field, tag_ids_not_null, tag_ids_update_field,
+    tags_response_field,
+)
 
 LoanKind = Literal["personal", "auto", "home"]
 LoanAmortization = Literal["fixed", "reduce_term"]
@@ -50,6 +54,7 @@ class AccountBase(BaseModel):
 
 class AccountCreate(AccountBase):
     is_active: bool = True
+    tag_ids: TagIds = tag_ids_create_field()
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -73,6 +78,12 @@ class AccountUpdate(BaseModel):
     loan_payments_made_offset: Optional[int] = Field(
         None, ge=0, description=LOAN_PAYMENTS_MADE_OFFSET_DESCRIPTION)
     is_active: Optional[bool] = None
+    tag_ids: Optional[TagIds] = tag_ids_update_field()
+
+    @field_validator("tag_ids")
+    @classmethod
+    def _tag_ids_not_null(cls, v):
+        return tag_ids_not_null(v)
 
     @field_validator("is_spending_wallet")
     @classmethod
@@ -87,7 +98,8 @@ class AccountResponse(AccountBase):
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+    tags: TagSummaries = tags_response_field()
+
     class Config:
         from_attributes = True
 

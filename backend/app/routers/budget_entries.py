@@ -16,6 +16,7 @@ from app.core.access import (
     require_owned_ref,
     viewable_account_ids,
 )
+from app.core.tags import attach_visible_tags, copy_explicit_tags, own_tag_ids, replace_own_tags
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
@@ -282,6 +283,7 @@ def list_budget_entries(
         .all()
     )
 
+    attach_visible_tags(db, current_user, entries)
     return BudgetEntryListResponse(
         items=_attach_occurrence_counts(db, entries),
         total=total,
@@ -296,6 +298,7 @@ def get_budget_entry(
     current_user: User = Depends(get_current_active_user),
 ):
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    attach_visible_tags(db, current_user, entry)
     return _attach_occurrence_counts(db, [entry])[0]
 
 
@@ -305,6 +308,8 @@ def create_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    # The caller's own tags only (404 otherwise); linked once the entry exists.
+    tag_ids = own_tag_ids(db, current_user, entry_in.tag_ids)
     _ensure_related_resources(
         db=db,
         user=current_user,
@@ -320,13 +325,18 @@ def create_budget_entry(
     )
 
     entry_data = entry_in.dict()
+    entry_data.pop("tag_ids", None)
     entry_data["user_id"] = current_user.id
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
     entry = BudgetEntry(**entry_data)
 
     db.add(entry)
+    db.flush()
+    if tag_ids:
+        replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
     db.commit()
     db.refresh(entry)
+    attach_visible_tags(db, current_user, entry)
     return _attach_occurrence_counts(db, [entry])[0]
 
 
@@ -341,6 +351,10 @@ def update_budget_entry(
         db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
     owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
+    # Tags: the caller's own only, on an entry they may edit (checked above).
+    tag_ids = prospective_data.pop("tag_ids", None)
+    if tag_ids is not None:
+        tag_ids = own_tag_ids(db, current_user, tag_ids)
 
     def changed(field: str) -> Optional[int]:
         """The request's new reference, or None when it leaves the stored one."""
@@ -392,8 +406,11 @@ def update_budget_entry(
         setattr(entry, field, value)
 
     db.add(entry)
+    if tag_ids is not None:
+        replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
     db.commit()
     db.refresh(entry)
+    attach_visible_tags(db, current_user, entry)
     return _attach_occurrence_counts(db, [entry])[0]
 
 
@@ -460,6 +477,10 @@ def materialize_budget_entry(
     entry's amount is more than the loan owes plus a month's interest (the
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
+
+    The entry's explicit tags are copied onto the new transaction in the same
+    commit (never the tags it gets from its accounts); later changes to the
+    entry's tags leave the transaction as it is.
     """
     from app.routers.transactions import add_transaction
     from app.schemas.transaction import TransactionCreate
@@ -503,6 +524,8 @@ def materialize_budget_entry(
         **transfer_fields,
     )
     db_txn = add_transaction(db, current_user, txn_create)
+    # The entry's explicit tags, in the same commit as the transaction.
+    copy_explicit_tags(db, entry.id, db_txn.id)
     db.commit()
     db.refresh(db_txn)
 
@@ -523,5 +546,5 @@ def materialize_budget_entry(
         db.commit()
         db.refresh(db_txn)
 
-    return db_txn
+    return attach_visible_tags(db, current_user, db_txn)
 

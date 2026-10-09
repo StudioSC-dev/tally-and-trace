@@ -13,6 +13,7 @@ from app.core.access import (
     touches_accounts,
     viewable_account_ids,
 )
+from app.core.tags import attach_visible_tags, own_tag_ids, replace_own_tags
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
 from app.models.account import Account, AccountType
@@ -574,6 +575,7 @@ def get_transactions(
         .all()
     )
     has_more = offset + len(transactions) < total
+    attach_visible_tags(db, current_user, transactions)
     return {"items": transactions, "total": total, "has_more": has_more}
 
 @router.post("/", response_model=TransactionResponse)
@@ -586,7 +588,7 @@ def create_transaction(
     db_transaction = add_transaction(db, current_user, transaction)
     db.commit()
     db.refresh(db_transaction)
-    return db_transaction
+    return attach_visible_tags(db, current_user, db_transaction)
 
 
 def add_transaction(db: Session, current_user: User, transaction: TransactionCreate) -> Transaction:
@@ -596,6 +598,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     materialised recurring entry) commits it all at once.
     """
     transaction_data = transaction.dict()
+    # The caller's own tags only (404 otherwise); linked once the row exists.
+    tag_ids = own_tag_ids(db, current_user, transaction_data.pop("tag_ids", None) or [])
     transaction_data["user_id"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
@@ -689,13 +693,15 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
             _apply_budget_delta(budget_allocations, delta, transaction.transaction_date)
 
     db.flush()
+    if tag_ids:
+        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     return db_transaction
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    return transaction
+    return attach_visible_tags(db, current_user, transaction)
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -706,6 +712,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
+    # Tags: the caller's own only, on a row they may edit (checked above).
+    tag_ids = requested.pop("tag_ids", None)
+    if tag_ids is not None:
+        tag_ids = own_tag_ids(db, current_user, tag_ids)
 
     # Every account the edit touches must be one the caller may change: the ones
     # it reverses (checked by get_record_or_404, reported as the row not being
@@ -791,6 +801,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
     update_data.pop("is_recurring", None)
     update_data.pop("recurrence_frequency", None)
+    update_data.pop("tag_ids", None)
 
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
@@ -868,10 +879,12 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 category_id=db_transaction.category_id,
             )
             _apply_budget_delta(new_budget_allocations, new_budget_delta, db_transaction.transaction_date)
-    
+
+    if tag_ids is not None:
+        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_transaction)
-    return db_transaction
+    return attach_visible_tags(db, current_user, db_transaction)
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):

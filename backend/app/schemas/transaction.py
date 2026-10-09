@@ -1,8 +1,12 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.transaction import TransactionType, RecurrenceFrequency
 from app.models.user import CurrencyType
+from app.schemas.tag import (
+    TagIds, TagSummaries, tag_ids_create_field, tag_ids_not_null, tag_ids_update_field,
+    tags_response_field,
+)
 
 class TransactionBase(BaseModel):
     account_id: int = Field(..., gt=0)
@@ -35,7 +39,7 @@ class TransactionBase(BaseModel):
     recurrence_frequency: Optional[RecurrenceFrequency] = None
 
 class TransactionCreate(TransactionBase):
-    pass
+    tag_ids: TagIds = tag_ids_create_field()
 
 class TransactionUpdate(BaseModel):
     account_id: Optional[int] = Field(None, gt=0)
@@ -62,6 +66,12 @@ class TransactionUpdate(BaseModel):
     is_reconciled: Optional[bool] = None
     is_recurring: Optional[bool] = None
     recurrence_frequency: Optional[RecurrenceFrequency] = None
+    tag_ids: Optional[TagIds] = tag_ids_update_field()
+
+    @field_validator("tag_ids")
+    @classmethod
+    def _tag_ids_not_null(cls, v):
+        return tag_ids_not_null(v)
 
 class TransactionResponse(TransactionBase):
     id: int
@@ -70,6 +80,7 @@ class TransactionResponse(TransactionBase):
     # materialised recurring entry, an edit that retargets a row into a loan,
     # posting a legacy planned row); null on other rows and on legacy rows.
     loan_payment_kind: Optional[str] = None
+    tags: TagSummaries = tags_response_field()
     created_at: datetime
     updated_at: Optional[datetime] = None
     
