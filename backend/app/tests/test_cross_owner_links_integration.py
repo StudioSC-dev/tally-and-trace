@@ -234,3 +234,35 @@ def test_the_creators_own_linked_row_still_suppresses_its_occurrence(client, db,
     _stale_txn(db, a, bank.id, OCCURRENCE, amount="100", budget_entry_id=entry.id,
                is_posted=False)
     assert _entry_events(db, a, entry.id) == []
+
+
+# --- Period summary category names ---------------------------------------------
+
+
+def test_summary_names_a_rows_category_only_when_its_creator_owns_it(client, db, people):
+    """On A's account: B's row naming C's category reads as Uncategorized; B's own
+    category and A's own keep their names."""
+    from app.models.category import Category
+    from app.models.transaction import TransactionType
+
+    a, b, c = people(), people(), people()
+    bank = _post(client, a, "/accounts/", {
+        "name": "A bank", "account_type": "checking", "balance": 1_000})["id"]
+    secret = Category(user_id=c["id"], name="Zq7Secret")
+    b_own = Category(user_id=b["id"], name="Zq7Bee")
+    db.add_all([secret, b_own])
+    db.commit()
+    a_own = _post(client, a, "/categories/", {"name": "Zq7Mine"})["id"]
+    when = datetime(2026, 8, 10)
+    _stale_txn(db, b, bank, when, TransactionType.CREDIT, "300", category_id=secret.id)
+    _stale_txn(db, b, bank, when, TransactionType.CREDIT, "20", category_id=b_own.id)
+    _stale_txn(db, a, bank, when, TransactionType.DEBIT, "7", category_id=a_own)
+
+    r = client.get(f"{API}/transactions/summary/period", headers=a["headers"], params={
+        "start_date": "2026-08-01T00:00:00", "end_date": "2026-08-31T23:59:59"})
+    assert r.status_code == 200, r.text
+    assert "Zq7Secret" not in r.text
+    breakdown = r.json()["category_breakdown"]
+    assert Decimal(str(breakdown["Uncategorized"]["income"])) == Decimal("300")
+    assert Decimal(str(breakdown["Zq7Bee"]["income"])) == Decimal("20")
+    assert Decimal(str(breakdown["Zq7Mine"]["expenses"])) == Decimal("7")

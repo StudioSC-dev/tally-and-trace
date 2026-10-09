@@ -952,7 +952,7 @@ LOAN_INTEREST_PREFIX = "Interest: "
 
 def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
-    loan_names: Optional[dict] = None,
+    loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
 
@@ -994,6 +994,10 @@ def summarize_period(
     for a destination in ``loan_names`` ({account id: name}) that fee is shown on
     an "Interest: <loan name>" row instead, counted exactly as any other fee.
     Income is every credit. Rows without a category are grouped as "Uncategorized".
+    With ``category_owners`` ({category id: owner's user id}) a row's category
+    name is used only when the row's creator owns the category; a row naming
+    another user's category (a stale reference) is grouped as "Uncategorized"
+    too, so that user's category name is never shown.
 
     The breakdown is keyed by name, as it always has been (two categories with
     one name already share a row). A synthetic row ("Uncategorized", "Transfer
@@ -1013,20 +1017,24 @@ def summarize_period(
     def row(name: str) -> dict:
         return breakdown.setdefault(name, {"income": zero, "expenses": zero})
 
-    def category(category_id: Optional[int]) -> str:
-        return category_names.get(category_id, UNCATEGORIZED) if category_id else UNCATEGORIZED
+    def category(t) -> str:
+        if not t.category_id:
+            return UNCATEGORIZED
+        if category_owners is not None and category_owners.get(t.category_id) != t.user_id:
+            return UNCATEGORIZED
+        return category_names.get(t.category_id, UNCATEGORIZED)
 
     for t in transactions:
         amount = _D(t.amount)
         if t.transaction_type == TransactionType.CREDIT:
             total_income += amount
-            row(category(t.category_id))["income"] += amount
+            row(category(t))["income"] += amount
             if t.account_id in wallet_ids:
                 # Income received into a wallet is also an implicit top-up.
                 total_expenses += amount
                 unallocated_wallet += amount
         elif t.transaction_type == TransactionType.DEBIT:
-            row(category(t.category_id))["expenses"] += amount
+            row(category(t))["expenses"] += amount
             if t.account_id in wallet_ids:
                 unallocated_wallet -= amount
             else:
@@ -1104,11 +1112,14 @@ def get_transaction_summary(
         if a.account_type == AccountType.LOAN and can_view_account(current_user, a)
     }
     category_ids = {t.category_id for t in transactions if t.category_id}
-    category_names = {
-        c.id: c.name for c in db.query(Category).filter(Category.id.in_(category_ids)).all()
-    } if category_ids else {}
+    categories = db.query(Category).filter(
+        Category.id.in_(category_ids)).all() if category_ids else []
+    # A row shows its category's name only when the row's creator owns it.
+    category_names = {c.id: c.name for c in categories}
+    category_owners = {c.id: c.user_id for c in categories}
 
-    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names)
+    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
+                               category_owners=category_owners)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses
