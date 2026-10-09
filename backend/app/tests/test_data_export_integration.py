@@ -4,7 +4,8 @@
 all of them) export the caller's own records in full, plus a limited view of
 records another user made on an account the caller owns. Every field is named
 by the export schema, never read off the ORM. They replace the entity export
-routes. Everything goes through the HTTP layer, on throwaway users. Skips
+routes. Tags (STU-231): the caller's own tags and the links from them to the
+caller's own records, never another user's. Everything goes through the HTTP layer, on throwaway users. Skips
 without a database.
 """
 import csv
@@ -70,12 +71,16 @@ def _post(client, headers, path, body):
 @pytest.fixture
 def world(client, db):
     """An owner with one record of every kind, another user with their own, and a
-    legacy transfer the other user made into the owner's bank."""
+    legacy transfer the other user made into the owner's bank. Each side tags its
+    bank, transaction and rent with a tag of its own; the other user's tag also
+    sits on the owner's transaction (only a direct write leaves one)."""
     from app.core.auth import get_password_hash
+    from app.core.tags import ensure_household_tag
     from app.models.account import Account
     from app.models.allocation import Allocation
     from app.models.budget_entry import BudgetEntry, BudgetEntryType
     from app.models.category import Category
+    from app.models.tag import transaction_tags
     from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
     from app.models.user import User
     from app.models.wishlist_item import WishlistItem
@@ -86,27 +91,32 @@ def world(client, db):
         u = User(email=email, password_hash=get_password_hash(PASSWORD),
                  first_name="Export", last_name=side, is_verified=True)
         db.add(u)
+        db.flush()
+        ensure_household_tag(db, u)
         db.commit()
         db.refresh(u)
         made.append(u.id)
         r = client.post(f"{API}/auth/login", json={"email": email, "password": PASSWORD})
         assert r.status_code == 200, r.text
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        tag = _post(client, h, "/tags/", {"name": f"{mark} Tag", "color": "#2563EB"})
         bank = _post(client, h, "/accounts/", {
-            "name": f"{mark} Bank", "account_type": "checking", "balance": 10_000})
+            "name": f"{mark} Bank", "account_type": "checking", "balance": 10_000,
+            "tag_ids": [tag]})
         category = _post(client, h, "/categories/", {"name": f"{mark} Food"})
         sides[side] = {
             "id": u.id, "email": email, "headers": h, "bank": bank, "category": category,
+            "tag": tag,
             "allocation": _post(client, h, "/allocations/", {
                 "account_id": bank, "name": f"{mark} Fund", "allocation_type": "budget",
                 "configuration": {"category_ids": [category]}}),
             "transaction": _post(client, h, "/transactions/", {
                 "account_id": bank, "amount": 25, "transaction_type": "debit",
                 "transaction_date": WHEN, "description": f"{mark} lunch",
-                "category_id": category}),
+                "category_id": category, "tag_ids": [tag]}),
             "entry": _post(client, h, "/budget-entries/", {
                 "name": f"{mark} Rent", "entry_type": "expense", "amount": 900,
-                "next_occurrence": WHEN, "account_id": bank}),
+                "next_occurrence": WHEN, "account_id": bank, "tag_ids": [tag]}),
             "accountless": _post(client, h, "/budget-entries/", {
                 "name": f"{mark} Side gig", "entry_type": "income", "amount": 300,
                 "next_occurrence": WHEN}),
@@ -127,6 +137,9 @@ def world(client, db):
         account_id=other["bank"], transfer_to_account_id=owner["bank"],
         category_id=other["category"])
     db.add_all([legacy, legacy_entry])
+    db.commit()
+    db.execute(transaction_tags.insert().values(
+        tag_id=other["tag"], transaction_id=owner["transaction"]))
     db.commit()
     sides["legacy"], sides["legacy_entry"] = legacy.id, legacy_entry.id
 
@@ -207,6 +220,25 @@ def test_the_export_never_carries_another_users_details_or_unlisted_columns(clie
     assert [a["id"] for a in other["accounts"]] == [world["other"]["bank"]]
     assert world["legacy"] in [t["id"] for t in other["transactions"]]
     assert other["others_transactions"] == [] and other["others_budget_entries"] == []
+
+
+def test_the_export_holds_own_tags_and_their_links_to_own_records_only(client, db, world):
+    from app.models.tag import Tag
+
+    for side in ("owner", "other"):
+        me = world[side]
+        body = _export(client, me).json()
+        household = db.query(Tag).filter(Tag.user_id == me["id"], Tag.is_system).one()
+        mark = OWNER_MARK if side == "owner" else OTHER_MARK
+        assert [(t["id"], t["name"], t["is_system"]) for t in body["tags"]] == [
+            (household.id, "Household", True), (me["tag"], f"{mark} Tag", False)]
+        assert body["tags"][1]["color"] == "#2563EB"
+        assert body["account_tags"] == [{"tag_id": me["tag"], "account_id": me["bank"]}]
+        # The other user's tag on the owner's transaction is in neither export.
+        assert body["transaction_tags"] == [
+            {"tag_id": me["tag"], "transaction_id": me["transaction"]}]
+        assert body["budget_entry_tags"] == [
+            {"tag_id": me["tag"], "budget_entry_id": me["entry"]}]
 
 
 def test_csv_export_of_one_table_uses_the_schema_header(client, world):
