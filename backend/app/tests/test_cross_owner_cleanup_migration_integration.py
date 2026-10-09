@@ -49,12 +49,13 @@ def _db_reachable() -> bool:
 needs_db = pytest.mark.skipif(not _db_reachable(), reason="no database available")
 
 
-def test_cleanup_is_the_single_head_after_demo_state():
+def test_cleanup_follows_demo_state_on_the_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [CLEANUP]
+    (head,) = script.get_heads()
+    assert CLEANUP in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(CLEANUP).down_revision == DEMO_STATE
 
 
@@ -210,7 +211,7 @@ def test_cleanup_clears_cross_owner_links_and_keeps_everything_else(scratch_url)
         with engine.begin() as c:
             ids = _seed(c)
 
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", CLEANUP)
         with engine.connect() as c:
             assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() \
                 == CLEANUP
@@ -282,7 +283,7 @@ def test_cleanup_clears_cross_owner_links_and_keeps_everything_else(scratch_url)
             assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() \
                 == DEMO_STATE
             assert _snapshot(c) == clean
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", CLEANUP)
         with engine.connect() as c:
             assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() \
                 == CLEANUP
