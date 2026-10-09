@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { BudgetEntry, FullTransaction, LimitedTransaction, RecordPermissions, SharedFullTransaction } from '../index'
 import { isDetailed, isLimited, isLimitedEvent, isOwnerFull, isSharedFull } from '../index'
-import { entryName, transactionDate, transactionDescription } from './records'
+import { entryName, timelineEventAmount, timelineEventName, transactionDate, transactionDescription } from './records'
 
 const none: RecordPermissions = { can_edit: false, can_delete: false, can_post: false, can_revert: false, can_tag: false }
 
@@ -93,5 +93,24 @@ describe('isLimitedEvent', () => {
   it('is true only for events with view "limited"', () => {
     expect(isLimitedEvent({ view: 'limited' as const })).toBe(true)
     expect(isLimitedEvent({ view: undefined })).toBe(false)
+  })
+})
+
+describe('timeline event readers', () => {
+  const fullEvent = {
+    date: '2026-10-05', name: 'Rent', amount: -500, type: 'expense', source: 'budget_entry' as const,
+    source_id: 7, running_balance: 100,
+  }
+  const limitedEvent = {
+    view: 'limited' as const, public_id: 'e1', date: '2026-10-06', original_date: null, overdue: false,
+    display_name: 'Loan payment', face_amount: 300, cash_delta: -300, currency: 'PHP' as const,
+    account: { id: null, name: 'Other account' }, kind: 'loan_payment' as const, running_balance: 50,
+  }
+
+  it('read the name and cash effect from either shape', () => {
+    expect(timelineEventName(fullEvent)).toBe('Rent')
+    expect(timelineEventAmount(fullEvent)).toBe(-500)
+    expect(timelineEventName(limitedEvent)).toBe('Loan payment')
+    expect(timelineEventAmount(limitedEvent)).toBe(-300)
   })
 })

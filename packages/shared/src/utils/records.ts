@@ -1,4 +1,4 @@
-import type { BudgetEntry, Transaction } from '../types/api'
+import type { BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, Transaction } from '../types/api'
 
 /**
  * Field readers that work on every record shape. A Limited record has `date` and
@@ -20,4 +20,14 @@ export function transactionDescription(transaction: Transaction): string | null 
 /** The name to show for a recurring entry. Limited entries use the neutral display name. */
 export function entryName(entry: BudgetEntry): string | null {
   return entry.view === 'limited' ? entry.display_name : entry.name
+}
+
+/** The name to show for a timeline event, whether full or limited. */
+export function timelineEventName(event: CashflowTimelineEvent | LimitedTimelineEvent): string {
+  return event.view === 'limited' ? event.display_name : event.name
+}
+
+/** The signed effect of a timeline event on cash (a limited event's `cash_delta`). */
+export function timelineEventAmount(event: CashflowTimelineEvent | LimitedTimelineEvent): number {
+  return event.view === 'limited' ? event.cash_delta : event.amount
 }
