@@ -94,11 +94,14 @@ export const accountingApi = createApi({
     }),
     createAccount: builder.mutation<Account, AccountInput>({
       query: (account) => ({ url: 'accounts/', method: 'POST', body: account }),
-      invalidatesTags: ['Account'],
+      // An account's tags are effective tags on its transactions and entries.
+      invalidatesTags: (_result, _error, account) =>
+        account.tag_ids && account.tag_ids.length > 0 ? ['Account', 'Transaction', 'BudgetEntry'] : ['Account'],
     }),
     updateAccount: builder.mutation<Account, { id: number; data: AccountInput }>({
       query: ({ id, data }) => ({ url: `accounts/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Account'],
+      invalidatesTags: (_result, _error, { data }) =>
+        data.tag_ids !== undefined ? ['Account', 'Transaction', 'BudgetEntry'] : ['Account'],
     }),
     deleteAccount: builder.mutation<void, number>({
       query: (id) => ({ url: `accounts/${id}`, method: 'DELETE' }),
