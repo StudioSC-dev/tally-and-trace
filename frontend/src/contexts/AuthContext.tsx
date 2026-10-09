@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useDispatch } from 'react-redux'
 import { authApi, User } from '../store/authApi'
-import { beginNewSession } from '../store/baseQuery'
+import { beginNewSession, currentSessionGeneration } from '../store/baseQuery'
 import type { AppDispatch } from '../store'
 
 interface AuthContextType {
@@ -39,14 +39,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (token && savedUser) {
       try {
         setUser(JSON.parse(savedUser))
+        // A login, logout or cleared session during the check owns the session
+        // from then on; the check's late result must not touch it.
+        const generation = currentSessionGeneration()
         // Verify token is still valid by fetching current user
         dispatch(authApi.endpoints.getCurrentUser.initiate())
           .unwrap()
           .then((userData: User) => {
+            if (generation !== currentSessionGeneration()) return
             setUser(userData)
             localStorage.setItem('user', JSON.stringify(userData))
           })
           .catch(() => {
+            if (generation !== currentSessionGeneration()) {
+              // Session was cleared meanwhile (not replaced by a new login): reflect it.
+              if (!localStorage.getItem('access_token')) setUser(null)
+              return
+            }
             // Token is invalid, clear everything
             beginNewSession()
             localStorage.removeItem('access_token')
