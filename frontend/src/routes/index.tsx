@@ -80,7 +80,7 @@ export function Dashboard() {
   }
 
   const { data: accountsData, isLoading: accountsLoading, error: accountsError } =
-    useGetAccountsQuery({ is_active: true, limit: 1000, ...tagParam }, { skip: !isAuthenticated })
+    useGetAccountsQuery({ is_active: true, limit: 1000 }, { skip: !isAuthenticated })
   const { data: transactionsData, isLoading: transactionsLoading, error: transactionsError } =
     useGetTransactionsQuery({ limit: 1000, ...tagParam }, { skip: !isAuthenticated })
   const { data: categoriesData, isLoading: categoriesLoading, error: categoriesError } =
