@@ -1,7 +1,9 @@
 # Database models
+# The entity_id columns and the entities / entity_memberships tables stay in the
+# database until the contract migration (STU-229 is the expand step); they are
+# no longer mapped. Autogenerate will offer to drop them: do not accept that here.
 from sqlalchemy.orm import relationship
 from app.models.user import User as User, CurrencyType as CurrencyType
-from app.models.entity import Entity as Entity, EntityMembership as EntityMembership, EntityType as EntityType, MemberRole as MemberRole
 from app.models.account import Account as Account, AccountType as AccountType
 from app.models.transaction import Transaction as Transaction, TransactionType as TransactionType
 from app.models.category import Category as Category
@@ -15,46 +17,11 @@ from app.models.demo_state import DemoState as DemoState
 # ---------------------------------------------------------------------------
 # User relationships
 # ---------------------------------------------------------------------------
-User.entity_memberships = relationship(
-    "EntityMembership",
-    back_populates="user",
-    cascade="all, delete-orphan",
-)
 User.wishlist_items = relationship("WishlistItem", back_populates="user")
-
-# ---------------------------------------------------------------------------
-# Entity relationships
-# ---------------------------------------------------------------------------
-Entity.accounts = relationship(
-    "Account",
-    foreign_keys="Account.entity_id",
-    back_populates="entity",
-)
-Entity.transactions = relationship(
-    "Transaction",
-    foreign_keys="Transaction.entity_id",
-    back_populates="entity",
-)
-Entity.categories = relationship(
-    "Category",
-    foreign_keys="Category.entity_id",
-    back_populates="entity",
-)
-Entity.allocations = relationship(
-    "Allocation",
-    foreign_keys="Allocation.entity_id",
-    back_populates="entity",
-)
-Entity.budget_entries = relationship(
-    "BudgetEntry",
-    foreign_keys="BudgetEntry.entity_id",
-    back_populates="entity",
-)
 
 # ---------------------------------------------------------------------------
 # Account relationships
 # ---------------------------------------------------------------------------
-Account.entity = relationship("Entity", back_populates="accounts", foreign_keys="Account.entity_id")
 Account.transactions = relationship(
     "Transaction",
     back_populates="account",
@@ -69,7 +36,6 @@ Account.allocations = relationship(
 # ---------------------------------------------------------------------------
 # Transaction relationships
 # ---------------------------------------------------------------------------
-Transaction.entity = relationship("Entity", back_populates="transactions", foreign_keys="Transaction.entity_id")
 Transaction.account = relationship(
     "Account",
     back_populates="transactions",
@@ -92,14 +58,12 @@ Transaction.transfer_to_account = relationship(
 # ---------------------------------------------------------------------------
 # Category relationships
 # ---------------------------------------------------------------------------
-Category.entity = relationship("Entity", back_populates="categories", foreign_keys="Category.entity_id")
 Category.transactions = relationship("Transaction", back_populates="category")
 Category.budget_entries = relationship("BudgetEntry", back_populates="category")
 
 # ---------------------------------------------------------------------------
 # Allocation relationships
 # ---------------------------------------------------------------------------
-Allocation.entity = relationship("Entity", back_populates="allocations", foreign_keys="Allocation.entity_id")
 Allocation.account = relationship("Account", back_populates="allocations")
 Allocation.transactions = relationship("Transaction", back_populates="allocation")
 Allocation.budget_entries = relationship("BudgetEntry", back_populates="allocation")
@@ -107,7 +71,6 @@ Allocation.budget_entries = relationship("BudgetEntry", back_populates="allocati
 # ---------------------------------------------------------------------------
 # BudgetEntry relationships
 # ---------------------------------------------------------------------------
-BudgetEntry.entity = relationship("Entity", back_populates="budget_entries", foreign_keys="BudgetEntry.entity_id")
 BudgetEntry.transactions = relationship(
     "Transaction",
     back_populates="budget_entry",

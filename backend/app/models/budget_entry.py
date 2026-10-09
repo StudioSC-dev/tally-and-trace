@@ -32,7 +32,6 @@ class BudgetEntry(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
     entry_type = Column(
         Enum(BudgetEntryType, values_callable=_enum_values, name="budgetentrytype"),
         nullable=False,
@@ -79,7 +78,6 @@ class BudgetEntry(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     user = relationship("User", back_populates="budget_entries")
-    entity = relationship("Entity", back_populates="budget_entries", foreign_keys="BudgetEntry.entity_id")
     account = relationship("Account", back_populates="budget_entries", foreign_keys=[account_id])
     overflow_account = relationship("Account", foreign_keys=[overflow_account_id])
     transfer_to_account = relationship("Account", foreign_keys=[transfer_to_account_id])

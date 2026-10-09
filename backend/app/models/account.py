@@ -62,8 +62,6 @@ class Account(Base):
     payment_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     payment_overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     
-    # Entity scoping (nullable – existing data retains null until backfilled)
-    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
 
     # Spending wallet (cash on hand, e-wallets): the balance is shown but is not
     # projection cash. Topping one up is the expense; spending from it is
@@ -101,7 +99,6 @@ class Account(Base):
     
     # Relationships
     user = relationship("User", back_populates="accounts")
-    entity = relationship("Entity", back_populates="accounts", foreign_keys="Account.entity_id")
     transactions = relationship(
         "Transaction",
         back_populates="account",

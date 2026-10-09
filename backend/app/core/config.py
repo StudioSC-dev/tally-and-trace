@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = "Tally & Trace API"
     VERSION: str = "2.0.0"
-    DESCRIPTION: str = "Multi-entity personal and business financial management"
+    DESCRIPTION: str = "Multi-currency personal and business financial management"
     API_V1_STR: str = "/api/v1"
     
     # CORS - will be parsed from comma-separated string
