@@ -470,3 +470,41 @@ def test_reconciled_and_active_filters_say_nothing_about_limited_records(
         sw_client, sw["a"], "/transactions/", is_reconciled=True, limit=100)["items"]}
     assert house["overflow_entry"] in {e["id"] for e in _get(
         sw_client, sw["a"], "/budget-entries/", is_active=False, limit=100)["items"]}
+
+
+# --- The period summary counts what the record view shows (audit round 1, A) -------------
+
+ALONE = {"start_date": "2026-11-03T00:00:00", "end_date": "2026-11-04T00:00:00"}
+
+
+@pytest.mark.parametrize("target", ["a_loan", "a_card", "wallet"])
+def test_the_summary_shows_a_payment_to_a_hidden_liability_whole(sw, sw_client, target):
+    """The only row in the window: a fee'd transfer from the joint account into one
+    of the owner's private accounts, so nothing else can mask its fee."""
+    a = sw["a"]
+    if target == "wallet":
+        destination = sw_post(sw_client, a, "/accounts/", {
+            "name": f"{PRIVATE} wallet", "account_type": "cash", "balance": 0,
+            "is_spending_wallet": True})["id"]
+        fee = 0
+    else:
+        destination, fee = sw[target], INTEREST
+    sw_post(sw_client, a, "/transactions/", {
+        "account_id": sw["joint"], "transfer_from_account_id": sw["joint"],
+        "transfer_to_account_id": destination, "amount": 4000, "transfer_fee": fee,
+        "transaction_type": "transfer", "description": f"{PRIVATE} payment",
+        "transaction_date": "2026-11-03T12:00:00"})
+    for who in ("b", "v", "d"):
+        body = _get(sw_client, sw[who], "/transactions/summary/period", **ALONE)
+        assert body["summary"] == {"total_income": 0.0, "total_expenses": 0.0,
+                                   "net_flow": 0.0, "transaction_count": 1}, (who, body)
+        assert body["category_breakdown"] == {}, (who, body)
+        assert sw_leaks(body, numbers=[INTEREST]) == []
+    # The owner, who sees every account, still gets the split and the fee row.
+    own = _get(sw_client, a, "/transactions/summary/period", **ALONE)
+    if target == "wallet":
+        assert own["summary"]["total_expenses"] == 4000.0
+    else:
+        assert own["summary"]["total_expenses"] == pytest.approx(INTEREST)
+        row = f"Interest: {PRIVATE} loan" if target == "a_loan" else "Transfer fees"
+        assert own["category_breakdown"][row]["expenses"] == pytest.approx(INTEREST)

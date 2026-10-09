@@ -1050,6 +1050,7 @@ LOAN_INTEREST_PREFIX = "Interest: "
 def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
+    hidden_liability_ids: Optional[Set[int]] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
 
@@ -1102,9 +1103,17 @@ def summarize_period(
     wallets") whose name a user category also uses is added into that row,
     never written over it, so no amount is lost and the expense column still
     sums to ``total_expenses``.
+
+    Every row is counted as the caller's record view shows it (app/core/redaction.py),
+    so no total reveals a field that view hides. A transfer into a loan or card
+    in ``hidden_liability_ids`` (one the caller can't view) is one whole payment
+    of amount + fee: no fee row, no interest split, nothing expensed. Callers
+    pass only in-scope accounts in ``wallet_ids``, so whether an account outside
+    the scope is a wallet never moves a total.
     """
     zero = Decimal("0")
     loan_names = loan_names or {}
+    hidden_liability_ids = hidden_liability_ids or set()
     total_income = zero
     total_expenses = zero
     unallocated_wallet = zero
@@ -1142,6 +1151,9 @@ def summarize_period(
                 continue  # inbound from outside the caller's scope
             fee = _D(t.transfer_fee)
             destination = t.transfer_to_account_id
+            if destination in hidden_liability_ids:
+                # The limited view's whole payment: principal and interest together.
+                amount, fee = amount + fee, zero
             from_wallet = source in wallet_ids
             to_wallet = destination in wallet_ids
             if fee:
@@ -1209,11 +1221,18 @@ def get_transaction_summary(
         if acc_id is not None
     }
     referenced = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
-    wallet_ids = {a.id for a in referenced if is_spending_wallet(a)}
+    # Wallets in the scope only: another user's account is never read as one.
+    wallet_ids = {a.id for a in referenced if a.id in scope_ids and is_spending_wallet(a)}
     # Loans the caller can see get their own interest row (others stay "Transfer fees").
     loan_names = {
         a.id: a.name for a in referenced
         if a.account_type == AccountType.LOAN and can_view_account(current_user, a)
+    }
+    # Loans and cards the caller can't view: a payment into one is shown whole.
+    hidden_liability_ids = {
+        a.id for a in referenced
+        if a.account_type in (AccountType.LOAN, AccountType.CREDIT)
+        and not can_view_account(current_user, a)
     }
     category_ids = {t.category_id for t in transactions if t.category_id}
     categories = db.query(Category).filter(
@@ -1223,7 +1242,8 @@ def get_transaction_summary(
     category_owners = {c.id: c.user_id for c in categories}
 
     summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
-                               category_owners=category_owners)
+                               category_owners=category_owners,
+                               hidden_liability_ids=hidden_liability_ids)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses
