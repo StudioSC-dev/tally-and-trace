@@ -8,7 +8,8 @@ import pytest
 from app.models.transaction import TransactionType
 from app.routers.transactions import summarize_period
 from app.services.loans import (
-    LoanError, amortize, cents, default_amortization, due_date, propose_split,
+    LoanError, amortize, cents, default_amortization, due_date, propose_split, scheduled_dues,
+    split_payment,
 )
 
 BANK, GCASH, LOAN = 1, 2, 3
@@ -96,3 +97,57 @@ def test_cents_normalises_whole_cents_and_refuses_finer_or_non_finite_values():
     for bad in (Decimal("0.005"), 0.005, Decimal("NaN"), Decimal("Infinity")):
         with pytest.raises(LoanError):
             cents(bad)
+
+
+def _reduce_term_loan(owed, rate="0"):
+    return SimpleNamespace(loan_first_payment_date=date(2026, 10, 4), loan_kind="home",
+                           loan_amortization="reduce_term", loan_payment_amount=Decimal("8000"),
+                           loan_annual_rate=Decimal(rate), loan_term_months=None,
+                           balance=-Decimal(owed))
+
+
+def test_reduce_term_rows_keep_what_each_open_due_date_still_owes():
+    # Oct 4 is unpaid, Nov 4 half paid, Dec 4 a quarter paid; 74,000 is owed at 0%.
+    loan = _reduce_term_loan("74000")
+    state = {"open": [(0, Decimal("8000.00")), (1, Decimal("4000.00")), (2, Decimal("6000.00")),
+                      *((step, Decimal("8000.00")) for step in range(3, 40))]}
+
+    rows = scheduled_dues(loan, state)
+    assert [r["payment"] for r in rows[:4]] == [Decimal("8000.00"), Decimal("4000.00"),
+                                                 Decimal("6000.00"), Decimal("8000.00")]
+    assert [r["due_date"] for r in rows[:3]] == [date(2026, 10, 4), date(2026, 11, 4),
+                                                  date(2026, 12, 4)]
+    assert sum(r["principal"] for r in rows) == Decimal("74000.00")
+    assert rows[-1]["balance_after"] == Decimal("0.00")
+
+
+def test_reduce_term_rows_split_a_part_paid_due_date_interest_first():
+    # 6% on 50,000 is 250 a month; 300 already paid on Nov 4 covers its interest.
+    loan = _reduce_term_loan("50000", rate="6")
+    state = {"open": [(0, Decimal("8000.00")), (1, Decimal("7700.00")),
+                      *((step, Decimal("8000.00")) for step in range(2, 40))]}
+
+    rows = scheduled_dues(loan, state)
+    assert (rows[0]["interest"], rows[0]["principal"]) == (Decimal("250.00"), Decimal("7750.00"))
+    assert rows[1]["payment"] == Decimal("7700.00")
+    assert rows[1]["interest"] == Decimal("0.00")  # 211.25 due, already paid
+    assert sum(r["principal"] for r in rows) == Decimal("50000.00")
+
+
+def test_a_fully_paid_loan_has_no_due_dates_left():
+    loan = SimpleNamespace(loan_first_payment_date=date(2026, 10, 4), loan_kind="auto",
+                           loan_amortization="fixed", loan_payment_amount=Decimal("8000"),
+                           loan_annual_rate=Decimal("6"), loan_term_months=12,
+                           balance=Decimal("0"))
+    state = {"open": [(step, Decimal("8000.00")) for step in range(12)]}
+    assert scheduled_dues(loan, state) == []
+
+
+def test_a_payment_above_what_is_owed_plus_interest_is_refused_not_split():
+    # 1,000 owed at 12%: 10 interest this month, so 1,010 is the final payment.
+    loan = SimpleNamespace(balance=Decimal("-1000"), loan_annual_rate=Decimal("12"),
+                           loan_payment_amount=Decimal("5000"))
+    assert split_payment(loan, Decimal("1010")) == (Decimal("1000.00"), Decimal("10.00"))
+    assert split_payment(loan, Decimal("600")) == (Decimal("590.00"), Decimal("10.00"))
+    with pytest.raises(LoanError, match="final payment"):
+        split_payment(loan, Decimal("5000"))

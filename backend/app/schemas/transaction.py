@@ -67,7 +67,10 @@ class TransactionUpdate(BaseModel):
 
 class TransactionResponse(TransactionBase):
     id: int
-    # Set only by the loan endpoints (scheduled / prepayment); read-only here.
+    # Read-only (scheduled / prepayment): set on every transfer into a loan
+    # recorded through the API (the loan endpoints, a generic create, a
+    # materialised recurring entry, an edit that retargets a row into a loan,
+    # posting a legacy planned row); null on other rows and on legacy rows.
     loan_payment_kind: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

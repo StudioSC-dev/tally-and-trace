@@ -14,6 +14,10 @@ nullable so existing rows are unaffected:
 A loan's balance is negative while money is owed. A payment is a transfer into
 the loan (principal as the amount, interest as the transfer fee);
 ``transactions.loan_payment_kind`` (scheduled / prepayment) tells the two apart.
+Existing rows keep it null: such a legacy transfer into a loan never counts as
+a scheduled payment (its payment belongs in ``loan_payments_made_offset``). The
+due dates after the offset are settled by the scheduled payments' combined
+amount, oldest first.
 
 Revision ID: c4e8a2f6b1d3
 Revises: b9e3f1a7c5d2

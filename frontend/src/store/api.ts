@@ -40,6 +40,13 @@ export type {
   WishlistPlan,
   WishlistReadiness,
   WishlistPlanItem,
+  LoanKind,
+  LoanAmortization,
+  LoanPaymentKind,
+  LoanPaymentRequest,
+  LoanPrepaymentRequest,
+  LoanSchedule,
+  LoanScheduleRow,
 } from '@tally-trace/shared'
 
 import type {
@@ -57,6 +64,9 @@ import type {
   WishlistItem,
   WishlistPlan,
   Entity,
+  LoanPaymentRequest,
+  LoanPrepaymentRequest,
+  LoanSchedule,
 } from '@tally-trace/shared'
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
@@ -86,6 +96,18 @@ export const accountingApi = createApi({
     deleteAccount: builder.mutation<void, number>({
       query: (id) => ({ url: `accounts/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Account'],
+    }),
+    getLoanSchedule: builder.query<LoanSchedule, number>({
+      query: (id) => `accounts/${id}/loan-schedule`,
+      providesTags: ['Account'],
+    }),
+    recordLoanPayment: builder.mutation<Transaction, { id: number; data: LoanPaymentRequest }>({
+      query: ({ id, data }) => ({ url: `accounts/${id}/loan-payment`, method: 'POST', body: data }),
+      invalidatesTags: ['Account', 'Transaction', 'Allocation'],
+    }),
+    recordLoanPrepayment: builder.mutation<Transaction, { id: number; data: LoanPrepaymentRequest }>({
+      query: ({ id, data }) => ({ url: `accounts/${id}/loan-prepayment`, method: 'POST', body: data }),
+      invalidatesTags: ['Account', 'Transaction', 'Allocation'],
     }),
     getAccountBalance: builder.query<AccountBalance, number>({
       query: (id) => `accounts/${id}/balance`,
@@ -284,10 +306,14 @@ export const {
   useGetAccountsQuery,
   useLazyGetAccountsQuery,
   useGetAccountQuery,
+  useLazyGetAccountQuery,
   useCreateAccountMutation,
   useUpdateAccountMutation,
   useDeleteAccountMutation,
   useGetAccountBalanceQuery,
+  useGetLoanScheduleQuery,
+  useRecordLoanPaymentMutation,
+  useRecordLoanPrepaymentMutation,
 
   // Category hooks
   useGetCategoriesQuery,

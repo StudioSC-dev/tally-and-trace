@@ -16,7 +16,8 @@ from app.schemas.transaction import TransactionCreate, TransactionResponse, Tran
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
-from app.routers.accounts import _funding_account, _loan_or_404
+from app.services.statements import resolve_cycle_fields
+from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
 from app.models.entity import Entity
 from app.models.user import User
@@ -205,9 +206,12 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
     amount changed while posted) once the loan is ``fixed``.
 
     Posting the row, or changing its money while it is posted, also re-runs the
-    endpoints' account checks against the accounts as they are now: the
-    destination is still a loan, the funding account is still one the caller
-    may use to fund it, and the two share a currency.
+    account checks against the accounts as they are now: the destination is
+    still a loan, the funding account is still one the caller may use to fund
+    it, and the two share a currency. A scheduled payment is held to the rule
+    for a transfer into a loan (``_loan_payment_source``: a card or a spending
+    wallet may fund it); a prepayment to the prepayment endpoint's
+    (``_funding_account``).
     """
     for field in LOAN_PAYMENT_FIXED_FIELDS:
         if field in requested and requested[field] != getattr(txn, field):
@@ -223,8 +227,11 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
     fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
     if posted and (not old_posted or amount_changed or fee_changed):
         loan = _loan_or_404(db, user, txn.transfer_to_account_id)
-        funding = _funding_account(
-            db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        if txn.loan_payment_kind == loan_svc.PREPAYMENT:
+            funding = _funding_account(
+                db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
+        else:
+            funding = _loan_payment_source(db, user, txn.transfer_from_account_id, loan)
         try:
             loan_svc.check_currency(loan, funding)
         except loan_svc.LoanError as exc:
@@ -255,6 +262,188 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
         )
     except loan_svc.LoanError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account) -> Account:
+    """The account a transfer into ``loan`` comes from, if it may pay it through this API.
+
+    Access is checked first (404). A generic or recurring transfer into a loan
+    may come from any account the caller can use except the loan itself or
+    another loan: a credit card or a spending wallet may fund it, as either may
+    fund any other transfer (the forecast bills a card-funded payment on the
+    card's statement and treats a wallet-funded one as moving no projection
+    cash). A card without billing cycle settings may not: no statement bills
+    it, so a payment from it would settle the loan without any cash ever
+    leaving. The loan endpoints keep their stricter funding rules
+    (``_funding_account``).
+    """
+    if source_id == loan.id:
+        raise HTTPException(status_code=400,
+                            detail="transfer_from_account_id cannot be the account itself")
+    source = db.query(Account).filter(Account.id == source_id).first()
+    if not source or not can_access_record(db, user, source):
+        raise HTTPException(status_code=404, detail="Source account not found")
+    if source.account_type == AccountType.LOAN:
+        raise HTTPException(status_code=400,
+                            detail="A loan cannot be paid from another loan")
+    if source.account_type == AccountType.CREDIT and resolve_cycle_fields(source) is None:
+        raise HTTPException(status_code=400,
+                            detail="A credit card pays a loan only once it has billing cycle "
+                                   "settings (a statement close or due day); set them first")
+    return source
+
+
+def _loan_payment_stamp(db: Session, user: User, loan: Account, source_id: int, *,
+                        currency, principal, interest, posted: bool) -> dict:
+    """The fields that make a transfer into ``loan`` a scheduled loan payment.
+
+    Money paid into a loan through this API (a plain transfer, a transfer edited
+    so it lands in a loan, or a recurring transfer entry being materialised) is
+    a scheduled payment: it is stamped ``loan_payment_kind`` "scheduled", so once
+    posted it settles its due date (services/loans.py) and the loan-payment edit
+    rules apply to it afterwards. Extra principal is recorded only through the
+    loan-prepayment endpoint.
+
+    The checks are the loan-payment endpoint's except for the source's type
+    (``_loan_payment_source``: a card or a spending wallet may fund it, another
+    loan may not): the source is in the loan's currency, the row is in that
+    currency too (``currency``, when the caller gave one), principal and
+    interest are whole cents and move some money, and a posted payment's
+    principal fits what is owed. The row is new to this loan (a new transfer,
+    or an edit that newly points a row at it), so it has no old effect on the
+    loan to reverse and what is owed is the loan's balance as it stands, for
+    the split as for the check. The loan and source account are locked first,
+    as the endpoint does. Nothing is written.
+
+    With ``interest`` None (the caller gave no fee) the amount is split as the
+    loan-payment endpoint proposes (``loan_svc.split_payment``): interest a
+    month at the loan rate, principal the rest, the cash moved unchanged. A
+    fee the caller gave is its own split and is kept.
+    """
+    funding = _loan_payment_source(db, user, source_id, loan)
+    _lock(db, loan, funding)
+    if currency is not None and currency != loan.currency:
+        raise HTTPException(status_code=400,
+                            detail="A loan payment's currency must match the loan's currency")
+    try:
+        loan_svc.check_currency(loan, funding)
+        if interest is None and principal is not None:
+            principal, interest = loan_svc.split_payment(loan, principal)
+        principal, interest = loan_svc.check_edited_payment(
+            loan, old_principal=0, old_posted=False, posted=posted,
+            principal=principal, interest=interest)
+    except loan_svc.LoanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return dict(amount=principal, transfer_fee=interest, currency=loan.currency,
+                loan_payment_kind=loan_svc.SCHEDULED)
+
+
+def _stamp_loan_payment(db: Session, user: User, transaction: TransactionCreate,
+                        transaction_data: dict, source: Account, loan: Account) -> None:
+    """Make a new transfer into a loan a scheduled loan payment (``_loan_payment_stamp``)."""
+    transaction_data.update(_loan_payment_stamp(
+        db, user, loan, source.id,
+        currency=transaction.currency if "currency" in transaction.model_fields_set else None,
+        principal=transaction.amount,
+        interest=(transaction.transfer_fee
+                  if "transfer_fee" in transaction.model_fields_set else None),
+        posted=transaction.is_posted))
+
+
+def _stamp_retargeted_loan_payment(db: Session, user: User, txn: Transaction,
+                                   requested: dict) -> dict:
+    """The stamp for an edit that newly points an unmarked row at a loan, or {}.
+
+    A row with no ``loan_payment_kind`` (a transfer to another account, or a
+    debit or credit) that the edit turns into a transfer into a loan gets the
+    same classification and checks as a new one, before anything is changed.
+    Without it the posted row would not settle its due date and the payable
+    would be charged again. The row has no old effect on that loan, so it is
+    validated against the loan as it stands. With no fee in the request
+    (missing or null), the row's stored fee is not reused as interest: the
+    request's amount, else the cash the row already moves (its amount plus a
+    transfer's fee), is split into principal and interest as for a new payment
+    without a fee. A fee the request gives is its own split and is kept.
+
+    A row that was already a transfer into that same loan (a legacy unmarked
+    payment) is stamped only when the edit posts it
+    (``_stamp_posted_legacy_loan_payment``); unposting it is refused. Any other
+    edit leaves it unmarked, so it is edited as a plain transfer and, like
+    every legacy row, never counts toward ``payments_made`` (its payment is in
+    ``loan_payments_made_offset``). Stamping it would count it a second time.
+    So every transfer into a loan recorded through the API carries a kind,
+    except a legacy row an otherwise unchanged edit leaves as it is. A legacy
+    row moved out of its loan and back in is a retargeting edit, so it is
+    stamped and counted again: the loan's offset must then be lowered.
+    """
+    if txn.loan_payment_kind:
+        return {}
+    if requested.get("transaction_type", txn.transaction_type) != TransactionType.TRANSFER:
+        return {}
+    loan_id = requested.get("transfer_to_account_id", txn.transfer_to_account_id)
+    loan = db.query(Account).filter(Account.id == loan_id).first() if loan_id else None
+    if loan is None or loan.account_type != AccountType.LOAN:
+        return {}
+    source_id = requested.get("transfer_from_account_id", txn.transfer_from_account_id)
+    if source_id is None:
+        return {}  # rejected below as a transfer without a source
+    if (txn.transaction_type == TransactionType.TRANSFER
+            and txn.transfer_to_account_id == loan.id):
+        return _stamp_posted_legacy_loan_payment(db, user, txn, requested, loan, source_id)
+    interest = requested.get("transfer_fee")
+    principal = requested.get("amount")
+    if interest is None and principal is None:
+        # The total to split is the cash the row already moves.
+        principal = _D(txn.amount)
+        if txn.transaction_type == TransactionType.TRANSFER:
+            principal += _D(txn.transfer_fee or 0)
+    elif principal is None:
+        principal = txn.amount
+    return _loan_payment_stamp(
+        db, user, loan, source_id,
+        currency=requested.get("currency"),
+        principal=principal,
+        interest=interest,
+        posted=bool(requested.get("is_posted", txn.is_posted)))
+
+
+def _stamp_posted_legacy_loan_payment(db: Session, user: User, txn: Transaction,
+                                      requested: dict, loan: Account, source_id: int) -> dict:
+    """The stamp for posting a legacy unmarked planned payment into ``loan``, or {}.
+
+    Posting it makes it a scheduled payment (as a new one is), so it settles
+    its due date instead of leaving that due date projected again. It is
+    validated as a new payment with the amount and fee the request gives,
+    else the stored ones (an explicit ``transfer_fee`` of null keeps the
+    stored fee). It is never re-split: a stored fee of 0 stays 0.
+
+    Unposting a legacy posted payment is refused: its payment is already in
+    ``loan_payments_made_offset``, so the planned row would then cover a due
+    date that was already paid. Any other edit leaves the row unmarked.
+    """
+    if txn.is_posted:
+        if "is_posted" in requested and not requested["is_posted"]:
+            raise HTTPException(
+                status_code=400,
+                detail="A posted loan payment recorded before payment tracking cannot be "
+                       "unposted: it is already counted in the loan's payments made. "
+                       "Correct it by editing the posted payment instead",
+            )
+        return {}
+    if not requested.get("is_posted"):
+        return {}
+    principal = requested.get("amount")
+    if principal is None:
+        principal = txn.amount
+    interest = requested.get("transfer_fee")
+    if interest is None:
+        interest = txn.transfer_fee if txn.transfer_fee is not None else 0
+    return _loan_payment_stamp(
+        db, user, loan, source_id,
+        currency=requested.get("currency"),
+        principal=principal,
+        interest=interest,
+        posted=True)
 
 
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
@@ -461,6 +650,9 @@ def create_transaction(
         ).first()
         if not destination_account or not can_access_record(db, current_user, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
+        if destination_account.account_type == AccountType.LOAN:
+            _stamp_loan_payment(db, current_user, transaction, transaction_data,
+                                primary_account, destination_account)
         
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = destination_account.currency
@@ -489,9 +681,11 @@ def create_transaction(
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
         primary_account.balance = _D(primary_account.balance) - _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.TRANSFER and transaction.is_posted:
-        primary_account.balance = _D(primary_account.balance) - (_D(transaction.amount) + _D(transaction.transfer_fee))
+        # The stored split: a loan payment's may differ from the request's.
+        principal, fee = transaction_data["amount"], transaction_data["transfer_fee"]
+        primary_account.balance = _D(primary_account.balance) - (_D(principal) + _D(fee))
         if destination_account:
-            destination_account.balance = _D(destination_account.balance) + _D(transaction.amount)
+            destination_account.balance = _D(destination_account.balance) + _D(principal)
 
     if transaction.is_posted:
         delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)
@@ -545,6 +739,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             "account_id", db_transaction.account_id), "Account not found")
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
+    loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
@@ -607,6 +802,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     update_data.pop("recurrence_frequency", None)
 
     for field, value in update_data.items():
+        setattr(db_transaction, field, value)
+    for field, value in loan_stamp.items():
         setattr(db_transaction, field, value)
     
     db_transaction.updated_at = utc_now()

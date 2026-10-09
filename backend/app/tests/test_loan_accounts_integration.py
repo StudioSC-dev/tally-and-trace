@@ -337,13 +337,14 @@ def test_payment_kind_is_set_by_each_endpoint_and_persisted(client, people, db):
         row = db.query(Transaction).filter(Transaction.id == txn["id"]).one()
         assert row.loan_payment_kind == kind
 
-    # The generic transactions API cannot set it.
+    # The generic transactions API cannot choose it: a transfer into a loan made
+    # there is always a scheduled payment (extra principal has its own endpoint).
     r = client.post(f"{API}/transactions/", headers=me["headers"], json={
         "account_id": bank["id"], "transaction_type": "transfer", "amount": 10,
         "transfer_from_account_id": bank["id"], "transfer_to_account_id": loan["id"],
-        "transaction_date": "2026-10-05T00:00:00", "loan_payment_kind": "scheduled",
+        "transaction_date": "2026-10-05T00:00:00", "loan_payment_kind": "prepayment",
     })
-    assert r.status_code == 200 and r.json()["loan_payment_kind"] is None
+    assert r.status_code == 200 and r.json()["loan_payment_kind"] == "scheduled"
 
 
 # --- invariants: balances and the period summary ------------------------------
@@ -797,15 +798,23 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
         client, people, change, expected):
     me = people()
     bank = _bank(client, me, balance=10_000)
-    loan = _loan(client, me, balance=-1_000)
-    pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
-                   principal=400, interest=10, is_posted=False)
+    loan = _loan(client, me, balance=-1_000, loan_kind="home")  # reduce_term: prepayable
+    if change in ("funding_credit_card", "funding_spending_wallet"):
+        # A scheduled payment may be funded from a card or a wallet once it is
+        # an ordinary transfer (see the next test); a prepayment keeps the
+        # prepayment endpoint's funding rules.
+        pending = _prepay(client, me, loan["id"], from_account_id=bank["id"], amount=410,
+                          is_posted=False)
+    else:
+        pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
+                       principal=400, interest=10, is_posted=False)
     assert pending.status_code == 200, pending.text
     txn_id = pending.json()["id"]
 
     target, body = {
         "funding_currency": (bank, {"currency": "USD"}),
-        "funding_credit_card": (bank, {"account_type": "credit"}),
+        # Billed: a card left without a cycle cannot fund a pending loan payment.
+        "funding_credit_card": (bank, {"account_type": "credit", "billing_cycle_start": 15}),
         "funding_spending_wallet": (bank, {"is_spending_wallet": True}),
         "loan_not_a_loan": (loan, {"account_type": "savings", **{f: None for f in (
             "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
@@ -825,6 +834,24 @@ def test_posting_a_pending_payment_rechecks_the_accounts_as_they_are_now(
     assert r.status_code == 200, r.text
     assert r.json()["description"] == "still pending"
     assert r.json()["is_posted"] is False
+
+
+@pytest.mark.parametrize("body", [{"account_type": "credit", "billing_cycle_start": 15},
+                                  {"is_spending_wallet": True}])
+def test_a_pending_scheduled_payment_from_a_card_or_wallet_can_be_posted(client, people, body):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    loan = _loan(client, me, balance=-1_000)
+    pending = _pay(client, me, loan["id"], from_account_id=bank["id"],
+                   principal=400, interest=10, is_posted=False)
+    assert pending.status_code == 200, pending.text
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    r = _put(client, me, pending.json()["id"], is_posted=True)
+    assert r.status_code == 200, r.text
+    assert _balance(client, me, bank["id"]) == Decimal("9590.00")
+    assert _balance(client, me, loan["id"]) == Decimal("-600.00")
 
 
 def test_a_money_edit_on_a_posted_payment_rechecks_the_funding_account(client, people):
@@ -850,10 +877,35 @@ def test_a_money_edit_on_a_posted_payment_rechecks_the_funding_account(client, p
     assert _balance(client, me, loan["id"]) == Decimal("-1000.00")
 
 
-def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people):
+def test_a_loans_paying_account_must_be_in_the_loans_currency(client, people):
     me = people()
+    php = _bank(client, me, name="PHP bank", balance=10_000)
     usd = _bank(client, me, name="USD bank", currency="USD", balance=10_000)
+
+    r = _account(client, me, name="L", account_type="loan", loan_kind="auto", balance=-1,
+                 payment_account_id=usd["id"])
+    assert r.status_code == 400 and "currency" in r.text, r.text
+    loan = _loan(client, me, payment_account_id=php["id"])
+    for body in ({"payment_account_id": usd["id"]}, {"currency": "USD"}):
+        r = client.put(f"{API}/accounts/{loan['id']}", json=body, headers=me["headers"])
+        assert r.status_code == 400 and "currency" in r.text, (body, r.text)
+    r = client.put(f"{API}/accounts/{loan['id']}",
+                   json={"currency": "USD", "payment_account_id": usd["id"]},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_a_loan_cannot_be_paid_from_an_account_in_another_currency(client, people, db):
+    from app.models.account import Account
+    from app.models.user import CurrencyType
+
+    me = people()
+    usd = _bank(client, me, name="Bank", balance=10_000)
     loan = _loan(client, me, loan_kind="home", balance=-1_000, payment_account_id=usd["id"])
+    # In the loan's currency when it was routed, then moved to another one (as
+    # legacy data could be: the account update now refuses it).
+    db.query(Account).filter(Account.id == usd["id"]).update({"currency": CurrencyType.USD})
+    db.commit()
 
     r = _pay(client, me, loan["id"], principal=100, interest=10)
     assert r.status_code == 400 and "currency" in r.text, r.text
@@ -945,3 +997,125 @@ def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, pe
     # The owner, who can see the loan, gets its interest row.
     rows = _summary(client, owner)["category_breakdown"]
     assert Decimal(str(rows["Interest: Owner Private Loan"]["expenses"])) == Decimal("50")
+
+
+@pytest.mark.parametrize("body", [{"currency": "USD"}, {"account_type": "credit"},
+                                  {"is_spending_wallet": True}])
+def test_a_loans_paying_account_cannot_change_out_from_under_its_routing(client, people, body):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    other = _bank(client, me, name="Other bank", balance=10_000)
+    loan = _loan(client, me, payment_account_id=bank["id"])
+
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    r = client.get(f"{API}/accounts/{bank['id']}", headers=me["headers"])
+    assert (r.json()["currency"], r.json()["account_type"], r.json()["is_spending_wallet"]) == (
+        "PHP", "savings", False)
+    assert client.put(f"{API}/accounts/{bank['id']}", json={"name": "Renamed"},
+                      headers=me["headers"]).status_code == 200
+
+    # Once the loan is paid from another account, the change goes through.
+    r = client.put(f"{API}/accounts/{loan['id']}", json={"payment_account_id": other["id"]},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    r = client.put(f"{API}/accounts/{bank['id']}", json=body, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+
+def _pending_card_payment(client, who, card, loan, **extra):
+    r = client.post(f"{API}/transactions/", headers=who["headers"], json={
+        "account_id": card["id"], "transaction_type": "transfer", "amount": 400,
+        "transfer_fee": 10, "is_posted": False,
+        "transfer_from_account_id": card["id"], "transfer_to_account_id": loan["id"],
+        "transaction_date": "2026-10-04T00:00:00", **extra})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_card_funding_a_pending_loan_payment_keeps_its_billing_cycle(client, people):
+    me = people()
+    card = _bank(client, me, name="Card", account_type="credit", balance=0,
+                 billing_cycle_start=15)
+    loan = _loan(client, me, balance=-1_000)
+    pending = _pending_card_payment(client, me, card, loan)
+
+    def put_card(**body):
+        return client.put(f"{API}/accounts/{card['id']}", json=body, headers=me["headers"])
+
+    r = put_card(billing_cycle_start=None)
+    assert r.status_code == 400 and "loan payment" in r.text and "billing cycle" in r.text, r.text
+    assert client.get(f"{API}/accounts/{card['id']}",
+                      headers=me["headers"]).json()["billing_cycle_start"] == 15
+    assert put_card(name="Renamed card").status_code == 200
+    # A due day alone still resolves a cycle; dropping that too does not.
+    assert put_card(billing_cycle_start=None, due_date=20).status_code == 200
+    assert put_card(due_date=None).status_code == 400
+
+    # Once the payment is posted, the card's settings are its own again.
+    assert _put(client, me, pending["id"], is_posted=True).status_code == 200
+    r = put_card(due_date=None)
+    assert r.status_code == 200, r.text
+
+
+def test_a_card_funding_a_hidden_loan_keeps_its_billing_cycle_without_naming_the_loan(
+        client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    card = _bank(client, owner, name="Entity card", account_type="credit", balance=0,
+                 billing_cycle_start=15, entity_id=entity_id)
+    private_loan = _loan(client, owner, name="Owner Private Loan", balance=-1_000)
+    _pending_card_payment(client, owner, card, private_loan, entity_id=entity_id)
+
+    r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
+                   headers=member_h["headers"])
+    assert r.status_code == 400 and "billing cycle" in r.text, r.text
+    assert "loan" not in r.json()["detail"].lower()
+    r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
+                   headers=owner["headers"])
+    assert r.status_code == 400 and "loan payment" in r.text, r.text
+
+
+def test_a_loans_paying_account_cannot_be_deactivated(client, people):
+    me = people()
+    bank = _bank(client, me, balance=10_000)
+    other = _bank(client, me, name="Other bank", balance=10_000)
+    loan = _loan(client, me, payment_account_id=bank["id"])
+
+    r = client.delete(f"{API}/accounts/{bank['id']}", headers=me["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    r = client.put(f"{API}/accounts/{bank['id']}", json={"is_active": False},
+                   headers=me["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    assert client.get(f"{API}/accounts/{bank['id']}",
+                      headers=me["headers"]).json()["is_active"] is True
+
+    r = client.put(f"{API}/accounts/{loan['id']}", json={"payment_account_id": other["id"]},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    r = client.delete(f"{API}/accounts/{bank['id']}", headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_a_paying_account_change_refused_for_a_hidden_loan_does_not_name_the_loan(
+        client, people):
+    owner, member = people(), people()
+    entity_id = people.entity(owner, member)
+    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
+    bank = _bank(client, owner, name="Entity bank", entity_id=entity_id)
+    _loan(client, owner, name="Owner Private Loan", payment_account_id=bank["id"])
+
+    for method, body in (("put", {"currency": "USD"}), ("put", {"is_spending_wallet": True}),
+                         ("put", {"is_active": False}), ("delete", None)):
+        kw = {"json": body} if body is not None else {}
+        r = getattr(client, method)(f"{API}/accounts/{bank['id']}",
+                                    headers=member_h["headers"], **kw)
+        assert r.status_code == 400, (body, r.text)
+        assert "loan" not in r.json()["detail"].lower(), body
+    # The owner, who can see the loan, is told which routing to change.
+    r = client.delete(f"{API}/accounts/{bank['id']}", headers=owner["headers"])
+    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
+    r = client.get(f"{API}/accounts/{bank['id']}", headers=owner["headers"])
+    assert (r.json()["currency"], r.json()["is_spending_wallet"], r.json()["is_active"]) == (
+        "PHP", False, True)

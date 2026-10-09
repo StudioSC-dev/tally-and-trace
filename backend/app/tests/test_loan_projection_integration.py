@@ -4,7 +4,7 @@ A loan's (negative) balance is not money on hand, so it is excluded from
 available cash, the timeline opening and the per-account closings. A planned
 payment into a loan from a bank still takes principal + interest out of cash
 exactly once, and the timeline closing agrees with the month-end balance. Loan
-payables on due dates are a later ticket and are not modelled here. Generic
+payables on due dates are covered in test_loan_payables_integration.py. Generic
 fixtures on a throwaway user. Skips without a database.
 """
 import os

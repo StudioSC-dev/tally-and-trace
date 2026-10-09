@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Account } from '../store/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { LoanActions, LoanSummary } from '../components/LoanPanel'
 
 export const Route = createFileRoute('/accounts')({
   component: AccountsPage,
@@ -21,6 +22,53 @@ function NotCountedTag() {
   )
 }
 
+type LoanKind = NonNullable<Account['loan_kind']>
+type LoanAmortization = NonNullable<Account['loan_amortization']>
+
+/** Home loans shorten their term on extra principal; the others follow the bank's schedule. */
+const defaultAmortization = (kind: LoanKind): LoanAmortization => (kind === 'home' ? 'reduce_term' : 'fixed')
+
+/** Today as YYYY-MM-DD in local time, to compare with a date input's value. */
+const todayInput = (): string => {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+const blankForm = (currency: CurrencyCode) => ({
+  name: '',
+  account_type: 'checking' as Account['account_type'],
+  balance: 0,
+  description: '',
+  credit_limit: undefined as number | undefined,
+  due_date: undefined as number | undefined,
+  billing_cycle_start: undefined as number | undefined,
+  currency,
+  days_until_due_date: 21,
+  payment_account_id: undefined as number | undefined,
+  payment_overflow_account_id: undefined as number | undefined,
+  is_spending_wallet: false,
+  loan_kind: undefined as LoanKind | undefined,
+  loan_annual_rate: undefined as number | undefined,
+  loan_term_months: undefined as number | undefined,
+  loan_payment_amount: undefined as number | undefined,
+  loan_first_payment_date: undefined as string | undefined,
+  loan_amortization: undefined as LoanAmortization | undefined,
+  loan_payments_made_offset: undefined as number | undefined,
+  is_active: true,
+})
+
+const LOAN_FIELDS = [
+  'loan_kind',
+  'loan_annual_rate',
+  'loan_term_months',
+  'loan_payment_amount',
+  'loan_first_payment_date',
+  'loan_amortization',
+  'loan_payments_made_offset',
+] as const
+
 export function AccountsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
@@ -31,21 +79,9 @@ export function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAccount, setActionAccount] = useState<Account | null>(null)
-  const [formData, setFormData] = useState({
-    name: '',
-    account_type: 'checking' as Account['account_type'],
-    balance: 0,
-    description: '',
-    credit_limit: undefined as number | undefined,
-    due_date: undefined as number | undefined,
-    billing_cycle_start: undefined as number | undefined,
-    currency: defaultCurrency,
-    days_until_due_date: 21,
-    payment_account_id: undefined as number | undefined,
-    payment_overflow_account_id: undefined as number | undefined,
-    is_spending_wallet: false,
-    is_active: true,
-  })
+  const [formData, setFormData] = useState(() => blankForm(defaultCurrency))
+  // Once the amortization is picked by hand, changing the loan kind no longer resets it.
+  const [amortizationTouched, setAmortizationTouched] = useState(false)
   const [showCreditSettings, setShowCreditSettings] = useState(false)
 
   const [triggerAccounts] = useLazyGetAccountsQuery()
@@ -62,10 +98,16 @@ export function AccountsPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
 
-  // Only non-credit, non-wallet accounts can fund a statement, and a card can't pay
-  // itself. Mirrors the backend validation in routers/accounts.py::_validate_payment_routing.
+  // Only non-credit, non-loan, non-wallet accounts can fund a statement or a loan payment
+  // (a card or loan holds no cash), and an account can't pay itself. Mirrors the backend
+  // validation in routers/accounts.py::_validate_payment_routing.
   const fundingAccounts = accounts.filter(
-    (a) => a.account_type !== 'credit' && !a.is_spending_wallet && a.is_active && a.id !== editingAccount?.id,
+    (a) =>
+      a.account_type !== 'credit' &&
+      a.account_type !== 'loan' &&
+      !a.is_spending_wallet &&
+      a.is_active &&
+      a.id !== editingAccount?.id,
   )
 
   // Spell out the cycle the backend will derive, so "closes 24th, +21 days" doesn't
@@ -212,35 +254,37 @@ export function AccountsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
+      const isLoan = formData.account_type === 'loan'
+      // Loan terms are accepted on loans only: drop them from every other type.
+      const payload = { ...formData }
+      if (!isLoan) {
+        for (const field of LOAN_FIELDS) delete payload[field]
+      }
       if (editingAccount) {
         // A cleared selector is undefined, which JSON drops; send null so "None" saves.
         await updateAccount({
           id: editingAccount.id,
           data: {
-            ...formData,
+            ...payload,
             payment_account_id: formData.payment_account_id ?? null,
-            payment_overflow_account_id: formData.payment_overflow_account_id ?? null,
+            payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
+            ...(isLoan
+              ? {
+                  loan_annual_rate: formData.loan_annual_rate ?? null,
+                  loan_term_months: formData.loan_term_months ?? null,
+                  loan_payment_amount: formData.loan_payment_amount ?? null,
+                  loan_first_payment_date: formData.loan_first_payment_date || null,
+                  loan_payments_made_offset: formData.loan_payments_made_offset ?? null,
+                }
+              : {}),
           },
         }).unwrap()
         setEditingAccount(null)
       } else {
-        await createAccount(formData).unwrap()
+        await createAccount(payload).unwrap()
       }
-      setFormData({
-        name: '',
-        account_type: 'checking',
-        balance: 0,
-        description: '',
-        credit_limit: undefined,
-        due_date: undefined,
-        billing_cycle_start: undefined,
-        currency: defaultCurrency,
-        days_until_due_date: 21,
-        payment_account_id: undefined,
-        payment_overflow_account_id: undefined,
-        is_spending_wallet: false,
-        is_active: true,
-      })
+      setFormData(blankForm(defaultCurrency))
+      setAmortizationTouched(false)
       setIsCreateModalOpen(false)
       await loadAccounts(true)
     } catch (error) {
@@ -263,8 +307,16 @@ export function AccountsPage() {
       payment_account_id: account.payment_account_id ?? undefined,
       payment_overflow_account_id: account.payment_overflow_account_id ?? undefined,
       is_spending_wallet: account.is_spending_wallet,
+      loan_kind: account.loan_kind ?? undefined,
+      loan_annual_rate: account.loan_annual_rate ?? undefined,
+      loan_term_months: account.loan_term_months ?? undefined,
+      loan_payment_amount: account.loan_payment_amount ?? undefined,
+      loan_first_payment_date: account.loan_first_payment_date ?? undefined,
+      loan_amortization: account.loan_amortization ?? undefined,
+      loan_payments_made_offset: account.loan_payments_made_offset ?? undefined,
       is_active: account.is_active,
     })
+    setAmortizationTouched(true)
     setShowCreditSettings(false)
     setIsCreateModalOpen(true)
   }
@@ -381,6 +433,8 @@ export function AccountsPage() {
                       </span>
                     </div>
 
+                    {account.account_type === 'loan' && <LoanSummary account={account} />}
+
                     <div className="flex flex-wrap gap-2 text-xs text-body">
                       <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
                         Currency: {account.currency}
@@ -494,6 +548,23 @@ export function AccountsPage() {
               </div>
             </div>
 
+            {actionAccount.account_type === 'loan' && (
+              <div className="mt-6 space-y-4">
+                <LoanSummary account={actionAccount} />
+                <LoanActions
+                  key={actionAccount.id}
+                  account={actionAccount}
+                  fundingAccounts={accounts.filter(
+                    (a) => a.account_type !== 'credit' && a.account_type !== 'loan' && !a.is_spending_wallet && a.is_active,
+                  )}
+                  onRecorded={() => {
+                    closeActionModal()
+                    void loadAccounts(true)
+                  }}
+                />
+              </div>
+            )}
+
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
                 onClick={() => handleToggleActive(actionAccount)}
@@ -545,21 +616,8 @@ export function AccountsPage() {
                 onClick={() => {
                   setIsCreateModalOpen(false)
                   setEditingAccount(null)
-                  setFormData({
-                    name: '',
-                    account_type: 'checking',
-                    balance: 0,
-                    description: '',
-                    credit_limit: undefined,
-                    due_date: undefined,
-                    billing_cycle_start: undefined,
-                    currency: defaultCurrency,
-                    days_until_due_date: 21,
-                    payment_account_id: undefined,
-                    payment_overflow_account_id: undefined,
-                    is_spending_wallet: false,
-                    is_active: true,
-                  })
+                  setFormData(blankForm(defaultCurrency))
+                  setAmortizationTouched(false)
                   setShowCreditSettings(false)
                 }}
                 className="text-muted hover:text-body transition-colors duration-200 w-full sm:w-auto"
@@ -591,25 +649,40 @@ export function AccountsPage() {
                     const nextType = e.target.value as Account['account_type']
                     // New cash / e-wallet accounts start as spending wallets; a card never is one.
                     const isSpendingWallet =
-                      nextType === 'credit'
+                      nextType === 'credit' || nextType === 'loan'
                         ? false
                         : editingAccount
                         ? formData.is_spending_wallet
                         : nextType === 'cash' || nextType === 'e_wallet'
-                    setFormData({ ...formData, account_type: nextType, is_spending_wallet: isSpendingWallet })
+                    const loanKind = nextType === 'loan' ? formData.loan_kind ?? 'personal' : formData.loan_kind
+                    setFormData({
+                      ...formData,
+                      account_type: nextType,
+                      is_spending_wallet: isSpendingWallet,
+                      loan_kind: loanKind,
+                      loan_amortization:
+                        nextType === 'loan'
+                          ? formData.loan_amortization ?? defaultAmortization(loanKind ?? 'personal')
+                          : formData.loan_amortization,
+                    })
                     setShowCreditSettings(false)
                   }}
                   className="select-field focus-ring"
+                  disabled={editingAccount?.account_type === 'loan'}
                 >
                   <option value="checking">🏦 Checking</option>
                   <option value="savings">💰 Savings</option>
                   <option value="credit">💳 Credit Card</option>
                   <option value="cash">💵 Cash</option>
                   <option value="e_wallet">📱 E-Wallet</option>
+                  <option value="loan">🏠 Loan</option>
                 </select>
+                {editingAccount?.account_type === 'loan' && (
+                  <p className="mt-1 text-xs text-muted">A loan account keeps its type.</p>
+                )}
               </div>
               
-              {formData.account_type !== 'credit' && (
+              {formData.account_type !== 'credit' && formData.account_type !== 'loan' && (
                 <div>
                   <label className="inline-flex items-center gap-2 text-sm text-body cursor-pointer">
                     <input
@@ -631,7 +704,17 @@ export function AccountsPage() {
                 <label className="label">Account Currency</label>
                 <select
                   value={formData.currency}
-                  onChange={(e) => setFormData({ ...formData, currency: e.target.value as CurrencyCode })}
+                  onChange={(e) => {
+                    const currency = e.target.value as CurrencyCode
+                    const payer = accounts.find((a) => a.id === formData.payment_account_id)
+                    // A loan's paying account must be in the loan's currency.
+                    const clearPayer = formData.account_type === 'loan' && !!payer && payer.currency !== currency
+                    setFormData({
+                      ...formData,
+                      currency,
+                      payment_account_id: clearPayer ? undefined : formData.payment_account_id,
+                    })
+                  }}
                   className="select-field focus-ring"
                 >
                   {currencyOptions.map((currency) => (
@@ -658,6 +741,11 @@ export function AccountsPage() {
                     required
                   />
                 </div>
+                {formData.account_type === 'loan' && (
+                  <p className="mt-1 text-xs text-muted">
+                    A loan's balance is negative while money is owed (for example -90000).
+                  </p>
+                )}
               </div>
               
               <div>
@@ -809,6 +897,148 @@ export function AccountsPage() {
                 </div>
               )}
 
+              {formData.account_type === 'loan' && (
+                <fieldset className="space-y-4 p-4 border border-line">
+                  <legend className="px-1 text-sm font-medium text-ink">Loan terms</legend>
+
+                  <div>
+                    <label className="label">Kind</label>
+                    <select
+                      value={formData.loan_kind ?? 'personal'}
+                      onChange={(e) => {
+                        const kind = e.target.value as LoanKind
+                        setFormData({
+                          ...formData,
+                          loan_kind: kind,
+                          loan_amortization: amortizationTouched
+                            ? formData.loan_amortization
+                            : defaultAmortization(kind),
+                        })
+                      }}
+                      className="select-field focus-ring"
+                    >
+                      <option value="personal">Personal</option>
+                      <option value="auto">Auto</option>
+                      <option value="home">Home</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Annual rate (%)</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        min={0}
+                        max={100}
+                        value={formData.loan_annual_rate ?? ''}
+                        onChange={(e) => setFormData({ ...formData, loan_annual_rate: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+                        className="input-field focus-ring"
+                        placeholder="6.5"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Term (months)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={600}
+                        value={formData.loan_term_months ?? ''}
+                        onChange={(e) => setFormData({ ...formData, loan_term_months: parseInt(e.target.value) || undefined })}
+                        className="input-field focus-ring"
+                        placeholder="60"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="label">Payment amount</label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <span className="text-muted sm:text-sm">{formCurrencySymbol}</span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={formData.loan_payment_amount ?? ''}
+                        onChange={(e) => setFormData({ ...formData, loan_payment_amount: parseFloat(e.target.value) || undefined })}
+                        className="input-field pl-7 focus-ring"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="label">First payment date</label>
+                    <input
+                      type="date"
+                      value={formData.loan_first_payment_date ?? ''}
+                      onChange={(e) => setFormData({ ...formData, loan_first_payment_date: e.target.value || undefined })}
+                      className="input-field focus-ring"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Amortization</label>
+                    <select
+                      value={formData.loan_amortization ?? defaultAmortization(formData.loan_kind ?? 'personal')}
+                      onChange={(e) => {
+                        setAmortizationTouched(true)
+                        setFormData({ ...formData, loan_amortization: e.target.value as LoanAmortization })
+                      }}
+                      className="select-field focus-ring"
+                    >
+                      <option value="fixed">Fixed (the bank's schedule)</option>
+                      <option value="reduce_term">Reduce term (extra principal shortens the loan)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="label">Payments already made</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={formData.loan_payments_made_offset ?? ''}
+                      onChange={(e) => setFormData({ ...formData, loan_payments_made_offset: e.target.value === '' ? undefined : parseInt(e.target.value) })}
+                      className="input-field focus-ring"
+                      placeholder="0"
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      Scheduled payments made before this loan was tracked here. Payments recorded here are counted on top.
+                    </p>
+                    {formData.loan_payments_made_offset === undefined &&
+                      !!formData.loan_first_payment_date &&
+                      formData.loan_first_payment_date < todayInput() && (
+                        <p className="mt-1 text-xs text-warn">
+                          The first payment date is in the past: with no payments already made, every due date
+                          from then until today will show as overdue.
+                        </p>
+                      )}
+                  </div>
+
+                  <div>
+                    <label className="label">Paid From</label>
+                    <select
+                      value={formData.payment_account_id ?? ''}
+                      onChange={(e) => setFormData({ ...formData, payment_account_id: parseInt(e.target.value) || undefined })}
+                      className="select-field focus-ring"
+                    >
+                      <option value="">Not set</option>
+                      {fundingAccounts
+                        .filter((a) => a.currency === formData.currency)
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                    </select>
+                    <p className="mt-1 text-xs text-muted">
+                      The account each payment is expected to leave in the forecast, in the loan's currency.
+                      Without it (or a payment amount) the loan adds no payable.
+                    </p>
+                  </div>
+                </fieldset>
+              )}
+
               <div className="flex items-center justify-between border border-line bg-surface/50 px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-body">Account status</p>
@@ -845,21 +1075,8 @@ export function AccountsPage() {
                   onClick={() => {
                     setIsCreateModalOpen(false)
                     setEditingAccount(null)
-                    setFormData({
-                      name: '',
-                      account_type: 'checking',
-                      balance: 0,
-                      description: '',
-                      credit_limit: undefined,
-                      due_date: undefined,
-                      billing_cycle_start: undefined,
-                    currency: defaultCurrency,
-                    days_until_due_date: 21,
-                    payment_account_id: undefined,
-                    payment_overflow_account_id: undefined,
-                    is_spending_wallet: false,
-                    is_active: true,
-                    })
+                    setFormData(blankForm(defaultCurrency))
+                    setAmortizationTouched(false)
                   }}
                   className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"
                 >

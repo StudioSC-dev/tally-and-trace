@@ -13,15 +13,17 @@ from app.core.entity_context import (
 )
 from app.models.account import Account, AccountType
 from app.models.entity import Entity
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.transaction import TransactionResponse
 from app.services import loans as loan_svc
+from app.services.statements import resolve_cycle_fields
 from app.core.time import naive_utc_now, utc_now
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 router = APIRouter()
 
@@ -108,6 +110,101 @@ def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account
         )
 
 
+def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
+                                 account: Account) -> None:
+    """Keep a card that funds a pending payment into a loan billable.
+
+    A transfer into a loan from a credit card is cash only through the card's
+    statements, so a card without billing cycle settings may not fund one
+    (``_loan_payment_source`` in routers/transactions.py). An update that would
+    leave a card with no resolvable cycle (``resolve_cycle_fields``) while an
+    unposted transfer into a loan is funded from it is refused: that payment
+    would otherwise vanish from projected outflows. When the caller cannot
+    access one of those loans, the message does not mention the loan.
+    """
+    if not any(f in data for f in ("account_type", "billing_cycle_start", "due_date")):
+        return
+    if data.get("account_type", account.account_type) != AccountType.CREDIT:
+        return
+    resolved = SimpleNamespace(**{
+        f: data.get(f, getattr(account, f))
+        for f in ("billing_cycle_start", "due_date", "days_until_due_date")})
+    if resolve_cycle_fields(resolved) is not None:
+        return
+    loans = db.query(Account).join(
+        Transaction, Transaction.transfer_to_account_id == Account.id,
+    ).filter(
+        Account.account_type == AccountType.LOAN,
+        Transaction.transaction_type == TransactionType.TRANSFER,
+        Transaction.transfer_from_account_id == account.id,
+        Transaction.is_posted.is_(False),
+    ).all()
+    if not loans:
+        return
+    if any(not can_access_record(db, current_user, loan) for loan in loans):
+        detail = ("This card funds a pending payment that needs its billing cycle settings; "
+                  "keep a statement close or due day until that payment is posted or removed")
+    else:
+        detail = ("This card funds a pending loan payment, which needs its billing cycle "
+                  "settings; keep a statement close or due day until that payment is posted "
+                  "or removed")
+    raise HTTPException(status_code=400, detail=detail)
+
+
+def _validate_loan_payer(db: Session, current_user: User, data: dict, account: Account) -> None:
+    """Keep an account that pays an active loan eligible to pay it.
+
+    A loan's ``payment_account_id`` is checked when it is routed: a funding
+    account (``_funding_account``: not a credit card, a loan or a spending
+    wallet) in the loan's currency. An update to that account must not break
+    either rule afterwards, nor deactivate it (``is_active`` False, as the
+    soft delete does), or the loan would be projected from an account that can
+    no longer pay it; the loan has to be re-routed first. When the caller
+    cannot access one of those loans, the message does not mention the loan.
+    """
+    loans = db.query(Account).filter(
+        Account.account_type == AccountType.LOAN,
+        Account.is_active.is_(True),
+        Account.payment_account_id == account.id,
+    ).all()
+    if not loans:
+        return
+    account_type = data.get("account_type", account.account_type)
+    wallet = data.get("is_spending_wallet", account.is_spending_wallet)
+    ineligible = (("account_type" in data or "is_spending_wallet" in data)
+                  and (account_type in (AccountType.CREDIT, AccountType.LOAN) or wallet))
+    currency_mismatch = ("currency" in data
+                         and any(loan.currency != data["currency"] for loan in loans))
+    deactivated = data.get("is_active") is False and account.is_active
+    if not (ineligible or currency_mismatch or deactivated):
+        return
+    if any(not can_access_record(db, current_user, loan) for loan in loans):
+        raise HTTPException(
+            status_code=400,
+            detail="This account is the payment account of an account you cannot access, "
+                   "so it must stay an active funding account in the same currency; "
+                   "that account's payment account has to change first",
+        )
+    if deactivated:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan; re-route the loan's payment account "
+                   "before deactivating it",
+        )
+    if ineligible:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan, which needs a funding account (not a credit "
+                   "card, loan or spending wallet); re-route the loan's payment account first",
+        )
+    if currency_mismatch:
+        raise HTTPException(
+            status_code=400,
+            detail="This account pays a loan in another currency; "
+                   "re-route the loan's payment account first",
+        )
+
+
 LOAN_FIELDS = (
     "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
     "loan_first_payment_date", "loan_amortization", "loan_payments_made_offset",
@@ -122,7 +219,8 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
     Loan terms are rejected on any other account type. An account that routing
     draws on (a card's statement payment or overflow, a loan's payment account,
     a budget entry's account or overflow) cannot become a loan: a loan holds no
-    cash to fund them.
+    cash to fund them. A loan's paying account must be in the loan's currency,
+    as every payment from it is (``loan_svc.check_currency``).
     """
     from app.models.budget_entry import BudgetEntry
 
@@ -145,6 +243,14 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
         )
     if resolved("loan_amortization") is None:
         data["loan_amortization"] = loan_svc.default_amortization(kind)
+    payment_account_id = resolved("payment_account_id")
+    if payment_account_id is not None:
+        payer = db.query(Account).filter(Account.id == payment_account_id).first()
+        if payer is not None and payer.currency != resolved("currency"):
+            raise HTTPException(
+                status_code=400,
+                detail="A loan's payment account must be in the loan's currency",
+            )
 
     if account is None or account.account_type == AccountType.LOAN:
         return
@@ -238,6 +344,8 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     if "entity_id" in update_data:
         validate_entity_ownership(db, current_user, update_data["entity_id"])
     _validate_payment_routing(db, current_user, update_data, account_id=account_id)
+    _validate_loan_payer(db, current_user, update_data, db_account)
+    _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
     for field, value in update_data.items():
@@ -252,6 +360,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Soft delete an account (mark as inactive)"""
     db_account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    _validate_loan_payer(db, current_user, {"is_active": False}, db_account)
 
     db_account.is_active = False
     db_account.updated_at = utc_now()

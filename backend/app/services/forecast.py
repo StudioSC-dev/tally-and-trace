@@ -17,8 +17,9 @@ from typing import Iterator, List, Optional, Sequence
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.entity_context import scope_criterion
+from app.core.entity_context import can_access_record, scope_criterion
 from app.core.time import naive_utc_now
+from app.services.loans import COVER_HORIZON, build_loan_payables
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
 )
@@ -26,6 +27,7 @@ from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.models.transaction import RecurrenceFrequency
+from app.models.user import User
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +118,17 @@ def wallet_ids_of(db: Session, account_ids) -> frozenset:
     )
 
 
+def _loan_ids_of(db: Session, account_ids) -> frozenset:
+    """The loans among ``account_ids``, judged from the accounts themselves (any scope)."""
+    ids = {i for i in account_ids if i is not None}
+    if not ids:
+        return frozenset()
+    return frozenset(
+        a.id for a in db.query(Account.id).filter(
+            Account.id.in_(ids), Account.account_type == AccountType.LOAN)
+    )
+
+
 def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
     """Return all active accounts for the user (optionally scoped to entity)."""
     query = db.query(Account).filter(
@@ -153,6 +166,11 @@ def project_cashflow(
     ``statement_payables`` is cash paid to credit cards in the period: statement
     payables due (net of payments) plus planned card payments, including those
     payments' transfer fees.
+    Loan payables (``source`` "loan": a due date's payment not covered by a
+    planned payment, see services/loans.py) are in ``net`` and the closing
+    balances only, not in any of the columns above; a planned payment into a
+    loan stays in its source's column (``unposted_expenses`` for a transaction,
+    ``expenses`` for a recurring transfer entry).
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     """
@@ -247,8 +265,8 @@ def get_upcoming_items(
 ) -> List[dict]:
     """
     Return every dated event from ``collect_events`` within the next N days
-    (budget-entry occurrences, unposted transactions and credit-card statement
-    payables), sorted by date. ``amount`` is the unsigned amount as entered.
+    (budget-entry occurrences, unposted transactions, credit-card statement
+    payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
     events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id)
@@ -284,9 +302,16 @@ def get_payables(
 
     Same window and events as ``get_upcoming_items``, restricted to events that
     take cash out of the pool (bills, unposted debits, card statements, planned
-    card payments, and spending-wallet top-ups for their amount + fee: topping a
-    wallet up is the spending). Other transfers between your own accounts are not
-    payables; card charges reach cash via their statement payable instead.
+    card payments, loan payables on due dates, planned payments into a loan
+    from cash (scheduled payments and prepayments, for principal + interest),
+    and spending-wallet top-ups for their amount + fee: topping a wallet up is
+    the spending). Other transfers between your own accounts are not payables;
+    card charges reach cash via their statement payable instead.
+
+    A planned payment into a loan dated up to ``PLANNED_LOOKBACK`` (31 days)
+    after the window end can still cover a due date inside the window (see
+    services/loans.py), so that due date is not listed, while the payment
+    itself falls outside the window and is not listed either.
     """
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id, entity_id)
@@ -297,8 +322,8 @@ def get_payables(
     for e in sorted(events, key=_event_sort_key):
         if not e["counts_as_cash"] or e["amount"] >= 0:
             continue
-        if (e["type"] == TransactionType.TRANSFER.value
-                and not e.get("card_payment") and not e.get("top_up")):
+        if (e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment")
+                and not e.get("top_up") and not e.get("loan_payment")):
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -622,6 +647,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     billed_ids: Optional[set] = None,
                     wallet_ids: frozenset = frozenset(),
                     known_wallet_ids: frozenset = frozenset(),
+                    loan_ids: frozenset = frozenset(),
+                    known_loan_ids: frozenset = frozenset(),
+                    hidden_loan_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -641,7 +669,12 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     the amount to it; a transfer between two wallets moves no projection cash.
     ``known_wallet_ids`` are every wallet the caller has classified, in scope or
     not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
-    so a payable), even when the wallet itself has no leg here.
+    so a payable), even when the wallet itself has no leg here. Likewise a
+    cash-funded transfer into a loan (``loan_ids`` in scope, ``known_loan_ids``
+    any other the caller references) is marked ``loan_payment``. A transfer
+    into a loan the caller cannot access (``hidden_loan_ids``) is a neutral
+    "Loan payment": no description, ``source_id`` or ``transfer_fee`` (the
+    interest), only its amounts, date and in-scope legs.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -686,16 +719,21 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         extra = {**extra, "card_payment": True}
     if src_cash and dst in (known_wallet_ids | wallet_ids):
         extra = {**extra, "top_up": True}
+    if src_cash and dst in (known_loan_ids | loan_ids):
+        # Paying a loan from cash is spending (principal and interest), so a payable.
+        extra = {**extra, "loan_payment": True}
+    hidden = dst in hidden_loan_ids
+    if not hidden:
+        extra = {**extra, "transfer_fee": _money(fee)}
     return _event(
         date=date or _naive(txn.transaction_date),
-        name=txn.description or "Unposted transfer",
+        name="Loan payment" if hidden else txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
         source=source,
-        source_id=txn.id,
+        source_id=None if hidden else txn.id,
         face_amount=amount,
         legs=legs,
         counts_as_cash=False if via_unbilled else None,
-        transfer_fee=_money(fee),
         **extra,
     )
 
@@ -711,8 +749,11 @@ def collect_events(
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
-    Sources: active budget-entry occurrences, unposted transactions, and one dated
-    payable per credit-card statement cycle due in the window. Occurrences of a
+    Sources: active budget-entry occurrences, unposted transactions, one dated
+    payable per credit-card statement cycle due in the window, and one per loan due
+    date (``source`` "loan", on the loan's paying account; a planned non-prepayment
+    transfer into the loan covers the oldest open due date, a recurring transfer
+    occurrence into it its own due date, see services/loans.py). Occurrences of a
     budget entry scheduled on a credit card are charges on that card's statement,
     not cash events (see ``_card_entry_charges``). A card without cycle settings
     has no statements, so occurrences scheduled on it stay cash events and
@@ -735,6 +776,16 @@ def collect_events(
     inactive is still a wallet. A statement payable funded from a wallet has a
     non-cash funding leg: the wallet's money left projection cash when it was
     topped up, so paying the card from it must not take cash out a second time.
+    A loan payable's leg is on the loan's paying account and routed like a
+    transfer leg: cash only when that account is a scoped projection-cash
+    account, non-cash on a scoped wallet, and absent when the account is outside
+    the scope; a loan outside the scope paid from a scoped account is projected
+    too, so the payment leaves cash once, in the paying account's projection.
+    When the caller cannot access such a loan (``can_access_record``), its
+    payable is a neutral "Loan payment": amounts and dates only, with no loan
+    name, ``source_id`` or ``loan_due_date``. The same holds for a planned or
+    recurring transfer into a loan the caller cannot access (see
+    ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on both accounts. Like unposted
     transfers, recurring transfers into or out of a scoped account are collected
@@ -760,6 +811,8 @@ def collect_events(
         accounts = get_account_balances(db, user_id, entity_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
+    loans = [a for a in accounts if a.account_type == AccountType.LOAN]
+    loan_ids = frozenset(a.id for a in loans)
     # In-scope wallets: their legs are kept (never as cash).
     scoped_wallet_ids = frozenset(a.id for a in accounts if is_spending_wallet(a))
     # Cards whose statements are modelled; the rest keep their charges as cash.
@@ -812,7 +865,36 @@ def collect_events(
           for acc in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)),
         *(acc for a in accounts if a.id in billed_ids
           for acc in (a.payment_account_id, a.payment_overflow_account_id)),
+        *(a.payment_account_id for a in loans),
     ))
+
+    # Every loan any transfer references, in scope or not (loan payments are payables).
+    known_loan_ids = loan_ids | _loan_ids_of(db, (
+        *(e.transfer_to_account_id for e in entries),
+        *(t.transfer_to_account_id for t in txns
+          if t.transaction_type == TransactionType.TRANSFER),
+    ))
+
+    # Active loans outside the scope paid from an in-scope account: their
+    # payables are projected here too (see below).
+    outside_payable_loans = [
+        a for a in db.query(Account).filter(
+            Account.account_type == AccountType.LOAN,
+            Account.is_active.is_(True),
+            Account.payment_account_id.in_(scoped_ids),
+        ).all() if a.id not in loan_ids
+    ] if scoped_ids else []
+    # Loans outside the scope the caller cannot access: every event paying one
+    # (derived payable, planned or recurring transfer) is a neutral "Loan payment".
+    outside_loans = {a.id: a for a in outside_payable_loans}
+    missing = known_loan_ids - loan_ids - set(outside_loans)
+    if missing:
+        outside_loans.update(
+            (a.id, a) for a in db.query(Account).filter(Account.id.in_(missing)).all())
+    caller = db.get(User, user_id) if outside_loans else None
+    hidden_loan_ids = frozenset(
+        lid for lid, a in outside_loans.items()
+        if caller is None or not can_access_record(db, caller, a))
 
     # Transactions already materialised from a recurring transfer entry, by day:
     # each stands in for one occurrence on its calendar day (as in
@@ -850,7 +932,8 @@ def collect_events(
                     ),
                     cash_ids, card_ids, date=occ, billed_ids=billed_ids,
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
-                    source="budget_entry",
+                    loan_ids=loan_ids, known_loan_ids=known_loan_ids,
+                    hidden_loan_ids=hidden_loan_ids, source="budget_entry",
                     overflow_account_id=overflow_id,
                 ))
             continue
@@ -886,7 +969,9 @@ def collect_events(
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
                                           billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
-                                          known_wallet_ids=wallet_ids, **overdue))
+                                          known_wallet_ids=wallet_ids, loan_ids=loan_ids,
+                                          known_loan_ids=known_loan_ids,
+                                          hidden_loan_ids=hidden_loan_ids, **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
             amt = Decimal(str(txn.amount))       # inflow
@@ -929,6 +1014,63 @@ def collect_events(
             face_amount=-p["amount"],
             legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
                        cash=p["funding_account_id"] not in wallet_ids)],
+            **extra,
+        ))
+
+    # Each loan contributes a dated payable per due date, less what the planned
+    # payments into it cover (see services/loans.py). Recurring transfers into a
+    # loan are projected past the window end, as a payment late for a due date in
+    # the window still covers it; one already materialised is skipped, as above.
+    # They are found by the loan alone, so an entry stored under another entity
+    # (paid from its own bank) still covers this loan; such an entry moves no cash
+    # here, since its source account is outside this projection.
+    #
+    # The payable is paid from the loan's paying account, so it is routed like
+    # a transfer leg: it moves cash only in a projection that holds that account
+    # as projection cash. An in-scope loan paid from an account outside the
+    # scope keeps the event with no leg (listed, no cash), and an active loan
+    # outside the scope paid from an in-scope account is projected here too, so
+    # its cash leaves the paying account's projection exactly once. A loan the
+    # caller cannot access is shown as a neutral payment (no name, id or due
+    # date), so projecting it never discloses the loan.
+    payable_loans = loans + outside_payable_loans
+    payable_loan_ids = [a.id for a in payable_loans]
+    loan_entries = db.query(BudgetEntry).filter(
+        BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
+        BudgetEntry.is_active.is_(True),
+    ).all() if payable_loan_ids else []
+    linked_covers = Counter(
+        (entry_id, _naive(when).date())
+        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .filter(Transaction.budget_entry_id.in_([e.id for e in loan_entries]))
+    ) if loan_entries else Counter()
+    projected_covers: dict = {}
+    for entry in loan_entries:
+        for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
+            key = (entry.id, occ.date())
+            if linked_covers[key]:
+                linked_covers[key] -= 1
+                continue
+            projected_covers.setdefault(entry.transfer_to_account_id, []).append(
+                (occ.date(), _money(entry.amount)))
+    for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
+        hidden = p["source_id"] in hidden_loan_ids
+        extra = {k: v for k, v in p.items() if k not in {
+            "date", "name", "amount", "type", "source", "source_id",
+            "funding_account_id", "overflow_account_id",
+        } and not (hidden and k not in ("overdue", "original_date"))}
+        payer = p["funding_account_id"]
+        events.append(_event(
+            date=p["date"],
+            name="Loan payment" if hidden else p["name"],
+            type=p["type"],
+            source=p["source"],
+            source_id=None if hidden else p["source_id"],
+            face_amount=-p["amount"],
+            # Cash only on a scoped projection-cash account; a scoped wallet's leg
+            # is kept as non-cash, and an account outside the scope has no leg.
+            legs=([_leg(payer, p["amount"], None, cash=payer in cash_ids)]
+                  if payer in scoped_ids else []),
             **extra,
         ))
 

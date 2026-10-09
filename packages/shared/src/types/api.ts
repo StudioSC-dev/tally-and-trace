@@ -41,12 +41,90 @@ export interface Account {
   loan_first_payment_date?: string | null
   /** Loans: defaults to `reduce_term` for home loans, `fixed` otherwise. */
   loan_amortization?: LoanAmortization | null
-  /** Loans: scheduled payments made before the loan was tracked here. */
+  /**
+   * Loans: scheduled payments made before the loan was tracked here. Later due dates
+   * are settled by the posted `scheduled` payments' combined amount (principal +
+   * interest), oldest first; legacy transfers (`loan_payment_kind` null) never count.
+   * Lower it when a legacy transfer is moved out of the loan and back in (that stamps
+   * it, so it is counted again).
+   */
   loan_payments_made_offset?: number | null
   entity_id: number
   is_active: boolean
   created_at: string
   updated_at?: string
+}
+
+// ─── Loan payments and schedule ──────────────────────────────────────────────
+
+/** POST /accounts/{id}/loan-payment. Money values have at most 2 decimals. */
+export interface LoanPaymentRequest {
+  /** Defaults to the loan's `payment_account_id`. */
+  from_account_id?: number
+  /** Total payment; with one of principal/interest the other is the difference. */
+  amount?: number
+  principal?: number
+  interest?: number
+  /** ISO datetime; defaults to now. */
+  transaction_date?: string
+  /** Defaults to true. */
+  is_posted?: boolean
+  description?: string
+}
+
+/** POST /accounts/{id}/loan-prepayment (extra principal; `reduce_term` loans only). */
+export interface LoanPrepaymentRequest {
+  from_account_id?: number
+  amount: number
+  transaction_date?: string
+  is_posted?: boolean
+  description?: string
+}
+
+export interface LoanScheduleSplit {
+  principal: number
+  interest: number
+}
+
+export interface LoanSchedulePayment {
+  transaction_id: number
+  /** ISO datetime. */
+  date: string
+  kind: LoanPaymentKind | null
+  principal: number
+  interest: number
+}
+
+export interface LoanScheduleRow {
+  /** Payment number in the loan's term. */
+  number: number
+  /** ISO date. */
+  due_date: string
+  payment: number | null
+  /** Null on a `fixed` loan: the bank's split is not known in advance. */
+  principal: number | null
+  interest: number | null
+  balance_after: number | null
+}
+
+/** GET /accounts/{id}/loan-schedule. */
+export interface LoanSchedule {
+  account_id: number
+  name: string
+  loan_kind: LoanKind | null
+  amortization: LoanAmortization
+  /** What is still owed (= -balance, never below zero). */
+  owed: number
+  annual_rate: number | null
+  payment_amount: number | null
+  term_months: number | null
+  first_payment_date: string | null
+  payments_made: number
+  payments_left: number | null
+  next_due_date: string | null
+  proposed_split: LoanScheduleSplit | null
+  payments: LoanSchedulePayment[]
+  upcoming: LoanScheduleRow[]
 }
 
 // ─── Category ───────────────────────────────────────────────────────────────
@@ -181,7 +259,13 @@ export interface Transaction {
   transfer_fee: number
   transfer_from_account_id?: number
   transfer_to_account_id?: number
-  /** Set by the loan payment / prepayment endpoints; null on other transactions. */
+  /**
+   * Set on every transfer into a loan recorded through the API (the loan payment and
+   * prepayment endpoints, a generic create, a materialised recurring entry, an edit
+   * that retargets a row into a loan, posting a legacy planned row). Null on other
+   * transactions and on legacy transfers into a loan, which an otherwise unchanged
+   * edit leaves null; a posted legacy transfer into a loan cannot be unposted.
+   */
   loan_payment_kind?: LoanPaymentKind | null
   created_at: string
   updated_at?: string
@@ -369,8 +453,12 @@ export interface CashflowTimelineEvent {
   /**
    * Where the event came from. `statement` is a credit card's derived payable for
    * one billing cycle — its `source_id` is the CARD's account id, not a transaction.
+   * `loan` is a loan's payable for one due date — its `source_id` is the LOAN's
+   * account id, and the outflow sits on the loan's paying account. Any event paying
+   * a loan the caller cannot access (`loan`, `transaction` or `budget_entry`) has a
+   * null `source_id` and is a neutral "Loan payment".
    */
-  source: 'budget_entry' | 'transaction' | 'statement'
+  source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
   running_balance: number
 }

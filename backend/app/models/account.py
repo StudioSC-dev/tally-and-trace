@@ -84,10 +84,13 @@ class Account(Base):
     # fixed: the bank's schedule (payments left are counted); reduce_term: a
     # prepayment shortens the term.
     loan_amortization = Column(String(16), nullable=True)
-    # Scheduled payments made before the loan was tracked here. Every posted
-    # transaction with a loan_payment_kind of "scheduled" is counted on top, so
-    # back-filled history must either reduce this offset or be recorded without
-    # a loan_payment_kind; otherwise it is counted twice.
+    # Scheduled payments made before the loan was tracked here. The due dates
+    # after them are settled by the combined amount (principal + interest) of
+    # the posted transfers with a loan_payment_kind of "scheduled", oldest
+    # first. Legacy transfers (loan_payment_kind null) never count: their
+    # payments belong in this offset. Back-filled history recorded as scheduled
+    # payments, or a legacy transfer moved out of the loan and back in (which
+    # stamps it), is counted again, so this offset must be lowered for it.
     loan_payments_made_offset = Column(Integer, nullable=True)
 
     # Account status
