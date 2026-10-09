@@ -206,3 +206,43 @@ def test_a_failed_reseed_logs_an_error_and_changes_nothing(db, seed, monkeypatch
     errors = [r for r in caplog.records if r.name == "app.core.seed" and r.levelno == logging.ERROR]
     assert errors and "seed data is broken" in (errors[0].exc_text or str(errors[0].exc_info))
     assert _snapshot(db) == before
+
+
+def test_concurrent_startups_seed_once(db, seed, monkeypatch, caplog):
+    """Two workers starting together after a shape bump: one reseeds, the other waits
+    on the advisory lock and then finds the demo current."""
+    import threading
+    import time
+
+    from app.core.database import engine
+
+    monkeypatch.setattr(seed, "DEMO_SHAPE_VERSION", seed.DEMO_SHAPE_VERSION + 1)
+    caplog.set_level(logging.INFO, logger=seed.logger.name)
+    workers = [threading.Thread(target=seed.seed_database) for _ in range(2)]
+    with engine.connect() as holder:
+        # Hold the seed lock so both workers are queued on it before either runs.
+        holder.execute(text("SELECT pg_advisory_lock(:k)"), {"k": seed._LOCK_KEY})
+        for w in workers:
+            w.start()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            waiting = holder.execute(text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+                " AND objid = :k AND database = (SELECT oid FROM pg_database"
+                " WHERE datname = current_database())"), {"k": seed._LOCK_KEY}).scalar()
+            if waiting >= 2:
+                break
+            time.sleep(0.05)
+        assert waiting >= 2, "both workers should be waiting on the seed lock"
+        holder.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": seed._LOCK_KEY})
+        holder.commit()
+    for w in workers:
+        w.join(timeout=60)
+        assert not w.is_alive()
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("replaced the demo user's data" in m for m in messages) == 1, messages
+    assert sum("nothing to do" in m for m in messages) == 1, messages
+    after = _snapshot(db)
+    assert after["state"][0] == seed.DEMO_SHAPE_VERSION
+    assert {table: len(ids) for table, ids in after["owned"].items()} == _seed_counts()
