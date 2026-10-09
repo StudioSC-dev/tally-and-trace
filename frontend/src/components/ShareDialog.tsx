@@ -45,6 +45,8 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
 
   const [email, setEmail] = useState('')
   const [match, setMatch] = useState<UserMatch | null>(null)
+  // The exact email the match was found by: the share is created by it, not by id.
+  const [matchedEmail, setMatchedEmail] = useState('')
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [role, setRole] = useState<ShareRole>('viewer')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -64,7 +66,9 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
       return
     }
     try {
-      setMatch(await lookupUser(trimmed).unwrap())
+      const found = await lookupUser(trimmed).unwrap()
+      setMatch(found)
+      setMatchedEmail(trimmed)
     } catch (error) {
       setLookupError(lookupErrorMessage(error))
     }
@@ -74,13 +78,18 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
     if (!match) return
     setActionError(null)
     try {
-      await createShare({ accountId: account.id, data: { user_id: match.id, role } }).unwrap()
+      await createShare({ accountId: account.id, data: { email: matchedEmail, role } }).unwrap()
       setNotice(`Shared with ${match.display_name} as ${ROLE_LABELS[role].toLowerCase()}.`)
       setMatch(null)
+      setMatchedEmail('')
       setEmail('')
       setRole('viewer')
     } catch (error) {
-      setActionError(apiErrorMessage(error) || 'Could not share the account. Try again.')
+      setActionError(
+        apiErrorStatus(error) === 404 || apiErrorStatus(error) === 429
+          ? lookupErrorMessage(error)
+          : apiErrorMessage(error) || 'Could not share the account. Try again.',
+      )
     }
   }
 
