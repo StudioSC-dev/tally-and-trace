@@ -774,10 +774,11 @@ def collect_events(
     ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on its scoped accounts.
-    An occurrence already materialised is suppressed: a transaction with this
-    ``budget_entry_id`` dated the same calendar day stands in for it (each
-    transaction suppresses at most one occurrence), so a ``materialize`` with
-    ``advance=False`` does not move the money twice.
+    An occurrence already materialised is suppressed: a transaction of the
+    entry's creator with this ``budget_entry_id`` dated the same calendar day
+    stands in for it (each transaction suppresses at most one occurrence; see
+    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``
+    does not move the money twice.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
