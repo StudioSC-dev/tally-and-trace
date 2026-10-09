@@ -376,3 +376,84 @@ def test_revoked_creator_reads_their_record_limited(sw, sw_client, sw_db):
     assert body["view"] == "limited"
     assert body["account"] == {"id": None, "name": "Other account"}
     assert body["permissions"]["can_delete"] is True
+
+
+# --- List filters (audit round 1, C) -----------------------------------------------------
+
+NOWHERE = 2_000_000_000  # an account id that doesn't exist
+YEAR = {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T00:00:00"}
+
+
+def _list(client, who, path, **params):
+    r = client.get(f"{API}{path}", headers=who["headers"], params=params)
+    return r.status_code, r.json()
+
+
+@pytest.mark.parametrize("who", ["b", "v", "d"])
+def test_a_hidden_account_filter_answers_as_a_nonexistent_one(sw, sw_client, house, who):
+    caller = sw[who]
+    nowhere = _list(sw_client, caller, "/transactions/", account_ids=[NOWHERE], limit=100)
+    assert nowhere == (200, {"items": [], "total": 0, "has_more": False})
+    # The owner's private bank (source of the deposit), loan (destination of the
+    # loan payment) and card: each answers exactly as the nonexistent id.
+    for hidden in (sw["a_private"], sw["a_loan"], sw["a_card"]):
+        assert _list(sw_client, caller, "/transactions/", account_ids=[hidden],
+                     limit=100) == nowhere, hidden
+        assert _list(sw_client, caller, "/transactions/", account_ids=[sw["joint"], hidden],
+                     limit=100) == _list(sw_client, caller, "/transactions/",
+                                         account_ids=[sw["joint"], NOWHERE], limit=100)
+        assert _list(sw_client, caller, "/transactions/summary/period", account_id=hidden,
+                     **YEAR) == _list(sw_client, caller, "/transactions/summary/period",
+                                      account_id=NOWHERE, **YEAR), hidden
+
+
+def test_a_revoked_account_filter_answers_as_a_nonexistent_one(sw, sw_client, sw_db):
+    from app.models.account_share import AccountShare
+
+    b, joint = sw["b"], sw["joint"]
+    sw_post(sw_client, b, "/transactions/", {
+        "account_id": joint, "amount": 20, "transaction_type": "debit",
+        "description": "Bea lunch", "transaction_date": DAY})
+    sw_post(sw_client, b, "/transactions/", {
+        "account_id": sw["b_private"], "transfer_from_account_id": sw["b_private"],
+        "transfer_to_account_id": joint, "amount": 50, "transaction_type": "transfer",
+        "description": "Bea top-up", "transaction_date": DAY})
+    sw_db.delete(sw_db.get(AccountShare, sw["shares"]["b"]))
+    sw_db.commit()
+    for path, params in (("/transactions/", {"account_ids": [joint], "limit": 100}),
+                         ("/transactions/summary/period", {"account_id": joint, **YEAR})):
+        other = dict(params)
+        other["account_ids" if "account_ids" in params else "account_id"] = (
+            [NOWHERE] if "account_ids" in params else NOWHERE)
+        assert _list(sw_client, b, path, **params) == _list(sw_client, b, path, **other), path
+
+
+def test_reconciled_and_active_filters_say_nothing_about_limited_records(
+        sw, sw_client, sw_db, house):
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    # The owner reconciles the joint debit (shown limited to the viewer) and
+    # deactivates the entry overflowing to their private account (limited to all).
+    sw_db.get(Transaction, house["joint_txn"]).is_reconciled = True
+    sw_db.get(BudgetEntry, house["overflow_entry"]).is_active = False
+    sw_db.commit()
+    v = sw["v"]
+    seen = set()
+    for flag in (True, False):
+        body = _get(sw_client, v, "/transactions/", is_reconciled=flag, limit=100)
+        assert {t["view"] for t in body["items"]} <= {"full", "shared_full"}
+        seen |= {t["id"] for t in body["items"]}
+    assert house["joint_txn"] not in seen
+    for who in ("b", "v", "d"):
+        listed = set()
+        for flag in (True, False):
+            body = _get(sw_client, sw[who], "/budget-entries/", is_active=flag, limit=100)
+            assert {e["view"] for e in body["items"]} <= {"full", "shared_full"}
+            listed |= {e["id"] for e in body["items"]}
+        assert house["overflow_entry"] not in listed
+    # The owner, who sees both in full, still filters on them.
+    assert house["joint_txn"] in {t["id"] for t in _get(
+        sw_client, sw["a"], "/transactions/", is_reconciled=True, limit=100)["items"]}
+    assert house["overflow_entry"] in {e["id"] for e in _get(
+        sw_client, sw["a"], "/budget-entries/", is_active=False, limit=100)["items"]}

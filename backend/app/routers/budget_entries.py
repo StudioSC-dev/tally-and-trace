@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.access import (
     RecordAccess,
     can_edit_account,
+    editable_account_ids,
     get_record_or_404,
     readable_criterion,
     require_account,
@@ -27,7 +28,9 @@ from app.models.category import Category
 from app.models.allocation import Allocation
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
-from app.core.redaction import serialize_entries, serialize_entry, serialize_transaction
+from app.core.redaction import (
+    full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
+)
 from app.schemas.budget_entry import (
     BudgetEntryCreate,
     BudgetEntryUpdate,
@@ -268,14 +271,17 @@ def list_budget_entries(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, current_user, viewable_account_ids(db, current_user))
-    )
+    viewable = viewable_account_ids(db, current_user)
+    query = db.query(BudgetEntry).filter(readable_criterion(BudgetEntry, current_user, viewable))
 
     if entry_type:
         query = query.filter(BudgetEntry.entry_type == entry_type)
     if is_active is not None:
-        query = query.filter(BudgetEntry.is_active == is_active)
+        # Not in the limited model: filter only the entries the caller sees in full.
+        query = query.filter(
+            BudgetEntry.is_active == is_active,
+            full_view_criterion(BudgetEntry, current_user, viewable,
+                                editable_account_ids(db, current_user)))
     if before is not None:
         query = query.filter(BudgetEntry.next_occurrence <= before)
     if after is not None:

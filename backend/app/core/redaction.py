@@ -309,6 +309,36 @@ def displayed_description_criterion(viewable_ids: Iterable[int]):
     )
 
 
+def full_view_criterion(model, user, viewable_ids: Iterable[int], editable_ids: Iterable[int]):
+    """Criterion: a transaction or recurring entry the caller sees ``full`` or ``shared_full``.
+
+    The SQL form of ``Redactor.view``: every account the record touches is
+    viewable, and the caller created it or holds an edit role on every one of
+    them (a record touching no account: its creator only). A filter on a field
+    the limited models leave out (``is_reconciled``, ``is_active``) is applied
+    only together with this, so it says nothing about records shown limited.
+    """
+    from sqlalchemy import and_, or_
+
+    from app.core.access import TOUCHED_COLUMNS, TRANSFER_ONLY_COLUMNS
+
+    def counted(column):
+        criterion = getattr(model, column).isnot(None)
+        if column in TRANSFER_ONLY_COLUMNS[model]:
+            criterion = and_(model.transaction_type == TransactionType.TRANSFER, criterion)
+        return criterion
+
+    def all_in(ids):
+        ids = list(ids)
+        return and_(*(or_(~counted(c), getattr(model, c).in_(ids))
+                      for c in TOUCHED_COLUMNS[model]))
+
+    touches_any = or_(*(counted(c) for c in TOUCHED_COLUMNS[model]))
+    uid = getattr(user, "id", user)
+    return or_(and_(model.user_id == uid, all_in(viewable_ids)),
+               and_(touches_any, all_in(editable_ids)))
+
+
 def serialize_transactions(db: Session, user, txns: List[Transaction]) -> List[dict]:
     """Transactions as ``user`` may see them, tags included."""
     from app.core.tags import attach_visible_tags

@@ -7,6 +7,7 @@ from app.core.access import (
     RecordAccess,
     can_edit_account,
     can_view_account,
+    editable_account_ids,
     get_record_or_404,
     readable_criterion,
     require_account,
@@ -20,7 +21,10 @@ from app.core.tags import (
 )
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
-from app.core.redaction import displayed_description_criterion, serialize_transaction, serialize_transactions
+from app.core.redaction import (
+    displayed_description_criterion, full_view_criterion, serialize_transaction,
+    serialize_transactions,
+)
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
@@ -555,7 +559,11 @@ def get_transactions(
     query = db.query(Transaction).filter(readable_criterion(Transaction, current_user, viewable))
 
     if account_ids:
-        query = query.filter(touches_accounts(Transaction, account_ids))
+        # Only accounts the caller can view: any other id (hidden or nonexistent)
+        # matches nothing, so a guessed id never reveals the account behind a
+        # neutral reference.
+        query = query.filter(touches_accounts(
+            Transaction, [i for i in account_ids if i in viewable]))
     # Categories and allocations are never shared: they filter the caller's own rows.
     if category_ids:
         query = query.filter(Transaction.category_id.in_(category_ids),
@@ -574,7 +582,11 @@ def get_transactions(
     if end_date:
         query = query.filter(Transaction.transaction_date <= end_date)
     if is_reconciled is not None:
-        query = query.filter(Transaction.is_reconciled == is_reconciled)
+        # Not in the limited model: filter only the rows the caller sees in full.
+        query = query.filter(
+            Transaction.is_reconciled == is_reconciled,
+            full_view_criterion(Transaction, current_user, viewable,
+                                editable_account_ids(db, current_user)))
     if search:
         # Displayed text only: a row whose description the caller is shown as a
         # neutral label never matches its stored description.
@@ -1180,7 +1192,9 @@ def get_transaction_summary(
     query = query.filter(touches_accounts(Transaction, scope_ids))
     
     if account_id:
-        query = query.filter(Transaction.account_id == account_id)
+        # An account the caller can't view matches nothing, as a nonexistent one.
+        query = query.filter(Transaction.account_id == account_id,
+                             Transaction.account_id.in_(scope_ids))
     # Only rows carrying the tag effectively; each row counts once.
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
