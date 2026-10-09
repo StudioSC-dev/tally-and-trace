@@ -555,16 +555,19 @@ def test_an_edit_cannot_move_a_transaction_onto_an_inaccessible_account(client, 
 def test_a_record_another_user_left_on_your_account_is_yours_to_delete(client, people, db):
     """A legacy row created by someone else on the caller's account (the API no
     longer lets one be made): its creator may read it but not change it, since
-    they hold no role on the account; the account's owner may delete it."""
+    they hold no role on the account; the account's owner may delete it. So may
+    its creator while it is unposted (STU-232: a creator may always delete their
+    own unposted record)."""
     from datetime import datetime
     from app.models.transaction import Transaction, TransactionType
 
     owner, creator = people(), people()
     bank = _bank(client, owner, balance=1_000)
-    row = Transaction(user_id=creator["id"], account_id=bank["id"], amount=Decimal("100"),
-                      transaction_type=TransactionType.DEBIT,
-                      transaction_date=datetime(2026, 10, 5), is_posted=False)
-    db.add(row)
+    row, other = (Transaction(user_id=creator["id"], account_id=bank["id"],
+                              amount=Decimal("100"), transaction_type=TransactionType.DEBIT,
+                              transaction_date=datetime(2026, 10, 5), is_posted=False)
+                  for _ in range(2))
+    db.add_all([row, other])
     db.commit()
 
     for who in (owner, creator):
@@ -572,9 +575,9 @@ def test_a_record_another_user_left_on_your_account_is_yours_to_delete(client, p
                           headers=who["headers"]).status_code == 200
     assert client.put(f"{API}/transactions/{row.id}", json={"amount": 150},
                       headers=creator["headers"]).status_code == 404
-    assert client.delete(f"{API}/transactions/{row.id}",
-                         headers=creator["headers"]).status_code == 404
     r = client.delete(f"{API}/transactions/{row.id}", headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    r = client.delete(f"{API}/transactions/{other.id}", headers=creator["headers"])
     assert r.status_code == 200, r.text
 
 

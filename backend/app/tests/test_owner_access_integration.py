@@ -334,7 +334,9 @@ def test_entity_headers_and_params_are_ignored(client, world):
 # shared entity). Such a row, created by B on A's account, stays reachable by
 # both: B created it, A owns every account it touches. Neither may edit it
 # through PUT (B can't change A's account; A's edit would leave the row on an
-# account its creator can't change), only A may delete it, a receipt is the
+# account its creator can't change), both may delete it while it is unposted
+# (STU-232: a creator may always delete their own unposted record, and so may
+# an owner of an account it touches), a receipt is the
 # creator's own field and needs the write rule too (so neither may set it), and
 # A can't materialise B's recurring entry (it is not A's to post from).
 #
@@ -347,18 +349,18 @@ LEGACY_MATRIX = [
     ("transaction", "get", "a", 200), ("transaction", "get", "b", 200),
     ("transaction", "list", "a", 200), ("transaction", "list", "b", 200),
     ("transaction", "put", "a", 404), ("transaction", "put", "b", 404),
-    ("transaction", "delete", "a", 200), ("transaction", "delete", "b", 404),
+    ("transaction", "delete", "a", 200), ("transaction", "delete", "b", 200),
     ("transaction", "upload-receipt", "a", 404), ("transaction", "upload-receipt", "b", 404),
     ("entry", "get", "a", 200), ("entry", "get", "b", 200),
     ("entry", "list", "a", 200), ("entry", "list", "b", 200),
     ("entry", "put", "a", 404), ("entry", "put", "b", 404),
-    ("entry", "delete", "a", 204), ("entry", "delete", "b", 404),
+    ("entry", "delete", "a", 204), ("entry", "delete", "b", 204),
     ("entry", "materialize", "a", 404), ("entry", "materialize", "b", 404),
     ("transaction", "clear-account", "a", 404), ("transaction", "clear-account", "b", 404),
     ("entry", "clear-account", "a", 404), ("entry", "clear-account", "b", 404),
     ("overflow_entry", "get", "a", 200), ("overflow_entry", "get", "b", 200),
     ("overflow_entry", "put", "a", 404), ("overflow_entry", "put", "b", 404),
-    ("overflow_entry", "delete", "a", 204), ("overflow_entry", "delete", "b", 404),
+    ("overflow_entry", "delete", "a", 204), ("overflow_entry", "delete", "b", 204),
 ]
 
 

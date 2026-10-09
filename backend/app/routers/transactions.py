@@ -4,6 +4,7 @@ from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
+    RecordAccess,
     can_edit_account,
     can_view_account,
     get_record_or_404,
@@ -598,25 +599,33 @@ def create_transaction(
     return attach_visible_tags(db, current_user, db_transaction)
 
 
-def add_transaction(db: Session, current_user: User, transaction: TransactionCreate) -> Transaction:
+def add_transaction(db: Session, current_user: User, transaction: TransactionCreate,
+                    owner: Optional[User] = None) -> Transaction:
     """Validate and add a new transaction with its balance and budget effects, uncommitted.
 
     The caller commits, so a caller that writes more in the same change (a
     materialised recurring entry) commits it all at once.
+
+    ``owner`` (default the caller) owns the new row: a materialised recurring
+    entry's transaction belongs to the entry's creator, whoever triggers it.
+    ``created_by_actor`` records the caller. Every account it touches must be
+    one both the caller and the owner may change, and every other reference
+    (category, allocation, recurring entry) must be the owner's.
     """
+    owner = owner or current_user
     transaction_data = transaction.dict()
-    # The caller's own tags only (404 otherwise); linked once the row exists.
-    tag_ids = own_tag_ids(db, current_user, transaction_data.pop("tag_ids", None) or [])
-    transaction_data["user_id"] = current_user.id
+    # The owner's own tags only (404 otherwise); linked once the row exists.
+    tag_ids = own_tag_ids(db, owner, transaction_data.pop("tag_ids", None) or [])
+    transaction_data["user_id"] = owner.id
+    transaction_data["created_by_actor"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
 
-    # Same-owner rule: every non-account reference is the caller's own.
+    # Same-owner rule: every non-account reference is the row owner's own.
     budget_entry = require_owned_ref(
-        db, BudgetEntry, transaction.budget_entry_id, "Budget entry not found", current_user)
-    require_owned_ref(db, Category, transaction.category_id, "Category not found", current_user)
-    require_owned_ref(db, Allocation, transaction.allocation_id, "Allocation not found",
-                      current_user)
+        db, BudgetEntry, transaction.budget_entry_id, "Budget entry not found", owner)
+    require_owned_ref(db, Category, transaction.category_id, "Category not found", owner)
+    require_owned_ref(db, Allocation, transaction.allocation_id, "Allocation not found", owner)
     
     if budget_entry:
         transaction_data["is_recurring"] = True
@@ -639,13 +648,13 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account = db.query(Account).filter(
             Account.id == transaction.transfer_from_account_id
         ).first()
-        if not _usable(current_user, None, primary_account):
+        if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Source account not found")
         
         destination_account = db.query(Account).filter(
             Account.id == transaction.transfer_to_account_id
         ).first()
-        if not _usable(current_user, None, destination_account):
+        if not _usable(current_user, owner, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
@@ -665,7 +674,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
-        if not _usable(current_user, None, primary_account):
+        if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = primary_account.currency
@@ -693,7 +702,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         if delta:
             budget_allocations = _get_budget_allocations_for_transaction(
                 db,
-                user_id=current_user.id,
+                user_id=owner.id,
                 allocation_id=transaction.allocation_id,
                 category_id=transaction.category_id,
             )
@@ -701,7 +710,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
 
     db.flush()
     if tag_ids:
-        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
+        replace_own_tags(db, Transaction, db_transaction.id, owner, tag_ids)
     return db_transaction
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
@@ -712,13 +721,35 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Update an existing transaction and recalculate account balance"""
-    db_transaction = get_record_or_404(
-        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+    """Update an existing transaction and recalculate account balance.
+
+    The write rule: the caller and the row's creator both keep an edit role on
+    every account the row touches, before and after. Posting or reverting
+    alone (a request with only ``is_posted``) is also open to the owner of
+    every account the row touches when its creator has lost access (the
+    account owner exemption). Receipts and invoices are the creator's.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
     owner = db_transaction.user
 
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
+    permissions = RecordAccess(db, current_user).permissions(db_transaction)
+    status_only = set(requested) == {"is_posted"}
+    if not permissions["can_edit"]:
+        resolving = status_only and (
+            permissions["can_post"] if requested["is_posted"] else permissions["can_revert"])
+        if not resolving:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        # Owner exemption: the creator's own access is not required.
+        owner = None
+    if db_transaction.user_id != current_user.id:
+        for field in ("receipt_url", "invoice_url"):
+            if field in requested and requested[field] != getattr(db_transaction, field):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only the transaction's creator can change its attachments")
     # Tags: the caller's own only, on a row they may edit (checked above).
     tag_ids = requested.pop("tag_ids", None)
     if tag_ids is not None:
@@ -746,7 +777,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                                  (Allocation, "allocation_id", "Allocation not found"),
                                  (BudgetEntry, "budget_entry_id", "Budget entry not found")):
         if field in requested and requested[field] != getattr(db_transaction, field):
-            require_owned_ref(db, model, requested[field], detail, current_user, owner)
+            require_owned_ref(db, model, requested[field], detail, current_user,
+                              db_transaction.user)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -895,11 +927,16 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Delete a transaction and update account balance"""
-    # Refused unless the caller may change every account the row touches
-    # (reported as not found).
-    db_transaction = get_record_or_404(
-        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+    """Delete a transaction and update account balance.
+
+    Under the write rule or the account owner exemption; an unposted row also
+    by its creator and by an owner of any account it touches (it moves no
+    balance). Anything else is reported as not found.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    if not RecordAccess(db, current_user).permissions(db_transaction)["can_delete"]:
+        raise HTTPException(status_code=404, detail="Transaction not found")
     
     # Update account balances if posted
     if db_transaction.is_posted:

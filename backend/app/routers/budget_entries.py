@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.access import (
+    RecordAccess,
     can_edit_account,
     get_record_or_404,
     readable_criterion,
@@ -354,8 +355,9 @@ def update_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = get_record_or_404(
-        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
     owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
     # Tags: the caller's own only, on an entry they may edit (checked above).
@@ -427,8 +429,27 @@ def delete_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = get_record_or_404(
-        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
+    """Delete a recurring entry.
+
+    Under the write rule, the account owner exemption, by its creator, or by
+    an owner of any account it touches (an entry moves no balance). Deleting
+    it clears ``budget_entry_id`` on the transactions linked to it, so it is
+    refused (409) while any of them belongs to someone else and is not one
+    the caller may edit: a delete never changes another user's transaction
+    the caller could not change directly. Deactivating the entry is the way
+    to stop it then.
+    """
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    access = RecordAccess(db, current_user)
+    if not access.permissions(entry)["can_delete"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    linked = db.query(Transaction).filter(Transaction.budget_entry_id == entry.id,
+                                          Transaction.user_id != current_user.id).all()
+    if any(not access.permissions(txn)["can_edit"] for txn in linked):
+        raise HTTPException(
+            status_code=409,
+            detail="This recurring entry has transactions you can't edit linked to it; "
+                   "deactivate it instead")
     db.delete(entry)
     db.commit()
 
@@ -485,6 +506,11 @@ def materialize_budget_entry(
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
 
+    The transaction belongs to the entry's creator (``created_by_actor`` is the
+    caller), so its category, allocation and tags stay one owner's. The caller
+    needs the write rule on the entry: an edit role on every account it
+    touches, which its creator must still hold too.
+
     The entry's explicit tags are copied onto the new transaction in the same
     commit (never the tags it gets from its accounts); later changes to the
     entry's tags leave the transaction as it is.
@@ -492,8 +518,9 @@ def materialize_budget_entry(
     from app.routers.transactions import add_transaction
     from app.schemas.transaction import TransactionCreate
 
-    entry = get_record_or_404(
-        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
 
@@ -530,7 +557,8 @@ def materialize_budget_entry(
         is_posted=True,
         **transfer_fields,
     )
-    db_txn = add_transaction(db, current_user, txn_create)
+    # The entry's creator owns the transaction; the caller is its actor.
+    db_txn = add_transaction(db, current_user, txn_create, owner=entry.user)
     # The entry's explicit tags, in the same commit as the transaction.
     copy_explicit_tags(db, entry.id, db_txn.id)
     db.commit()

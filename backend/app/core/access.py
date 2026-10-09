@@ -19,8 +19,17 @@ Records that touch accounts (transactions and recurring entries) follow from it:
 - **Write:** the caller holds an edit role (``owner``, ``admin`` or ``editor``)
   on every account the record touches, before and after the change, and the
   record's creator still holds one on every account it touches afterwards.
+- **Account owner exemption:** the owner of every account a record touches may
+  post, revert or delete it even when its creator has lost access, so a
+  stranded record can always be resolved.
+- **Unposted records:** the creator may always delete their own unposted record
+  (and their own recurring entry), whatever their role now; so may an owner of
+  any account it touches. Neither moves a balance.
 - A record that touches no account (a recurring entry with no account) is the
   creator's alone, for reading and writing.
+
+``RecordAccess.permissions`` turns these into the flags every record response
+carries; the write routes check the same flags.
 
 Categories, allocations and wishlist items are never shared: only their owner
 reaches them. Every account a record references must be one its owner and
@@ -241,6 +250,95 @@ def can_write_record(db: Session, user, record) -> bool:
     if len(accounts) != len(ids):
         return False
     return all(account_role(user, a) in EDIT_ROLES for a in accounts.values())
+
+
+class RecordAccess:
+    """Per-request access for one caller over many records, without a query per record.
+
+    Accounts are loaded once (with their shares) and roles are computed by the
+    same rules as ``account_role``, for the caller and for each record's
+    creator. ``permissions`` gives the flags every record response carries.
+    """
+
+    def __init__(self, db: Session, user):
+        self.db = db
+        self.uid = _uid(user)
+        self._accounts: Dict[int, Optional[Account]] = {}
+
+    def load(self, ids: Iterable[int]) -> None:
+        missing = [i for i in set(ids) if i is not None and i not in self._accounts]
+        if missing:
+            for account in self.db.query(Account).filter(Account.id.in_(missing)).all():
+                self._accounts[account.id] = account
+            for i in missing:
+                self._accounts.setdefault(i, None)
+
+    def account(self, account_id: Optional[int]) -> Optional[Account]:
+        if account_id is None:
+            return None
+        self.load([account_id])
+        return self._accounts[account_id]
+
+    def role(self, account_id: Optional[int], user=None) -> str:
+        """``user``'s role (default the caller) on the account."""
+        return account_role(self.uid if user is None else user, self.account(account_id))
+
+    def facts(self, record) -> dict:
+        """The access facts every rule about ``record`` is built from."""
+        ids = record_account_ids(record)
+        self.load(ids)
+        is_creator = record.user_id == self.uid
+        mine = [self.role(i) for i in ids]
+        theirs = [self.role(i, record.user_id) for i in ids]
+        return {
+            "ids": ids,
+            "is_creator": is_creator,
+            # An accountless record is its creator's alone.
+            "view_all": all(r in DIRECT_ROLES for r in mine) if ids else is_creator,
+            "edit_all": all(r in EDIT_ROLES for r in mine) if ids else is_creator,
+            "creator_edits": all(r in EDIT_ROLES for r in theirs),
+            "owns_all": bool(ids) and all(r == OWNER for r in mine),
+            "owns_any": any(r == OWNER for r in mine),
+        }
+
+    def permissions(self, record) -> dict:
+        """``can_edit``, ``can_delete``, ``can_post``, ``can_revert`` and ``can_tag``.
+
+        - edit (and tag): the write rule, an edit role on every touched account
+          for the caller and for the creator;
+        - post, revert and delete also under the account owner exemption: the
+          owner of every touched account may resolve a record whose creator lost
+          access;
+        - an unposted transaction may always be deleted by its creator and by an
+          owner of any account it touches; so may a recurring entry (it moves no
+          balance either);
+        - a recurring entry is "posted" by materialising it (``can_post``), which
+          needs the write rule and an account to post to; it is never reverted.
+        """
+        f = self.facts(record)
+        can_edit = f["edit_all"] and f["creator_edits"]
+        resolve = f["edit_all"] and (f["creator_edits"] or f["owns_all"])
+        unposted_delete = f["is_creator"] or f["owns_any"]
+        if isinstance(record, Transaction):
+            posted = bool(record.is_posted)
+            return {
+                "can_edit": can_edit,
+                "can_delete": resolve or (not posted and unposted_delete),
+                "can_post": resolve and not posted,
+                "can_revert": resolve and posted,
+                "can_tag": can_edit,
+            }
+        return {
+            "can_edit": can_edit,
+            "can_delete": resolve or unposted_delete,
+            "can_post": can_edit and record.account_id is not None,
+            "can_revert": False,
+            "can_tag": can_edit,
+        }
+
+
+def record_permissions(db: Session, user, record) -> dict:
+    return RecordAccess(db, user).permissions(record)
 
 
 def get_account_or_404(db: Session, user, account_id: int, detail: str = "Account not found",
