@@ -55,7 +55,7 @@ Read this before writing, editing, or reviewing any code.
 tally-and-trace/
 ├── backend/                  → FastAPI backend (Python)
 │   ├── app/
-│   │   ├── core/             → config, DB engine, auth, seeding
+│   │   ├── core/             → config, DB engine, auth, access rules, tags, seeding
 │   │   ├── constants/        → seed data (JSON)
 │   │   ├── models/           → SQLAlchemy ORM models
 │   │   ├── routers/          → API route definitions
