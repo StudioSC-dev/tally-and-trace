@@ -326,3 +326,54 @@ def test_projection_endpoints_carry_no_sentinel(sw, sw_client, sw_db, who):
         r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
         assert r.status_code == 200, r.text
         assert sw_leaks(r.json(), secret, numbers=[500]) == [], path
+
+
+# --- Statement legs follow the projection scope (audit round 1, I) -----------------------
+
+def _deactivate(db, account_id):
+    from app.models.account import Account
+
+    db.get(Account, account_id).is_active = False
+    db.commit()
+
+
+def test_statement_legs_skip_inactive_funding_and_overflow_accounts(sw_client, sw_db, sw_people):
+    """A user with no shares: an inactive account stays viewable but is outside the scope."""
+    from app.services.forecast import project_running_balance
+
+    u = sw_people("Una", "Solo")
+    main = sw_post(sw_client, u, "/accounts/", {
+        "name": "Main", "account_type": "checking", "balance": 1_000})["id"]
+    old = sw_post(sw_client, u, "/accounts/", {
+        "name": "Old bank", "account_type": "checking", "balance": 9_000})["id"]
+    card = sw_post(sw_client, u, "/accounts/", {
+        "name": "Card", "account_type": "credit", "balance": 0, "billing_cycle_start": 10,
+        "days_until_due_date": 20, "payment_account_id": main,
+        "payment_overflow_account_id": old})["id"]
+    stale = sw_post(sw_client, u, "/accounts/", {
+        "name": "Stale card", "account_type": "credit", "balance": 0, "billing_cycle_start": 10,
+        "days_until_due_date": 20, "payment_account_id": old})["id"]
+    _txn(sw_client, u, card, 1_500, "2026-10-02T00:00:00", posted=True)
+    _txn(sw_client, u, stale, 200, "2026-10-03T00:00:00", posted=True)
+    _deactivate(sw_db, old)
+
+    statements = {e["source_id"]: e for e in _events(sw_db, u) if e["source"] == "statement"}
+    # The active primary keeps its leg; the inactive overflow is dropped.
+    paid = statements[card]
+    assert paid["date"] == datetime(2026, 10, 30)
+    assert paid["legs"] == [{"account_id": main, "amount": Decimal("-1500.00"),
+                             "overflow_account_id": None, "cash": True}]
+    assert paid["amount"] == Decimal("-1500.00")
+    assert paid["overflow_account_id"] is None
+    # An inactive primary: listed with no leg and no cash.
+    unpaid = statements[stale]
+    assert unpaid["legs"] == [] and unpaid["amount"] == 0
+    assert unpaid["funding_account_id"] is None
+    assert unpaid["face_amount"] == Decimal("200.00")
+
+    sw_db.expire_all()
+    result = project_running_balance(sw_db, u["id"], days=60, reference=REF)
+    assert result["overflow_moves"] == []
+    closings = {a["account_id"]: a["closing_balance"] for a in result["by_account"]}
+    assert closings == {main: Decimal("-500.00")}
+    assert result["closing_balance"] == Decimal("-500.00")

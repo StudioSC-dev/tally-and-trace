@@ -844,10 +844,6 @@ def collect_events(
     scoped_ids = cash_ids | card_ids | scoped_wallet_ids
 
     events: List[dict] = []
-    # Accounts the caller can view, active or not: a statement's funding legs
-    # are kept only on these (routing never crosses owners, so an owner's view
-    # is unchanged; a sharee never sees the owner's private funding account).
-    viewable_ids = viewable_account_ids(db, user_id)
     redactor = Redactor(db, user_id)
 
     # Every record of any type the caller created or that touches an account
@@ -1044,16 +1040,17 @@ def collect_events(
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
     # the projected charges of budget entries scheduled on it.
-    # A funding or overflow account the caller can't view gets no leg, and its id
-    # is never emitted (STU-227).
+    # A funding or overflow account outside the projection scope (one the caller
+    # can't view, or an inactive one) gets no leg, and its id is never emitted
+    # (STU-227), as for loan dues.
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
-        funding = p["funding_account_id"] if p["funding_account_id"] in viewable_ids else None
-        overflow = p["overflow_account_id"] if p["overflow_account_id"] in viewable_ids else None
+        funding = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
+        overflow = p["overflow_account_id"] if p["overflow_account_id"] in scoped_ids else None
         events.append(_event(
             date=p["date"],
             name=p["name"],
