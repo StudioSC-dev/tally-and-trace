@@ -157,110 +157,117 @@ def test_transfer_funds_destination_before_its_payable_and_costs_only_the_fee(db
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def entities(db, user):
-    """Two throwaway entities; the user's accounts, entries and transactions go first on teardown."""
+def owners(db):
+    """Two throwaway users, A and B, each owning the accounts of one scope."""
+    from app.core.access import touches_accounts
+    from app.core.auth import get_password_hash
     from app.models.account import Account
     from app.models.budget_entry import BudgetEntry
-    from app.models.entity import Entity, EntityType
     from app.models.transaction import Transaction
+    from app.models.user import User
 
     created = []
     for label in ("A", "B"):
-        e = Entity(name=f"Proj {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
-        db.add(e)
-        created.append(e)
+        u = User(email=f"proj-{label.lower()}-{os.urandom(4).hex()}@example.com",
+                 password_hash=get_password_hash("password123"),
+                 first_name="Proj", last_name=label, is_verified=True)
+        db.add(u)
+        created.append(u)
     db.commit()
-    ids = [e.id for e in created]
+    ids = [u.id for u in created]
 
     yield created
 
     db.rollback()
-    db.query(Transaction).filter(Transaction.user_id == user.id).delete()
-    db.query(BudgetEntry).filter(BudgetEntry.user_id == user.id).delete()
-    db.query(Account).filter(Account.user_id == user.id).update(
-        {"payment_account_id": None, "payment_overflow_account_id": None}
-    )
+    account_ids = [a.id for a in db.query(Account.id).filter(Account.user_id.in_(ids))]
+    for model in (Transaction, BudgetEntry):
+        db.query(model).filter(model.user_id.in_(ids)).delete(synchronize_session=False)
+        if account_ids:
+            db.query(model).filter(touches_accounts(model, account_ids)).delete(
+                synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).update(
+        {"payment_account_id": None, "payment_overflow_account_id": None},
+        synchronize_session=False)
     db.commit()
-    db.query(Account).filter(Account.user_id == user.id).delete()
-    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
 
 
-def _cross_entity_transfer(db, user, entities, row_entity):
-    """5,000 + 15 fee from entity A's 10,000 account to an empty entity-B account."""
+def _cross_owner_transfer(db, owners, row_owner):
+    """5,000 + 15 fee from A's 10,000 account to an empty account of B's, created by ``row_owner``."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
 
-    ent_a, ent_b = entities
-    acc_a = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00", entity_id=ent_a.id)
-    acc_b = _account(db, user, "Checking B", AccountType.CHECKING, "0.00", entity_id=ent_b.id)
-    _txn(db, user, acc_a, TransactionType.TRANSFER, "5000.00", datetime(2026, 8, 5),
+    a, b = owners
+    acc_a = _account(db, a, "Savings A", AccountType.SAVINGS, "10000.00")
+    acc_b = _account(db, b, "Checking B", AccountType.CHECKING, "0.00")
+    _txn(db, row_owner, acc_a, TransactionType.TRANSFER, "5000.00", datetime(2026, 8, 5),
          transfer_fee=Decimal("15.00"), description="Move to B",
-         transfer_from_account_id=acc_a.id, transfer_to_account_id=acc_b.id,
-         entity_id=row_entity.id)
+         transfer_from_account_id=acc_a.id, transfer_to_account_id=acc_b.id)
     return acc_a, acc_b
 
 
 @pytest.mark.parametrize("row_owner", ["source", "destination"])
-def test_transfer_out_of_scope_costs_the_pool_amount_and_fee(db, user, entities, row_owner):
+def test_transfer_out_of_scope_costs_the_pool_amount_and_fee(db, owners, row_owner):
     from app.services.forecast import project_cashflow, project_running_balance
 
-    ent_a, ent_b = entities
-    acc_a, _ = _cross_entity_transfer(
-        db, user, entities, ent_a if row_owner == "source" else ent_b)
+    owner_a, owner_b = owners
+    acc_a, _ = _cross_owner_transfer(
+        db, owners, owner_a if row_owner == "source" else owner_b)
 
-    r = project_running_balance(db, user.id, ent_a.id, days=30, reference=datetime(2026, 8, 1))
+    r = project_running_balance(db, owner_a.id, days=30, reference=datetime(2026, 8, 1))
     assert r["closing_balance"] == Decimal("4985.00")
     assert [(a["account_id"], a["closing_balance"]) for a in r["by_account"]] == [
         (acc_a.id, Decimal("4985.00")),
     ]
     assert r["unassigned_closing"] == Decimal("0")
 
-    (aug,) = project_cashflow(db, user.id, ent_a.id, months=1, reference=datetime(2026, 8, 1))
+    (aug,) = project_cashflow(db, owner_a.id, months=1, reference=datetime(2026, 8, 1))
     assert aug["closing_balance"] == 4985.0
     assert aug["unassigned_closing"] == 0.0
 
 
 @pytest.mark.parametrize("row_owner", ["source", "destination"])
-def test_transfer_into_scope_from_outside_adds_the_amount(db, user, entities, row_owner):
+def test_transfer_into_scope_from_outside_adds_the_amount(db, owners, row_owner):
     from app.services.forecast import (
         get_upcoming_items, project_cashflow, project_running_balance, serialize_timeline,
     )
 
-    ent_a, ent_b = entities
-    _, acc_b = _cross_entity_transfer(
-        db, user, entities, ent_a if row_owner == "source" else ent_b)
+    owner_a, owner_b = owners
+    _, acc_b = _cross_owner_transfer(
+        db, owners, owner_a if row_owner == "source" else owner_b)
 
-    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    r = project_running_balance(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert r["closing_balance"] == Decimal("5000.00")
     assert [(a["account_id"], a["closing_balance"]) for a in r["by_account"]] == [
         (acc_b.id, Decimal("5000.00")),
     ]
     assert r["unassigned_closing"] == Decimal("0")
-    # Entity A's account is never named in B's view.
+    # A's account is never named in B's view.
     assert "Savings A" not in repr(serialize_timeline(r))
 
-    (aug,) = project_cashflow(db, user.id, ent_b.id, months=1, reference=datetime(2026, 8, 1))
+    (aug,) = project_cashflow(db, owner_b.id, months=1, reference=datetime(2026, 8, 1))
     assert aug["closing_balance"] == 5000.0
     assert "Savings A" not in repr(aug)
 
-    items = get_upcoming_items(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    items = get_upcoming_items(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
         ("2026-08-05", "Move to B", 5000.0),
     ]
 
 
-def test_same_day_inbound_transfer_funds_a_bill_in_the_pooled_timeline_too(db, user, entities):
+def test_same_day_inbound_transfer_funds_a_bill_in_the_pooled_timeline_too(db, owners):
     """Zero opening cash: the pooled trough and shortfalls agree with account routing."""
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import project_running_balance
 
-    ent_a, ent_b = entities
-    _, acc_b = _cross_entity_transfer(db, user, entities, ent_a)
-    _entry(db, user, "Bill from B", BudgetEntryType.EXPENSE, "4000.00", datetime(2026, 8, 5),
-           account=acc_b, entity_id=ent_b.id, end_mode="after_occurrences", max_occurrences=1)
+    owner_a, owner_b = owners
+    _, acc_b = _cross_owner_transfer(db, owners, owner_a)
+    _entry(db, owner_b, "Bill from B", BudgetEntryType.EXPENSE, "4000.00", datetime(2026, 8, 5),
+           account=acc_b, end_mode="after_occurrences", max_occurrences=1)
 
-    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    r = project_running_balance(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert r["opening_balance"] == Decimal("0.00")
     assert r["account_shortfalls"] == []
     assert r["shortfall"] is False
@@ -273,29 +280,28 @@ def test_same_day_inbound_transfer_funds_a_bill_in_the_pooled_timeline_too(db, u
 @pytest.mark.parametrize("row_owner", ["outside", "card"])
 @pytest.mark.parametrize("direction", ["into_card", "from_card"])
 def test_cross_scope_transfer_touching_an_in_scope_card_is_listed_but_not_cash(
-        db, user, entities, direction, row_owner):
+        db, owners, direction, row_owner):
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
     from app.services.forecast import (
         collect_events, get_payables, get_upcoming_items, project_running_balance,
     )
 
-    ent_a, ent_b = entities
-    outside = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00", entity_id=ent_a.id)
-    card = _account(db, user, "Card C", AccountType.CREDIT, "0.00", entity_id=ent_b.id,
+    owner_a, owner_b = owners
+    outside = _account(db, owner_a, "Savings A", AccountType.SAVINGS, "10000.00")
+    card = _account(db, owner_b, "Card C", AccountType.CREDIT, "0.00",
                     billing_cycle_start=24, days_until_due_date=21)
-    checking = _account(db, user, "Checking B", AccountType.CHECKING, "1000.00",
-                        entity_id=ent_b.id)
+    checking = _account(db, owner_b, "Checking B", AccountType.CHECKING, "1000.00")
     card.payment_account_id = checking.id
     db.commit()
     src, dst = (outside, card) if direction == "into_card" else (card, outside)
-    _txn(db, user, src, TransactionType.TRANSFER, "3000.00", datetime(2026, 8, 5),
+    _txn(db, owner_a if row_owner == "outside" else owner_b, src, TransactionType.TRANSFER,
+         "3000.00", datetime(2026, 8, 5),
          transfer_fee=Decimal("20.00"), description="Card move",
-         transfer_from_account_id=src.id, transfer_to_account_id=dst.id,
-         entity_id=(ent_a if row_owner == "outside" else ent_b).id)
+         transfer_from_account_id=src.id, transfer_to_account_id=dst.id)
 
     events = collect_events(db, datetime(2026, 8, 1), datetime(2026, 9, 1),
-                            user_id=user.id, entity_id=ent_b.id)
+                            user_id=owner_b.id)
     assert len(events) == 1
     (ev,) = events
     assert ev["counts_as_cash"] is False
@@ -305,14 +311,14 @@ def test_cross_scope_transfer_touching_an_in_scope_card_is_listed_but_not_cash(
         (card.id, leg_amount, False),
     ]
 
-    items = get_upcoming_items(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    items = get_upcoming_items(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
         ("2026-08-05", "Card move", 3000.0),
     ]
-    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    r = project_running_balance(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert r["events"] == []
     assert r["closing_balance"] == Decimal("1000.00")
-    assert get_payables(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1)) == []
+    assert get_payables(db, owner_b.id, days=30, reference=datetime(2026, 8, 1)) == []
 
 
 def test_overdue_cash_advance_is_cash_on_the_window_start_and_billed_on_its_statement(db, user):
@@ -783,26 +789,25 @@ def test_overdue_planned_payment_of_a_statement_due_before_the_window_stays_in_c
     ]
 
 
-def test_cross_entity_bank_transfer_into_the_card_nets_its_statement(db, user, entities):
-    """The row and its source live in another entity; only transfer_to names the card."""
+def test_cross_owner_bank_transfer_into_the_card_nets_its_statement(db, owners):
+    """The row and its source belong to another user; only transfer_to names the card."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
     from app.services.forecast import project_running_balance
 
-    ent_a, ent_b = entities
-    outside = _account(db, user, "Savings A", AccountType.SAVINGS, "10000.00", entity_id=ent_a.id)
-    checking = _account(db, user, "Checking B", AccountType.CHECKING, "50000.00",
-                        entity_id=ent_b.id)
-    card = _account(db, user, "Card C", AccountType.CREDIT, "-8000.00", entity_id=ent_b.id,
+    owner_a, owner_b = owners
+    outside = _account(db, owner_a, "Savings A", AccountType.SAVINGS, "10000.00")
+    checking = _account(db, owner_b, "Checking B", AccountType.CHECKING, "50000.00")
+    card = _account(db, owner_b, "Card C", AccountType.CREDIT, "-8000.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
-    _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 10),
-         entity_id=ent_b.id, is_posted=True)
-    _txn(db, user, outside, TransactionType.TRANSFER, "4000.00", datetime(2026, 7, 30),
-         entity_id=ent_a.id, is_posted=True,
+    _txn(db, owner_b, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 10),
+         is_posted=True)
+    _txn(db, owner_a, outside, TransactionType.TRANSFER, "4000.00", datetime(2026, 7, 30),
+         is_posted=True,
          transfer_from_account_id=outside.id, transfer_to_account_id=card.id)
 
-    r = project_running_balance(db, user.id, ent_b.id, days=30, reference=datetime(2026, 8, 1))
+    r = project_running_balance(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-8000.00"))]
 
 
@@ -1088,53 +1093,50 @@ def test_card_without_cycle_settings_keeps_its_schedule_as_cash_and_its_transfer
     assert aug["closing_balance"] == 8000.0 == float(r["closing_balance"])
 
 
-def _billed_card_paid_from_an_unbilled_card(db, user, card_entity=None, source_entity=None,
-                                           source_active=True):
+def _billed_card_paid_from_an_unbilled_card(db, user, source_owner=None, source_active=True):
     """1,000 charged on billed Card C (24 Jul statement, due 14 Aug), then 'paid' on
-    5 Aug by a transfer from Card D, which has no cycle settings."""
+    5 Aug by a transfer from Card D, which has no cycle settings (owned, and the
+    transfer created, by ``source_owner``, default ``user``)."""
     from app.models.account import AccountType
     from app.models.transaction import TransactionType
 
-    ids = {"entity_id": card_entity.id} if card_entity else {}
-    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00", **ids)
+    source_owner = source_owner or user
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
     card = _account(db, user, "Card C", AccountType.CREDIT, "-1000.00",
                     billing_cycle_start=24, days_until_due_date=21,
-                    payment_account_id=checking.id, **ids)
-    source = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
-                      is_active=source_active,
-                      **({"entity_id": source_entity.id} if source_entity else {}))
+                    payment_account_id=checking.id)
+    source = _account(db, source_owner, "Card D", AccountType.CREDIT, "0.00",
+                      is_active=source_active)
     _txn(db, user, card, TransactionType.DEBIT, "1000.00", datetime(2026, 7, 10),
-         is_posted=True, **ids)
-    _txn(db, user, source, TransactionType.TRANSFER, "1000.00", datetime(2026, 8, 5),
+         is_posted=True)
+    _txn(db, source_owner, source, TransactionType.TRANSFER, "1000.00", datetime(2026, 8, 5),
          description="Pay C from D", transfer_from_account_id=source.id,
-         transfer_to_account_id=card.id,
-         **({"entity_id": source_entity.id} if source_entity else {}))
+         transfer_to_account_id=card.id)
     return checking, card
 
 
-def _assert_billed_debt_is_still_paid_in_cash(db, user, entity_id):
+def _assert_billed_debt_is_still_paid_in_cash(db, user):
     from app.services.forecast import get_payables, project_running_balance
 
     reference = datetime(2026, 8, 1)
-    r = project_running_balance(db, user.id, entity_id, days=30, reference=reference)
+    r = project_running_balance(db, user.id, days=30, reference=reference)
     assert _cash_events(r) == [("2026-08-14", "Card C statement", Decimal("-1000.00"))]
     assert r["closing_balance"] == Decimal("9000.00")
     assert [(p["due_date"], p["name"], p["amount"]) for p in get_payables(
-        db, user.id, entity_id, days=30, reference=reference)] == [
+        db, user.id, days=30, reference=reference)] == [
         ("2026-08-14", "Card C statement", 1000.0),
     ]
 
 
-def test_payment_from_another_entitys_unbilled_card_does_not_net_the_statement(
-        db, user, entities):
-    ent_a, ent_b = entities
-    _billed_card_paid_from_an_unbilled_card(db, user, card_entity=ent_b, source_entity=ent_a)
-    _assert_billed_debt_is_still_paid_in_cash(db, user, ent_b.id)
+def test_payment_from_another_users_unbilled_card_does_not_net_the_statement(db, owners):
+    owner_a, owner_b = owners
+    _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
+    _assert_billed_debt_is_still_paid_in_cash(db, owner_b)
 
 
 def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):
     _billed_card_paid_from_an_unbilled_card(db, user, source_active=False)
-    _assert_billed_debt_is_still_paid_in_cash(db, user, None)
+    _assert_billed_debt_is_still_paid_in_cash(db, user)
 
 
 def test_refund_beyond_its_statement_reduces_the_next_payable_in_every_view(db, user):

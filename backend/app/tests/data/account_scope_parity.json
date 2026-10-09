@@ -1,0 +1,1453 @@
+{
+ "bare": {
+  "cashflow": [
+   {
+    "by_account": [],
+    "closing_balance": 2000.0,
+    "expenses": 3000.0,
+    "income": 5000.0,
+    "net": 2000.0,
+    "opening_balance": 0.0,
+    "overflow_moves": [],
+    "period_end": "2026-11-01T00:00:00",
+    "period_label": "October 2026",
+    "period_start": "2026-10-01T00:00:00",
+    "statement_payables": 0.0,
+    "unassigned_closing": 2000.0,
+    "unposted_expenses": 0.0
+   },
+   {
+    "by_account": [],
+    "closing_balance": 4000.0,
+    "expenses": 3000.0,
+    "income": 5000.0,
+    "net": 2000.0,
+    "opening_balance": 2000.0,
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-01T00:00:00",
+    "statement_payables": 0.0,
+    "unassigned_closing": 4000.0,
+    "unposted_expenses": 0.0
+   }
+  ],
+  "disposable": {
+   "monthly_disposable": 2000.0,
+   "monthly_expenses": 3000.0,
+   "monthly_income": 5000.0
+  },
+  "events": [
+   {
+    "amount": "-3000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-03T00:00:00",
+    "face_amount": "3000.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "-3000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Bare expense",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense",
+    "type": "expense"
+   },
+   {
+    "amount": "5000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-10T00:00:00",
+    "face_amount": "5000.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "5000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Bare income",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare income",
+    "type": "income"
+   },
+   {
+    "amount": "-3000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-03T00:00:00",
+    "face_amount": "3000.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "-3000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Bare expense",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense",
+    "type": "expense"
+   },
+   {
+    "amount": "5000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-10T00:00:00",
+    "face_amount": "5000.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "5000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Bare income",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare income",
+    "type": "income"
+   }
+  ],
+  "payables": [
+   {
+    "account_id": null,
+    "account_name": null,
+    "amount": 3000.0,
+    "due_date": "2026-10-03",
+    "name": "Bare expense",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense"
+   },
+   {
+    "account_id": null,
+    "account_name": null,
+    "amount": 3000.0,
+    "due_date": "2026-11-03",
+    "name": "Bare expense",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense"
+   }
+  ],
+  "timeline": {
+   "account_shortfalls": [],
+   "by_account": [],
+   "closing_balance": 4000.0,
+   "events": [
+    {
+     "amount": -3000.0,
+     "date": "2026-10-03",
+     "name": "Bare expense",
+     "running_balance": -3000.0,
+     "source": "budget_entry",
+     "source_id": "entry:Bare expense",
+     "type": "expense"
+    },
+    {
+     "amount": 5000.0,
+     "date": "2026-10-10",
+     "name": "Bare income",
+     "running_balance": 2000.0,
+     "source": "budget_entry",
+     "source_id": "entry:Bare income",
+     "type": "income"
+    },
+    {
+     "amount": -3000.0,
+     "date": "2026-11-03",
+     "name": "Bare expense",
+     "running_balance": -1000.0,
+     "source": "budget_entry",
+     "source_id": "entry:Bare expense",
+     "type": "expense"
+    },
+    {
+     "amount": 5000.0,
+     "date": "2026-11-10",
+     "name": "Bare income",
+     "running_balance": 4000.0,
+     "source": "budget_entry",
+     "source_id": "entry:Bare income",
+     "type": "income"
+    }
+   ],
+   "lowest_balance": -3000.0,
+   "opening_balance": 0.0,
+   "overflow_moves": [],
+   "shortfall": true,
+   "shortfalls": [
+    {
+     "balance_after": -3000.0,
+     "date": "2026-10-03",
+     "name": "Bare expense"
+    },
+    {
+     "balance_after": -1000.0,
+     "date": "2026-11-03",
+     "name": "Bare expense"
+    }
+   ],
+   "trough_date": "2026-10-03",
+   "unassigned_closing": 4000.0,
+   "window_end": "2026-11-30",
+   "window_start": "2026-10-01"
+  },
+  "upcoming": [
+   {
+    "amount": "3000.00",
+    "due_date": "2026-10-03",
+    "entry_type": "expense",
+    "name": "Bare expense",
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense"
+   },
+   {
+    "amount": "5000.00",
+    "due_date": "2026-10-10",
+    "entry_type": "income",
+    "name": "Bare income",
+    "source": "budget_entry",
+    "source_id": "entry:Bare income"
+   },
+   {
+    "amount": "3000.00",
+    "due_date": "2026-11-03",
+    "entry_type": "expense",
+    "name": "Bare expense",
+    "source": "budget_entry",
+    "source_id": "entry:Bare expense"
+   },
+   {
+    "amount": "5000.00",
+    "due_date": "2026-11-10",
+    "entry_type": "income",
+    "name": "Bare income",
+    "source": "budget_entry",
+    "source_id": "entry:Bare income"
+   }
+  ]
+ },
+ "owner": {
+  "cashflow": [
+   {
+    "by_account": [
+     {
+      "account_id": "Bank",
+      "account_name": "Bank",
+      "closing_balance": 21985.0
+     },
+     {
+      "account_id": "Savings",
+      "account_name": "Savings",
+      "closing_balance": 8000.0
+     }
+    ],
+    "closing_balance": 31285.0,
+    "expenses": 10200.0,
+    "income": 32500.0,
+    "net": 17285.0,
+    "opening_balance": 14000.0,
+    "overflow_moves": [
+     {
+      "amount": 3300.0,
+      "date": "2026-10-05",
+      "from_account_id": "Savings",
+      "from_account_name": "Savings",
+      "name": "Rent",
+      "to_account_id": "Bank",
+      "to_account_name": "Bank"
+     }
+    ],
+    "period_end": "2026-11-01T00:00:00",
+    "period_label": "October 2026",
+    "period_start": "2026-10-01T00:00:00",
+    "statement_payables": 1500.0,
+    "unassigned_closing": 1300.0,
+    "unposted_expenses": 515.0
+   },
+   {
+    "by_account": [
+     {
+      "account_id": "Bank",
+      "account_name": "Bank",
+      "closing_balance": 36785.0
+     },
+     {
+      "account_id": "Savings",
+      "account_name": "Savings",
+      "closing_balance": 10000.0
+     }
+    ],
+    "closing_balance": 49385.0,
+    "expenses": 10200.0,
+    "income": 32500.0,
+    "net": 18100.0,
+    "opening_balance": 31285.0,
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-01T00:00:00",
+    "statement_payables": 1200.0,
+    "unassigned_closing": 2600.0,
+    "unposted_expenses": 0.0
+   }
+  ],
+  "disposable": {
+   "monthly_disposable": 21800.0,
+   "monthly_expenses": 10700.0,
+   "monthly_income": 32500.0
+  },
+  "events": [
+   {
+    "amount": "-300.00",
+    "counts_as_cash": true,
+    "date": "2026-10-01T00:00:00",
+    "face_amount": "300.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-300.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Overdue bill",
+    "original_date": "2026-09-28T00:00:00",
+    "overdue": true,
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Overdue bill",
+    "type": "debit"
+   },
+   {
+    "amount": "-1000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-02T00:00:00",
+    "face_amount": "1000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-1000.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "GCash",
+      "amount": "1000.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Load GCash",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash",
+    "top_up": true,
+    "transfer_fee": "0.00",
+    "type": "transfer"
+   },
+   {
+    "amount": "-3000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-04T00:00:00",
+    "face_amount": "3000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-3000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "loan_due_date": "2026-10-04",
+    "name": "Car loan payment",
+    "overflow_account_id": null,
+    "source": "loan",
+    "source_id": "loan:Car loan",
+    "type": "expense"
+   },
+   {
+    "amount": "-8000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-05T00:00:00",
+    "face_amount": "8000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-8000.00",
+      "cash": true,
+      "overflow_account_id": "Savings"
+     }
+    ],
+    "name": "Rent",
+    "overflow_account_id": "Savings",
+    "source": "budget_entry",
+    "source_id": "entry:Rent",
+    "type": "expense"
+   },
+   {
+    "amount": "-450.00",
+    "counts_as_cash": true,
+    "date": "2026-10-07T00:00:00",
+    "face_amount": "450.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-450.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Groceries",
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Groceries",
+    "type": "debit"
+   },
+   {
+    "amount": "0",
+    "counts_as_cash": false,
+    "date": "2026-10-08T00:00:00",
+    "face_amount": "500.00",
+    "funding_account_id": "Card",
+    "legs": [
+     {
+      "account_id": "Card",
+      "amount": "-500.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Streaming",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Streaming",
+    "type": "expense"
+   },
+   {
+    "amount": "0",
+    "counts_as_cash": false,
+    "date": "2026-10-10T00:00:00",
+    "face_amount": "700.00",
+    "funding_account_id": "Card",
+    "legs": [
+     {
+      "account_id": "Card",
+      "amount": "-700.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Card charge pending",
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Card charge pending",
+    "type": "debit"
+   },
+   {
+    "amount": "250.00",
+    "counts_as_cash": true,
+    "date": "2026-10-11T00:00:00",
+    "face_amount": "250.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "250.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Refund",
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Refund",
+    "type": "credit"
+   },
+   {
+    "amount": "-1200.00",
+    "counts_as_cash": true,
+    "date": "2026-10-12T00:00:00",
+    "face_amount": "1200.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "-1200.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Gym",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Gym",
+    "type": "expense"
+   },
+   {
+    "amount": "-600.00",
+    "card_payment": true,
+    "counts_as_cash": true,
+    "date": "2026-10-13T00:00:00",
+    "face_amount": "600.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-600.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "Card",
+      "amount": "600.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Pay card",
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Pay card",
+    "transfer_fee": "0.00",
+    "type": "transfer"
+   },
+   {
+    "amount": "-900.00",
+    "counts_as_cash": true,
+    "date": "2026-10-15T00:00:00",
+    "face_amount": "900.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-900.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Card statement",
+    "overflow_account_id": null,
+    "source": "statement",
+    "source_id": "account:Card",
+    "statement_balance": "1500.00",
+    "statement_close": "2026-09-24T00:00:00",
+    "type": "expense"
+   },
+   {
+    "amount": "30000.00",
+    "counts_as_cash": true,
+    "date": "2026-10-15T00:00:00",
+    "face_amount": "30000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "30000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Salary",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Salary",
+    "type": "income"
+   },
+   {
+    "amount": "-15.00",
+    "counts_as_cash": true,
+    "date": "2026-10-18T00:00:00",
+    "face_amount": "1000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-1015.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "Savings",
+      "amount": "1000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Move to savings",
+    "overflow_account_id": null,
+    "source": "transaction",
+    "source_id": "txn:Move to savings",
+    "transfer_fee": "15.00",
+    "type": "transfer"
+   },
+   {
+    "amount": "2500.00",
+    "counts_as_cash": true,
+    "date": "2026-10-20T00:00:00",
+    "face_amount": "2500.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "2500.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Side gig",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Side gig",
+    "type": "income"
+   },
+   {
+    "amount": "0.00",
+    "counts_as_cash": true,
+    "date": "2026-10-25T00:00:00",
+    "face_amount": "2000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-2000.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "Savings",
+      "amount": "2000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "To savings",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:To savings",
+    "transfer_fee": "0.00",
+    "type": "transfer"
+   },
+   {
+    "amount": "-1000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-02T00:00:00",
+    "face_amount": "1000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-1000.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "GCash",
+      "amount": "1000.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Load GCash",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash",
+    "top_up": true,
+    "transfer_fee": "0.00",
+    "type": "transfer"
+   },
+   {
+    "amount": "-3000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-04T00:00:00",
+    "face_amount": "3000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-3000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "loan_due_date": "2026-11-04",
+    "name": "Car loan payment",
+    "overflow_account_id": null,
+    "source": "loan",
+    "source_id": "loan:Car loan",
+    "type": "expense"
+   },
+   {
+    "amount": "-8000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-05T00:00:00",
+    "face_amount": "8000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-8000.00",
+      "cash": true,
+      "overflow_account_id": "Savings"
+     }
+    ],
+    "name": "Rent",
+    "overflow_account_id": "Savings",
+    "source": "budget_entry",
+    "source_id": "entry:Rent",
+    "type": "expense"
+   },
+   {
+    "amount": "0",
+    "counts_as_cash": false,
+    "date": "2026-11-08T00:00:00",
+    "face_amount": "500.00",
+    "funding_account_id": "Card",
+    "legs": [
+     {
+      "account_id": "Card",
+      "amount": "-500.00",
+      "cash": false,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Streaming",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Streaming",
+    "type": "expense"
+   },
+   {
+    "amount": "-1200.00",
+    "counts_as_cash": true,
+    "date": "2026-11-12T00:00:00",
+    "face_amount": "1200.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "-1200.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Gym",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Gym",
+    "type": "expense"
+   },
+   {
+    "amount": "-1200.00",
+    "counts_as_cash": true,
+    "date": "2026-11-14T00:00:00",
+    "face_amount": "1200.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-1200.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Card statement",
+    "overflow_account_id": null,
+    "source": "statement",
+    "source_id": "account:Card",
+    "statement_balance": "1200.00",
+    "statement_close": "2026-10-24T00:00:00",
+    "type": "expense"
+   },
+   {
+    "amount": "30000.00",
+    "counts_as_cash": true,
+    "date": "2026-11-15T00:00:00",
+    "face_amount": "30000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "30000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Salary",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Salary",
+    "type": "income"
+   },
+   {
+    "amount": "2500.00",
+    "counts_as_cash": true,
+    "date": "2026-11-20T00:00:00",
+    "face_amount": "2500.00",
+    "funding_account_id": null,
+    "legs": [
+     {
+      "account_id": null,
+      "amount": "2500.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Side gig",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:Side gig",
+    "type": "income"
+   },
+   {
+    "amount": "0.00",
+    "counts_as_cash": true,
+    "date": "2026-11-25T00:00:00",
+    "face_amount": "2000.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-2000.00",
+      "cash": true,
+      "overflow_account_id": null
+     },
+     {
+      "account_id": "Savings",
+      "amount": "2000.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "To savings",
+    "overflow_account_id": null,
+    "source": "budget_entry",
+    "source_id": "entry:To savings",
+    "transfer_fee": "0.00",
+    "type": "transfer"
+   }
+  ],
+  "payables": [
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 300.0,
+    "due_date": "2026-10-01",
+    "name": "Overdue bill",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "transaction",
+    "source_id": "txn:Overdue bill"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 1000.0,
+    "due_date": "2026-10-02",
+    "name": "Load GCash",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 3000.0,
+    "due_date": "2026-10-04",
+    "name": "Car loan payment",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "loan",
+    "source_id": "loan:Car loan"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 8000.0,
+    "due_date": "2026-10-05",
+    "name": "Rent",
+    "overflow_account_id": "Savings",
+    "overflow_account_name": "Savings",
+    "source": "budget_entry",
+    "source_id": "entry:Rent"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 450.0,
+    "due_date": "2026-10-07",
+    "name": "Groceries",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "transaction",
+    "source_id": "txn:Groceries"
+   },
+   {
+    "account_id": null,
+    "account_name": null,
+    "amount": 1200.0,
+    "due_date": "2026-10-12",
+    "name": "Gym",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Gym"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 600.0,
+    "due_date": "2026-10-13",
+    "name": "Pay card",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "transaction",
+    "source_id": "txn:Pay card"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 900.0,
+    "due_date": "2026-10-15",
+    "name": "Card statement",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "account:Card"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 1000.0,
+    "due_date": "2026-11-02",
+    "name": "Load GCash",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 3000.0,
+    "due_date": "2026-11-04",
+    "name": "Car loan payment",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "loan",
+    "source_id": "loan:Car loan"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 8000.0,
+    "due_date": "2026-11-05",
+    "name": "Rent",
+    "overflow_account_id": "Savings",
+    "overflow_account_name": "Savings",
+    "source": "budget_entry",
+    "source_id": "entry:Rent"
+   },
+   {
+    "account_id": null,
+    "account_name": null,
+    "amount": 1200.0,
+    "due_date": "2026-11-12",
+    "name": "Gym",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "budget_entry",
+    "source_id": "entry:Gym"
+   },
+   {
+    "account_id": "Bank",
+    "account_name": "Bank",
+    "amount": 1200.0,
+    "due_date": "2026-11-14",
+    "name": "Card statement",
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "account:Card"
+   }
+  ],
+  "timeline": {
+   "account_shortfalls": [
+    {
+     "account_id": "Bank",
+     "account_name": "Bank",
+     "date": "2026-10-07",
+     "name": "Groceries",
+     "overflow_used": 0.0,
+     "short_amount": 450.0
+    },
+    {
+     "account_id": "Bank",
+     "account_name": "Bank",
+     "date": "2026-10-13",
+     "name": "Pay card",
+     "overflow_used": 0.0,
+     "short_amount": 800.0
+    },
+    {
+     "account_id": "Bank",
+     "account_name": "Bank",
+     "date": "2026-10-15",
+     "name": "Card statement",
+     "overflow_used": 0.0,
+     "short_amount": 1700.0
+    }
+   ],
+   "by_account": [
+    {
+     "account_id": "Bank",
+     "account_name": "Bank",
+     "closing_balance": 36785.0,
+     "opening_balance": 9000.0
+    },
+    {
+     "account_id": "Savings",
+     "account_name": "Savings",
+     "closing_balance": 10000.0,
+     "opening_balance": 5000.0
+    }
+   ],
+   "closing_balance": 49385.0,
+   "events": [
+    {
+     "amount": -300.0,
+     "date": "2026-10-01",
+     "name": "Overdue bill",
+     "running_balance": 13700.0,
+     "source": "transaction",
+     "source_id": "txn:Overdue bill",
+     "type": "debit"
+    },
+    {
+     "amount": -1000.0,
+     "date": "2026-10-02",
+     "name": "Load GCash",
+     "running_balance": 12700.0,
+     "source": "budget_entry",
+     "source_id": "entry:Load GCash",
+     "type": "transfer"
+    },
+    {
+     "amount": -3000.0,
+     "date": "2026-10-04",
+     "name": "Car loan payment",
+     "running_balance": 9700.0,
+     "source": "loan",
+     "source_id": "loan:Car loan",
+     "type": "expense"
+    },
+    {
+     "amount": -8000.0,
+     "date": "2026-10-05",
+     "name": "Rent",
+     "running_balance": 1700.0,
+     "source": "budget_entry",
+     "source_id": "entry:Rent",
+     "type": "expense"
+    },
+    {
+     "amount": -450.0,
+     "date": "2026-10-07",
+     "name": "Groceries",
+     "running_balance": 1250.0,
+     "source": "transaction",
+     "source_id": "txn:Groceries",
+     "type": "debit"
+    },
+    {
+     "amount": 250.0,
+     "date": "2026-10-11",
+     "name": "Refund",
+     "running_balance": 1500.0,
+     "source": "transaction",
+     "source_id": "txn:Refund",
+     "type": "credit"
+    },
+    {
+     "amount": -1200.0,
+     "date": "2026-10-12",
+     "name": "Gym",
+     "running_balance": 300.0,
+     "source": "budget_entry",
+     "source_id": "entry:Gym",
+     "type": "expense"
+    },
+    {
+     "amount": -600.0,
+     "date": "2026-10-13",
+     "name": "Pay card",
+     "running_balance": -300.0,
+     "source": "transaction",
+     "source_id": "txn:Pay card",
+     "type": "transfer"
+    },
+    {
+     "amount": -900.0,
+     "date": "2026-10-15",
+     "name": "Card statement",
+     "running_balance": -1200.0,
+     "source": "statement",
+     "source_id": "account:Card",
+     "type": "expense"
+    },
+    {
+     "amount": 30000.0,
+     "date": "2026-10-15",
+     "name": "Salary",
+     "running_balance": 28800.0,
+     "source": "budget_entry",
+     "source_id": "entry:Salary",
+     "type": "income"
+    },
+    {
+     "amount": -15.0,
+     "date": "2026-10-18",
+     "name": "Move to savings",
+     "running_balance": 28785.0,
+     "source": "transaction",
+     "source_id": "txn:Move to savings",
+     "type": "transfer"
+    },
+    {
+     "amount": 2500.0,
+     "date": "2026-10-20",
+     "name": "Side gig",
+     "running_balance": 31285.0,
+     "source": "budget_entry",
+     "source_id": "entry:Side gig",
+     "type": "income"
+    },
+    {
+     "amount": 0.0,
+     "date": "2026-10-25",
+     "name": "To savings",
+     "running_balance": 31285.0,
+     "source": "budget_entry",
+     "source_id": "entry:To savings",
+     "type": "transfer"
+    },
+    {
+     "amount": -1000.0,
+     "date": "2026-11-02",
+     "name": "Load GCash",
+     "running_balance": 30285.0,
+     "source": "budget_entry",
+     "source_id": "entry:Load GCash",
+     "type": "transfer"
+    },
+    {
+     "amount": -3000.0,
+     "date": "2026-11-04",
+     "name": "Car loan payment",
+     "running_balance": 27285.0,
+     "source": "loan",
+     "source_id": "loan:Car loan",
+     "type": "expense"
+    },
+    {
+     "amount": -8000.0,
+     "date": "2026-11-05",
+     "name": "Rent",
+     "running_balance": 19285.0,
+     "source": "budget_entry",
+     "source_id": "entry:Rent",
+     "type": "expense"
+    },
+    {
+     "amount": -1200.0,
+     "date": "2026-11-12",
+     "name": "Gym",
+     "running_balance": 18085.0,
+     "source": "budget_entry",
+     "source_id": "entry:Gym",
+     "type": "expense"
+    },
+    {
+     "amount": -1200.0,
+     "date": "2026-11-14",
+     "name": "Card statement",
+     "running_balance": 16885.0,
+     "source": "statement",
+     "source_id": "account:Card",
+     "type": "expense"
+    },
+    {
+     "amount": 30000.0,
+     "date": "2026-11-15",
+     "name": "Salary",
+     "running_balance": 46885.0,
+     "source": "budget_entry",
+     "source_id": "entry:Salary",
+     "type": "income"
+    },
+    {
+     "amount": 2500.0,
+     "date": "2026-11-20",
+     "name": "Side gig",
+     "running_balance": 49385.0,
+     "source": "budget_entry",
+     "source_id": "entry:Side gig",
+     "type": "income"
+    },
+    {
+     "amount": 0.0,
+     "date": "2026-11-25",
+     "name": "To savings",
+     "running_balance": 49385.0,
+     "source": "budget_entry",
+     "source_id": "entry:To savings",
+     "type": "transfer"
+    }
+   ],
+   "lowest_balance": -1200.0,
+   "opening_balance": 14000.0,
+   "overflow_moves": [
+    {
+     "amount": 3300.0,
+     "date": "2026-10-05",
+     "from_account_id": "Savings",
+     "from_account_name": "Savings",
+     "name": "Rent",
+     "to_account_id": "Bank",
+     "to_account_name": "Bank"
+    }
+   ],
+   "shortfall": true,
+   "shortfalls": [
+    {
+     "balance_after": -300.0,
+     "date": "2026-10-13",
+     "name": "Pay card"
+    },
+    {
+     "balance_after": -1200.0,
+     "date": "2026-10-15",
+     "name": "Card statement"
+    }
+   ],
+   "trough_date": "2026-10-15",
+   "unassigned_closing": 2600.0,
+   "window_end": "2026-11-30",
+   "window_start": "2026-10-01"
+  },
+  "upcoming": [
+   {
+    "amount": "300.00",
+    "due_date": "2026-10-01",
+    "entry_type": "debit",
+    "name": "Overdue bill",
+    "source": "transaction",
+    "source_id": "txn:Overdue bill"
+   },
+   {
+    "amount": "1000.00",
+    "due_date": "2026-10-02",
+    "entry_type": "transfer",
+    "name": "Load GCash",
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash"
+   },
+   {
+    "amount": "3000.00",
+    "due_date": "2026-10-04",
+    "entry_type": "expense",
+    "name": "Car loan payment",
+    "source": "loan",
+    "source_id": "loan:Car loan"
+   },
+   {
+    "amount": "8000.00",
+    "due_date": "2026-10-05",
+    "entry_type": "expense",
+    "name": "Rent",
+    "source": "budget_entry",
+    "source_id": "entry:Rent"
+   },
+   {
+    "amount": "450.00",
+    "due_date": "2026-10-07",
+    "entry_type": "debit",
+    "name": "Groceries",
+    "source": "transaction",
+    "source_id": "txn:Groceries"
+   },
+   {
+    "amount": "500.00",
+    "due_date": "2026-10-08",
+    "entry_type": "expense",
+    "name": "Streaming",
+    "source": "budget_entry",
+    "source_id": "entry:Streaming"
+   },
+   {
+    "amount": "700.00",
+    "due_date": "2026-10-10",
+    "entry_type": "debit",
+    "name": "Card charge pending",
+    "source": "transaction",
+    "source_id": "txn:Card charge pending"
+   },
+   {
+    "amount": "250.00",
+    "due_date": "2026-10-11",
+    "entry_type": "credit",
+    "name": "Refund",
+    "source": "transaction",
+    "source_id": "txn:Refund"
+   },
+   {
+    "amount": "1200.00",
+    "due_date": "2026-10-12",
+    "entry_type": "expense",
+    "name": "Gym",
+    "source": "budget_entry",
+    "source_id": "entry:Gym"
+   },
+   {
+    "amount": "600.00",
+    "due_date": "2026-10-13",
+    "entry_type": "transfer",
+    "name": "Pay card",
+    "source": "transaction",
+    "source_id": "txn:Pay card"
+   },
+   {
+    "amount": "30000.00",
+    "due_date": "2026-10-15",
+    "entry_type": "income",
+    "name": "Salary",
+    "source": "budget_entry",
+    "source_id": "entry:Salary"
+   },
+   {
+    "amount": "900.00",
+    "due_date": "2026-10-15",
+    "entry_type": "expense",
+    "name": "Card statement",
+    "source": "statement",
+    "source_id": "account:Card"
+   },
+   {
+    "amount": "1000.00",
+    "due_date": "2026-10-18",
+    "entry_type": "transfer",
+    "name": "Move to savings",
+    "source": "transaction",
+    "source_id": "txn:Move to savings"
+   },
+   {
+    "amount": "2500.00",
+    "due_date": "2026-10-20",
+    "entry_type": "income",
+    "name": "Side gig",
+    "source": "budget_entry",
+    "source_id": "entry:Side gig"
+   },
+   {
+    "amount": "2000.00",
+    "due_date": "2026-10-25",
+    "entry_type": "transfer",
+    "name": "To savings",
+    "source": "budget_entry",
+    "source_id": "entry:To savings"
+   },
+   {
+    "amount": "1000.00",
+    "due_date": "2026-11-02",
+    "entry_type": "transfer",
+    "name": "Load GCash",
+    "source": "budget_entry",
+    "source_id": "entry:Load GCash"
+   },
+   {
+    "amount": "3000.00",
+    "due_date": "2026-11-04",
+    "entry_type": "expense",
+    "name": "Car loan payment",
+    "source": "loan",
+    "source_id": "loan:Car loan"
+   },
+   {
+    "amount": "8000.00",
+    "due_date": "2026-11-05",
+    "entry_type": "expense",
+    "name": "Rent",
+    "source": "budget_entry",
+    "source_id": "entry:Rent"
+   },
+   {
+    "amount": "500.00",
+    "due_date": "2026-11-08",
+    "entry_type": "expense",
+    "name": "Streaming",
+    "source": "budget_entry",
+    "source_id": "entry:Streaming"
+   },
+   {
+    "amount": "1200.00",
+    "due_date": "2026-11-12",
+    "entry_type": "expense",
+    "name": "Gym",
+    "source": "budget_entry",
+    "source_id": "entry:Gym"
+   },
+   {
+    "amount": "1200.00",
+    "due_date": "2026-11-14",
+    "entry_type": "expense",
+    "name": "Card statement",
+    "source": "statement",
+    "source_id": "account:Card"
+   },
+   {
+    "amount": "30000.00",
+    "due_date": "2026-11-15",
+    "entry_type": "income",
+    "name": "Salary",
+    "source": "budget_entry",
+    "source_id": "entry:Salary"
+   },
+   {
+    "amount": "2500.00",
+    "due_date": "2026-11-20",
+    "entry_type": "income",
+    "name": "Side gig",
+    "source": "budget_entry",
+    "source_id": "entry:Side gig"
+   },
+   {
+    "amount": "2000.00",
+    "due_date": "2026-11-25",
+    "entry_type": "transfer",
+    "name": "To savings",
+    "source": "budget_entry",
+    "source_id": "entry:To savings"
+   }
+  ]
+ }
+}

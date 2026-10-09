@@ -6,7 +6,6 @@ from app.routers import (
     categories,
     allocations,
     budget_entries,
-    entities,
     wishlist,
     dashboard,
     forecast,
@@ -23,7 +22,6 @@ api_router.include_router(transactions.router, prefix="/transactions", tags=["tr
 api_router.include_router(categories.router, prefix="/categories", tags=["categories"])
 api_router.include_router(allocations.router, prefix="/allocations", tags=["allocations"])
 api_router.include_router(budget_entries.router, prefix="/budget-entries", tags=["budget_entries"])
-api_router.include_router(entities.router, prefix="/entities", tags=["entities"])
 api_router.include_router(wishlist.router, prefix="/wishlist", tags=["wishlist"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(forecast.router, prefix="/forecast", tags=["forecast"])

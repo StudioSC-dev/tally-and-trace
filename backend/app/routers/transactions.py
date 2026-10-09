@@ -1,15 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import (
-    can_access_record,
-    get_accessible_or_404,
-    get_active_entity,
-    scope_criterion,
-    validate_entity_ownership,
+from app.core.access import (
+    can_edit_account,
+    can_read_record,
+    can_view_account,
+    get_record_or_404,
+    readable_criterion,
+    require_account,
+    viewable_account_ids,
 )
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
@@ -19,7 +21,6 @@ from app.services import loans as loan_svc
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
-from app.models.entity import Entity
 from app.models.user import User
 from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
@@ -157,22 +158,20 @@ def _ensure_budget_period(allocation: Allocation, reference: Optional[datetime])
     return True
 
 
-def _require_account(db: Session, user: User, account_id: Optional[int], detail: str) -> None:
-    """404 with ``detail`` unless the caller may use the account (a None id is skipped)."""
-    if account_id is None:
-        return
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account or not can_access_record(db, user, account):
-        raise HTTPException(status_code=404, detail=detail)
+def _require_account(db: Session, user: User, account_id: Optional[int], detail: str,
+                     owner: Optional[User] = None) -> None:
+    """404 with ``detail`` unless the caller may change the account (a None id is skipped).
+
+    With ``owner`` (the record's creator) the owner must be able to change it too,
+    so an edit never moves a record onto an account its owner can't reach.
+    """
+    require_account(db, user, account_id, detail, owner=owner)
 
 
-def _balance_account_ids(transaction_type, account_id, transfer_from_id, transfer_to_id) -> List[int]:
-    """The accounts whose balances a transaction of this shape moves."""
-    if transaction_type == TransactionType.TRANSFER:
-        ids = [transfer_from_id, transfer_to_id]
-    else:
-        ids = [account_id]
-    return [i for i in ids if i is not None]
+def _usable(user: User, owner: Optional[User], account: Optional[Account]) -> bool:
+    """Whether a record owned by ``owner`` may touch ``account`` when ``user`` writes it."""
+    return (account is not None and can_edit_account(user, account)
+            and (owner is None or can_edit_account(owner, account)))
 
 
 LOAN_PAYMENT_FIXED_FIELDS = (
@@ -226,7 +225,7 @@ def _validate_loan_payment_edit(db: Session, user: User, txn: Transaction, reque
     amount_changed = _money_changed(requested, "amount", txn.amount)
     fee_changed = _money_changed(requested, "transfer_fee", txn.transfer_fee, none_is_zero=True)
     if posted and (not old_posted or amount_changed or fee_changed):
-        loan = _loan_or_404(db, user, txn.transfer_to_account_id)
+        loan = _loan_or_404(db, user, txn.transfer_to_account_id, edit=True)
         if txn.loan_payment_kind == loan_svc.PREPAYMENT:
             funding = _funding_account(
                 db, user, txn.transfer_from_account_id, "from_account_id", loan.id)
@@ -281,7 +280,7 @@ def _loan_payment_source(db: Session, user: User, source_id: int, loan: Account)
         raise HTTPException(status_code=400,
                             detail="transfer_from_account_id cannot be the account itself")
     source = db.query(Account).filter(Account.id == source_id).first()
-    if not source or not can_access_record(db, user, source):
+    if not source or not can_edit_account(user, source):
         raise HTTPException(status_code=404, detail="Source account not found")
     if source.account_type == AccountType.LOAN:
         raise HTTPException(status_code=400,
@@ -528,7 +527,6 @@ def _apply_budget_delta(
 def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_ids: Optional[List[int]] = Query(None, alias="account_ids", description="Filter by account IDs"),
     category_ids: Optional[List[int]] = Query(None, alias="category_ids", description="Filter by category IDs"),
     allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),
@@ -541,23 +539,11 @@ def get_transactions(
     offset: int = Query(0, ge=0),
 ):
     """Get all transactions with optional filtering"""
-    if active_entity is not None:
-        # Shared scope: every transaction in the entity, regardless of which member
-        # created it. Membership was already proven by get_active_entity.
-        query = db.query(Transaction).filter(Transaction.entity_id == active_entity.id)
-    else:
-        # No entity context: fall back to the user's own accounts (this also keeps
-        # transfers where either leg touches one of the user's accounts).
-        user_account_ids = [
-            a.id for a in db.query(Account.id).filter(Account.user_id == current_user.id).all()
-        ]
-        query = db.query(Transaction).filter(
-            or_(
-                Transaction.account_id.in_(user_account_ids),
-                Transaction.transfer_from_account_id.in_(user_account_ids),
-                Transaction.transfer_to_account_id.in_(user_account_ids)
-            )
-        )
+    # Every transaction the caller may read: their own, plus any touching an
+    # account they hold a role on (including transfers where either leg does).
+    query = db.query(Transaction).filter(
+        readable_criterion(Transaction, current_user, viewable_account_ids(db, current_user))
+    )
 
     if account_ids:
         query = query.filter(
@@ -601,14 +587,9 @@ def create_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new transaction and update account balance"""
     transaction_data = transaction.dict()
-    if transaction_data.get("entity_id") is None and active_entity is not None:
-        transaction_data["entity_id"] = active_entity.id
-    else:
-        validate_entity_ownership(db, current_user, transaction_data.get("entity_id"))
     transaction_data["user_id"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
@@ -617,7 +598,7 @@ def create_transaction(
         budget_entry = db.query(BudgetEntry).filter(
             BudgetEntry.id == transaction.budget_entry_id
         ).first()
-        if not budget_entry or not can_access_record(db, current_user, budget_entry):
+        if not budget_entry or not can_read_record(db, current_user, budget_entry):
             raise HTTPException(status_code=404, detail="Budget entry not found")
         transaction_data["budget_entry_id"] = budget_entry.id
     
@@ -642,13 +623,13 @@ def create_transaction(
         primary_account = db.query(Account).filter(
             Account.id == transaction.transfer_from_account_id
         ).first()
-        if not primary_account or not can_access_record(db, current_user, primary_account):
+        if not _usable(current_user, None, primary_account):
             raise HTTPException(status_code=404, detail="Source account not found")
         
         destination_account = db.query(Account).filter(
             Account.id == transaction.transfer_to_account_id
         ).first()
-        if not destination_account or not can_access_record(db, current_user, destination_account):
+        if not _usable(current_user, None, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
@@ -664,7 +645,7 @@ def create_transaction(
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
-        if not primary_account or not can_access_record(db, current_user, primary_account):
+        if not _usable(current_user, None, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = primary_account.currency
@@ -705,38 +686,34 @@ def create_transaction(
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
-    transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
+    transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     return transaction
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance"""
-    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
+    db_transaction = get_record_or_404(
+        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+    owner = db_transaction.user
 
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
-    if "entity_id" in requested:
-        validate_entity_ownership(db, current_user, transaction_update.entity_id)
 
-    # Every account the edit touches must be the caller's to use: the ones it
-    # reverses (a shared row can move a co-member's private account, which is
-    # reported as the row not being found) and the ones it lands on.
-    for acc_id in _balance_account_ids(
-        db_transaction.transaction_type, db_transaction.account_id,
-        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
-    ):
-        _require_account(db, current_user, acc_id, "Transaction not found")
+    # Every account the edit touches must be one the caller may change: the ones
+    # it reverses (checked by get_record_or_404, reported as the row not being
+    # found) and the ones it lands on, which the row's owner must be able to
+    # change too.
     new_type = requested.get("transaction_type", db_transaction.transaction_type)
     if new_type == TransactionType.TRANSFER:
         _require_account(db, current_user, requested.get(
             "transfer_from_account_id", db_transaction.transfer_from_account_id),
-            "Source account not found")
+            "Source account not found", owner)
         _require_account(db, current_user, requested.get(
             "transfer_to_account_id", db_transaction.transfer_to_account_id),
-            "Destination account not found")
+            "Destination account not found", owner)
     else:
         _require_account(db, current_user, requested.get(
-            "account_id", db_transaction.account_id), "Account not found")
+            "account_id", db_transaction.account_id), "Account not found", owner)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -776,7 +753,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         if old_budget_delta:
             previous_budget_allocations = _get_budget_allocations_for_transaction(
                 db,
-                user_id=current_user.id,
+                user_id=db_transaction.user_id,
                 allocation_id=old_allocation_id,
                 category_id=old_category_id,
             )
@@ -791,7 +768,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             budget_entry = db.query(BudgetEntry).filter(
                 BudgetEntry.id == new_budget_entry_id
             ).first()
-            if not budget_entry or not can_access_record(db, current_user, budget_entry):
+            if not budget_entry or not can_read_record(db, current_user, budget_entry):
                 raise HTTPException(status_code=404, detail="Budget entry not found")
         setattr(db_transaction, "budget_entry_id", new_budget_entry_id)
         db_transaction.is_recurring = bool(budget_entry)
@@ -822,13 +799,13 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             primary_account = db.query(Account).filter(
                 Account.id == db_transaction.transfer_from_account_id
             ).first()
-            if not primary_account or not can_access_record(db, current_user, primary_account):
+            if not _usable(current_user, owner, primary_account):
                 raise HTTPException(status_code=404, detail="Source account not found")
             
             destination_account = db.query(Account).filter(
                 Account.id == db_transaction.transfer_to_account_id
             ).first()
-            if not destination_account or not can_access_record(db, current_user, destination_account):
+            if not _usable(current_user, owner, destination_account):
                 raise HTTPException(status_code=404, detail="Destination account not found")
             
             db_transaction.account_id = db_transaction.transfer_from_account_id
@@ -842,7 +819,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             primary_account = db.query(Account).filter(
                 Account.id == db_transaction.account_id
             ).first()
-            if not primary_account or not can_access_record(db, current_user, primary_account):
+            if not _usable(current_user, owner, primary_account):
                 raise HTTPException(status_code=404, detail="Account not found")
             if db_transaction.currency is None:
                 db_transaction.currency = primary_account.currency
@@ -867,7 +844,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         if new_budget_delta:
             new_budget_allocations = _get_budget_allocations_for_transaction(
                 db,
-                user_id=current_user.id,
+                user_id=db_transaction.user_id,
                 allocation_id=db_transaction.allocation_id,
                 category_id=db_transaction.category_id,
             )
@@ -880,14 +857,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Delete a transaction and update account balance"""
-    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    # A shared row can move a co-member's private account: refuse unless the
-    # caller may use every account it touches (reported as not found).
-    for acc_id in _balance_account_ids(
-        db_transaction.transaction_type, db_transaction.account_id,
-        db_transaction.transfer_from_account_id, db_transaction.transfer_to_account_id,
-    ):
-        _require_account(db, current_user, acc_id, "Transaction not found")
+    # Refused unless the caller may change every account the row touches
+    # (reported as not found).
+    db_transaction = get_record_or_404(
+        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
     
     # Update account balances if posted
     if db_transaction.is_posted:
@@ -912,7 +885,7 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
         if budget_delta:
             budget_allocations = _get_budget_allocations_for_transaction(
                 db,
-                user_id=current_user.id,
+                user_id=db_transaction.user_id,
                 allocation_id=db_transaction.allocation_id,
                 category_id=db_transaction.category_id,
             )
@@ -930,7 +903,8 @@ async def upload_receipt(
     current_user: User = Depends(get_current_active_user)
 ):
     """Upload a receipt for a transaction"""
-    db_transaction = get_accessible_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
+    db_transaction = get_record_or_404(
+        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
     
     # Validate file type
     file_extension = file.filename.split(".")[-1].lower()
@@ -973,7 +947,7 @@ def summarize_period(
 
     ``scope_ids`` are the caller's in-scope accounts. A transfer counts only when
     its source is one of them: a transfer in from an account outside the scope
-    (e.g. an entity co-member topping up the caller's wallet) is not the caller's
+    (e.g. another user topping up the caller's wallet) is not the caller's
     spending, so neither its amount nor its fee is expensed.
 
     Spending wallets (cash on hand, e-wallets) are expensed when topped up, so:
@@ -1085,7 +1059,6 @@ def summarize_period(
 def get_transaction_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
     start_date: datetime = Query(..., description="Start date for summary"),
     end_date: datetime = Query(..., description="End date for summary"),
     account_id: Optional[int] = Query(None, description="Filter by account ID")
@@ -1095,28 +1068,15 @@ def get_transaction_summary(
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date <= end_date,
     )
-    # The caller's accounts in this scope (inactive ones included: this is history).
-    scope_ids = {
-        a.id for a in db.query(Account.id).filter(
-            scope_criterion(Account, current_user.id, active_entity.id if active_entity else None)
-        ).all()
-    }
-    touches_scope = or_(
+    # The accounts the caller holds a role on (inactive ones included: this is
+    # history). Rows touching them, whoever entered them; summarize_period's
+    # source-scope guard decides what a transfer from outside counts for.
+    scope_ids = viewable_account_ids(db, current_user)
+    query = query.filter(or_(
         Transaction.account_id.in_(scope_ids),
         Transaction.transfer_from_account_id.in_(scope_ids),
         Transaction.transfer_to_account_id.in_(scope_ids)
-    )
-    if active_entity is not None:
-        # The entity's own rows, plus transfers into or out of its accounts however
-        # the row is tagged (e.g. a top-up from this entity's bank into another
-        # entity's wallet, recorded under the other entity). summarize_period's
-        # source-scope guard decides what such a transfer counts for.
-        query = query.filter(or_(
-            Transaction.entity_id == active_entity.id,
-            and_(Transaction.transaction_type == TransactionType.TRANSFER, touches_scope),
-        ))
-    else:
-        query = query.filter(touches_scope)
+    ))
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)
@@ -1134,7 +1094,7 @@ def get_transaction_summary(
     # Loans the caller can see get their own interest row (others stay "Transfer fees").
     loan_names = {
         a.id: a.name for a in referenced
-        if a.account_type == AccountType.LOAN and can_access_record(db, current_user, a)
+        if a.account_type == AccountType.LOAN and can_view_account(current_user, a)
     }
     category_ids = {t.category_id for t in transactions if t.category_id}
     category_names = {

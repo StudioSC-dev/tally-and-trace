@@ -3,16 +3,14 @@ Unified dashboard snapshot endpoint for Tally & Trace.
 Returns everything the front-end needs in a single call.
 """
 import math
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.entity_context import get_active_entity, scope_criterion
+from app.core.access import owned_criterion
 from app.models.allocation import Allocation, AllocationType
-from app.models.entity import Entity
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.services import forecast as forecast_svc
@@ -27,7 +25,6 @@ SAVINGS_RATE_FACTOR = 0.5
 def get_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """
     Single-call snapshot returning:
@@ -41,13 +38,10 @@ def get_snapshot(
     - Per-account month-end closings over the forecast window
     - Payables (cash outflows) due in the next 30 days
     """
-    # Was an unvalidated entity_id query param; get_active_entity verifies membership.
-    entity_id = active_entity.id if active_entity else None
-
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
-    accounts = forecast_svc.get_account_balances(db, current_user.id, entity_id)
+    accounts = forecast_svc.get_account_balances(db, current_user.id)
     total_balance = sum(a.balance for a in accounts)
     by_account = [
         {
@@ -64,23 +58,23 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 2. Upcoming this month (next 30 days)
     # -----------------------------------------------------------------------
-    upcoming = forecast_svc.get_upcoming_items(db, current_user.id, entity_id, days=30)
+    upcoming = forecast_svc.get_upcoming_items(db, current_user.id, days=30)
 
     # -----------------------------------------------------------------------
     # 3. Monthly income/expense summary (disposable income)
     # -----------------------------------------------------------------------
-    disposable_data = forecast_svc.get_disposable_income(db, current_user.id, entity_id)
+    disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
 
     # -----------------------------------------------------------------------
     # 4. 3-month cash-flow forecast
     # -----------------------------------------------------------------------
-    forecast_3m = forecast_svc.project_cashflow(db, current_user.id, entity_id, months=3)
+    forecast_3m = forecast_svc.project_cashflow(db, current_user.id, months=3)
 
     # -----------------------------------------------------------------------
     # 5. Goals progress
     # -----------------------------------------------------------------------
     goals_query = db.query(Allocation).filter(
-        scope_criterion(Allocation, current_user.id, entity_id),
+        owned_criterion(Allocation, current_user),
         Allocation.allocation_type == AllocationType.GOAL,
         Allocation.is_active.is_(True),
     )
@@ -116,7 +110,7 @@ def get_snapshot(
     wishlist_items = (
         db.query(WishlistItem)
         .filter(
-            scope_criterion(WishlistItem, current_user.id, entity_id),
+            owned_criterion(WishlistItem, current_user),
             WishlistItem.is_purchased.is_(False),
         )
         .order_by(priority_order, WishlistItem.created_at)
@@ -152,7 +146,7 @@ def get_snapshot(
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.get_payables(db, current_user.id, entity_id, days=30)
+    payables = forecast_svc.get_payables(db, current_user.id, days=30)
 
     return {
         "balances": {

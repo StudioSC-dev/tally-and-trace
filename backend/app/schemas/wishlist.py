@@ -6,7 +6,6 @@ from app.models.user import CurrencyType
 
 
 class WishlistItemCreate(BaseModel):
-    entity_id: Optional[int] = Field(None, gt=0)
     name: str = Field(..., min_length=1, max_length=200)
     estimated_cost: float = Field(..., gt=0)
     currency: CurrencyType = CurrencyType.PHP
@@ -18,7 +17,6 @@ class WishlistItemCreate(BaseModel):
 
 
 class WishlistItemUpdate(BaseModel):
-    entity_id: Optional[int] = Field(None, gt=0)
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     estimated_cost: Optional[float] = Field(None, gt=0)
     currency: Optional[CurrencyType] = None
@@ -34,7 +32,6 @@ class WishlistItemUpdate(BaseModel):
 class WishlistItemResponse(BaseModel):
     id: int
     user_id: int
-    entity_id: Optional[int] = None
     name: str
     estimated_cost: float
     currency: CurrencyType

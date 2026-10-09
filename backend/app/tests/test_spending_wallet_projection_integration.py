@@ -302,33 +302,41 @@ def test_disposable_income_expenses_top_ups_once_and_ignores_other_transfers(db,
 
 
 @pytest.fixture
-def entities(db):
-    """Two throwaway entities; rows tagged to them are removed afterwards."""
+def owners(db):
+    """Two throwaway users, A and B, each owning the accounts of one scope."""
+    from app.core.access import touches_accounts
+    from app.core.auth import get_password_hash
     from app.models.account import Account
     from app.models.budget_entry import BudgetEntry
-    from app.models.entity import Entity, EntityType
     from app.models.transaction import Transaction
+    from app.models.user import User
 
     made = []
     for label in ("A", "B"):
-        e = Entity(name=f"Wallet {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
-        db.add(e)
+        u = User(email=f"wallet-{label.lower()}-{os.urandom(4).hex()}@example.com",
+                 password_hash=get_password_hash("password123"),
+                 first_name="Wallet", last_name=label, is_verified=True)
+        db.add(u)
         db.commit()
-        db.refresh(e)
-        made.append(e)
+        db.refresh(u)
+        made.append(u)
 
     yield made
 
     db.rollback()
-    ids = [e.id for e in made]
-    db.query(Transaction).filter(Transaction.entity_id.in_(ids)).delete(synchronize_session=False)
-    db.query(BudgetEntry).filter(BudgetEntry.entity_id.in_(ids)).delete(synchronize_session=False)
-    db.query(Account).filter(Account.entity_id.in_(ids)).update(
+    ids = [u.id for u in made]
+    account_ids = [a.id for a in db.query(Account.id).filter(Account.user_id.in_(ids))]
+    for model in (Transaction, BudgetEntry):
+        db.query(model).filter(model.user_id.in_(ids)).delete(synchronize_session=False)
+        if account_ids:
+            db.query(model).filter(touches_accounts(model, account_ids)).delete(
+                synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).update(
         {"payment_account_id": None, "payment_overflow_account_id": None},
         synchronize_session=False)
     db.commit()
-    db.query(Account).filter(Account.entity_id.in_(ids)).delete(synchronize_session=False)
-    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
 
 
@@ -353,19 +361,19 @@ def test_entry_and_transactions_on_an_inactive_wallet_are_still_wallet_spending(
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
 
 
-def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, user, entities):
+def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, user, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import collect_events, project_running_balance
 
-    biz = entities[0]
-    _account(db, user, "Biz Bank", AccountType.SAVINGS, "5000.00", entity_id=biz.id)
-    personal_wallet = _wallet(db, user, "Personal GCash", "800.00")  # no entity: out of scope
-    _entry(db, user, "Parking", BudgetEntryType.EXPENSE, "500.00", datetime(2026, 11, 3),
-           account=personal_wallet, entity_id=biz.id)
+    biz = owners[0]
+    _account(db, biz, "Biz Bank", AccountType.SAVINGS, "5000.00")
+    personal_wallet = _wallet(db, user, "Personal GCash", "800.00")  # outside biz's scope
+    _entry(db, biz, "Parking", BudgetEntryType.EXPENSE, "500.00", datetime(2026, 11, 3),
+           account=personal_wallet)
 
-    assert collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id, entity_id=biz.id) == []
-    r = project_running_balance(db, user.id, biz.id, days=30, reference=REF)
+    assert collect_events(db, REF, datetime(2026, 12, 1), user_id=biz.id) == []
+    r = project_running_balance(db, biz.id, days=30, reference=REF)
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
 
 
@@ -398,27 +406,27 @@ def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
     assert get_payables(db, user.id, days=30, reference=REF) == []
 
 
-def test_cross_entity_recurring_transfer_keeps_each_views_in_scope_leg(db, user, entities):
+def test_cross_owner_recurring_transfer_keeps_each_views_in_scope_leg(db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import project_running_balance
 
-    a, b = entities
-    secb = _account(db, user, "SecB", AccountType.SAVINGS, "20000.00", entity_id=a.id)
-    bdo = _account(db, user, "BDO", AccountType.CHECKING, "0.00", entity_id=b.id)
-    _entry(db, user, "BDO loan", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 4),
-           account=bdo, entity_id=b.id)
-    # The transfer entry belongs to entity A but pays into entity B's account.
-    _entry(db, user, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 1),
-           account=secb, transfer_to_account_id=bdo.id, entity_id=a.id)
+    a, b = owners
+    secb = _account(db, a, "SecB", AccountType.SAVINGS, "20000.00")
+    bdo = _account(db, b, "BDO", AccountType.CHECKING, "0.00")
+    _entry(db, b, "BDO loan", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 4),
+           account=bdo)
+    # The transfer entry belongs to A but pays into B's account.
+    _entry(db, a, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 1),
+           account=secb, transfer_to_account_id=bdo.id)
 
-    view_b = project_running_balance(db, user.id, b.id, days=30, reference=REF)
+    view_b = project_running_balance(db, b.id, days=30, reference=REF)
     assert view_b["account_shortfalls"] == []
     assert [(e["name"], e["amount"]) for e in view_b["events"]] == [
         ("SecB to BDO", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
     assert _closings(view_b) == {"BDO": Decimal("0.00")}
 
-    view_a = project_running_balance(db, user.id, a.id, days=30, reference=REF)
+    view_a = project_running_balance(db, a.id, days=30, reference=REF)
     assert [(e["name"], e["amount"]) for e in view_a["events"]] == [
         ("SecB to BDO", Decimal("-8000.00"))]
     assert _closings(view_a) == {"SecB": Decimal("12000.00")}
@@ -487,95 +495,95 @@ def test_disposable_income_counts_income_paid_into_a_wallet_once(db, user):
         "monthly_income": 5000.0, "monthly_expenses": 0.0, "monthly_disposable": 5000.0}
 
 
-def test_disposable_income_does_not_offset_money_sent_to_another_entitys_account(
-        db, user, entities):
+def test_disposable_income_does_not_offset_money_sent_to_another_users_account(
+        db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
 
-    a, b = entities
-    bank = _account(db, user, "A Bank", AccountType.SAVINGS, "0.00", entity_id=a.id)
-    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
-                      is_spending_wallet=True, entity_id=a.id)
-    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
-    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
-           account=bank, transfer_to_account_id=wallet.id, entity_id=a.id)
-    # Leaving entity A's scope: still A's wallet spend, not money returned.
-    _entry(db, user, "GCash to B", BudgetEntryType.EXPENSE, "500.00", REF,
-           account=wallet, transfer_to_account_id=theirs.id, entity_id=a.id)
+    a, b = owners
+    bank = _account(db, a, "A Bank", AccountType.SAVINGS, "0.00")
+    wallet = _account(db, a, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True)
+    theirs = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
+    _entry(db, a, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id)
+    # Leaving A's scope: still A's wallet spend, not money returned.
+    _entry(db, a, "GCash to B", BudgetEntryType.EXPENSE, "500.00", REF,
+           account=wallet, transfer_to_account_id=theirs.id)
 
-    assert get_disposable_income(db, user.id, a.id) == {
+    assert get_disposable_income(db, a.id) == {
         "monthly_income": 0.0, "monthly_expenses": 2000.0, "monthly_disposable": -2000.0}
 
 
-def test_disposable_income_does_not_expense_a_top_up_funded_from_another_entity(
-        db, user, entities):
+def test_disposable_income_does_not_expense_a_top_up_funded_from_another_user(
+        db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
 
-    a, b = entities
-    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
-                      is_spending_wallet=True, entity_id=a.id)
-    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
-    _entry(db, user, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
-           account=theirs, transfer_to_account_id=wallet.id, entity_id=a.id)
+    a, b = owners
+    wallet = _account(db, a, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True)
+    theirs = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
+    _entry(db, a, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=theirs, transfer_to_account_id=wallet.id)
 
-    assert get_disposable_income(db, user.id, a.id) == {
+    assert get_disposable_income(db, a.id) == {
         "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
 
 
-def test_disposable_income_expenses_a_top_up_it_funds_into_another_entitys_wallet(
-        db, user, entities):
+def test_disposable_income_expenses_a_top_up_it_funds_into_another_users_wallet(
+        db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
 
-    a, b = entities
-    wallet = _account(db, user, "A GCash", AccountType.E_WALLET, "0.00",
-                      is_spending_wallet=True, entity_id=a.id)
-    theirs = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
-    # Stored under A, funded from B's bank: B's money leaves B's scope.
-    _entry(db, user, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
-           account=theirs, transfer_to_account_id=wallet.id, entity_id=a.id)
+    a, b = owners
+    wallet = _account(db, a, "A GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True)
+    theirs = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
+    # Created by A, funded from B's bank: B's money leaves B's scope.
+    _entry(db, a, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=theirs, transfer_to_account_id=wallet.id)
 
-    assert get_disposable_income(db, user.id, b.id) == {
+    assert get_disposable_income(db, b.id) == {
         "monthly_income": 0.0, "monthly_expenses": 1000.0, "monthly_disposable": -1000.0}
 
 
-def test_disposable_income_offsets_a_return_stored_under_another_entity(db, user, entities):
+def test_disposable_income_offsets_a_return_created_by_another_user(db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
 
-    a, b = entities
-    bank = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
-    wallet = _account(db, user, "B GCash", AccountType.E_WALLET, "0.00",
-                      is_spending_wallet=True, entity_id=b.id)
-    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
-           account=bank, transfer_to_account_id=wallet.id, entity_id=b.id)
-    _entry(db, user, "GCash back to bank", BudgetEntryType.EXPENSE, "500.00", REF,
-           account=wallet, transfer_to_account_id=bank.id, entity_id=a.id)
+    a, b = owners
+    bank = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
+    wallet = _account(db, b, "B GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True)
+    _entry(db, b, "Load GCash", BudgetEntryType.EXPENSE, "2000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id)
+    _entry(db, a, "GCash back to bank", BudgetEntryType.EXPENSE, "500.00", REF,
+           account=wallet, transfer_to_account_id=bank.id)
 
-    assert get_disposable_income(db, user.id, b.id) == {
+    assert get_disposable_income(db, b.id) == {
         "monthly_income": 0.0, "monthly_expenses": 1500.0, "monthly_disposable": -1500.0}
 
 
-def test_disposable_income_ignores_another_entitys_transfer_between_its_own_accounts(
-        db, user, entities):
+def test_disposable_income_ignores_another_users_transfer_between_its_own_accounts(
+        db, owners):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
 
-    a, b = entities
-    _account(db, user, "A Bank", AccountType.SAVINGS, "0.00", entity_id=a.id)
-    bank = _account(db, user, "B Bank", AccountType.SAVINGS, "0.00", entity_id=b.id)
-    wallet = _account(db, user, "B GCash", AccountType.E_WALLET, "0.00",
-                      is_spending_wallet=True, entity_id=b.id)
-    _entry(db, user, "Load GCash", BudgetEntryType.EXPENSE, "1000.00", REF,
-           account=bank, transfer_to_account_id=wallet.id, entity_id=b.id)
+    a, b = owners
+    _account(db, a, "A Bank", AccountType.SAVINGS, "0.00")
+    bank = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
+    wallet = _account(db, b, "B GCash", AccountType.E_WALLET, "0.00",
+                      is_spending_wallet=True)
+    _entry(db, b, "Load GCash", BudgetEntryType.EXPENSE, "1000.00", REF,
+           account=bank, transfer_to_account_id=wallet.id)
 
-    assert get_disposable_income(db, user.id, a.id) == {
+    assert get_disposable_income(db, a.id) == {
         "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
 
 

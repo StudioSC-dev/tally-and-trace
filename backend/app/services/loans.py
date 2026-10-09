@@ -42,7 +42,7 @@ Matching payments to due dates, in this order (``build_loan_payables``):
    a settled date is no longer projected.
 2. One-off PLANNED payments cover what is left: every UNPOSTED transfer into
    the loan that is not a prepayment (a planned or partial scheduled payment,
-   a plain transfer), whatever its entity. Taken in date order, each pays the
+   a plain transfer), whoever created it. Taken in date order, each pays the
    oldest open due date it can reach (``cover_planned``): a due date on or
    after ``PLANNED_LOOKBACK`` (31 days) before the payment's own date, so a
    catch-up a few days or weeks late pays the overdue due date, while one
@@ -527,7 +527,6 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
 
     txn = Transaction(
         user_id=user_id,
-        entity_id=loan.entity_id,
         account_id=funding.id,
         transfer_from_account_id=funding.id,
         transfer_to_account_id=loan.id,
@@ -571,9 +570,9 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date
 def planned_covers(db: Session, loan: Account) -> List[Tuple[date, Decimal]]:
     """``(date, cash)`` of every unposted non-prepayment transfer into the loan.
 
-    Loaded by the loan alone, whatever the row's date or entity, so a payable
-    does not depend on the window, and a payment stored under another entity
-    still covers this loan's due date.
+    Loaded by the loan alone, whatever the row's date or creator, so a payable
+    does not depend on the window, and a payment another user recorded still
+    covers this loan's due date.
     """
     rows = (
         db.query(Transaction)
