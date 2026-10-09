@@ -930,7 +930,7 @@ def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client
     assert _balance(client, me, bank["id"]) == Decimal("10000.00")
 
 
-def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, people, db):
+def test_a_payment_into_a_loan_the_caller_cannot_see_has_no_fee_or_interest_row(client, people, db):
     from datetime import datetime
     from app.models.transaction import Transaction, TransactionType
 
@@ -945,10 +945,13 @@ def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, pe
                        transaction_date=datetime(2026, 10, 5), is_posted=True))
     db.commit()
 
+    # The limited view shows one whole payment (audit round 1, A): its interest
+    # appears as neither a fee nor an interest row.
     s = _summary(client, other)
     rows = s["category_breakdown"]
-    assert Decimal(str(rows["Transfer fees"]["expenses"])) == Decimal("50")
+    assert "Transfer fees" not in rows, rows
     assert not any(name.startswith("Interest: ") for name in rows), rows
+    assert Decimal(str(s["summary"]["total_expenses"])) == Decimal("0")
     _assert_rows_sum(s)
 
     # The loan's owner paid nothing: the money left an account outside their scope.
