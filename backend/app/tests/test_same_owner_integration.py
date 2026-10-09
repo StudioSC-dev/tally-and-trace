@@ -280,3 +280,79 @@ def test_every_reference_column_has_a_case():
         "allocations.configuration.savings_category_id", "wishlist_items.category_id",
         "accounts.payment_account_id", "accounts.payment_overflow_account_id",
     }
+
+
+# --- A debit or credit's transfer_* fields name no account it touches ---------
+#
+# Only a transfer touches its transfer_from/transfer_to accounts. A debit or
+# credit carrying one (stored by an older client, or left behind by an edit
+# from a transfer) must not reach the user who owns that account: not in their
+# list, search, period summary, upcoming list, dashboard, projections or export.
+
+STRAY = "Zq7Stray"
+
+
+def _soon(days=3):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(days=days)).replace(
+        tzinfo=None, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+
+def _assert_victim_sees_nothing(client, victim):
+    h = victim["headers"]
+    for path, params in (
+        ("/transactions/", {"limit": 200}),
+        ("/transactions/", {"search": STRAY}),
+        ("/forecast/upcoming", {"days": 60}),
+        ("/forecast/timeline", {"days": 60}),
+        ("/forecast/cashflow", {}),
+        ("/dashboard/snapshot", {}),
+        ("/data/export.json", {}),
+    ):
+        r = client.get(f"{API}{path}", headers=h, params=params)
+        assert r.status_code == 200, (path, r.text)
+        assert STRAY not in r.text, path
+    assert client.get(f"{API}/transactions/", headers=h).json()["total"] == 0
+    assert client.get(f"{API}/data/export.json", headers=h).json()["others_transactions"] == []
+    r = client.get(f"{API}/transactions/summary/period", headers=h, params={
+        "start_date": "2000-01-01T00:00:00", "end_date": "2100-01-01T00:00:00"})
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"]["transaction_count"] == 0
+    assert r.json()["category_breakdown"] == {}
+
+
+@pytest.mark.parametrize("txn_type", ["debit", "credit"])
+@pytest.mark.parametrize("column", ["transfer_from_account_id", "transfer_to_account_id"])
+def test_a_stored_stray_transfer_account_on_a_debit_or_credit_reaches_no_one(
+        client, db, world, txn_type, column):
+    """Rows already stored with a stray transfer_* id (not just new requests)."""
+    from datetime import datetime
+
+    from app.models.transaction import Transaction, TransactionType
+
+    mine, theirs = world["mine"], world["theirs"]
+    my_id = db.execute(text("SELECT user_id FROM accounts WHERE id = :a"),
+                       {"a": mine["bank"]}).scalar()
+    for posted, when in ((True, datetime.fromisoformat(WHEN)),
+                         (False, datetime.fromisoformat(_soon()))):
+        db.add(Transaction(
+            user_id=my_id, account_id=mine["bank"], amount=77, currency="PHP",
+            transaction_type=TransactionType(txn_type), transaction_date=when,
+            description=f"{STRAY} {txn_type}", is_posted=posted, transfer_fee=0,
+            **{column: theirs["bank"]}))
+    db.commit()
+
+    _assert_victim_sees_nothing(client, theirs)
+    # The victim cannot open it either; its creator still can.
+    rows = client.get(f"{API}/transactions/", headers=mine["headers"],
+                      params={"search": STRAY}).json()["items"]
+    assert len(rows) == 2
+    for row in rows:
+        r = client.get(f"{API}/transactions/{row['id']}", headers=theirs["headers"])
+        assert r.status_code == 404
+        assert client.get(f"{API}/transactions/{row['id']}",
+                          headers=mine["headers"]).status_code == 200
+    # The creator, owner of the row's only touched account, may delete it.
+    r = client.delete(f"{API}/transactions/{rows[0]['id']}", headers=mine["headers"])
+    assert r.status_code == 200, r.text

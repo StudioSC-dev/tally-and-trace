@@ -36,12 +36,12 @@ no right to know that.
 from typing import Iterable, Optional, Set, Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry
-from app.models.transaction import Transaction
+from app.models.transaction import Transaction, TransactionType
 
 OWNER = "owner"
 NONE = "none"
@@ -61,6 +61,21 @@ TOUCHED_COLUMNS = {
     Transaction: ("account_id", "transfer_from_account_id", "transfer_to_account_id"),
     BudgetEntry: ("account_id", "transfer_to_account_id", "overflow_account_id"),
 }
+# Columns that count only on a transfer. A debit or credit touches its
+# account_id alone: any transfer_* value it carries (a stale one left by an
+# edit from a transfer, or one a client sent) names no account it moves money
+# on, so it grants no one access to it.
+TRANSFER_ONLY_COLUMNS = {
+    Transaction: frozenset({"transfer_from_account_id", "transfer_to_account_id"}),
+    BudgetEntry: frozenset(),
+}
+
+
+def _counts(record, column: str) -> bool:
+    """Whether ``column`` names an account ``record`` touches."""
+    if column not in TRANSFER_ONLY_COLUMNS[type(record)]:
+        return True
+    return record.transaction_type == TransactionType.TRANSFER
 
 
 def _uid(user) -> Optional[int]:
@@ -105,6 +120,8 @@ def record_account_ids(record) -> Tuple[int, ...]:
     columns = TOUCHED_COLUMNS[type(record)]
     ids = []
     for column in columns:
+        if not _counts(record, column):
+            continue
         value = getattr(record, column)
         if value is not None and value not in ids:
             ids.append(value)
@@ -114,7 +131,13 @@ def record_account_ids(record) -> Tuple[int, ...]:
 def touches_accounts(model, account_ids: Iterable[int]):
     """Criterion: the record touches any of ``account_ids``."""
     ids = list(account_ids)
-    return or_(*(getattr(model, column).in_(ids) for column in TOUCHED_COLUMNS[model]))
+    criteria = []
+    for column in TOUCHED_COLUMNS[model]:
+        criterion = getattr(model, column).in_(ids)
+        if column in TRANSFER_ONLY_COLUMNS[model]:
+            criterion = and_(model.transaction_type == TransactionType.TRANSFER, criterion)
+        criteria.append(criterion)
+    return or_(*criteria)
 
 
 def readable_criterion(model, user, scope_ids: Iterable[int]):

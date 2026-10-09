@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -11,6 +10,7 @@ from app.core.access import (
     readable_criterion,
     require_account,
     require_owned_ref,
+    touches_accounts,
     viewable_account_ids,
 )
 from app.models.transaction import Transaction, TransactionType
@@ -546,13 +546,7 @@ def get_transactions(
     )
 
     if account_ids:
-        query = query.filter(
-            or_(
-                Transaction.account_id.in_(account_ids),
-                Transaction.transfer_from_account_id.in_(account_ids),
-                Transaction.transfer_to_account_id.in_(account_ids)
-            )
-        )
+        query = query.filter(touches_accounts(Transaction, account_ids))
     if category_ids:
         query = query.filter(Transaction.category_id.in_(category_ids))
     if allocation_id:
@@ -1076,11 +1070,7 @@ def get_transaction_summary(
     # history). Rows touching them, whoever entered them; summarize_period's
     # source-scope guard decides what a transfer from outside counts for.
     scope_ids = viewable_account_ids(db, current_user)
-    query = query.filter(or_(
-        Transaction.account_id.in_(scope_ids),
-        Transaction.transfer_from_account_id.in_(scope_ids),
-        Transaction.transfer_to_account_id.in_(scope_ids)
-    ))
+    query = query.filter(touches_accounts(Transaction, scope_ids))
     
     if account_id:
         query = query.filter(Transaction.account_id == account_id)
