@@ -910,8 +910,11 @@ async def upload_receipt(
     current_user: User = Depends(get_current_active_user)
 ):
     """Upload a receipt for a transaction"""
+    # The receipt is the creator's: only they may set it, and only while they
+    # may still change the row's accounts.
     db_transaction = get_record_or_404(
-        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+        db, Transaction, transaction_id, current_user, "Transaction not found",
+        write=True, creator=True)
     
     # Validate file type
     file_extension = file.filename.split(".")[-1].lower()

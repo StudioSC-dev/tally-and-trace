@@ -321,3 +321,91 @@ def test_entity_headers_and_params_are_ignored(client, world):
         assert MARK not in r.text, path
     r = client.get(f"{API}/transactions/{world['transaction']}", headers=headers)
     assert r.status_code == 404
+
+
+# --- Legacy cross-owner rows ---------------------------------------------------
+#
+# Before STU-229 a user could record a row on another user's account (through a
+# shared entity). Such a row, created by B on A's account, stays reachable by
+# both: B created it, A owns every account it touches. Neither may edit it
+# through PUT (B can't change A's account; A's edit would leave the row on an
+# account its creator can't change), only A may delete it, a receipt is the
+# creator's own field and needs the write rule too (so neither may set it), and
+# A can't materialise B's recurring entry (it is not A's to post from).
+
+LEGACY_MATRIX = [
+    ("transaction", "get", "a", 200), ("transaction", "get", "b", 200),
+    ("transaction", "list", "a", 200), ("transaction", "list", "b", 200),
+    ("transaction", "put", "a", 404), ("transaction", "put", "b", 404),
+    ("transaction", "delete", "a", 200), ("transaction", "delete", "b", 404),
+    ("transaction", "upload-receipt", "a", 404), ("transaction", "upload-receipt", "b", 404),
+    ("entry", "get", "a", 200), ("entry", "get", "b", 200),
+    ("entry", "list", "a", 200), ("entry", "list", "b", 200),
+    ("entry", "put", "a", 404), ("entry", "put", "b", 404),
+    ("entry", "delete", "a", 204), ("entry", "delete", "b", 404),
+    ("entry", "materialize", "a", 404), ("entry", "materialize", "b", 404),
+]
+
+
+@pytest.fixture
+def legacy(client, db, people):
+    """B's transaction and recurring entry on A's account, as the entity era left them."""
+    from datetime import datetime
+
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import Transaction, TransactionType
+
+    a, b = people(), people()
+    bank = _post(client, a, "/accounts/", {
+        "name": "A bank", "account_type": "checking", "balance": 1_000})["id"]
+    _post(client, b, "/accounts/", {"name": "B bank", "account_type": "checking", "balance": 0})
+    txn = Transaction(
+        user_id=b["id"], account_id=bank, amount=55, currency="PHP",
+        transaction_type=TransactionType.DEBIT, transaction_date=datetime.fromisoformat(WHEN),
+        description="Legacy row", is_posted=False, transfer_fee=0)
+    entry = BudgetEntry(
+        user_id=b["id"], account_id=bank, name="Legacy bill", amount=66, currency="PHP",
+        entry_type=BudgetEntryType.EXPENSE, next_occurrence=datetime.fromisoformat(WHEN))
+    db.add_all([txn, entry])
+    db.commit()
+    return {"a": a, "b": b, "transaction": txn.id, "entry": entry.id}
+
+
+@pytest.mark.parametrize("kind,action,actor,expected", LEGACY_MATRIX)
+def test_a_legacy_cross_owner_row(client, db, legacy, kind, action, actor, expected):
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    who = legacy[actor]
+    rid = legacy[kind]
+    base = "/transactions/" if kind == "transaction" else "/budget-entries/"
+    model = Transaction if kind == "transaction" else BudgetEntry
+
+    def stored():
+        db.expire_all()
+        row = db.query(model).filter(model.id == rid).first()
+        return None if row is None else (
+            row.amount, row.account_id, getattr(row, "receipt_url", None))
+
+    before = stored()
+    if action == "list":
+        r = client.get(f"{API}{base}", headers=who["headers"], params={"limit": 200})
+        assert r.status_code == expected, r.text
+        assert rid in {row["id"] for row in r.json()["items"]}
+        return
+    if action == "get":
+        r = client.get(f"{API}{base}{rid}", headers=who["headers"])
+    elif action == "put":
+        r = client.put(f"{API}{base}{rid}", headers=who["headers"], json={"amount": 1})
+    elif action == "delete":
+        r = client.delete(f"{API}{base}{rid}", headers=who["headers"])
+    elif action == "upload-receipt":
+        r = client.post(f"{API}{base}{rid}/upload-receipt", headers=who["headers"],
+                        files={"file": ("r.png", b"x", "image/png")})
+    else:
+        r = client.post(f"{API}{base}{rid}/materialize", headers=who["headers"])
+    assert r.status_code == expected, (r.status_code, r.text)
+    if action == "delete" and expected < 300:
+        assert stored() is None
+    else:
+        assert stored() == before

@@ -208,12 +208,19 @@ def require_account(db: Session, user, account_id: Optional[int], detail: str,
 
 
 def get_record_or_404(db: Session, model, record_id: int, user, detail: str = "Not found",
-                      *, write: bool = False):
-    """A transaction or recurring entry the caller may read (or write, with ``write``)."""
+                      *, write: bool = False, creator: bool = False):
+    """A transaction or recurring entry the caller may read (or write, with ``write``).
+
+    With ``creator`` the caller must also have created it: for changes to the
+    creator's own fields (a receipt), which the owner of the accounts the record
+    touches may not make on someone else's record.
+    """
     record = db.query(model).filter(model.id == record_id).first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     allowed = can_write_record(db, user, record) if write else can_read_record(db, user, record)
+    if creator and record.user_id != _uid(user):
+        allowed = False
     if not allowed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return record
