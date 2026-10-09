@@ -10,6 +10,7 @@ from app.models.budget_entry import BudgetEntry as BudgetEntry, BudgetEntryType 
 from app.models.email_token import EmailToken as EmailToken, EmailTokenType as EmailTokenType
 from app.models.refresh_token import RefreshToken as RefreshToken
 from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPriority as WishlistPriority
+from app.models.demo_state import DemoState as DemoState
 
 # ---------------------------------------------------------------------------
 # User relationships

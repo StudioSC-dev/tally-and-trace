@@ -48,7 +48,8 @@ def _run_startup():
     The database SCHEMA is owned by Alembic. Migrations run at build time in
     production via render.yaml (`alembic upgrade head`), and must be run locally
     with `alembic upgrade head` before starting the app. This hook only seeds
-    demo data (a no-op if the DB is already populated).
+    the demo user (a no-op unless the demo shape version changed; see
+    app/core/seed.py).
 
     The old raw-SQL DDL block that used to live here was removed: it duplicated
     the migrations and was proven incomplete (it never created
