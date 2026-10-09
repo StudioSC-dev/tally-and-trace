@@ -8,18 +8,18 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.entity_context import (
-    can_access_record,
-    get_accessible_or_404,
-    get_active_entity,
-    scope_criterion,
-    validate_entity_ownership,
+from app.core.access import (
+    can_edit_account,
+    get_record_or_404,
+    readable_criterion,
+    require_account,
+    require_owned_ref,
+    viewable_account_ids,
 )
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.allocation import Allocation
-from app.models.entity import Entity
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import (
@@ -57,6 +57,9 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     ``occurrences_paid_offset`` is the explicit escape hatch: charges paid before
     import (no linked transaction) are added to the linked count.
 
+    Only the entry creator's transactions count: another user's row naming the
+    entry is a stale reference and pays nothing.
+
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
     meaningless.
@@ -66,7 +69,9 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     if installments:
         rows = (
             db.query(Transaction.budget_entry_id, func.count(Transaction.id))
-            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]))
+            .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]),
+                    Transaction.user_id == BudgetEntry.user_id)
             .group_by(Transaction.budget_entry_id)
             .all()
         )
@@ -89,26 +94,51 @@ def _ensure_related_resources(
     account_id: Optional[int],
     category_id: Optional[int],
     allocation_id: Optional[int],
+    owner: Optional[User] = None,
 ):
     """Verify the caller may reference each related record.
 
-    Takes the User rather than a bare user_id so it can honour entity sharing: a
-    member may attach an entry to a co-member's account/category/allocation within
-    an entity they both belong to.
+    The account must be one both the caller and the entry's owner (``owner``,
+    default the caller) may change. Categories and allocations are never
+    shared: by the same-owner rule they must belong to the caller and to the
+    entry's owner.
     """
-    for model, record_id, label in (
-        (Account, account_id, "Account"),
-        (Category, category_id, "Category"),
-        (Allocation, allocation_id, "Allocation"),
-    ):
-        if not record_id:
-            continue
-        record = db.query(model).filter(model.id == record_id).first()
-        if not record or not can_access_record(db, user, record):
-            raise HTTPException(status_code=404, detail=f"{label} not found")
+    if account_id:
+        require_account(db, user, account_id, "Account not found", owner=owner)
+    require_owned_ref(db, Category, category_id or None, "Category not found", user, owner)
+    require_owned_ref(db, Allocation, allocation_id or None, "Allocation not found", user, owner)
 
 
-def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int]) -> None:
+PROSPECTIVE_ACCOUNT_FIELDS = (
+    ("account_id", "Account not found"),
+    ("transfer_to_account_id", "Transfer destination account not found"),
+    ("overflow_account_id", "Overflow account not found"),
+)
+
+
+def _ensure_prospective_accounts(db: Session, user: User, entry: BudgetEntry,
+                                 prospective_data: dict, owner: User) -> None:
+    """404 unless the edit leaves the entry on accounts both the caller and its creator may change.
+
+    Each touched-account column is read as it will be after the update (sent
+    or stored). With none left, the entry is accountless and only its creator
+    may make that change.
+    """
+    touched = [
+        (prospective_data.get(field, getattr(entry, field)), detail)
+        for field, detail in PROSPECTIVE_ACCOUNT_FIELDS
+    ]
+    touched = [(account_id, detail) for account_id, detail in touched if account_id]
+    if not touched:
+        if entry.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Budget entry not found")
+        return
+    for account_id, detail in touched:
+        require_account(db, user, account_id, detail, owner=owner)
+
+
+def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int],
+                               owner: Optional[User] = None) -> None:
     """An overflow account is a funding source: accessible, not a wallet or a loan.
 
     Neither a wallet nor a loan is projection cash, so routing cannot pull an
@@ -117,9 +147,8 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
     """
     if not overflow_account_id:
         return
-    account = db.query(Account).filter(Account.id == overflow_account_id).first()
-    if not account or not can_access_record(db, user, account):
-        raise HTTPException(status_code=404, detail="Overflow account not found")
+    account = require_account(db, user, overflow_account_id, "Overflow account not found",
+                              owner=owner)
     if account.is_spending_wallet:
         raise HTTPException(
             status_code=400,
@@ -158,6 +187,7 @@ def _validate_transfer_destination(
     transfer_to_account_id: Optional[int],
     entry_type: BudgetEntryType,
     currency=None,
+    owner: Optional[User] = None,
 ) -> None:
     """A recurring transfer moves money between two accessible non-credit accounts.
 
@@ -183,7 +213,8 @@ def _validate_transfer_destination(
             status_code=400, detail="Only an expense entry can be a recurring transfer"
         )
     destination = db.query(Account).filter(Account.id == transfer_to_account_id).first()
-    if not destination or not can_access_record(db, user, destination):
+    if (not destination or not can_edit_account(user, destination)
+            or (owner is not None and not can_edit_account(owner, destination))):
         raise HTTPException(status_code=404, detail="Transfer destination account not found")
     if destination.account_type == AccountType.CREDIT:
         raise HTTPException(
@@ -217,7 +248,6 @@ def _validate_transfer_destination(
 def list_budget_entries(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
     entry_type: Optional[BudgetEntryType] = Query(
         None, description="Filter by entry type (income or expense)"
     ),
@@ -232,7 +262,7 @@ def list_budget_entries(
     offset: int = Query(0, ge=0),
 ):
     query = db.query(BudgetEntry).filter(
-        scope_criterion(BudgetEntry, current_user.id, active_entity.id if active_entity else None)
+        readable_criterion(BudgetEntry, current_user, viewable_account_ids(db, current_user))
     )
 
     if entry_type:
@@ -265,7 +295,7 @@ def get_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     return _attach_occurrence_counts(db, [entry])[0]
 
 
@@ -274,7 +304,6 @@ def create_budget_entry(
     entry_in: BudgetEntryCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     _ensure_related_resources(
         db=db,
@@ -291,11 +320,6 @@ def create_budget_entry(
     )
 
     entry_data = entry_in.dict()
-    if entry_data.get("entity_id") is None and active_entity is not None:
-        entry_data["entity_id"] = active_entity.id
-    else:
-        validate_entity_ownership(db, current_user, entry_data.get("entity_id"))
-
     entry_data["user_id"] = current_user.id
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
     entry = BudgetEntry(**entry_data)
@@ -313,21 +337,38 @@ def update_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    entry = get_record_or_404(
+        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
+    owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
-    if "entity_id" in prospective_data:
-        validate_entity_ownership(db, current_user, prospective_data["entity_id"])
+
+    def changed(field: str) -> Optional[int]:
+        """The request's new reference, or None when it leaves the stored one."""
+        value = prospective_data.get(field, getattr(entry, field))
+        return value if value != getattr(entry, field) else None
+
+    # Every account the entry will touch is checked as it will be (the write
+    # rule), whether the edit changes it or not: the caller and the entry's
+    # creator must both be able to change each one. An entry left touching no
+    # account is its creator's alone, so only the creator may make it so;
+    # otherwise the owner of its accounts could turn it into the creator's
+    # accountless entry and move their unassigned cash.
+    _ensure_prospective_accounts(db, current_user, entry, prospective_data, owner)
+    # A category or allocation only when the edit changes it, so a stored
+    # legacy reference never blocks an unrelated edit.
     _ensure_related_resources(
         db=db,
         user=current_user,
-        account_id=prospective_data.get("account_id", entry.account_id),
-        category_id=prospective_data.get("category_id", entry.category_id),
-        allocation_id=prospective_data.get("allocation_id", entry.allocation_id),
+        account_id=None,
+        category_id=changed("category_id"),
+        allocation_id=changed("allocation_id"),
+        owner=owner,
     )
     if "account_id" in prospective_data:
         _validate_entry_account(db, prospective_data["account_id"])
     if "overflow_account_id" in prospective_data:
-        _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"])
+        _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"],
+                                   owner=owner)
     _validate_transfer_destination(
         db,
         current_user,
@@ -335,6 +376,7 @@ def update_budget_entry(
         prospective_data.get("transfer_to_account_id", entry.transfer_to_account_id),
         prospective_data.get("entry_type") or entry.entry_type,
         prospective_data.get("currency") or entry.currency,
+        owner=owner,
     )
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
@@ -361,7 +403,8 @@ def delete_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    entry = get_record_or_404(
+        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
     db.delete(entry)
     db.commit()
 
@@ -421,7 +464,8 @@ def materialize_budget_entry(
     from app.routers.transactions import create_transaction
     from app.schemas.transaction import TransactionCreate
 
-    entry = get_accessible_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    entry = get_record_or_404(
+        db, BudgetEntry, entry_id, current_user, "Budget entry not found", write=True)
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
 
@@ -453,13 +497,12 @@ def materialize_budget_entry(
         transaction_date=occurrence_date,
         category_id=entry.category_id,
         allocation_id=entry.allocation_id,
-        entity_id=entry.entity_id,
         budget_entry_id=entry.id,
         description=entry.name,
         is_posted=True,
         **transfer_fields,
     )
-    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user, active_entity=None)
+    db_txn = create_transaction(transaction=txn_create, db=db, current_user=current_user)
 
     if payload.advance:
         next_occ = _advance_occurrence(entry, entry.next_occurrence)

@@ -2,8 +2,8 @@
 
 The routing fields are account ids supplied by the client, and the ids they name
 surface back to the caller through the timeline's ``account_shortfalls``
-(which include ``account_name``). So they need the same treatment entity_id got in
-Session 13: validate membership rather than trusting the payload.
+(which include ``account_name``). So they are validated against the accounts the
+caller may change, rather than trusted from the payload.
 
 Skips itself when no database is reachable.
 """

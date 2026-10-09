@@ -5,8 +5,6 @@ import type {
   Allocation,
   BudgetEntry,
   Transaction,
-  Entity,
-  EntityWithMembers,
   WishlistItem,
   PaginatedResponse,
   AccountBalance,
@@ -29,8 +27,6 @@ export type {
   Allocation,
   BudgetEntry,
   Transaction,
-  Entity,
-  EntityWithMembers,
   WishlistItem,
   PaginatedResponse,
   AccountBalance,
@@ -68,7 +64,7 @@ const rawBaseQuery = fetchBaseQuery({
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: rawBaseQuery,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Entity', 'Wishlist', 'Dashboard'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Dashboard'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; limit?: number; offset?: number } | void>({
@@ -214,28 +210,6 @@ export const accountingApi = createApi({
       providesTags: ['Transaction'],
     }),
 
-    // ── Entities ──────────────────────────────────────────────────────────────
-    getMyEntities: builder.query<Entity[], void>({
-      query: () => 'entities/me',
-      providesTags: ['Entity'],
-    }),
-    getEntity: builder.query<EntityWithMembers, number>({
-      query: (id) => `entities/${id}`,
-      providesTags: ['Entity'],
-    }),
-    createEntity: builder.mutation<Entity, { name: string; entity_type: string }>({
-      query: (body) => ({ url: 'entities/', method: 'POST', body }),
-      invalidatesTags: ['Entity'],
-    }),
-    updateEntity: builder.mutation<Entity, { id: number; data: { name?: string; entity_type?: string } }>({
-      query: ({ id, data }) => ({ url: `entities/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Entity'],
-    }),
-    deleteEntity: builder.mutation<void, number>({
-      query: (id) => ({ url: `entities/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Entity'],
-    }),
-
     // ── Wishlist ──────────────────────────────────────────────────────────────
     getWishlistItems: builder.query<PaginatedResponse<WishlistItem>, { is_achieved?: boolean; limit?: number; offset?: number } | void>({
       query: (params) => ({ url: 'wishlist/', params: params ?? {} }),
@@ -306,12 +280,6 @@ export const {
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useGetTransactionSummaryQuery,
-  // Entity
-  useGetMyEntitiesQuery,
-  useGetEntityQuery,
-  useCreateEntityMutation,
-  useUpdateEntityMutation,
-  useDeleteEntityMutation,
   // Wishlist
   useGetWishlistItemsQuery,
   useCreateWishlistItemMutation,

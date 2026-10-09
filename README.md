@@ -4,7 +4,7 @@ A **full-stack, type-safe monorepo** for personal and business financial managem
 
 ## Why I Built This
 
-I developed Tally & Trace to solve my own need for a simple, flexible financial tracking tool that would replace my aging Google Sheet tracker. Existing solutions were either too complex, too expensive, or lacked the multi-entity support I needed to manage both personal and business finances in one place. This app represents my ideal balance of functionality and simplicity, built with modern tools and best practices.
+I developed Tally & Trace to solve my own need for a simple, flexible financial tracking tool that would replace my aging Google Sheet tracker. Existing solutions were either too complex, too expensive, or lacked the flexibility I needed to manage personal and business finances in one place. This app represents my ideal balance of functionality and simplicity, built with modern tools and best practices.
 
 I built this with my own use cases (my personal use cases, my wife's, our household's and our potential business ventures) in mind. It might not fit yours right away, but do let me know if you have certain features in mind via seth@studiosc.dev.
 
@@ -70,12 +70,12 @@ tally-and-trace/
 
 ## Features
 
-- **Multi-Entity Architecture**: Manage personal and business finances under separate entities
+- **Owner-Scoped Records**: Every account has one owner; a record is visible to the user who made it and to the owner of any account it touches, and every reference must belong to the same owner
 - **Account Management**: Cash, e-wallets, savings, checking, and credit accounts with multi-currency support
 - **Transaction Tracking**: Record income, expenses, and transfers with FX fields
 - **Budget Entries**: Recurring income/expense items with configurable cadence and end rules
 - **Allocations**: Savings goals, budgets, and period-based allocations
-- **Wishlist**: Prioritised wishlist items linked to categories and entities
+- **Wishlist**: Prioritised wishlist items linked to categories
 - **Category Organisation**: Color-coded categories for transactions and budgets
 - **Auth & Email**: JWT authentication with email verification and password reset (via Resend)
 - **Shared Package**: `@tally-trace/shared` provides types and utilities consumed by both web and mobile
@@ -195,10 +195,9 @@ All endpoints are prefixed with `/api/v1`.
 - `PUT    /budget-entries/{id}` — Update a budget entry
 - `DELETE /budget-entries/{id}` — Delete a budget entry
 
-### Entities
-- `GET    /entities/` — List entities for current user
-- `POST   /entities/` — Create an entity
-- `GET    /entities/{id}` — Get entity details
+### Data export
+- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema)
+- `GET    /data/export.csv?table=<name>` — Download one table as CSV; without `table`, a ZIP of every table
 
 ### Wishlist
 - `GET    /wishlist/` — List wishlist items
@@ -220,7 +219,7 @@ All endpoints are prefixed with `/api/v1`.
   alembic upgrade head
   ```
 - **Auto-router inclusion**: All files in `app/routers/` are automatically registered.
-- **Database seeding**: Initial data loaded from `app/constants/seed_data.json` on startup.
+- **Demo seeding**: On startup, the demo user (`demo@example.com`) gets the generic data in `app/constants/seed_data.json`. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing or the version differs, only the demo user's data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes.
 - **Type safety**: Pydantic v2 for request/response validation.
 
 ### Frontend (Web)

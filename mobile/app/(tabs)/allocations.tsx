@@ -41,14 +41,12 @@ function AllocationFormModal({
   onClose,
   initial,
   accounts,
-  entityId,
   defaultCurrency,
 }: {
   visible: boolean
   onClose: () => void
   initial?: Partial<Allocation>
   accounts: Account[]
-  entityId: number
   defaultCurrency: CurrencyCode
 }) {
   const isEdit = !!initial?.id
@@ -81,7 +79,6 @@ function AllocationFormModal({
         current_amount: parseFloat(form.current_amount) || 0,
         account_id: parseInt(form.account_id),
         currency: form.currency as CurrencyCode,
-        entity_id: entityId,
       }
       if (isEdit && initial?.id) {
         await update({ id: initial.id, data: payload }).unwrap()
@@ -343,7 +340,6 @@ export default function AllocationsScreen() {
         onClose={() => setModalVisible(false)}
         initial={editing}
         accounts={accounts}
-        entityId={1}
         defaultCurrency={currency}
       />
     </SafeAreaView>

@@ -16,11 +16,6 @@ export type {
   EndMode,
   Transaction,
   TransactionType,
-  Entity,
-  EntityType,
-  EntityMembership,
-  EntityMembershipRole,
-  EntityWithMembers,
   WishlistItem,
   WishlistItemPriority,
   PaginatedResponse,
@@ -63,7 +58,6 @@ import type {
   CashflowTimeline,
   WishlistItem,
   WishlistPlan,
-  Entity,
   LoanPaymentRequest,
   LoanPrepaymentRequest,
   LoanSchedule,
@@ -74,7 +68,7 @@ import type {
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Entity'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; limit?: number; offset?: number }>({
@@ -254,18 +248,18 @@ export const accountingApi = createApi({
     }),
 
     // ── Forecast ──────────────────────────────────────────────────────────────
-    getForecastTimeline: builder.query<CashflowTimeline, { days?: number; entity_id?: number } | void>({
+    getForecastTimeline: builder.query<CashflowTimeline, { days?: number } | void>({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
       providesTags: ['Account', 'BudgetEntry', 'Transaction'],
     }),
 
     // ── Wishlist ──────────────────────────────────────────────────────────────
-    getWishlist: builder.query<WishlistItem[], { entity_id?: number; is_purchased?: boolean } | void>({
+    getWishlist: builder.query<WishlistItem[], { is_purchased?: boolean } | void>({
       query: (params) => ({ url: 'wishlist/', params: params ?? {} }),
       providesTags: ['Wishlist'],
     }),
-    getWishlistPlan: builder.query<WishlistPlan, { entity_id?: number } | void>({
-      query: (params) => ({ url: 'wishlist/plan', params: params ?? {} }),
+    getWishlistPlan: builder.query<WishlistPlan, void>({
+      query: () => 'wishlist/plan',
       providesTags: ['Wishlist', 'BudgetEntry'],
     }),
     createWishlistItem: builder.mutation<WishlistItem, Partial<WishlistItem>>({
@@ -279,24 +273,6 @@ export const accountingApi = createApi({
     deleteWishlistItem: builder.mutation<void, number>({
       query: (id) => ({ url: `wishlist/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Wishlist'],
-    }),
-
-    // ── Entities ──────────────────────────────────────────────────────────────
-    getEntities: builder.query<Entity[], { is_active?: boolean } | void>({
-      query: (params) => ({ url: 'entities/', params: params ?? {} }),
-      providesTags: ['Entity'],
-    }),
-    createEntity: builder.mutation<Entity, Partial<Entity>>({
-      query: (body) => ({ url: 'entities/', method: 'POST', body }),
-      invalidatesTags: ['Entity'],
-    }),
-    updateEntity: builder.mutation<Entity, { id: number; data: Partial<Entity> }>({
-      query: ({ id, data }) => ({ url: `entities/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Entity'],
-    }),
-    deleteEntity: builder.mutation<void, number>({
-      query: (id) => ({ url: `entities/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Entity'],
     }),
   }),
 })
@@ -359,10 +335,4 @@ export const {
   useCreateWishlistItemMutation,
   useUpdateWishlistItemMutation,
   useDeleteWishlistItemMutation,
-
-  // Entity hooks
-  useGetEntitiesQuery,
-  useCreateEntityMutation,
-  useUpdateEntityMutation,
-  useDeleteEntityMutation,
 } = accountingApi

@@ -49,7 +49,6 @@ export interface Account {
    * it, so it is counted again).
    */
   loan_payments_made_offset?: number | null
-  entity_id: number
   is_active: boolean
   created_at: string
   updated_at?: string
@@ -144,7 +143,6 @@ export interface Category {
    */
   kind: CategoryKind
   is_active: boolean
-  entity_id: number
   created_at: string
   updated_at?: string
 }
@@ -157,7 +155,6 @@ export type BudgetPeriodFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly'
 export interface Allocation {
   id: number
   account_id: number
-  entity_id: number
   name: string
   allocation_type: AllocationType
   description?: string
@@ -192,7 +189,6 @@ export type EndMode = 'indefinite' | 'on_date' | 'after_occurrences'
 export interface BudgetEntry {
   id: number
   user_id: number
-  entity_id: number
   entry_type: BudgetEntryType
   name: string
   description?: string
@@ -234,7 +230,6 @@ export type TransactionType = 'debit' | 'credit' | 'transfer'
 export interface Transaction {
   id: number
   account_id: number
-  entity_id: number
   category_id?: number
   allocation_id?: number
   budget_entry_id?: number
@@ -271,35 +266,6 @@ export interface Transaction {
   updated_at?: string
 }
 
-// ─── Entity ──────────────────────────────────────────────────────────────────
-
-export type EntityType = 'personal' | 'business'
-export type EntityMembershipRole = 'owner' | 'member'
-
-export interface Entity {
-  id: number
-  name: string
-  entity_type: EntityType
-  description?: string
-  default_currency?: string
-  is_active: boolean
-  created_at: string
-  updated_at?: string
-}
-
-export interface EntityMembership {
-  id: number
-  entity_id: number
-  user_id: number
-  role: EntityMembershipRole
-  created_at: string
-  updated_at?: string
-}
-
-export interface EntityWithMembers extends Entity {
-  members: EntityMembership[]
-}
-
 // ─── Wishlist ────────────────────────────────────────────────────────────────
 
 export type WishlistItemPriority = 'low' | 'medium' | 'high' | 'critical'
@@ -307,7 +273,6 @@ export type WishlistItemPriority = 'low' | 'medium' | 'high' | 'critical'
 export interface WishlistItem {
   id: number
   user_id: number
-  entity_id?: number
   name: string
   estimated_cost: number
   currency: CurrencyCode

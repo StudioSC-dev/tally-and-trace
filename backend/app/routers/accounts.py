@@ -4,15 +4,19 @@ from sqlalchemy import or_
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import (
-    can_access_record,
-    get_accessible_or_404,
-    get_active_entity,
-    scope_criterion,
-    validate_entity_ownership,
+from app.core.access import (
+    DIRECT_ROLES,
+    EDIT_ROLES,
+    MANAGE_ROLES,
+    OWNER,
+    OWNER_ROLES,
+    account_role,
+    can_edit_account,
+    can_view_account,
+    get_account_or_404,
+    viewable_accounts,
 )
 from app.models.account import Account, AccountType
-from app.models.entity import Entity
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
@@ -29,20 +33,24 @@ router = APIRouter()
 
 
 def _funding_account(
-    db: Session, current_user: User, target_id: int, field: str, account_id: Optional[int] = None
+    db: Session, current_user: User, target_id: int, field: str, account_id: Optional[int] = None,
+    owner=None,
 ) -> Account:
     """The account ``field`` names, if the caller may use it to fund a payment.
 
     Access is checked first (404), so the type rules never describe an account
-    the caller cannot see. A funding account holds projection cash: not the
-    paying account itself, a credit card (owed, not held), a spending wallet
-    (already spent at top-up) or a loan (owed, not held).
+    the caller cannot see: the caller needs an edit role on it, and with
+    ``owner`` (an account's routing) it must be owned by that same user, since
+    routing never points across owners. A funding account holds projection
+    cash: not the paying account itself, a credit card (owed, not held), a
+    spending wallet (already spent at top-up) or a loan (owed, not held).
     """
     if account_id is not None and target_id == account_id:
         raise HTTPException(status_code=400, detail=f"{field} cannot be the account itself")
 
     target = db.query(Account).filter(Account.id == target_id).first()
-    if not target or not can_access_record(db, current_user, target):
+    if (not target or not can_edit_account(current_user, target)
+            or (owner is not None and account_role(owner, target) != OWNER)):
         raise HTTPException(status_code=404, detail=f"{field} account not found")
     if target.account_type == AccountType.CREDIT:
         raise HTTPException(
@@ -62,20 +70,23 @@ def _funding_account(
     return target
 
 
-def _validate_payment_routing(db: Session, current_user: User, data: dict, account_id: Optional[int] = None) -> None:
+def _validate_payment_routing(db: Session, current_user: User, data: dict,
+                              account_id: Optional[int] = None, owner=None) -> None:
     """Reject payment routing that points at accounts the caller can't use.
 
     Covers a card's statement payment / overflow account and a loan's payment
-    account. Without this, a caller could route a payment at an arbitrary account
-    id and read that account's name back out of the timeline's
-    ``account_shortfalls``. Also rejects self-routing, which would make an account
-    fund its own payment.
+    account. A routing target must be owned by the account's owner (``owner``,
+    default the caller), so a route never crosses owners. Without this, a caller
+    could route a payment at an arbitrary account id and read that account's
+    name back out of the timeline's ``account_shortfalls``. Also rejects
+    self-routing, which would make an account fund its own payment.
     """
     for field in ("payment_account_id", "payment_overflow_account_id"):
         target_id = data.get(field)
         if target_id is None:
             continue
-        _funding_account(db, current_user, target_id, field, account_id)
+        _funding_account(db, current_user, target_id, field, account_id,
+                         owner=owner if owner is not None else current_user)
 
 
 def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account] = None) -> None:
@@ -141,7 +152,7 @@ def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
     ).all()
     if not loans:
         return
-    if any(not can_access_record(db, current_user, loan) for loan in loans):
+    if any(not can_view_account(current_user, loan) for loan in loans):
         detail = ("This card funds a pending payment that needs its billing cycle settings; "
                   "keep a statement close or due day until that payment is posted or removed")
     else:
@@ -178,7 +189,7 @@ def _validate_loan_payer(db: Session, current_user: User, data: dict, account: A
     deactivated = data.get("is_active") is False and account.is_active
     if not (ineligible or currency_mismatch or deactivated):
         return
-    if any(not can_access_record(db, current_user, loan) for loan in loans):
+    if any(not can_view_account(current_user, loan) for loan in loans):
         raise HTTPException(
             status_code=400,
             detail="This account is the payment account of an account you cannot access, "
@@ -274,16 +285,13 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
 def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_type: Optional[str] = Query(None, description="Filter by account type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
     """Get all accounts with optional filtering"""
-    query = db.query(Account).filter(
-        scope_criterion(Account, current_user.id, active_entity.id if active_entity else None)
-    )
+    query = viewable_accounts(db, current_user)
 
     if account_type:
         # Convert string to enum
@@ -311,14 +319,9 @@ def create_account(
     account: AccountCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new account"""
     account_data = account.dict()
-    if account_data.get("entity_id") is None and active_entity is not None:
-        account_data["entity_id"] = active_entity.id
-    else:
-        validate_entity_ownership(db, current_user, account_data.get("entity_id"))
 
     _validate_payment_routing(db, current_user, account_data)
     _validate_spending_wallet(db, account_data)
@@ -333,17 +336,18 @@ def create_account(
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific account by ID"""
-    return get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    return get_account_or_404(db, current_user, account_id)
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Update an existing account"""
-    db_account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    """Update an existing account (settings and routing: owner or admin; deactivating: owner)"""
+    db_account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
 
     update_data = account_update.dict(exclude_unset=True)
-    if "entity_id" in update_data:
-        validate_entity_ownership(db, current_user, update_data["entity_id"])
-    _validate_payment_routing(db, current_user, update_data, account_id=account_id)
+    if "is_active" in update_data and account_role(current_user, db_account) not in OWNER_ROLES:
+        raise HTTPException(status_code=404, detail="Account not found")
+    _validate_payment_routing(db, current_user, update_data, account_id=account_id,
+                              owner=db_account.user)
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
@@ -358,8 +362,8 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
 
 @router.delete("/{account_id}")
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Soft delete an account (mark as inactive)"""
-    db_account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    """Soft delete an account (mark as inactive). Owner only."""
+    db_account = get_account_or_404(db, current_user, account_id, roles=OWNER_ROLES)
     _validate_loan_payer(db, current_user, {"is_active": False}, db_account)
 
     db_account.is_active = False
@@ -370,7 +374,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db), current_user:
 @router.get("/{account_id}/balance")
 def get_account_balance(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get current balance and balance history for an account"""
-    account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+    account = get_account_or_404(db, current_user, account_id)
 
     # Calculate running balance from transactions
     from app.models.transaction import Transaction, TransactionType
@@ -421,8 +425,10 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
 
 # --- Loans -------------------------------------------------------------------
 
-def _loan_or_404(db: Session, current_user: User, account_id: int) -> Account:
-    account = get_accessible_or_404(db, Account, account_id, current_user, "Account not found")
+def _loan_or_404(db: Session, current_user: User, account_id: int, *, edit: bool = False) -> Account:
+    """The loan, 404ing unless the caller holds a role on it (an edit role with ``edit``)."""
+    account = get_account_or_404(
+        db, current_user, account_id, roles=EDIT_ROLES if edit else DIRECT_ROLES)
     if account.account_type != AccountType.LOAN:
         raise HTTPException(status_code=400, detail="Account is not a loan")
     return account
@@ -495,7 +501,7 @@ def record_loan_payment(
 
     The bank's figures (principal / interest) override the proposed split.
     """
-    loan = _loan_or_404(db, current_user, account_id)
+    loan = _loan_or_404(db, current_user, account_id, edit=True)
     funding = _loan_funding(db, current_user, loan, payment.from_account_id)
     _lock(db, loan, funding)
     total, principal, interest = (
@@ -518,7 +524,7 @@ def record_loan_prepayment(
     current_user: User = Depends(get_current_active_user),
 ):
     """Record extra principal (no interest). Refused on a ``fixed`` loan."""
-    loan = _loan_or_404(db, current_user, account_id)
+    loan = _loan_or_404(db, current_user, account_id, edit=True)
     if loan_svc.amortization_of(loan) == loan_svc.FIXED:
         raise HTTPException(
             status_code=400,

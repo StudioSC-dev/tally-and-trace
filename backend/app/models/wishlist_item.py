@@ -22,7 +22,6 @@ class WishlistItem(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
     name = Column(String(200), nullable=False)
     estimated_cost = Column(Numeric(15, 2), nullable=False)
     currency = Column(
@@ -46,5 +45,4 @@ class WishlistItem(Base):
 
     # Relationships
     user = relationship("User", back_populates="wishlist_items")
-    entity = relationship("Entity", foreign_keys=[entity_id])
     category = relationship("Category", foreign_keys=[category_id])

@@ -10,7 +10,7 @@ Read this before writing, editing, or reviewing any code.
 
 - **Project name:** Tally & Trace (`accounting-for-dummies-fastapi`)
 - **Repo:** `smpalileo/accounting-for-dummies-fastapi`
-- **Purpose:** Multi-entity, multi-currency financial tracker for personal and business
+- **Purpose:** Multi-currency financial tracker for personal and business
   finances. Web app, API, and mobile app (Expo, in progress).
 - **Nature:** Portfolio/demo project. Decisions should reflect best practices and be
   presentable to potential employers or collaborators.

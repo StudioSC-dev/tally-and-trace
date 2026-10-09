@@ -181,12 +181,11 @@ def test_invariant_holds_after_create_edit_and_delete(client, headers):
 
 
 @pytest.fixture
-def co_member(client):
-    """A caller (logged in) and a co-member of a shared entity; all removed afterwards."""
+def other_user(client):
+    """A caller (logged in) and another user; all removed afterwards."""
     from app.core.auth import get_password_hash
     from app.core.database import SessionLocal
     from app.models.account import Account
-    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
     from app.models.transaction import Transaction
     from app.models.user import User
 
@@ -201,41 +200,32 @@ def co_member(client):
         db.refresh(u)
         users.append(u)
     caller, member = users
-    entity = Entity(name=f"Shared {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
-    db.add(entity)
-    db.commit()
-    db.refresh(entity)
-    for u, role in ((caller, MemberRole.OWNER), (member, MemberRole.MEMBER)):
-        db.add(EntityMembership(entity_id=entity.id, user_id=u.id, role=role))
-    db.commit()
     login = client.post(f"{API}/auth/login",
                         json={"email": caller.email, "password": "password123"})
     assert login.status_code == 200, login.text
 
-    yield {"db": db, "caller": caller, "member": member, "entity": entity,
+    yield {"db": db, "caller": caller, "member": member,
            "headers": {"Authorization": f"Bearer {login.json()['access_token']}"}}
 
     db.rollback()
     ids = [caller.id, member.id]
     db.query(Transaction).filter(Transaction.user_id.in_(ids)).delete(synchronize_session=False)
     db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
-    db.query(EntityMembership).filter(EntityMembership.entity_id == entity.id).delete()
-    db.query(Entity).filter(Entity.id == entity.id).delete()
     db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
     db.close()
 
 
-def test_co_member_transfers_in_are_not_the_callers_expense(client, co_member):
+def test_another_users_transfers_in_are_not_the_callers_expense(client, other_user):
     from datetime import datetime
 
     from app.models.account import Account, AccountType
     from app.models.transaction import Transaction, TransactionType
 
-    db, caller, member, entity = (co_member[k] for k in ("db", "caller", "member", "entity"))
-    gcash = Account(user_id=caller.id, entity_id=entity.id, name="GCash",
+    db, caller, member = (other_user[k] for k in ("db", "caller", "member"))
+    gcash = Account(user_id=caller.id, name="GCash",
                     account_type=AccountType.E_WALLET, balance=0, is_spending_wallet=True)
-    bank = Account(user_id=caller.id, entity_id=entity.id, name="Bank",
+    bank = Account(user_id=caller.id, name="Bank",
                    account_type=AccountType.SAVINGS, balance=0)
     theirs = Account(user_id=member.id, name="Their bank", account_type=AccountType.SAVINGS,
                      balance=10000)
@@ -249,7 +239,7 @@ def test_co_member_transfers_in_are_not_the_callers_expense(client, co_member):
                            is_posted=True))
     db.commit()
 
-    total, rows = _summary(client, co_member["headers"])
+    total, rows = _summary(client, other_user["headers"])
     assert total == Decimal("0") and rows == {}
 
 
@@ -358,110 +348,90 @@ def test_income_into_a_wallet_counts_once_as_it_is_created_edited_and_deleted(cl
 
 
 @pytest.fixture
-def two_entities(client):
-    """A logged-in caller owning entities A and B; all removed afterwards."""
+def two_owners(client):
+    """Two logged-in callers, A and B, each owning the accounts of one scope."""
+    from app.core.access import touches_accounts
     from app.core.auth import get_password_hash
     from app.core.database import SessionLocal
     from app.models.account import Account
-    from app.models.entity import Entity, EntityMembership, EntityType, MemberRole
     from app.models.transaction import Transaction
     from app.models.user import User
 
     db = SessionLocal()
-    u = User(email=f"wsum-ent-{os.urandom(4).hex()}@example.com",
-             password_hash=get_password_hash("password123"),
-             first_name="Wallet", last_name="Entities", is_verified=True)
-    db.add(u)
-    db.commit()
-    db.refresh(u)
-    made = []
+    users, headers = [], []
     for label in ("A", "B"):
-        e = Entity(name=f"Wallet {label} {os.urandom(3).hex()}", entity_type=EntityType.BUSINESS)
-        db.add(e)
+        u = User(email=f"wsum-{label.lower()}-{os.urandom(4).hex()}@example.com",
+                 password_hash=get_password_hash("password123"),
+                 first_name="Wallet", last_name=label, is_verified=True)
+        db.add(u)
         db.commit()
-        db.refresh(e)
-        db.add(EntityMembership(entity_id=e.id, user_id=u.id, role=MemberRole.OWNER))
-        db.commit()
-        made.append(e)
-    login = client.post(f"{API}/auth/login", json={"email": u.email, "password": "password123"})
-    assert login.status_code == 200, login.text
+        db.refresh(u)
+        login = client.post(f"{API}/auth/login",
+                            json={"email": u.email, "password": "password123"})
+        assert login.status_code == 200, login.text
+        users.append(u)
+        headers.append({"Authorization": f"Bearer {login.json()['access_token']}"})
 
-    yield {"db": db, "user": u, "entities": made,
-           "headers": {"Authorization": f"Bearer {login.json()['access_token']}"}}
+    yield {"db": db, "users": users, "headers": headers}
 
     db.rollback()
-    ids = [e.id for e in made]
-    db.query(Transaction).filter(Transaction.user_id == u.id).delete(synchronize_session=False)
-    db.query(Account).filter(Account.user_id == u.id).delete(synchronize_session=False)
-    db.query(EntityMembership).filter(EntityMembership.entity_id.in_(ids)).delete(
-        synchronize_session=False)
-    db.query(Entity).filter(Entity.id.in_(ids)).delete(synchronize_session=False)
-    db.query(User).filter(User.id == u.id).delete()
+    ids = [u.id for u in users]
+    account_ids = [a.id for a in db.query(Account.id).filter(Account.user_id.in_(ids))]
+    db.query(Transaction).filter(Transaction.user_id.in_(ids)).delete(synchronize_session=False)
+    if account_ids:
+        db.query(Transaction).filter(touches_accounts(Transaction, account_ids)).delete(
+            synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
     db.close()
 
 
-def test_entity_summaries_count_top_ups_by_source_not_by_row_tag(client, two_entities):
+def test_summaries_count_top_ups_by_source_account_not_by_creator(client, two_owners):
+    from datetime import datetime
     from app.models.account import Account, AccountType
+    from app.models.transaction import Transaction, TransactionType
 
-    db, user, (a, b) = (two_entities[k] for k in ("db", "user", "entities"))
-    headers = two_entities["headers"]
-    bank_a = Account(user_id=user.id, entity_id=a.id, name="A Bank",
-                     account_type=AccountType.SAVINGS, balance=10000)
-    bank_b = Account(user_id=user.id, entity_id=b.id, name="B Bank",
-                     account_type=AccountType.SAVINGS, balance=10000)
-    wallet_b = Account(user_id=user.id, entity_id=b.id, name="B GCash",
-                       account_type=AccountType.E_WALLET, balance=0, is_spending_wallet=True)
+    db = two_owners["db"]
+    a, b = two_owners["users"]
+    headers_a, headers_b = two_owners["headers"]
+    bank_a = Account(user_id=a.id, name="A Bank", account_type=AccountType.SAVINGS,
+                     balance=10000)
+    bank_b = Account(user_id=b.id, name="B Bank", account_type=AccountType.SAVINGS,
+                     balance=10000)
+    wallet_b = Account(user_id=b.id, name="B GCash", account_type=AccountType.E_WALLET,
+                       balance=0, is_spending_wallet=True)
     db.add_all([bank_a, bank_b, wallet_b])
     db.commit()
 
-    def view(entity):
-        return _summary(client, {**headers, "X-Entity-Id": str(entity.id)})
-
-    def transfer(src, dst, amount, fee, tag):
-        r = client.post(f"{API}/transactions/", headers=headers, json={
-            "account_id": src.id, "transfer_from_account_id": src.id,
-            "transfer_to_account_id": dst.id, "amount": amount, "transfer_fee": fee,
-            "transaction_type": "transfer", "transaction_date": WHEN, "entity_id": tag.id})
-        assert r.status_code == 200, r.text
-        return r.json()["id"]
+    def transfer(creator, src, dst, amount, fee):
+        t = Transaction(user_id=creator.id, account_id=src.id, transfer_from_account_id=src.id,
+                        transfer_to_account_id=dst.id, amount=Decimal(amount),
+                        transfer_fee=Decimal(fee), transaction_type=TransactionType.TRANSFER,
+                        transaction_date=datetime(2026, 9, 15))
+        db.add(t)
+        db.commit()
+        return t
 
     # B's own spending stays out of A's summary.
-    r = client.post(f"{API}/transactions/", headers=headers, json={
+    r = client.post(f"{API}/transactions/", headers=headers_b, json={
         "account_id": bank_b.id, "amount": 70, "transaction_type": "debit",
-        "transaction_date": WHEN, "entity_id": b.id})
+        "transaction_date": WHEN})
     assert r.status_code == 200, r.text
-    b_debit = r.json()["id"]
 
-    # A's bank tops up B's wallet, but the row is tagged with entity B.
-    a_top_up = transfer(bank_a, wallet_b, 1000, 10, b)
-    # B's bank tops up B's wallet, but the row is tagged with entity A.
-    b_top_up = transfer(bank_b, wallet_b, 300, 0, a)
+    # A's bank tops up B's wallet, created by B (written directly: the API
+    # refuses a record across two owners' accounts).
+    a_top_up = transfer(b, bank_a, wallet_b, "1000", "10")
+    # B's bank tops up B's wallet, created by A.
+    transfer(a, bank_b, wallet_b, "300", "0")
 
-    assert view(a) == (Decimal("1010"), {"Transfer fees": Decimal("10"),
-                                         "Unallocated wallet spend": Decimal("1000")})
-    assert view(b) == (Decimal("370"), {"Uncategorized": Decimal("70"),
-                                        "Unallocated wallet spend": Decimal("300")})
+    assert _summary(client, headers_a) == (Decimal("1010"), {
+        "Transfer fees": Decimal("10"), "Unallocated wallet spend": Decimal("1000")})
+    assert _summary(client, headers_b) == (Decimal("370"), {
+        "Uncategorized": Decimal("70"), "Unallocated wallet spend": Decimal("300")})
 
-    for txn_id, change, expected_a, expected_b in (
-        (a_top_up, {"amount": 2000}, Decimal("2010"), Decimal("370")),
-        (a_top_up, {"transfer_fee": 0}, Decimal("2000"), Decimal("370")),
-        (a_top_up, {"transfer_from_account_id": bank_b.id}, Decimal("0"), Decimal("2370")),
-        (a_top_up, {"transfer_from_account_id": bank_a.id}, Decimal("2000"), Decimal("370")),
-        (b_top_up, {"amount": 500}, Decimal("2000"), Decimal("570")),
-    ):
-        r = client.put(f"{API}/transactions/{txn_id}", headers=headers, json=change)
-        assert r.status_code == 200, r.text
-        assert view(a)[0] == expected_a
-        assert view(b)[0] == expected_b
-
-    for txn_id, expected_a, expected_b in (
-        (a_top_up, Decimal("0"), Decimal("570")),
-        (b_top_up, Decimal("0"), Decimal("70")),
-        (b_debit, Decimal("0"), Decimal("0")),
-    ):
-        r = client.delete(f"{API}/transactions/{txn_id}", headers=headers)
-        assert r.status_code == 200, r.text
-        assert view(a)[0] == expected_a
-        assert view(b)[0] == expected_b
-    assert view(a) == (Decimal("0"), {}) and view(b) == (Decimal("0"), {})
+    # Moving the source moves the spend with it.
+    a_top_up.transfer_from_account_id = a_top_up.account_id = bank_b.id
+    db.commit()
+    assert _summary(client, headers_a)[0] == Decimal("0")
+    assert _summary(client, headers_b)[0] == Decimal("1380")

@@ -60,11 +60,10 @@ def people(client, db):
     from app.core.auth import get_password_hash
     from app.models.account import Account
     from app.models.budget_entry import BudgetEntry
-    from app.models.entity import Entity, EntityMembership
     from app.models.transaction import Transaction
     from app.models.user import User
 
-    users, entities = [], []
+    users = []
 
     def make():
         email = f"loan-{secrets.token_hex(6)}@example.com"
@@ -78,21 +77,6 @@ def people(client, db):
         assert r.status_code == 200, r.text
         return {"id": u.id, "headers": {"Authorization": f"Bearer {r.json()['access_token']}"}}
 
-    def entity(*members):
-        from app.models.entity import EntityType, MemberRole
-
-        e = Entity(name=f"Loan Biz {secrets.token_hex(3)}", entity_type=EntityType.BUSINESS)
-        db.add(e)
-        db.commit()
-        db.refresh(e)
-        entities.append(e.id)
-        for i, m in enumerate(members):
-            db.add(EntityMembership(entity_id=e.id, user_id=m["id"],
-                                    role=MemberRole.OWNER if i == 0 else MemberRole.MEMBER))
-        db.commit()
-        return e.id
-
-    make.entity = entity
     yield make
 
     db.rollback()
@@ -103,9 +87,6 @@ def people(client, db):
         synchronize_session=False)
     db.commit()
     db.query(Account).filter(Account.user_id.in_(users)).delete(synchronize_session=False)
-    db.query(EntityMembership).filter(EntityMembership.entity_id.in_(entities)).delete(
-        synchronize_session=False)
-    db.query(Entity).filter(Entity.id.in_(entities)).delete(synchronize_session=False)
     db.query(User).filter(User.id.in_(users)).delete(synchronize_session=False)
     db.commit()
 
@@ -504,57 +485,24 @@ def test_an_inaccessible_funding_account_is_rejected(client, people):
     assert r.status_code == 404
 
 
-def test_entity_membership_governs_loan_access(client, people):
-    owner, member, outsider = people(), people(), people()
-    entity_id = people.entity(owner, member)
-    in_entity = {"X-Entity-Id": str(entity_id)}
-
-    bank = _bank(client, owner, entity_id=entity_id)
-    loan = _loan(client, owner, entity_id=entity_id, loan_kind="home",
-                 payment_account_id=bank["id"])
-    member_h = {**member, "headers": {**member["headers"], **in_entity}}
-
-    # A co-member may read the schedule and pay from the entity's bank.
-    assert _schedule(client, member_h, loan["id"]).status_code == 200
-    r = _pay(client, member_h, loan["id"], principal=100, interest=10)
-    assert r.status_code == 200, r.text
-    r = _prepay(client, member_h, loan["id"], amount=50)
-    assert r.status_code == 200, r.text
-
-    # A non-member may not, with or without the entity header.
-    for headers in (outsider["headers"], {**outsider["headers"], **in_entity}):
-        who = {**outsider, "headers": headers}
-        assert _schedule(client, who, loan["id"]).status_code in (403, 404)
-        assert _pay(client, who, loan["id"], principal=100, interest=0).status_code in (403, 404)
-        assert _prepay(client, who, loan["id"], amount=50).status_code in (403, 404)
-    assert _balance(client, owner, loan["id"]) == Decimal("-999850.00")
-
-
-def _shared_loan_paid_from_a_private_bank(client, people):
-    """A shared-entity loan paid from the owner's private bank, and a co-member's bank."""
-    owner, member = people(), people()
-    entity_id = people.entity(owner, member)
-    in_entity = {"X-Entity-Id": str(entity_id)}
-    member_h = {**member, "headers": {**member["headers"], **in_entity}}
-
+def _loan_paid_from_a_private_bank(client, people):
+    """The owner's loan paid from the owner's private bank, and another user's bank."""
+    owner, other = people(), people()
     private = _bank(client, owner, name="Owner private", balance=100_000)
-    member_bank = _bank(client, member_h, name="Entity bank", entity_id=entity_id)
-    loan = _loan(client, owner, entity_id=entity_id, balance=-500_000,
-                 payment_account_id=private["id"])
+    other_bank = _bank(client, other, name="Other bank")
+    loan = _loan(client, owner, balance=-500_000, payment_account_id=private["id"])
     paid = _pay(client, owner, loan["id"], principal=20_000, interest=8_000,
                 transaction_date="2026-10-04T00:00:00")
     assert paid.status_code == 200, paid.text
-    assert paid.json()["entity_id"] == entity_id
-    return owner, member_h, private, member_bank, loan, paid.json()
+    return owner, other, private, other_bank, loan, paid.json()
 
 
-def test_a_co_member_cannot_delete_a_payment_funded_from_a_private_account(client, people):
-    owner, member, private, _, loan, paid = _shared_loan_paid_from_a_private_bank(client, people)
+def test_another_user_cannot_read_or_delete_a_loan_payment(client, people):
+    owner, other, private, _, loan, paid = _loan_paid_from_a_private_bank(client, people)
 
-    # The co-member sees the entity's row, but not the account it moves.
     assert client.get(f"{API}/transactions/{paid['id']}",
-                      headers=member["headers"]).status_code == 200
-    r = client.delete(f"{API}/transactions/{paid['id']}", headers=member["headers"])
+                      headers=other["headers"]).status_code == 404
+    r = client.delete(f"{API}/transactions/{paid['id']}", headers=other["headers"])
     assert r.status_code == 404, r.text
     assert r.json()["detail"] == "Transaction not found"
     assert _balance(client, owner, private["id"]) == Decimal("72000.00")
@@ -567,21 +515,20 @@ def test_a_co_member_cannot_delete_a_payment_funded_from_a_private_account(clien
 
 
 @pytest.mark.parametrize("change", ["amount", "retarget"])
-def test_a_co_member_cannot_edit_a_payment_funded_from_a_private_account(
-        client, people, change):
-    owner, member, private, member_bank, loan, paid = _shared_loan_paid_from_a_private_bank(
+def test_another_user_cannot_edit_a_loan_payment(client, people, change):
+    owner, other, private, other_bank, loan, paid = _loan_paid_from_a_private_bank(
         client, people)
 
     body = ({"amount": 19_000} if change == "amount" else
-            {"account_id": member_bank["id"], "transfer_from_account_id": member_bank["id"]})
-    r = client.put(f"{API}/transactions/{paid['id']}", json=body, headers=member["headers"])
+            {"account_id": other_bank["id"], "transfer_from_account_id": other_bank["id"]})
+    r = client.put(f"{API}/transactions/{paid['id']}", json=body, headers=other["headers"])
     assert r.status_code == 404, r.text
     assert r.json()["detail"] == "Transaction not found"
     assert _balance(client, owner, private["id"]) == Decimal("72000.00")
     assert _balance(client, owner, loan["id"]) == Decimal("-480000.00")
-    assert _balance(client, member, member_bank["id"]) == Decimal("500000.00")
+    assert _balance(client, other, other_bank["id"]) == Decimal("500000.00")
 
-    # The owner, who can reach the private bank, still can.
+    # The owner still can.
     r = client.put(f"{API}/transactions/{paid['id']}", json={"amount": 19_000},
                    headers=owner["headers"])
     assert r.status_code == 200, r.text
@@ -605,24 +552,30 @@ def test_an_edit_cannot_move_a_transaction_onto_an_inaccessible_account(client, 
     assert _balance(client, stranger, stranger_bank["id"]) == Decimal("1000.00")
 
 
-def test_a_co_member_still_edits_and_deletes_an_in_scope_transaction(client, people):
-    owner, member = people(), people()
-    entity_id = people.entity(owner, member)
-    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
-    bank = _bank(client, owner, balance=1_000, entity_id=entity_id)
-    r = client.post(f"{API}/transactions/", headers=owner["headers"], json={
-        "account_id": bank["id"], "transaction_type": "debit", "amount": 100,
-        "entity_id": entity_id, "transaction_date": "2026-10-05T00:00:00"})
-    assert r.status_code == 200, r.text
-    txn_id = r.json()["id"]
+def test_a_record_another_user_left_on_your_account_is_yours_to_delete(client, people, db):
+    """A legacy row created by someone else on the caller's account (the API no
+    longer lets one be made): its creator may read it but not change it, since
+    they hold no role on the account; the account's owner may delete it."""
+    from datetime import datetime
+    from app.models.transaction import Transaction, TransactionType
 
-    r = client.put(f"{API}/transactions/{txn_id}", json={"amount": 150},
-                   headers=member_h["headers"])
+    owner, creator = people(), people()
+    bank = _bank(client, owner, balance=1_000)
+    row = Transaction(user_id=creator["id"], account_id=bank["id"], amount=Decimal("100"),
+                      transaction_type=TransactionType.DEBIT,
+                      transaction_date=datetime(2026, 10, 5), is_posted=False)
+    db.add(row)
+    db.commit()
+
+    for who in (owner, creator):
+        assert client.get(f"{API}/transactions/{row.id}",
+                          headers=who["headers"]).status_code == 200
+    assert client.put(f"{API}/transactions/{row.id}", json={"amount": 150},
+                      headers=creator["headers"]).status_code == 404
+    assert client.delete(f"{API}/transactions/{row.id}",
+                         headers=creator["headers"]).status_code == 404
+    r = client.delete(f"{API}/transactions/{row.id}", headers=owner["headers"])
     assert r.status_code == 200, r.text
-    assert _balance(client, owner, bank["id"]) == Decimal("850.00")
-    r = client.delete(f"{API}/transactions/{txn_id}", headers=member_h["headers"])
-    assert r.status_code == 200, r.text
-    assert _balance(client, owner, bank["id"]) == Decimal("1000.00")
 
 
 # --- money values ------------------------------------------------------------
@@ -974,29 +927,29 @@ def test_a_payment_waits_for_a_concurrent_change_and_uses_the_locked_loan(client
     assert _balance(client, me, bank["id"]) == Decimal("10000.00")
 
 
-def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, people):
-    owner, member = people(), people()
-    entity_id = people.entity(owner, member)
-    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
-    bank = _bank(client, owner, name="Entity bank", entity_id=entity_id)
+def test_a_fee_into_a_loan_the_caller_cannot_see_stays_a_transfer_fee(client, people, db):
+    from datetime import datetime
+    from app.models.transaction import Transaction, TransactionType
+
+    owner, other = people(), people()
+    bank = _bank(client, other, name="Other bank")
     private_loan = _loan(client, owner, name="Owner Private Loan")
+    # A legacy cross-owner payment (the API refuses one now).
+    db.add(Transaction(user_id=other["id"], account_id=bank["id"], amount=Decimal("1000"),
+                       transfer_fee=Decimal("50"), transaction_type=TransactionType.TRANSFER,
+                       transfer_from_account_id=bank["id"],
+                       transfer_to_account_id=private_loan["id"],
+                       transaction_date=datetime(2026, 10, 5), is_posted=True))
+    db.commit()
 
-    r = client.post(f"{API}/transactions/", headers=owner["headers"], json={
-        "account_id": bank["id"], "transaction_type": "transfer", "amount": 1_000,
-        "transfer_fee": 50, "entity_id": entity_id,
-        "transfer_from_account_id": bank["id"], "transfer_to_account_id": private_loan["id"],
-        "transaction_date": "2026-10-05T00:00:00"})
-    assert r.status_code == 200, r.text
-
-    s = _summary(client, member_h)
+    s = _summary(client, other)
     rows = s["category_breakdown"]
     assert Decimal(str(rows["Transfer fees"]["expenses"])) == Decimal("50")
     assert not any(name.startswith("Interest: ") for name in rows), rows
     _assert_rows_sum(s)
 
-    # The owner, who can see the loan, gets its interest row.
-    rows = _summary(client, owner)["category_breakdown"]
-    assert Decimal(str(rows["Interest: Owner Private Loan"]["expenses"])) == Decimal("50")
+    # The loan's owner paid nothing: the money left an account outside their scope.
+    assert Decimal(str(_summary(client, owner)["summary"]["total_expenses"])) == Decimal("0")
 
 
 @pytest.mark.parametrize("body", [{"currency": "USD"}, {"account_type": "credit"},
@@ -1059,22 +1012,26 @@ def test_a_card_funding_a_pending_loan_payment_keeps_its_billing_cycle(client, p
 
 
 def test_a_card_funding_a_hidden_loan_keeps_its_billing_cycle_without_naming_the_loan(
-        client, people):
-    owner, member = people(), people()
-    entity_id = people.entity(owner, member)
-    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
-    card = _bank(client, owner, name="Entity card", account_type="credit", balance=0,
-                 billing_cycle_start=15, entity_id=entity_id)
+        client, people, db):
+    from datetime import datetime
+    from app.models.transaction import Transaction, TransactionType
+
+    owner, other = people(), people()
+    card = _bank(client, other, name="Other card", account_type="credit", balance=0,
+                 billing_cycle_start=15)
     private_loan = _loan(client, owner, name="Owner Private Loan", balance=-1_000)
-    _pending_card_payment(client, owner, card, private_loan, entity_id=entity_id)
+    # A legacy pending payment from another user's card (the API refuses one now).
+    db.add(Transaction(user_id=other["id"], account_id=card["id"], amount=Decimal("400"),
+                       transfer_fee=Decimal("10"), transaction_type=TransactionType.TRANSFER,
+                       transfer_from_account_id=card["id"],
+                       transfer_to_account_id=private_loan["id"],
+                       transaction_date=datetime(2026, 10, 4), is_posted=False))
+    db.commit()
 
     r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
-                   headers=member_h["headers"])
+                   headers=other["headers"])
     assert r.status_code == 400 and "billing cycle" in r.text, r.text
     assert "loan" not in r.json()["detail"].lower()
-    r = client.put(f"{API}/accounts/{card['id']}", json={"billing_cycle_start": None},
-                   headers=owner["headers"])
-    assert r.status_code == 400 and "loan payment" in r.text, r.text
 
 
 def test_a_loans_paying_account_cannot_be_deactivated(client, people):
@@ -1099,23 +1056,23 @@ def test_a_loans_paying_account_cannot_be_deactivated(client, people):
 
 
 def test_a_paying_account_change_refused_for_a_hidden_loan_does_not_name_the_loan(
-        client, people):
-    owner, member = people(), people()
-    entity_id = people.entity(owner, member)
-    member_h = {**member, "headers": {**member["headers"], "X-Entity-Id": str(entity_id)}}
-    bank = _bank(client, owner, name="Entity bank", entity_id=entity_id)
-    _loan(client, owner, name="Owner Private Loan", payment_account_id=bank["id"])
+        client, people, db):
+    from app.models.account import Account
+
+    owner, other = people(), people()
+    bank = _bank(client, other, name="Other bank")
+    loan = _loan(client, owner, name="Owner Private Loan")
+    # Legacy routing onto another user's account (the API refuses it now).
+    db.query(Account).filter(Account.id == loan["id"]).update({"payment_account_id": bank["id"]})
+    db.commit()
 
     for method, body in (("put", {"currency": "USD"}), ("put", {"is_spending_wallet": True}),
                          ("put", {"is_active": False}), ("delete", None)):
         kw = {"json": body} if body is not None else {}
         r = getattr(client, method)(f"{API}/accounts/{bank['id']}",
-                                    headers=member_h["headers"], **kw)
+                                    headers=other["headers"], **kw)
         assert r.status_code == 400, (body, r.text)
         assert "loan" not in r.json()["detail"].lower(), body
-    # The owner, who can see the loan, is told which routing to change.
-    r = client.delete(f"{API}/accounts/{bank['id']}", headers=owner["headers"])
-    assert r.status_code == 400 and "re-route the loan" in r.text, r.text
-    r = client.get(f"{API}/accounts/{bank['id']}", headers=owner["headers"])
+    r = client.get(f"{API}/accounts/{bank['id']}", headers=other["headers"])
     assert (r.json()["currency"], r.json()["is_spending_wallet"], r.json()["is_active"]) == (
         "PHP", False, True)

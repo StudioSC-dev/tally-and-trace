@@ -3,27 +3,49 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.entity_context import (
-    can_access_record,
-    get_accessible_or_404,
-    get_active_entity,
-    scope_criterion,
-    validate_entity_ownership,
+from app.core.access import (
+    OWNER_ROLES, get_account_or_404, get_owned_or_404, owned_criterion, require_owned_ref,
 )
+from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
-from app.models.account import Account
-from app.models.entity import Entity
 from app.models.user import User
 from app.core.time import utc_now
 
 router = APIRouter()
 
+
+def _ids(value, detail: str) -> list:
+    """Configuration ids as ints; anything else is a 400."""
+    try:
+        return [int(v) for v in value]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def _validate_configuration(db: Session, user: User, configuration) -> None:
+    """Same-owner rule for the ids in an allocation's configuration.
+
+    ``category_ids``, ``account_ids`` and ``savings_category_id`` must all be
+    the caller's own (allocations are never shared, so the caller is the owner).
+    """
+    if not configuration:
+        return
+    for category_id in _ids(configuration.get("category_ids") or [],
+                            "configuration.category_ids must be a list of ids"):
+        require_owned_ref(db, Category, category_id, "Category not found", user)
+    for account_id in _ids(configuration.get("account_ids") or [],
+                           "configuration.account_ids must be a list of ids"):
+        get_account_or_404(db, user, account_id, roles=OWNER_ROLES)
+    savings = configuration.get("savings_category_id")
+    if savings is not None:
+        (savings_id,) = _ids([savings], "configuration.savings_category_id must be an id")
+        require_owned_ref(db, Category, savings_id, "Category not found", user)
+
 @router.get("/", response_model=AllocationListResponse)
 def get_allocations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
     account_id: Optional[int] = Query(None, description="Filter by account ID"),
     allocation_type: Optional[str] = Query(None, description="Filter by allocation type"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
@@ -31,9 +53,8 @@ def get_allocations(
     offset: int = Query(0, ge=0),
 ):
     """Get all allocations with optional filtering"""
-    query = db.query(Allocation).filter(
-        scope_criterion(Allocation, current_user.id, active_entity.id if active_entity else None)
-    )
+    # Allocations are never shared: the caller's own only.
+    query = db.query(Allocation).filter(owned_criterion(Allocation, current_user))
 
     if account_id:
         query = query.filter(Allocation.account_id == account_id)
@@ -62,19 +83,13 @@ def create_allocation(
     allocation: AllocationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Create a new allocation"""
-    # Verify account exists
-    account = db.query(Account).filter(Account.id == allocation.account_id).first()
-    if not account or not can_access_record(db, current_user, account):
-        raise HTTPException(status_code=404, detail="Account not found")
+    # An allocation is the owner's: its account must be the caller's own.
+    get_account_or_404(db, current_user, allocation.account_id, roles=OWNER_ROLES)
+    _validate_configuration(db, current_user, allocation.configuration)
 
     allocation_data = allocation.dict()
-    if allocation_data.get("entity_id") is None and active_entity is not None:
-        allocation_data["entity_id"] = active_entity.id
-    else:
-        validate_entity_ownership(db, current_user, allocation_data.get("entity_id"))
 
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
@@ -89,7 +104,7 @@ def get_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Get a specific allocation by ID"""
-    allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     return allocation
 
 @router.put("/{allocation_id}", response_model=AllocationResponse)
@@ -100,14 +115,12 @@ def update_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Update an existing allocation"""
-    db_allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     update_data = allocation_update.dict(exclude_unset=True)
-    if "entity_id" in update_data:
-        validate_entity_ownership(db, current_user, update_data["entity_id"])
     if "account_id" in update_data and update_data["account_id"] is not None:
-        account = db.query(Account).filter(Account.id == update_data["account_id"]).first()
-        if not account or not can_access_record(db, current_user, account):
-            raise HTTPException(status_code=404, detail="Account not found")
+        get_account_or_404(db, current_user, update_data["account_id"], roles=OWNER_ROLES)
+    if "configuration" in update_data:
+        _validate_configuration(db, current_user, update_data["configuration"])
     for field, value in update_data.items():
         setattr(db_allocation, field, value)
     
@@ -123,7 +136,7 @@ def delete_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Soft delete an allocation (mark as inactive)"""
-    db_allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     db_allocation.is_active = False
     db_allocation.updated_at = utc_now()
     db.commit()
@@ -136,7 +149,7 @@ def get_allocation_progress(
     current_user: User = Depends(get_current_active_user),
 ):
     """Get progress details for an allocation"""
-    allocation = get_accessible_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
     # Calculate progress percentage
     progress_percentage = 0
     if allocation.target_amount and allocation.target_amount > 0:
@@ -148,12 +161,14 @@ def get_allocation_progress(
         from app.models.transaction import Transaction, TransactionType
         from datetime import datetime, timedelta
         
-        # Get transactions for this allocation in the current month
+        # The allocation owner's transactions for it in the current month. Another
+        # user's row naming it is a stale reference and never counts.
         start_of_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
         
         transactions = db.query(Transaction).filter(
             Transaction.allocation_id == allocation_id,
+            Transaction.user_id == allocation.user_id,
             Transaction.transaction_date >= start_of_month,
             Transaction.transaction_date <= end_of_month,
             Transaction.transaction_type == TransactionType.CREDIT
@@ -177,13 +192,12 @@ def get_allocation_progress(
 def get_goals_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_entity: Optional[Entity] = Depends(get_active_entity),
 ):
     """Get summary of all active goals"""
     goals = (
         db.query(Allocation)
         .filter(
-            scope_criterion(Allocation, current_user.id, active_entity.id if active_entity else None),
+            owned_criterion(Allocation, current_user),
             Allocation.allocation_type == AllocationType.GOAL,
             Allocation.is_active.is_(True),
         )

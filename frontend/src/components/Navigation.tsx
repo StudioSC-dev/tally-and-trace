@@ -1,17 +1,14 @@
 import { Link } from '@tanstack/react-router'
 import { useAuth } from '../contexts/AuthContext'
-import { useEntity } from '../contexts/EntityContext'
 import { useTheme } from '../hooks/useTheme'
 import { useState } from 'react'
 import { getCurrencyLogoSymbol } from '../utils/currency'
 
 export function Navigation() {
   const { user, logout } = useAuth()
-  const { entities, activeEntity, setActiveEntityId } = useEntity()
   const { theme, toggleTheme } = useTheme()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
-  const [showEntityMenu, setShowEntityMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
 
   // Active tab is an ink underline rather than a tinted pill — a saturated fill
@@ -72,40 +69,8 @@ export function Navigation() {
             </div>
           </div>
 
-          {/* Right side: entity switcher + theme toggle + user menu + mobile hamburger */}
+          {/* Right side: theme toggle + user menu + mobile hamburger */}
           <div className="flex items-center space-x-2 shrink-0">
-            {/* Entity Switcher */}
-            {entities.length > 1 && (
-              <div className="relative hidden sm:block sm:mr-1 sm:border-r sm:border-line sm:pr-3">
-                <button
-                  onClick={() => setShowEntityMenu(!showEntityMenu)}
-                  className="inline-flex max-w-[9rem] items-center gap-1.5 border border-line px-3 py-2 text-sm text-body transition-colors duration-200 hover:border-line-strong hover:text-ink lg:max-w-[12rem]"
-                >
-                  <svg className="w-4 h-4 shrink-0 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                  <span className="truncate min-w-0 capitalize">{activeEntity?.name ?? 'Select entity'}</span>
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {showEntityMenu && (
-                  <div className="absolute right-0 z-50 mt-2 w-56 border border-line bg-surface py-1">
-                    {entities.map((e) => (
-                      <button
-                        key={e.id}
-                        onClick={() => { setShowEntityMenu(false); if (e.id !== activeEntity?.id) setActiveEntityId(e.id) }}
-                        className={`block w-full text-left px-4 py-2 text-sm transition-colors duration-200 ${e.id === activeEntity?.id ? 'text-ink' : 'text-body hover:bg-sunken'}`}
-                      >
-                        <span className="font-medium">{e.name}</span>
-                        <span className="label ml-2 inline">{e.entity_type}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}

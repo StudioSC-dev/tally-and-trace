@@ -90,7 +90,7 @@ def test_wallet_spending_without_a_top_up_shows_a_negative_unallocated_row():
     _assert_invariant(result)
 
 
-OTHER = 99  # an account outside the caller's scope (e.g. an entity co-member's)
+OTHER = 99  # an account outside the caller's scope (e.g. another user's)
 
 
 def test_inbound_transfers_from_outside_the_scope_are_not_expense():

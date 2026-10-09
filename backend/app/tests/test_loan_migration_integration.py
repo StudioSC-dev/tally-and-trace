@@ -39,12 +39,13 @@ def _db_reachable() -> bool:
         return False
 
 
-def test_alembic_has_a_single_head_which_is_m3():
+def test_alembic_has_a_single_head_descending_from_m3():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [M3]
+    (head,) = script.get_heads()
+    assert M3 in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(M3).down_revision == M2
 
 

@@ -32,7 +32,7 @@ SAVINGS_A, CHECKING_B, CARD_C = 1, 2, 3
 NAMES = {SAVINGS_A: "Savings A", CHECKING_B: "Checking B", CARD_C: "Card C"}
 CASH = {SAVINGS_A, CHECKING_B}
 CARDS = {CARD_C}
-OUTSIDE = 4  # an account outside the projection's scope (another entity, or inactive)
+OUTSIDE = 4  # an account outside the projection's scope (another user's, or inactive)
 
 
 def _txn_transfer(day, amount, fee, src, dst):

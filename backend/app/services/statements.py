@@ -55,7 +55,6 @@ from typing import Iterator, List, Optional, Tuple
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.entity_context import scope_criterion
 
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
@@ -296,7 +295,7 @@ def build_statement_payables(
     ignored, see ``_split_card_rows``). Such a source is any card in ``cards``
     without cycle settings, plus the ids in ``unbilled_sources``: the caller
     names those from the source account itself, so a card outside ``cards``
-    (another entity's, or an inactive one) counts too.
+    (one the caller holds no role on, or an inactive one) counts too.
 
     ``projected_by_card`` holds line items that have no transaction yet (budget
     entries scheduled on the card), which the caller projects only up to ``end``.
@@ -367,32 +366,30 @@ def build_statement_payables(
 
 def get_statement_payables(
     db: Session,
-    user_id: int,
-    entity_id: Optional[int],
+    cards: List[Account],
     start: datetime,
     end: datetime,
     projected_charges: Optional[dict] = None,
 ) -> List[dict]:
-    """DB wrapper: load the user's credit cards and build their statement payables.
+    """DB wrapper: build the statement payables of ``cards``.
+
+    ``cards`` are the credit cards in the caller's projection scope (active
+    accounts the caller holds a role on, see ``collect_events``); access is
+    decided there, through ``app.core.access``.
 
     ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
     transaction yet (budget entries scheduled on a card); each is billed on the
     cycle containing its date, after the recorded rows are settled (see
     ``build_statement_payables``).
     """
-    card_query = db.query(Account).filter(
-        scope_criterion(Account, user_id, entity_id),
-        Account.is_active.is_(True),
-        Account.account_type == AccountType.CREDIT,
-    )
-    cards = card_query.all()
+    cards = [c for c in cards if c.account_type == AccountType.CREDIT]
     if not cards:
         return []
 
-    # Rows are filtered by card id ALONE, not re-scoped by user/entity: the card
-    # itself was already access-checked above, and a statement must include every
-    # charge on it and every payment into it — including ones a co-member entered
-    # in a shared entity, or a transfer from another entity's account.
+    # Rows are filtered by card id ALONE, not re-scoped by user: the card itself
+    # is already in the caller's scope, and a statement must include every
+    # charge on it and every payment into it, whoever entered it, including a
+    # transfer from an account outside the caller's scope.
     card_ids = [c.id for c in cards]
     txns = (
         db.query(Transaction)
@@ -418,7 +415,7 @@ def get_statement_payables(
 
     # Whether a payment's source card is billed is a fact about that account, not
     # about this view: it is loaded by id, outside the card scope above, so a
-    # payment from another entity's or an inactive card without cycle settings
+    # payment from an out-of-scope or inactive card without cycle settings
     # still does not net the statement it was paid into.
     source_ids = {
         txn.transfer_from_account_id or txn.account_id

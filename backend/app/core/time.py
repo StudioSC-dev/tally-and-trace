@@ -10,7 +10,7 @@ datetime families and they need different answers:
 ``utc_now()`` -> **aware**. For ``TIMESTAMP WITH TIME ZONE`` columns:
     every ``created_at`` / ``updated_at``, ``email_tokens.expires_at``,
     ``users.last_login``, ``wishlist_items.target_date`` / ``purchased_at``,
-    ``entity_memberships.joined_at``. Also correct for JWT ``exp`` claims.
+    and JWT ``exp`` claims.
 
 ``naive_utc_now()`` -> **naive UTC**. For ``TIMESTAMP WITHOUT TIME ZONE`` columns
     and anything compared against them:

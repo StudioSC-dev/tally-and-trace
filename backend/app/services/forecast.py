@@ -14,10 +14,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.entity_context import can_access_record, scope_criterion
+from app.core.access import (
+    NONE, account_role, can_read_record, readable_criterion, viewable_account_ids,
+    viewable_accounts,
+)
 from app.core.time import naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables
 from app.services.statements import (
@@ -27,7 +29,6 @@ from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.models.transaction import RecurrenceFrequency
-from app.models.user import User
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +108,8 @@ def wallet_ids_of(db: Session, account_ids) -> frozenset:
     """The spending wallets among ``account_ids``, judged from the accounts themselves.
 
     Scope and ``is_active`` decide which legs a projection keeps, never whether an
-    account is a wallet: an entry funded from another entity's wallet, or from an
-    inactive one, is still wallet spending, not projection cash.
+    account is a wallet: an entry funded from a wallet outside the caller's
+    scope, or from an inactive one, is still wallet spending, not projection cash.
     """
     ids = {i for i in account_ids if i is not None}
     if not ids:
@@ -129,19 +130,14 @@ def _loan_ids_of(db: Session, account_ids) -> frozenset:
     )
 
 
-def get_account_balances(db: Session, user_id: int, entity_id: Optional[int] = None):
-    """Return all active accounts for the user (optionally scoped to entity)."""
-    query = db.query(Account).filter(
-        scope_criterion(Account, user_id, entity_id),
-        Account.is_active.is_(True),
-    )
-    return query.all()
+def get_account_balances(db: Session, user_id: int):
+    """The projection's scope: every active account the user holds a role on."""
+    return viewable_accounts(db, user_id, active_only=True).all()
 
 
 def project_cashflow(
     db: Session,
     user_id: int,
-    entity_id: Optional[int] = None,
     months: int = 6,
     reference: Optional[datetime] = None,
 ) -> List[dict]:
@@ -181,10 +177,10 @@ def project_cashflow(
     boundaries = [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
     end = boundaries[-1]
 
-    accounts, opening_by_account, account_names = _projection_accounts(db, user_id, entity_id)
+    accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
     opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
     cash_events = [e for e in events if e["counts_as_cash"]]
     routing = _route_legs(
         opening_by_account, cash_events, account_names,
@@ -259,7 +255,6 @@ def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
 def get_upcoming_items(
     db: Session,
     user_id: int,
-    entity_id: Optional[int] = None,
     days: int = 30,
     reference: Optional[datetime] = None,
 ) -> List[dict]:
@@ -269,7 +264,7 @@ def get_upcoming_items(
     payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
-    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id)
+    events = collect_events(db, start, end, user_id=user_id)
 
     items = [
         {
@@ -294,7 +289,6 @@ def get_available_cash(accounts) -> Decimal:
 def get_payables(
     db: Session,
     user_id: int,
-    entity_id: Optional[int] = None,
     days: int = 30,
     reference: Optional[datetime] = None,
 ) -> List[dict]:
@@ -314,9 +308,9 @@ def get_payables(
     itself falls outside the window and is not listed either.
     """
     start, end = _upcoming_window(days, reference)
-    accounts = get_account_balances(db, user_id, entity_id)
+    accounts = get_account_balances(db, user_id)
     names = {a.id: a.name for a in accounts}
-    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
 
     payables = []
     for e in sorted(events, key=_event_sort_key):
@@ -344,7 +338,6 @@ def get_payables(
 def get_disposable_income(
     db: Session,
     user_id: int,
-    entity_id: Optional[int] = None,
 ) -> dict:
     """
     Compute monthly net disposable income:
@@ -362,29 +355,16 @@ def get_disposable_income(
     top-up, so the same amount counts as expense: moving it on to a non-wallet
     account then nets it back out instead of counting it twice.
     """
-    # The caller's accounts in this scope (inactive ones included), as in the
+    # The accounts the caller holds a role on (inactive ones included), as in the
     # period summary: a top-up counts only when its source is one of them, and a
     # return only when both the wallet and the destination are.
-    scope_ids = {
-        a.id for a in db.query(Account.id).filter(
-            scope_criterion(Account, user_id, entity_id)
-        ).all()
-    }
-    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
-    if scope_ids:
-        # Recurring transfers touching an in-scope account, wherever the entry lives.
-        entry_scope = or_(entry_scope, and_(
-            BudgetEntry.transfer_to_account_id.isnot(None),
-            or_(
-                BudgetEntry.transfer_to_account_id.in_(scope_ids),
-                BudgetEntry.account_id.in_(scope_ids),
-            ),
-        ))
-    be_query = db.query(BudgetEntry).filter(
-        entry_scope,
+    scope_ids = viewable_account_ids(db, user_id)
+    # Every entry the caller may read: their own, plus any touching one of those
+    # accounts, whoever created it.
+    entries = db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user_id, scope_ids),
         BudgetEntry.is_active.is_(True),
-    )
-    entries = be_query.all()
+    ).all()
     referenced = {
         acc_id for e in entries
         for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id is not None
@@ -409,6 +389,8 @@ def get_disposable_income(
             elif from_wallet and not to_wallet and entry.transfer_to_account_id in scope_ids:
                 monthly_expenses -= monthly
             continue
+        if entry.user_id != user_id and entry.account_id not in scope_ids:
+            continue  # another user's entry paid from outside the caller's accounts
         if entry.entry_type == BudgetEntryType.INCOME:
             monthly_income += monthly
             if entry.account_id in wallet_ids:
@@ -655,8 +637,8 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     """A transfer: -(amount + fee) on the source, +amount on the destination.
 
     Legs are kept only for accounts in the projection's scope (``cash_ids``,
-    ``card_ids`` and ``wallet_ids``); an account outside it (another entity's, or
-    an inactive one) is never exposed. A leg is cash when its account is a
+    ``card_ids`` and ``wallet_ids``); an account outside it (one the caller holds
+    no role on, or an inactive one) is never exposed. A leg is cash when its account is a
     projection-cash account, so:
 
     - between two projection-cash accounts the pooled total moves only by the fee,
@@ -695,8 +677,8 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     touching a card without cycle settings moves no projection cash at all: no
     statement bills an advance from it or is netted by a payment into it, so
     counting either side would leave cash that nothing balances. A payment into
-    a billed card from such a card outside the scope (another entity's, or an
-    inactive one) agrees: its source has no leg here, so it moves no cash, and
+    a billed card from such a card outside the scope (one the caller holds no
+    role on, or an inactive one) agrees: its source has no leg here, so it moves no cash, and
     statements decide "unbilled" from the source account itself, so it does not
     net the statement either; that debt is paid in cash on its due date.
     """
@@ -744,7 +726,6 @@ def collect_events(
     end: datetime,
     *,
     user_id: int,
-    entity_id: Optional[int] = None,
     accounts: Optional[list] = None,
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
@@ -761,12 +742,17 @@ def collect_events(
     projection cash are included (``counts_as_cash`` False) so listings can show
     them; cash views must filter on ``counts_as_cash``.
 
-    A transaction leg is cash only when its account is one of the scoped
-    projection-cash accounts. Unposted transfers into or out of any scoped account
-    (projection-cash or credit card) are collected even when the transaction row
-    belongs to another scope (a cross-entity transfer), but only their in-scope
-    legs are kept; a card's own leg is never cash, while the other side of a card
-    payment or cash advance is (see ``_transfer_event``).
+    The scope is every active account the caller holds a role on (``accounts``,
+    default ``get_account_balances``). Every unposted transaction and active
+    budget entry the caller may read is collected, of any type: the caller's
+    own, plus any touching a scoped account, whoever created it. Legs are built
+    only for scoped accounts, so another user's account (or an inactive one) is
+    never exposed; an entry's overflow account is kept only when it is scoped
+    too. The caller's own entries with no account keep a cash leg with no
+    account, which lands in unassigned cash. A transaction leg is cash only
+    when its account is one of the scoped projection-cash accounts; a card's
+    own leg is never cash, while the other side of a card payment or cash
+    advance is (see ``_transfer_event``).
 
     Spending wallets are not projection cash. Transfers into or out of one keep
     their legs (the wallet's never cash, see ``_transfer_event``); a wallet's other
@@ -781,19 +767,18 @@ def collect_events(
     account, non-cash on a scoped wallet, and absent when the account is outside
     the scope; a loan outside the scope paid from a scoped account is projected
     too, so the payment leaves cash once, in the paying account's projection.
-    When the caller cannot access such a loan (``can_access_record``), its
+    When the caller holds no role on such a loan (``account_role``), its
     payable is a neutral "Loan payment": amounts and dates only, with no loan
     name, ``source_id`` or ``loan_due_date``. The same holds for a planned or
     recurring transfer into a loan the caller cannot access (see
     ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
-    occurrence is a transfer event with legs on both accounts. Like unposted
-    transfers, recurring transfers into or out of a scoped account are collected
-    even when the entry belongs to another scope, keeping only the in-scope legs.
-    An occurrence already materialised is suppressed: a transaction with this
-    ``budget_entry_id`` dated the same calendar day stands in for it (each
-    transaction suppresses at most one occurrence), so a ``materialize`` with
-    ``advance=False`` does not move the money twice.
+    occurrence is a transfer event with legs on its scoped accounts.
+    An occurrence already materialised is suppressed: a transaction of the
+    entry's creator with this ``budget_entry_id`` dated the same calendar day
+    stands in for it (each transaction suppresses at most one occurrence; see
+    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``
+    does not move the money twice.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -808,7 +793,7 @@ def collect_events(
     start = _naive(start)
     end = _naive(end)
     if accounts is None:
-        accounts = get_account_balances(db, user_id, entity_id)
+        accounts = get_account_balances(db, user_id)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
     loans = [a for a in accounts if a.account_type == AccountType.LOAN]
@@ -822,41 +807,19 @@ def collect_events(
 
     events: List[dict] = []
 
-    def entry_in_scope(entry) -> bool:
-        # Mirrors scope_criterion(BudgetEntry, user_id, entity_id).
-        if entity_id is not None:
-            return entry.entity_id == entity_id
-        return entry.user_id == user_id
-
-    entry_scope = scope_criterion(BudgetEntry, user_id, entity_id)
-    if scoped_ids:
-        # Recurring transfers touching an in-scope account, wherever the entry lives.
-        entry_scope = or_(entry_scope, and_(
-            BudgetEntry.transfer_to_account_id.isnot(None),
-            or_(
-                BudgetEntry.transfer_to_account_id.in_(scoped_ids),
-                BudgetEntry.account_id.in_(scoped_ids),
-            ),
-        ))
-    entries = db.query(BudgetEntry).filter(
-        entry_scope,
+    # Every record of any type the caller created or that touches an account
+    # in the scope (loans included), kept only when the caller may read it.
+    scope_account_ids = {a.id for a in accounts}
+    entries = [e for e in db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user_id, scope_account_ids),
         BudgetEntry.is_active.is_(True),
-    ).all()
+    ).all() if can_read_record(db, user_id, e)]
 
-    in_scope = scope_criterion(Transaction, user_id, entity_id)
-    if scoped_ids:
-        in_scope = or_(in_scope, and_(
-            Transaction.transaction_type == TransactionType.TRANSFER,
-            or_(
-                Transaction.transfer_to_account_id.in_(scoped_ids),
-                Transaction.transfer_from_account_id.in_(scoped_ids),
-            ),
-        ))
-    txns = db.query(Transaction).filter(
-        in_scope,
+    txns = [t for t in db.query(Transaction).filter(
+        readable_criterion(Transaction, user_id, scope_account_ids),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).all()
+    ).all() if can_read_record(db, user_id, t)]
 
     # Every wallet any event references, in scope or not.
     wallet_ids = scoped_wallet_ids | wallet_ids_of(db, (
@@ -884,36 +847,28 @@ def collect_events(
             Account.payment_account_id.in_(scoped_ids),
         ).all() if a.id not in loan_ids
     ] if scoped_ids else []
-    # Loans outside the scope the caller cannot access: every event paying one
+    # Loans outside the scope the caller holds no role on: every event paying one
     # (derived payable, planned or recurring transfer) is a neutral "Loan payment".
     outside_loans = {a.id: a for a in outside_payable_loans}
     missing = known_loan_ids - loan_ids - set(outside_loans)
     if missing:
         outside_loans.update(
             (a.id, a) for a in db.query(Account).filter(Account.id.in_(missing)).all())
-    caller = db.get(User, user_id) if outside_loans else None
     hidden_loan_ids = frozenset(
-        lid for lid, a in outside_loans.items()
-        if caller is None or not can_access_record(db, caller, a))
+        lid for lid, a in outside_loans.items() if account_role(user_id, a) == NONE)
 
     # Transactions already materialised from a recurring transfer entry, by day:
     # each stands in for one occurrence on its calendar day (as in
     # _card_entry_charges), since the posted transfer has already moved the balance.
     transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
-    linked = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_(transfer_entry_ids))
-    ) if transfer_entry_ids else Counter()
+    linked = _linked_occurrence_days(db, transfer_entry_ids)
 
     card_entries = []
     for entry in entries:
+        # Overflow routing only onto a scoped account, on every entry type.
+        overflow_id = entry.overflow_account_id if entry.overflow_account_id in scoped_ids else None
         if entry.transfer_to_account_id is not None:
-            # Another scope's entry keeps only its in-scope legs (see _transfer_event),
-            # and its overflow routing only when that account is in scope too.
-            overflow_id = entry.overflow_account_id
-            if not entry_in_scope(entry) and overflow_id not in cash_ids:
-                overflow_id = None
+            # Only the scoped legs are kept (see _transfer_event).
             for occ in iter_occurrences(entry, start, end):
                 key = (entry.id, occ.date())
                 if linked[key]:
@@ -943,6 +898,14 @@ def collect_events(
             card_entries.append(entry)
             continue
         sign = Decimal("1") if entry.entry_type == BudgetEntryType.INCOME else Decimal("-1")
+        # A leg on a scoped account; the caller's own entry with no account keeps
+        # a cash leg with no account (unassigned cash). Any other account is
+        # outside the scope, so the occurrence is listed with no leg.
+        if entry.account_id in scoped_ids or (
+                entry.account_id is None and entry.user_id == user_id):
+            legs = [_leg(entry.account_id, sign * Decimal(str(entry.amount)), overflow_id)]
+        else:
+            legs = []
         for occ in iter_occurrences(entry, start, end):
             events.append(_event(
                 date=occ,
@@ -951,8 +914,7 @@ def collect_events(
                 source="budget_entry",
                 source_id=entry.id,
                 face_amount=entry.amount,
-                legs=[_leg(entry.account_id, sign * Decimal(str(entry.amount)),
-                           entry.overflow_account_id)],
+                legs=legs,
             ))
 
     for txn in txns:
@@ -989,7 +951,8 @@ def collect_events(
             source="transaction",
             source_id=txn.id,
             face_amount=txn.amount,
-            legs=[_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)],
+            legs=([_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)]
+                  if txn.account_id in scoped_ids else []),
             **overdue,
         ))
 
@@ -999,7 +962,7 @@ def collect_events(
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
     # the projected charges of budget entries scheduled on it.
-    for p in get_statement_payables(db, user_id, entity_id, start, end,
+    for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
@@ -1021,8 +984,8 @@ def collect_events(
     # payments into it cover (see services/loans.py). Recurring transfers into a
     # loan are projected past the window end, as a payment late for a due date in
     # the window still covers it; one already materialised is skipped, as above.
-    # They are found by the loan alone, so an entry stored under another entity
-    # (paid from its own bank) still covers this loan; such an entry moves no cash
+    # They are found by the loan alone, so an entry another user created (paid
+    # from their own bank) still covers this loan; such an entry moves no cash
     # here, since its source account is outside this projection.
     #
     # The payable is paid from the loan's paying account, so it is routed like
@@ -1039,11 +1002,7 @@ def collect_events(
         BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
         BudgetEntry.is_active.is_(True),
     ).all() if payable_loan_ids else []
-    linked_covers = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_([e.id for e in loan_entries]))
-    ) if loan_entries else Counter()
+    linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
     for entry in loan_entries:
         for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
@@ -1077,6 +1036,24 @@ def collect_events(
     return events
 
 
+def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
+    """``{(entry id, day): count}`` of transactions materialised from each entry.
+
+    Each stands in for one occurrence on its calendar day. Only the entry
+    creator's transactions count: another user's row naming the entry is a
+    stale reference (left by the entity era) and suppresses nothing.
+    """
+    if not entry_ids:
+        return Counter()
+    rows = (
+        db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+        .filter(Transaction.budget_entry_id.in_(entry_ids),
+                Transaction.user_id == BudgetEntry.user_id)
+    )
+    return Counter((entry_id, _naive(when).date()) for entry_id, when in rows)
+
+
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
                         end: datetime, events: List[dict]) -> dict:
     """Projected statement charges for budget entries scheduled on a credit card.
@@ -1095,9 +1072,9 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     stale one would invent overdue statements nobody recorded.
 
     An occurrence whose linked transaction already exists is suppressed: a
-    transaction with this ``budget_entry_id`` dated the same calendar day stands in
-    for it (each transaction suppresses at most one occurrence), since that
-    transaction is itself a line item on the card. This is what keeps a
+    transaction of the entry's creator with this ``budget_entry_id`` dated the same
+    calendar day stands in for it (each transaction suppresses at most one
+    occurrence), since that transaction is itself a line item on the card. This is what keeps a
     ``materialize`` with ``advance=False`` from billing twice. Matching is by day
     only: materialising with a custom ``transaction_date`` on another day and
     ``advance=False`` suppresses nothing, so that occurrence is still billed too.
@@ -1107,11 +1084,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     """
     if not entries:
         return {}
-    linked = Counter(
-        (entry_id, _naive(when).date())
-        for entry_id, when in db.query(Transaction.budget_entry_id, Transaction.transaction_date)
-        .filter(Transaction.budget_entry_id.in_([e.id for e in entries]))
-    )
+    linked = _linked_occurrence_days(db, [e.id for e in entries])
     charges: dict = {}
     for entry in entries:
         income = entry.entry_type == BudgetEntryType.INCOME
@@ -1268,9 +1241,9 @@ def route_accounts(opening_by_account: dict, events: List[dict], account_names: 
     return _route_legs(opening_by_account, events, account_names)["shortfalls"]
 
 
-def _projection_accounts(db: Session, user_id: int, entity_id: Optional[int]):
+def _projection_accounts(db: Session, user_id: int):
     """Accounts in scope, plus the projection-cash opening balance per account."""
-    accounts = get_account_balances(db, user_id, entity_id)
+    accounts = get_account_balances(db, user_id)
     opening_by_account = {
         a.id: Decimal(str(a.balance)) for a in accounts if is_projection_cash(a)
     }
@@ -1281,7 +1254,6 @@ def _projection_accounts(db: Session, user_id: int, entity_id: Optional[int]):
 def project_running_balance(
     db: Session,
     user_id: int,
-    entity_id: Optional[int] = None,
     days: int = 60,
     reference: Optional[datetime] = None,
 ) -> dict:
@@ -1292,10 +1264,10 @@ def project_running_balance(
     end = start + timedelta(days=days)
 
     # Available cash is projection-cash accounts only (see is_projection_cash).
-    accounts, opening_by_account, account_names = _projection_accounts(db, user_id, entity_id)
+    accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
     opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events = collect_events(db, start, end, user_id=user_id, entity_id=entity_id, accounts=accounts)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts)
     cash_events = [e for e in events if e["counts_as_cash"]]
 
     result = build_timeline(opening, cash_events)

@@ -38,8 +38,7 @@ function isInFixedLayer(element: HTMLElement) {
 }
 
 // Nearest ancestor that clips the element, e.g. the desktop nav link strip,
-// which scrolls sideways when the links do not fit (narrow desktop widths, or
-// with the entity switcher shown).
+// which scrolls sideways when the links do not fit (narrow desktop widths).
 function clippingAncestor(element: HTMLElement) {
   for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
     const style = getComputedStyle(node)

@@ -451,7 +451,7 @@ def test_posted_payment_from_a_card_without_statements_does_not_net_the_billed_c
 
 
 def test_payment_from_an_unbilled_card_outside_the_cards_list_does_not_net():
-    """The source card is another entity's (or inactive), so it is not in ``cards``:
+    """The source card is another user's (or inactive), so it is not in ``cards``:
     the caller names it as unbilled from the account itself."""
     _, rows = _from_unbilled_card()
     events = build_statement_payables([_card()], {1: rows}, AUG, SEP,

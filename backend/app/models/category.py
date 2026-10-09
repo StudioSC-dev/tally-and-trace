@@ -29,7 +29,6 @@ class Category(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=True, index=True)
     name = Column(String(100), nullable=False, index=True)
     description = Column(Text, nullable=True)
     color = Column(String(7), nullable=True)  # Hex color code
@@ -51,6 +50,5 @@ class Category(Base):
 
     # Relationships
     user = relationship("User", back_populates="categories")
-    entity = relationship("Entity", back_populates="categories", foreign_keys="Category.entity_id")
     transactions = relationship("Transaction", back_populates="category")
     budget_entries = relationship("BudgetEntry", back_populates="category")

@@ -110,7 +110,6 @@ function TransactionFormModal({
   initial,
   accounts,
   categories,
-  entityId,
   defaultCurrency,
 }: {
   visible: boolean
@@ -118,7 +117,6 @@ function TransactionFormModal({
   initial?: Partial<Transaction>
   accounts: Account[]
   categories: Category[]
-  entityId: number
   defaultCurrency: CurrencyCode
 }) {
   const isEdit = !!initial?.id
@@ -151,7 +149,6 @@ function TransactionFormModal({
         account_id: parseInt(form.account_id),
         category_id: form.category_id ? parseInt(form.category_id) : undefined,
         transaction_date: new Date(form.transaction_date).toISOString(),
-        entity_id: entityId,
         currency: defaultCurrency,
       }
       if (isEdit && initial?.id) {
@@ -415,7 +412,6 @@ export default function TransactionsScreen() {
         initial={editing}
         accounts={accounts}
         categories={categories}
-        entityId={1}
         defaultCurrency={currency}
       />
     </SafeAreaView>
