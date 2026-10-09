@@ -36,6 +36,7 @@ export const authApi = createApi({
         body: credentials,
       }),
       async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        beginNewSession()
         try {
           const { data } = await queryFulfilled
           beginNewSession()
