@@ -1,12 +1,20 @@
-"""The demo seed: one demo user with generic data, replaced by shape version.
+"""The demo seed: two demo users with generic data, replaced by shape version.
 
 On startup ``seed_database`` compares the one-row ``demo_state`` table with
-``DEMO_SHAPE_VERSION``. When the row is missing or holds another version, the
-demo user's data is replaced with the current shape (the user row, and so its
-id, is kept); otherwise nothing changes, so every id stays the same. Only the
-demo user, matched by its fixed email, is ever touched. The whole run is one
-transaction under a Postgres advisory lock, so concurrent workers seed once,
-and a failure rolls back and logs at error level.
+``DEMO_SHAPE_VERSION``. When the row is missing, holds another version, or a
+demo user is missing, both demo users' data is replaced with the current shape
+(the user rows, and so their ids, are kept); otherwise nothing changes, so
+every id stays the same. Only the two demo users, matched by their fixed
+emails, are ever touched. The whole run is one transaction under a Postgres
+advisory lock, so concurrent workers seed once, and a failure rolls back and
+logs at error level.
+
+Shape 3 (STU-232): the demo owner's Joint Account, tagged Household, is shared
+with the Demo Partner as editor. Household bills are paid from the joint
+account and from the owner's private card, and the partner has an account of
+their own and a deposit from it into the joint account (``partner`` and
+``shares`` in ``constants/seed_data.json``). Demo users can't change shares
+(``app/routers/shares.py``), so the share comes only from this seed.
 
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
@@ -17,13 +25,14 @@ import logging
 import os
 from datetime import datetime
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
 from app.core.tags import LINKS, ensure_household_tag
 from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
+from app.models.account_share import AccountShare
 from app.models.account import AccountType
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
 from app.models.budget_entry import BudgetEntryType
@@ -39,7 +48,7 @@ DEMO_PARTNER_EMAIL = "demo.partner@example.com"
 # Demo users can neither share nor be shared with (app/routers/shares.py).
 DEMO_EMAILS = frozenset({DEMO_EMAIL, DEMO_PARTNER_EMAIL})
 DEMO_PASSWORD = "password123"
-DEMO_SHAPE_VERSION = 2  # 2: tags (STU-231)
+DEMO_SHAPE_VERSION = 3  # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232)
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
@@ -62,7 +71,9 @@ def _seed(db: Session) -> None:
         db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _LOCK_KEY})
     state = db.get(DemoState, 1)
     user = db.query(User).filter(User.email == DEMO_EMAIL).first()
-    if state is not None and state.shape_version == DEMO_SHAPE_VERSION and user is not None:
+    partner = db.query(User).filter(User.email == DEMO_PARTNER_EMAIL).first()
+    if (state is not None and state.shape_version == DEMO_SHAPE_VERSION
+            and user is not None and partner is not None):
         db.rollback()  # releases the lock; nothing changed
         logger.info("Demo seed is current (shape %s); nothing to do", DEMO_SHAPE_VERSION)
         return
@@ -70,12 +81,16 @@ def _seed(db: Session) -> None:
     if user is None:
         user = User(email=DEMO_EMAIL)
         db.add(user)
-    else:
-        _delete_demo_data(db, user)
-    _reset_demo_user(user)
+    if partner is None:
+        partner = User(email=DEMO_PARTNER_EMAIL)
+        db.add(partner)
+    _reset_demo_user(user, "User", onboarded=False)
+    _reset_demo_user(partner, "Partner", onboarded=True)
     db.flush()
+    _delete_demo_data(db, [user, partner])
     household = ensure_household_tag(db, user)  # kept across reseeds, like the user row
-    _load_seed_data(db, user, household)
+    ensure_household_tag(db, partner)
+    _load_seed_data(db, user, household, partner)
 
     if state is None:
         db.add(DemoState(id=1, shape_version=DEMO_SHAPE_VERSION))
@@ -86,35 +101,79 @@ def _seed(db: Session) -> None:
     logger.info("Demo seed replaced the demo user's data (shape %s)", DEMO_SHAPE_VERSION)
 
 
-def _reset_demo_user(user: User) -> None:
+def _reset_demo_user(user: User, last_name: str, *, onboarded: bool) -> None:
     user.password_hash = get_password_hash(DEMO_PASSWORD)
     user.first_name = "Demo"
-    user.last_name = "User"
+    user.last_name = last_name
     user.is_active = True
     user.is_verified = True
-    user.onboarding_completed = False  # the demo user starts pre-onboarding
+    # The demo owner starts pre-onboarding; the partner goes straight in.
+    user.onboarding_completed = onboarded
     user.default_currency = CurrencyType.PHP
 
 
-def _delete_demo_data(db: Session, user: User) -> None:
-    """Everything the demo user owns, children first; the user row stays.
+def _delete_demo_data(db: Session, users) -> None:
+    """Everything the demo users own, children first; the user rows stay.
 
-    So does the Household system tag, as every user keeps theirs; its links go
-    with the records they tag.
+    So does each Household system tag, as every user keeps theirs; its links go
+    with the records they tag. Every user's transactions go before any account,
+    since the partner's deposit lands on the owner's joint account.
     """
+    ids = [u.id for u in users]
     for model in (Transaction, BudgetEntry, WishlistItem, Allocation, Category):
-        db.query(model).filter(model.user_id == user.id).delete(synchronize_session=False)
-    db.query(Tag).filter(Tag.user_id == user.id, Tag.is_system.is_(False)).delete(
+        db.query(model).filter(model.user_id.in_(ids)).delete(synchronize_session=False)
+    db.query(Tag).filter(Tag.user_id.in_(ids), Tag.is_system.is_(False)).delete(
         synchronize_session=False)
-    db.query(Account).filter(Account.user_id == user.id).update(
+    owned = select(Account.id).where(Account.user_id.in_(ids))
+    db.query(AccountShare).filter(or_(
+        AccountShare.account_id.in_(owned), AccountShare.user_id.in_(ids),
+    )).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).update(
         {"payment_account_id": None, "payment_overflow_account_id": None},
         synchronize_session=False)
-    db.query(Account).filter(Account.user_id == user.id).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id.in_(ids)).delete(synchronize_session=False)
     db.flush()
 
 
-def _load_seed_data(db: Session, default_user: User, household: Tag) -> None:
-    """The generic demo data in ``constants/seed_data.json``, owned by the demo user.
+def _load_partner_data(db: Session, owner: User, partner: User, seed_data: dict,
+                       owner_accounts: dict) -> None:
+    """The Demo Partner's accounts and transactions, and the owner's shares to them.
+
+    Partner transactions name the partner's accounts by 1-based index
+    (``account_id``) and an owner account by ``transfer_to_owner_account_id``.
+    """
+    data = seed_data.get("partner", {})
+    accounts = {}
+    for i, account_data in enumerate(data.get("accounts", []), start=1):
+        row = dict(account_data)
+        row["account_type"] = AccountType(row["account_type"].lower())
+        row["user_id"] = partner.id
+        row.setdefault("currency", partner.default_currency)
+        account = Account(**row)
+        db.add(account)
+        db.flush()
+        accounts[i] = account
+    for txn_data in data.get("transactions", []):
+        row = dict(txn_data)
+        source = accounts[row.pop("account_id")]
+        target = row.pop("transfer_to_owner_account_id", None)
+        kind = TransactionType(row.pop("transaction_type").lower())
+        db.add(Transaction(
+            user_id=partner.id, created_by_actor=partner.id, account_id=source.id,
+            transaction_type=kind, currency=source.currency, transfer_fee=0.0,
+            transaction_date=datetime.fromisoformat(row.pop("transaction_date")),
+            transfer_from_account_id=source.id if kind == TransactionType.TRANSFER else None,
+            transfer_to_account_id=owner_accounts[target] if target else None,
+            is_recurring=False, **row))
+    for share in seed_data.get("shares", []):
+        db.add(AccountShare(account_id=owner_accounts[share["account_id"]], user_id=partner.id,
+                            role=share["role"], created_by=owner.id))
+    db.flush()
+
+
+def _load_seed_data(db: Session, default_user: User, household: Tag, partner: User) -> None:
+    """The generic demo data in ``constants/seed_data.json``: the demo owner's,
+    then the Demo Partner's (``_load_partner_data``).
 
     Records name their tags in a ``tags`` list: Household is the user's system
     tag, and every other name is one of the top-level ``tags``.
@@ -270,6 +329,7 @@ def _load_seed_data(db: Session, default_user: User, household: Tag) -> None:
             transaction_data["posting_date"] = datetime.fromisoformat(transaction_data["posting_date"])
         # Add user_id to transaction data
         transaction_data["user_id"] = default_user.id
+        transaction_data["created_by_actor"] = default_user.id
         # Map foreign key IDs to actual IDs
         transaction_data["account_id"] = account_id_mapping[original_account_id]
         original_category_id = transaction_data.get("category_id")
@@ -319,3 +379,5 @@ def _load_seed_data(db: Session, default_user: User, household: Tag) -> None:
         for name in names:
             db.execute(table.insert().values({"tag_id": tag_ids[name], column: record.id}))
     db.flush()
+
+    _load_partner_data(db, default_user, partner, seed_data, account_id_mapping)

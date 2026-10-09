@@ -5,7 +5,10 @@ On startup ``seed_database`` compares the one-row ``demo_state`` table with
 user's data; otherwise nothing changes and every id stays the same. Only the
 user with the fixed demo email is touched, and a failure logs at error level
 and leaves the database as it was. Shape 2 (STU-231) tags the demo: Household
-and Business on the records the seed file names. Skips without a database.
+and Business on the records the seed file names. Shape 3 (STU-232) adds the
+Demo Partner, the owner's Joint Account shared with them as editor, household
+bills on the joint account and the owner's card, and the partner's deposit.
+Skips without a database.
 """
 import json
 import logging
@@ -206,7 +209,7 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
 def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
     from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD, DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 2
+    assert DEMO_SHAPE_VERSION == 3  # shape 3 (STU-232) keeps shape 2's tags
     seed.seed_database()
     r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -220,9 +223,11 @@ def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
     assert tagged("/transactions/", "description", "Business") == [
         "Gas station fill-up", "Online purchase - Amazon"]
     assert tagged("/transactions/", "description", "Household") == [
-        "Grocery shopping at Whole Foods", "Projected September electric bill"]
-    assert tagged("/budget-entries/", "name", "Household") == ["Electric Bill"]
-    assert tagged("/accounts/", "name", "Household") == ["Cash Wallet"]
+        "Grocery shopping at Whole Foods", "Household groceries",
+        "Projected September electric bill", "Water bill"]
+    assert tagged("/budget-entries/", "name", "Household") == [
+        "Electric Bill", "Internet", "Rent"]
+    assert tagged("/accounts/", "name", "Household") == ["Cash Wallet", "Joint Account"]
     # The Cash Wallet's Household tag reaches the cash it receives.
     household = client.get(f"{API}/transactions/", headers=headers,
                            params={"tag": tags["Household"]["id"], "limit": 100}).json()
@@ -332,3 +337,129 @@ def test_concurrent_startups_seed_once(db, seed, monkeypatch, caplog):
     after = _snapshot(db)
     assert after["state"][0] == seed.DEMO_SHAPE_VERSION
     assert {table: len(ids) for table, ids in after["owned"].items()} == _seed_counts()
+
+
+# --- Shape 3: the Demo Partner (STU-232) -----------------------------------------------
+
+def _login(client, email):
+    from app.core.seed import DEMO_PASSWORD
+
+    r = client.post(f"{API}/auth/login", json={"email": email, "password": DEMO_PASSWORD})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def _partner_snapshot(db):
+    """The Demo Partner's id, accounts, transactions and the shares they hold."""
+    from app.core.seed import DEMO_PARTNER_EMAIL
+    from app.models import Account, Transaction, User
+    from app.models.account_share import AccountShare
+
+    db.expire_all()
+    partner = db.query(User).filter(User.email == DEMO_PARTNER_EMAIL).one()
+    return {
+        "user": partner.id,
+        "accounts": sorted(a.id for a in db.query(Account).filter(Account.user_id == partner.id)),
+        "transactions": sorted(
+            t.id for t in db.query(Transaction).filter(Transaction.user_id == partner.id)),
+        "shares": sorted((s.id, s.account_id, s.role) for s in db.query(AccountShare).filter(
+            AccountShare.user_id == partner.id)),
+    }
+
+
+def test_shape_3_shares_the_joint_account_with_the_demo_partner(client, db, seed):
+    from app.core.seed import DEMO_EMAIL, DEMO_PARTNER_EMAIL
+
+    seed.seed_database()
+    owner, partner = _login(client, DEMO_EMAIL), _login(client, DEMO_PARTNER_EMAIL)
+    accounts = {a["name"]: a for a in client.get(
+        f"{API}/accounts/", headers=partner, params={"limit": 100}).json()["items"]}
+    assert set(accounts) == {"Partner Checking", "Joint Account"}
+    joint = accounts["Joint Account"]
+    assert (joint["my_role"], joint["owner_name"]) == ("editor", "Demo U.")
+    assert joint["permissions"] == {"can_edit_settings": False, "can_manage_shares": False,
+                                    "can_add_transactions": True}
+    assert accounts["Partner Checking"]["my_role"] == "owner"
+
+    def rows(headers, path):
+        return client.get(f"{API}{path}", headers=headers, params={"limit": 100}).json()["items"]
+
+    mine = {t.get("description") or t.get("display_description"): t
+            for t in rows(partner, "/transactions/")}
+    deposit = mine["Deposit to the joint account"]
+    assert (deposit["view"], deposit["amount"]) == ("full", 1500.0)
+    assert deposit["transfer_to_account_id"] == joint["id"]
+    assert mine["Water bill"]["view"] == "shared_full"
+    assert "Household groceries" not in mine  # on the owner's private card
+    assert "Rent" in [e.get("name") for e in rows(partner, "/budget-entries/")]
+    assert "Internet" not in [e.get("name") or e.get("display_name")
+                              for e in rows(partner, "/budget-entries/")]
+    # The owner sees the deposit limited: the partner's account is not shared with them.
+    theirs = {t["id"]: t for t in rows(owner, "/transactions/")}
+    seen = theirs[deposit["id"]]
+    assert (seen["view"], seen["display_description"], seen["created_by"]) == (
+        "limited", "Transfer", "Demo P.")
+    assert seen["account"] == {"id": None, "name": "Other account"}
+    assert seen["counterpart"] == {"id": joint["id"], "name": "Joint Account"}
+
+
+def test_the_demo_partner_logs_in_and_cannot_share(client, db, seed):
+    from app.core.seed import DEMO_PARTNER_EMAIL
+
+    partner = _login(client, DEMO_PARTNER_EMAIL)
+    me = client.get(f"{API}/auth/me", headers=partner).json()
+    assert (me["first_name"], me["last_name"]) == ("Demo", "Partner")
+    for path in ("/users/lookup?email=demo@example.com", "/shares/received"):
+        assert client.get(f"{API}{path}", headers=partner).status_code == 403, path
+
+
+def test_a_repeated_startup_keeps_the_demo_partner_as_it_is(db, seed):
+    before = (_snapshot(db), _partner_snapshot(db))
+    seed.seed_database()
+    seed.seed_database()
+    assert (_snapshot(db), _partner_snapshot(db)) == before
+    assert before[1]["accounts"] and before[1]["transactions"] and before[1]["shares"]
+
+
+def test_a_shape_bump_replaces_the_demo_partners_data(db, seed, monkeypatch):
+    before, owner_before = _partner_snapshot(db), _snapshot(db)
+    monkeypatch.setattr(seed, "DEMO_SHAPE_VERSION", seed.DEMO_SHAPE_VERSION + 1)
+    seed.seed_database()
+    after, owner_after = _partner_snapshot(db), _snapshot(db)
+    assert after["user"] == before["user"]
+    assert len(after["accounts"]) == len(before["accounts"]) == 1
+    assert not set(after["accounts"]) & set(before["accounts"])
+    assert not set(after["transactions"]) & set(before["transactions"])
+    assert len(after["transactions"]) == 1
+    [(_, account_id, role)] = after["shares"]
+    assert role == "editor" and account_id in owner_after["owned"]["accounts"]
+    assert account_id not in owner_before["owned"]["accounts"]
+
+
+def test_a_missing_state_row_replaces_the_demo_partners_data(db, seed):
+    from app.models.demo_state import DemoState
+
+    before = _partner_snapshot(db)
+    db.query(DemoState).delete()
+    db.commit()
+    seed.seed_database()
+    after = _partner_snapshot(db)
+    assert after["user"] == before["user"]
+    assert not set(after["accounts"]) & set(before["accounts"])
+    assert len(after["shares"]) == 1
+
+
+def test_a_missing_demo_partner_is_recreated(client, db, seed):
+    from app.core.seed import DEMO_PARTNER_EMAIL
+    from app.models import User
+    from app.models.account_share import AccountShare
+
+    partner = _partner_snapshot(db)
+    seed._delete_demo_data(db, [db.get(User, partner["user"])])
+    db.query(AccountShare).filter(AccountShare.user_id == partner["user"]).delete()
+    db.query(User).filter(User.id == partner["user"]).delete()
+    db.commit()
+    seed.seed_database()
+    after = _partner_snapshot(db)
+    assert after["user"] != partner["user"] and len(after["shares"]) == 1
+    _login(client, DEMO_PARTNER_EMAIL)
