@@ -159,3 +159,37 @@ def sw(sw_client, sw_db, sw_people):
 
 def sw_money(value) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def sw_leaks(body, private_ids=(), numbers=(), path="$"):
+    """Every leak in a JSON tree, envelopes included.
+
+    A leak is a string containing ``PRIVATE``, a private id under any id key
+    (``id``, ``*_id``, ``*_ids``), or one of ``numbers`` anywhere (a sentinel
+    amount such as a hidden loan's interest).
+    """
+    private_ids = set(private_ids)
+    numbers = {round(float(n), 2) for n in numbers}
+    found = []
+
+    def walk(node, where, key=None):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if PRIVATE in str(k):
+                    found.append((where, k))
+                walk(v, f"{where}.{k}", k)
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{where}[{i}]", key)
+        elif isinstance(node, str):
+            if PRIVATE in node:
+                found.append((where, node))
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            idish = key is not None and (key == "id" or key.endswith("_id") or key.endswith("_ids"))
+            if idish and node in private_ids:
+                found.append((where, node))
+            if round(float(node), 2) in numbers:
+                found.append((where, node))
+
+    walk(body, path)
+    return found

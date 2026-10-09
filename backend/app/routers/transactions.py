@@ -15,11 +15,12 @@ from app.core.access import (
     viewable_account_ids,
 )
 from app.core.tags import (
-    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    TAG_FILTER_HELP, effective_tag_criterion, filter_tag_id, own_tag_ids,
     replace_own_tags,
 )
 from app.models.transaction import Transaction, TransactionType
-from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
+from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
+from app.core.redaction import displayed_description_criterion, serialize_transaction, serialize_transactions
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
@@ -547,16 +548,18 @@ def get_transactions(
     """Get all transactions with optional filtering"""
     # Every transaction the caller may read: their own, plus any touching an
     # account they hold a role on (including transfers where either leg does).
-    query = db.query(Transaction).filter(
-        readable_criterion(Transaction, current_user, viewable_account_ids(db, current_user))
-    )
+    viewable = viewable_account_ids(db, current_user)
+    query = db.query(Transaction).filter(readable_criterion(Transaction, current_user, viewable))
 
     if account_ids:
         query = query.filter(touches_accounts(Transaction, account_ids))
+    # Categories and allocations are never shared: they filter the caller's own rows.
     if category_ids:
-        query = query.filter(Transaction.category_id.in_(category_ids))
+        query = query.filter(Transaction.category_id.in_(category_ids),
+                             Transaction.user_id == current_user.id)
     if allocation_id:
-        query = query.filter(Transaction.allocation_id == allocation_id)
+        query = query.filter(Transaction.allocation_id == allocation_id,
+                             Transaction.user_id == current_user.id)
     if transaction_types:
         try:
             allowed_types = [TransactionType(item.lower()) for item in transaction_types]
@@ -570,7 +573,10 @@ def get_transactions(
     if is_reconciled is not None:
         query = query.filter(Transaction.is_reconciled == is_reconciled)
     if search:
-        query = query.filter(Transaction.description.ilike(f"%{search}%"))
+        # Displayed text only: a row whose description the caller is shown as a
+        # neutral label never matches its stored description.
+        query = query.filter(Transaction.description.ilike(f"%{search}%"),
+                             displayed_description_criterion(viewable))
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(Transaction, tag_id))
@@ -583,10 +589,10 @@ def get_transactions(
         .all()
     )
     has_more = offset + len(transactions) < total
-    attach_visible_tags(db, current_user, transactions)
-    return {"items": transactions, "total": total, "has_more": has_more}
+    return {"items": serialize_transactions(db, current_user, transactions), "total": total,
+            "has_more": has_more}
 
-@router.post("/", response_model=TransactionResponse)
+@router.post("/", response_model=TransactionOut)
 def create_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db),
@@ -596,7 +602,7 @@ def create_transaction(
     db_transaction = add_transaction(db, current_user, transaction)
     db.commit()
     db.refresh(db_transaction)
-    return attach_visible_tags(db, current_user, db_transaction)
+    return serialize_transaction(db, current_user, db_transaction)
 
 
 def add_transaction(db: Session, current_user: User, transaction: TransactionCreate,
@@ -713,13 +719,13 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         replace_own_tags(db, Transaction, db_transaction.id, owner, tag_ids)
     return db_transaction
 
-@router.get("/{transaction_id}", response_model=TransactionResponse)
+@router.get("/{transaction_id}", response_model=TransactionOut)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    return attach_visible_tags(db, current_user, transaction)
+    return serialize_transaction(db, current_user, transaction)
 
-@router.put("/{transaction_id}", response_model=TransactionResponse)
+@router.put("/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance.
 
@@ -923,7 +929,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_transaction)
-    return attach_visible_tags(db, current_user, db_transaction)
+    return serialize_transaction(db, current_user, db_transaction)
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):

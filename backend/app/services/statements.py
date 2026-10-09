@@ -222,7 +222,7 @@ def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
 
 
 def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
-                     ) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
+                     keep_source: bool = False) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
     """Separate a card's rows into statement line items and payments into the card.
 
     Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
@@ -233,6 +233,8 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
     payment: no statement of that card bills it, so no cash ever leaves for it
     (the forecast treats it as moving no cash, see ``forecast._transfer_event``),
     and netting it would make the debt it moved disappear.
+
+    With ``keep_source`` a cash advance's line keeps its row as ``source``.
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
@@ -245,10 +247,12 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
                     payments.append((row.transaction_date, amount))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
                 fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
+                extra = {"source": row} if keep_source else {}
                 lines.append(SimpleNamespace(
                     transaction_date=row.transaction_date,
                     amount=amount + fee,
                     transaction_type=TransactionType.DEBIT,
+                    **extra,
                 ))
             continue
         lines.append(row)
@@ -364,33 +368,8 @@ def build_statement_payables(
     return events
 
 
-def get_statement_payables(
-    db: Session,
-    cards: List[Account],
-    start: datetime,
-    end: datetime,
-    projected_charges: Optional[dict] = None,
-) -> List[dict]:
-    """DB wrapper: build the statement payables of ``cards``.
-
-    ``cards`` are the credit cards in the caller's projection scope (active
-    accounts the caller holds a role on, see ``collect_events``); access is
-    decided there, through ``app.core.access``.
-
-    ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
-    transaction yet (budget entries scheduled on a card); each is billed on the
-    cycle containing its date, after the recorded rows are settled (see
-    ``build_statement_payables``).
-    """
-    cards = [c for c in cards if c.account_type == AccountType.CREDIT]
-    if not cards:
-        return []
-
-    # Rows are filtered by card id ALONE, not re-scoped by user: the card itself
-    # is already in the caller's scope, and a statement must include every
-    # charge on it and every payment into it, whoever entered it, including a
-    # transfer from an account outside the caller's scope.
-    card_ids = [c.id for c in cards]
+def _card_rows(db: Session, card_ids: List[int]):
+    """Every row touching each card (whoever entered it) and the unbilled payment sources."""
     txns = (
         db.query(Transaction)
         .filter(or_(
@@ -429,6 +408,86 @@ def get_statement_payables(
             a.id for a in db.query(Account).filter(Account.id.in_(source_ids))
             if a.account_type == AccountType.CREDIT and resolve_cycle_fields(a) is None
         )
+    return by_card, unbilled_sources
 
+
+def statement_history(db: Session, card: Account, today: datetime) -> List[dict]:
+    """The card's recorded statements, oldest first, through the cycle open on ``today``.
+
+    Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
+    line-item balance, ``owed`` what is left of it after payments (allocated
+    oldest statement first, as for payables), ``status`` "paid" (nothing owed),
+    "overdue" (owed and due before ``today``) or "open", and ``lines`` the
+    charges and refunds in its window as ``{date, amount, transaction}``
+    (a refund negative; a cash advance its amount plus fee). Recorded rows
+    only: nothing is projected.
+    """
+    if resolve_cycle_fields(card) is None:
+        return []
+    by_card, unbilled_sources = _card_rows(db, [card.id])
+    rows = by_card.get(card.id, [])
+    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
+    if not lines:
+        return []
+    days = [row.transaction_date.date() for row in lines]
+    last = max(max(days), today.date())
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last))
+    balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+    owed = allocate_payments(balances, [amount for _, amount in payments])
+    history = []
+    for cycle, balance, left in zip(cycles, balances, owed):
+        first_excluded, last_included = cycle["window_start"].date(), cycle["close"].date()
+        window = [row for row in lines
+                  if first_excluded < row.transaction_date.date() <= last_included]
+        if left <= 0:
+            status = "paid"
+        elif cycle["due"].date() < today.date():
+            status = "overdue"
+        else:
+            status = "open"
+        history.append({
+            "close": cycle["close"],
+            "due": cycle["due"],
+            "balance": balance,
+            "owed": left,
+            "status": status,
+            "lines": [{
+                "date": row.transaction_date,
+                "amount": (-Decimal(str(row.amount))
+                           if row.transaction_type == TransactionType.CREDIT
+                           else Decimal(str(row.amount))),
+                "transaction": getattr(row, "source", row),
+            } for row in sorted(window, key=lambda r: r.transaction_date)],
+        })
+    return history
+
+
+def get_statement_payables(
+    db: Session,
+    cards: List[Account],
+    start: datetime,
+    end: datetime,
+    projected_charges: Optional[dict] = None,
+) -> List[dict]:
+    """DB wrapper: build the statement payables of ``cards``.
+
+    ``cards`` are the credit cards in the caller's projection scope (active
+    accounts the caller holds a role on, see ``collect_events``); access is
+    decided there, through ``app.core.access``.
+
+    ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
+    transaction yet (budget entries scheduled on a card); each is billed on the
+    cycle containing its date, after the recorded rows are settled (see
+    ``build_statement_payables``).
+    """
+    cards = [c for c in cards if c.account_type == AccountType.CREDIT]
+    if not cards:
+        return []
+
+    # Rows are filtered by card id ALONE, not re-scoped by user: the card itself
+    # is already in the caller's scope, and a statement must include every
+    # charge on it and every payment into it, whoever entered it, including a
+    # transfer from an account outside the caller's scope.
+    by_card, unbilled_sources = _card_rows(db, [c.id for c in cards])
     return build_statement_payables(cards, by_card, start, end, unbilled_sources,
                                     projected_by_card=projected_charges)

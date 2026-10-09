@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
+from app.schemas.access import AccountRef, RecordPermissions
 from app.models.budget_entry import BudgetEntryType
 from app.models.transaction import RecurrenceFrequency
 from app.models.user import CurrencyType
@@ -97,7 +98,8 @@ class BudgetEntryUpdate(BaseModel):
         return v
 
 
-class BudgetEntryResponse(BudgetEntryBase):
+class BudgetEntryFields(BudgetEntryBase):
+    """A recurring entry's stored fields as its creator sees them (no access fields)."""
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -110,8 +112,76 @@ class BudgetEntryResponse(BudgetEntryBase):
         from_attributes = True
 
 
+class BudgetEntryResponse(BudgetEntryFields):
+    """``view`` "full": the creator's view of their own entry."""
+    view: Literal["full"] = "full"
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+
+
+class SharedFullRecurringEntry(BaseModel):
+    """``view`` "shared_full": an editor's or admin's view of someone else's entry.
+
+    The owner schema without the creator's category and allocation, plus
+    ``category_name``.
+    """
+    view: Literal["shared_full"]
+    id: int
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+    name: str
+    entry_type: BudgetEntryType
+    amount: float
+    currency: CurrencyType
+    cadence: RecurrenceFrequency
+    next_occurrence: datetime
+    lead_time_days: int = 0
+    semi_monthly_day_1: int = 1
+    semi_monthly_day_2: int = 15
+    end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
+    account_id: Optional[int] = None
+    overflow_account_id: Optional[int] = None
+    transfer_to_account_id: Optional[int] = None
+    is_autopay: bool = False
+    is_active: bool = True
+    description: Optional[str] = None
+    end_date: Optional[datetime] = None
+    max_occurrences: Optional[int] = None
+    occurrences_paid_offset: int = 0
+    occurrences_paid: Optional[int] = None
+    category_name: Optional[str] = None
+    tags: TagSummaries = tags_response_field()
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class LimitedRecurringEntry(BaseModel):
+    """``view`` "limited": the allowlist for everyone else (see app/core/redaction.py)."""
+    view: Literal["limited"]
+    id: int
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+    display_name: Optional[str] = None
+    amount: float
+    currency: CurrencyType
+    entry_type: BudgetEntryType
+    cadence: RecurrenceFrequency
+    next_occurrence: datetime
+    end_date: Optional[datetime] = None
+    category_name: Optional[str] = None
+    account: Optional[AccountRef] = None
+    counterpart: Optional[AccountRef] = None
+    tags: TagSummaries = tags_response_field()
+
+
+BudgetEntryOut = Annotated[
+    Union[BudgetEntryResponse, SharedFullRecurringEntry, LimitedRecurringEntry],
+    Field(discriminator="view"),
+]
+
+
 class BudgetEntryListResponse(BaseModel):
-    items: List[BudgetEntryResponse]
+    items: List[BudgetEntryOut]
     total: int
     has_more: bool
 

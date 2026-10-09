@@ -18,7 +18,7 @@ from app.core.access import (
     viewable_account_ids,
 )
 from app.core.tags import (
-    TAG_FILTER_HELP, attach_visible_tags, copy_explicit_tags, effective_tag_criterion,
+    TAG_FILTER_HELP, copy_explicit_tags, effective_tag_criterion,
     filter_tag_id, own_tag_ids, replace_own_tags,
 )
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -27,16 +27,17 @@ from app.models.category import Category
 from app.models.allocation import Allocation
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
+from app.core.redaction import serialize_entries, serialize_entry, serialize_transaction
 from app.schemas.budget_entry import (
     BudgetEntryCreate,
     BudgetEntryUpdate,
-    BudgetEntryResponse,
+    BudgetEntryOut,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
-from app.schemas.transaction import TransactionResponse
+from app.schemas.transaction import TransactionOut
 from app.core.time import utc_now
 
 router = APIRouter()
@@ -291,26 +292,22 @@ def list_budget_entries(
         .all()
     )
 
-    attach_visible_tags(db, current_user, entries)
-    return BudgetEntryListResponse(
-        items=_attach_occurrence_counts(db, entries),
-        total=total,
-        has_more=(offset + len(entries)) < total,
-    )
+    _attach_occurrence_counts(db, entries)
+    return {"items": serialize_entries(db, current_user, entries), "total": total,
+            "has_more": (offset + len(entries)) < total}
 
 
-@router.get("/{entry_id}", response_model=BudgetEntryResponse)
+@router.get("/{entry_id}", response_model=BudgetEntryOut)
 def get_budget_entry(
     entry_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
-    attach_visible_tags(db, current_user, entry)
-    return _attach_occurrence_counts(db, [entry])[0]
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
 
 
-@router.post("/", response_model=BudgetEntryResponse, status_code=201)
+@router.post("/", response_model=BudgetEntryOut, status_code=201)
 def create_budget_entry(
     entry_in: BudgetEntryCreate,
     db: Session = Depends(get_db),
@@ -344,11 +341,10 @@ def create_budget_entry(
         replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
     db.commit()
     db.refresh(entry)
-    attach_visible_tags(db, current_user, entry)
-    return _attach_occurrence_counts(db, [entry])[0]
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
 
 
-@router.put("/{entry_id}", response_model=BudgetEntryResponse)
+@router.put("/{entry_id}", response_model=BudgetEntryOut)
 def update_budget_entry(
     entry_id: int,
     entry_update: BudgetEntryUpdate,
@@ -419,8 +415,7 @@ def update_budget_entry(
         replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
     db.commit()
     db.refresh(entry)
-    attach_visible_tags(db, current_user, entry)
-    return _attach_occurrence_counts(db, [entry])[0]
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
 
 
 @router.delete("/{entry_id}", status_code=204)
@@ -475,7 +470,7 @@ def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
     return _next_occurrence(current, entry.cadence)
 
 
-@router.post("/{entry_id}/materialize", response_model=TransactionResponse, status_code=201)
+@router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)
 def materialize_budget_entry(
     entry_id: int,
     payload: BudgetEntryMaterialize = BudgetEntryMaterialize(),
@@ -581,5 +576,5 @@ def materialize_budget_entry(
         db.commit()
         db.refresh(db_txn)
 
-    return attach_visible_tags(db, current_user, db_txn)
+    return serialize_transaction(db, current_user, db_txn)
 

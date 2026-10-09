@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 
@@ -78,7 +78,8 @@ def tag_ids_not_null(value):
 
 def tags_response_field():
     """The record's explicit tags the caller may see (their own), as ``tags``."""
-    return Field(default_factory=list, validation_alias="visible_tags")
+    return Field(default_factory=list,
+                 validation_alias=AliasChoices("visible_tags", "tags"))
 
 
 TagIds = List[int]

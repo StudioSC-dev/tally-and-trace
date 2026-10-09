@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Annotated, Literal, Optional, List, Union
 from datetime import datetime
+from app.schemas.access import AccountRef, RecordPermissions
 from app.models.transaction import TransactionType, RecurrenceFrequency
 from app.models.user import CurrencyType
 from app.schemas.tag import (
@@ -73,7 +74,8 @@ class TransactionUpdate(BaseModel):
     def _tag_ids_not_null(cls, v):
         return tag_ids_not_null(v)
 
-class TransactionResponse(TransactionBase):
+class TransactionFields(TransactionBase):
+    """A transaction's stored fields as its creator sees them (no access fields)."""
     id: int
     # Read-only (scheduled / prepayment): set on every transfer into a loan
     # recorded through the API (the loan endpoints, a generic create, a
@@ -88,7 +90,79 @@ class TransactionResponse(TransactionBase):
         from_attributes = True
 
 
+class TransactionResponse(TransactionFields):
+    """``view`` "full": the creator's view of their own record."""
+    view: Literal["full"] = "full"
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+
+
+class SharedFullTransaction(BaseModel):
+    """``view`` "shared_full": an editor's or admin's view of someone else's record.
+
+    The owner schema without the creator's private references (category,
+    allocation, recurring entry, receipt and invoice), plus ``category_name``.
+    """
+    view: Literal["shared_full"]
+    id: int
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+    account_id: int
+    amount: float
+    currency: CurrencyType
+    projected_amount: Optional[float] = None
+    projected_currency: Optional[CurrencyType] = None
+    original_amount: Optional[float] = None
+    original_currency: Optional[CurrencyType] = None
+    exchange_rate: Optional[float] = None
+    transfer_fee: float = 0
+    description: Optional[str] = None
+    transaction_type: TransactionType
+    is_posted: bool
+    transfer_from_account_id: Optional[int] = None
+    transfer_to_account_id: Optional[int] = None
+    transaction_date: datetime
+    posting_date: Optional[datetime] = None
+    is_reconciled: bool = False
+    is_recurring: bool = False
+    recurrence_frequency: Optional[RecurrenceFrequency] = None
+    loan_payment_kind: Optional[str] = None
+    category_name: Optional[str] = None
+    tags: TagSummaries = tags_response_field()
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class LimitedTransaction(BaseModel):
+    """``view`` "limited": the allowlist for everyone else (see app/core/redaction.py).
+
+    A payment into a loan or card the caller can't view has ``transfer_fee`` null
+    and ``amount`` the whole payment.
+    """
+    view: Literal["limited"]
+    id: int
+    permissions: RecordPermissions
+    created_by: Optional[str] = None
+    date: datetime
+    display_description: Optional[str] = None
+    amount: float
+    transfer_fee: Optional[float] = None
+    currency: CurrencyType
+    transaction_type: TransactionType
+    is_posted: bool
+    category_name: Optional[str] = None
+    account: Optional[AccountRef] = None
+    counterpart: Optional[AccountRef] = None
+    tags: TagSummaries = tags_response_field()
+
+
+TransactionOut = Annotated[
+    Union[TransactionResponse, SharedFullTransaction, LimitedTransaction],
+    Field(discriminator="view"),
+]
+
+
 class TransactionListResponse(BaseModel):
-    items: List[TransactionResponse]
+    items: List[TransactionOut]
     total: int
     has_more: bool

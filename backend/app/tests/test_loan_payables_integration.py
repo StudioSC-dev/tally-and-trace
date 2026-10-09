@@ -793,6 +793,8 @@ def test_a_transfer_retargeted_into_a_loan_is_validated_before_any_change(db, us
     for account, balance in ((bank, "105000.00"), (savings, "95000.00"), (loan, "-90000.00")):
         db.refresh(account)
         assert Decimal(str(account.balance)) == Decimal(balance), account.name
+    from app.models.transaction import Transaction
+    txn = db.get(Transaction, txn.id)  # the route returns its response model, not the row
     db.refresh(txn)
     assert (txn.transfer_to_account_id, txn.loan_payment_kind) == (savings.id, None)
 
