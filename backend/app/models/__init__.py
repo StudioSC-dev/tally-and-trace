@@ -1,7 +1,4 @@
 # Database models
-# The entity_id columns and the entities / entity_memberships tables stay in the
-# database until the contract migration (STU-229 is the expand step); they are
-# no longer mapped. Autogenerate will offer to drop them: do not accept that here.
 from sqlalchemy.orm import relationship
 from app.models.user import User as User, CurrencyType as CurrencyType
 from app.models.account import Account as Account, AccountType as AccountType
