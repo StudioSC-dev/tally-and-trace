@@ -3,8 +3,8 @@
 STU-218 made update handlers check entity membership when ``entity_id`` changed.
 Entities are gone (STU-229), so per resource:
 
-  * an ``entity_id`` in an update body is ignored: 200, and the stored column
-    (kept in the database until the expand/contract drop) stays NULL
+  * an ``entity_id`` in an update body is ignored: 200, and no such column is
+    stored (STU-230 dropped it)
   * another user's update gets 404 and the stored row is unchanged
   * the owner's own update succeeds
 
@@ -171,7 +171,7 @@ IDS = [name for name, _ in RESOURCES]
 
 
 def _stored(db, resource, record_id):
-    """The raw stored row, read past the ORM (which no longer maps entity_id)."""
+    """The raw stored row, read past the ORM."""
     db.rollback()
     row = db.execute(text(f"SELECT * FROM {TABLES[resource]} WHERE id = :id"),
                      {"id": record_id}).mappings().one()
@@ -190,7 +190,7 @@ def test_an_entity_id_in_an_update_is_ignored(client, db, world, resource, facto
 
     assert r.status_code == 200, r.text
     assert "entity_id" not in r.json()
-    assert _stored(db, resource, record_id)["entity_id"] is None
+    assert "entity_id" not in _stored(db, resource, record_id)
 
 
 @pytest.mark.parametrize("resource,factory", RESOURCES, ids=IDS)
