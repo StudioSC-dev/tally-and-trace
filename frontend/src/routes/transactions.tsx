@@ -1074,23 +1074,41 @@ export function TransactionsPage() {
     resetPostingFormState()
   }
 
+  // Posting or reverting a record the caller may not edit (the account owner resolving
+  // a record whose creator lost access) sends the status alone: the API refuses any
+  // other field from them.
+  const handlePostStatusOnly = async (transaction: Transaction) => {
+    let updatedTransaction: Transaction
+    try {
+      updatedTransaction = await updateTransaction({ id: transaction.id, data: { is_posted: true } }).unwrap()
+    } catch (error) {
+      alert(apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.')
+      return
+    }
+    setActionTransaction(updatedTransaction)
+    setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
+    resetPostingFormState()
+  }
+
   const handleRevertPostedFromModal = async (transaction: Transaction) => {
     if (isLimited(transaction)) {
       return
     }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
-    const payload: Record<string, unknown> = {
-      is_posted: false,
-      posting_date: undefined,
-      // A loan payment's projected amount is the whole payment; its interest is kept.
-      amount:
-        transaction.projected_amount != null && isLoanPayment(transaction)
-          ? toPrincipal(transaction.projected_amount, transaction.transfer_fee)
-          : transaction.projected_amount ?? transaction.amount,
-      currency: accountCurrency,
-      exchange_rate: undefined,
-    }
+    const payload: Record<string, unknown> = !transaction.permissions.can_edit
+      ? { is_posted: false }
+      : {
+          is_posted: false,
+          posting_date: undefined,
+          // A loan payment's projected amount is the whole payment; its interest is kept.
+          amount:
+            transaction.projected_amount != null && isLoanPayment(transaction)
+              ? toPrincipal(transaction.projected_amount, transaction.transfer_fee)
+              : transaction.projected_amount ?? transaction.amount,
+          currency: accountCurrency,
+          exchange_rate: undefined,
+        }
     let updatedTransaction: Transaction
     try {
       updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
@@ -1106,6 +1124,11 @@ export function TransactionsPage() {
 
   const handleInitPostingForm = (transaction: Transaction) => {
     if (isLimited(transaction)) {
+      return
+    }
+    // No amount to confirm when only the status may change.
+    if (!transaction.permissions.can_edit) {
+      void handlePostStatusOnly(transaction)
       return
     }
     const account = accounts.find((item) => item.id === transaction.account_id)
