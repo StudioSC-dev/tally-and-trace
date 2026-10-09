@@ -1,16 +1,27 @@
 """The per-user data export: an explicit schema, never raw ORM columns.
 
-A user's export holds their own records, in full, and every record another
-user created that touches an account they own, reduced to a limited field set
-(see ``LIMITED_*``). Every field is named here, so a column added to a model
-never reaches an export until it is added on purpose.
+A user's export holds their own records in full, and a limited view of every
+other record they can read (see ``LIMITED_*``). Every field is named here, so a
+column added to a model never reaches an export until it is added on purpose.
 
-Owner form (STU-229): with no shares, records by others on the caller's
-accounts exist only as legacy data.
+Version 2 (STU-232, shared accounts):
+
+- ``accounts``: the accounts the caller owns, in full. ``shared_accounts``: the
+  accounts shared with them, as a reference (id, name, type, currency, their
+  role and the owner's display name), nothing an owner keeps to managers.
+- ``transactions`` / ``budget_entries``: the caller's own records whose view is
+  ``full`` (they can view every account the record touches).
+- ``others_transactions`` / ``others_budget_entries``: every other record the
+  caller can read, through the Limited models (``app/core/redaction.py``):
+  another user's records on accounts the caller holds a role on, and the
+  caller's own records that touch an account they can no longer view (after a
+  revocation). Accounts are references; a hidden one is neutral, and a payment
+  into a hidden loan or card shows no interest.
 
 Tags (STU-231): the caller's own tags, and the links from those tags to the
-caller's own accounts, transactions and recurring entries. Another user's tags,
-and links to records not in the export, are never included.
+caller's own accounts and the records in ``transactions`` and
+``budget_entries``. Another user's tags, and links to records not in the
+export, are never included.
 """
 
 from datetime import date, datetime
@@ -18,16 +29,18 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
     OWNER,
     account_role,
     owned_criterion,
-    record_account_ids,
-    touches_accounts,
+    readable_criterion,
+    viewable_account_ids,
+    viewable_accounts,
 )
+from app.core.redaction import FULL, Redactor, display_name
 from app.core.time import utc_now
 from app.models.account import Account
 from app.models.allocation import Allocation
@@ -38,7 +51,7 @@ from app.models.transaction import Transaction
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 
-EXPORT_VERSION = 1
+EXPORT_VERSION = 2
 
 USER_FIELDS = ("email", "first_name", "last_name", "default_currency", "created_at")
 
@@ -89,25 +102,23 @@ ACCOUNT_TAG_FIELDS = ("tag_id", "account_id")
 TRANSACTION_TAG_FIELDS = ("tag_id", "transaction_id")
 BUDGET_ENTRY_TAG_FIELDS = ("tag_id", "budget_entry_id")
 
-# Records another user created on the caller's accounts: amounts, dates and the
-# caller's own accounts only. No description, category, allocation, recurring
-# entry, receipt or invoice, and no account of anyone else's.
+SHARED_ACCOUNT_FIELDS = ("id", "name", "account_type", "currency", "my_role", "owner_name")
+
+# Records the caller can read but not in full: the Limited models' fields, minus
+# the per-response ``view``, ``permissions`` and ``tags``. ``account`` and
+# ``counterpart`` are references ({id, name}, or {id: null, name} when hidden).
 LIMITED_TRANSACTION_FIELDS = (
-    "id", "transaction_date", "amount", "transfer_fee", "currency", "transaction_type",
-    "is_posted", "account_id", "transfer_from_account_id", "transfer_to_account_id",
+    "id", "date", "display_description", "amount", "transfer_fee", "currency",
+    "transaction_type", "is_posted", "category_name", "created_by", "account", "counterpart",
 )
 
 LIMITED_BUDGET_ENTRY_FIELDS = (
-    "id", "entry_type", "amount", "currency", "cadence", "next_occurrence", "end_date",
-    "is_active", "account_id", "transfer_to_account_id", "overflow_account_id",
+    "id", "display_name", "amount", "currency", "entry_type", "cadence", "next_occurrence",
+    "end_date", "category_name", "created_by", "account", "counterpart",
 )
 
-ACCOUNT_REF_FIELDS = {
-    "account_id", "transfer_from_account_id", "transfer_to_account_id", "overflow_account_id",
-}
-
 TABLES = (
-    "accounts", "transactions", "budget_entries", "categories", "allocations",
+    "accounts", "shared_accounts", "transactions", "budget_entries", "categories", "allocations",
     "wishlist_items", "others_transactions", "others_budget_entries", "tags",
     "account_tags", "transaction_tags", "budget_entry_tags",
 )
@@ -127,19 +138,8 @@ def _row(record, fields) -> dict:
     return {f: _value(getattr(record, f)) for f in fields}
 
 
-def _limited(record, fields, owned_ids) -> dict:
-    """A record by another user, with only the caller's own accounts named."""
-    row = _row(record, fields)
-    for f in ACCOUNT_REF_FIELDS & set(fields):
-        if row[f] is not None and row[f] not in owned_ids:
-            row[f] = None
-    touched = set(record_account_ids(record))
-    if "transfer_fee" in row and not touched <= owned_ids:
-        # The counterpart is not the caller's (it may be a loan they cannot see):
-        # report the whole payment, with no split that would show interest.
-        row["amount"] = str(Decimal(row["amount"] or 0) + Decimal(row["transfer_fee"] or 0))
-        row["transfer_fee"] = None
-    return row
+def _pick(body: dict, fields) -> dict:
+    return {f: _value(body.get(f)) for f in fields}
 
 
 def _own_links(db: Session, user: User, table, fields, record_ids) -> list:
@@ -159,19 +159,26 @@ def _own_links(db: Session, user: User, table, fields, record_ids) -> list:
 def build_export(db: Session, user: User) -> Dict[str, object]:
     """The caller's export, as plain JSON-ready data (see the module docstring)."""
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
-    owned_ids = {a.id for a in owned if account_role(user, a) == OWNER}
+    owned = [a for a in owned if account_role(user, a) == OWNER]
+    shared = [a for a in viewable_accounts(db, user).order_by(Account.id).all()
+              if account_role(user, a) != OWNER]
+    scope_ids = viewable_account_ids(db, user)
+    redactor = Redactor(db, user)
 
     def own(model):
         return db.query(model).filter(owned_criterion(model, user)).order_by(model.id).all()
 
-    def others(model):
-        if not owned_ids:
-            return []
-        return db.query(model).filter(and_(
-            model.user_id != user.id, touches_accounts(model, owned_ids),
-        )).order_by(model.id).all()
+    def split(model):
+        """(own records in full, every other readable record) for ``model``."""
+        rows = (db.query(model).filter(readable_criterion(model, user, scope_ids))
+                .order_by(model.id).all())
+        redactor.prepare(rows)
+        full = [r for r in rows if r.user_id == user.id and redactor.view(r) == FULL]
+        full_ids = {r.id for r in full}
+        return full, [r for r in rows if r.id not in full_ids]
 
-    transactions, entries = own(Transaction), own(BudgetEntry)
+    transactions, others_transactions = split(Transaction)
+    entries, others_entries = split(BudgetEntry)
     tags = db.query(Tag).filter(Tag.user_id == user.id).order_by(Tag.id).all()
 
     return {
@@ -179,15 +186,21 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
         "exported_at": utc_now().isoformat(),
         "user": _row(user, USER_FIELDS),
         "accounts": [_row(a, ACCOUNT_FIELDS) for a in owned],
+        "shared_accounts": [
+            {"id": a.id, "name": a.name, "account_type": _value(a.account_type),
+             "currency": _value(a.currency), "my_role": account_role(user, a),
+             "owner_name": display_name(a.user)} for a in shared],
         "transactions": [_row(t, TRANSACTION_FIELDS) for t in transactions],
         "budget_entries": [_row(e, BUDGET_ENTRY_FIELDS) for e in entries],
         "categories": [_row(c, CATEGORY_FIELDS) for c in own(Category)],
         "allocations": [_row(a, ALLOCATION_FIELDS) for a in own(Allocation)],
         "wishlist_items": [_row(w, WISHLIST_FIELDS) for w in own(WishlistItem)],
         "others_transactions": [
-            _limited(t, LIMITED_TRANSACTION_FIELDS, owned_ids) for t in others(Transaction)],
+            _pick(redactor.limited_transaction(t), LIMITED_TRANSACTION_FIELDS)
+            for t in others_transactions],
         "others_budget_entries": [
-            _limited(e, LIMITED_BUDGET_ENTRY_FIELDS, owned_ids) for e in others(BudgetEntry)],
+            _pick(redactor.limited_entry(e), LIMITED_BUDGET_ENTRY_FIELDS)
+            for e in others_entries],
         "tags": [_row(t, TAG_FIELDS) for t in tags],
         "account_tags": _own_links(
             db, user, account_tags, ACCOUNT_TAG_FIELDS, [a.id for a in owned]),
@@ -200,6 +213,7 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
 
 TABLE_FIELDS: Dict[str, tuple] = {
     "accounts": ACCOUNT_FIELDS,
+    "shared_accounts": SHARED_ACCOUNT_FIELDS,
     "transactions": TRANSACTION_FIELDS,
     "budget_entries": BUDGET_ENTRY_FIELDS,
     "categories": CATEGORY_FIELDS,

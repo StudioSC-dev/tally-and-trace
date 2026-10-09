@@ -214,6 +214,11 @@ class Redactor:
                     data.pop(field, None)
                 data["category_name"] = self.category_name(txn)
             return data
+        return self.limited_transaction(txn, facts)
+
+    def limited_transaction(self, txn: Transaction, facts: Optional[dict] = None) -> dict:
+        """The ``LimitedTransaction`` body, whatever the caller's view (exports use it)."""
+        facts = facts or self.access.facts(txn)
         shown = facts["view_all"] and bool(facts["ids"])
         hidden = self._hidden_liability(txn)
         amount, fee = txn.amount, txn.transfer_fee
@@ -255,6 +260,11 @@ class Redactor:
                     data.pop(field, None)
                 data["category_name"] = self.category_name(entry)
             return data
+        return self.limited_entry(entry, facts)
+
+    def limited_entry(self, entry: BudgetEntry, facts: Optional[dict] = None) -> dict:
+        """The ``LimitedRecurringEntry`` body, whatever the caller's view (exports use it)."""
+        facts = facts or self.access.facts(entry)
         shown = facts["view_all"] and bool(facts["ids"])
         return {
             **self._common(entry, LIMITED),

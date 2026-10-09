@@ -2,8 +2,10 @@
 Data portability endpoints for Tally & Trace.
 
 ``GET /data/export.json`` and ``GET /data/export.csv`` export the caller's own
-data: their records in full, plus a limited view of records other users made
-on accounts they own. The schema is explicit (``app/services/export.py``).
+data: their records in full, plus every other record they can read through the
+Limited models (records by others on accounts they own or that are shared with
+them, and their own records on an account they can no longer view). The schema
+is explicit (``app/services/export.py``).
 """
 
 import csv
