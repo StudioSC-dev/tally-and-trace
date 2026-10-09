@@ -287,3 +287,51 @@ def test_a_user_with_no_accounts_keeps_accountless_income_and_expense(db, fixtur
     assert (october["net"], october["unassigned_closing"]) == (2000.0, 2000.0)
     assert get_disposable_income(db, uid) == {
         "monthly_income": 5000.0, "monthly_expenses": 3000.0, "monthly_disposable": 2000.0}
+
+
+def test_own_entries_on_an_inactive_own_account_move_no_cash(db, fixtures):
+    """Legs are built only on scope accounts, and an inactive account is not one.
+
+    The owner's recurring entry and pending debit on their own deactivated
+    account are listed with no leg: they reach neither an account's balance
+    nor unassigned cash. (Before STU-229 they fell into unassigned cash.)
+    """
+    from app.models.account import Account, AccountType
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
+    from app.services.forecast import (
+        collect_events, get_upcoming_items, project_cashflow, project_running_balance,
+    )
+
+    uid = fixtures["owner"]
+    before = project_running_balance(db, uid, days=30, reference=REF)
+    before_cashflow = project_cashflow(db, uid, months=1, reference=REF)
+    old = Account(user_id=uid, name="Old bank", account_type=AccountType.CHECKING,
+                  balance=Decimal("700.00"), is_active=False)
+    db.add(old)
+    db.commit()
+    db.add_all([
+        BudgetEntry(user_id=uid, name="Old salary", entry_type=BudgetEntryType.INCOME,
+                    amount=Decimal("4000.00"), cadence=RecurrenceFrequency.MONTHLY,
+                    next_occurrence=datetime(2026, 10, 16), account_id=old.id),
+        Transaction(user_id=uid, account_id=old.id, amount=Decimal("90.00"),
+                    transaction_type=TransactionType.DEBIT,
+                    transaction_date=datetime(2026, 10, 17), description="Old debit",
+                    is_posted=False),
+    ])
+    db.commit()
+
+    events = collect_events(db, REF, datetime(2026, 11, 1), user_id=uid)
+    listed = {e["name"]: e["legs"] for e in events if e["name"] in ("Old salary", "Old debit")}
+    assert listed == {"Old salary": [], "Old debit": []}
+    after = project_running_balance(db, uid, days=30, reference=REF)
+    for key in ("unassigned_closing", "closing_balance", "by_account"):
+        assert after[key] == before[key], key
+    assert old.id not in {a["account_id"] for a in after["by_account"]}
+    (october,) = project_cashflow(db, uid, months=1, reference=REF)
+    (october_before,) = before_cashflow
+    for key in ("net", "unassigned_closing", "income", "expenses"):
+        if key in october:
+            assert october[key] == october_before[key], key
+    upcoming = {i["name"] for i in get_upcoming_items(db, uid, days=60, reference=REF)}
+    assert {"Old salary", "Old debit"} <= upcoming
