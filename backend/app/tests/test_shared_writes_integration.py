@@ -249,7 +249,7 @@ def test_non_creator_cannot_set_the_creators_category(sw, sw_client):
                        {"name": "Bea food"})["id"]
     txn = _debit(sw_client, sw["a"], sw["joint"])["id"]
     r = _call(sw_client, sw["b"], "PUT", f"/transactions/{txn}", {"category_id": category})
-    assert r.status_code == 404
+    assert r.status_code == 400  # only the creator names its category (audit round 1, B)
 
 
 # --- Accountless entries -----------------------------------------------------------------
@@ -358,11 +358,11 @@ def test_linking_needs_the_entry_owner(sw, sw_client):
     own = _debit(sw_client, b, sw["joint"])["id"]
     assert _call(sw_client, b, "PUT", f"/transactions/{own}",
                  {"budget_entry_id": a_entry}).status_code == 404
-    # The owner's own transaction on the joint account, edited by the editor: still 404,
-    # since the editor doesn't own the entry.
+    # The owner's own transaction on the joint account, edited by the editor: refused,
+    # since only its creator names its recurring entry (400, audit round 1, B).
     a_txn = _debit(sw_client, sw["a"], sw["joint"])["id"]
     assert _call(sw_client, b, "PUT", f"/transactions/{a_txn}",
-                 {"budget_entry_id": a_entry}).status_code == 404
+                 {"budget_entry_id": a_entry}).status_code == 400
     assert _call(sw_client, sw["a"], "PUT", f"/transactions/{a_txn}",
                  {"budget_entry_id": a_entry}).status_code == 200
 
@@ -407,3 +407,72 @@ def test_creator_and_owner_delete_a_stranded_entry(sw, sw_client, sw_db):
     assert _call(sw_client, b, "DELETE", f"/budget-entries/{mine}").status_code == 204
     assert _call(sw_client, sw["d"], "DELETE", f"/budget-entries/{theirs}").status_code == 404
     assert _call(sw_client, a, "DELETE", f"/budget-entries/{theirs}").status_code == 204
+
+
+# --- The creator's private references (audit round 1, B) ---------------------------------
+
+def _owners_references(client, sw):
+    """The owner's posted joint-account debit naming their category, budget and entry."""
+    from app.core.time import naive_utc_now
+
+    a, joint = sw["a"], sw["joint"]
+    category = sw_post(client, a, "/categories/", {"name": "Owner food"})["id"]
+    budget = sw_post(client, a, "/allocations/", {
+        "account_id": joint, "name": "Owner budget", "allocation_type": "budget",
+        "configuration": {"category_ids": [category]}})["id"]
+    entry = _entry(client, a, joint, category_id=category, allocation_id=budget)["id"]
+    txn = _debit(client, a, joint, amount=100, category_id=category, allocation_id=budget,
+                 budget_entry_id=entry,
+                 transaction_date=naive_utc_now().replace(microsecond=0).isoformat())["id"]
+    return {"category": category, "budget": budget, "entry": entry, "txn": txn}
+
+
+def _references_of(db, refs):
+    from app.models.allocation import Allocation
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    db.expire_all()
+    txn, entry = db.get(Transaction, refs["txn"]), db.get(BudgetEntry, refs["entry"])
+    return ((txn.category_id, txn.allocation_id, txn.budget_entry_id, txn.is_recurring),
+            (entry.category_id, entry.allocation_id),
+            float(db.get(Allocation, refs["budget"]).current_amount or 0))
+
+
+@pytest.mark.parametrize("who", ["b", "d"])
+def test_non_creator_cannot_clear_or_probe_the_creators_references(sw, sw_client, sw_db, who):
+    refs = _owners_references(sw_client, sw)
+    before = _references_of(sw_db, refs)
+    assert before[2] == 100.0  # the posted debit counts against the owner's budget
+    caller = sw[who]
+    for field, stored in (("category_id", refs["category"]), ("allocation_id", refs["budget"]),
+                          ("budget_entry_id", refs["entry"])):
+        for value in (None, stored):  # clearing, or guessing the stored id
+            r = _call(sw_client, caller, "PUT", f"/transactions/{refs['txn']}", {field: value})
+            assert r.status_code == 400, (field, value, r.text)
+    for field, stored in (("category_id", refs["category"]), ("allocation_id", refs["budget"])):
+        for value in (None, stored):
+            r = _call(sw_client, caller, "PUT", f"/budget-entries/{refs['entry']}",
+                      {field: value})
+            assert r.status_code == 400, (field, value, r.text)
+    assert _references_of(sw_db, refs) == before
+    # Fields the editor may change still save.
+    assert _call(sw_client, caller, "PUT", f"/transactions/{refs['txn']}",
+                 {"description": "Edited"}).status_code == 200
+    assert _call(sw_client, caller, "PUT", f"/budget-entries/{refs['entry']}",
+                 {"amount": 41}).status_code == 200
+    assert _references_of(sw_db, refs) == before
+
+
+def test_the_creator_still_clears_their_own_references(sw, sw_client, sw_db):
+    refs = _owners_references(sw_client, sw)
+    a = sw["a"]
+    for field in ("category_id", "allocation_id", "budget_entry_id"):
+        assert _call(sw_client, a, "PUT", f"/transactions/{refs['txn']}",
+                     {field: None}).status_code == 200, field
+    for field in ("category_id", "allocation_id"):
+        assert _call(sw_client, a, "PUT", f"/budget-entries/{refs['entry']}",
+                     {field: None}).status_code == 200, field
+    txn_refs, entry_refs, spent = _references_of(sw_db, refs)
+    assert txn_refs == (None, None, None, False) and entry_refs == (None, None)
+    assert spent == 0.0

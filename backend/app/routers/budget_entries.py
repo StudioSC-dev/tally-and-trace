@@ -356,6 +356,14 @@ def update_budget_entry(
         raise HTTPException(status_code=404, detail="Budget entry not found")
     owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
+    # The creator's private references, which a non-creator is never shown:
+    # any request naming one is refused, null included (clearing is a change),
+    # so it can neither change them nor probe their stored values.
+    if entry.user_id != current_user.id and any(
+            field in prospective_data for field in ("category_id", "allocation_id")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only the recurring entry's creator can change its category or allocation")
     # Tags: the caller's own only, on an entry they may edit (checked above).
     tag_ids = prospective_data.pop("tag_ids", None)
     if tag_ids is not None:
