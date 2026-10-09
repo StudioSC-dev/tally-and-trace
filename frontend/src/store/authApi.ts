@@ -1,5 +1,5 @@
 import { createApi } from '@reduxjs/toolkit/query/react'
-import { baseQueryWithReauth } from './baseQuery'
+import { baseQueryWithReauth, beginNewSession } from './baseQuery'
 import { accountingApi } from './api'
 
 // Re-export auth types from shared so existing imports continue to work
@@ -37,8 +37,10 @@ export const authApi = createApi({
         body: credentials,
       }),
       async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        beginNewSession()
         try {
           const { data } = await queryFulfilled
+          beginNewSession()
           // A new session must never see the previous user's cached data, and
           // requests still in flight from that session are aborted by the reset.
           dispatch(accountingApi.util.resetApiState())
@@ -87,6 +89,7 @@ export const authApi = createApi({
         body: {},
       }),
       async onQueryStarted(_, { dispatch }) {
+        beginNewSession()
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token') // legacy key cleanup
         localStorage.removeItem('user')
