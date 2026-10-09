@@ -1,9 +1,10 @@
 """Migration d1e3a5c7b9f2 (the one-row ``demo_state`` table, STU-229).
 
-It is the single head, straight after M3. Runs alembic in a subprocess against
-a throwaway database on the same server as ``DATABASE_URL``: upgrade creates
-the table (one row only), downgrade -1 drops it and leaves M3 in place, and
-upgrade applies again. Skips without a database; the head check needs none.
+It follows M3, and the cross-owner cleanup follows it. Runs alembic in a
+subprocess against a throwaway database on the same server as
+``DATABASE_URL``: upgrade to it creates the table (one row only), downgrade to
+M3 drops it and leaves M3 in place, and upgrade applies again. Skips without
+a database; the revision check needs none.
 """
 import os
 import subprocess
@@ -32,12 +33,13 @@ def _db_reachable() -> bool:
         return False
 
 
-def test_demo_state_is_the_single_head_after_m3():
+def test_demo_state_follows_m3_on_the_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [DEMO_STATE]
+    (head,) = script.get_heads()
+    assert DEMO_STATE in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(DEMO_STATE).down_revision == M3
 
 
@@ -75,7 +77,7 @@ def _version(conn):
 def test_demo_state_upgrades_downgrades_and_upgrades_again(scratch_url):
     engine = create_engine(scratch_url)
     try:
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", DEMO_STATE)
         with engine.begin() as c:
             assert _version(c) == DEMO_STATE
             assert {col["name"] for col in inspect(c).get_columns("demo_state")} == {
@@ -85,13 +87,13 @@ def test_demo_state_upgrades_downgrades_and_upgrades_again(scratch_url):
             with engine.begin() as c:
                 c.execute(text("INSERT INTO demo_state (id, shape_version) VALUES (2, 1)"))
 
-        _alembic(scratch_url, "downgrade", "-1")
+        _alembic(scratch_url, "downgrade", M3)
         with engine.connect() as c:
             assert _version(c) == M3
             assert not inspect(c).has_table("demo_state")
             assert inspect(c).has_table("accounts")
 
-        _alembic(scratch_url, "upgrade", "head")
+        _alembic(scratch_url, "upgrade", DEMO_STATE)
         with engine.connect() as c:
             assert _version(c) == DEMO_STATE
             assert c.execute(text("SELECT count(*) FROM demo_state")).scalar_one() == 0
