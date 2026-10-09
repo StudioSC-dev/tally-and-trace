@@ -15,7 +15,7 @@ import * as Sentry from '@sentry/react'
 const DSN = import.meta.env.VITE_SENTRY_DSN
 const ENVIRONMENT = import.meta.env.MODE
 
-// Query strings on our API calls can carry entity ids and date ranges; the
+// Query strings on our API calls can carry date ranges and filters; the
 // token itself lives in a header, but strip search params anyway to be safe.
 function scrubUrl(url: string): string {
   const queryStart = url.indexOf('?')

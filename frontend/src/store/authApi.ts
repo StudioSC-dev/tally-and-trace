@@ -86,7 +86,6 @@ export const authApi = createApi({
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token') // legacy key cleanup
         localStorage.removeItem('user')
-        localStorage.removeItem('active_entity_id')
         // Clear all cached data
         dispatch(authApi.util.resetApiState())
       },

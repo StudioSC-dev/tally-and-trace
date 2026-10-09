@@ -10,8 +10,6 @@ const rawBaseQuery = fetchBaseQuery({
   prepareHeaders: (headers) => {
     const token = localStorage.getItem('access_token')
     if (token) headers.set('authorization', `Bearer ${token}`)
-    const entityId = localStorage.getItem('active_entity_id')
-    if (entityId) headers.set('X-Entity-Id', entityId)
     return headers
   },
 })
@@ -27,7 +25,6 @@ function clearSession() {
   // cookie the server clears on logout / failed refresh.
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
-  localStorage.removeItem('active_entity_id')
 }
 
 async function refreshAccessToken(): Promise<boolean> {
