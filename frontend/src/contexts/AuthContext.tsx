@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { useDispatch } from 'react-redux'
 import { authApi, User } from '../store/authApi'
+import { accountingApi } from '../store/api'
 import type { AppDispatch } from '../store'
 
 interface AuthContextType {
@@ -49,6 +50,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             // Token is invalid, clear everything
             localStorage.removeItem('access_token')
             localStorage.removeItem('user')
+            dispatch(accountingApi.util.resetApiState())
             setUser(null)
           })
           .finally(() => {
