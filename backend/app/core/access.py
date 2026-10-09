@@ -21,7 +21,10 @@ Records that touch accounts (transactions and recurring entries) follow from it:
 
 Categories, allocations and wishlist items are never shared: only their owner
 reaches them. Every account a record references must be one its owner and
-the caller may change; see ``require_account``.
+the caller may change; see ``require_account``. Every other record it
+references (category, allocation, recurring entry, and the ids in an
+allocation's configuration) must belong to the caller and to the record's
+owner: the same-owner rule, see ``require_owned_ref``.
 
 With no shares, the creator and the owner of the accounts a record touches are
 the same user, so all of this reduces to "your own records only".
@@ -197,6 +200,21 @@ def get_owned_or_404(db: Session, model, record_id: int, user, detail: str = "No
     """A record that is never shared (category, allocation, wishlist item): owner only."""
     record = db.query(model).filter(model.id == record_id).first()
     if not record or record.user_id != _uid(user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return record
+
+
+def require_owned_ref(db: Session, model, ref_id: Optional[int], detail: str, *owners):
+    """A never-shared record another record references, 404ing unless it is every owner's.
+
+    The same-owner rule: a category, allocation or recurring entry referenced by
+    a record must belong to the caller and to the referencing record's owner
+    (pass both; None is skipped). A None id is skipped.
+    """
+    if ref_id is None:
+        return None
+    record = db.query(model).filter(model.id == ref_id).first()
+    if not record or any(record.user_id != _uid(o) for o in owners if o is not None):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return record
 

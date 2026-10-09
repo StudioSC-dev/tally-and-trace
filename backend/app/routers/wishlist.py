@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.access import get_owned_or_404, owned_criterion
+from app.core.access import get_owned_or_404, owned_criterion, require_owned_ref
+from app.models.category import Category
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.schemas.wishlist import (
@@ -56,6 +57,9 @@ def create_wishlist_item(
     current_user: User = Depends(get_current_active_user),
 ):
     item_data = payload.dict()
+    # Same-owner rule: the category is the caller's own.
+    require_owned_ref(db, Category, item_data.get("category_id"), "Category not found",
+                      current_user)
 
     item = WishlistItem(**item_data, user_id=current_user.id)
     db.add(item)
@@ -136,6 +140,9 @@ def update_wishlist_item(
     item = get_owned_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
 
     update_data = payload.dict(exclude_unset=True)
+    if "category_id" in update_data:
+        require_owned_ref(db, Category, update_data["category_id"], "Category not found",
+                          current_user)
     if update_data.get("is_purchased") and not item.is_purchased:
         update_data.setdefault("purchased_at", utc_now())
     for field, value in update_data.items():

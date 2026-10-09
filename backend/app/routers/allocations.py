@@ -3,13 +3,44 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
-from app.core.access import OWNER_ROLES, get_account_or_404, get_owned_or_404, owned_criterion
+from app.core.access import (
+    OWNER_ROLES, get_account_or_404, get_owned_or_404, owned_criterion, require_owned_ref,
+)
+from app.models.category import Category
 from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
 from app.models.user import User
 from app.core.time import utc_now
 
 router = APIRouter()
+
+
+def _ids(value, detail: str) -> list:
+    """Configuration ids as ints; anything else is a 400."""
+    try:
+        return [int(v) for v in value]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def _validate_configuration(db: Session, user: User, configuration) -> None:
+    """Same-owner rule for the ids in an allocation's configuration.
+
+    ``category_ids``, ``account_ids`` and ``savings_category_id`` must all be
+    the caller's own (allocations are never shared, so the caller is the owner).
+    """
+    if not configuration:
+        return
+    for category_id in _ids(configuration.get("category_ids") or [],
+                            "configuration.category_ids must be a list of ids"):
+        require_owned_ref(db, Category, category_id, "Category not found", user)
+    for account_id in _ids(configuration.get("account_ids") or [],
+                           "configuration.account_ids must be a list of ids"):
+        get_account_or_404(db, user, account_id, roles=OWNER_ROLES)
+    savings = configuration.get("savings_category_id")
+    if savings is not None:
+        (savings_id,) = _ids([savings], "configuration.savings_category_id must be an id")
+        require_owned_ref(db, Category, savings_id, "Category not found", user)
 
 @router.get("/", response_model=AllocationListResponse)
 def get_allocations(
@@ -56,6 +87,7 @@ def create_allocation(
     """Create a new allocation"""
     # An allocation is the owner's: its account must be the caller's own.
     get_account_or_404(db, current_user, allocation.account_id, roles=OWNER_ROLES)
+    _validate_configuration(db, current_user, allocation.configuration)
 
     allocation_data = allocation.dict()
 
@@ -87,6 +119,8 @@ def update_allocation(
     update_data = allocation_update.dict(exclude_unset=True)
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, current_user, update_data["account_id"], roles=OWNER_ROLES)
+    if "configuration" in update_data:
+        _validate_configuration(db, current_user, update_data["configuration"])
     for field, value in update_data.items():
         setattr(db_allocation, field, value)
     

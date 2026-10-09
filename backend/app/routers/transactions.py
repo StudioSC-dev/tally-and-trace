@@ -6,11 +6,11 @@ from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
     can_edit_account,
-    can_read_record,
     can_view_account,
     get_record_or_404,
     readable_criterion,
     require_account,
+    require_owned_ref,
     viewable_account_ids,
 )
 from app.models.transaction import Transaction, TransactionType
@@ -594,13 +594,12 @@ def create_transaction(
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
 
-    if transaction.budget_entry_id:
-        budget_entry = db.query(BudgetEntry).filter(
-            BudgetEntry.id == transaction.budget_entry_id
-        ).first()
-        if not budget_entry or not can_read_record(db, current_user, budget_entry):
-            raise HTTPException(status_code=404, detail="Budget entry not found")
-        transaction_data["budget_entry_id"] = budget_entry.id
+    # Same-owner rule: every non-account reference is the caller's own.
+    budget_entry = require_owned_ref(
+        db, BudgetEntry, transaction.budget_entry_id, "Budget entry not found", current_user)
+    require_owned_ref(db, Category, transaction.category_id, "Category not found", current_user)
+    require_owned_ref(db, Allocation, transaction.allocation_id, "Allocation not found",
+                      current_user)
     
     if budget_entry:
         transaction_data["is_recurring"] = True
@@ -714,6 +713,13 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     else:
         _require_account(db, current_user, requested.get(
             "account_id", db_transaction.account_id), "Account not found", owner)
+    # Same-owner rule: a new category, allocation or recurring entry must be both
+    # the caller's and the row owner's.
+    for model, field, detail in ((Category, "category_id", "Category not found"),
+                                 (Allocation, "allocation_id", "Allocation not found"),
+                                 (BudgetEntry, "budget_entry_id", "Budget entry not found")):
+        if field in requested:
+            require_owned_ref(db, model, requested[field], detail, current_user, owner)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -768,8 +774,6 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             budget_entry = db.query(BudgetEntry).filter(
                 BudgetEntry.id == new_budget_entry_id
             ).first()
-            if not budget_entry or not can_read_record(db, current_user, budget_entry):
-                raise HTTPException(status_code=404, detail="Budget entry not found")
         setattr(db_transaction, "budget_entry_id", new_budget_entry_id)
         db_transaction.is_recurring = bool(budget_entry)
         db_transaction.recurrence_frequency = budget_entry.cadence if budget_entry else None

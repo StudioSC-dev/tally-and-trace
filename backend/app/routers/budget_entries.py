@@ -13,6 +13,7 @@ from app.core.access import (
     get_record_or_404,
     readable_criterion,
     require_account,
+    require_owned_ref,
     viewable_account_ids,
 )
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -94,19 +95,13 @@ def _ensure_related_resources(
 
     The account must be one both the caller and the entry's owner (``owner``,
     default the caller) may change. Categories and allocations are never
-    shared, so they must be the caller's own.
+    shared: by the same-owner rule they must belong to the caller and to the
+    entry's owner.
     """
     if account_id:
         require_account(db, user, account_id, "Account not found", owner=owner)
-    for model, record_id, label in (
-        (Category, category_id, "Category"),
-        (Allocation, allocation_id, "Allocation"),
-    ):
-        if not record_id:
-            continue
-        record = db.query(model).filter(model.id == record_id).first()
-        if not record or record.user_id != user.id:
-            raise HTTPException(status_code=404, detail=f"{label} not found")
+    require_owned_ref(db, Category, category_id or None, "Category not found", user, owner)
+    require_owned_ref(db, Allocation, allocation_id or None, "Allocation not found", user, owner)
 
 
 def _validate_overflow_account(db: Session, user: User, overflow_account_id: Optional[int],
