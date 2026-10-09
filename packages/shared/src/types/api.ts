@@ -163,13 +163,18 @@ export interface LoanScheduleRow {
   balance_after: number | null
 }
 
-/** GET /accounts/{id}/loan-schedule for an owner, admin or editor. */
+/**
+ * GET /accounts/{id}/loan-schedule for an owner, admin or editor. Loan terms are the
+ * owner's and admins' only: for an editor, `amortization`, `annual_rate`,
+ * `payment_amount`, `term_months`, `first_payment_date` and `proposed_split` are null,
+ * and so are each upcoming row's `principal`, `interest` and `balance_after`.
+ */
 export interface LoanSchedule {
   view: 'full'
   account_id: number
   name: string
   loan_kind: LoanKind | null
-  amortization: LoanAmortization
+  amortization: LoanAmortization | null
   /** What is still owed (= -balance, never below zero). */
   owed: number
   annual_rate: number | null

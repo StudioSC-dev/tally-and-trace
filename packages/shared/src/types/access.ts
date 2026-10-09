@@ -20,9 +20,12 @@ export type AccountRole = 'owner' | 'admin' | 'editor' | 'viewer'
 
 /** What the caller may do on one account. */
 export interface AccountPermissions {
+  /** Owner or admin: name, balance, terms and other settings (never `is_active`). */
   can_edit_settings: boolean
   can_manage_shares: boolean
   can_add_transactions: boolean
+  /** Owner only: delete the account or mark it inactive (send `is_active`). */
+  can_delete: boolean
 }
 
 /**
@@ -44,9 +47,13 @@ export interface UserMatch {
   display_name: string
 }
 
-/** POST /accounts/{id}/shares. */
+/**
+ * POST /accounts/{id}/shares. The person is named by exact email (case-insensitive),
+ * through the same rate-limited lookup as GET /users/lookup: no match answers 404
+ * "No matching user", and every POST counts toward the caller's 429 limit.
+ */
 export interface ShareCreate {
-  user_id: number
+  email: string
   role: ShareRole
 }
 
