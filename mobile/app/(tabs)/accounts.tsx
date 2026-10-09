@@ -273,12 +273,15 @@ export default function AccountsScreen() {
                   >
                     <Text className="text-slate-200 text-sm font-medium">✏️ Edit</Text>
                   </TouchableOpacity>
+                  {/* Deleting is the owner's alone. */}
+                  {acc.permissions.can_delete && (
                   <TouchableOpacity
                     onPress={() => handleDelete(acc)}
                     className="flex-1 py-2 rounded-lg bg-red-900/40 items-center"
                   >
                     <Text className="text-red-400 text-sm font-medium">🗑 Delete</Text>
                   </TouchableOpacity>
+                  )}
                 </View>
                 )}
               </Card>
