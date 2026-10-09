@@ -548,3 +548,25 @@ def test_a_creator_with_edit_rights_still_deletes_an_entry_with_own_links(sw, sw
     assert _call(sw_client, b, "DELETE", f"/budget-entries/{entry}").status_code == 204
     sw_db.expire_all()
     assert sw_db.get(Transaction, posted).budget_entry_id is None
+
+
+# --- created_by_actor on every new transaction (audit round 1, L) ------------------------
+
+def test_loan_payments_and_prepayments_record_their_actor(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    a = sw["a"]
+    home = sw_post(sw_client, a, "/accounts/", {
+        "name": "Home loan", "account_type": "loan", "loan_kind": "home",
+        "balance": -50_000, "loan_annual_rate": 6, "loan_term_months": 120,
+        "loan_payment_amount": 600, "loan_first_payment_date": "2026-10-20",
+        "payment_account_id": sw["a_private"]})["id"]
+    payment = sw_post(sw_client, a, f"/accounts/{home}/loan-payment", {
+        "from_account_id": sw["a_private"], "amount": 600, "transaction_date": DAY})["id"]
+    prepayment = sw_post(sw_client, a, f"/accounts/{home}/loan-prepayment", {
+        "from_account_id": sw["a_private"], "amount": 1_000, "transaction_date": DAY})["id"]
+    debit = _debit(sw_client, a, sw["a_private"])["id"]
+    sw_db.expire_all()
+    for txn_id in (payment, prepayment, debit):
+        txn = sw_db.get(Transaction, txn_id)
+        assert txn.created_by_actor == a["id"], txn_id
