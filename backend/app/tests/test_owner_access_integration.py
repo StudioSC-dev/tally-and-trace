@@ -186,6 +186,12 @@ def _id_routes(w):
         ("get", f"/tags/{w['tag']}", {}),
         ("put", f"/tags/{w['tag']}", {"json": {"name": "Taken"}}),
         ("delete", f"/tags/{w['tag']}", {}),
+        ("get", f"/accounts/{w['bank']}/shares", {}),
+        ("post", f"/accounts/{w['bank']}/shares",
+         {"json": {"user_id": 1, "role": "viewer"}}),
+        ("patch", f"/accounts/{w['bank']}/shares/{w['bank']}", {"json": {"role": "viewer"}}),
+        ("delete", f"/accounts/{w['bank']}/shares/{w['bank']}", {}),
+        ("delete", f"/shares/received/{w['bank']}", {}),
     ]
     return routes
 
@@ -262,7 +268,7 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
             continue
         generic = path[len(API):]
         for name in ("account_id", "transaction_id", "category_id", "allocation_id",
-                     "entry_id", "item_id", "tag_id"):
+                     "entry_id", "item_id", "tag_id", "share_id"):
             generic = generic.replace("{" + name + "}", "{id}")
         for method in ops:
             assert (method.upper(), generic) in swept, (method, path)

@@ -35,6 +35,9 @@ from app.models.wishlist_item import WishlistItem
 logger = logging.getLogger(__name__)
 
 DEMO_EMAIL = "demo@example.com"
+DEMO_PARTNER_EMAIL = "demo.partner@example.com"
+# Demo users can neither share nor be shared with (app/routers/shares.py).
+DEMO_EMAILS = frozenset({DEMO_EMAIL, DEMO_PARTNER_EMAIL})
 DEMO_PASSWORD = "password123"
 DEMO_SHAPE_VERSION = 2  # 2: tags (STU-231)
 # One seeder at a time across workers (pg_advisory_xact_lock key).
