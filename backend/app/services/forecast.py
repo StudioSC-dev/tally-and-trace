@@ -14,12 +14,14 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.access import (
     NONE, account_role, can_read_record, readable_criterion, viewable_account_ids,
     viewable_accounts,
 )
+from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
 from app.core.time import naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables
@@ -279,9 +281,13 @@ def get_upcoming_items(
             "source": e["source"],
             "source_id": e["source_id"],
         }
-        for e in events
+        for e in events if e.get("view") != LIMITED
     ]
-    items.sort(key=lambda x: x["due_date"])
+    # A limited event (see collect_events) is listed in its public shape only.
+    limited = [e for e in events if e.get("view") == LIMITED]
+    items += [limited_event(e, f"e{i}") for i, e in enumerate(
+        sorted(limited, key=_event_sort_key), start=1)]
+    items.sort(key=lambda x: x.get("due_date") or x["date"])
     return items
 
 
@@ -318,11 +324,16 @@ def get_payables(
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
 
     payables = []
+    public = 0
     for e in sorted(events, key=_event_sort_key):
         if not e["counts_as_cash"] or e["amount"] >= 0:
             continue
         if (e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment")
                 and not e.get("top_up") and not e.get("loan_payment")):
+            continue
+        if e.get("view") == LIMITED:
+            public += 1
+            payables.append(limited_event(e, f"e{public}"))
             continue
         acc = e["funding_account_id"]
         ov = e["overflow_account_id"]
@@ -538,6 +549,10 @@ def build_timeline(opening, events: List[dict]) -> dict:
             "source_id": e.get("source_id"),
             "running_balance": running,
         })
+        if e.get("view") == LIMITED:
+            out_events[-1].update({k: e.get(k) for k in (
+                "view", "face_amount", "currency", "account", "kind", "overdue",
+                "original_date")})
         if running < lowest:
             lowest = running
             trough_date = d
@@ -644,6 +659,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     loan_ids: frozenset = frozenset(),
                     known_loan_ids: frozenset = frozenset(),
                     hidden_loan_ids: frozenset = frozenset(),
+                    unbilled_ids: frozenset = frozenset(),
                     source: str = "transaction",
                     overflow_account_id: Optional[int] = None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
@@ -669,6 +685,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     into a loan the caller cannot access (``hidden_loan_ids``) is a neutral
     "Loan payment": no description, ``source_id`` or ``transfer_fee`` (the
     interest), only its amounts, date and in-scope legs.
+
+    ``unbilled_ids`` are cards outside the scope without cycle settings: a
+    transfer touching one moves no cash, as for a scoped one.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -696,7 +715,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     """
     if billed_ids is None:
         billed_ids = card_ids
-    unbilled = card_ids - billed_ids
+    unbilled = (card_ids - billed_ids) | unbilled_ids
     src = txn.transfer_from_account_id or txn.account_id
     dst = txn.transfer_to_account_id
     amount = Decimal(str(txn.amount))
@@ -825,6 +844,11 @@ def collect_events(
     scoped_ids = cash_ids | card_ids | scoped_wallet_ids
 
     events: List[dict] = []
+    # Accounts the caller can view, active or not: a statement's funding legs
+    # are kept only on these (routing never crosses owners, so an owner's view
+    # is unchanged; a sharee never sees the owner's private funding account).
+    viewable_ids = viewable_account_ids(db, user_id)
+    redactor = Redactor(db, user_id)
 
     # Every record of any type the caller created or that touches an account
     # in the scope (loans included), kept only when the caller may read it.
@@ -876,10 +900,43 @@ def collect_events(
     hidden_loan_ids = frozenset(
         lid for lid, a in outside_loans.items() if account_role(user_id, a) == NONE)
 
+    # Active billed cards outside the scope whose statement payment (primary or
+    # overflow) comes from an in-scope account: internal liability discovery.
+    # Routing is same-owner, so each is the paying account owner's card. Their
+    # payables are computed from every row and entry on them (internal inputs)
+    # and emitted only as neutral "Card payment" events (see below).
+    outside_cards = [
+        a for a in db.query(Account).filter(
+            Account.account_type == AccountType.CREDIT,
+            Account.is_active.is_(True),
+            or_(Account.payment_account_id.in_(scoped_ids),
+                Account.payment_overflow_account_id.in_(scoped_ids)),
+        ).all()
+        if a.id not in card_ids and resolve_cycle_fields(a) is not None
+        and account_role(user_id, a) == NONE
+    ] if scoped_ids else []
+    # Cards outside the scope that transfers pay into (or draw from): a payment
+    # into a billed one is a card payment; one without cycle settings moves no cash.
+    referenced_cards = {
+        a.id: a for a in db.query(Account).filter(
+            Account.id.in_({
+                acc for t in txns if t.transaction_type == TransactionType.TRANSFER
+                for acc in (t.transfer_from_account_id, t.transfer_to_account_id)
+            } | {e.transfer_to_account_id for e in entries if e.transfer_to_account_id}),
+            Account.account_type == AccountType.CREDIT,
+        ).all() if a.id not in card_ids
+    }
+    outside_billed = {cid for cid, a in referenced_cards.items()
+                      if resolve_cycle_fields(a) is not None}
+    outside_unbilled = frozenset(set(referenced_cards) - outside_billed)
+    transfer_billed_ids = billed_ids | outside_billed
+
     # Transactions already materialised from a recurring transfer entry, by day:
     # each stands in for one occurrence on its calendar day (as in
     # _card_entry_charges), since the posted transfer has already moved the balance.
     transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
+    records = {(BudgetEntry, e.id): e for e in entries}
+    records.update(((Transaction, t.id), t) for t in txns)
     linked = _linked_occurrence_days(db, transfer_entry_ids)
 
     card_entries = []
@@ -904,10 +961,11 @@ def collect_events(
                         transaction_type=TransactionType.TRANSFER,
                         description=entry.name,
                     ),
-                    cash_ids, card_ids, date=occ, billed_ids=billed_ids,
+                    cash_ids, card_ids, date=occ, billed_ids=transfer_billed_ids,
                     wallet_ids=scoped_wallet_ids, known_wallet_ids=wallet_ids,
                     loan_ids=loan_ids, known_loan_ids=known_loan_ids,
-                    hidden_loan_ids=hidden_loan_ids, source="budget_entry",
+                    hidden_loan_ids=hidden_loan_ids, unbilled_ids=outside_unbilled,
+                    source="budget_entry",
                     overflow_account_id=overflow_id, origin=(BudgetEntry, entry.id),
                 ))
             continue
@@ -950,10 +1008,12 @@ def collect_events(
             when, overdue = start, {"overdue": True, "original_date": when}
         if txn.transaction_type == TransactionType.TRANSFER:
             events.append(_transfer_event(txn, cash_ids, card_ids, date=when,
-                                          billed_ids=billed_ids, wallet_ids=scoped_wallet_ids,
+                                          billed_ids=transfer_billed_ids,
+                                          wallet_ids=scoped_wallet_ids,
                                           known_wallet_ids=wallet_ids, loan_ids=loan_ids,
                                           known_loan_ids=known_loan_ids,
                                           hidden_loan_ids=hidden_loan_ids,
+                                          unbilled_ids=outside_unbilled,
                                           origin=(Transaction, txn.id), **overdue))
             continue
         if txn.transaction_type == TransactionType.CREDIT:
@@ -984,12 +1044,16 @@ def collect_events(
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
     # the projected charges of budget entries scheduled on it.
+    # A funding or overflow account the caller can't view gets no leg, and its id
+    # is never emitted (STU-227).
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
+        funding = p["funding_account_id"] if p["funding_account_id"] in viewable_ids else None
+        overflow = p["overflow_account_id"] if p["overflow_account_id"] in viewable_ids else None
         events.append(_event(
             date=p["date"],
             name=p["name"],
@@ -997,11 +1061,46 @@ def collect_events(
             source=p["source"],
             source_id=p["source_id"],
             face_amount=-p["amount"],
-            legs=[_leg(p["funding_account_id"], p["amount"], p["overflow_account_id"],
-                       cash=p["funding_account_id"] not in wallet_ids)],
+            legs=([_leg(funding, p["amount"], overflow, cash=funding not in wallet_ids)]
+                  if funding is not None else []),
             origin=(Account, p["source_id"]),  # the card
             **extra,
         ))
+
+    # Discovered cards: neutral "Card payment" events from internal inputs. A
+    # leg only when the statement's primary payment account is in scope (with
+    # its overflow only when that is in scope too). With a hidden primary there
+    # is no leg and no overflow move, whatever the overflow: no routing is
+    # computed for the caller, so nothing about the hidden account can be read
+    # from it.
+    if outside_cards:
+        hidden_cards = {a.id: a for a in outside_cards}
+        card_rows = db.query(BudgetEntry).filter(
+            BudgetEntry.account_id.in_(list(hidden_cards)),
+            BudgetEntry.is_active.is_(True),
+            BudgetEntry.transfer_to_account_id.is_(None),
+        ).all()
+        hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None)
+        for p in get_statement_payables(db, outside_cards, start, end,
+                                        projected_charges=hidden_charges):
+            card = hidden_cards[p["source_id"]]
+            primary = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
+            overflow = (p["overflow_account_id"]
+                        if primary is not None and p["overflow_account_id"] in scoped_ids
+                        else None)
+            overdue = {k: p[k] for k in ("overdue", "original_date") if k in p}
+            events.append(_limit(_event(
+                date=p["date"],
+                name=CARD_PAYMENT,
+                type=p["type"],
+                source=p["source"],
+                source_id=None,
+                face_amount=0,
+                legs=([_leg(primary, p["amount"], overflow, cash=primary not in wallet_ids)]
+                      if primary is not None else []),
+                origin=(Account, card.id),
+                **overdue,
+            ), redactor, name=CARD_PAYMENT, currency=card.currency, kind="card_payment"))
 
     # Each loan contributes a dated payable per due date, less what the planned
     # payments into it cover (see services/loans.py). Recurring transfers into a
@@ -1035,6 +1134,7 @@ def collect_events(
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
                 (occ.date(), _money(entry.amount)))
+    loans_by_id = {a.id: a for a in payable_loans}
     for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
         hidden = p["source_id"] in hidden_loan_ids
         extra = {k: v for k, v in p.items() if k not in {
@@ -1042,7 +1142,7 @@ def collect_events(
             "funding_account_id", "overflow_account_id",
         } and not (hidden and k not in ("overdue", "original_date"))}
         payer = p["funding_account_id"]
-        events.append(_event(
+        event = _event(
             date=p["date"],
             name="Loan payment" if hidden else p["name"],
             type=p["type"],
@@ -1055,13 +1155,98 @@ def collect_events(
                   if payer in scoped_ids else []),
             origin=(Account, p["source_id"]),  # the loan
             **extra,
-        ))
+        )
+        if hidden:
+            event = _limit(event, redactor, name=LOAN_PAYMENT,
+                           currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
+        events.append(event)
+
+    # Records the caller sees Limited (see app/core/redaction.py) become limited
+    # events: the displayed name only, no source id, no fee or statement detail.
+    for e in events:
+        record = records.get(e["origin"])
+        if record is None or e.get("view") == LIMITED:
+            continue
+        if redactor.view(record) != LIMITED:
+            continue
+        _limit(e, redactor, name=redactor.display_description(record),
+               currency=record.currency, kind=_record_kind(e, redactor, record))
 
     if tag_id is not None:
         events = _keep_tagged(db, events, tag_id)
     for e in events:
         del e["origin"]
     return events
+
+
+# Keys a limited event never carries: the hidden source's id and details.
+_LIMITED_DROPPED = ("transfer_fee", "statement_close", "statement_balance", "loan_due_date")
+
+
+def _limit(e: dict, redactor, *, name: str, currency, kind: str) -> dict:
+    """Make ``e`` a limited event, in place (see ``limited_event`` for its public shape).
+
+    Its name becomes the displayed one and its source id and details are
+    dropped. For a payment to a hidden loan or card ``face_amount`` is
+    ``|cash_delta|`` (no split, no statement total); otherwise it stays the
+    amount as entered, which the limited record shows too. Every engine field
+    it needs (date, legs, amount, flags) stays.
+    """
+    for key in _LIMITED_DROPPED:
+        e.pop(key, None)
+    legs = e.get("legs") or []
+    e.update({
+        "view": LIMITED,
+        "name": name,
+        "source_id": None,
+        "face_amount": (abs(e["amount"]) if kind in ("loan_payment", "card_payment")
+                        else e["face_amount"]),
+        "currency": getattr(currency, "value", currency),
+        "kind": kind,
+        "account": redactor.account_ref(legs[0]["account_id"]) if legs else None,
+    })
+    return e
+
+
+def _record_kind(e: dict, redactor, record) -> str:
+    """A limited record event's kind: what it is, without naming its source."""
+    if e["type"] == TransactionType.TRANSFER.value:
+        target = redactor.access.account(record.transfer_to_account_id)
+        if target is not None and not redactor.can_view(target.id):
+            if target.account_type == AccountType.LOAN:
+                return "loan_payment"
+            if target.account_type == AccountType.CREDIT:
+                return "card_payment"
+        return "transfer"
+    if e["type"] in (TransactionType.DEBIT.value, BudgetEntryType.EXPENSE.value):
+        return "expense"
+    return "income"
+
+
+def limited_event(e: dict, public_id: str) -> dict:
+    """The public shape of a limited event (``LimitedEvent``).
+
+    ``public_id`` is opaque and per response; ``cash_delta`` is the sum of the
+    event's cash legs on scope accounts.
+    """
+    def day(d):
+        if d is None:
+            return None
+        return (d.date() if isinstance(d, datetime) else d).isoformat()
+
+    return {
+        "view": LIMITED,
+        "public_id": public_id,
+        "date": day(e["date"]),
+        "original_date": day(e.get("original_date")),
+        "overdue": bool(e.get("overdue")),
+        "display_name": e["name"],
+        "face_amount": round(float(e["face_amount"]), 2),
+        "cash_delta": round(float(e["amount"]), 2),
+        "currency": e.get("currency"),
+        "account": e.get("account"),
+        "kind": e.get("kind"),
+    }
 
 
 def _keep_tagged(db: Session, events: List[dict], tag_id: int) -> List[dict]:
@@ -1086,7 +1271,10 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
 
     Each stands in for one occurrence on its calendar day. Only the entry
     creator's transactions count: another user's row naming the entry is a
-    stale reference (left by the entity era) and suppresses nothing.
+    stale reference (left by the entity era) and suppresses nothing. So do
+    only transactions on the entry's own account: one recorded on another
+    account (the creator's private one, say) never suppresses an occurrence
+    projected on a shared account.
     """
     if not entry_ids:
         return Counter()
@@ -1094,13 +1282,14 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
         db.query(Transaction.budget_entry_id, Transaction.transaction_date)
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
-                Transaction.user_id == BudgetEntry.user_id)
+                Transaction.user_id == BudgetEntry.user_id,
+                Transaction.account_id == BudgetEntry.account_id)
     )
     return Counter((entry_id, _naive(when).date()) for entry_id, when in rows)
 
 
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
-                        end: datetime, events: List[dict]) -> dict:
+                        end: datetime, events: Optional[List[dict]]) -> dict:
     """Projected statement charges for budget entries scheduled on a credit card.
 
     A card-backed occurrence is not a cash event: it is a charge on the card, so it
@@ -1125,7 +1314,8 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     ``advance=False`` suppresses nothing, so that occurrence is still billed too.
 
     In-window occurrences are appended to ``events`` as non-cash listings, like
-    unposted card charges. Returns ``{card_id: [line items]}``.
+    unposted card charges; with ``events`` None (a discovered card's internal
+    inputs) nothing is listed. Returns ``{card_id: [line items]}``.
     """
     if not entries:
         return {}
@@ -1147,7 +1337,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
                 amount=amount,
                 transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
             ))
-            if occ >= start:
+            if occ >= start and events is not None:
                 events.append(_event(
                     date=occ,
                     name=entry.name,
@@ -1390,16 +1580,23 @@ def serialize_timeline(result: dict) -> dict:
         ],
         "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
         "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
-        "events": [
-            {
-                "date": iso(e["date"]),
-                "name": e["name"],
-                "amount": f(e["amount"]),
-                "type": e["type"],
-                "source": e["source"],
-                "source_id": e["source_id"],
-                "running_balance": f(e["running_balance"]),
-            }
-            for e in result["events"]
-        ],
+        "events": [_timeline_event(e, i) for i, e in enumerate(result["events"], start=1)],
+    }
+
+
+def _timeline_event(e: dict, index: int) -> dict:
+    """A timeline event: the full shape, or a limited event plus its running balance."""
+    def f(x):
+        return float(x) if isinstance(x, Decimal) else x
+
+    if e.get("view") == LIMITED:
+        return {**limited_event(e, f"e{index}"), "running_balance": f(e["running_balance"])}
+    return {
+        "date": e["date"].isoformat() if e["date"] is not None else None,
+        "name": e["name"],
+        "amount": f(e["amount"]),
+        "type": e["type"],
+        "source": e["source"],
+        "source_id": e["source_id"],
+        "running_balance": f(e["running_balance"]),
     }

@@ -1060,8 +1060,8 @@ def test_a_loan_paid_from_an_account_outside_the_scope_leaves_cash_only_in_its_v
     month = project_cashflow(db, other.id, months=1, reference=REF)[0]
     assert (month["net"], month["closing_balance"], month["unassigned_closing"]) == (
         -8000.0, 42000.0, 0.0)
-    assert [(p["source"], p["amount"], p["account_id"]) for p in get_payables(
-        db, other.id, days=30, reference=REF)] == [("loan", 8000.0, payer_bank.id)]
+    assert [(p["kind"], p["face_amount"], p["account"]["id"]) for p in get_payables(
+        db, other.id, days=30, reference=REF)] == [("loan_payment", 8000.0, payer_bank.id)]
 
 
 # --- round-3 audit fixes -------------------------------------------------------
@@ -1236,16 +1236,17 @@ def test_a_loan_the_caller_cannot_access_is_a_neutral_payment_on_its_paying_acco
     assert [(e["name"], e["source_id"], e["amount"], e["date"]) for e in events] == [
         ("Loan payment", None, Decimal("-8000.00"), datetime(2026, 10, 4))]
     assert "loan_due_date" not in events[0]
-    assert [(e["name"], e["source_id"], e["amount"]) for e in timeline["events"]] == [
-        ("Loan payment", None, -8000.0)]
+    assert [(e["display_name"], e["kind"], e["cash_delta"]) for e in timeline["events"]] == [
+        ("Loan payment", "loan_payment", -8000.0)]
+    assert "source_id" not in timeline["events"][0]
     assert [s["name"] for s in timeline["account_shortfalls"]] == ["Loan payment"]
     assert timeline["closing_balance"] == -7000.0
     assert [(a["account_name"], a["closing_balance"]) for a in timeline["by_account"]] == [
         ("Payer bank", -7000.0)]
     assert (months[0]["net"], months[0]["closing_balance"]) == (-8000.0, -7000.0)
-    assert [(i["name"], i["source_id"]) for i in upcoming] == [("Loan payment", None)]
-    assert [(p["name"], p["source_id"], p["amount"], p["account_id"]) for p in payables] == [
-        ("Loan payment", None, 8000.0, payer_bank.id)]
+    assert [(i["display_name"], i["kind"]) for i in upcoming] == [("Loan payment", "loan_payment")]
+    assert [(p["display_name"], p["kind"], p["face_amount"], p["account"]["id"])
+            for p in payables] == [("Loan payment", "loan_payment", 8000.0, payer_bank.id)]
     dumped = json.dumps([[{k: v for k, v in e.items() if k != "legs"} for e in events],
                          timeline, months, upcoming, payables], default=str)
     assert "Secret car loan" not in dumped
@@ -1293,25 +1294,29 @@ def test_a_payment_into_a_loan_the_caller_cannot_access_is_a_neutral_payment(
     # The payment, plus the remainder of a partial cover, both leave the
     # paying account as neutral loan payments with no loan detail.
     rest = 8000 - int(amount)
-    expected = sorted([(-float(amount), "Loan payment", None)]
-                      + ([(-float(rest), "Loan payment", None)] if rest else []))
+    expected = sorted([(-float(amount), "Loan payment", "loan_payment")]
+                      + ([(-float(rest), "Loan payment", "loan_payment")] if rest else []))
     timeline, upcoming, payables = views(other)
-    assert sorted((e["amount"], e["name"], e["source_id"])
+    assert sorted((e["cash_delta"], e["display_name"], e["kind"])
                   for e in timeline["events"]) == expected
     assert timeline["closing_balance"] == 1000.0 - 8000
-    assert sorted((-float(i["amount"]), i["name"], i["source_id"])
+    assert sorted((i["cash_delta"], i["display_name"], i["kind"])
                   for i in upcoming) == expected
-    assert sorted((-p["amount"], p["name"], p["source_id"]) for p in payables) == expected
-    assert {p["account_id"] for p in payables} == {payer_bank.id}
+    assert sorted((-p["face_amount"], p["display_name"], p["kind"])
+                  for p in payables) == expected
+    assert {p["account"]["id"] for p in payables} == {payer_bank.id}
     dumped = json.dumps([timeline, upcoming, payables], default=str)
     assert "Secret car loan" not in dumped
     assert f'"source_id": {loan.id}' not in dumped
     assert f'"source_id": {paid_id}' not in dumped
 
-    # The loan's owner reads the payment in full (it touches the loan).
+    # The loan's owner reads the payment (it touches the loan), limited: it
+    # cannot view the paying account. Its own loan due keeps its name.
     events = collect_events(db, REF, datetime(2026, 10, 21), user_id=user.id)
-    assert paid_id in {e["source_id"] for e in events if e["source"] != "loan"}
-    assert "Secret car loan" in json.dumps(events, default=str)
+    [paid] = [e for e in events if e["source"] != "loan"]
+    label = "Transfer" if how == "planned" else "Recurring transfer"
+    assert (paid["view"], paid["name"], paid["source_id"]) == ("limited", label, None)
+    assert ("Secret car loan" in json.dumps(events, default=str)) == bool(rest)
 
 
 # --- round-5 audit fixes -------------------------------------------------------

@@ -420,15 +420,17 @@ def test_cross_owner_recurring_transfer_keeps_each_views_in_scope_leg(db, owners
     _entry(db, a, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 1),
            account=secb, transfer_to_account_id=bdo.id)
 
+    # B cannot view SecB, so A's entry shows under its neutral label.
     view_b = project_running_balance(db, b.id, days=30, reference=REF)
     assert view_b["account_shortfalls"] == []
     assert [(e["name"], e["amount"]) for e in view_b["events"]] == [
-        ("SecB to BDO", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
+        ("Recurring transfer", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
     assert _closings(view_b) == {"BDO": Decimal("0.00")}
 
+    # A created it but cannot view BDO, so it reads the neutral label too.
     view_a = project_running_balance(db, a.id, days=30, reference=REF)
     assert [(e["name"], e["amount"]) for e in view_a["events"]] == [
-        ("SecB to BDO", Decimal("-8000.00"))]
+        ("Recurring transfer", Decimal("-8000.00"))]
     assert _closings(view_a) == {"SecB": Decimal("12000.00")}
 
 
