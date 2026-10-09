@@ -49,11 +49,10 @@ interface AccountFormProps {
   visible: boolean
   onClose: () => void
   initial?: Partial<Account>
-  entityId: number
   defaultCurrency: CurrencyCode
 }
 
-function AccountFormModal({ visible, onClose, initial, entityId, defaultCurrency }: AccountFormProps) {
+function AccountFormModal({ visible, onClose, initial, defaultCurrency }: AccountFormProps) {
   const [createAccount, { isLoading: creating }] = useCreateAccountMutation()
   const [updateAccount, { isLoading: updating }] = useUpdateAccountMutation()
 
@@ -78,7 +77,6 @@ function AccountFormModal({ visible, onClose, initial, entityId, defaultCurrency
         description: form.description.trim() || undefined,
         balance: parseFloat(form.balance) || 0,
         currency: form.currency as CurrencyCode,
-        entity_id: entityId,
       }
       if (isEdit && initial?.id) {
         await updateAccount({ id: initial.id, data: payload }).unwrap()
@@ -287,7 +285,6 @@ export default function AccountsScreen() {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         initial={editing}
-        entityId={1} // TODO: use active entity from context
         defaultCurrency={currency}
       />
     </SafeAreaView>

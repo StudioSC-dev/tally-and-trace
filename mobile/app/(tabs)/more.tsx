@@ -91,7 +91,7 @@ function BudgetEntriesSection({ currency }: { currency: CurrencyCode }) {
 
 // ─── Categories Section ───────────────────────────────────────────────────────
 
-function CategoriesSection({ entityId }: { entityId: number }) {
+function CategoriesSection() {
   const { data: cats, isLoading, isFetching, refetch } = useGetCategoriesQuery({ is_active: true })
   const [createCategory] = useCreateCategoryMutation()
   const [deleteCategory] = useDeleteCategoryMutation()
@@ -103,7 +103,7 @@ function CategoriesSection({ entityId }: { entityId: number }) {
   const handleCreate = async () => {
     if (!name.trim()) return Alert.alert('Error', 'Name is required.')
     try {
-      await createCategory({ name: name.trim(), is_expense: isExpense, entity_id: entityId }).unwrap()
+      await createCategory({ name: name.trim(), is_expense: isExpense }).unwrap()
       setName('')
       setShowForm(false)
     } catch {
@@ -186,7 +186,7 @@ function CategoriesSection({ entityId }: { entityId: number }) {
 
 // ─── Wishlist Section ─────────────────────────────────────────────────────────
 
-function WishlistSection({ currency, entityId }: { currency: CurrencyCode; entityId: number }) {
+function WishlistSection({ currency }: { currency: CurrencyCode }) {
   const { data, isLoading, isFetching, refetch } = useGetWishlistItemsQuery()
   const [createItem] = useCreateWishlistItemMutation()
   const [deleteItem] = useDeleteWishlistItemMutation()
@@ -205,7 +205,6 @@ function WishlistSection({ currency, entityId }: { currency: CurrencyCode; entit
         estimated_cost: parseFloat(form.estimated_cost),
         priority: form.priority as WishlistItem['priority'],
         currency,
-        entity_id: entityId,
         is_achieved: false,
       }).unwrap()
       setForm({ name: '', estimated_cost: '', priority: 'medium' })
@@ -353,8 +352,8 @@ export default function MoreScreen() {
           </Text>
         </View>
         {section === 'budget-entries' && <BudgetEntriesSection currency={currency} />}
-        {section === 'categories' && <CategoriesSection entityId={1} />}
-        {section === 'wishlist' && <WishlistSection currency={currency} entityId={1} />}
+        {section === 'categories' && <CategoriesSection />}
+        {section === 'wishlist' && <WishlistSection currency={currency} />}
         {section === 'profile' && <ProfileSection />}
       </SafeAreaView>
     )
