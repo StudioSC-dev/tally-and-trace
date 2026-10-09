@@ -18,9 +18,9 @@ import {
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
 } from '../../src/store/api'
-import type { Transaction, Account, Category } from '../../src/store/api'
+import type { Transaction, Account, Category, FullTransaction, SharedFullTransaction } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
-import { formatCurrency, formatRelativeDate } from '@tally-trace/shared'
+import { formatCurrency, formatRelativeDate, transactionDate, transactionDescription } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
 import { Card, Button, Input, LoadingSpinner, EmptyState, Badge, SectionHeader } from '../../src/components/ui'
 
@@ -39,13 +39,26 @@ function TransactionItem({
   onEdit: (tx: Transaction) => void
   onDelete: (tx: Transaction) => void
 }) {
-  const account = accounts.find((a) => a.id === tx.account_id)
-  const category = categories.find((c) => c.id === tx.category_id)
+  // Limited rows carry account refs and a category name instead of ids; narrow before reading ids.
+  const accountName =
+    tx.view === 'limited'
+      ? tx.counterpart
+        ? `${tx.account?.name ?? 'Other account'} → ${tx.counterpart.name}`
+        : tx.account?.name
+      : accounts.find((a) => a.id === tx.account_id)?.name
+  const categoryName =
+    tx.view === 'limited'
+      ? tx.category_name
+      : tx.view === 'shared_full'
+        ? tx.category_name
+        : categories.find((c) => c.id === tx.category_id)?.name
+  const canEdit = tx.permissions.can_edit
+  const canDelete = tx.permissions.can_delete
   const isDebit = tx.transaction_type === 'debit'
   const isCredit = tx.transaction_type === 'credit'
 
   return (
-    <TouchableOpacity onLongPress={() => onEdit(tx)}>
+    <TouchableOpacity onLongPress={canEdit ? () => onEdit(tx) : undefined} activeOpacity={canEdit ? 0.2 : 1}>
       <Card className="mb-3">
         <View className="flex-row items-start justify-between">
           <View className="flex-row items-center gap-3 flex-1">
@@ -58,12 +71,13 @@ function TransactionItem({
             </View>
             <View className="flex-1">
               <Text className="text-white font-medium" numberOfLines={1}>
-                {tx.description ?? '(no description)'}
+                {transactionDescription(tx) ?? '(no description)'}
               </Text>
               <Text className="text-slate-500 text-xs">
-                {formatRelativeDate(tx.transaction_date)}
-                {account ? ` · ${account.name}` : ''}
-                {category ? ` · ${category.name}` : ''}
+                {formatRelativeDate(transactionDate(tx))}
+                {accountName ? ` · ${accountName}` : ''}
+                {categoryName ? ` · ${categoryName}` : ''}
+                {tx.created_by ? ` · ${tx.created_by}` : ''}
               </Text>
             </View>
           </View>
@@ -77,26 +91,32 @@ function TransactionItem({
               {isDebit ? '-' : isCredit ? '+' : ''}
               {formatCurrency(tx.amount, tx.currency as CurrencyCode)}
             </Text>
-            {tx.is_reconciled && (
+            {tx.view !== 'limited' && tx.is_reconciled && (
               <Text className="text-slate-500 text-xs">✓ Reconciled</Text>
             )}
           </View>
         </View>
 
-        <View className="flex-row gap-2 mt-3">
-          <TouchableOpacity
-            onPress={() => onEdit(tx)}
-            className="flex-1 py-1.5 rounded-lg bg-slate-700 items-center"
-          >
-            <Text className="text-slate-200 text-xs font-medium">✏️ Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => onDelete(tx)}
-            className="flex-1 py-1.5 rounded-lg bg-red-900/40 items-center"
-          >
-            <Text className="text-red-400 text-xs font-medium">🗑 Delete</Text>
-          </TouchableOpacity>
-        </View>
+        {(canEdit || canDelete) && (
+          <View className="flex-row gap-2 mt-3">
+            {canEdit && (
+              <TouchableOpacity
+                onPress={() => onEdit(tx)}
+                className="flex-1 py-1.5 rounded-lg bg-slate-700 items-center"
+              >
+                <Text className="text-slate-200 text-xs font-medium">✏️ Edit</Text>
+              </TouchableOpacity>
+            )}
+            {canDelete && (
+              <TouchableOpacity
+                onPress={() => onDelete(tx)}
+                className="flex-1 py-1.5 rounded-lg bg-red-900/40 items-center"
+              >
+                <Text className="text-red-400 text-xs font-medium">🗑 Delete</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </Card>
     </TouchableOpacity>
   )
@@ -114,12 +134,13 @@ function TransactionFormModal({
 }: {
   visible: boolean
   onClose: () => void
-  initial?: Partial<Transaction>
+  initial?: FullTransaction | SharedFullTransaction
   accounts: Account[]
   categories: Category[]
   defaultCurrency: CurrencyCode
 }) {
   const isEdit = !!initial?.id
+  const isSharedEdit = initial?.view === 'shared_full'
   const [createTransaction, { isLoading: creating }] = useCreateTransactionMutation()
   const [updateTransaction, { isLoading: updating }] = useUpdateTransactionMutation()
 
@@ -128,7 +149,7 @@ function TransactionFormModal({
     amount: String(initial?.amount ?? ''),
     transaction_type: initial?.transaction_type ?? 'debit',
     account_id: String(initial?.account_id ?? accounts[0]?.id ?? ''),
-    category_id: String(initial?.category_id ?? ''),
+    category_id: String(initial && initial.view === 'full' ? (initial.category_id ?? '') : ''),
     transaction_date: initial?.transaction_date
       ? initial.transaction_date.split('T')[0]
       : new Date().toISOString().split('T')[0],
@@ -142,7 +163,7 @@ function TransactionFormModal({
       return Alert.alert('Error', 'Amount and account are required.')
     }
     try {
-      const payload: Partial<Transaction> = {
+      const payload: Partial<FullTransaction> = {
         description: form.description.trim() || undefined,
         amount: parseFloat(form.amount),
         transaction_type: form.transaction_type as Transaction['transaction_type'],
@@ -151,6 +172,8 @@ function TransactionFormModal({
         transaction_date: new Date(form.transaction_date).toISOString(),
         currency: defaultCurrency,
       }
+      // Another user's record: the server refuses references owned by someone else.
+      if (isSharedEdit) delete payload.category_id
       if (isEdit && initial?.id) {
         await updateTransaction({ id: initial.id, data: payload }).unwrap()
       } else {
@@ -248,7 +271,8 @@ function TransactionFormModal({
             </ScrollView>
           </View>
 
-          {/* Category */}
+          {/* Category (hidden when editing another user's record) */}
+          {!isSharedEdit && (
           <View className="gap-2">
             <Text className="text-slate-400 text-sm font-medium">Category (optional)</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -287,6 +311,7 @@ function TransactionFormModal({
               </View>
             </ScrollView>
           </View>
+          )}
 
           <Input
             label="Date"
@@ -319,11 +344,13 @@ export default function TransactionsScreen() {
   const [deleteTransaction] = useDeleteTransactionMutation()
 
   const [modalVisible, setModalVisible] = useState(false)
-  const [editing, setEditing] = useState<Transaction | undefined>()
+  const [editing, setEditing] = useState<FullTransaction | SharedFullTransaction | undefined>()
   const [filterType, setFilterType] = useState<string>('')
 
   const transactions = txData?.items ?? []
   const accounts = accData?.items ?? []
+  // Only accounts the caller may add transactions to are offered in the form.
+  const writableAccounts = accounts.filter((a) => a.permissions.can_add_transactions)
   const categories = catData ?? []
 
   const filtered = filterType
@@ -333,11 +360,22 @@ export default function TransactionsScreen() {
   const handleDelete = (tx: Transaction) => {
     Alert.alert('Delete Transaction', 'Remove this transaction?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteTransaction(tx.id) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          deleteTransaction(tx.id)
+            .unwrap()
+            .catch((e: { data?: { detail?: unknown } }) =>
+              Alert.alert('Error', typeof e?.data?.detail === 'string' ? e.data.detail : 'Could not delete transaction.'),
+            )
+        },
+      },
     ])
   }
 
   const openEdit = (tx: Transaction) => {
+    if (tx.view === 'limited' || !tx.permissions.can_edit) return
     setEditing(tx)
     setModalVisible(true)
   }
@@ -350,12 +388,14 @@ export default function TransactionsScreen() {
         <SectionHeader
           title="Transactions"
           action={
+            writableAccounts.length > 0 ? (
             <TouchableOpacity
               onPress={() => { setEditing(undefined); setModalVisible(true) }}
               className="bg-sky-500 px-3 py-1.5 rounded-lg"
             >
               <Text className="text-white font-semibold text-sm">+ Add</Text>
             </TouchableOpacity>
+            ) : undefined
           }
         />
 
@@ -410,7 +450,7 @@ export default function TransactionsScreen() {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         initial={editing}
-        accounts={accounts}
+        accounts={writableAccounts}
         categories={categories}
         defaultCurrency={currency}
       />

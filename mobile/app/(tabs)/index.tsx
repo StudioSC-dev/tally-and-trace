@@ -4,7 +4,7 @@ import { useGetDashboardSnapshotQuery } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
-import { formatRelativeDate } from '@tally-trace/shared'
+import { formatRelativeDate, isLimitedEvent } from '@tally-trace/shared'
 import { Card, SectionHeader, LoadingSpinner, Badge, AmountText } from '../../src/components/ui'
 
 export default function HomeScreen() {
@@ -129,34 +129,44 @@ export default function HomeScreen() {
           <View>
             <SectionHeader title="Upcoming Bills" />
             <Card className="gap-3">
-              {snapshot.upcoming_events.slice(0, 5).map((event, idx) => (
+              {snapshot.upcoming_events.slice(0, 5).map((event, idx) => {
+                // Limited events (shared accounts) carry a neutral name and a signed cash_delta only.
+                const limited = isLimitedEvent(event)
+                const full = isLimitedEvent(event) ? null : event
+                const name = limited ? event.display_name : (full?.name ?? '')
+                const amount = limited ? Math.abs(event.cash_delta) : (full?.amount ?? 0)
+                const isIncome = limited ? event.cash_delta > 0 : full?.entry_type === 'income'
+                const isExpense = limited ? event.cash_delta < 0 : full?.entry_type === 'expense'
+                const kindLabel = limited ? event.kind.replace('_', ' ') : (full?.entry_type ?? '')
+                return (
                 <View key={idx}>
                   {idx > 0 && <View className="h-px bg-slate-700" />}
                   <View className="flex-row items-center justify-between py-1">
                     <View className="flex-1 mr-3">
                       <Text className="text-white font-medium" numberOfLines={1}>
-                        {event.name}
+                        {name}
                       </Text>
                       <Text className="text-slate-500 text-xs">
                         {formatRelativeDate(event.date)}
-                        {event.is_autopay ? ' · Auto-pay' : ''}
+                        {full?.is_autopay ? ' · Auto-pay' : ''}
                       </Text>
                     </View>
                     <View className="items-end gap-1">
                       <AmountText
-                        amount={event.amount}
+                        amount={amount}
                         currency={event.currency}
-                        negative={event.entry_type === 'expense'}
-                        positive={event.entry_type === 'income'}
+                        negative={isExpense}
+                        positive={isIncome}
                       />
                       <Badge
-                        label={event.entry_type}
-                        color={event.entry_type === 'income' ? 'green' : 'red'}
+                        label={kindLabel}
+                        color={isIncome ? 'green' : 'red'}
                       />
                     </View>
                   </View>
                 </View>
-              ))}
+                )
+              })}
             </Card>
           </View>
         )}

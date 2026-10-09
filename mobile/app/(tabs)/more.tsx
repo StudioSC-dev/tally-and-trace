@@ -21,7 +21,7 @@ import {
   useDeleteWishlistItemMutation,
 } from '../../src/store/api'
 import type { BudgetEntry, Category, WishlistItem } from '../../src/store/api'
-import { formatCurrency } from '@tally-trace/shared'
+import { entryName, formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
 import { Card, Button, Input, SectionHeader, LoadingSpinner, EmptyState, Badge } from '../../src/components/ui'
 
@@ -50,13 +50,14 @@ function BudgetEntriesSection({ currency }: { currency: CurrencyCode }) {
           <Card key={entry.id} className="mb-3">
             <View className="flex-row items-start justify-between">
               <View className="flex-1 mr-3">
-                <Text className="text-white font-semibold">{entry.name}</Text>
+                <Text className="text-white font-semibold">{entryName(entry)}</Text>
                 <Text className="text-slate-500 text-xs capitalize">
                   {entry.cadence} · {entry.entry_type}
-                  {entry.is_autopay ? ' · Auto-pay' : ''}
+                  {entry.view !== 'limited' && entry.is_autopay ? ' · Auto-pay' : ''}
                 </Text>
                 <Text className="text-slate-500 text-xs mt-0.5">
                   Next: {entry.next_occurrence.split('T')[0]}
+                  {entry.created_by ? ` · ${entry.created_by}` : ''}
                 </Text>
               </View>
               <View className="items-end gap-1">
@@ -71,9 +72,10 @@ function BudgetEntriesSection({ currency }: { currency: CurrencyCode }) {
                 />
               </View>
             </View>
+            {entry.permissions.can_delete && (
             <TouchableOpacity
               onPress={() =>
-                Alert.alert('Delete Entry', `Remove "${entry.name}"?`, [
+                Alert.alert('Delete Entry', `Remove "${entryName(entry)}"?`, [
                   { text: 'Cancel', style: 'cancel' },
                   { text: 'Delete', style: 'destructive', onPress: () => deleteEntry(entry.id) },
                 ])
@@ -82,6 +84,7 @@ function BudgetEntriesSection({ currency }: { currency: CurrencyCode }) {
             >
               <Text className="text-red-400 text-xs font-medium">🗑 Delete</Text>
             </TouchableOpacity>
+            )}
           </Card>
         ))
       )}

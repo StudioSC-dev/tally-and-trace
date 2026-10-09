@@ -227,7 +227,8 @@ export default function AccountsScreen() {
           <Text className="text-slate-400 text-xs mb-1">Total Balance</Text>
           <Text className="text-white text-3xl font-bold">
             {formatCurrency(
-              accounts.reduce((s, a) => s + a.balance, 0),
+              // Accounts shared with you are not yours to total.
+              accounts.filter((a) => a.my_role === 'owner').reduce((s, a) => s + a.balance, 0),
               currency
             )}
           </Text>
@@ -248,6 +249,11 @@ export default function AccountsScreen() {
                       <Text className="text-slate-400 text-xs capitalize">
                         {acc.account_type.replace('_', ' ')} · {acc.currency}
                       </Text>
+                      {acc.my_role !== 'owner' && (
+                        <Text className="text-sky-400 text-xs">
+                          Shared by {acc.owner_name} · {acc.my_role}
+                        </Text>
+                      )}
                     </View>
                   </View>
                   <Text className="text-white font-bold text-lg">
@@ -259,6 +265,7 @@ export default function AccountsScreen() {
                   <Text className="text-slate-500 text-xs mt-2">{acc.description}</Text>
                 )}
 
+                {acc.permissions.can_edit_settings && (
                 <View className="flex-row gap-2 mt-3">
                   <TouchableOpacity
                     onPress={() => openEdit(acc)}
@@ -273,6 +280,7 @@ export default function AccountsScreen() {
                     <Text className="text-red-400 text-sm font-medium">🗑 Delete</Text>
                   </TouchableOpacity>
                 </View>
+                )}
               </Card>
             ))}
           </View>

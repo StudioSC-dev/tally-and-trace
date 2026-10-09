@@ -218,7 +218,8 @@ export default function AllocationsScreen() {
   const [editing, setEditing] = useState<Allocation | undefined>()
 
   const allocations = data?.items ?? []
-  const accounts = accData?.items ?? []
+  // Allocations are private to their owner, so only own accounts are offered.
+  const accounts = (accData?.items ?? []).filter((a) => a.my_role === 'owner')
 
   const handleDelete = (alloc: Allocation) => {
     Alert.alert('Delete Allocation', `Remove "${alloc.name}"?`, [
