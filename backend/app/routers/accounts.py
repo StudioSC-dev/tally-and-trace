@@ -638,6 +638,11 @@ def record_loan_prepayment(
                    loan_svc.PREPAYMENT, prepayment)
 
 
+# Schedule fields built from the loan's terms: shown to its owner and admins only.
+LOAN_TERM_SCHEDULE_FIELDS = ("annual_rate", "payment_amount", "term_months",
+                             "first_payment_date", "amortization", "proposed_split")
+
+
 @router.get("/{account_id}/loan-schedule")
 def get_loan_schedule(
     account_id: int,
@@ -646,8 +651,13 @@ def get_loan_schedule(
 ):
     """The loan's owed amount, payments made / left, next due date and upcoming rows.
 
-    An owner, admin or editor gets the full schedule (``view`` "full"). A viewer
-    gets the limited schedule: ``{name, currency, owed, next_due_date,
+    An owner, admin or editor gets the full schedule (``view`` "full"). Loan
+    terms are an owner's or admin's (plan §2), so for an editor they are null:
+    ``annual_rate``, ``payment_amount``, ``term_months``, ``first_payment_date``,
+    ``amortization``, ``proposed_split``, and each upcoming row's
+    ``principal``, ``interest`` and ``balance_after`` (derived from the rate).
+    The editor keeps the payment rows (with ``transaction_id``) and each
+    upcoming due date and amount. A viewer gets the limited schedule: ``{name, currency, owed, next_due_date,
     payments_left, rows: [{due_date, amount, status}]}`` with ``status`` "paid"
     (a posted payment, dated when it was made, principal and interest together)
     or "open" (an upcoming due date). No rate, term, amortisation, first payment
@@ -655,8 +665,14 @@ def get_loan_schedule(
     """
     loan = _loan_or_404(db, current_user, account_id)
     schedule = loan_svc.build_schedule(db, loan)
-    if account_role(current_user, loan) in EDIT_ROLES:
+    role = account_role(current_user, loan)
+    if role in MANAGE_ROLES:
         return {"view": "full", **schedule}
+    if role in EDIT_ROLES:
+        terms = dict.fromkeys(LOAN_TERM_SCHEDULE_FIELDS)
+        upcoming = [{**row, "principal": None, "interest": None, "balance_after": None}
+                    for row in schedule["upcoming"]]
+        return {"view": "full", **schedule, **terms, "upcoming": upcoming}
     rows = [{"due_date": p["date"], "amount": round(p["principal"] + p["interest"], 2),
              "status": "paid"} for p in schedule["payments"]]
     rows += [{"due_date": r["due_date"], "amount": r["payment"], "status": "open"}

@@ -211,9 +211,21 @@ def test_viewer_gets_the_limited_loan_schedule(sw, sw_client, house):
     for row in body["rows"]:
         assert set(row) == {"due_date", "amount", "status"}
     assert "9.75" not in str(body)
-    for who in ("a", "b", "d"):
+    for who in ("a", "d"):
         full = _get(sw_client, sw[who], f"/accounts/{house['shared_loan']}/loan-schedule")
         assert full["view"] == "full" and full["annual_rate"] == 9.75
+    # An editor keeps the payment rows but not the loan's terms (audit round 1, G).
+    editor = _get(sw_client, sw["b"], f"/accounts/{house['shared_loan']}/loan-schedule")
+    assert editor["view"] == "full"
+    for field in ("annual_rate", "payment_amount", "term_months", "first_payment_date",
+                  "amortization", "proposed_split"):
+        assert editor[field] is None, field
+    assert "9.75" not in str(editor)
+    assert [p["principal"] + p["interest"] for p in editor["payments"]] == [1050.0]
+    assert editor["payments"][0]["transaction_id"]
+    assert editor["upcoming"] and all(r["payment"] and r["due_date"] for r in editor["upcoming"])
+    for row in editor["upcoming"]:
+        assert (row["principal"], row["interest"], row["balance_after"]) == (None, None, None)
 
 
 def test_viewer_gets_limited_statements(sw, sw_client, house):
