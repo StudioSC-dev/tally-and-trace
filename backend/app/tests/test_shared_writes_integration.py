@@ -476,3 +476,42 @@ def test_the_creator_still_clears_their_own_references(sw, sw_client, sw_db):
     txn_refs, entry_refs, spent = _references_of(sw_db, refs)
     assert txn_refs == (None, None, None, False) and entry_refs == (None, None)
     assert spent == 0.0
+
+
+# --- Account settings for admins (audit round 1, D) --------------------------------------
+
+def test_an_admin_saves_settings_with_is_active_unchanged_but_cannot_change_it(
+        sw, sw_client, sw_db):
+    from app.models.account import Account
+
+    d, joint = sw["d"], sw["joint"]
+    form = _call(sw_client, d, "GET", f"/accounts/{joint}").json()
+    assert form["is_active"] is True
+    # The settings form resends every field, is_active included and unchanged.
+    r = _call(sw_client, d, "PUT", f"/accounts/{joint}",
+              {"name": "Joint renamed", "is_active": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Joint renamed"
+    assert form["permissions"]["can_delete"] is False
+    r = _call(sw_client, d, "PUT", f"/accounts/{joint}", {"name": "Nope", "is_active": False})
+    assert r.status_code == 404
+    sw_db.expire_all()
+    account = sw_db.get(Account, joint)
+    assert (account.name, account.is_active) == ("Joint renamed", True)
+    # The owner alone may deactivate it, and is told so.
+    owner_view = _call(sw_client, sw["a"], "GET", f"/accounts/{joint}").json()
+    assert owner_view["permissions"]["can_delete"] is True
+    assert _call(sw_client, sw["a"], "PUT", f"/accounts/{joint}",
+                 {"is_active": False}).status_code == 200
+    # Reactivating is a change too.
+    assert _call(sw_client, d, "PUT", f"/accounts/{joint}",
+                 {"is_active": True}).status_code == 404
+
+
+@pytest.mark.parametrize("who,expected", [("a", True), ("d", False), ("b", False), ("v", False)])
+def test_only_the_owner_gets_can_delete(sw, sw_client, who, expected):
+    body = _call(sw_client, sw[who], "GET", f"/accounts/{sw['joint']}").json()
+    assert body["permissions"]["can_delete"] is expected
+    listed = {a["id"]: a for a in _call(sw_client, sw[who], "GET", "/accounts/?limit=100").json()[
+        "items"]}
+    assert listed[sw["joint"]]["permissions"]["can_delete"] is expected

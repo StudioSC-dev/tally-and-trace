@@ -28,3 +28,5 @@ class AccountPermissions(BaseModel):
     can_edit_settings: bool
     can_manage_shares: bool
     can_add_transactions: bool
+    # Deleting or deactivating the account (``is_active``): its owner only.
+    can_delete: bool

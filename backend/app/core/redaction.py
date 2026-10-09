@@ -386,8 +386,9 @@ MANAGER_ONLY_ACCOUNT_FIELDS = (
 
 def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]:
     """Accounts as ``user`` sees them: ``my_role``, ``permissions``, ``owner_name``,
-    and the owner-or-admin fields nulled for everyone else."""
-    from app.core.access import MANAGE_ROLES, account_role
+    and the owner-or-admin fields nulled for everyone else. ``can_delete``
+    (deleting or deactivating the account) is the owner's alone."""
+    from app.core.access import MANAGE_ROLES, OWNER_ROLES, account_role
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
@@ -407,6 +408,7 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
                 "can_edit_settings": role in MANAGE_ROLES,
                 "can_manage_shares": role in MANAGE_ROLES,
                 "can_add_transactions": role in EDIT_ROLES,
+                "can_delete": role in OWNER_ROLES,
             },
             "owner_name": display_name(owners.get(account.user_id)),
         })

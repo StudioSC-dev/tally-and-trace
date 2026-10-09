@@ -363,7 +363,10 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     tag_ids = update_data.pop("tag_ids", None)
     if tag_ids is not None:
         tag_ids = own_tag_ids(db, current_user, tag_ids)
-    if "is_active" in update_data and account_role(current_user, db_account) not in OWNER_ROLES:
+    # Deactivating (or reactivating) is the owner's alone; an admin's form that
+    # resends the stored value unchanged still saves.
+    if ("is_active" in update_data and update_data["is_active"] != db_account.is_active
+            and account_role(current_user, db_account) not in OWNER_ROLES):
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_payment_routing(db, current_user, update_data, account_id=account_id,
                               owner=db_account.user)

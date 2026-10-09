@@ -378,7 +378,7 @@ def test_shape_3_shares_the_joint_account_with_the_demo_partner(client, db, seed
     joint = accounts["Joint Account"]
     assert (joint["my_role"], joint["owner_name"]) == ("editor", "Demo U.")
     assert joint["permissions"] == {"can_edit_settings": False, "can_manage_shares": False,
-                                    "can_add_transactions": True}
+                                    "can_add_transactions": True, "can_delete": False}
     assert accounts["Partner Checking"]["my_role"] == "owner"
 
     def rows(headers, path):
