@@ -174,23 +174,27 @@ def teardown(db, built):
     db.commit()
 
 
+# An event's ``source`` says which table its ``source_id`` is in (ids of
+# different tables can be equal, so the id alone is ambiguous).
+SOURCE_KINDS = {"budget_entry": "entry", "transaction": "txn", "loan": "loan",
+                "statement": "account"}
+
+
 def _canonical(value, names):
     """JSON-ready, with every id replaced by the name it was built with."""
-    def sub(key, v):
+    def sub(key, v, source):
         if v is None or not isinstance(v, int) or isinstance(v, bool):
             return walk(v)
         if key.endswith("account_id"):
             return names.get(("account", v), f"account:{v}")
         if key == "source_id":
-            for kind in ("entry", "txn", "loan", "account"):
-                if (kind, v) in names:
-                    return f"{kind}:{names[(kind, v)]}"
-            return f"unknown:{v}"
+            kind = SOURCE_KINDS.get(source, f"unknown {source}")
+            return f"{kind}:{names.get((kind, v), v)}"
         return v
 
     def walk(v):
         if isinstance(v, dict):
-            out = {k: sub(k, x) for k, x in v.items()}
+            out = {k: sub(k, x, v.get("source")) for k, x in v.items()}
             if isinstance(out.get("by_account"), list):
                 # Account order is not part of the contract (the query has no ORDER BY).
                 out["by_account"] = sorted(out["by_account"], key=lambda a: str(a))
