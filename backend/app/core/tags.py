@@ -15,7 +15,7 @@ never confirms that it exists.
 from typing import Dict, Iterable, List, Optional, Set
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, delete, exists, func, insert, literal, or_, select
+from sqlalchemy import and_, delete, exists, func, insert, literal, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.access import TRANSFER_ONLY_COLUMNS
@@ -49,6 +49,23 @@ def ensure_household_tag(db: Session, user) -> Tag:
         db.add(tag)
         db.flush()
     return tag
+
+
+def backfill_household_tags(db: Session) -> int:
+    """Give every user without a Household system tag one; returns how many were made.
+
+    Covers users registered by an older release during a deploy, after the
+    migration's own backfill. Idempotent and safe under concurrent startups:
+    ``ON CONFLICT DO NOTHING`` leaves a tag another worker made first (or a
+    same-named custom tag) alone. Committed here, as one short transaction.
+    """
+    result = db.execute(text(
+        "INSERT INTO tags (user_id, name, is_system) "
+        "SELECT u.id, :name, true FROM users u "
+        "WHERE NOT EXISTS (SELECT 1 FROM tags t WHERE t.user_id = u.id AND t.is_system) "
+        "ON CONFLICT DO NOTHING"), {"name": HOUSEHOLD_TAG_NAME})
+    db.commit()
+    return result.rowcount
 
 
 def usable_tag_ids(db: Session, user) -> Set[int]:

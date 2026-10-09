@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.routers import api_router
 from app.core.seed import seed_database
+from app.core.tags import backfill_household_tags
 from app.core.observability import init_sentry
 from contextlib import asynccontextmanager
 import os
@@ -42,6 +43,20 @@ logger.info("Logging configured successfully.")
 init_sentry()
 
 
+def _backfill_household_tags():
+    """Household tag for users an older release registered after the migration."""
+    db = SessionLocal()
+    try:
+        made = backfill_household_tags(db)
+        if made:
+            logger.info("Created %s missing Household tag(s)", made)
+    except Exception:
+        db.rollback()
+        logger.exception("Household tag backfill failed")
+    finally:
+        db.close()
+
+
 def _run_startup():
     """Seed initial data on startup.
 
@@ -58,6 +73,7 @@ def _run_startup():
     """
     logger.info("Application startup - seeding database (schema managed by Alembic)")
     seed_database()
+    _backfill_household_tags()
     logger.info("Database seeding completed")
 
 

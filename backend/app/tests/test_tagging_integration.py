@@ -338,6 +338,20 @@ def test_materialise_ignores_links_from_other_users_tags(client, db, owner_world
     assert _links(db, "transaction", r.json()["id"]) == [w["business"]]
 
 
+def test_startup_backfills_a_missing_household_tag(client, db, people):
+    """A user created without one (a deploy gap) gets exactly one at startup, however often it runs."""
+    from app.main import _run_startup
+
+    who = people()
+    db.execute(text("DELETE FROM tags WHERE user_id = :u AND is_system"), {"u": who["id"]})
+    db.commit()
+    for _ in range(2):
+        _run_startup()
+        count = db.execute(text("SELECT count(*) FROM tags WHERE user_id = :u AND is_system"),
+                           {"u": who["id"]}).scalar_one()
+        assert count == 1
+
+
 def test_a_failed_materialise_copies_no_tags(client, db, owner_world):
     """The copy is in the transaction's own commit: a refused post leaves nothing."""
     w, owner = owner_world, owner_world["owner"]
