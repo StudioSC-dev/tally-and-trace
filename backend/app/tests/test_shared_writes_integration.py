@@ -515,3 +515,36 @@ def test_only_the_owner_gets_can_delete(sw, sw_client, who, expected):
     listed = {a["id"]: a for a in _call(sw_client, sw[who], "GET", "/accounts/?limit=100").json()[
         "items"]}
     assert listed[sw["joint"]]["permissions"]["can_delete"] is expected
+
+
+# --- Deleting an entry with the caller's own linked transactions (audit round 1, J) ------
+
+@pytest.mark.parametrize("change", ["revoke", "demote"])
+def test_a_creator_who_lost_edit_cannot_unlink_their_own_posted_transaction(
+        sw, sw_client, sw_db, change):
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    b, joint = sw["b"], sw["joint"]
+    entry = _entry(sw_client, b, joint)["id"]
+    posted = _debit(sw_client, b, joint, budget_entry_id=entry)["id"]
+    _set_role(sw_db, sw, "b", None if change == "revoke" else "viewer")
+    r = _call(sw_client, b, "DELETE", f"/budget-entries/{entry}")
+    assert r.status_code == 409, r.text
+    sw_db.expire_all()
+    assert sw_db.get(BudgetEntry, entry) is not None
+    assert sw_db.get(Transaction, posted).budget_entry_id == entry
+    # The account's owner, who may edit the stranded row... may not either: its
+    # creator lost access, so it is not editable (only post, revert or delete).
+    assert _call(sw_client, sw["a"], "DELETE", f"/budget-entries/{entry}").status_code == 409
+
+
+def test_a_creator_with_edit_rights_still_deletes_an_entry_with_own_links(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    b, joint = sw["b"], sw["joint"]
+    entry = _entry(sw_client, b, joint)["id"]
+    posted = _debit(sw_client, b, joint, budget_entry_id=entry)["id"]
+    assert _call(sw_client, b, "DELETE", f"/budget-entries/{entry}").status_code == 204
+    sw_db.expire_all()
+    assert sw_db.get(Transaction, posted).budget_entry_id is None

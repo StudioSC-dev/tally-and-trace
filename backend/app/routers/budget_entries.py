@@ -443,17 +443,17 @@ def delete_budget_entry(
     Under the write rule, the account owner exemption, by its creator, or by
     an owner of any account it touches (an entry moves no balance). Deleting
     it clears ``budget_entry_id`` on the transactions linked to it, so it is
-    refused (409) while any of them belongs to someone else and is not one
-    the caller may edit: a delete never changes another user's transaction
-    the caller could not change directly. Deactivating the entry is the way
-    to stop it then.
+    refused (409) while any of them is not one the caller may edit: a delete
+    never changes a transaction the caller could not change directly, whoever
+    created it (a creator demoted or revoked on the account their own linked
+    transaction sits on included). Deactivating the entry is the way to stop
+    it then.
     """
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     access = RecordAccess(db, current_user)
     if not access.permissions(entry)["can_delete"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")
-    linked = db.query(Transaction).filter(Transaction.budget_entry_id == entry.id,
-                                          Transaction.user_id != current_user.id).all()
+    linked = db.query(Transaction).filter(Transaction.budget_entry_id == entry.id).all()
     if any(not access.permissions(txn)["can_edit"] for txn in linked):
         raise HTTPException(
             status_code=409,
