@@ -328,7 +328,7 @@ def test_projection_endpoints_carry_no_sentinel(sw, sw_client, sw_db, who):
         assert sw_leaks(r.json(), secret, numbers=[500]) == [], path
 
 
-# --- Statement legs follow the projection scope (audit round 1, I) -----------------------
+# --- Statement legs: viewable accounts keep theirs (audit round 2, 7) --------------------
 
 def _deactivate(db, account_id):
     from app.models.account import Account
@@ -337,8 +337,10 @@ def _deactivate(db, account_id):
     db.commit()
 
 
-def test_statement_legs_skip_inactive_funding_and_overflow_accounts(sw_client, sw_db, sw_people):
-    """A user with no shares: an inactive account stays viewable but is outside the scope."""
+def test_statement_legs_keep_inactive_own_funding_and_overflow_accounts(
+        sw_client, sw_db, sw_people):
+    """A user with no shares gets the pre-STU-232 output: an inactive account of
+    their own still funds (or overflows) a card statement, as before."""
     from app.services.forecast import project_running_balance
 
     u = sw_people("Una", "Solo")
@@ -358,25 +360,52 @@ def test_statement_legs_skip_inactive_funding_and_overflow_accounts(sw_client, s
     _deactivate(sw_db, old)
 
     statements = {e["source_id"]: e for e in _events(sw_db, u) if e["source"] == "statement"}
-    # The active primary keeps its leg; the inactive overflow is dropped.
     paid = statements[card]
     assert paid["date"] == datetime(2026, 10, 30)
     assert paid["legs"] == [{"account_id": main, "amount": Decimal("-1500.00"),
-                             "overflow_account_id": None, "cash": True}]
+                             "overflow_account_id": old, "cash": True}]
     assert paid["amount"] == Decimal("-1500.00")
-    assert paid["overflow_account_id"] is None
-    # An inactive primary: listed with no leg and no cash.
+    assert (paid["funding_account_id"], paid["overflow_account_id"]) == (main, old)
     unpaid = statements[stale]
-    assert unpaid["legs"] == [] and unpaid["amount"] == 0
-    assert unpaid["funding_account_id"] is None
-    assert unpaid["face_amount"] == Decimal("200.00")
+    assert unpaid["date"] == datetime(2026, 10, 30)
+    assert unpaid["legs"] == [{"account_id": old, "amount": Decimal("-200.00"),
+                               "overflow_account_id": None, "cash": True}]
+    assert unpaid["amount"] == Decimal("-200.00")
+    assert unpaid["funding_account_id"] == old
 
     sw_db.expire_all()
     result = project_running_balance(sw_db, u["id"], days=60, reference=REF)
+    # The inactive overflow has no opening balance in the projection, so nothing
+    # is pulled from it; the inactive funder's leg lands in unassigned cash.
     assert result["overflow_moves"] == []
     closings = {a["account_id"]: a["closing_balance"] for a in result["by_account"]}
     assert closings == {main: Decimal("-500.00")}
-    assert result["closing_balance"] == Decimal("-500.00")
+    assert result["unassigned_closing"] == Decimal("-200.00")
+    assert result["closing_balance"] == Decimal("-700.00")
+
+
+def test_statement_legs_skip_a_hidden_funding_or_overflow_account(sw, sw_client, sw_db):
+    """A card shared with the partner, paid from the owner's private account with
+    the joint account as overflow, and one paid from the joint account with the
+    private one as overflow: the partner gets no leg, and no id, for the
+    private account (STU-227)."""
+    a, b, joint, private = sw["a"], sw["b"], sw["joint"], sw["a_private"]
+    hidden_primary = _card(sw_client, sw, sw_db, payment=private, overflow=joint,
+                           name="Card one")
+    hidden_overflow = _card(sw_client, sw, sw_db, payment=joint, overflow=private,
+                            name="Card two")
+    _txn(sw_client, a, hidden_primary, 300, "2026-10-12T00:00:00", posted=True)
+    _txn(sw_client, a, hidden_overflow, 400, "2026-10-12T00:00:00", posted=True)
+    statements = {e["source_id"]: e for e in _events(sw_db, b) if e["source"] == "statement"}
+    one, two = statements[hidden_primary], statements[hidden_overflow]
+    assert one["legs"] == [] and one["amount"] == 0
+    assert (one["funding_account_id"], one["overflow_account_id"]) == (None, None)
+    assert two["legs"] == [{"account_id": joint, "amount": Decimal("-400.00"),
+                            "overflow_account_id": None, "cash": True}]
+    assert (two["funding_account_id"], two["overflow_account_id"]) == (joint, None)
+    owner = {e["source_id"]: e for e in _events(sw_db, a) if e["source"] == "statement"}
+    assert owner[hidden_primary]["legs"][0]["account_id"] == private
+    assert owner[hidden_overflow]["legs"][0]["overflow_account_id"] == private
 
 
 # --- Occurrence suppression (audit round 1, K) -------------------------------------------

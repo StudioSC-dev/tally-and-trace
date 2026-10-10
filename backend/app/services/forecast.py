@@ -1047,17 +1047,18 @@ def collect_events(
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
     # the projected charges of budget entries scheduled on it.
-    # A funding or overflow account outside the projection scope (one the caller
-    # can't view, or an inactive one) gets no leg, and its id is never emitted
-    # (STU-227), as for loan dues.
+    # A funding or overflow account the caller can't view gets no leg, and its id
+    # is never emitted (STU-227). One they can view keeps its leg even when
+    # inactive, as before shared accounts, so a user with no shares projects
+    # exactly as then.
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
-        funding = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
-        overflow = p["overflow_account_id"] if p["overflow_account_id"] in scoped_ids else None
+        funding = p["funding_account_id"] if p["funding_account_id"] in viewable_ids else None
+        overflow = p["overflow_account_id"] if p["overflow_account_id"] in viewable_ids else None
         events.append(_event(
             date=p["date"],
             name=p["name"],
