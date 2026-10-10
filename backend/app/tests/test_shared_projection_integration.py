@@ -424,3 +424,67 @@ def test_another_users_private_row_never_suppresses_a_joint_occurrence(sw, sw_cl
         dates = sorted(e["date"] for e in _events(sw_db, sw[who])
                        if e["name"] == "Joint saving")
         assert dates == [datetime(2026, 10, 25), datetime(2026, 11, 25)], who
+
+
+def test_a_private_row_never_suppresses_a_shared_occurrence(sw, sw_client, sw_db):
+    """Audit round 2, 3: the partner's own row on their private account, linked to
+    their own recurring transfer on the joint account, takes nothing out of the
+    owner's projection (who cannot read that row); a row on the entry's own
+    accounts still stands in for its occurrence."""
+    from app.services.forecast import project_running_balance
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    pot = sw_post(sw_client, a, "/accounts/", {
+        "name": "Joint savings", "account_type": "savings", "balance": 0})["id"]
+    sw_share(sw_db, pot, b["id"], "editor", a["id"])
+    entry = sw_post(sw_client, b, "/budget-entries/", {
+        "name": "Bea saving", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "transfer_to_account_id": pot})["id"]
+
+    def closings():
+        sw_db.expire_all()
+        result = project_running_balance(sw_db, a["id"], days=60, reference=REF)
+        return {k: v for k, v in ((x["account_id"], x["closing_balance"])
+                                  for x in result["by_account"]) if k in (joint, pot)}
+
+    expected = {joint: Decimal("9800.00"), pot: Decimal("200.00")}
+    assert closings() == expected
+    # Bea's own debit on her private account, linked to her entry, on its day.
+    _txn(sw_client, b, sw["b_private"], 100, "2026-10-25T00:00:00", posted=True,
+         budget_entry_id=entry)
+    assert closings() == expected
+    for who in ("a", "b"):
+        dates = sorted(e["date"] for e in _events(sw_db, sw[who]) if e["name"] == "Bea saving")
+        assert dates == [datetime(2026, 10, 25), datetime(2026, 11, 25)], who
+    # Materialising it (a row from the joint account into the pot) still does.
+    r = sw_client.post(f"{API}/budget-entries/{entry}/materialize", headers=b["headers"],
+                       json={"advance": False})
+    assert r.status_code in (200, 201), r.text
+    assert closings() == {joint: Decimal("9800.00"), pot: Decimal("200.00")}
+    dates = sorted(e["date"] for e in _events(sw_db, b) if e["name"] == "Bea saving")
+    assert dates == [datetime(2026, 11, 25)]
+
+
+def test_a_private_row_never_counts_as_a_paid_installment_on_a_shared_account(
+        sw, sw_client, sw_db):
+    """The same rule for ``occurrences_paid``, which the owner is shown on the
+    partner's installment on the joint account."""
+    b, joint = sw["b"], sw["joint"]
+    entry = sw_post(sw_client, b, "/budget-entries/", {
+        "name": "Bea installment", "entry_type": "expense", "amount": 100,
+        "cadence": "monthly", "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "end_mode": "after_occurrences", "max_occurrences": 6})["id"]
+    _txn(sw_client, b, sw["b_private"], 100, "2026-10-25T00:00:00", posted=True,
+         budget_entry_id=entry)
+
+    def paid(who):
+        r = sw_client.get(f"{API}/budget-entries/{entry}", headers=sw[who]["headers"])
+        assert r.status_code == 200, r.text
+        return r.json()["occurrences_paid"]
+
+    assert (paid("a"), paid("b")) == (0, 0)
+    r = sw_client.post(f"{API}/budget-entries/{entry}/materialize", headers=b["headers"],
+                       json={})
+    assert r.status_code in (200, 201), r.text
+    assert (paid("a"), paid("b")) == (1, 1)

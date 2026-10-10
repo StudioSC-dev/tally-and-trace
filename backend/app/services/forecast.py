@@ -29,6 +29,7 @@ from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
 )
 from app.models.account import Account, AccountType
+from app.models.account_share import AccountShare
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.models.transaction import RecurrenceFrequency
@@ -1263,26 +1264,58 @@ def _keep_tagged(db: Session, events: List[dict], tag_id: int) -> List[dict]:
     return [e for e in events if e["origin"][1] in tagged[e["origin"][0]]]
 
 
-def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
-    """``{(entry id, day): count}`` of transactions materialised from each entry.
+def linked_transactions(db: Session, entry_ids) -> List[tuple]:
+    """``[(entry id, transaction date)]``: the transactions that stand for an
+    entry's occurrences (materialised from it, or linked to it by hand).
 
-    Each stands in for one occurrence on its calendar day. Only the entry
-    creator's transactions count, on whichever account they were recorded (as
-    before shared accounts, so a user with no shares projects exactly as
-    then): another user's row naming the entry is a stale reference (left by
-    the entity era; the same-owner rule allows no new one) and suppresses
-    nothing, so a transaction in another user's private account never
-    suppresses an occurrence projected on a shared account.
+    Only the entry creator's transactions count: another user's row naming the
+    entry is a stale reference (left by the entity era; the same-owner rule
+    allows no new one) and stands for nothing.
+
+    For an entry touching no shared account the creator's row counts on
+    whichever account it was recorded (as before shared accounts, so a user
+    with no shares gets exactly the same result as then). For an entry touching
+    an account with any share, only a row on the entry's own account counts
+    (for a recurring transfer, one from its source into its destination):
+    everyone who can see that account sees the entry, and a row on the
+    creator's private account, which they cannot read, must change nothing
+    they are shown.
     """
+    entry_ids = list(entry_ids)
     if not entry_ids:
-        return Counter()
+        return []
     rows = (
-        db.query(Transaction.budget_entry_id, Transaction.transaction_date)
+        db.query(Transaction.budget_entry_id, Transaction.transaction_date,
+                 Transaction.transaction_type, Transaction.account_id,
+                 Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
+                 BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
+                 BudgetEntry.overflow_account_id)
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
                 Transaction.user_id == BudgetEntry.user_id)
+        .all()
     )
-    return Counter((entry_id, _naive(when).date()) for entry_id, when in rows)
+    touched = {acc for row in rows for acc in row[6:] if acc is not None}
+    shared = {acc for (acc,) in db.query(AccountShare.account_id).filter(
+        AccountShare.account_id.in_(touched)).distinct()} if touched else set()
+
+    def on_entry_accounts(row) -> bool:
+        _, _, kind, account, src, dst, entry_account, entry_dst, _ = row
+        if entry_dst is not None:
+            return (kind == TransactionType.TRANSFER and (src or account) == entry_account
+                    and dst == entry_dst)
+        return account == entry_account
+
+    return [(row[0], row[1]) for row in rows
+            if not shared.intersection(row[6:]) or on_entry_accounts(row)]
+
+
+def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
+    """``{(entry id, day): count}`` of the transactions standing for each entry's
+    occurrences (``linked_transactions``). Each stands in for one occurrence on
+    its calendar day."""
+    return Counter((entry_id, _naive(when).date())
+                   for entry_id, when in linked_transactions(db, entry_ids))
 
 
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,

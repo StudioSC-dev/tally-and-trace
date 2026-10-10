@@ -1,9 +1,9 @@
+from collections import Counter
 from calendar import monthrange
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
@@ -66,8 +66,10 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     ``occurrences_paid_offset`` is the explicit escape hatch: charges paid before
     import (no linked transaction) are added to the linked count.
 
-    Only the entry creator's transactions count: another user's row naming the
-    entry is a stale reference and pays nothing.
+    Only the transactions ``linked_transactions`` counts (services/forecast.py):
+    the entry creator's, and for an entry on a shared account only those on the
+    entry's own accounts, so a row on the creator's private account changes
+    nothing another user is shown.
 
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
@@ -76,15 +78,10 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
     installments = [e for e in entries if e.end_mode == "after_occurrences"]
     counts: dict = {}
     if installments:
-        rows = (
-            db.query(Transaction.budget_entry_id, func.count(Transaction.id))
-            .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
-            .filter(Transaction.budget_entry_id.in_([e.id for e in installments]),
-                    Transaction.user_id == BudgetEntry.user_id)
-            .group_by(Transaction.budget_entry_id)
-            .all()
-        )
-        counts = {entry_id: total for entry_id, total in rows}
+        from app.services.forecast import linked_transactions
+
+        counts = Counter(entry_id for entry_id, _ in linked_transactions(
+            db, [e.id for e in installments]))
 
     for entry in entries:
         is_installment = entry.end_mode == "after_occurrences"
