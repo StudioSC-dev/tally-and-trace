@@ -76,7 +76,7 @@ def _funding_account(
 
 
 def _validate_payment_routing(db: Session, current_user: User, data: dict,
-                              account_id: Optional[int] = None, owner=None) -> None:
+                              account: Optional[Account] = None, owner=None) -> None:
     """Reject payment routing that points at accounts the caller can't use.
 
     Covers a card's statement payment / overflow account and a loan's payment
@@ -85,10 +85,17 @@ def _validate_payment_routing(db: Session, current_user: User, data: dict,
     could route a payment at an arbitrary account id and read that account's
     name back out of the timeline's ``account_shortfalls``. Also rejects
     self-routing, which would make an account fund its own payment.
+
+    On an update (``account``) only a target that changes is checked: an admin's
+    form resending a stored route they may not use (the owner's private payer)
+    still saves, and learns nothing it was not already shown.
     """
+    account_id = account.id if account is not None else None
     for field in ("payment_account_id", "payment_overflow_account_id"):
         target_id = data.get(field)
         if target_id is None:
+            continue
+        if account is not None and target_id == getattr(account, field):
             continue
         _funding_account(db, current_user, target_id, field, account_id,
                          owner=owner if owner is not None else current_user)
@@ -368,7 +375,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     if ("is_active" in update_data and update_data["is_active"] != db_account.is_active
             and account_role(current_user, db_account) not in OWNER_ROLES):
         raise HTTPException(status_code=404, detail="Account not found")
-    _validate_payment_routing(db, current_user, update_data, account_id=account_id,
+    _validate_payment_routing(db, current_user, update_data, account=db_account,
                               owner=db_account.user)
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)

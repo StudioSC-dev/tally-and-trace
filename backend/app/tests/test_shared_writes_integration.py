@@ -8,7 +8,7 @@ deleted by its creator and by an owner of any account it touches.
 """
 import pytest
 
-from app.tests.conftest import API, sw_db_reachable, sw_post
+from app.tests.conftest import API, sw_db_reachable, sw_post, sw_share
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -527,6 +527,52 @@ def test_an_admin_saves_settings_with_is_active_unchanged_but_cannot_change_it(
     # Reactivating is a change too.
     assert _call(sw_client, d, "PUT", f"/accounts/{joint}",
                  {"is_active": True}).status_code == 404
+
+
+@pytest.mark.parametrize("kind", ["credit", "loan"])
+def test_an_admin_saves_settings_with_a_hidden_payer_unchanged(sw, sw_client, sw_db, kind):
+    """Audit round 2, 5: a card or loan shared with an admin, paid from the owner's
+    private account (one the admin can't use). Resending that stored routing
+    saves; routing to it anew, or to an account of the admin's own, is refused;
+    routing to the owner's joint account, which the admin manages, saves."""
+    from app.models.account import Account
+
+    a, d, private, joint = sw["a"], sw["d"], sw["a_private"], sw["joint"]
+    body = {"name": "Shared liability", "account_type": kind, "balance": 0,
+            "payment_account_id": private}
+    if kind == "credit":
+        body.update({"billing_cycle_start": 10, "days_until_due_date": 20,
+                     "payment_overflow_account_id": joint})
+    else:
+        body.update({"balance": -1_000, "loan_kind": "personal", "loan_annual_rate": 10,
+                     "loan_term_months": 12, "loan_payment_amount": 100,
+                     "loan_first_payment_date": "2026-11-01"})
+    shared = sw_post(sw_client, a, "/accounts/", body)["id"]
+    other = sw_post(sw_client, a, "/accounts/", {**body, "payment_account_id": joint,
+                                                 "name": "Other liability"})["id"]
+    for account in (shared, other):
+        sw_share(sw_db, account, d["id"], "admin", a["id"])
+    d_own = sw_post(sw_client, d, "/accounts/", {
+        "name": "Dee bank", "account_type": "checking", "balance": 10})["id"]
+
+    form = _call(sw_client, d, "GET", f"/accounts/{shared}").json()
+    assert form["payment_account_id"] == private
+    resend = {"name": "Renamed", "payment_account_id": form["payment_account_id"]}
+    if kind == "credit":
+        resend["payment_overflow_account_id"] = form["payment_overflow_account_id"]
+    r = _call(sw_client, d, "PUT", f"/accounts/{shared}", resend)
+    assert r.status_code == 200, r.text
+    assert (r.json()["name"], r.json()["payment_account_id"]) == ("Renamed", private)
+    # A changed target is still checked: the hidden account, or the admin's own.
+    for target in (private, d_own):
+        r = _call(sw_client, d, "PUT", f"/accounts/{other}", {"payment_account_id": target})
+        assert r.status_code == 404, (target, r.text)
+    sw_db.expire_all()
+    assert sw_db.get(Account, other).payment_account_id == joint
+    r = _call(sw_client, d, "PUT", f"/accounts/{shared}", {"payment_account_id": joint})
+    assert r.status_code == 200, r.text
+    sw_db.expire_all()
+    assert sw_db.get(Account, shared).payment_account_id == joint
 
 
 @pytest.mark.parametrize("who,expected", [("a", True), ("d", False), ("b", False), ("v", False)])
