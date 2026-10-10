@@ -508,3 +508,48 @@ def test_the_summary_shows_a_payment_to_a_hidden_liability_whole(sw, sw_client, 
         assert own["summary"]["total_expenses"] == pytest.approx(INTEREST)
         row = f"Interest: {PRIVATE} loan" if target == "a_loan" else "Transfer fees"
         assert own["category_breakdown"][row]["expenses"] == pytest.approx(INTEREST)
+
+
+# --- A transfer drawn from a hidden loan or card (audit round 2, 1) ----------------------
+
+@pytest.mark.parametrize("source", ["a_card", "a_loan"])
+def test_a_transfer_from_a_hidden_liability_shows_no_fee(sw, sw_client, source):
+    """The only row in the window: the owner draws from their private card (a cash
+    advance) or loan (a disbursement) into the joint account, with a fee charged to
+    the hidden source. Nobody else is shown that fee, or the amount plus it, in the
+    record list or get, the period summary, or the JSON, CSV and ZIP exports."""
+    from app.tests.test_shared_export_integration import _all_exports
+
+    a = sw["a"]
+    txn = sw_post(sw_client, a, "/transactions/", {
+        "account_id": sw[source], "transfer_from_account_id": sw[source],
+        "transfer_to_account_id": sw["joint"], "amount": 4000, "transfer_fee": INTEREST,
+        "transaction_type": "transfer", "description": f"{PRIVATE} draw",
+        "transaction_date": "2026-11-03T12:00:00"})["id"]
+    sentinels = [INTEREST, 4000 + INTEREST]
+    for who in ("b", "v", "d"):
+        caller = sw[who]
+        got = _get(sw_client, caller, f"/transactions/{txn}")
+        listed = {t["id"]: t for t in _get(sw_client, caller, "/transactions/",
+                                           limit=100)["items"]}
+        assert listed[txn] == got
+        assert got["view"] == "limited"
+        assert (got["amount"], got["transfer_fee"]) == (4000.0, None), (who, got)
+        assert got["account"] == {"id": None, "name": "Card payment" if source == "a_card"
+                                  else "Loan payment"}
+        assert got["counterpart"] == {"id": sw["joint"], "name": "Joint account"}
+        summary = _get(sw_client, caller, "/transactions/summary/period", **ALONE)
+        assert summary["summary"]["total_expenses"] == 0.0, (who, summary)
+        assert summary["category_breakdown"] == {}, (who, summary)
+        body, texts = _all_exports(sw_client, caller)
+        exported = {t["id"]: t for t in body["others_transactions"]}[txn]
+        assert (exported["amount"], exported["transfer_fee"]) == ("4000.00", None)
+        for tree in (got, listed, summary, body):
+            assert sw_leaks(tree, numbers=sentinels) == [], who
+        for text in texts:
+            assert PRIVATE not in text
+            for n in ("777.77", "4777.77"):
+                assert n not in text, (who, n)
+    # The owner, who sees the source, still gets the fee.
+    own = _get(sw_client, a, f"/transactions/{txn}")
+    assert (own["amount"], own["transfer_fee"]) == (4000.0, INTEREST)

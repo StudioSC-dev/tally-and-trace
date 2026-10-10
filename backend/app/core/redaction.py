@@ -21,7 +21,10 @@ for anyone else.
 category name a limited record shows) is the stored text only when the caller
 can view every account the record touches; otherwise a neutral label for its
 kind. A payment into a loan or card the caller can't view shows no interest:
-``transfer_fee`` is null and ``amount`` is the whole payment.
+``transfer_fee`` is null and ``amount`` is the whole payment. A transfer drawn
+from a loan or card the caller can't view shows no fee either (it is charged to
+that account): ``transfer_fee`` is null and ``amount`` is what the other side
+received.
 
 Tags are only ever the caller's own (``attach_visible_tags``). Every record
 carries ``view``, ``permissions`` (``RecordAccess.permissions``) and
@@ -160,16 +163,26 @@ class Redactor:
             return SHARED_FULL
         return LIMITED
 
-    def _hidden_liability(self, record) -> Optional[Account]:
-        """The loan or card a transfer pays into, when the caller can't view it."""
+    def _hidden_liability(self, record, column: str = "transfer_to_account_id"
+                          ) -> Optional[Account]:
+        """The loan or card on one side of a transfer (by default the one it pays
+        into), when the caller can't view it."""
         if getattr(record, "transaction_type", None) != TransactionType.TRANSFER:
             return None
-        target = self.access.account(record.transfer_to_account_id)
+        if column == "transfer_from_account_id":
+            account_id = record.transfer_from_account_id or record.account_id
+        else:
+            account_id = getattr(record, column)
+        target = self.access.account(account_id)
         if target is None or self.can_view(target.id):
             return None
         if target.account_type in (AccountType.LOAN, AccountType.CREDIT):
             return target
         return None
+
+    def _hidden_source_liability(self, record) -> Optional[Account]:
+        """The loan or card a transfer draws from, when the caller can't view it."""
+        return self._hidden_liability(record, "transfer_from_account_id")
 
     def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
         """The stored description when every touched account is viewable, else a label."""
@@ -220,9 +233,12 @@ class Redactor:
         """The ``LimitedTransaction`` body, whatever the caller's view (exports use it)."""
         facts = facts or self.access.facts(txn)
         shown = facts["view_all"] and bool(facts["ids"])
-        hidden = self._hidden_liability(txn)
         amount, fee = txn.amount, txn.transfer_fee
-        if hidden is not None:
+        if self._hidden_source_liability(txn) is not None:
+            # Drawn from a hidden loan or card: its fee is that account's charge,
+            # so only what the visible side received is shown.
+            fee = None
+        elif self._hidden_liability(txn) is not None:
             # No interest shown: the whole payment, no split.
             amount, fee = (amount or 0) + (fee or 0), None
         transfer = txn.transaction_type == TransactionType.TRANSFER

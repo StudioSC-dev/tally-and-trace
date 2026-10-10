@@ -137,7 +137,8 @@ class LimitedTransaction(BaseModel):
     """``view`` "limited": the allowlist for everyone else (see app/core/redaction.py).
 
     A payment into a loan or card the caller can't view has ``transfer_fee`` null
-    and ``amount`` the whole payment.
+    and ``amount`` the whole payment; a transfer drawn from one has ``transfer_fee``
+    null and ``amount`` what the other side received.
     """
     view: Literal["limited"]
     id: int
