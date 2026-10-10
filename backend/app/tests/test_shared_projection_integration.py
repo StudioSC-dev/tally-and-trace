@@ -488,3 +488,53 @@ def test_a_private_row_never_counts_as_a_paid_installment_on_a_shared_account(
                        json={})
     assert r.status_code in (200, 201), r.text
     assert (paid("a"), paid("b")) == (1, 1)
+
+
+# --- A hidden account's wallet flag changes nothing (audit round 2, 4) -------------------
+
+@pytest.mark.parametrize("who", ["b", "v", "d"])
+def test_a_hidden_wallet_flag_changes_nothing_the_sharee_is_shown(sw, sw_client, sw_db, who):
+    """A monthly transfer of 100 from the joint account into the owner's private
+    cash account, recurring and planned: flipping that hidden account's
+    ``is_spending_wallet`` leaves disposable income, payables, upcoming items, the
+    timeline, the cash flow and the whole dashboard snapshot unchanged."""
+    from app.models.account import Account
+
+    a, joint = sw["a"], sw["joint"]
+    hidden = sw_post(sw_client, a, "/accounts/", {
+        "name": f"{PRIVATE} cash", "account_type": "cash", "balance": 0})["id"]
+    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    sw_post(sw_client, a, "/budget-entries/", {
+        "name": f"{PRIVATE} allowance", "entry_type": "expense", "amount": 100,
+        "cadence": "monthly", "next_occurrence": soon, "account_id": joint,
+        "transfer_to_account_id": hidden})
+    _transfer(sw_client, a, joint, hidden, 40, soon, description=f"{PRIVATE} top-up")
+
+    def shown():
+        sw_db.expire_all()
+        out = {}
+        for path in ("/forecast/disposable", "/forecast/upcoming?days=30",
+                     "/forecast/timeline?days=60", "/forecast/cashflow?months=3",
+                     "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def flag(value):
+        sw_db.get(Account, hidden).is_spending_wallet = value
+        sw_db.commit()
+
+    before = shown()
+    snapshot = before["/dashboard/snapshot"]
+    assert snapshot["monthly_summary"]["monthly_expenses"] == 0.0
+    assert snapshot["payables"] == []
+    flag(True)
+    after = shown()
+    for path in before:
+        assert after[path] == before[path], path
+    assert sw_leaks(after, {hidden}) == []
+    # The owner, who sees the account, gets it as a wallet: a top-up each month.
+    sw_db.expire_all()
+    own = sw_client.get(f"{API}/forecast/disposable", headers=a["headers"]).json()
+    assert own["monthly_expenses"] == 100.0

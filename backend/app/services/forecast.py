@@ -111,9 +111,10 @@ def is_spending_wallet(account) -> bool:
 def wallet_ids_of(db: Session, account_ids) -> frozenset:
     """The spending wallets among ``account_ids``, judged from the accounts themselves.
 
-    Scope and ``is_active`` decide which legs a projection keeps, never whether an
-    account is a wallet: an entry funded from a wallet outside the caller's
-    scope, or from an inactive one, is still wallet spending, not projection cash.
+    ``is_active`` decides which legs a projection keeps, never whether an
+    account is a wallet: an entry funded from an inactive wallet is still wallet
+    spending, not projection cash. Callers pass only accounts the caller can
+    view, so a hidden account's flag never changes what they are shown.
     """
     ids = {i for i in account_ids if i is not None}
     if not ids:
@@ -389,14 +390,14 @@ def get_disposable_income(
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
     entries = query.all()
+    # Wallets among those accounts only: whether an account the caller can't
+    # view is a wallet never moves a total (for a user with no shares every
+    # referenced account is their own, so nothing changes).
     referenced = {
         acc_id for e in entries
-        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id is not None
+        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
     }
-    wallet_ids = {
-        a.id for a in db.query(Account).filter(Account.id.in_(referenced)).all()
-        if is_spending_wallet(a)
-    } if referenced else set()
+    wallet_ids = set(wallet_ids_of(db, referenced))
 
     monthly_income: float = 0.0
     monthly_expenses: float = 0.0
@@ -678,8 +679,8 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     A spending wallet's leg is never cash, so a top-up (cash to wallet) costs the
     source amount + fee, and money moved from a wallet back to a cash account adds
     the amount to it; a transfer between two wallets moves no projection cash.
-    ``known_wallet_ids`` are every wallet the caller has classified, in scope or
-    not; a cash-funded transfer into one of them is marked ``top_up`` (spending,
+    ``known_wallet_ids`` are every wallet the caller can view, in the projection
+    scope or not (an inactive one); a cash-funded transfer into one of them is marked ``top_up`` (spending,
     so a payable), even when the wallet itself has no leg here. Likewise a
     cash-funded transfer into a loan (``loan_ids`` in scope, ``known_loan_ids``
     any other the caller references) is marked ``loan_payment``. A transfer
@@ -791,8 +792,9 @@ def collect_events(
     their legs (the wallet's never cash, see ``_transfer_event``); a wallet's other
     unposted transactions and budget entries funded from a wallet (other than
     recurring transfers) are skipped. Whether an account is a wallet is read from
-    the account itself (``wallet_ids_of``), so a wallet outside the scope or
-    inactive is still a wallet. A statement payable funded from a wallet has a
+    the account itself (``wallet_ids_of``), so an inactive wallet is still a
+    wallet; an account the caller can't view is never read as one, so its flag
+    changes nothing they are shown. A statement payable funded from a wallet has a
     non-cash funding leg: the wallet's money left projection cash when it was
     topped up, so paying the card from it must not take cash out a second time.
     A loan payable's leg is on the loan's paying account and routed like a
@@ -861,15 +863,19 @@ def collect_events(
         Transaction.transaction_date < end,
     ).all() if can_read_record(db, user_id, t)]
 
-    # Every wallet any event references, in scope or not.
-    wallet_ids = scoped_wallet_ids | wallet_ids_of(db, (
+    # Every wallet any event references among the accounts the caller can view
+    # (inactive ones included). Whether an account they can't view is a wallet
+    # never changes what they are shown; for a user with no shares every
+    # referenced account is their own, so nothing changes.
+    viewable_ids = viewable_account_ids(db, user_id)
+    wallet_ids = scoped_wallet_ids | wallet_ids_of(db, (acc for acc in (
         *(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id)),
         *(acc for t in txns
           for acc in (t.account_id, t.transfer_from_account_id, t.transfer_to_account_id)),
         *(acc for a in accounts if a.id in billed_ids
           for acc in (a.payment_account_id, a.payment_overflow_account_id)),
         *(a.payment_account_id for a in loans),
-    ))
+    ) if acc in viewable_ids))
 
     # Every loan any transfer references, in scope or not (loan payments are payables).
     known_loan_ids = loan_ids | _loan_ids_of(db, (
