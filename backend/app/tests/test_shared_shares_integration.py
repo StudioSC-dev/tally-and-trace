@@ -338,3 +338,39 @@ def test_share_creation_counts_toward_the_lookup_limit(sw, sw_client, sw_people)
         _call(sw_client, sw["b"], "post", path, json={"email": "x@example.com", "role": "viewer"})
     assert _call(sw_client, sw["b"], "get", "/users/lookup",
                  params={"email": newcomer["email"]}).status_code == 429
+
+
+# --- Emails differing only by case (audit round 2, 6) ------------------------------------
+
+def test_an_email_two_users_share_by_case_matches_no_one(sw, sw_client, sw_db, sw_people):
+    from app.models.user import User
+
+    target = sw_people("Nia", "New")
+    variant = sw_people("Eve", "Variant")
+    sw_db.query(User).filter(User.id == variant["id"]).update(
+        {User.email: target["email"].upper()})
+    sw_db.commit()
+    path = f"/accounts/{sw['joint']}/shares"
+    answers = []
+    for email in (target["email"], target["email"].upper(), f" {target['email'].title()} "):
+        answers.append(_call(sw_client, sw["a"], "get", "/users/lookup",
+                             params={"email": email}))
+        answers.append(_call(sw_client, sw["a"], "post", path,
+                             json={"email": email, "role": "viewer"}))
+    assert {(r.status_code, r.text) for r in answers} == {(404, '{"detail":"No matching user"}')}
+    from app.models.account_share import AccountShare
+    assert sw_db.query(AccountShare).filter(
+        AccountShare.user_id.in_([target["id"], variant["id"]])).count() == 0
+
+
+def test_registration_refuses_an_email_differing_only_by_case(sw, sw_client, sw_db):
+    from app.models.user import User
+
+    existing = sw["b"]["email"]
+    for email in (existing, existing.upper(), existing.capitalize()):
+        r = sw_client.post(f"{API}/auth/register", json={
+            "email": email, "password": "Password123!", "first_name": "Eve",
+            "last_name": "Variant"})
+        assert (r.status_code, r.json()) == (400, {"detail": "Email already registered"}), email
+    from sqlalchemy import func
+    assert sw_db.query(User).filter(func.lower(User.email) == existing.lower()).count() == 1

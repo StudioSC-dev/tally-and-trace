@@ -229,10 +229,18 @@ def _check_rate(user: User) -> None:
 
 
 def _match(db: Session, email: str) -> Optional[User]:
-    """The active, non-demo user with exactly this email (case-insensitive), else None."""
+    """The active, non-demo user with exactly this email (case-insensitive), else None.
+
+    ``users.email`` is unique only as stored, so two accounts can differ by case
+    alone (registered before registration compared case-insensitively). Such
+    an email names no one: None, never whichever row comes first.
+    """
     wanted = email.strip().lower()
-    user = db.query(User).filter(func.lower(User.email) == wanted).first()
-    if user is None or not user.is_active or _is_demo(user):
+    users = db.query(User).filter(func.lower(User.email) == wanted).limit(2).all()
+    if len(users) != 1:
+        return None
+    user = users[0]
+    if not user.is_active or _is_demo(user):
         return None
     return user
 

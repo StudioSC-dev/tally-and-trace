@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -78,10 +79,12 @@ def _clear_refresh_cookie(response: Response) -> None:
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
-    # Check if user already exists. The demo users' fixed emails are reserved
-    # (in any case), answered as any taken email is.
-    existing_user = db.query(User).filter(User.email == user.email).first()
-    if existing_user or user.email.strip().lower() in DEMO_EMAILS:
+    # Check if user already exists, in any case (an email differing only by case
+    # would make share-by-email ambiguous). The demo users' fixed emails are
+    # reserved too, answered as any taken email is.
+    wanted = user.email.strip().lower()
+    existing_user = db.query(User).filter(func.lower(User.email) == wanted).first()
+    if existing_user or wanted in DEMO_EMAILS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
