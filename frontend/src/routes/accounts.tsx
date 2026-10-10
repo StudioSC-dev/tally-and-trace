@@ -124,16 +124,33 @@ export function AccountsPage() {
   // Only non-credit, non-loan, non-wallet accounts can fund a statement or a loan payment
   // (a card or loan holds no cash), and an account can't pay itself. Mirrors the backend
   // validation in routers/accounts.py::_validate_payment_routing.
+  const editingOwnAccount = !editingAccount || editingAccount.my_role === 'owner'
   const fundingAccounts = routingAccounts.filter(
     (a) =>
       a.account_type !== 'credit' &&
       a.account_type !== 'loan' &&
       !a.is_spending_wallet &&
       a.is_active &&
-      // Routing never points across owners, so a shared account can't be a target.
-      a.my_role === 'owner' &&
-      a.id !== editingAccount?.id,
+      a.id !== editingAccount?.id &&
+      // Routing never points across owners: a target belongs to the edited account's
+      // owner, and the caller needs an edit role on it. Your own account routes to your
+      // own accounts; an account shared with you (as admin) to accounts of that same
+      // owner shared with you as editor or admin.
+      (editingOwnAccount
+        ? a.my_role === 'owner'
+        : a.my_role !== 'owner' &&
+          a.permissions.can_add_transactions &&
+          a.owner_name === editingAccount?.owner_name),
   )
+  // A stored route the picker can't offer (the owner's account, not shared with you)
+  // stays selected as it is, under a neutral name, and is left out of the save.
+  const storedRouteOption = (field: 'payment_account_id' | 'payment_overflow_account_id') => {
+    const stored = editingAccount?.[field]
+    if (stored == null || stored !== formData[field] || fundingAccounts.some((a) => a.id === stored)) {
+      return null
+    }
+    return <option value={stored}>Current account</option>
+  }
 
   // Spell out the cycle the backend will derive, so "closes 24th, +21 days" doesn't
   // have to be worked out in your head.
@@ -295,7 +312,20 @@ export function AccountsPage() {
         for (const field of LOAN_FIELDS) delete payload[field]
       }
       if (editingAccount) {
+        // Routing is sent only when it changes: the backend checks every target it is
+        // sent, and an admin may not use a stored one (the owner's own account).
         // A cleared selector is undefined, which JSON drops; send null so "None" saves.
+        delete payload.payment_account_id
+        delete payload.payment_overflow_account_id
+        const routing = {
+          payment_account_id: formData.payment_account_id ?? null,
+          payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
+        }
+        const changedRouting = Object.fromEntries(
+          Object.entries(routing).filter(
+            ([field, value]) => value !== (editingAccount[field as keyof typeof routing] ?? null),
+          ),
+        )
         await updateAccount({
           id: editingAccount.id,
           data: {
@@ -303,8 +333,7 @@ export function AccountsPage() {
             // Activating or deactivating is the owner's alone: an admin's save leaves it out.
             ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
             ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
-            payment_account_id: formData.payment_account_id ?? null,
-            payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
+            ...changedRouting,
             ...(isLoan
               ? {
                   loan_annual_rate: formData.loan_annual_rate ?? null,
@@ -964,6 +993,7 @@ export function AccountsPage() {
                           className="select-field focus-ring"
                         >
                           <option value="">Not set</option>
+                          {storedRouteOption('payment_account_id')}
                           {fundingAccounts.map((a) => (
                             <option key={a.id} value={a.id}>{a.name}</option>
                           ))}
@@ -979,6 +1009,7 @@ export function AccountsPage() {
                           disabled={!formData.payment_account_id}
                         >
                           <option value="">Not set</option>
+                          {storedRouteOption('payment_overflow_account_id')}
                           {fundingAccounts
                             .filter((a) => a.id !== formData.payment_account_id)
                             .map((a) => (
@@ -1122,6 +1153,7 @@ export function AccountsPage() {
                       className="select-field focus-ring"
                     >
                       <option value="">Not set</option>
+                      {storedRouteOption('payment_account_id')}
                       {fundingAccounts
                         .filter((a) => a.currency === formData.currency)
                         .map((a) => (
