@@ -46,6 +46,7 @@ router = APIRouter()
 
 # References only a transaction's creator may set or clear (see update_transaction).
 OWNER_REFERENCE_FIELDS = ("category_id", "allocation_id", "budget_entry_id")
+ATTACHMENT_FIELDS = ("receipt_url", "invoice_url")
 
 # Largest UTC offset in use (UTC+14): how far ahead of UTC a user's local "today" can reach.
 _MAX_UTC_OFFSET = timedelta(hours=14)
@@ -766,14 +767,14 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         # Owner exemption: the creator's own access is not required.
         owner = None
     if db_transaction.user_id != current_user.id:
-        for field in ("receipt_url", "invoice_url"):
-            if field in requested and requested[field] != getattr(db_transaction, field):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Only the transaction's creator can change its attachments")
-        # The creator's private references, which a non-creator is never shown:
-        # any request naming one is refused, null included (clearing is a change),
-        # so it can neither change them nor probe their stored values.
+        # The creator's attachments and private references, which a non-creator
+        # is never shown: any request naming one is refused, whatever its value
+        # (null included: clearing is a change), so it can neither change them
+        # nor probe their stored values.
+        if any(field in requested for field in ATTACHMENT_FIELDS):
+            raise HTTPException(
+                status_code=400,
+                detail="Only the transaction's creator can change its attachments")
         if any(field in requested for field in OWNER_REFERENCE_FIELDS):
             raise HTTPException(
                 status_code=400,

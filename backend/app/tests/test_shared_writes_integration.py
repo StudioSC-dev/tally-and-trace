@@ -456,6 +456,27 @@ def test_non_creator_cannot_clear_or_probe_the_creators_references(sw, sw_client
                       {field: value})
             assert r.status_code == 400, (field, value, r.text)
     assert _references_of(sw_db, refs) == before
+    # Attachments (audit round 2, 2): refused whatever the value, so a stored URL,
+    # the null of none stored and a guess all get the same answer.
+    attached = _debit(sw_client, sw["a"], sw["joint"],
+                      receipt_url="/uploads/receipts/r.png",
+                      invoice_url="/uploads/invoices/i.pdf")["id"]
+    answers = set()
+    for txn, stored in ((refs["txn"], None), (attached, "stored")):
+        for field in ("receipt_url", "invoice_url"):
+            current = (None if stored is None else
+                       "/uploads/receipts/r.png" if field == "receipt_url"
+                       else "/uploads/invoices/i.pdf")
+            for value in (current, None, "/uploads/guess.png"):
+                r = _call(sw_client, caller, "PUT", f"/transactions/{txn}", {field: value})
+                answers.add((r.status_code, r.text))
+    assert answers == {(400, '{"detail":"Only the transaction\'s creator can change its '
+                             'attachments"}')}, answers
+    sw_db.expire_all()
+    from app.models.transaction import Transaction
+    stored = sw_db.get(Transaction, attached)
+    assert (stored.receipt_url, stored.invoice_url) == ("/uploads/receipts/r.png",
+                                                        "/uploads/invoices/i.pdf")
     # Fields the editor may change still save.
     assert _call(sw_client, caller, "PUT", f"/transactions/{refs['txn']}",
                  {"description": "Edited"}).status_code == 200
