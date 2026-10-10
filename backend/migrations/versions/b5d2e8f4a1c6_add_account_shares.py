@@ -7,9 +7,11 @@ Shared accounts (STU-232).
   the user deletes the share; deleting the user who created it keeps the share
   with ``created_by`` null. Indexed on ``user_id`` (the accounts shared with a
   user).
-- ``transactions.created_by_actor``: who triggered a transaction when it is
-  not its owner (an editor materialising another user's recurring entry).
-  Nullable; null on every existing row.
+- ``transactions.created_by_actor``: who created a transaction. The app sets
+  it to the caller on every new row; it differs from the owner (``user_id``)
+  when an editor materialises another user's recurring entry. Nullable: null
+  on every row that exists before this migration, and once that user is
+  deleted.
 
 Every constraint is named explicitly, with the same names as the ORM.
 Downgrade drops the column and the table.

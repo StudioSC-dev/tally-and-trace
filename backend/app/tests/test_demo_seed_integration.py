@@ -401,6 +401,15 @@ def test_shape_3_shares_the_joint_account_with_the_demo_partner(client, db, seed
         "limited", "Transfer", "Demo P.")
     assert seen["account"] == {"id": None, "name": "Other account"}
     assert seen["counterpart"] == {"id": joint["id"], "name": "Joint Account"}
+    # Every seeded row records its creator (null only on rows from before STU-232).
+    from app.models.transaction import Transaction
+    from app.models.user import User
+
+    db.expire_all()
+    ids = [u.id for u in db.query(User).filter(User.email.in_([DEMO_EMAIL, DEMO_PARTNER_EMAIL]))]
+    seeded = db.query(Transaction).filter(Transaction.user_id.in_(ids)).all()
+    assert len({t.user_id for t in seeded}) == 2
+    assert all(t.created_by_actor == t.user_id for t in seeded)
 
 
 def test_the_demo_partner_logs_in_and_cannot_share(client, db, seed):
