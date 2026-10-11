@@ -323,3 +323,37 @@ def test_dashboard_month_hides_a_hidden_loans_interest(hh, sw_client, sw_db, vie
         {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0), **expected}]
     if viewer == "c":
         assert sw_leaks(body, numbers=(50,)) == []
+
+
+# --- A posted charge on an open statement is left to the projection (owner ruling) ----------------
+
+MIXED = datetime(2026, 10, 20)   # the charge is posted (October), its statement due November 5
+
+
+def test_posted_bill_routed_to_joint_is_counted_once(hh, sw_client, sw_db):
+    _put(sw_client, hh["a"], f"/accounts/{hh['a_card']}", {"payment_account_id": hh["joint"]})
+    _charge(sw_client, hh, "recorded")
+    months = _monthly(sw_db, hh["c"], hh["a"], MIXED)
+    lines = [(m["month"], m["kind"], line) for m in months for line in m["currencies"]]
+    assert lines == [("2026-11", "projected", {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                               "expense": 100.0})]
+
+
+@pytest.mark.parametrize("paid", [0, 40, 100])
+def test_posted_charge_with_a_planned_joint_payment_is_counted_once(hh, sw_client, sw_db, paid):
+    _charge(sw_client, hh, "recorded")
+    if paid:
+        _pay(sw_client, hh, paid, "projected")
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], MIXED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (paid, 100.0 - paid)
+
+
+def test_posted_charge_on_a_settled_statement_keeps_the_posted_rule(hh, sw_client, sw_db):
+    # Settled by A's posted private payment: a later planned joint payment
+    # pays the next statement, not this charge.
+    _charge(sw_client, hh, "recorded")
+    _transfer(sw_client, hh["a"], hh["a_private"], hh["a_card"], 100, "2026-10-16T00:00:00",
+              posted=True)
+    _pay(sw_client, hh, 100, "projected")
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], MIXED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (100.0, 100.0)

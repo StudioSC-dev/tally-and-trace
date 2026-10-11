@@ -20,11 +20,11 @@ the transaction rows are balanced and paid oldest statement first, and only
 then are the projected entry charges added and paid from what is left, so
 a payment the rows already used never covers a charge projected later.
 Recurring transfers into the card, which the engine does not net, are
-applied last. A virtual overflow move is not cash and never counts. When the card's primary payment account is in the view scope,
-its routed statement payment pays whatever the statement still owes, so that
-counts as covered too (in the projection; a recorded month counts only the
-payments actually posted). The in-scope part allocated to a statement covers its
-Household lines first, in date order, capped at their total; each line's
+applied last. A virtual overflow move is not cash and never counts. When the
+card's primary payment account is in the view scope, its routed statement
+payment pays whatever the statement still owes, so that counts as covered
+too (in the projection). The in-scope part allocated to a statement covers
+its Household lines first, in date order, capped at their total; each line's
 remainder is ``max(0, line - its covered part)`` and only a remainder above 0
 is returned, as the occurrence's ``face_amount``. Any other occurrence
 (a wallet, a bank, a card without cycle settings, a refund, a transfer, or an
@@ -33,6 +33,18 @@ accountless entry) is returned at its face amount.
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
 planned and recurring payments plus the routed payment (the projection).
+
+**A posted charge on an open statement is left to the projection.** In a
+recorded month, a posted Household charge whose statement the posted
+payments have not settled is covered as the projection covers it: by the
+posted, planned and recurring in-scope cash payments and the routed payment
+(over ``projection``, the window the projection runs on). Those planned
+payments are counted as joint outflow by the projection, so the charge is
+counted once: the joint outflow plus its remainder is the charge, across
+the recorded and projected months together. A statement the posted payments
+settled keeps the posted-only rule, and so does one past due with no further
+planned payment (the projection then adds nothing in scope; a routed overdue
+statement is still projected, from the joint account, and so still covers).
 """
 
 from __future__ import annotations
@@ -90,7 +102,9 @@ def _naive(dt: datetime) -> datetime:
 
 def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Account],
                           start: datetime, end: datetime, *, recorded: bool,
-                          viewable_ids: Iterable[int]) -> List[Occurrence]:
+                          viewable_ids: Iterable[int],
+                          projection: Optional[Tuple[datetime, datetime]] = None
+                          ) -> List[Occurrence]:
     """The Household occurrences of ``grant``'s sharer in ``[start, end)`` (module docstring).
 
     ``scope`` is the Household view scope (``household_accounts``). Projected
@@ -98,7 +112,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     dated before ``start`` is listed at ``start``, overdue) and active
     recurring entries' occurrences in the window. Recorded: posted
     transactions dated in the window. ``viewable_ids`` are the caller's
-    viewable accounts (``statements._card_rows``).
+    viewable accounts (``statements._card_rows``). ``projection`` (recorded
+    only) is the projection's ``[start, end)``: a posted charge on a
+    statement the posted payments have not settled is covered as that
+    projection covers it (module docstring); without it, posted payments only.
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
 
@@ -166,15 +183,27 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     for card_id, lines in card_lines.items():
         covered = _card_household_cover(db, billed[card_id], cash_ids, start, end,
                                         recorded=recorded, viewable_ids=viewable_ids)
+        projected: Dict[tuple, tuple] = {}
+        if recorded and projection is not None and any(
+                covered[key][1] for _, key in lines if key in covered):
+            # Open statements: left to the projection (module docstring).
+            projected = _card_household_cover(db, billed[card_id], cash_ids,
+                                              *map(_naive, projection), recorded=False,
+                                              viewable_ids=viewable_ids)
         for occ, key in lines:
-            occ.remainder = covered.get(key, occ.face)
+            remainder, still_owed = covered.get(key, (occ.face, False))
+            if still_owed and key in projected:
+                remainder = projected[key][0]
+            occ.remainder = remainder
     return [o for o in out if o.remainder > 0]
 
 
 def _card_household_cover(db: Session, card: Account, cash_ids: set, start: datetime,
                           end: datetime, *, recorded: bool,
-                          viewable_ids: Iterable[int]) -> Dict[tuple, Decimal]:
-    """``{line key: remainder}`` for every Household line on ``card`` (module docstring).
+                          viewable_ids: Iterable[int]) -> Dict[tuple, Tuple[Decimal, bool]]:
+    """``{line key: (remainder, open)}`` for every Household line on ``card``
+    (module docstring); ``open`` is True when the line's statement still owes
+    something after the payments counted.
 
     Line keys are ``("t", transaction id)`` and ``("e", entry id, occurrence)``;
     a line whose key is missing has no statement (remainder = face). The card's
@@ -235,7 +264,7 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     # Projected only: in a recorded month only posted payments cover anything.
     routed = not recorded and card.payment_account_id in cash_ids
 
-    out: Dict[tuple, Decimal] = {}
+    out: Dict[tuple, Tuple[Decimal, bool]] = {}
     for idx, c in enumerate(cycles):
         cover = in_scope[idx] + (owed[idx] if routed else ZERO)
         lo, hi = c["window_start"].date(), c["close"].date()
@@ -246,7 +275,7 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
         for _, amt, key in household:
             part = min(cover, amt)
             cover -= part
-            out[key] = amt - part
+            out[key] = (amt - part, owed[idx] > 0)
     return out
 
 
@@ -426,7 +455,10 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
       a non-liability account outside the scope (the viewer's own deposit from
       their private account is "Moved in");
     - ``paid_from_other_accounts``: the remainders of the sharer's Household
-      expense occurrences outside the scope (see the module docstring).
+      expense occurrences outside the scope (see the module docstring). A
+      posted charge on a statement not yet settled is left to the projection:
+      it is covered by the planned and routed in-scope payments the
+      projection counts as expense, so it is counted once.
 
     Transfers between two scope cash accounts count only their fee. A card
     charge in scope counts when the card is paid, not when it is made.
@@ -510,7 +542,8 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
     if first < recorded_end:
         for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True,
                                          viewable_ids=viewable_account_ids(
-                                             db, uid, roles=VIEW_ROLES)):
+                                             db, uid, roles=VIEW_ROLES),
+                                         projection=(today, max(end, today))):
             if occ.record.transaction_type == TransactionType.DEBIT:
                 add(occ.date, occ.record.currency, "paid_from_other_accounts", occ.remainder)
 
