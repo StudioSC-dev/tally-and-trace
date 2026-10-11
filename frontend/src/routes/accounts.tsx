@@ -9,6 +9,11 @@ import { LoanActions, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
+import { AccountRoleBadge } from '../components/AccountRoleBadge'
+import { ShareDialog } from '../components/ShareDialog'
+import { SharedWithMe } from '../components/SharedWithMe'
+import { StatementsPanel } from '../components/StatementsPanel'
+import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 export const Route = createFileRoute('/accounts')({
@@ -86,10 +91,13 @@ export function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAccount, setActionAccount] = useState<Account | null>(null)
+  const [shareAccount, setShareAccount] = useState<Account | null>(null)
   const [formData, setFormData] = useState(() => blankForm(defaultCurrency))
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
   const [amortizationTouched, setAmortizationTouched] = useState(false)
   const [showCreditSettings, setShowCreditSettings] = useState(false)
+  // Why the last save failed, shown in the form until the next attempt or close.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const [triggerAccounts] = useLazyGetAccountsQuery()
   const beginAccountsRequest = useRequestGeneration()
@@ -116,14 +124,33 @@ export function AccountsPage() {
   // Only non-credit, non-loan, non-wallet accounts can fund a statement or a loan payment
   // (a card or loan holds no cash), and an account can't pay itself. Mirrors the backend
   // validation in routers/accounts.py::_validate_payment_routing.
+  const editingOwnAccount = !editingAccount || editingAccount.my_role === 'owner'
   const fundingAccounts = routingAccounts.filter(
     (a) =>
       a.account_type !== 'credit' &&
       a.account_type !== 'loan' &&
       !a.is_spending_wallet &&
       a.is_active &&
-      a.id !== editingAccount?.id,
+      a.id !== editingAccount?.id &&
+      // Routing never points across owners: a target belongs to the edited account's
+      // owner, and the caller needs an edit role on it. Your own account routes to your
+      // own accounts; an account shared with you (as admin) to accounts of that same
+      // owner shared with you as editor or admin.
+      (editingOwnAccount
+        ? a.my_role === 'owner'
+        : a.my_role !== 'owner' &&
+          a.permissions.can_add_transactions &&
+          a.owner_name === editingAccount?.owner_name),
   )
+  // A stored route the picker can't offer (the owner's account, not shared with you)
+  // stays selected as it is, under a neutral name, and is left out of the save.
+  const storedRouteOption = (field: 'payment_account_id' | 'payment_overflow_account_id') => {
+    const stored = editingAccount?.[field]
+    if (stored == null || stored !== formData[field] || fundingAccounts.some((a) => a.id === stored)) {
+      return null
+    }
+    return <option value={stored}>Current account</option>
+  }
 
   // Spell out the cycle the backend will derive, so "closes 24th, +21 days" doesn't
   // have to be worked out in your head.
@@ -276,22 +303,37 @@ export function AccountsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSaveError(null)
     try {
       const isLoan = formData.account_type === 'loan'
       // Loan terms are accepted on loans only: drop them from every other type.
-      const { tag_ids: selectedTagIds, ...payload } = formData
+      const { tag_ids: selectedTagIds, is_active: isActive, ...payload } = formData
       if (!isLoan) {
         for (const field of LOAN_FIELDS) delete payload[field]
       }
       if (editingAccount) {
+        // Routing is sent only when it changes: the backend checks every target it is
+        // sent, and an admin may not use a stored one (the owner's own account).
         // A cleared selector is undefined, which JSON drops; send null so "None" saves.
+        delete payload.payment_account_id
+        delete payload.payment_overflow_account_id
+        const routing = {
+          payment_account_id: formData.payment_account_id ?? null,
+          payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
+        }
+        const changedRouting = Object.fromEntries(
+          Object.entries(routing).filter(
+            ([field, value]) => value !== (editingAccount[field as keyof typeof routing] ?? null),
+          ),
+        )
         await updateAccount({
           id: editingAccount.id,
           data: {
             ...payload,
+            // Activating or deactivating is the owner's alone: an admin's save leaves it out.
+            ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
             ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
-            payment_account_id: formData.payment_account_id ?? null,
-            payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
+            ...changedRouting,
             ...(isLoan
               ? {
                   loan_annual_rate: formData.loan_annual_rate ?? null,
@@ -305,25 +347,26 @@ export function AccountsPage() {
         }).unwrap()
         setEditingAccount(null)
       } else {
-        await createAccount({ ...payload, tag_ids: selectedTagIds }).unwrap()
+        await createAccount({ ...payload, is_active: isActive, tag_ids: selectedTagIds }).unwrap()
       }
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
       setIsCreateModalOpen(false)
       await loadAccountsRef.current(true)
     } catch (error) {
-      console.error('Error saving account:', error)
+      setSaveError(apiErrorMessage(error) || 'Could not save the account. Please try again.')
     }
   }
 
   const handleEdit = (account: Account) => {
+    setSaveError(null)
     setEditingAccount(account)
     setFormData({
       name: account.name,
       account_type: account.account_type,
       balance: account.balance,
       description: account.description || '',
-      credit_limit: account.credit_limit,
+      credit_limit: account.credit_limit ?? undefined,
       due_date: account.due_date,
       billing_cycle_start: account.billing_cycle_start,
       currency: (account.currency as CurrencyCode) || defaultCurrency,
@@ -356,6 +399,7 @@ export function AccountsPage() {
         await loadAccountsRef.current(true)
       } catch (error) {
         console.error('Error deleting account:', error)
+        alert(apiErrorMessage(error) || 'Could not delete the account. Please try again.')
       }
     }
   }
@@ -381,6 +425,7 @@ export function AccountsPage() {
       }
     } catch (error) {
       console.error('Error updating account status:', error)
+      alert(apiErrorMessage(error) || 'Could not update the account. Please try again.')
     }
   }
 
@@ -469,8 +514,9 @@ export function AccountsPage() {
                         Currency: {account.currency}
                       </span>
                       {account.is_spending_wallet && <NotCountedTag />}
+                      <AccountRoleBadge account={account} />
                       <TagChips tags={account.tags} />
-                      {account.account_type === 'credit' && account.credit_limit !== undefined && (
+                      {account.account_type === 'credit' && account.credit_limit != null && (
                         <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
                           Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
                         </span>
@@ -519,6 +565,20 @@ export function AccountsPage() {
         </>
       )}
 
+      <SharedWithMe onLeft={() => void loadAccountsRef.current(true)} />
+
+      {shareAccount && (
+        <ShareDialog
+          account={shareAccount}
+          onClose={() => {
+            setShareAccount(null)
+            // The list is a copy of a lazy query: reload it, since a share change can
+            // change what the accounts show.
+            void loadAccountsRef.current(true)
+          }}
+        />
+      )}
+
       {isActionModalOpen && actionAccount && (
         <div
           className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6"
@@ -533,9 +593,10 @@ export function AccountsPage() {
               <div>
                 <h2 className="text-xl font-semibold text-ink">{actionAccount.name}</h2>
                 <p className="text-sm text-muted capitalize">{actionAccount.account_type.replace('_', ' ')}</p>
-                {actionAccount.is_spending_wallet && (
-                  <div className="mt-2">
-                    <NotCountedTag />
+                {(actionAccount.is_spending_wallet || actionAccount.my_role !== 'owner') && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {actionAccount.is_spending_wallet && <NotCountedTag />}
+                    <AccountRoleBadge account={actionAccount} />
                   </div>
                 )}
               </div>
@@ -557,7 +618,7 @@ export function AccountsPage() {
                   {formatCurrency(actionAccount.balance, actionAccount.currency as CurrencyCode)}
                 </p>
                 <p className="mt-2 text-sm text-muted">Currency: {actionAccount.currency}</p>
-                {actionAccount.account_type === 'credit' && actionAccount.credit_limit !== undefined && (
+                {actionAccount.account_type === 'credit' && actionAccount.credit_limit != null && (
                   <p className="mt-1 text-sm text-muted">
                     Credit limit {formatCurrency(actionAccount.credit_limit, actionAccount.currency as CurrencyCode)}
                   </p>
@@ -581,21 +642,35 @@ export function AccountsPage() {
             {actionAccount.account_type === 'loan' && (
               <div className="mt-6 space-y-4">
                 <LoanSummary account={actionAccount} />
+                {actionAccount.permissions.can_add_transactions && (
                 <LoanActions
                   key={actionAccount.id}
                   account={actionAccount}
                   fundingAccounts={routingAccounts.filter(
-                    (a) => a.account_type !== 'credit' && a.account_type !== 'loan' && !a.is_spending_wallet && a.is_active,
+                    (a) =>
+                      a.account_type !== 'credit' &&
+                      a.account_type !== 'loan' &&
+                      !a.is_spending_wallet &&
+                      a.is_active &&
+                      a.permissions.can_add_transactions,
                   )}
                   onRecorded={() => {
                     closeActionModal()
                     void loadAccountsRef.current(true)
                   }}
                 />
+                )}
+              </div>
+            )}
+
+            {actionAccount.account_type === 'credit' && (
+              <div className="mt-6">
+                <StatementsPanel account={actionAccount} />
               </div>
             )}
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleToggleActive(actionAccount)}
                 className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ actionAccount.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
@@ -609,6 +684,8 @@ export function AccountsPage() {
                   />
                 </span>
               </button>
+              )}
+              {actionAccount.permissions.can_edit_settings && (
               <button
                 onClick={() => openEditFromModal(actionAccount)}
                 className="flex items-center justify-center gap-2 bg-ink px-4 py-3 text-sm font-semibold text-paper transition-colors duration-200 hover:bg-ink"
@@ -618,6 +695,17 @@ export function AccountsPage() {
                 </svg>
                 Edit account
               </button>
+              )}
+              {actionAccount.permissions.can_manage_shares && (
+              <button
+                onClick={() => setShareAccount(actionAccount)}
+                className="flex items-center justify-center gap-2 border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-sunken"
+                data-testid="share-account"
+              >
+                Share account
+              </button>
+              )}
+              {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleDelete(actionAccount.id)}
                 className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken sm:col-span-2"
@@ -627,6 +715,7 @@ export function AccountsPage() {
                 </svg>
                 Delete account
               </button>
+              )}
             </div>
           </div>
           </div>
@@ -649,6 +738,7 @@ export function AccountsPage() {
                   setFormData(blankForm(defaultCurrency))
                   setAmortizationTouched(false)
                   setShowCreditSettings(false)
+                  setSaveError(null)
                 }}
                 className="text-muted hover:text-body transition-colors duration-200 w-full sm:w-auto"
               >
@@ -903,6 +993,7 @@ export function AccountsPage() {
                           className="select-field focus-ring"
                         >
                           <option value="">Not set</option>
+                          {storedRouteOption('payment_account_id')}
                           {fundingAccounts.map((a) => (
                             <option key={a.id} value={a.id}>{a.name}</option>
                           ))}
@@ -918,6 +1009,7 @@ export function AccountsPage() {
                           disabled={!formData.payment_account_id}
                         >
                           <option value="">Not set</option>
+                          {storedRouteOption('payment_overflow_account_id')}
                           {fundingAccounts
                             .filter((a) => a.id !== formData.payment_account_id)
                             .map((a) => (
@@ -1061,6 +1153,7 @@ export function AccountsPage() {
                       className="select-field focus-ring"
                     >
                       <option value="">Not set</option>
+                      {storedRouteOption('payment_account_id')}
                       {fundingAccounts
                         .filter((a) => a.currency === formData.currency)
                         .map((a) => (
@@ -1075,6 +1168,7 @@ export function AccountsPage() {
                 </fieldset>
               )}
 
+              {(!editingAccount || editingAccount.permissions.can_delete) && (
               <div className="flex items-center justify-between border border-line bg-surface/50 px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-body">Account status</p>
@@ -1098,6 +1192,13 @@ export function AccountsPage() {
                   </button>
                 </div>
               </div>
+              )}
+
+              {saveError && (
+                <p className="text-sm text-danger" role="alert" data-testid="account-save-error">
+                  {saveError}
+                </p>
+              )}
               
               <div className="flex space-x-3 pt-6 border-t border-line">
                 <button
@@ -1113,6 +1214,7 @@ export function AccountsPage() {
                     setEditingAccount(null)
                     setFormData(blankForm(defaultCurrency))
                     setAmortizationTouched(false)
+                    setSaveError(null)
                   }}
                   className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"
                 >

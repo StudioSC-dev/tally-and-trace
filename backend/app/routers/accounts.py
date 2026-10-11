@@ -14,10 +14,12 @@ from app.core.access import (
     can_edit_account,
     can_view_account,
     get_account_or_404,
+    viewable_account_ids,
     viewable_accounts,
 )
+from app.core.redaction import serialize_account, serialize_accounts
 from app.core.tags import (
-    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    TAG_FILTER_HELP, effective_tag_criterion, filter_tag_id, own_tag_ids,
     replace_own_tags,
 )
 from app.models.account import Account, AccountType
@@ -25,7 +27,7 @@ from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
-from app.schemas.transaction import TransactionResponse
+from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
 from app.services.statements import resolve_cycle_fields
 from app.core.time import naive_utc_now, utc_now
@@ -75,7 +77,7 @@ def _funding_account(
 
 
 def _validate_payment_routing(db: Session, current_user: User, data: dict,
-                              account_id: Optional[int] = None, owner=None) -> None:
+                              account: Optional[Account] = None, owner=None) -> None:
     """Reject payment routing that points at accounts the caller can't use.
 
     Covers a card's statement payment / overflow account and a loan's payment
@@ -84,10 +86,17 @@ def _validate_payment_routing(db: Session, current_user: User, data: dict,
     could route a payment at an arbitrary account id and read that account's
     name back out of the timeline's ``account_shortfalls``. Also rejects
     self-routing, which would make an account fund its own payment.
+
+    On an update (``account``) only a target that changes is checked: an admin's
+    form resending a stored route they may not use (the owner's private payer)
+    still saves, and learns nothing it was not already shown.
     """
+    account_id = account.id if account is not None else None
     for field in ("payment_account_id", "payment_overflow_account_id"):
         target_id = data.get(field)
         if target_id is None:
+            continue
+        if account is not None and target_id == getattr(account, field):
             continue
         _funding_account(db, current_user, target_id, field, account_id,
                          owner=owner if owner is not None else current_user)
@@ -320,8 +329,8 @@ def get_accounts(
         .all()
     )
     has_more = offset + len(accounts) < total
-    attach_visible_tags(db, current_user, accounts)
-    return {"items": accounts, "total": total, "has_more": has_more}
+    return {"items": serialize_accounts(db, current_user, accounts), "total": total,
+            "has_more": has_more}
 
 @router.post("/", response_model=AccountResponse)
 def create_account(
@@ -345,12 +354,12 @@ def create_account(
         replace_own_tags(db, Account, db_account.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_account)
-    return attach_visible_tags(db, current_user, db_account)
+    return serialize_account(db, current_user, db_account)
 
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific account by ID"""
-    return attach_visible_tags(db, current_user, get_account_or_404(db, current_user, account_id))
+    return serialize_account(db, current_user, get_account_or_404(db, current_user, account_id))
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -362,9 +371,12 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     tag_ids = update_data.pop("tag_ids", None)
     if tag_ids is not None:
         tag_ids = own_tag_ids(db, current_user, tag_ids)
-    if "is_active" in update_data and account_role(current_user, db_account) not in OWNER_ROLES:
+    # Deactivating (or reactivating) is the owner's alone; an admin's form that
+    # resends the stored value unchanged still saves.
+    if ("is_active" in update_data and update_data["is_active"] != db_account.is_active
+            and account_role(current_user, db_account) not in OWNER_ROLES):
         raise HTTPException(status_code=404, detail="Account not found")
-    _validate_payment_routing(db, current_user, update_data, account_id=account_id,
+    _validate_payment_routing(db, current_user, update_data, account=db_account,
                               owner=db_account.user)
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
@@ -378,7 +390,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
         replace_own_tags(db, Account, db_account.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_account)
-    return attach_visible_tags(db, current_user, db_account)
+    return serialize_account(db, current_user, db_account)
 
 @router.delete("/{account_id}")
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -393,54 +405,126 @@ def delete_account(account_id: int, db: Session = Depends(get_db), current_user:
 
 @router.get("/{account_id}/balance")
 def get_account_balance(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Get current balance and balance history for an account"""
-    account = get_account_or_404(db, current_user, account_id)
+    """Current balance and balance history for an account.
 
-    # Calculate running balance from transactions
+    Each history entry carries ``view``. One for a row the caller sees in full
+    (``full`` or ``shared_full``, see app/core/redaction.py) is ``{date, amount,
+    balance_after, balance, transaction_id, display_description}``; any other
+    is the limited allowlist ``{date, amount, balance_after,
+    display_description}``. ``amount`` is the row's signed effect on this
+    account.
+    """
+    from app.core.redaction import FULL, SHARED_FULL, Redactor
     from app.models.transaction import Transaction, TransactionType
-    
-    
+
+    account = get_account_or_404(db, current_user, account_id)
     transactions = db.query(Transaction).filter(
         or_(
             Transaction.account_id == account_id,
             Transaction.transfer_from_account_id == account_id,
             Transaction.transfer_to_account_id == account_id
         )
-    ).order_by(Transaction.transaction_date).all()
-    
+    ).order_by(Transaction.transaction_date, Transaction.id).all()
+    redactor = Redactor(db, current_user)
+    redactor.prepare(transactions)
+
     balance_history = []
     running_balance = 0.0
-    
     for transaction in transactions:
         if not transaction.is_posted:
             continue
 
         if transaction.transaction_type == TransactionType.CREDIT and transaction.account_id == account_id:
-            running_balance += float(transaction.amount)
+            effect = float(transaction.amount)
         elif transaction.transaction_type == TransactionType.DEBIT and transaction.account_id == account_id:
-            running_balance -= float(transaction.amount)
+            effect = -float(transaction.amount)
         elif transaction.transaction_type == TransactionType.TRANSFER:
             if transaction.transfer_from_account_id == account_id:
-                running_balance -= float(transaction.amount) + float(transaction.transfer_fee or 0.0)
+                effect = -(float(transaction.amount) + float(transaction.transfer_fee or 0.0))
             elif transaction.transfer_to_account_id == account_id:
-                running_balance += float(transaction.amount)
+                effect = float(transaction.amount)
             else:
                 continue
         else:
             continue
-        
-        balance_history.append({
+        running_balance += effect
+
+        facts = redactor.access.facts(transaction)
+        view = redactor.view(transaction, facts)
+        entry = {
+            "view": view,
             "date": transaction.transaction_date,
-            "balance": running_balance,
-            "transaction_id": transaction.id
-        })
-    
+            "amount": effect,
+            "balance_after": running_balance,
+            "display_description": redactor.display_description(transaction, facts),
+        }
+        if view in (FULL, SHARED_FULL):
+            entry.update({"balance": running_balance, "transaction_id": transaction.id})
+        else:
+            entry["view"] = "limited"
+        balance_history.append(entry)
+
     return {
         "account_id": account_id,
         "current_balance": account.balance,
         "calculated_balance": running_balance,
         "balance_history": balance_history
     }
+
+
+@router.get("/{account_id}/statements")
+def get_card_statements(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """A credit card's statements, oldest first, through the one closing next.
+
+    Any role on the card. An owner, admin or editor gets each statement's
+    ``statement_balance`` and its lines with ``transaction_id``; a viewer gets
+    the limited statement: ``{close_date, due_date, amount_due, currency,
+    status, lines: [{date, display_description, amount}]}``. Line descriptions
+    follow the description rule (app/core/redaction.py). ``status`` is "paid",
+    "open" or "overdue".
+    """
+    from app.core.redaction import Redactor
+    from app.services.statements import statement_history
+
+    card = get_account_or_404(db, current_user, account_id)
+    if card.account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="Account is not a credit card")
+    role = account_role(current_user, card)
+    limited = role not in EDIT_ROLES
+    history = statement_history(db, card, naive_utc_now(),
+                                viewable_account_ids(db, current_user))
+    redactor = Redactor(db, current_user)
+    redactor.prepare([line["transaction"] for s in history for line in s["lines"]])
+    statements = []
+    for statement in history:
+        lines = []
+        for line in statement["lines"]:
+            txn = line["transaction"]
+            item = {"date": line["date"], "amount": float(line["amount"]),
+                    "display_description": redactor.display_description(txn)}
+            if not limited:
+                item["transaction_id"] = txn.id
+            lines.append(item)
+        row = {
+            "close_date": statement["close"],
+            "due_date": statement["due"],
+            "amount_due": float(statement["owed"]),
+            "currency": card.currency,
+            "status": statement["status"],
+            "lines": lines,
+        }
+        if not limited:
+            row["statement_balance"] = float(statement["balance"])
+        statements.append(row)
+    body = {"view": "limited" if limited else "full", "name": card.name,
+            "currency": card.currency, "statements": statements}
+    if not limited:
+        body["account_id"] = card.id
+    return body
 
 
 # --- Loans -------------------------------------------------------------------
@@ -507,10 +591,11 @@ def _record(db: Session, current_user: User, loan: Account, funding: Account,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit()
     db.refresh(txn)
-    return attach_visible_tags(db, current_user, txn)
+    from app.core.redaction import serialize_transaction
+    return serialize_transaction(db, current_user, txn)
 
 
-@router.post("/{account_id}/loan-payment", response_model=TransactionResponse)
+@router.post("/{account_id}/loan-payment", response_model=TransactionOut)
 def record_loan_payment(
     account_id: int,
     payment: LoanPaymentCreate,
@@ -536,21 +621,26 @@ def record_loan_payment(
     return _record(db, current_user, loan, funding, principal, interest, loan_svc.SCHEDULED, payment)
 
 
-@router.post("/{account_id}/loan-prepayment", response_model=TransactionResponse)
+@router.post("/{account_id}/loan-prepayment", response_model=TransactionOut)
 def record_loan_prepayment(
     account_id: int,
     prepayment: LoanPrepaymentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Record extra principal (no interest). Refused on a ``fixed`` loan."""
+    """Record extra principal (no interest). Refused on a ``fixed`` loan.
+
+    The funding account is checked first, so a caller who may not use it gets
+    the same 404 whatever the loan's amortisation (which the loan's terms hide
+    from an editor).
+    """
     loan = _loan_or_404(db, current_user, account_id, edit=True)
+    funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
     if loan_svc.amortization_of(loan) == loan_svc.FIXED:
         raise HTTPException(
             status_code=400,
             detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
         )
-    funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
     _lock(db, loan, funding)
     if loan_svc.amortization_of(loan) == loan_svc.FIXED:  # re-read under the lock
         db.rollback()
@@ -562,12 +652,51 @@ def record_loan_prepayment(
                    loan_svc.PREPAYMENT, prepayment)
 
 
+# Schedule fields built from the loan's terms: shown to its owner and admins only.
+LOAN_TERM_SCHEDULE_FIELDS = ("annual_rate", "payment_amount", "term_months",
+                             "first_payment_date", "amortization", "proposed_split")
+
+
 @router.get("/{account_id}/loan-schedule")
 def get_loan_schedule(
     account_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """The loan's owed amount, payments made / left, next due date and upcoming rows."""
+    """The loan's owed amount, payments made / left, next due date and upcoming rows.
+
+    An owner, admin or editor gets the full schedule (``view`` "full"). Loan
+    terms are an owner's or admin's (plan §2), so for an editor they are null:
+    ``annual_rate``, ``payment_amount``, ``term_months``, ``first_payment_date``,
+    ``amortization``, ``proposed_split``, and each upcoming row's
+    ``principal``, ``interest`` and ``balance_after`` (derived from the rate).
+    The editor keeps the payment rows (with ``transaction_id``) and each
+    upcoming due date and amount. A viewer gets the limited schedule: ``{name, currency, owed, next_due_date,
+    payments_left, rows: [{due_date, amount, status}]}`` with ``status`` "paid"
+    (a posted payment, dated when it was made, principal and interest together)
+    or "open" (an upcoming due date). No rate, term, amortisation, first payment
+    date, balance after, principal and interest split, or row ids.
+    """
     loan = _loan_or_404(db, current_user, account_id)
-    return loan_svc.build_schedule(db, loan)
+    schedule = loan_svc.build_schedule(db, loan)
+    role = account_role(current_user, loan)
+    if role in MANAGE_ROLES:
+        return {"view": "full", **schedule}
+    if role in EDIT_ROLES:
+        terms = dict.fromkeys(LOAN_TERM_SCHEDULE_FIELDS)
+        upcoming = [{**row, "principal": None, "interest": None, "balance_after": None}
+                    for row in schedule["upcoming"]]
+        return {"view": "full", **schedule, **terms, "upcoming": upcoming}
+    rows = [{"due_date": p["date"], "amount": round(p["principal"] + p["interest"], 2),
+             "status": "paid"} for p in schedule["payments"]]
+    rows += [{"due_date": r["due_date"], "amount": r["payment"], "status": "open"}
+             for r in schedule["upcoming"]]
+    return {
+        "view": "limited",
+        "name": loan.name,
+        "currency": loan.currency,
+        "owed": schedule["owed"],
+        "next_due_date": schedule["next_due_date"],
+        "payments_left": schedule["payments_left"],
+        "rows": rows,
+    }

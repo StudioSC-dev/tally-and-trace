@@ -1,5 +1,6 @@
 import { useMemo, useId } from 'react'
 import type { CashflowTimeline } from '../store/api'
+import { timelineEventName } from '@tally-trace/shared'
 
 interface Props {
   timeline: CashflowTimeline
@@ -44,7 +45,7 @@ export function RunningBalanceChart({ timeline, format, height = 280, compact = 
 
     const pts = [
       { t: startT, v: timeline.opening_balance, name: 'Opening', date: timeline.window_start },
-      ...timeline.events.map((e) => ({ t: new Date(e.date).getTime(), v: e.running_balance, name: e.name, date: e.date })),
+      ...timeline.events.map((e) => ({ t: new Date(e.date).getTime(), v: e.running_balance, name: timelineEventName(e), date: e.date })),
     ]
 
     const values = pts.map((p) => p.v)

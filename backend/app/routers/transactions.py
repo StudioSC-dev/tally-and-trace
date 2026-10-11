@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
+    RecordAccess,
     can_edit_account,
     can_view_account,
+    editable_account_ids,
     get_record_or_404,
     readable_criterion,
     require_account,
@@ -14,11 +17,18 @@ from app.core.access import (
     viewable_account_ids,
 )
 from app.core.tags import (
-    TAG_FILTER_HELP, attach_visible_tags, effective_tag_criterion, filter_tag_id, own_tag_ids,
+    TAG_FILTER_HELP, effective_tag_criterion, filter_tag_id, own_tag_ids,
     replace_own_tags,
 )
 from app.models.transaction import Transaction, TransactionType
-from app.schemas.transaction import TransactionCreate, TransactionResponse, TransactionUpdate, TransactionListResponse
+from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
+from app.core.redaction import (
+    FULL, Redactor, displayed_description_criterion, full_view_criterion,
+    serialize_transaction, serialize_transactions,
+)
+from app.core.attachments import (
+    RECEIPTS, STORED_PREFIX, new_receipt_filename, public_receipt_url, stored_receipt_path,
+)
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
@@ -37,6 +47,10 @@ import os
 from app.core.config import settings
 
 router = APIRouter()
+
+# References only a transaction's creator may set or clear (see update_transaction).
+OWNER_REFERENCE_FIELDS = ("category_id", "allocation_id", "budget_entry_id")
+ATTACHMENT_FIELDS = ("receipt_url", "invoice_url")
 
 # Largest UTC offset in use (UTC+14): how far ahead of UTC a user's local "today" can reach.
 _MAX_UTC_OFFSET = timedelta(hours=14)
@@ -546,16 +560,22 @@ def get_transactions(
     """Get all transactions with optional filtering"""
     # Every transaction the caller may read: their own, plus any touching an
     # account they hold a role on (including transfers where either leg does).
-    query = db.query(Transaction).filter(
-        readable_criterion(Transaction, current_user, viewable_account_ids(db, current_user))
-    )
+    viewable = viewable_account_ids(db, current_user)
+    query = db.query(Transaction).filter(readable_criterion(Transaction, current_user, viewable))
 
     if account_ids:
-        query = query.filter(touches_accounts(Transaction, account_ids))
+        # Only accounts the caller can view: any other id (hidden or nonexistent)
+        # matches nothing, so a guessed id never reveals the account behind a
+        # neutral reference.
+        query = query.filter(touches_accounts(
+            Transaction, [i for i in account_ids if i in viewable]))
+    # Categories and allocations are never shared: they filter the caller's own rows.
     if category_ids:
-        query = query.filter(Transaction.category_id.in_(category_ids))
+        query = query.filter(Transaction.category_id.in_(category_ids),
+                             Transaction.user_id == current_user.id)
     if allocation_id:
-        query = query.filter(Transaction.allocation_id == allocation_id)
+        query = query.filter(Transaction.allocation_id == allocation_id,
+                             Transaction.user_id == current_user.id)
     if transaction_types:
         try:
             allowed_types = [TransactionType(item.lower()) for item in transaction_types]
@@ -567,9 +587,16 @@ def get_transactions(
     if end_date:
         query = query.filter(Transaction.transaction_date <= end_date)
     if is_reconciled is not None:
-        query = query.filter(Transaction.is_reconciled == is_reconciled)
+        # Not in the limited model: filter only the rows the caller sees in full.
+        query = query.filter(
+            Transaction.is_reconciled == is_reconciled,
+            full_view_criterion(Transaction, current_user, viewable,
+                                editable_account_ids(db, current_user)))
     if search:
-        query = query.filter(Transaction.description.ilike(f"%{search}%"))
+        # Displayed text only: a row whose description the caller is shown as a
+        # neutral label never matches its stored description.
+        query = query.filter(Transaction.description.ilike(f"%{search}%"),
+                             displayed_description_criterion(viewable))
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(Transaction, tag_id))
@@ -582,10 +609,10 @@ def get_transactions(
         .all()
     )
     has_more = offset + len(transactions) < total
-    attach_visible_tags(db, current_user, transactions)
-    return {"items": transactions, "total": total, "has_more": has_more}
+    return {"items": serialize_transactions(db, current_user, transactions), "total": total,
+            "has_more": has_more}
 
-@router.post("/", response_model=TransactionResponse)
+@router.post("/", response_model=TransactionOut)
 def create_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db),
@@ -595,28 +622,36 @@ def create_transaction(
     db_transaction = add_transaction(db, current_user, transaction)
     db.commit()
     db.refresh(db_transaction)
-    return attach_visible_tags(db, current_user, db_transaction)
+    return serialize_transaction(db, current_user, db_transaction)
 
 
-def add_transaction(db: Session, current_user: User, transaction: TransactionCreate) -> Transaction:
+def add_transaction(db: Session, current_user: User, transaction: TransactionCreate,
+                    owner: Optional[User] = None) -> Transaction:
     """Validate and add a new transaction with its balance and budget effects, uncommitted.
 
     The caller commits, so a caller that writes more in the same change (a
     materialised recurring entry) commits it all at once.
+
+    ``owner`` (default the caller) owns the new row: a materialised recurring
+    entry's transaction belongs to the entry's creator, whoever triggers it.
+    ``created_by_actor`` records the caller. Every account it touches must be
+    one both the caller and the owner may change, and every other reference
+    (category, allocation, recurring entry) must be the owner's.
     """
+    owner = owner or current_user
     transaction_data = transaction.dict()
-    # The caller's own tags only (404 otherwise); linked once the row exists.
-    tag_ids = own_tag_ids(db, current_user, transaction_data.pop("tag_ids", None) or [])
-    transaction_data["user_id"] = current_user.id
+    # The owner's own tags only (404 otherwise); linked once the row exists.
+    tag_ids = own_tag_ids(db, owner, transaction_data.pop("tag_ids", None) or [])
+    transaction_data["user_id"] = owner.id
+    transaction_data["created_by_actor"] = current_user.id
     transaction_data["transfer_fee"] = transaction.transfer_fee or 0.0
     budget_entry: Optional[BudgetEntry] = None
 
-    # Same-owner rule: every non-account reference is the caller's own.
+    # Same-owner rule: every non-account reference is the row owner's own.
     budget_entry = require_owned_ref(
-        db, BudgetEntry, transaction.budget_entry_id, "Budget entry not found", current_user)
-    require_owned_ref(db, Category, transaction.category_id, "Category not found", current_user)
-    require_owned_ref(db, Allocation, transaction.allocation_id, "Allocation not found",
-                      current_user)
+        db, BudgetEntry, transaction.budget_entry_id, "Budget entry not found", owner)
+    require_owned_ref(db, Category, transaction.category_id, "Category not found", owner)
+    require_owned_ref(db, Allocation, transaction.allocation_id, "Allocation not found", owner)
     
     if budget_entry:
         transaction_data["is_recurring"] = True
@@ -639,13 +674,13 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account = db.query(Account).filter(
             Account.id == transaction.transfer_from_account_id
         ).first()
-        if not _usable(current_user, None, primary_account):
+        if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Source account not found")
         
         destination_account = db.query(Account).filter(
             Account.id == transaction.transfer_to_account_id
         ).first()
-        if not _usable(current_user, None, destination_account):
+        if not _usable(current_user, owner, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
@@ -665,7 +700,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
-        if not _usable(current_user, None, primary_account):
+        if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = primary_account.currency
@@ -693,7 +728,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         if delta:
             budget_allocations = _get_budget_allocations_for_transaction(
                 db,
-                user_id=current_user.id,
+                user_id=owner.id,
                 allocation_id=transaction.allocation_id,
                 category_id=transaction.category_id,
             )
@@ -701,24 +736,54 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
 
     db.flush()
     if tag_ids:
-        replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
+        replace_own_tags(db, Transaction, db_transaction.id, owner, tag_ids)
     return db_transaction
 
-@router.get("/{transaction_id}", response_model=TransactionResponse)
+@router.get("/{transaction_id}", response_model=TransactionOut)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Get a specific transaction by ID"""
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
-    return attach_visible_tags(db, current_user, transaction)
+    return serialize_transaction(db, current_user, transaction)
 
-@router.put("/{transaction_id}", response_model=TransactionResponse)
+@router.put("/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Update an existing transaction and recalculate account balance"""
-    db_transaction = get_record_or_404(
-        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+    """Update an existing transaction and recalculate account balance.
+
+    The write rule: the caller and the row's creator both keep an edit role on
+    every account the row touches, before and after. Posting or reverting
+    alone (a request with only ``is_posted``) is also open to the owner of
+    every account the row touches when its creator has lost access (the
+    account owner exemption). Receipts and invoices are the creator's.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
     owner = db_transaction.user
 
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
+    permissions = RecordAccess(db, current_user).permissions(db_transaction)
+    status_only = set(requested) == {"is_posted"}
+    if not permissions["can_edit"]:
+        resolving = status_only and (
+            permissions["can_post"] if requested["is_posted"] else permissions["can_revert"])
+        if not resolving:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        # Owner exemption: the creator's own access is not required.
+        owner = None
+    if db_transaction.user_id != current_user.id:
+        # The creator's attachments and private references, which a non-creator
+        # is never shown: any request naming one is refused, whatever its value
+        # (null included: clearing is a change), so it can neither change them
+        # nor probe their stored values.
+        if any(field in requested for field in ATTACHMENT_FIELDS):
+            raise HTTPException(
+                status_code=400,
+                detail="Only the transaction's creator can change its attachments")
+        if any(field in requested for field in OWNER_REFERENCE_FIELDS):
+            raise HTTPException(
+                status_code=400,
+                detail="Only the transaction's creator can change its category, "
+                       "allocation or recurring entry")
     # Tags: the caller's own only, on a row they may edit (checked above).
     tag_ids = requested.pop("tag_ids", None)
     if tag_ids is not None:
@@ -746,7 +811,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                                  (Allocation, "allocation_id", "Allocation not found"),
                                  (BudgetEntry, "budget_entry_id", "Budget entry not found")):
         if field in requested and requested[field] != getattr(db_transaction, field):
-            require_owned_ref(db, model, requested[field], detail, current_user, owner)
+            require_owned_ref(db, model, requested[field], detail, current_user,
+                              db_transaction.user)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -809,6 +875,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     update_data.pop("is_recurring", None)
     update_data.pop("recurrence_frequency", None)
     update_data.pop("tag_ids", None)
+    # A stored receipt is shown as its route: sending that back leaves it as is.
+    if update_data.get("receipt_url") is not None and update_data["receipt_url"] == \
+            public_receipt_url(db_transaction.id, db_transaction.receipt_url):
+        update_data.pop("receipt_url")
 
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
@@ -891,15 +961,20 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
     db.commit()
     db.refresh(db_transaction)
-    return attach_visible_tags(db, current_user, db_transaction)
+    return serialize_transaction(db, current_user, db_transaction)
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Delete a transaction and update account balance"""
-    # Refused unless the caller may change every account the row touches
-    # (reported as not found).
-    db_transaction = get_record_or_404(
-        db, Transaction, transaction_id, current_user, "Transaction not found", write=True)
+    """Delete a transaction and update account balance.
+
+    Under the write rule or the account owner exemption; an unposted row also
+    by its creator and by an owner of any account it touches (it moves no
+    balance). Anything else is reported as not found.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    if not RecordAccess(db, current_user).permissions(db_transaction)["can_delete"]:
+        raise HTTPException(status_code=404, detail="Transaction not found")
     
     # Update account balances if posted
     if db_transaction.is_posted:
@@ -941,7 +1016,11 @@ async def upload_receipt(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Upload a receipt for a transaction"""
+    """Upload a receipt for a transaction.
+
+    Saved under a random name and served only by ``GET .../receipt``
+    (see ``app/core/attachments.py``); ``file_url`` is that route.
+    """
     # The receipt is the creator's: only they may set it, and only while they
     # may still change the row's accounts.
     db_transaction = get_record_or_404(
@@ -957,11 +1036,11 @@ async def upload_receipt(
         )
     
     # Create upload directory if it doesn't exist
-    upload_dir = os.path.join(settings.UPLOAD_DIR, "receipts")
+    upload_dir = os.path.join(settings.UPLOAD_DIR, RECEIPTS)
     os.makedirs(upload_dir, exist_ok=True)
     
     # Save file
-    filename = f"receipt_{transaction_id}_{utc_now().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
+    filename = new_receipt_filename(transaction_id, file_extension)
     file_path = os.path.join(upload_dir, filename)
     
     with open(file_path, "wb") as buffer:
@@ -969,10 +1048,36 @@ async def upload_receipt(
         buffer.write(content)
     
     # Update transaction with receipt URL
-    db_transaction.receipt_url = f"/uploads/receipts/{filename}"
+    db_transaction.receipt_url = f"{STORED_PREFIX}{RECEIPTS}/{filename}"
     db.commit()
     
-    return {"message": "Receipt uploaded successfully", "file_url": db_transaction.receipt_url}
+    return {"message": "Receipt uploaded successfully",
+            "file_url": public_receipt_url(transaction_id, db_transaction.receipt_url)}
+
+
+@router.get("/{transaction_id}/receipt")
+def get_receipt(
+    transaction_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """A transaction's uploaded receipt file.
+
+    Only for a caller who sees the transaction in ``full`` view (its creator,
+    while they can view every account it touches): the same rule that gives
+    ``receipt_url``. Anyone else, and a missing, foreign or out-of-place file,
+    gets the record routes' "Transaction not found".
+    """
+    not_found = HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    if Redactor(db, current_user).view(db_transaction) != FULL:
+        raise not_found
+    path = stored_receipt_path(db_transaction.id, db_transaction.receipt_url)
+    if path is None:
+        raise not_found
+    return FileResponse(path, headers={"Cache-Control": "private, no-store",
+                                       "X-Content-Type-Options": "nosniff"})
 
 UNCATEGORIZED = "Uncategorized"
 TRANSFER_FEES = "Transfer fees"
@@ -984,6 +1089,7 @@ LOAN_INTEREST_PREFIX = "Interest: "
 def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
+    hidden_liability_ids: Optional[Set[int]] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
 
@@ -1036,9 +1142,17 @@ def summarize_period(
     wallets") whose name a user category also uses is added into that row,
     never written over it, so no amount is lost and the expense column still
     sums to ``total_expenses``.
+
+    Every row is counted as the caller's record view shows it (app/core/redaction.py),
+    so no total reveals a field that view hides. A transfer into a loan or card
+    in ``hidden_liability_ids`` (one the caller can't view) is one whole payment
+    of amount + fee: no fee row, no interest split, nothing expensed. Callers
+    pass only in-scope accounts in ``wallet_ids``, so whether an account outside
+    the scope is a wallet never moves a total.
     """
     zero = Decimal("0")
     loan_names = loan_names or {}
+    hidden_liability_ids = hidden_liability_ids or set()
     total_income = zero
     total_expenses = zero
     unallocated_wallet = zero
@@ -1076,6 +1190,9 @@ def summarize_period(
                 continue  # inbound from outside the caller's scope
             fee = _D(t.transfer_fee)
             destination = t.transfer_to_account_id
+            if destination in hidden_liability_ids:
+                # The limited view's whole payment: principal and interest together.
+                amount, fee = amount + fee, zero
             from_wallet = source in wallet_ids
             to_wallet = destination in wallet_ids
             if fee:
@@ -1126,7 +1243,9 @@ def get_transaction_summary(
     query = query.filter(touches_accounts(Transaction, scope_ids))
     
     if account_id:
-        query = query.filter(Transaction.account_id == account_id)
+        # An account the caller can't view matches nothing, as a nonexistent one.
+        query = query.filter(Transaction.account_id == account_id,
+                             Transaction.account_id.in_(scope_ids))
     # Only rows carrying the tag effectively; each row counts once.
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
@@ -1141,11 +1260,18 @@ def get_transaction_summary(
         if acc_id is not None
     }
     referenced = db.query(Account).filter(Account.id.in_(account_ids)).all() if account_ids else []
-    wallet_ids = {a.id for a in referenced if is_spending_wallet(a)}
+    # Wallets in the scope only: another user's account is never read as one.
+    wallet_ids = {a.id for a in referenced if a.id in scope_ids and is_spending_wallet(a)}
     # Loans the caller can see get their own interest row (others stay "Transfer fees").
     loan_names = {
         a.id: a.name for a in referenced
         if a.account_type == AccountType.LOAN and can_view_account(current_user, a)
+    }
+    # Loans and cards the caller can't view: a payment into one is shown whole.
+    hidden_liability_ids = {
+        a.id for a in referenced
+        if a.account_type in (AccountType.LOAN, AccountType.CREDIT)
+        and not can_view_account(current_user, a)
     }
     category_ids = {t.category_id for t in transactions if t.category_id}
     categories = db.query(Category).filter(
@@ -1155,7 +1281,8 @@ def get_transaction_summary(
     category_owners = {c.id: c.user_id for c in categories}
 
     summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
-                               category_owners=category_owners)
+                               category_owners=category_owners,
+                               hidden_liability_ids=hidden_liability_ids)
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
     net_flow = total_income - total_expenses

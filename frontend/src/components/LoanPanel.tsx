@@ -73,7 +73,10 @@ export function LoanActions({
   fundingAccounts: Account[]
   onRecorded?: () => void
 }) {
-  const { data: schedule } = useGetLoanScheduleQuery(account.id)
+  const { data: scheduleResponse } = useGetLoanScheduleQuery(account.id)
+  // Only an editor or above gets the full schedule, and only an owner or admin gets its
+  // terms: an editor's has no amortisation or split, so the API decides extra principal.
+  const schedule = scheduleResponse?.view === 'full' ? scheduleResponse : undefined
   // A loan is paid only from an account in its own currency (the API refuses others).
   const eligibleFunding = fundingAccounts.filter((a) => a.currency === account.currency)
   const defaultFunding = eligibleFunding.some((a) => a.id === account.payment_account_id)

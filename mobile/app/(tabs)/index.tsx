@@ -4,7 +4,7 @@ import { useGetDashboardSnapshotQuery } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
-import { formatRelativeDate } from '@tally-trace/shared'
+import { formatRelativeDate, isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
 import { Card, SectionHeader, LoadingSpinner, Badge, AmountText } from '../../src/components/ui'
 
 export default function HomeScreen() {
@@ -38,29 +38,29 @@ export default function HomeScreen() {
         <Card className="bg-gradient-to-br from-sky-600 to-sky-800">
           <Text className="text-sky-200 text-sm font-medium mb-1">Total Balance</Text>
           <Text className="text-white text-4xl font-bold">
-            {formatCurrency(snapshot?.total_balance ?? 0, currency)}
+            {formatCurrency(snapshot?.balances.total ?? 0, currency)}
           </Text>
           <Text className="text-sky-300 text-xs mt-2">
-            Across {snapshot?.account_balances?.length ?? 0} account(s)
+            Across {snapshot?.balances.by_account.length ?? 0} account(s)
           </Text>
         </Card>
 
         {/* Quick Stats */}
-        {snapshot?.net_disposable_income && (
+        {snapshot?.monthly_summary && (
           <View className="flex-row gap-3">
             <Card className="flex-1">
-              <Text className="text-slate-400 text-xs mb-1">Income (MTD)</Text>
+              <Text className="text-slate-400 text-xs mb-1">Monthly income</Text>
               <AmountText
-                amount={snapshot.net_disposable_income.total_income}
+                amount={snapshot.monthly_summary.monthly_income}
                 currency={currency}
                 positive
                 className="text-xl"
               />
             </Card>
             <Card className="flex-1">
-              <Text className="text-slate-400 text-xs mb-1">Expenses (MTD)</Text>
+              <Text className="text-slate-400 text-xs mb-1">Monthly expenses</Text>
               <AmountText
-                amount={snapshot.net_disposable_income.total_expenses}
+                amount={snapshot.monthly_summary.monthly_expenses}
                 currency={currency}
                 negative
                 className="text-xl"
@@ -70,19 +70,19 @@ export default function HomeScreen() {
         )}
 
         {/* Account Balances */}
-        {snapshot?.account_balances && snapshot.account_balances.length > 0 && (
+        {snapshot && snapshot.balances.by_account.length > 0 && (
           <View>
             <SectionHeader title="Accounts" />
             <Card className="gap-3">
-              {snapshot.account_balances.map((acc, idx) => (
+              {snapshot.balances.by_account.map((acc, idx) => (
                 <View key={acc.id}>
                   {idx > 0 && <View className="h-px bg-slate-700" />}
                   <View className="flex-row items-center justify-between py-1">
                     <View>
                       <Text className="text-white font-medium">{acc.name}</Text>
-                      <Text className="text-slate-500 text-xs capitalize">
-                        {acc.type.replace('_', ' ')}
-                      </Text>
+                      {acc.is_spending_wallet && (
+                        <Text className="text-slate-500 text-xs">Spending wallet</Text>
+                      )}
                     </View>
                     <Text className="text-white font-semibold">
                       {formatCurrency(acc.balance, acc.currency as CurrencyCode)}
@@ -94,79 +94,58 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Recent Transactions */}
-        {snapshot?.recent_transactions && snapshot.recent_transactions.length > 0 && (
-          <View>
-            <SectionHeader title="Recent Transactions" />
-            <Card className="gap-3">
-              {snapshot.recent_transactions.map((tx, idx) => (
-                <View key={tx.id}>
-                  {idx > 0 && <View className="h-px bg-slate-700" />}
-                  <View className="flex-row items-center justify-between py-1">
-                    <View className="flex-1 mr-3">
-                      <Text className="text-white font-medium" numberOfLines={1}>
-                        {tx.description ?? '(no description)'}
-                      </Text>
-                      <Text className="text-slate-500 text-xs">
-                        {formatRelativeDate(tx.date)} · {tx.account_name}
-                      </Text>
-                    </View>
-                    <AmountText
-                      amount={tx.amount}
-                      currency={tx.currency}
-                      positive={tx.type === 'credit'}
-                      negative={tx.type === 'debit'}
-                    />
-                  </View>
-                </View>
-              ))}
-            </Card>
-          </View>
-        )}
-
         {/* Upcoming Events */}
-        {snapshot?.upcoming_events && snapshot.upcoming_events.length > 0 && (
+        {snapshot && snapshot.upcoming_this_month.length > 0 && (
           <View>
             <SectionHeader title="Upcoming Bills" />
             <Card className="gap-3">
-              {snapshot.upcoming_events.slice(0, 5).map((event, idx) => (
+              {snapshot.upcoming_this_month.slice(0, 5).map((event, idx) => {
+                // Limited events (shared accounts) carry a neutral name; they list their
+                // face amount, since a card charge billed later has a cash_delta of 0.
+                const limited = isLimitedEvent(event)
+                const full = isLimitedEvent(event) ? null : event
+                const name = limited ? event.display_name : (full?.name ?? '')
+                const { amount, direction } = upcomingItemAmount(event)
+                const date = limited ? event.date : (full?.due_date ?? '')
+                const isIncome = direction === 'in'
+                const isExpense = direction === 'out'
+                const kindLabel = limited ? event.kind.replace('_', ' ') : (full?.entry_type ?? '')
+                return (
                 <View key={idx}>
                   {idx > 0 && <View className="h-px bg-slate-700" />}
                   <View className="flex-row items-center justify-between py-1">
                     <View className="flex-1 mr-3">
                       <Text className="text-white font-medium" numberOfLines={1}>
-                        {event.name}
+                        {name}
                       </Text>
-                      <Text className="text-slate-500 text-xs">
-                        {formatRelativeDate(event.date)}
-                        {event.is_autopay ? ' · Auto-pay' : ''}
-                      </Text>
+                      <Text className="text-slate-500 text-xs">{formatRelativeDate(date)}</Text>
                     </View>
                     <View className="items-end gap-1">
                       <AmountText
-                        amount={event.amount}
-                        currency={event.currency}
-                        negative={event.entry_type === 'expense'}
-                        positive={event.entry_type === 'income'}
+                        amount={amount}
+                        currency={limited ? event.currency : currency}
+                        negative={isExpense}
+                        positive={isIncome}
                       />
                       <Badge
-                        label={event.entry_type}
-                        color={event.entry_type === 'income' ? 'green' : 'red'}
+                        label={kindLabel}
+                        color={isIncome ? 'green' : 'red'}
                       />
                     </View>
                   </View>
                 </View>
-              ))}
+                )
+              })}
             </Card>
           </View>
         )}
 
         {/* Wishlist Summary */}
-        {snapshot?.wishlist_summary && snapshot.wishlist_summary.length > 0 && (
+        {snapshot && snapshot.wishlist_next_up.length > 0 && (
           <View>
             <SectionHeader title="Wishlist" />
             <Card className="gap-3">
-              {snapshot.wishlist_summary.map((item, idx) => (
+              {snapshot.wishlist_next_up.map((item, idx) => (
                 <View key={item.id}>
                   {idx > 0 && <View className="h-px bg-slate-700" />}
                   <View className="flex-row items-center justify-between py-1">
@@ -178,12 +157,9 @@ export default function HomeScreen() {
                     </View>
                     <View className="items-end gap-1">
                       <Text className="text-white font-semibold">
-                        {formatCurrency(item.estimated_cost, item.currency as CurrencyCode)}
+                        {formatCurrency(item.cost, currency)}
                       </Text>
-                      <Badge
-                        label={item.is_ready ? 'Ready!' : 'Saving'}
-                        color={item.is_ready ? 'green' : 'yellow'}
-                      />
+                      <Badge label={`By ${item.affordable_by}`} color="yellow" />
                     </View>
                   </View>
                 </View>

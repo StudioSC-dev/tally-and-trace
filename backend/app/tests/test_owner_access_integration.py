@@ -106,8 +106,11 @@ def _post(client, who, path, body):
 
 
 @pytest.fixture
-def world(client, people):
+def world(client, people, tmp_path, monkeypatch):
     """An owner with one of every kind of record, and a stranger with a bank of their own."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
     owner, stranger = people(), people()
     bank = _post(client, owner, "/accounts/", {
         "name": f"{MARK} Bank", "account_type": "checking", "balance": 50_000})
@@ -127,6 +130,9 @@ def world(client, people):
         "account_id": bank["id"], "amount": 1_234, "transaction_type": "debit",
         "transaction_date": WHEN, "description": f"{MARK} groceries",
         "category_id": category["id"]})
+    r = client.post(f"{API}/transactions/{txn['id']}/upload-receipt", headers=owner["headers"],
+                    files={"file": ("r.png", f"{MARK} receipt".encode(), "image/png")})
+    assert r.status_code == 200, r.text
     entry = _post(client, owner, "/budget-entries/", {
         "name": f"{MARK} Rent", "entry_type": "expense", "amount": 9_876,
         "next_occurrence": WHEN, "account_id": bank["id"], "category_id": category["id"]})
@@ -153,6 +159,7 @@ def _id_routes(w):
         ("put", f"/accounts/{w['bank']}", {"json": {"name": "Taken"}}),
         ("delete", f"/accounts/{w['card']}", {}),
         ("get", f"/accounts/{w['bank']}/balance", {}),
+        ("get", f"/accounts/{w['card']}/statements", {}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
         ("post", f"/accounts/{w['loan']}/loan-payment",
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),
@@ -163,6 +170,7 @@ def _id_routes(w):
         ("delete", f"/transactions/{w['transaction']}", {}),
         ("post", f"/transactions/{w['transaction']}/upload-receipt",
          {"files": {"file": ("r.png", b"x", "image/png")}}),
+        ("get", f"/transactions/{w['transaction']}/receipt", {}),
         ("get", f"/categories/{w['category']}", {}),
         ("put", f"/categories/{w['category']}", {"json": {"name": "Taken"}}),
         ("delete", f"/categories/{w['category']}", {}),
@@ -185,6 +193,12 @@ def _id_routes(w):
         ("get", f"/tags/{w['tag']}", {}),
         ("put", f"/tags/{w['tag']}", {"json": {"name": "Taken"}}),
         ("delete", f"/tags/{w['tag']}", {}),
+        ("get", f"/accounts/{w['bank']}/shares", {}),
+        ("post", f"/accounts/{w['bank']}/shares",
+         {"json": {"email": "nobody@example.com", "role": "viewer"}}),
+        ("patch", f"/accounts/{w['bank']}/shares/{w['bank']}", {"json": {"role": "viewer"}}),
+        ("delete", f"/accounts/{w['bank']}/shares/{w['bank']}", {}),
+        ("delete", f"/shares/received/{w['bank']}", {}),
     ]
     return routes
 
@@ -245,7 +259,7 @@ def _snapshot(client, w):
     for p in paths:
         r = client.get(f"{API}{p}", headers=owner["headers"])
         assert r.status_code == 200, (p, r.text)
-        out[p] = r.json()
+        out[p] = r.content if p.endswith("/receipt") else r.json()
     return out
 
 
@@ -261,7 +275,7 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
             continue
         generic = path[len(API):]
         for name in ("account_id", "transaction_id", "category_id", "allocation_id",
-                     "entry_id", "item_id", "tag_id"):
+                     "entry_id", "item_id", "tag_id", "share_id"):
             generic = generic.replace("{" + name + "}", "{id}")
         for method in ops:
             assert (method.upper(), generic) in swept, (method, path)
@@ -334,7 +348,9 @@ def test_entity_headers_and_params_are_ignored(client, world):
 # shared entity). Such a row, created by B on A's account, stays reachable by
 # both: B created it, A owns every account it touches. Neither may edit it
 # through PUT (B can't change A's account; A's edit would leave the row on an
-# account its creator can't change), only A may delete it, a receipt is the
+# account its creator can't change), both may delete it while it is unposted
+# (STU-232: a creator may always delete their own unposted record, and so may
+# an owner of an account it touches), a receipt is the
 # creator's own field and needs the write rule too (so neither may set it), and
 # A can't materialise B's recurring entry (it is not A's to post from).
 #
@@ -347,18 +363,18 @@ LEGACY_MATRIX = [
     ("transaction", "get", "a", 200), ("transaction", "get", "b", 200),
     ("transaction", "list", "a", 200), ("transaction", "list", "b", 200),
     ("transaction", "put", "a", 404), ("transaction", "put", "b", 404),
-    ("transaction", "delete", "a", 200), ("transaction", "delete", "b", 404),
+    ("transaction", "delete", "a", 200), ("transaction", "delete", "b", 200),
     ("transaction", "upload-receipt", "a", 404), ("transaction", "upload-receipt", "b", 404),
     ("entry", "get", "a", 200), ("entry", "get", "b", 200),
     ("entry", "list", "a", 200), ("entry", "list", "b", 200),
     ("entry", "put", "a", 404), ("entry", "put", "b", 404),
-    ("entry", "delete", "a", 204), ("entry", "delete", "b", 404),
+    ("entry", "delete", "a", 204), ("entry", "delete", "b", 204),
     ("entry", "materialize", "a", 404), ("entry", "materialize", "b", 404),
     ("transaction", "clear-account", "a", 404), ("transaction", "clear-account", "b", 404),
     ("entry", "clear-account", "a", 404), ("entry", "clear-account", "b", 404),
     ("overflow_entry", "get", "a", 200), ("overflow_entry", "get", "b", 200),
     ("overflow_entry", "put", "a", 404), ("overflow_entry", "put", "b", 404),
-    ("overflow_entry", "delete", "a", 204), ("overflow_entry", "delete", "b", 404),
+    ("overflow_entry", "delete", "a", 204), ("overflow_entry", "delete", "b", 204),
 ]
 
 

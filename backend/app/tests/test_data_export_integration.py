@@ -196,17 +196,21 @@ def test_records_by_others_on_the_owners_accounts_are_limited(client, world):
     owner = world["owner"]
     body = _export(client, owner).json()
 
+    # Version 2 (STU-232): the Limited model. The owner can't view the source,
+    # so it is a neutral reference and the description a label.
     assert body["others_transactions"] == [{
-        "id": world["legacy"], "transaction_date": "2026-10-06T00:00:00+00:00",
-        # The source is not the owner's: one total, no fee split.
-        "amount": "1040.00", "transfer_fee": None, "currency": "PHP",
-        "transaction_type": "transfer", "is_posted": False,
-        "account_id": None, "transfer_from_account_id": None,
-        "transfer_to_account_id": owner["bank"],
+        "id": world["legacy"], "date": "2026-10-06T00:00:00+00:00",
+        "display_description": "Transfer", "amount": "1000.00", "transfer_fee": "40.00",
+        "currency": "PHP", "transaction_type": "transfer", "is_posted": False,
+        "category_name": None, "created_by": "Export o.",
+        "account": {"id": None, "name": "Other account"},
+        "counterpart": {"id": owner["bank"], "name": f"{OWNER_MARK} Bank"},
     }]
     (entry,) = body["others_budget_entries"]
     assert entry["id"] == world["legacy_entry"]
-    assert (entry["account_id"], entry["transfer_to_account_id"]) == (None, owner["bank"])
+    assert (entry["account"], entry["counterpart"]) == (
+        {"id": None, "name": "Other account"}, {"id": owner["bank"], "name": f"{OWNER_MARK} Bank"})
+    assert entry["display_name"] == "Recurring transfer"
     assert "name" not in entry and "category_id" not in entry
 
 
@@ -218,8 +222,12 @@ def test_the_export_never_carries_another_users_details_or_unlisted_columns(clie
             assert f'"{column}"' not in raw, (who, column)
     other = _export(client, world["other"]).json()
     assert [a["id"] for a in other["accounts"]] == [world["other"]["bank"]]
-    assert world["legacy"] in [t["id"] for t in other["transactions"]]
-    assert other["others_transactions"] == [] and other["others_budget_entries"] == []
+    # Version 2 (STU-232): its creator can't view the owner's bank, so the
+    # legacy transfer is limited for them too, with the bank a neutral reference.
+    assert world["legacy"] not in [t["id"] for t in other["transactions"]]
+    assert [(t["id"], t["counterpart"]) for t in other["others_transactions"]] == [
+        (world["legacy"], {"id": None, "name": "Other account"})]
+    assert [e["id"] for e in other["others_budget_entries"]] == [world["legacy_entry"]]
 
 
 def test_the_export_holds_own_tags_and_their_links_to_own_records_only(client, db, world):

@@ -1,0 +1,681 @@
+"""Shared accounts (STU-232): the projection over a shared scope.
+
+Each case of the ticket's matrix, with exact amounts and dates, through
+``collect_events`` and the views built on it, at a fixed reference date.
+"""
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+import pytest
+
+from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post, sw_share
+
+pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+
+REF = datetime(2026, 10, 10)
+END = REF + timedelta(days=60)
+LIMITED_EVENT_KEYS = {"view", "public_id", "date", "original_date", "overdue", "display_name",
+                      "face_amount", "cash_delta", "currency", "account", "kind"}
+
+
+def _events(db, who):
+    from app.services.forecast import collect_events
+
+    db.expire_all()
+    return collect_events(db, REF, END, user_id=who["id"])
+
+
+def _legs(e):
+    return [(leg["account_id"], leg["amount"], leg["cash"]) for leg in e["legs"]]
+
+
+def _txn(client, who, account, amount, when, kind="debit", posted=False, **extra):
+    body = {"account_id": account, "amount": amount, "transaction_type": kind,
+            "transaction_date": when, "is_posted": posted, "description": "Plain", **extra}
+    return sw_post(client, who, "/transactions/", body)["id"]
+
+
+def _transfer(client, who, frm, to, amount, when, posted=False, **extra):
+    return _txn(client, who, frm, amount, when, kind="transfer", posted=posted,
+                transfer_from_account_id=frm, transfer_to_account_id=to, **extra)
+
+
+def _card(client, sw, db, *, payment, overflow=None, share=("b",), name="Shared card"):
+    body = {"name": name, "account_type": "credit", "balance": 0,
+            "billing_cycle_start": 10, "days_until_due_date": 20, "payment_account_id": payment}
+    if overflow:
+        body["payment_overflow_account_id"] = overflow
+    card = sw_post(client, sw["a"], "/accounts/", body)["id"]
+    for who in share:
+        sw_share(db, card, sw[who]["id"], "editor", sw["a"]["id"])
+    return card
+
+
+def _put(client, who, path, body):
+    r = client.put(f"{API}{path}", json=body, headers=who["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_partners_deposit_is_counted_once(sw, sw_client, sw_db):
+    _transfer(sw_client, sw["b"], sw["b_private"], sw["joint"], 250, "2026-10-15T00:00:00")
+    owner = [e for e in _events(sw_db, sw["a"]) if e["date"] == datetime(2026, 10, 15)]
+    assert len(owner) == 1
+    assert _legs(owner[0]) == [(sw["joint"], Decimal("250.00"), True)]
+    assert owner[0]["amount"] == Decimal("250.00")
+    assert owner[0]["view"] == "limited" and owner[0]["name"] == "Transfer"
+    partner = [e for e in _events(sw_db, sw["b"]) if e["date"] == datetime(2026, 10, 15)]
+    assert len(partner) == 1
+    assert _legs(partner[0]) == [(sw["b_private"], Decimal("-250.00"), True),
+                                 (sw["joint"], Decimal("250.00"), True)]
+    assert partner[0]["amount"] == 0
+
+
+def test_owners_private_loan_paid_from_joint_is_a_neutral_loan_payment(sw, sw_client, sw_db):
+    _transfer(sw_client, sw["a"], sw["joint"], sw["a_loan"], 4000, "2026-10-18T00:00:00",
+              transfer_fee=500)
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["date"] == datetime(2026, 10, 18)]
+    assert e["name"] == "Loan payment" and e["source_id"] is None
+    assert "transfer_fee" not in e
+    assert _legs(e) == [(sw["joint"], Decimal("-4500.00"), True)]
+    assert e["amount"] == Decimal("-4500.00") and e["face_amount"] == Decimal("4500.00")
+    assert e["kind"] == "loan_payment" and e["loan_payment"] is True
+    assert sw_leaks(e, {sw["a_loan"], sw["a_private"]}) == []
+
+
+def test_discovered_loan_routed_to_joint_is_a_neutral_payable(sw, sw_client, sw_db):
+    _put(sw_client, sw["a"], f"/accounts/{sw['a_loan']}", {"payment_account_id": sw["joint"]})
+    owner = [e for e in _events(sw_db, sw["a"]) if e["source"] == "loan"]
+    partner = [e for e in _events(sw_db, sw["b"]) if e["source"] == "loan"]
+    assert [(e["date"], e["amount"]) for e in partner] == \
+        [(e["date"], e["amount"]) for e in owner]
+    first = partner[0]
+    assert first["date"] == datetime(2026, 10, 20) and first["amount"] == Decimal("-5000.00")
+    assert first["name"] == "Loan payment" and first["source_id"] is None
+    assert "loan_due_date" not in first and first["view"] == "limited"
+    assert owner[0]["name"].startswith(PRIVATE) and owner[0]["source_id"] == sw["a_loan"]
+
+
+def test_card_payment_to_a_visible_card_moves_cash(sw, sw_client, sw_db):
+    card = _card(sw_client, sw, sw_db, payment=sw["joint"])
+    _transfer(sw_client, sw["a"], sw["joint"], card, 100, "2026-10-16T00:00:00")
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["date"] == datetime(2026, 10, 16)]
+    assert e["amount"] == Decimal("-100.00") and e["card_payment"] is True
+    assert _legs(e) == [(sw["joint"], Decimal("-100.00"), True),
+                        (card, Decimal("100.00"), False)]
+
+
+def test_wallet_top_up_and_return_move_cash_legs_only(sw, sw_client, sw_db):
+    wallet = sw_post(sw_client, sw["a"], "/accounts/", {
+        "name": "Cash wallet", "account_type": "cash", "balance": 0,
+        "is_spending_wallet": True})["id"]
+    sw_share(sw_db, wallet, sw["b"]["id"], "editor", sw["a"]["id"])
+    _transfer(sw_client, sw["a"], sw["joint"], wallet, 50, "2026-10-17T00:00:00")
+    _transfer(sw_client, sw["a"], wallet, sw["joint"], 20, "2026-10-19T00:00:00")
+    events = {e["date"]: e for e in _events(sw_db, sw["b"])}
+    top_up, back = events[datetime(2026, 10, 17)], events[datetime(2026, 10, 19)]
+    assert top_up["amount"] == Decimal("-50.00") and top_up["top_up"] is True
+    assert _legs(top_up) == [(sw["joint"], Decimal("-50.00"), True),
+                             (wallet, Decimal("50.00"), False)]
+    assert back["amount"] == Decimal("20.00")
+    assert _legs(back) == [(wallet, Decimal("-20.00"), False),
+                           (sw["joint"], Decimal("20.00"), True)]
+
+
+def test_loan_payment_moves_principal_plus_interest(sw, sw_client, sw_db):
+    loan = sw_post(sw_client, sw["a"], "/accounts/", {
+        "name": "Shared loan", "account_type": "loan", "loan_kind": "personal",
+        "balance": -10_000, "loan_annual_rate": 12, "loan_term_months": 12,
+        "loan_payment_amount": 1_000, "loan_first_payment_date": "2026-11-15",
+        "payment_account_id": sw["joint"]})["id"]
+    sw_share(sw_db, loan, sw["b"]["id"], "editor", sw["a"]["id"])
+    _transfer(sw_client, sw["a"], sw["joint"], loan, 1000, "2026-10-21T00:00:00",
+              transfer_fee=50)
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["date"] == datetime(2026, 10, 21)]
+    assert e["amount"] == Decimal("-1050.00") and e["transfer_fee"] == Decimal("50.00")
+
+
+def test_overdue_statements_and_dues_are_distinct_events(sw, sw_client, sw_db):
+    card = _card(sw_client, sw, sw_db, payment=sw["joint"])
+    _txn(sw_client, sw["a"], card, 70, "2026-08-05T00:00:00", posted=True)
+    _txn(sw_client, sw["b"], card, 90, "2026-09-05T00:00:00", posted=True)
+    loan = sw_post(sw_client, sw["a"], "/accounts/", {
+        "name": "Old loan", "account_type": "loan", "loan_kind": "personal",
+        "balance": -6_000, "loan_annual_rate": 0, "loan_term_months": 12,
+        "loan_payment_amount": 500, "loan_first_payment_date": "2026-08-15",
+        "payment_account_id": sw["joint"]})["id"]
+    sw_share(sw_db, loan, sw["b"]["id"], "editor", sw["a"]["id"])
+    for who in ("a", "b"):
+        events = _events(sw_db, sw[who])
+        statements = sorted((e["original_date"], e["amount"]) for e in events
+                            if e["source"] == "statement" and e.get("overdue"))
+        assert statements == [(datetime(2026, 8, 30), Decimal("-70.00")),
+                              (datetime(2026, 9, 30), Decimal("-90.00"))]
+        dues = sorted((e["original_date"], e["amount"]) for e in events
+                      if e["source"] == "loan" and e.get("overdue"))
+        assert dues == [(datetime(2026, 8, 15), Decimal("-500.00")),
+                        (datetime(2026, 9, 15), Decimal("-500.00"))]
+
+
+def test_recurring_entries_by_each_user_appear_for_both(sw, sw_client, sw_db):
+    for who, name in (("a", "Alice rent"), ("b", "Bea internet")):
+        sw_post(sw_client, sw[who], "/budget-entries/", {
+            "name": name, "entry_type": "expense", "amount": 300,
+            "next_occurrence": "2026-10-25T00:00:00", "account_id": sw["joint"]})
+    for who in ("a", "b", "d"):
+        names = {e["name"] for e in _events(sw_db, sw[who])
+                 if e["date"] == datetime(2026, 10, 25)}
+        assert names == {"Alice rent", "Bea internet"}
+    # A viewer sees both as limited events, with their names (every account viewable).
+    viewer = [e for e in _events(sw_db, sw["v"]) if e["date"] == datetime(2026, 10, 25)]
+    assert sorted(e["name"] for e in viewer) == ["Alice rent", "Bea internet"]
+    assert {e["view"] for e in viewer} == {"limited"}
+    assert {e["source_id"] for e in viewer} == {None}
+
+
+def test_another_users_debit_on_joint_is_in_the_owners_projection(sw, sw_client, sw_db):
+    _txn(sw_client, sw["b"], sw["joint"], 80, "2026-10-22T00:00:00")
+    [e] = [e for e in _events(sw_db, sw["a"]) if e["date"] == datetime(2026, 10, 22)]
+    assert _legs(e) == [(sw["joint"], Decimal("-80.00"), True)]
+    assert e["amount"] == Decimal("-80.00")
+
+
+def test_owners_private_card_routed_to_joint_is_a_neutral_card_payment(sw, sw_client, sw_db):
+    _put(sw_client, sw["a"], f"/accounts/{sw['a_card']}", {"payment_account_id": sw["joint"]})
+    _txn(sw_client, sw["a"], sw["a_card"], 300, "2026-10-01T00:00:00", posted=True,
+         description=f"{PRIVATE} purchase")
+    [owner] = [e for e in _events(sw_db, sw["a"]) if e["source"] == "statement"]
+    assert owner["date"] == datetime(2026, 11, 5) and owner["source_id"] == sw["a_card"]
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["source"] == "statement"]
+    assert e["name"] == "Card payment" and e["source_id"] is None
+    assert e["date"] == datetime(2026, 11, 5)
+    assert e["amount"] == Decimal("-300.00") and e["face_amount"] == Decimal("300.00")
+    assert _legs(e) == [(sw["joint"], Decimal("-300.00"), True)]
+    for key in ("statement_close", "statement_balance"):
+        assert key not in e
+    assert sw_leaks(e, {sw["a_card"], sw["a_private"]}) == []
+
+
+def test_hidden_primary_with_joint_overflow_gets_no_leg(sw, sw_client, sw_db):
+    from app.services.forecast import project_running_balance
+
+    _put(sw_client, sw["a"], f"/accounts/{sw['a_card']}",
+         {"payment_overflow_account_id": sw["joint"]})
+    _txn(sw_client, sw["a"], sw["a_card"], 6_000, "2026-10-01T00:00:00", posted=True)
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["source"] == "statement"]
+    assert e["name"] == "Card payment" and e["legs"] == [] and e["amount"] == 0
+    assert e["counts_as_cash"] is False
+    sw_db.expire_all()
+    owner = project_running_balance(sw_db, sw["a"]["id"], days=60, reference=REF)
+    partner = project_running_balance(sw_db, sw["b"]["id"], days=60, reference=REF)
+    assert owner["overflow_moves"]  # the owner's 5,000 private balance falls 1,000 short
+    assert partner["overflow_moves"] == []
+
+    def joint(result):
+        return [a["closing_balance"] for a in result["by_account"]
+                if a["account_id"] == sw["joint"]]
+    assert joint(owner) == joint(partner) == [Decimal("10000.00")]
+
+
+def test_visible_card_with_a_hidden_payment_account_has_no_leg(sw, sw_client, sw_db):
+    card = _card(sw_client, sw, sw_db, payment=sw["a_private"])
+    _txn(sw_client, sw["a"], card, 120, "2026-10-02T00:00:00", posted=True)
+    [e] = [e for e in _events(sw_db, sw["b"]) if e["source"] == "statement"]
+    assert e["source_id"] == card and e["legs"] == []
+    assert e["funding_account_id"] is None and e["overflow_account_id"] is None
+    assert e["amount"] == 0 and e["face_amount"] == Decimal("120.00")
+    assert sw_leaks(e, {sw["a_private"]}) == []
+    [owner] = [e for e in _events(sw_db, sw["a"]) if e["source"] == "statement"]
+    assert _legs(owner) == [(sw["a_private"], Decimal("-120.00"), True)]
+
+
+def test_another_users_debit_on_a_shared_card_is_billed(sw, sw_client, sw_db):
+    card = _card(sw_client, sw, sw_db, payment=sw["joint"])
+    _txn(sw_client, sw["a"], card, 60, "2026-10-02T00:00:00", posted=True)
+    _txn(sw_client, sw["b"], card, 40, "2026-10-03T00:00:00", posted=True)
+    [e] = [e for e in _events(sw_db, sw["a"]) if e["source"] == "statement"]
+    assert e["date"] == datetime(2026, 10, 30) and e["amount"] == Decimal("-100.00")
+
+
+def test_transfer_into_the_partners_loan_is_neutral_for_the_owner(sw, sw_client, sw_db):
+    b_loan = sw_post(sw_client, sw["b"], "/accounts/", {
+        "name": "Bea student loan", "account_type": "loan", "loan_kind": "personal",
+        "balance": -8_000, "loan_annual_rate": 6, "loan_term_months": 24,
+        "loan_payment_amount": 400, "loan_first_payment_date": "2026-12-20",
+        "payment_account_id": sw["b_private"]})["id"]
+    _transfer(sw_client, sw["b"], sw["joint"], b_loan, 700, "2026-10-23T00:00:00",
+              transfer_fee=30)
+    [e] = [e for e in _events(sw_db, sw["a"]) if e["date"] == datetime(2026, 10, 23)]
+    assert e["name"] == "Loan payment" and e["source_id"] is None
+    assert "transfer_fee" not in e
+    assert e["amount"] == Decimal("-730.00")
+    assert _legs(e) == [(sw["joint"], Decimal("-730.00"), True)]
+    assert "Bea student loan" not in str(e)
+    assert sw_leaks(e, {b_loan}) == []
+
+
+def test_accountless_entries_never_reach_a_sharees_cash(sw, sw_client, sw_db):
+    from app.services.forecast import project_running_balance
+
+    sw_post(sw_client, sw["a"], "/budget-entries/", {
+        "name": "Pocket money", "entry_type": "expense", "amount": 90,
+        "next_occurrence": "2026-10-26T00:00:00"})
+    assert "Pocket money" in {e["name"] for e in _events(sw_db, sw["a"])}
+    for who in ("b", "v", "d"):
+        assert "Pocket money" not in {e["name"] for e in _events(sw_db, sw[who])}
+        result = project_running_balance(sw_db, sw[who]["id"], days=60, reference=REF)
+        assert result["unassigned_closing"] == 0
+
+
+@pytest.mark.skip(reason="T5: needs tag shares (the Household tag share is STU-233)")
+def test_t5_partner_records_on_joint_seen_through_owners_tag_share():
+    """Partner B's records on A's joint account, seen by C through A's tag share."""
+
+
+# --- Public shapes -----------------------------------------------------------------------
+
+def test_limited_events_have_the_allowlist_shape(sw, sw_client, sw_db):
+    from app.services.forecast import get_payables, get_upcoming_items, project_running_balance
+    from app.services.forecast import serialize_timeline
+
+    _put(sw_client, sw["a"], f"/accounts/{sw['a_card']}", {"payment_account_id": sw["joint"]})
+    _txn(sw_client, sw["a"], sw["a_card"], 300, "2026-10-01T00:00:00", posted=True,
+         description=f"{PRIVATE} purchase")
+    _transfer(sw_client, sw["a"], sw["joint"], sw["a_loan"], 4000, "2026-10-18T00:00:00",
+              transfer_fee=500)
+    b = sw["b"]["id"]
+    sw_db.expire_all()
+    upcoming = [i for i in get_upcoming_items(sw_db, b, days=60, reference=REF)
+                if i.get("view") == "limited"]
+    payables = [p for p in get_payables(sw_db, b, days=60, reference=REF)
+                if p.get("view") == "limited"]
+    timeline = serialize_timeline(project_running_balance(sw_db, b, days=60, reference=REF))
+    limited_timeline = [e for e in timeline["events"] if e.get("view") == "limited"]
+    assert upcoming and payables and limited_timeline
+    for item in upcoming + payables:
+        assert set(item) == LIMITED_EVENT_KEYS
+    for item in limited_timeline:
+        assert set(item) == LIMITED_EVENT_KEYS | {"running_balance"}
+    card = next(i for i in payables if i["kind"] == "card_payment")
+    assert card == {**card, "display_name": "Card payment", "cash_delta": -300.0,
+                    "face_amount": 300.0, "date": "2026-11-05",
+                    "account": {"id": sw["joint"], "name": "Joint account"}}
+    secret = {sw["a_card"], sw["a_loan"], sw["a_private"]}
+    for body in (upcoming, payables, timeline):
+        assert sw_leaks(body, secret, numbers=[500]) == []
+
+
+@pytest.mark.parametrize("who", ["b", "v", "d"])
+def test_projection_endpoints_carry_no_sentinel(sw, sw_client, sw_db, who):
+    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    _put(sw_client, sw["a"], f"/accounts/{sw['a_card']}",
+         {"payment_account_id": sw["joint"], "payment_overflow_account_id": sw["a_private"]})
+    _txn(sw_client, sw["a"], sw["a_card"], 300, soon, posted=True,
+         description=f"{PRIVATE} purchase")
+    _transfer(sw_client, sw["a"], sw["joint"], sw["a_loan"], 4000, soon, transfer_fee=500,
+              description=f"{PRIVATE} loan payment")
+    _transfer(sw_client, sw["a"], sw["a_private"], sw["joint"], 600, soon,
+              description=f"{PRIVATE} top-up")
+    sw_post(sw_client, sw["a"], "/budget-entries/", {
+        "name": f"{PRIVATE} insurance", "entry_type": "expense", "amount": 60,
+        "next_occurrence": soon, "account_id": sw["joint"],
+        "overflow_account_id": sw["a_private"]})
+    secret = {sw["a_card"], sw["a_loan"], sw["a_private"]}
+    for path in ("/forecast/upcoming?days=60", "/forecast/timeline?days=60",
+                 "/forecast/cashflow?months=3", "/forecast/disposable",
+                 "/dashboard/snapshot"):
+        r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+        assert r.status_code == 200, r.text
+        assert sw_leaks(r.json(), secret, numbers=[500]) == [], path
+
+
+# --- Statement legs: viewable accounts keep theirs (audit round 2, 7) --------------------
+
+def _deactivate(db, account_id):
+    from app.models.account import Account
+
+    db.get(Account, account_id).is_active = False
+    db.commit()
+
+
+def test_statement_legs_keep_inactive_own_funding_and_overflow_accounts(
+        sw_client, sw_db, sw_people):
+    """A user with no shares gets the pre-STU-232 output: an inactive account of
+    their own still funds (or overflows) a card statement, as before."""
+    from app.services.forecast import project_running_balance
+
+    u = sw_people("Una", "Solo")
+    main = sw_post(sw_client, u, "/accounts/", {
+        "name": "Main", "account_type": "checking", "balance": 1_000})["id"]
+    old = sw_post(sw_client, u, "/accounts/", {
+        "name": "Old bank", "account_type": "checking", "balance": 9_000})["id"]
+    card = sw_post(sw_client, u, "/accounts/", {
+        "name": "Card", "account_type": "credit", "balance": 0, "billing_cycle_start": 10,
+        "days_until_due_date": 20, "payment_account_id": main,
+        "payment_overflow_account_id": old})["id"]
+    stale = sw_post(sw_client, u, "/accounts/", {
+        "name": "Stale card", "account_type": "credit", "balance": 0, "billing_cycle_start": 10,
+        "days_until_due_date": 20, "payment_account_id": old})["id"]
+    _txn(sw_client, u, card, 1_500, "2026-10-02T00:00:00", posted=True)
+    _txn(sw_client, u, stale, 200, "2026-10-03T00:00:00", posted=True)
+    _deactivate(sw_db, old)
+
+    statements = {e["source_id"]: e for e in _events(sw_db, u) if e["source"] == "statement"}
+    paid = statements[card]
+    assert paid["date"] == datetime(2026, 10, 30)
+    assert paid["legs"] == [{"account_id": main, "amount": Decimal("-1500.00"),
+                             "overflow_account_id": old, "cash": True}]
+    assert paid["amount"] == Decimal("-1500.00")
+    assert (paid["funding_account_id"], paid["overflow_account_id"]) == (main, old)
+    unpaid = statements[stale]
+    assert unpaid["date"] == datetime(2026, 10, 30)
+    assert unpaid["legs"] == [{"account_id": old, "amount": Decimal("-200.00"),
+                               "overflow_account_id": None, "cash": True}]
+    assert unpaid["amount"] == Decimal("-200.00")
+    assert unpaid["funding_account_id"] == old
+
+    sw_db.expire_all()
+    result = project_running_balance(sw_db, u["id"], days=60, reference=REF)
+    # The inactive overflow has no opening balance in the projection, so nothing
+    # is pulled from it; the inactive funder's leg lands in unassigned cash.
+    assert result["overflow_moves"] == []
+    closings = {a["account_id"]: a["closing_balance"] for a in result["by_account"]}
+    assert closings == {main: Decimal("-500.00")}
+    assert result["unassigned_closing"] == Decimal("-200.00")
+    assert result["closing_balance"] == Decimal("-700.00")
+
+
+def test_statement_legs_skip_a_hidden_funding_or_overflow_account(sw, sw_client, sw_db):
+    """A card shared with the partner, paid from the owner's private account with
+    the joint account as overflow, and one paid from the joint account with the
+    private one as overflow: the partner gets no leg, and no id, for the
+    private account (STU-227)."""
+    a, b, joint, private = sw["a"], sw["b"], sw["joint"], sw["a_private"]
+    hidden_primary = _card(sw_client, sw, sw_db, payment=private, overflow=joint,
+                           name="Card one")
+    hidden_overflow = _card(sw_client, sw, sw_db, payment=joint, overflow=private,
+                            name="Card two")
+    _txn(sw_client, a, hidden_primary, 300, "2026-10-12T00:00:00", posted=True)
+    _txn(sw_client, a, hidden_overflow, 400, "2026-10-12T00:00:00", posted=True)
+    statements = {e["source_id"]: e for e in _events(sw_db, b) if e["source"] == "statement"}
+    one, two = statements[hidden_primary], statements[hidden_overflow]
+    assert one["legs"] == [] and one["amount"] == 0
+    assert (one["funding_account_id"], one["overflow_account_id"]) == (None, None)
+    assert two["legs"] == [{"account_id": joint, "amount": Decimal("-400.00"),
+                            "overflow_account_id": None, "cash": True}]
+    assert (two["funding_account_id"], two["overflow_account_id"]) == (joint, None)
+    owner = {e["source_id"]: e for e in _events(sw_db, a) if e["source"] == "statement"}
+    assert owner[hidden_primary]["legs"][0]["account_id"] == private
+    assert owner[hidden_overflow]["legs"][0]["overflow_account_id"] == private
+
+
+# --- Occurrence suppression (audit round 1, K) -------------------------------------------
+
+def test_a_hand_linked_transfer_from_another_own_account_still_suppresses(
+        sw_client, sw_db, sw_people):
+    """A user with no shares, as before shared accounts: their own linked row on any
+    of their accounts stands in for the occurrence on its day."""
+    u = sw_people("Una", "Solo")
+    main = sw_post(sw_client, u, "/accounts/", {
+        "name": "Main", "account_type": "checking", "balance": 1_000})["id"]
+    other = sw_post(sw_client, u, "/accounts/", {
+        "name": "Other", "account_type": "checking", "balance": 1_000})["id"]
+    savings = sw_post(sw_client, u, "/accounts/", {
+        "name": "Savings", "account_type": "savings", "balance": 0})["id"]
+    entry = sw_post(sw_client, u, "/budget-entries/", {
+        "name": "Save", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": main,
+        "transfer_to_account_id": savings})["id"]
+    _transfer(sw_client, u, other, savings, 100, "2026-10-25T00:00:00", posted=True,
+              budget_entry_id=entry)
+    dates = sorted(e["date"] for e in _events(sw_db, u) if e["source_id"] == entry)
+    assert dates == [datetime(2026, 11, 25)]
+
+
+def test_another_users_private_row_never_suppresses_a_joint_occurrence(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction, TransactionType
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    pot = sw_post(sw_client, a, "/accounts/", {
+        "name": "Joint savings", "account_type": "savings", "balance": 0})["id"]
+    sw_share(sw_db, pot, b["id"], "editor", a["id"])
+    entry = sw_post(sw_client, a, "/budget-entries/", {
+        "name": "Joint saving", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "transfer_to_account_id": pot})["id"]
+    # A stale link (the API refuses it): the partner's row on their private account.
+    sw_db.add(Transaction(
+        user_id=b["id"], created_by_actor=b["id"], account_id=sw["b_private"],
+        transaction_type=TransactionType.DEBIT, amount=100, transfer_fee=0,
+        currency="PHP", transaction_date=datetime(2026, 10, 25), is_posted=True,
+        is_recurring=False, budget_entry_id=entry, description="Bea"))
+    sw_db.commit()
+    for who in ("a", "b"):
+        dates = sorted(e["date"] for e in _events(sw_db, sw[who])
+                       if e["name"] == "Joint saving")
+        assert dates == [datetime(2026, 10, 25), datetime(2026, 11, 25)], who
+
+
+def test_a_private_row_never_suppresses_a_shared_occurrence(sw, sw_client, sw_db):
+    """Audit round 2, 3: the partner's own row on their private account, linked to
+    their own recurring transfer on the joint account, takes nothing out of the
+    owner's projection (who cannot read that row); a row on the entry's own
+    accounts still stands in for its occurrence."""
+    from app.services.forecast import project_running_balance
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    pot = sw_post(sw_client, a, "/accounts/", {
+        "name": "Joint savings", "account_type": "savings", "balance": 0})["id"]
+    sw_share(sw_db, pot, b["id"], "editor", a["id"])
+    entry = sw_post(sw_client, b, "/budget-entries/", {
+        "name": "Bea saving", "entry_type": "expense", "amount": 100, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "transfer_to_account_id": pot})["id"]
+
+    def closings():
+        sw_db.expire_all()
+        result = project_running_balance(sw_db, a["id"], days=60, reference=REF)
+        return {k: v for k, v in ((x["account_id"], x["closing_balance"])
+                                  for x in result["by_account"]) if k in (joint, pot)}
+
+    expected = {joint: Decimal("9800.00"), pot: Decimal("200.00")}
+    assert closings() == expected
+    # Bea's own debit on her private account, linked to her entry, on its day.
+    _txn(sw_client, b, sw["b_private"], 100, "2026-10-25T00:00:00", posted=True,
+         budget_entry_id=entry)
+    assert closings() == expected
+    for who in ("a", "b"):
+        dates = sorted(e["date"] for e in _events(sw_db, sw[who]) if e["name"] == "Bea saving")
+        assert dates == [datetime(2026, 10, 25), datetime(2026, 11, 25)], who
+    # Materialising it (a row from the joint account into the pot) still does.
+    r = sw_client.post(f"{API}/budget-entries/{entry}/materialize", headers=b["headers"],
+                       json={"advance": False})
+    assert r.status_code in (200, 201), r.text
+    assert closings() == {joint: Decimal("9800.00"), pot: Decimal("200.00")}
+    dates = sorted(e["date"] for e in _events(sw_db, b) if e["name"] == "Bea saving")
+    assert dates == [datetime(2026, 11, 25)]
+
+
+def test_a_private_row_never_counts_as_a_paid_installment_on_a_shared_account(
+        sw, sw_client, sw_db):
+    """The same rule for ``occurrences_paid``, which the owner is shown on the
+    partner's installment on the joint account."""
+    b, joint = sw["b"], sw["joint"]
+    entry = sw_post(sw_client, b, "/budget-entries/", {
+        "name": "Bea installment", "entry_type": "expense", "amount": 100,
+        "cadence": "monthly", "next_occurrence": "2026-10-25T00:00:00", "account_id": joint,
+        "end_mode": "after_occurrences", "max_occurrences": 6})["id"]
+    _txn(sw_client, b, sw["b_private"], 100, "2026-10-25T00:00:00", posted=True,
+         budget_entry_id=entry)
+
+    def paid(who):
+        r = sw_client.get(f"{API}/budget-entries/{entry}", headers=sw[who]["headers"])
+        assert r.status_code == 200, r.text
+        return r.json()["occurrences_paid"]
+
+    assert (paid("a"), paid("b")) == (0, 0)
+    r = sw_client.post(f"{API}/budget-entries/{entry}/materialize", headers=b["headers"],
+                       json={})
+    assert r.status_code in (200, 201), r.text
+    assert (paid("a"), paid("b")) == (1, 1)
+
+
+# --- A hidden account's wallet flag changes nothing (audit round 2, 4) -------------------
+
+@pytest.mark.parametrize("who", ["b", "v", "d"])
+def test_a_hidden_wallet_flag_changes_nothing_the_sharee_is_shown(sw, sw_client, sw_db, who):
+    """A monthly transfer of 100 from the joint account into the owner's private
+    cash account, recurring and planned: flipping that hidden account's
+    ``is_spending_wallet`` leaves disposable income, payables, upcoming items, the
+    timeline, the cash flow and the whole dashboard snapshot unchanged."""
+    from app.models.account import Account
+
+    a, joint = sw["a"], sw["joint"]
+    hidden = sw_post(sw_client, a, "/accounts/", {
+        "name": f"{PRIVATE} cash", "account_type": "cash", "balance": 0})["id"]
+    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    sw_post(sw_client, a, "/budget-entries/", {
+        "name": f"{PRIVATE} allowance", "entry_type": "expense", "amount": 100,
+        "cadence": "monthly", "next_occurrence": soon, "account_id": joint,
+        "transfer_to_account_id": hidden})
+    _transfer(sw_client, a, joint, hidden, 40, soon, description=f"{PRIVATE} top-up")
+
+    def shown():
+        sw_db.expire_all()
+        out = {}
+        for path in ("/forecast/disposable", "/forecast/upcoming?days=30",
+                     "/forecast/timeline?days=60", "/forecast/cashflow?months=3",
+                     "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def flag(value):
+        sw_db.get(Account, hidden).is_spending_wallet = value
+        sw_db.commit()
+
+    before = shown()
+    snapshot = before["/dashboard/snapshot"]
+    assert snapshot["monthly_summary"]["monthly_expenses"] == 0.0
+    assert snapshot["payables"] == []
+    flag(True)
+    after = shown()
+    for path in before:
+        assert after[path] == before[path], path
+    assert sw_leaks(after, {hidden}) == []
+    # The owner, who sees the account, gets it as a wallet: a top-up each month.
+    sw_db.expire_all()
+    own = sw_client.get(f"{API}/forecast/disposable", headers=a["headers"]).json()
+    assert own["monthly_expenses"] == 100.0
+
+
+# --- A hidden card's billing settings change nothing (audit round 3, 2) ------------------
+
+@pytest.mark.parametrize("direction", ["into_card", "from_card"])
+def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
+        sw, sw_client, sw_db, direction):
+    """A planned transfer of 100 between the joint account and the owner's private
+    card, either way: the joint leg always moves cash for a sharee (-100 into the
+    card, +100 from it), and flipping the hidden card's cycle settings leaves
+    upcoming items, payables, the timeline, the cash flow and the whole dashboard
+    snapshot unchanged."""
+    from app.models.account import Account
+
+    a, joint, card = sw["a"], sw["joint"], sw["a_card"]
+    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    frm, to = (joint, card) if direction == "into_card" else (card, joint)
+    _transfer(sw_client, a, frm, to, 100, soon, description=f"{PRIVATE} card move")
+    expected = -100.0 if direction == "into_card" else 100.0
+
+    def shown(who):
+        sw_db.expire_all()
+        out = {}
+        for path in ("/forecast/disposable", "/forecast/upcoming?days=30",
+                     "/forecast/timeline?days=60", "/forecast/cashflow?months=3",
+                     "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def cycle(billed):
+        account = sw_db.get(Account, card)
+        account.billing_cycle_start = 15 if billed else None
+        account.due_date = None
+        sw_db.commit()
+
+    for who in ("b", "v", "d"):
+        cycle(True)
+        billed = shown(who)
+        events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
+        assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
+        cycle(False)
+        unbilled = shown(who)
+        for path in billed:
+            assert unbilled[path] == billed[path], (who, path)
+        events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
+        assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
+        assert sw_leaks(unbilled, {card}) == []
+
+
+# --- A hidden card's billing settings change no statement (audit round 4, 2) -------------
+
+def test_a_hidden_cards_billing_settings_change_no_shared_statement(sw, sw_client, sw_db):
+    """A shared card with a 1,000 charge and a 100 payment from the owner's private
+    card. A sharee always sees the payment net the statement (900 due), and
+    flipping only the private card's cycle settings leaves their statements,
+    upcoming items, payables, timeline, cash flow and dashboard unchanged. The
+    owner, who can view the private card, still sees it as before: without cycle
+    settings its payment is not netted."""
+    from app.models.account import Account
+
+    a, private_card = sw["a"], sw["a_card"]
+    card = _card(sw_client, sw, sw_db, payment=sw["joint"], share=("b",))
+    sw_share(sw_db, card, sw["v"]["id"], "viewer", a["id"])
+    sw_share(sw_db, card, sw["d"]["id"], "admin", a["id"])
+    today = datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    _txn(sw_client, a, card, 1000, today.isoformat(), posted=True,
+         description="Groceries")
+    _transfer(sw_client, a, private_card, card, 100, today.isoformat(), posted=True,
+              description=f"{PRIVATE} card payment")
+
+    def shown(who):
+        sw_db.expire_all()
+        out = {}
+        for path in (f"/accounts/{card}/statements", "/forecast/disposable",
+                     "/forecast/upcoming?days=60", "/forecast/timeline?days=90",
+                     "/forecast/cashflow?months=4", "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def cycle(billed):
+        account = sw_db.get(Account, private_card)
+        account.billing_cycle_start = 15 if billed else None
+        account.due_date = None
+        sw_db.commit()
+
+    def due(body):
+        return sum(s["amount_due"] for s in body[f"/accounts/{card}/statements"]["statements"])
+
+    def payable(who):
+        return [e["amount"] for e in _events(sw_db, sw[who])
+                if e["counts_as_cash"] and e["date"] > today]
+
+    for who in ("b", "v", "d"):
+        cycle(True)
+        billed = shown(who)
+        assert due(billed) == 900.0, (who, billed[f"/accounts/{card}/statements"])
+        assert payable(who) == [Decimal("-900.00")], who
+        cycle(False)
+        unbilled = shown(who)
+        for path in billed:
+            assert unbilled[path] == billed[path], (who, path)
+        assert payable(who) == [Decimal("-900.00")], who
+        assert sw_leaks(unbilled, {private_card}) == []
+
+    cycle(True)
+    assert due(shown("a")) == 900.0
+    cycle(False)
+    assert due(shown("a")) == 1000.0

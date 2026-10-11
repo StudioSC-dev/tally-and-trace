@@ -361,7 +361,11 @@ def test_entry_and_transactions_on_an_inactive_wallet_are_still_wallet_spending(
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
 
 
-def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, user, owners):
+def test_entry_funded_from_an_account_the_caller_cant_view_moves_no_cash(db, user, owners):
+    """A stale entity-era entry on another user's account: that account is outside
+    the scope, so the occurrence moves no cash. Whether that account is a wallet
+    is never read (STU-232 audit round 2, 4): the occurrence is listed, limited,
+    with no leg."""
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import collect_events, project_running_balance
@@ -372,7 +376,8 @@ def test_entry_funded_from_an_out_of_scope_wallet_is_still_wallet_spending(db, u
     _entry(db, biz, "Parking", BudgetEntryType.EXPENSE, "500.00", datetime(2026, 11, 3),
            account=personal_wallet)
 
-    assert collect_events(db, REF, datetime(2026, 12, 1), user_id=biz.id) == []
+    events = collect_events(db, REF, datetime(2026, 12, 1), user_id=biz.id)
+    assert [(e["name"], e["legs"], e["amount"]) for e in events] == [("Recurring expense", [], 0)]
     r = project_running_balance(db, biz.id, days=30, reference=REF)
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
 
@@ -420,15 +425,17 @@ def test_cross_owner_recurring_transfer_keeps_each_views_in_scope_leg(db, owners
     _entry(db, a, "SecB to BDO", BudgetEntryType.EXPENSE, "8000.00", datetime(2026, 11, 1),
            account=secb, transfer_to_account_id=bdo.id)
 
+    # B cannot view SecB, so A's entry shows under its neutral label.
     view_b = project_running_balance(db, b.id, days=30, reference=REF)
     assert view_b["account_shortfalls"] == []
     assert [(e["name"], e["amount"]) for e in view_b["events"]] == [
-        ("SecB to BDO", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
+        ("Recurring transfer", Decimal("8000.00")), ("BDO loan", Decimal("-8000.00"))]
     assert _closings(view_b) == {"BDO": Decimal("0.00")}
 
+    # A created it but cannot view BDO, so it reads the neutral label too.
     view_a = project_running_balance(db, a.id, days=30, reference=REF)
     assert [(e["name"], e["amount"]) for e in view_a["events"]] == [
-        ("SecB to BDO", Decimal("-8000.00"))]
+        ("Recurring transfer", Decimal("-8000.00"))]
     assert _closings(view_a) == {"SecB": Decimal("12000.00")}
 
 
@@ -533,8 +540,11 @@ def test_disposable_income_does_not_expense_a_top_up_funded_from_another_user(
         "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
 
 
-def test_disposable_income_expenses_a_top_up_it_funds_into_another_users_wallet(
+def test_disposable_income_never_reads_the_wallet_flag_of_another_users_account(
         db, owners):
+    """Created by A, funded from B's bank into A's wallet, which B can't view: for
+    B it is money moved out to another account, never a top-up, whatever A's
+    wallet flag says (STU-232 audit round 2, 4)."""
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
     from app.services.forecast import get_disposable_income
@@ -543,12 +553,11 @@ def test_disposable_income_expenses_a_top_up_it_funds_into_another_users_wallet(
     wallet = _account(db, a, "A GCash", AccountType.E_WALLET, "0.00",
                       is_spending_wallet=True)
     theirs = _account(db, b, "B Bank", AccountType.SAVINGS, "0.00")
-    # Created by A, funded from B's bank: B's money leaves B's scope.
     _entry(db, a, "Load from B", BudgetEntryType.EXPENSE, "1000.00", REF,
            account=theirs, transfer_to_account_id=wallet.id)
 
     assert get_disposable_income(db, b.id) == {
-        "monthly_income": 0.0, "monthly_expenses": 1000.0, "monthly_disposable": -1000.0}
+        "monthly_income": 0.0, "monthly_expenses": 0.0, "monthly_disposable": 0.0}
 
 
 def test_disposable_income_offsets_a_return_created_by_another_user(db, owners):

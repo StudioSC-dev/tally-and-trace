@@ -515,7 +515,10 @@ def check_currency(loan, funding) -> None:
 def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account,
                    principal: Decimal, interest: Decimal, kind: str,
                    when: datetime, is_posted: bool, description: Optional[str]) -> Transaction:
-    """Add the transfer funding -> loan and apply it to both balances (not committed)."""
+    """Add the transfer funding -> loan and apply it to both balances (not committed).
+
+    ``user_id`` is the caller: the row's owner and its ``created_by_actor``.
+    """
     principal, interest = cents(principal), cents(interest)
     check_currency(loan, funding)
     if principal < 0 or interest < 0:
@@ -527,6 +530,7 @@ def record_payment(db: Session, *, user_id: int, loan: Account, funding: Account
 
     txn = Transaction(
         user_id=user_id,
+        created_by_actor=user_id,
         account_id=funding.id,
         transfer_from_account_id=funding.id,
         transfer_to_account_id=loan.id,

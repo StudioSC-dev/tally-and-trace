@@ -15,7 +15,23 @@ export type {
   RecurrenceFrequency,
   EndMode,
   Transaction,
+  FullTransaction,
+  SharedFullTransaction,
+  LimitedTransaction,
   TransactionType,
+  FullBudgetEntry,
+  SharedFullBudgetEntry,
+  LimitedBudgetEntry,
+  RecordView,
+  RecordPermissions,
+  AccountRole,
+  AccountPermissions,
+  AccountRef,
+  ShareRole,
+  UserMatch,
+  AccountShare,
+  AccountShares,
+  ReceivedShare,
   WishlistItem,
   WishlistItemPriority,
   PaginatedResponse,
@@ -42,6 +58,12 @@ export type {
   LoanPrepaymentRequest,
   LoanSchedule,
   LoanScheduleRow,
+  LimitedLoanSchedule,
+  LoanScheduleResponse,
+  CardStatementsResponse,
+  BalanceHistoryEntry,
+  LimitedEvent,
+  LimitedTimelineEvent,
   Tag,
   TagRef,
   TagCreate,
@@ -67,7 +89,14 @@ import type {
   WishlistPlan,
   LoanPaymentRequest,
   LoanPrepaymentRequest,
-  LoanSchedule,
+  LoanScheduleResponse,
+  CardStatementsResponse,
+  AccountShares,
+  AccountShare,
+  ReceivedShare,
+  ShareCreate,
+  ShareUpdate,
+  UserMatch,
   Tag,
   TagCreate,
   TagUpdate,
@@ -81,7 +110,7 @@ import type {
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
@@ -107,9 +136,15 @@ export const accountingApi = createApi({
       query: (id) => ({ url: `accounts/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Account'],
     }),
-    getLoanSchedule: builder.query<LoanSchedule, number>({
+    // An owner, admin or editor gets the full schedule; a viewer gets the limited one.
+    getLoanSchedule: builder.query<LoanScheduleResponse, number>({
       query: (id) => `accounts/${id}/loan-schedule`,
       providesTags: ['Account'],
+    }),
+    // Credit accounts only (anything else is a 400).
+    getAccountStatements: builder.query<CardStatementsResponse, number>({
+      query: (id) => `accounts/${id}/statements`,
+      providesTags: ['Account', 'Transaction'],
     }),
     recordLoanPayment: builder.mutation<Transaction, { id: number; data: LoanPaymentRequest }>({
       query: ({ id, data }) => ({ url: `accounts/${id}/loan-payment`, method: 'POST', body: data }),
@@ -261,6 +296,17 @@ export const accountingApi = createApi({
       },
       invalidatesTags: ['Transaction'],
     }),
+    // A receipt is served only behind auth (GET /transactions/{id}/receipt), so it is
+    // fetched as a blob and shown through an object URL; the caller revokes the URL.
+    fetchReceipt: builder.mutation<{ url: string; type: string }, number>({
+      query: (transactionId) => ({
+        url: `transactions/${transactionId}/receipt`,
+        cache: 'no-store',
+        responseHandler: (response: Response) =>
+          response.ok ? response.blob() : response.json().catch(() => null),
+      }),
+      transformResponse: (blob: Blob) => ({ url: URL.createObjectURL(blob), type: blob.type }),
+    }),
     getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number; tag?: number }>({
       query: (params) => ({ url: 'transactions/summary/period', params }),
       providesTags: ['Transaction'],
@@ -290,6 +336,50 @@ export const accountingApi = createApi({
     deleteTag: builder.mutation<void, number>({
       query: (id) => ({ url: `tags/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
+    }),
+
+    // ── Shares ────────────────────────────────────────────────────────────────
+    // Owner or admin only (and never a demo user: those get 403). Any share change
+    // refreshes the shares and the accounts, which carry the role and owner name.
+    getAccountShares: builder.query<AccountShares, number>({
+      query: (accountId) => `accounts/${accountId}/shares`,
+      providesTags: ['Share'],
+    }),
+    // An account's first share changes which rows count as paid installments of its
+    // recurring entries, and any share changes how its records read, so every share
+    // change refreshes like leaveShare. Demoting or removing a share also deactivates
+    // the recurring entries that person kept on the account.
+    createAccountShare: builder.mutation<AccountShare, { accountId: number; data: ShareCreate }>({
+      query: ({ accountId, data }) => ({ url: `accounts/${accountId}/shares`, method: 'POST', body: data }),
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    updateAccountShare: builder.mutation<AccountShare, { accountId: number; shareId: number; data: ShareUpdate }>({
+      query: ({ accountId, shareId, data }) => ({
+        url: `accounts/${accountId}/shares/${shareId}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    deleteAccountShare: builder.mutation<void, { accountId: number; shareId: number }>({
+      query: ({ accountId, shareId }) => ({ url: `accounts/${accountId}/shares/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    // Shares other people made to the caller.
+    getReceivedShares: builder.query<ReceivedShare[], void>({
+      query: () => 'shares/received',
+      providesTags: ['ReceivedShare'],
+    }),
+    // Leaving drops the account and every record, entry and projection that came through it.
+    leaveShare: builder.mutation<void, number>({
+      query: (shareId) => ({ url: `shares/received/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: ['ReceivedShare', 'Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    // Exact, case-insensitive email match; 404 "No matching user" otherwise; 429 when
+    // the caller looks up too often (10 per 60 seconds).
+    lookupUser: builder.query<UserMatch, string>({
+      query: (email) => ({ url: 'users/lookup', params: { email } }),
+      keepUnusedDataFor: 0,
     }),
 
     // ── Wishlist ──────────────────────────────────────────────────────────────
@@ -327,6 +417,7 @@ export const {
   useDeleteAccountMutation,
   useGetAccountBalanceQuery,
   useGetLoanScheduleQuery,
+  useGetAccountStatementsQuery,
   useRecordLoanPaymentMutation,
   useRecordLoanPrepaymentMutation,
 
@@ -363,6 +454,7 @@ export const {
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
+  useFetchReceiptMutation,
   useGetTransactionSummaryQuery,
 
   // Tag hooks
@@ -370,6 +462,15 @@ export const {
   useCreateTagMutation,
   useUpdateTagMutation,
   useDeleteTagMutation,
+
+  // Share hooks
+  useGetAccountSharesQuery,
+  useCreateAccountShareMutation,
+  useUpdateAccountShareMutation,
+  useDeleteAccountShareMutation,
+  useGetReceivedSharesQuery,
+  useLeaveShareMutation,
+  useLazyLookupUserQuery,
 
   // Forecast hooks
   useGetForecastTimelineQuery,

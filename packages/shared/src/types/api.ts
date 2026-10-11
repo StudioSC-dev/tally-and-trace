@@ -1,4 +1,5 @@
 import type { CurrencyCode } from '../utils/currency'
+import type { AccountPermissions, AccountRef, AccountRole, RecordPermissions } from './access'
 
 // ─── Tag ─────────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,12 @@ export interface Account {
   account_type: AccountType
   balance: number
   currency: CurrencyCode
-  description?: string
-  credit_limit?: number
+  /**
+   * `description`, `credit_limit`, the routing ids and the loan terms below come back
+   * null for an editor or viewer on a shared account. Hide them; don't show empty or zero.
+   */
+  description?: string | null
+  credit_limit?: number | null
   /** Day of month the payment is due. Legacy: prefer billing_cycle_start. */
   due_date?: number
   /** Day of month the statement closes. */
@@ -93,10 +98,18 @@ export interface Account {
   tags: TagRef[]
   created_at: string
   updated_at?: string
+  /** The caller's role on the account. */
+  my_role: AccountRole
+  /** Who owns the account ("First L."). */
+  owner_name: string | null
+  permissions: AccountPermissions
 }
 
 /** POST /accounts/ and PUT /accounts/{id}. */
-export type AccountInput = Partial<Omit<Account, 'tags'>> & TagIdsInput
+export type AccountInput = Partial<
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
+> &
+  TagIdsInput
 
 // ─── Loan payments and schedule ──────────────────────────────────────────────
 
@@ -150,12 +163,18 @@ export interface LoanScheduleRow {
   balance_after: number | null
 }
 
-/** GET /accounts/{id}/loan-schedule. */
+/**
+ * GET /accounts/{id}/loan-schedule for an owner, admin or editor. Loan terms are the
+ * owner's and admins' only: for an editor, `amortization`, `annual_rate`,
+ * `payment_amount`, `term_months`, `first_payment_date` and `proposed_split` are null,
+ * and so are each upcoming row's `principal`, `interest` and `balance_after`.
+ */
 export interface LoanSchedule {
+  view: 'full'
   account_id: number
   name: string
   loan_kind: LoanKind | null
-  amortization: LoanAmortization
+  amortization: LoanAmortization | null
   /** What is still owed (= -balance, never below zero). */
   owed: number
   annual_rate: number | null
@@ -169,6 +188,87 @@ export interface LoanSchedule {
   payments: LoanSchedulePayment[]
   upcoming: LoanScheduleRow[]
 }
+
+export interface LimitedLoanScheduleRow {
+  /** ISO date: when the payment was made (`paid`) or falls due (`open`). */
+  due_date: string
+  /** Principal and interest together. */
+  amount: number | null
+  status: 'paid' | 'open'
+}
+
+/**
+ * GET /accounts/{id}/loan-schedule for a viewer. No rate, term, amortisation, first
+ * payment date, balance after, principal/interest split or row ids.
+ */
+export interface LimitedLoanSchedule {
+  view: 'limited'
+  name: string
+  currency: CurrencyCode
+  owed: number
+  next_due_date: string | null
+  payments_left: number | null
+  rows: LimitedLoanScheduleRow[]
+}
+
+export type LoanScheduleResponse = LoanSchedule | LimitedLoanSchedule
+
+// ─── Card statements ─────────────────────────────────────────────────────────
+
+export type StatementStatus = 'paid' | 'overdue' | 'open'
+
+export interface StatementLine {
+  /** ISO datetime. */
+  date: string
+  display_description: string | null
+  amount: number
+  transaction_id: number
+}
+
+export interface Statement {
+  close_date: string
+  due_date: string
+  amount_due: number
+  currency: CurrencyCode
+  status: StatementStatus
+  /** The statement's total before payments. */
+  statement_balance: number
+  lines: StatementLine[]
+}
+
+/** GET /accounts/{id}/statements for an owner, admin or editor (credit accounts only). */
+export interface CardStatements {
+  view: 'full'
+  account_id: number
+  name: string
+  currency: CurrencyCode
+  statements: Statement[]
+}
+
+export interface LimitedStatementLine {
+  date: string
+  display_description: string | null
+  amount: number
+}
+
+export interface LimitedStatement {
+  close_date: string
+  due_date: string
+  amount_due: number
+  currency: CurrencyCode
+  status: StatementStatus
+  lines: LimitedStatementLine[]
+}
+
+/** GET /accounts/{id}/statements for a viewer. */
+export interface LimitedCardStatements {
+  view: 'limited'
+  name: string
+  currency: CurrencyCode
+  statements: LimitedStatement[]
+}
+
+export type CardStatementsResponse = CardStatements | LimitedCardStatements
 
 // ─── Category ───────────────────────────────────────────────────────────────
 
@@ -230,9 +330,9 @@ export type RecurrenceFrequency =
   | 'annual'
 export type EndMode = 'indefinite' | 'on_date' | 'after_occurrences'
 
-export interface BudgetEntry {
+/** The fields a recurring entry has in every shape except Limited. */
+interface RecurringEntryDetail {
   id: number
-  user_id: number
   entry_type: BudgetEntryType
   name: string
   description?: string
@@ -259,29 +359,78 @@ export interface BudgetEntry {
   overflow_account_id?: number | null
   /** Recurring transfer: occurrences move money from account_id to this non-credit account. */
   transfer_to_account_id?: number | null
-  category_id?: number
-  allocation_id?: number
   is_autopay: boolean
   is_active: boolean
-  /** The entry's own tags (the caller's). */
+  /** The caller's tags on the entry. */
   tags: TagRef[]
   created_at: string
   updated_at?: string
+  permissions: RecordPermissions
+  /** Who created the entry ("First L."). */
+  created_by: string | null
 }
 
-/** POST /budget-entries/ and PUT /budget-entries/{id}. */
-export type BudgetEntryInput = Partial<Omit<BudgetEntry, 'tags'>> & TagIdsInput
+/** `view` "full": the creator's own entry. */
+export interface FullBudgetEntry extends RecurringEntryDetail {
+  view: 'full'
+  category_id?: number
+  allocation_id?: number
+}
+
+/**
+ * `view` "shared_full": an editor's or admin's view of someone else's entry. The
+ * category and allocation stay the creator's, so only `category_name` (read-only) shows.
+ */
+export interface SharedFullBudgetEntry extends RecurringEntryDetail {
+  view: 'shared_full'
+  category_name: string | null
+}
+
+/** `view` "limited": the allowlist for everyone else. */
+export interface LimitedBudgetEntry {
+  view: 'limited'
+  id: number
+  permissions: RecordPermissions
+  created_by: string | null
+  display_name: string | null
+  amount: number
+  currency: CurrencyCode
+  entry_type: BudgetEntryType
+  cadence: RecurrenceFrequency
+  next_occurrence: string
+  end_date: string | null
+  category_name: string | null
+  account: AccountRef | null
+  counterpart: AccountRef | null
+  tags: TagRef[]
+}
+
+/** A recurring entry as the API returns it; narrow on `view` before reading a field Limited lacks. */
+export type BudgetEntry = FullBudgetEntry | SharedFullBudgetEntry | LimitedBudgetEntry
+
+/**
+ * POST /budget-entries/ and PUT /budget-entries/{id}. A non-creator editing a
+ * `shared_full` entry must not send `category_id` or `allocation_id`.
+ */
+export type BudgetEntryInput = Partial<
+  Omit<
+    FullBudgetEntry,
+    'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid'
+  >
+> &
+  TagIdsInput & {
+    /** Installments paid before import with no linked transaction. */
+    occurrences_paid_offset?: number
+  }
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
 
 export type TransactionType = 'debit' | 'credit' | 'transfer'
 
-export interface Transaction {
+/** The fields a transaction has in every shape except Limited. */
+interface TransactionDetail {
   id: number
   account_id: number
-  category_id?: number
-  allocation_id?: number
-  budget_entry_id?: number
   amount: number
   currency: CurrencyCode
   projected_amount?: number
@@ -293,8 +442,6 @@ export interface Transaction {
   transaction_type: TransactionType
   transaction_date: string
   posting_date?: string
-  receipt_url?: string
-  invoice_url?: string
   is_posted: boolean
   is_reconciled: boolean
   is_recurring: boolean
@@ -311,14 +458,71 @@ export interface Transaction {
    * edit leaves null; a posted legacy transfer into a loan cannot be unposted.
    */
   loan_payment_kind?: LoanPaymentKind | null
-  /** The transaction's own tags (the caller's). */
+  /** The caller's tags on the transaction. */
   tags: TagRef[]
   created_at: string
   updated_at?: string
+  permissions: RecordPermissions
+  /** Who created the transaction ("First L."). */
+  created_by: string | null
 }
 
-/** POST /transactions/ and PUT /transactions/{id}. */
-export type TransactionInput = Partial<Omit<Transaction, 'tags'>> & TagIdsInput
+/** `view` "full": the creator's own transaction. */
+export interface FullTransaction extends TransactionDetail {
+  view: 'full'
+  category_id?: number
+  allocation_id?: number
+  budget_entry_id?: number
+  /** An uploaded receipt is `/api/v1/transactions/{id}/receipt`, fetched with the bearer token. */
+  receipt_url?: string
+  invoice_url?: string
+}
+
+/**
+ * `view` "shared_full": an editor's or admin's view of someone else's transaction.
+ * Category, allocation, recurring-entry link and attachments stay the creator's, so
+ * only `category_name` (read-only) shows and an edit must not send those fields.
+ */
+export interface SharedFullTransaction extends TransactionDetail {
+  view: 'shared_full'
+  category_name: string | null
+}
+
+/**
+ * `view` "limited": the allowlist for everyone else. A payment into a loan or card the
+ * caller can't view has a null `transfer_fee` and `amount` is the whole payment.
+ */
+export interface LimitedTransaction {
+  view: 'limited'
+  id: number
+  permissions: RecordPermissions
+  created_by: string | null
+  /** ISO datetime. */
+  date: string
+  display_description: string | null
+  amount: number
+  transfer_fee: number | null
+  currency: CurrencyCode
+  transaction_type: TransactionType
+  is_posted: boolean
+  category_name: string | null
+  account: AccountRef | null
+  counterpart: AccountRef | null
+  tags: TagRef[]
+}
+
+/** A transaction as the API returns it; narrow on `view` before reading a field Limited lacks. */
+export type Transaction = FullTransaction | SharedFullTransaction | LimitedTransaction
+
+/**
+ * POST /transactions/ and PUT /transactions/{id}. A non-creator editing a
+ * `shared_full` transaction must not send `category_id`, `allocation_id`,
+ * `budget_entry_id`, `receipt_url` or `invoice_url`.
+ */
+export type TransactionInput = Partial<
+  Omit<FullTransaction, 'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at'>
+> &
+  TagIdsInput
 
 // ─── Wishlist ────────────────────────────────────────────────────────────────
 
@@ -374,15 +578,34 @@ export interface PaginatedResponse<T> {
   has_more: boolean
 }
 
+/** A balance-history row the caller sees in full (`full` or `shared_full`). */
+export interface DetailedBalanceHistoryEntry {
+  view: 'full' | 'shared_full'
+  date: string
+  /** The row's signed effect on this account. */
+  amount: number
+  balance_after: number
+  balance: number
+  transaction_id: number
+  display_description: string | null
+}
+
+/** A balance-history row for a record the caller sees Limited. */
+export interface LimitedBalanceHistoryEntry {
+  view: 'limited'
+  date: string
+  amount: number
+  balance_after: number
+  display_description: string | null
+}
+
+export type BalanceHistoryEntry = DetailedBalanceHistoryEntry | LimitedBalanceHistoryEntry
+
 export interface AccountBalance {
   account_id: number
   current_balance: number
   calculated_balance: number
-  balance_history: Array<{
-    date: string
-    balance: number
-    transaction_id: number
-  }>
+  balance_history: BalanceHistoryEntry[]
 }
 
 export interface AllocationProgress {
@@ -441,7 +664,10 @@ export interface CashFlowProjection {
   monthly_summary: MonthlySummary[]
 }
 
+/** A full upcoming item in the dashboard's older summary shape. */
 export interface UpcomingBill {
+  /** Absent on a full event; lets `isLimitedEvent` narrow the union. */
+  view?: undefined
   type: string
   name: string
   date: string
@@ -450,6 +676,69 @@ export interface UpcomingBill {
   entry_type: BudgetEntryType
   lead_time_days: number
   is_autopay: boolean
+}
+
+/** What a limited event is, without naming its (possibly hidden) source. */
+export type LimitedEventKind = 'expense' | 'income' | 'transfer' | 'loan_payment' | 'card_payment'
+
+/**
+ * A projected event the caller sees Limited (upcoming, payables, timeline, dashboard).
+ * Full events keep their old shape and have no `view` key, so narrow with
+ * `isLimitedEvent`. `public_id` is opaque and only unique within one response.
+ */
+export interface LimitedEvent {
+  view: 'limited'
+  public_id: string
+  /** ISO date. */
+  date: string
+  original_date: string | null
+  overdue: boolean
+  display_name: string
+  face_amount: number
+  /** Signed effect on the caller's cash. */
+  cash_delta: number
+  currency: CurrencyCode
+  account: AccountRef | null
+  kind: LimitedEventKind
+}
+
+/** A limited event on the timeline, with the running balance after it. */
+export interface LimitedTimelineEvent extends LimitedEvent {
+  running_balance: number
+}
+
+/** GET /forecast/upcoming: a full item has no `view` key. */
+export interface UpcomingItem {
+  view?: undefined
+  name: string
+  amount: number
+  due_date: string
+  entry_type: string
+  source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
+  source_id: number | null
+}
+
+export type UpcomingItemOrEvent = UpcomingItem | LimitedEvent
+
+/** A payable (cash outflow) as GET /forecast/payables and the dashboard list it; a full one has no `view` key. */
+export interface Payable {
+  view?: undefined
+  due_date: string
+  name: string
+  amount: number
+  source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
+  source_id: number | null
+  account_id: number | null
+  account_name: string | null
+  overflow_account_id: number | null
+  overflow_account_name: string | null
+}
+
+export type PayableOrEvent = Payable | LimitedEvent
+
+/** Type guard for the forecast unions: a full event has no `view`. */
+export function isLimitedEvent<T extends { view?: string }>(event: T): event is Extract<T, { view: 'limited' }> {
+  return event.view === 'limited'
 }
 
 export interface NetDisposableIncome {
@@ -464,6 +753,8 @@ export interface NetDisposableIncome {
 // ─── Cash-flow timeline (pre-due-date solvency) ───────────────────────────────
 
 export interface CashflowTimelineEvent {
+  /** A full event has no `view` key; a limited one is a `LimitedTimelineEvent`. */
+  view?: undefined
   date: string
   name: string
   /** Signed: positive = inflow, negative = outflow. */
@@ -509,51 +800,94 @@ export interface CashflowTimeline {
   shortfall: boolean
   shortfalls: CashflowShortfall[]
   account_shortfalls: AccountShortfall[]
-  events: CashflowTimelineEvent[]
+  events: Array<CashflowTimelineEvent | LimitedTimelineEvent>
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
+/** One account in the dashboard's balances: every active account the caller can view. */
+export interface DashboardAccountBalance {
+  id: number
+  name: string
+  balance: number
+  currency: CurrencyCode
+  /** Shown, but not counted in available cash or projections. */
+  is_spending_wallet: boolean
+}
+
+/** A virtual pull from an overflow account to cover a shortfall on its primary. */
+export interface OverflowMove {
+  date: string
+  name: string
+  from_account_id: number
+  from_account_name: string | null
+  to_account_id: number
+  to_account_name: string | null
+  amount: number
+}
+
+/** One projection-cash account's closing balance at the end of a forecast period. */
+export interface AccountClosing {
+  account_id: number
+  account_name: string | null
+  closing_balance: number
+}
+
+/** One period of the month-by-month cash-flow projection. */
+export interface ForecastPeriod {
+  period_label: string
+  period_start: string
+  period_end: string
+  opening_balance: number
+  income: number
+  expenses: number
+  unposted_expenses: number
+  statement_payables: number
+  net: number
+  closing_balance: number
+  by_account: AccountClosing[]
+  unassigned_closing: number
+  overflow_moves: OverflowMove[]
+}
+
+/** Monthly income and expenses, normalised from each recurring entry's cadence. */
+export interface MonthlyDisposable {
+  monthly_income: number
+  monthly_expenses: number
+  monthly_disposable: number
+}
+
+/** GET /dashboard/snapshot, exactly as the backend returns it. */
 export interface DashboardSnapshot {
-  account_balances: Array<{
+  balances: {
+    total: number
+    by_account: DashboardAccountBalance[]
+  }
+  /** Everything due in the next 30 days; limited events have `view: 'limited'`. */
+  upcoming_this_month: UpcomingItemOrEvent[]
+  monthly_summary: MonthlyDisposable
+  forecast_next_3_months: ForecastPeriod[]
+  goals_progress: Array<{
     id: number
     name: string
-    type: AccountType
-    balance: number
-    currency: CurrencyCode
-  }>
-  total_balance: number
-  allocations_summary: Array<{
-    id: number
-    name: string
-    type: AllocationType
+    target_amount: number | null
     current_amount: number
-    target_amount?: number
-    currency: CurrencyCode
-    progress_percent: number
-    target_date?: string
+    progress_pct: number
+    remaining: number
   }>
-  recent_transactions: Array<{
-    id: number
-    description?: string
-    amount: number
-    currency: CurrencyCode
-    type: TransactionType
-    date: string
-    account_name?: string
-    category_name?: string
-  }>
-  upcoming_events: UpcomingBill[]
-  cash_flow_forecast: CashFlowProjection
-  net_disposable_income: NetDisposableIncome
-  wishlist_summary: Array<{
+  /** The top three unpurchased wishlist items, with when they could be afforded. */
+  wishlist_next_up: Array<{
     id: number
     name: string
-    estimated_cost: number
-    currency: CurrencyCode
+    cost: number
     priority: WishlistItemPriority
-    target_date?: string
-    is_ready: boolean
-    readiness_reason: string
+    affordable_by: string
   }>
+  /** Pooled projection cash (card balances are owed, not held). */
+  available_cash: number
+  account_closings: Array<Pick<ForecastPeriod,
+    'period_label' | 'period_start' | 'period_end' | 'by_account' | 'unassigned_closing'
+    | 'overflow_moves'>>
+  /** Cash outflows due in the next 30 days; limited events have `view: 'limited'`. */
+  payables: PayableOrEvent[]
 }

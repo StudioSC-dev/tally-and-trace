@@ -6,6 +6,7 @@ import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
 
+import { timelineEventAmount, timelineEventName } from '@tally-trace/shared'
 export const Route = createFileRoute('/forecast')({
   component: ForecastPage,
 })
@@ -163,11 +164,11 @@ function ForecastPage() {
                   </thead>
                   <tbody className="divide-y divide-line/50">
                     {data.events.map((e, i) => (
-                      <tr key={`${e.source}-${e.source_id}-${i}`} className="hover:bg-sunken/50 transition-colors duration-150">
+                      <tr key={e.view === 'limited' ? e.public_id : `${e.source}-${e.source_id}-${i}`} className="hover:bg-sunken/50 transition-colors duration-150">
                         <td className="py-3 px-4 sm:px-6 whitespace-nowrap text-muted">{longDate(e.date)}</td>
-                        <td className="py-3 px-4 text-ink">{e.name}</td>
-                        <td className={`py-3 px-4 text-right font-medium ${e.amount >= 0 ? 'text-ok' : 'text-danger'}`}>
-                          {signed(e.amount)}
+                        <td className="py-3 px-4 text-ink">{timelineEventName(e)}</td>
+                        <td className={`py-3 px-4 text-right font-medium ${timelineEventAmount(e) >= 0 ? 'text-ok' : 'text-danger'}`}>
+                          {signed(timelineEventAmount(e))}
                         </td>
                         <td className={`py-3 px-4 sm:px-6 text-right font-semibold ${e.running_balance < 0 ? 'text-danger' : 'text-ink'}`}>
                           {format(e.running_balance)}

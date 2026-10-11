@@ -251,10 +251,11 @@ def test_transfer_into_scope_from_outside_adds_the_amount(db, owners, row_owner)
     assert aug["closing_balance"] == 5000.0
     assert "Savings A" not in repr(aug)
 
+    # B cannot view A's account, so the row is a limited event under its neutral label.
     items = get_upcoming_items(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
-    assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
-        ("2026-08-05", "Move to B", 5000.0),
-    ]
+    assert [(i["date"], i["display_name"], i["face_amount"], i["cash_delta"])
+            for i in items] == [("2026-08-05", "Transfer", 5000.0, 5000.0)]
+    assert "Move to B" not in repr(items)
 
 
 def test_same_day_inbound_transfer_funds_a_bill_in_the_pooled_timeline_too(db, owners):
@@ -311,10 +312,10 @@ def test_cross_scope_transfer_touching_an_in_scope_card_is_listed_but_not_cash(
         (card.id, leg_amount, False),
     ]
 
+    # B cannot view A's account, so the row is a limited event under its neutral label.
     items = get_upcoming_items(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
-    assert [(i["due_date"], i["name"], float(i["amount"])) for i in items] == [
-        ("2026-08-05", "Card move", 3000.0),
-    ]
+    assert [(i["date"], i["display_name"], i["face_amount"], i["cash_delta"])
+            for i in items] == [("2026-08-05", "Transfer", 3000.0, 0.0)]
     r = project_running_balance(db, owner_b.id, days=30, reference=datetime(2026, 8, 1))
     assert r["events"] == []
     assert r["closing_balance"] == Decimal("1000.00")
@@ -1128,10 +1129,19 @@ def _assert_billed_debt_is_still_paid_in_cash(db, user):
     ]
 
 
-def test_payment_from_another_users_unbilled_card_does_not_net_the_statement(db, owners):
+def test_payment_from_a_card_the_caller_cant_view_nets_the_statement(db, owners):
+    """Card D is another user's, which owner B can't view: it counts as billed
+    whatever its cycle settings (STU-232), so its payment nets the statement and
+    nothing is left to pay in cash."""
+    from app.services.forecast import get_payables, project_running_balance
+
     owner_a, owner_b = owners
     _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
-    _assert_billed_debt_is_still_paid_in_cash(db, owner_b)
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, owner_b.id, days=30, reference=reference)
+    assert _cash_events(r) == []
+    assert r["closing_balance"] == Decimal("10000.00")
+    assert get_payables(db, owner_b.id, days=30, reference=reference) == []
 
 
 def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):

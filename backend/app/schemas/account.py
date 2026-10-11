@@ -3,6 +3,7 @@ from typing import Literal, Optional, List
 from datetime import date, datetime
 from app.models.account import AccountType
 from app.models.user import CurrencyType
+from app.schemas.access import AccountPermissions
 from app.schemas.tag import (
     TagIds, TagSummaries, tag_ids_create_field, tag_ids_not_null, tag_ids_update_field,
     tags_response_field,
@@ -93,7 +94,8 @@ class AccountUpdate(BaseModel):
             raise ValueError("is_spending_wallet cannot be null")
         return v
 
-class AccountResponse(AccountBase):
+class AccountFields(AccountBase):
+    """An account's stored fields (no access fields)."""
     id: int
     is_active: bool
     created_at: datetime
@@ -102,6 +104,17 @@ class AccountResponse(AccountBase):
 
     class Config:
         from_attributes = True
+
+
+class AccountResponse(AccountFields):
+    """An account as the caller sees it.
+
+    ``description``, ``credit_limit``, the routing ids and the loan terms are
+    null unless ``my_role`` is "owner" or "admin".
+    """
+    my_role: Literal["owner", "admin", "editor", "viewer"]
+    permissions: AccountPermissions
+    owner_name: Optional[str] = None
 
 
 class AccountListResponse(BaseModel):

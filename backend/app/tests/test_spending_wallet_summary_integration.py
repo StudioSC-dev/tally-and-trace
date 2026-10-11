@@ -425,8 +425,9 @@ def test_summaries_count_top_ups_by_source_account_not_by_creator(client, two_ow
     # B's bank tops up B's wallet, created by A.
     transfer(a, bank_b, wallet_b, "300", "0")
 
-    assert _summary(client, headers_a) == (Decimal("1010"), {
-        "Transfer fees": Decimal("10"), "Unallocated wallet spend": Decimal("1000")})
+    # B's wallet is hidden from A, so A's summary can't read it as a wallet: the
+    # top-up is a plain transfer out with its fee (audit round 1, A).
+    assert _summary(client, headers_a) == (Decimal("10"), {"Transfer fees": Decimal("10")})
     assert _summary(client, headers_b) == (Decimal("370"), {
         "Uncategorized": Decimal("70"), "Unallocated wallet spend": Decimal("300")})
 

@@ -11,7 +11,18 @@ import {
   useUpdateBudgetEntryMutation,
   useDeleteBudgetEntryMutation,
 } from '../store/api'
-import type { Allocation, BudgetEntry, Account, Category, WishlistItem } from '../store/api'
+import type {
+  Allocation,
+  BudgetEntry,
+  FullBudgetEntry,
+  LimitedBudgetEntry,
+  SharedFullBudgetEntry,
+  Account,
+  Category,
+  WishlistItem,
+} from '../store/api'
+import { isLimited, isOwnerFull, isSharedFull } from '@tally-trace/shared'
+import { apiErrorMessage } from '../utils/apiError'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
@@ -268,7 +279,8 @@ export function AllocationsPage() {
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingAllocation, setEditingAllocation] = useState<Allocation | null>(null)
-  const [editingBudgetEntry, setEditingBudgetEntry] = useState<BudgetEntry | null>(null)
+  // An entry the caller can edit is one they see in full or shared-full, never Limited.
+  const [editingBudgetEntry, setEditingBudgetEntry] = useState<FullBudgetEntry | SharedFullBudgetEntry | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
@@ -365,6 +377,10 @@ export function AllocationsPage() {
   const [updateBudgetEntry] = useUpdateBudgetEntryMutation()
   const [deleteBudgetEntry] = useDeleteBudgetEntryMutation()
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
+  // A recurring entry is written like a transaction: only to accounts the caller may add to.
+  const writableAccounts = useMemo(() => accounts.filter((a) => a.permissions.can_add_transactions), [accounts])
+  // Allocations are private to their owner, so only the caller's own accounts can back one.
+  const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
   const savingsCategory = useMemo(
     () => categories.find((category) => category.name.toLowerCase() === 'savings'),
@@ -630,6 +646,10 @@ export function AllocationsPage() {
 
   const openRecurringModal = useCallback(
     (entry?: BudgetEntry) => {
+      // A Limited entry has no fields to edit.
+      if (entry && isLimited(entry)) {
+        return
+      }
       setActiveTab('subscriptions')
       setModalMode('subscription')
       setEditingAllocation(null)
@@ -644,8 +664,9 @@ export function AllocationsPage() {
           account_id: entry.account_id ?? 0,
           overflow_account_id: entry.overflow_account_id ?? undefined,
           transfer_to_account_id: entry.transfer_to_account_id ?? undefined,
-          category_id: entry.category_id ?? undefined,
-          allocation_id: entry.allocation_id ?? undefined,
+          // A shared-full entry has no category or allocation to edit.
+          category_id: isOwnerFull(entry) ? entry.category_id ?? undefined : undefined,
+          allocation_id: isOwnerFull(entry) ? entry.allocation_id ?? undefined : undefined,
           cadence: entry.cadence,
           next_occurrence: toLocalDateTimeInput(entry.next_occurrence),
           lead_time_days: entry.lead_time_days ?? 0,
@@ -757,7 +778,8 @@ export function AllocationsPage() {
 
   const handleDeleteBudgetEntry = useCallback(
     async (entry: BudgetEntry) => {
-      if (!confirm(`Delete recurring entry "${entry.name}"?`)) {
+      const name = isLimited(entry) ? entry.display_name : entry.name
+      if (!confirm(`Delete recurring entry "${name ?? 'this entry'}"?`)) {
         return
       }
       try {
@@ -768,6 +790,8 @@ export function AllocationsPage() {
         await loadBudgetEntriesRef.current()
       } catch (error) {
         console.error('Error deleting budget entry:', error)
+        // E.g. 409: it has linked transactions the caller can't edit.
+        alert(apiErrorMessage(error) || 'Could not delete the recurring entry. Please try again.')
       }
     },
     [createSubscriptionDefaults, deleteBudgetEntry, loadBudgetEntriesRef]
@@ -840,7 +864,11 @@ export function AllocationsPage() {
         }
 
         if (editingBudgetEntry) {
-          await updateBudgetEntry({ id: editingBudgetEntry.id, data: subscriptionPayload }).unwrap()
+          // Someone else's entry keeps its creator's category and envelope: the server
+          // refuses an edit that sends them.
+          const { category_id, allocation_id, ...sharedPayload } = subscriptionPayload
+          const data = isSharedFull(editingBudgetEntry) ? sharedPayload : { ...sharedPayload, category_id, allocation_id }
+          await updateBudgetEntry({ id: editingBudgetEntry.id, data }).unwrap()
           setEditingBudgetEntry(null)
         } else {
           await createBudgetEntry(subscriptionPayload).unwrap()
@@ -1289,11 +1317,86 @@ export function AllocationsPage() {
     )
   }
 
+  // A Limited entry shows only its allowlisted fields; a hidden account is a neutral name
+  // with no id, so nothing here links into it. It is read-only: its flags decide whether a
+  // delete is offered.
+  const renderLimitedEntryCard = (entry: LimitedBudgetEntry) => (
+    <article key={entry.id} className="card p-4 sm:p-5" data-testid="limited-entry">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-base font-semibold text-ink">{entry.display_name ?? 'Recurring entry'}</p>
+            <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-muted">
+              <span>{entry.entry_type === 'income' ? 'Recurring Income' : 'Recurring Expense'}</span>
+              <span className="text-muted">•</span>
+              <span>{formatCadenceLabel(entry.cadence)}</span>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className={`text-lg font-bold ${entry.entry_type === 'income' ? 'text-ok' : 'text-danger'}`}>
+              {formatAmount(entry.amount, entry.currency)}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs text-body">
+          <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+            Next {formatFullDate(entry.next_occurrence)}
+          </span>
+          {entry.account && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+              Account: {entry.account.name}
+            </span>
+          )}
+          {entry.counterpart && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+              Transfer to: {entry.counterpart.name}
+            </span>
+          )}
+          {entry.category_name && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+              Category: {entry.category_name}
+            </span>
+          )}
+          {entry.end_date && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+              Ends {formatFullDate(entry.end_date)}
+            </span>
+          )}
+          {entry.created_by && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
+              by {entry.created_by}
+            </span>
+          )}
+          <TagChips tags={entry.tags} />
+        </div>
+        {entry.permissions.can_delete && (
+          <div>
+            <button
+              type="button"
+              onClick={() => handleDeleteBudgetEntry(entry)}
+              className="text-sm text-danger hover:underline"
+            >
+              Delete recurring entry
+            </button>
+          </div>
+        )}
+      </div>
+    </article>
+  )
+
   const renderBudgetEntryCard = (entry: BudgetEntry) => {
+    if (isLimited(entry)) {
+      return renderLimitedEntryCard(entry)
+    }
+    const canEdit = entry.permissions.can_edit
     const account = entry.account_id ? accountsById.get(entry.account_id) : undefined
     const transferTo = entry.transfer_to_account_id ? accountsById.get(entry.transfer_to_account_id) : undefined
-    const category = entry.category_id ? categoriesById.get(entry.category_id) : undefined
-    const allocation = entry.allocation_id ? allocationsById.get(entry.allocation_id) : undefined
+    const categoryName = isSharedFull(entry)
+      ? entry.category_name
+      : entry.category_id
+      ? categoriesById.get(entry.category_id)?.name
+      : undefined
+    const allocation = isOwnerFull(entry) && entry.allocation_id ? allocationsById.get(entry.allocation_id) : undefined
     const cadenceLabel = formatCadenceLabel(entry.cadence)
     const amountLabel = formatAmount(entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
@@ -1322,16 +1425,20 @@ export function AllocationsPage() {
     return (
       <article
         key={entry.id}
-        className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${ entry.is_active ? '' : 'opacity-60' }`}
-        onClick={() => openRecurringModal(entry)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            openRecurringModal(entry)
-          }
-        }}
+        className={`card p-4 sm:p-5 transition-colors duration-200 ${canEdit ? 'hover:bg-sunken cursor-pointer' : ''} ${ entry.is_active ? '' : 'opacity-60' }`}
+        onClick={canEdit ? () => openRecurringModal(entry) : undefined}
+        role={canEdit ? 'button' : undefined}
+        tabIndex={canEdit ? 0 : undefined}
+        onKeyDown={
+          canEdit
+            ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  openRecurringModal(entry)
+                }
+              }
+            : undefined
+        }
       >
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between gap-4">
@@ -1383,9 +1490,14 @@ export function AllocationsPage() {
                 Transfer to: {transferTo.name}
               </span>
             )}
-            {category && (
+            {categoryName && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                Category: {category.name}
+                Category: {categoryName}
+              </span>
+            )}
+            {entry.created_by && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
+                by {entry.created_by}
               </span>
             )}
             {allocation && (
@@ -1408,6 +1520,20 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
+          {!canEdit && entry.permissions.can_delete && (
+            <div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  void handleDeleteBudgetEntry(entry)
+                }}
+                className="text-sm text-danger hover:underline"
+              >
+                Delete recurring entry
+              </button>
+            </div>
+          )}
         </div>
       </article>
     )
@@ -1829,7 +1955,7 @@ export function AllocationsPage() {
                   required
                 >
                         <option value={0}>Select account</option>
-                        {accounts
+                        {writableAccounts
                           .filter((account) => account.account_type !== 'loan')
                           .filter((account) => {
                             // Paying a loan: only accounts in the loan's currency.
@@ -1845,6 +1971,14 @@ export function AllocationsPage() {
                   ))}
                 </select>
                     </div>
+                    {editingBudgetEntry && isSharedFull(editingBudgetEntry) ? (
+                    <div>
+                      <label className="block text-sm font-medium text-body">Category</label>
+                      <p className="mt-1 py-2 text-sm text-body" data-testid="shared-category">
+                        {editingBudgetEntry.category_name || 'Uncategorized'}
+                      </p>
+                    </div>
+                    ) : (
                     <div>
                       <label className="block text-sm font-medium text-body">Category</label>
                       <select
@@ -1865,6 +1999,7 @@ export function AllocationsPage() {
                         ))}
                       </select>
                     </div>
+                    )}
               </div>
 
               {subscriptionForm.entry_type === 'expense' && (
@@ -1876,7 +2011,7 @@ export function AllocationsPage() {
                     className="mt-1 block w-full border border-line px-3 py-2"
                   >
                     <option value={0}>None</option>
-                    {accounts.filter((a) => a.id !== subscriptionForm.account_id && a.account_type !== 'loan' && !a.is_spending_wallet).map((account) => (
+                    {writableAccounts.filter((a) => a.id !== subscriptionForm.account_id && a.account_type !== 'loan' && !a.is_spending_wallet).map((account) => (
                       <option key={account.id} value={account.id}>{account.name}</option>
                     ))}
                   </select>
@@ -1894,7 +2029,7 @@ export function AllocationsPage() {
                     disabled={accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'}
                   >
                     <option value={0}>None (a payment)</option>
-                    {accounts
+                    {writableAccounts
                       .filter((a) => a.account_type !== 'credit' && a.id !== subscriptionForm.account_id)
                       .filter((a) => {
                         // A loan is paid only from an account in its own currency.
@@ -2013,6 +2148,7 @@ export function AllocationsPage() {
                         className="mt-1 block w-full border border-line px-3 py-2"
                       />
                   </div>
+                    {!(editingBudgetEntry && isSharedFull(editingBudgetEntry)) && (
                     <div>
                       <label className="block text-sm font-medium text-body">Link to Budget (optional)</label>
                       <select
@@ -2033,6 +2169,7 @@ export function AllocationsPage() {
                         ))}
                       </select>
                     </div>
+                    )}
                   </div>
 
                   <div className="space-y-3">
@@ -2140,10 +2277,12 @@ export function AllocationsPage() {
                       </button>
               </div>
 
-                    <TagPicker
-                      value={subscriptionForm.tag_ids}
-                      onChange={(tag_ids) => setSubscriptionForm((prev) => ({ ...prev, tag_ids }))}
-                    />
+                    {(!editingBudgetEntry || editingBudgetEntry.permissions.can_tag) && (
+                      <TagPicker
+                        value={subscriptionForm.tag_ids}
+                        onChange={(tag_ids) => setSubscriptionForm((prev) => ({ ...prev, tag_ids }))}
+                      />
+                    )}
 
                     <div className="flex items-center justify-between border border-line px-4 py-3">
                       <div>
@@ -2203,7 +2342,7 @@ export function AllocationsPage() {
                   required
                 >
                       <option value={0}>Select account</option>
-                      {accounts.map((account) => (
+                      {ownAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.name}
                     </option>
@@ -2362,7 +2501,7 @@ export function AllocationsPage() {
                             Accounts to aggregate
                           </label>
                           <div className="mt-1 flex flex-wrap gap-2">
-                            {accounts.map((account) => {
+                            {ownAccounts.map((account) => {
                               const isSelected = selectedSavingsAccountIds.includes(account.id)
                               return (
                                 <button
@@ -2528,7 +2667,7 @@ export function AllocationsPage() {
                 >
                   Cancel
                 </button>
-                {isSubscriptionMode && editingBudgetEntry && (
+                {isSubscriptionMode && editingBudgetEntry && editingBudgetEntry.permissions.can_delete && (
                   <button
                     type="button"
                     onClick={() => handleDeleteBudgetEntry(editingBudgetEntry)}

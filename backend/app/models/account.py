@@ -107,3 +107,6 @@ class Account(Base):
     )
     allocations = relationship("Allocation", back_populates="account")
     budget_entries = relationship("BudgetEntry", back_populates="account")
+    # Who else holds a role on the account (app/core/access.py reads it).
+    shares = relationship("AccountShare", back_populates="account", lazy="selectin",
+                          cascade="all, delete-orphan", passive_deletes=True)

@@ -7,7 +7,8 @@ import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
-import { generateOccurrences } from '@tally-trace/shared'
+import { apiErrorMessage } from '../utils/apiError'
+import { generateOccurrences, isDetailed, isOwnerFull, transactionDate } from '@tally-trace/shared'
 
 const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
 
@@ -74,6 +75,7 @@ export function Dashboard() {
       await materializeEntry({ id: entryId }).unwrap()
     } catch (error) {
       console.error('Error posting budget entry:', error)
+      alert(apiErrorMessage(error) || 'Could not mark the entry as paid. Please try again.')
     } finally {
       setPostingId(null)
     }
@@ -93,7 +95,9 @@ export function Dashboard() {
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   const transactions = useMemo(() => transactionsData?.items ?? [], [transactionsData])
   const categories = categoriesData ?? []
-  const budgetEntries = useMemo(() => budgetEntriesData?.items ?? [], [budgetEntriesData])
+  // A Limited entry (someone else's, on an account touching a private one) has no schedule
+  // fields to project from, so only entries the caller sees in full are planned here.
+  const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isDetailed), [budgetEntriesData])
   const allocations = useMemo(() => allocationsData?.items ?? [], [allocationsData])
   const budgetAllocations = useMemo(
     () => allocations.filter((a) => a.allocation_type === 'budget' && a.is_active),
@@ -125,8 +129,8 @@ export function Dashboard() {
   const monthTransactionsBySchedule = useMemo(() => {
     const map = new Map<number, Transaction[]>()
     transactions.forEach((transaction) => {
-      if (!transaction.budget_entry_id || !transaction.is_posted) return
-      const txDate = new Date(transaction.transaction_date)
+      if (!isOwnerFull(transaction) || !transaction.budget_entry_id || !transaction.is_posted) return
+      const txDate = new Date(transactionDate(transaction))
       if (txDate < currentMonthStart || txDate > currentMonthEnd) return
       const key = transaction.budget_entry_id
       const existing = map.get(key)
@@ -206,7 +210,7 @@ export function Dashboard() {
     let expenses = 0
     transactions.forEach((transaction) => {
       if (!transaction.is_posted) return
-      const txDate = new Date(transaction.transaction_date)
+      const txDate = new Date(transactionDate(transaction))
       if (txDate < start || txDate > end) return
       if (transaction.transaction_type === 'credit') income += transaction.amount
       else if (transaction.transaction_type === 'debit') expenses += transaction.amount
@@ -294,10 +298,10 @@ export function Dashboard() {
 
   const getTransactionsForPeriod = () => {
     return transactions.filter(transaction => {
-      const transactionDate = new Date(transaction.transaction_date)
+      const date = new Date(transactionDate(transaction))
       const startDate = new Date(dateRange.start_date)
       const endDate = new Date(dateRange.end_date)
-      return transactionDate >= startDate && transactionDate <= endDate
+      return date >= startDate && date <= endDate
     })
   }
 
@@ -309,7 +313,8 @@ export function Dashboard() {
     const categoryTotals = new Map()
     const categoryTransactions = new Map()
     filteredTransactions.forEach(transaction => {
-      if (transaction.category_id) {
+      // Categories are the caller's own, so only their own records carry a category id.
+      if (isOwnerFull(transaction) && transaction.category_id) {
         const category = categories.find(cat => cat.id === transaction.category_id)
         if (category) {
           categoryTotals.set(category.id, (categoryTotals.get(category.id) || 0) + transaction.amount)
@@ -592,13 +597,15 @@ export function Dashboard() {
                       <p className="text-xs text-muted">
                         {reminder.daysUntil === 0 ? 'Due today' : `${reminder.daysUntil} day${reminder.daysUntil === 1 ? '' : 's'} remaining`}
                       </p>
-                      <button
-                        onClick={() => handleMarkPaid(entry.id)}
-                        disabled={postingId === entry.id}
-                        className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
-                      >
-                        {postingId === entry.id ? 'Posting…' : 'Mark paid'}
-                      </button>
+                      {entry.permissions.can_post && (
+                        <button
+                          onClick={() => handleMarkPaid(entry.id)}
+                          disabled={postingId === entry.id}
+                          className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
+                        >
+                          {postingId === entry.id ? 'Posting…' : 'Mark paid'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )

@@ -45,6 +45,14 @@
       "balance": 150.00,
       "description": "Digital wallet for online transactions",
       "currency": "USD"
+    },
+    {
+      "name": "Joint Account",
+      "account_type": "CHECKING",
+      "balance": 4000.00,
+      "description": "Shared household account (shared with the Demo Partner)",
+      "currency": "PHP",
+      "tags": ["Household"]
     }
   ],
   "categories": [
@@ -291,6 +299,36 @@
       "is_autopay": true,
       "description": "Automatic transfer to brokerage account",
       "end_mode": "indefinite"
+    },
+    {
+      "name": "Rent",
+      "entry_type": "EXPENSE",
+      "amount": 2500.0,
+      "currency": "PHP",
+      "cadence": "MONTHLY",
+      "next_occurrence": "2025-09-01T09:00:00",
+      "lead_time_days": 3,
+      "account_id": 6,
+      "category_id": 7,
+      "is_autopay": false,
+      "description": "Household rent, paid from the joint account",
+      "end_mode": "indefinite",
+      "tags": ["Household"]
+    },
+    {
+      "name": "Internet",
+      "entry_type": "EXPENSE",
+      "amount": 60.0,
+      "currency": "PHP",
+      "cadence": "MONTHLY",
+      "next_occurrence": "2025-09-12T09:00:00",
+      "lead_time_days": 2,
+      "account_id": 3,
+      "category_id": 4,
+      "is_autopay": true,
+      "description": "Household internet, charged to the owner's card",
+      "end_mode": "indefinite",
+      "tags": ["Household"]
     }
   ],
   "transactions": [
@@ -426,6 +464,51 @@
       "transaction_date": "2025-08-15T10:00:00",
       "is_posted": true,
       "allocation_id": 5
+    },
+    {
+      "account_id": 6,
+      "category_id": 4,
+      "amount": 40.00,
+      "description": "Water bill",
+      "transaction_type": "DEBIT",
+      "transaction_date": "2025-08-18T08:00:00",
+      "is_posted": true,
+      "tags": ["Household"]
+    },
+    {
+      "account_id": 3,
+      "category_id": 1,
+      "amount": 85.00,
+      "description": "Household groceries",
+      "transaction_type": "DEBIT",
+      "transaction_date": "2025-08-23T11:00:00",
+      "is_posted": true,
+      "tags": ["Household"]
     }
+  ],
+  "partner": {
+    "accounts": [
+      {
+        "name": "Partner Checking",
+        "account_type": "CHECKING",
+        "balance": 3000.00,
+        "description": "The Demo Partner's own account",
+        "currency": "PHP"
+      }
+    ],
+    "transactions": [
+      {
+        "account_id": 1,
+        "transfer_to_owner_account_id": 6,
+        "amount": 1500.00,
+        "description": "Deposit to the joint account",
+        "transaction_type": "TRANSFER",
+        "transaction_date": "2025-08-28T09:00:00",
+        "is_posted": true
+      }
+    ]
+  },
+  "shares": [
+    {"account_id": 6, "role": "editor"}
   ]
 }
