@@ -18,9 +18,10 @@ A record that touches no account is ``full`` for its creator and ``limited``
 for anyone else.
 
 ``display_description`` (and a recurring entry's ``display_name``, and the
-category name a limited record shows) is the stored text only when the caller
-can view every account the record touches; otherwise a neutral label for its
-kind. A payment into a loan or card the caller can't view shows no interest:
+category name a limited record shows) is the stored text only when (i) the
+caller can view every account the record touches, or (ii) read rule (c)
+applies: the record carries, explicitly, the Household tag its owner shared
+with the caller (STU-233). Otherwise a neutral label for its kind. A payment into a loan or card the caller can't view shows no interest:
 ``transfer_fee`` is null and ``amount`` is the whole payment. A transfer drawn
 from a loan or card the caller can't view shows no fee either (it is charged to
 that account): ``transfer_fee`` is null and ``amount`` is what the other side
@@ -28,7 +29,8 @@ received. The exception is a transfer into a loan the caller can view: its fee
 is that loan's interest, which the loan's schedule and balance history already
 show them, so ``transfer_fee`` is shown and the source stays a neutral reference.
 
-Tags are only ever the caller's own (``attach_visible_tags``). Every record
+Tags are the caller's own, plus a sharer's Household tag where rule (c)
+applies (``attach_visible_tags``). Every record
 carries ``view``, ``permissions`` (``RecordAccess.permissions``) and
 ``created_by`` (the creator's display name).
 """
@@ -109,6 +111,7 @@ class Redactor:
                 if value is not None:
                     ids.add(value)
         self.access.load(ids)
+        self.access.load_explicit(records)
         self._load_users({r.user_id for r in records})
         self._load_categories({r.category_id for r in records if r.category_id})
 
@@ -197,10 +200,16 @@ class Redactor:
         return (target is not None and target.account_type == AccountType.LOAN
                 and self.can_view(target.id))
 
-    def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
-        """The stored description when every touched account is viewable, else a label."""
+    def shows_text(self, record, facts: Optional[dict] = None) -> bool:
+        """Whether the caller is shown the record's stored text: rule (i) or (ii)."""
         f = facts or self.access.facts(record)
         if f["view_all"] and record_account_ids(record):
+            return True
+        return self.access.household(record) == "c"
+
+    def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
+        """The stored description under rule (i) or (ii) (``shows_text``), else a label."""
+        if self.shows_text(record, facts):
             return record.description if isinstance(record, Transaction) else record.name
         hidden = self._hidden_liability(record) if isinstance(record, Transaction) else None
         if hidden is None and isinstance(record, BudgetEntry) and record.transfer_to_account_id:
@@ -248,7 +257,7 @@ class Redactor:
     def limited_transaction(self, txn: Transaction, facts: Optional[dict] = None) -> dict:
         """The ``LimitedTransaction`` body, whatever the caller's view (exports use it)."""
         facts = facts or self.access.facts(txn)
-        shown = facts["view_all"] and bool(facts["ids"])
+        shown = self.shows_text(txn, facts)
         amount, fee = txn.amount, txn.transfer_fee
         if self._hidden_source_liability(txn) is not None and not self._into_viewable_loan(txn):
             # Drawn from a hidden loan or card: its fee is that account's charge,
@@ -298,7 +307,7 @@ class Redactor:
     def limited_entry(self, entry: BudgetEntry, facts: Optional[dict] = None) -> dict:
         """The ``LimitedRecurringEntry`` body, whatever the caller's view (exports use it)."""
         facts = facts or self.access.facts(entry)
-        shown = facts["view_all"] and bool(facts["ids"])
+        shown = self.shows_text(entry, facts)
         return {
             **self._common(entry, LIMITED),
             "id": entry.id,
@@ -319,17 +328,20 @@ class Redactor:
         return [self.entry(e) for e in entries]
 
 
-def displayed_description_criterion(viewable_ids: Iterable[int]):
+def displayed_description_criterion(viewable_ids: Iterable[int], grants: Iterable = ()):
     """Criterion: a transaction whose stored description the caller is shown.
 
-    That is one whose every touched account is viewable (``display_description``;
-    ``viewable_ids`` include ``tag_viewer`` accounts). Search matches displayed
-    text only, so it is combined with this.
+    That is one whose every touched account is viewable (rule (i);
+    ``viewable_ids`` include ``tag_viewer`` accounts), or, through a Household
+    tag share (``grants``, ``household_grants``), one read rule (c) reads
+    (rule (ii)). Search matches displayed text only, so it is combined with this.
     """
     from sqlalchemy import and_, or_
 
+    from app.core.access import household_explicit_criterion
+
     ids = list(viewable_ids)
-    return and_(
+    return or_(*(household_explicit_criterion(Transaction, g) for g in grants), and_(
         Transaction.account_id.in_(ids),
         or_(
             Transaction.transaction_type != TransactionType.TRANSFER,
@@ -340,7 +352,7 @@ def displayed_description_criterion(viewable_ids: Iterable[int]):
                     Transaction.transfer_to_account_id.in_(ids)),
             ),
         ),
-    )
+    ))
 
 
 def full_view_criterion(model, user, viewable_ids: Iterable[int], editable_ids: Iterable[int]):

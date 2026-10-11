@@ -602,7 +602,7 @@ def get_transactions(
         # Displayed text only: a row whose description the caller is shown as a
         # neutral label never matches its stored description.
         query = query.filter(Transaction.description.ilike(f"%{search}%"),
-                             displayed_description_criterion(seen))
+                             displayed_description_criterion(seen, grants))
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(Transaction, tag_id))
