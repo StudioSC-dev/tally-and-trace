@@ -192,7 +192,9 @@ An account's owner can share it with another user as `viewer`, `editor` or
   or clear a record's category, allocation or recurring entry (400).
 - **Loan terms** (rate, payment amount, term, first payment date, amortisation
   and the proposed split) are shown to the owner and admins only; an editor's
-  loan schedule keeps the payment rows with those fields null.
+  loan schedule keeps the payment rows with those fields null. Prepayment is
+  refused on a fixed loan, so anyone who can record payments on a loan can
+  tell whether it is fixed.
 - **Responses** carry `view`: `full` (you created it and can view every account
   it touches), `shared_full` (another editor's record; the creator's category,
   allocation, recurring-entry, receipt and invoice references are dropped and a

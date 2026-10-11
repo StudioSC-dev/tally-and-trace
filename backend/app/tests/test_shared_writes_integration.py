@@ -637,3 +637,35 @@ def test_loan_payments_and_prepayments_record_their_actor(sw, sw_client, sw_db):
     for txn_id in (payment, prepayment, debit):
         txn = sw_db.get(Transaction, txn_id)
         assert txn.created_by_actor == a["id"], txn_id
+
+
+# --- A prepayment says nothing of a loan's amortisation before funding (audit round 3, 3) -
+
+def test_a_prepayment_with_an_unusable_funding_account_404s_on_any_loan(sw, sw_client, sw_db):
+    """An editor (who is not shown loan terms) prepaying a fixed and a reduce-term
+    loan from a nonexistent account, from the owner's private account, or from the
+    loan's own (hidden) payment account gets the same 404 on both."""
+    a, b = sw["a"], sw["b"]
+    loans = {}
+    for kind, amortization in (("home", "reduce_term"), ("personal", "fixed")):
+        loans[amortization] = sw_post(sw_client, a, "/accounts/", {
+            "name": f"{kind} loan", "account_type": "loan", "loan_kind": kind,
+            "balance": -50_000, "loan_annual_rate": 6, "loan_term_months": 120,
+            "loan_payment_amount": 600, "loan_first_payment_date": "2026-10-20",
+            "payment_account_id": sw["a_private"]})["id"]
+        sw_share(sw_db, loans[amortization], b["id"], "editor", a["id"])
+    for funding in (987_654_321, sw["a_private"], None):
+        body = {"amount": 1_000, "transaction_date": DAY}
+        if funding is not None:
+            body["from_account_id"] = funding
+        got = {mode: _call(sw_client, b, "POST", f"/accounts/{loan}/loan-prepayment", body)
+               for mode, loan in loans.items()}
+        assert {r.status_code for r in got.values()} == {404}, (funding, got)
+        assert got["fixed"].json() == got["reduce_term"].json(), funding
+    # With a funding account the editor may use, the amortisation decides.
+    sw_share(sw_db, sw["a_private"], b["id"], "editor", a["id"])
+    body = {"from_account_id": sw["a_private"], "amount": 1_000, "transaction_date": DAY}
+    assert _call(sw_client, b, "POST", f"/accounts/{loans['fixed']}/loan-prepayment",
+                 body).status_code == 400
+    assert _call(sw_client, b, "POST", f"/accounts/{loans['reduce_term']}/loan-prepayment",
+                 body).status_code == 200

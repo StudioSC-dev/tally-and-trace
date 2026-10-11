@@ -626,14 +626,19 @@ def record_loan_prepayment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Record extra principal (no interest). Refused on a ``fixed`` loan."""
+    """Record extra principal (no interest). Refused on a ``fixed`` loan.
+
+    The funding account is checked first, so a caller who may not use it gets
+    the same 404 whatever the loan's amortisation (which the loan's terms hide
+    from an editor).
+    """
     loan = _loan_or_404(db, current_user, account_id, edit=True)
+    funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
     if loan_svc.amortization_of(loan) == loan_svc.FIXED:
         raise HTTPException(
             status_code=400,
             detail="Prepayment is not available on a fixed loan (its schedule is the bank's)",
         )
-    funding = _loan_funding(db, current_user, loan, prepayment.from_account_id)
     _lock(db, loan, funding)
     if loan_svc.amortization_of(loan) == loan_svc.FIXED:  # re-read under the lock
         db.rollback()
