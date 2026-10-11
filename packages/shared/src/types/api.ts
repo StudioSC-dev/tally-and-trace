@@ -473,6 +473,7 @@ export interface FullTransaction extends TransactionDetail {
   category_id?: number
   allocation_id?: number
   budget_entry_id?: number
+  /** An uploaded receipt is `/api/v1/transactions/{id}/receipt`, fetched with the bearer token. */
   receipt_url?: string
   invoice_url?: string
 }
