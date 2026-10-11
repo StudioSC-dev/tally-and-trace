@@ -229,6 +229,64 @@ An account's owner can share it with another user as `viewer`, `editor` or
   sharee's recurring entries on that account; their transactions stay.
 - Demo users can neither share nor be shared with (403).
 
+### Household viewer share
+
+You can share your Household tag (only that system tag) read-only with another
+user, chosen by exact email through the same rate-limited lookup as account
+shares. It gives them your Household, never write access and never
+`can_delete`:
+
+- **Accounts:** the accounts you own and tag Household become visible to them
+  with `my_role` `tag_viewer` (ranked below `viewer`), showing only `id`,
+  `name`, `account_type`, `currency`, `balance`, the access fields (every
+  permission false), `owner_name` and `tags`. Statements, loan schedules,
+  shares and settings stay 404; balance history lists only the records they
+  may read. An account share they also hold wins when its role is higher, so
+  an editor on your joint account stays `editor` there.
+- **Records:** they read your own records whose every account is yours and
+  that either touch a Household-tagged account (rule b2) or carry your
+  Household tag explicitly (rule c, including a record with no account).
+  Another user's records on your accounts are never shown to them, in lists,
+  search, balance history, summaries, projections or exports. Tagging an
+  account Household exposes your own transactions on it.
+- **Display:** records are `limited`. A description is shown when the record
+  carries your Household tag explicitly (a tag the record inherits from its
+  account doesn't count), and your Household tag is listed in its `tags` only
+  then. A Household bill on your private card or wallet shows its description
+  with the account neutral.
+- **Projections** include your Household-tagged accounts. Your explicitly
+  Household-tagged records outside them (a bill on a private card or wallet,
+  or a recurring entry with no account) are listed as Household occurrences:
+  `cash_delta` 0, never in unassigned cash, and on a card only the part not
+  already covered by payments from Household accounts (allocated to
+  statements oldest first, Household lines first).
+- **Revoking or leaving** removes access at once. Demo users can neither share
+  nor be shared with (403).
+
+### Household views
+
+One sharer's Household at a time: `sharer_id` is a user whose Household tag
+share you hold, or yourself (your own Household view, over your own
+Household-tagged accounts). Any other id is 404. The view's scope is the
+sharer's active Household-tagged accounts you can see; your own private
+accounts are outside it.
+
+- `GET    /household/` — The views you can open: `[{sharer_id, sharer_name, is_self}]`, your own first
+- `GET    /household/{sharer_id}/dashboard` — `{sharer, accounts, month, upcoming}`: the scope accounts (as `/accounts/` returns them), this month's totals and the next 30 days
+- `GET    /household/{sharer_id}/transactions` — The scope's transactions you may read and the sharer's Household occurrences, newest first, as `/transactions/` (`start_date`, `end_date`, `limit`, `offset`)
+- `GET    /household/{sharer_id}/upcoming?days=` — `{sharer, items, days}`, items as `/forecast/upcoming`
+- `GET    /household/{sharer_id}/monthly?from=YYYY-MM&to=YYYY-MM` — Monthly totals (each bound defaults to this month; at most 36 months): `{sharer, from, to, months: [{month, kind, currencies}]}` with `kind` `recorded`, `current` or `projected`, and one line per currency, never converted: `income`, `expense`, `fees`, `moved_in`, `moved_out`, `paid_from_other_accounts`
+
+Recorded months use posted transactions; the current month adds the projection
+from today, and later months are projected. Income, expense and fees come from
+the scope's cash accounts: credits and debits, card and loan payments (a card
+charge counts when the card is paid), and transfer fees. A transfer between a
+scope account and an account outside the scope that is not a card or loan is
+"Moved in" or "Moved out" (your own deposit from a private account into the
+joint account is "Moved in", and your private spending never appears).
+"Paid from other accounts" is the remainder of the sharer's Household bills
+outside the scope.
+
 ### Accounts
 - `GET    /accounts/` — List the accounts you own or that are shared with you
 - `POST   /accounts/` — Create an account
@@ -246,6 +304,8 @@ An account's owner can share it with another user as `viewer`, `editor` or
 ### Shares and users
 - `GET    /shares/received` — The shares you hold
 - `DELETE /shares/received/{id}` — Leave a share
+- `GET    /shares/received/household` — The Household tag shares you hold: `[{id, tag_id, sharer_id, sharer_name, created_at}]`
+- `DELETE /shares/received/household/{id}` — Leave a Household tag share
 - `GET    /users/lookup?email=` — `{id, display_name}` on an exact, case-insensitive email match; anything else is the same 404 "No matching user"; rate-limited
 
 ### Transactions
@@ -284,9 +344,12 @@ An account's owner can share it with another user as `viewer`, `editor` or
 - `GET    /tags/{id}` — Get a tag
 - `PUT    /tags/{id}` — Rename or recolour a tag; the Household tag can be recoloured but not renamed
 - `DELETE /tags/{id}` — Delete a tag and its links; the Household tag can't be deleted
+- `GET    /tags/household/shares` — Who you share your Household tag with: `{tag_id, shares: [{id, tag_id, user_id, display_name, created_at}]}`
+- `POST   /tags/household/shares` — Share your Household tag by exact email (`email`); rate-limited like `/users/lookup`, 404 "No matching user", 409 for yourself or a duplicate
+- `DELETE /tags/household/shares/{id}` — Revoke a Household tag share
 
 ### Data export
-- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema), including your tags and their links to your records; other records you can read (and your own on an account you can no longer view) are exported in their limited form
+- `GET    /data/export.json` — Download your data as JSON (an explicit, versioned schema), including your tags and their links to your records; other records you can read (and your own on an account you can no longer view) are exported in their limited form, and accounts reached through a Household tag share are listed with `my_role` `tag_viewer`
 - `GET    /data/export.csv?table=<name>` — Download one table as CSV; without `table`, a ZIP of every table
 
 ### Wishlist
@@ -309,7 +372,7 @@ An account's owner can share it with another user as `viewer`, `editor` or
   alembic upgrade head
   ```
 - **Auto-router inclusion**: All files in `app/routers/` are automatically registered.
-- **Demo seeding**: On startup, the demo user (`demo@example.com`) and the Demo Partner (`demo.partner@example.com`) get the generic data in `app/constants/seed_data.json`, including the demo user's Joint Account shared with the partner as editor. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing, the version differs or a demo user is missing, only the two demo users' data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes. Records name their tags in a `tags` list (Household, or a name from the top-level `tags`); the demo user's Household tag is kept across reseeds.
+- **Demo seeding**: On startup, the demo user (`demo@example.com`) and the Demo Partner (`demo.partner@example.com`) get the generic data in `app/constants/seed_data.json`, including the demo user's Joint Account shared with the partner as editor, the demo user's Household tag shared with the partner (so "Sign in as Demo Partner" opens their Household view), and the demo user's credit card routed to the joint account. The one-row `demo_state` table records `DEMO_SHAPE_VERSION` (in `app/core/seed.py`): when the row is missing, the version differs or a demo user is missing, only the two demo users' data is replaced; otherwise startup changes nothing. Bump the version whenever the demo data changes. Records name their tags in a `tags` list (Household, or a name from the top-level `tags`); the demo user's Household tag is kept across reseeds.
 - **Type safety**: Pydantic v2 for request/response validation.
 
 ### Frontend (Web)
