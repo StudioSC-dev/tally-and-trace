@@ -10,6 +10,8 @@ from app.core.access import (
     MANAGE_ROLES,
     OWNER,
     OWNER_ROLES,
+    TAG_VIEWER,
+    VIEW_ROLES,
     account_role,
     can_edit_account,
     can_view_account,
@@ -304,8 +306,14 @@ def get_accounts(
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    """Get all accounts with optional filtering"""
-    query = viewable_accounts(db, current_user)
+    """Get all accounts with optional filtering.
+
+    Includes the accounts reached through a Household tag share (``my_role``
+    "tag_viewer", the minimal shape), active ones only.
+    """
+    direct = viewable_accounts(db, current_user).with_entities(Account.id)
+    query = viewable_accounts(db, current_user, roles=VIEW_ROLES).filter(
+        or_(Account.id.in_(direct), Account.is_active.is_(True)))
 
     if account_type:
         # Convert string to enum
@@ -358,8 +366,9 @@ def create_account(
 
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Get a specific account by ID"""
-    return serialize_account(db, current_user, get_account_or_404(db, current_user, account_id))
+    """Get a specific account by ID (any role, ``tag_viewer`` included)."""
+    return serialize_account(db, current_user, get_account_or_404(
+        db, current_user, account_id, roles=VIEW_ROLES))
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -413,11 +422,15 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     is the limited allowlist ``{date, amount, balance_after,
     display_description}``. ``amount`` is the row's signed effect on this
     account.
+
+    A ``tag_viewer`` (Household tag share) gets the history of the rows it may
+    read only, the sharer's own (the tag-share invariant): ``balance_after``
+    and ``calculated_balance`` then run over those rows alone.
     """
     from app.core.redaction import FULL, SHARED_FULL, Redactor
     from app.models.transaction import Transaction, TransactionType
 
-    account = get_account_or_404(db, current_user, account_id)
+    account = get_account_or_404(db, current_user, account_id, roles=VIEW_ROLES)
     transactions = db.query(Transaction).filter(
         or_(
             Transaction.account_id == account_id,
@@ -427,6 +440,8 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     ).order_by(Transaction.transaction_date, Transaction.id).all()
     redactor = Redactor(db, current_user)
     redactor.prepare(transactions)
+    if account_role(current_user, account) == TAG_VIEWER:
+        transactions = [t for t in transactions if redactor.access.readable(t)]
 
     balance_history = []
     running_balance = 0.0

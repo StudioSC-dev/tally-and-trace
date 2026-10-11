@@ -193,3 +193,72 @@ def sw_leaks(body, private_ids=(), numbers=(), path="$"):
 
     walk(body, path)
     return found
+
+
+# --- Household tag shares (STU-233) ---------------------------------------------------------
+
+def hh_household(db, who) -> int:
+    """``who``'s Household system tag id (made when missing: ``sw_people`` users
+    are created outside registration)."""
+    from app.core.tags import ensure_household_tag
+
+    tag = ensure_household_tag(db, who["id"])
+    db.commit()
+    return tag.id
+
+
+def hh_tag_share(db, sharer, holder) -> int:
+    """``sharer`` shares their Household tag with ``holder`` (a row, written directly;
+    the endpoints are tested in ``test_household_shares_integration.py``)."""
+    from app.models.tag_share import TagShare
+
+    share = TagShare(tag_id=hh_household(db, sharer), user_id=holder["id"])
+    db.add(share)
+    db.commit()
+    return share.id
+
+
+@pytest.fixture
+def hh(sw_client, sw_db, sw_people):
+    """The Household-share world: owner A, partner B (editor on A's joint
+    account), and a third user C holding both A's and B's Household tag shares.
+
+    A's joint account carries A's Household tag. A also has a private bank,
+    card (paid from the private bank), loan and spending wallet, every name
+    carrying ``PRIVATE``. B and C each have a private bank. No records yet.
+    """
+    client, db = sw_client, sw_db
+    a = sw_people("Alice", "Owner")
+    b = sw_people("Bea", "Partner")
+    c = sw_people("Cal", "Third")
+    hh_a, hh_b, hh_c = (hh_household(db, w) for w in (a, b, c))
+    joint = sw_post(client, a, "/accounts/", {
+        "name": "Joint account", "account_type": "checking", "balance": 10_000,
+        "tag_ids": [hh_a]})["id"]
+    a_private = sw_post(client, a, "/accounts/", {
+        "name": f"{PRIVATE} bank", "account_type": "checking", "balance": 5_000,
+        "description": f"{PRIVATE} description"})["id"]
+    a_card = sw_post(client, a, "/accounts/", {
+        "name": f"{PRIVATE} card", "account_type": "credit", "balance": 0,
+        "billing_cycle_start": 15, "days_until_due_date": 21,
+        "payment_account_id": a_private, "credit_limit": 77_777})["id"]
+    a_loan = sw_post(client, a, "/accounts/", {
+        "name": f"{PRIVATE} loan", "account_type": "loan", "loan_kind": "auto",
+        "balance": -100_000, "loan_annual_rate": 12, "loan_term_months": 24,
+        "loan_payment_amount": 5_000, "loan_first_payment_date": "2026-10-20",
+        "payment_account_id": a_private})["id"]
+    a_wallet = sw_post(client, a, "/accounts/", {
+        "name": f"{PRIVATE} wallet", "account_type": "checking", "balance": 800,
+        "is_spending_wallet": True})["id"]
+    b_private = sw_post(client, b, "/accounts/", {
+        "name": "Bea bank", "account_type": "checking", "balance": 3_000})["id"]
+    c_private = sw_post(client, c, "/accounts/", {
+        "name": "Cal bank", "account_type": "checking", "balance": 2_000})["id"]
+    b_share = sw_share(db, joint, b["id"], "editor", a["id"])
+    return {
+        "a": a, "b": b, "c": c, "hh_a": hh_a, "hh_b": hh_b, "hh_c": hh_c,
+        "joint": joint, "a_private": a_private, "a_card": a_card, "a_loan": a_loan,
+        "a_wallet": a_wallet, "b_private": b_private, "c_private": c_private,
+        "b_share": b_share,
+        "a_to_c": hh_tag_share(db, a, c), "b_to_c": hh_tag_share(db, b, c),
+    }

@@ -37,7 +37,7 @@ from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.access import DIRECT_ROLES, EDIT_ROLES, RecordAccess, record_account_ids
+from app.core.access import EDIT_ROLES, VIEW_ROLES, RecordAccess, record_account_ids
 from app.core.attachments import public_receipt_url
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -145,7 +145,8 @@ class Redactor:
     # --- rules -----------------------------------------------------------------------
 
     def can_view(self, account_id: Optional[int]) -> bool:
-        return self.access.role(account_id) in DIRECT_ROLES
+        """Whether the caller sees the account (any role, ``tag_viewer`` included)."""
+        return self.access.role(account_id) in VIEW_ROLES
 
     def account_ref(self, account_id: Optional[int]) -> Optional[dict]:
         """``{id, name}`` for a viewable account, a neutral ``{id: null, name}`` otherwise."""
@@ -321,8 +322,9 @@ class Redactor:
 def displayed_description_criterion(viewable_ids: Iterable[int]):
     """Criterion: a transaction whose stored description the caller is shown.
 
-    That is one whose every touched account is viewable (``display_description``).
-    Search matches displayed text only, so it is combined with this.
+    That is one whose every touched account is viewable (``display_description``;
+    ``viewable_ids`` include ``tag_viewer`` accounts). Search matches displayed
+    text only, so it is combined with this.
     """
     from sqlalchemy import and_, or_
 
@@ -416,11 +418,18 @@ MANAGER_ONLY_ACCOUNT_FIELDS = (
 )
 
 
+# All an account reached only through a Household tag share shows (``tag_viewer``).
+TAG_VIEWER_ACCOUNT_FIELDS = ("id", "name", "account_type", "currency", "balance")
+
+
 def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]:
     """Accounts as ``user`` sees them: ``my_role``, ``permissions``, ``owner_name``,
     and the owner-or-admin fields nulled for everyone else. ``can_delete``
-    (deleting or deactivating the account) is the owner's alone."""
-    from app.core.access import MANAGE_ROLES, OWNER_ROLES, account_role
+    (deleting or deactivating the account) is the owner's alone. An account
+    the caller reaches only through a Household tag share (``tag_viewer``)
+    shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
+    (every permission false) and ``tags``."""
+    from app.core.access import MANAGE_ROLES, OWNER_ROLES, TAG_VIEWER, account_role
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
@@ -431,7 +440,9 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
     for account in accounts:
         role = account_role(user, account)
         data = AccountFields.model_validate(account).model_dump()
-        if role not in MANAGE_ROLES:
+        if role == TAG_VIEWER:
+            data = {k: data[k] for k in (*TAG_VIEWER_ACCOUNT_FIELDS, "tags")}
+        elif role not in MANAGE_ROLES:
             for field in MANAGER_ONLY_ACCOUNT_FIELDS:
                 data[field] = None
         data.update({

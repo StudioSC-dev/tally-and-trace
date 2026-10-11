@@ -5,11 +5,13 @@ from typing import List, Optional, Set
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
+    VIEW_ROLES,
     RecordAccess,
     can_edit_account,
     can_view_account,
     editable_account_ids,
     get_record_or_404,
+    household_grants,
     readable_criterion,
     require_account,
     require_owned_ref,
@@ -558,17 +560,21 @@ def get_transactions(
     offset: int = Query(0, ge=0),
 ):
     """Get all transactions with optional filtering"""
-    # Every transaction the caller may read: their own, plus any touching an
-    # account they hold a role on (including transfers where either leg does).
+    # Every transaction the caller may read: their own, any touching an
+    # account they hold a direct role on (including transfers where either leg
+    # does), and through a Household tag share rules (b2) and (c).
     viewable = viewable_account_ids(db, current_user)
-    query = db.query(Transaction).filter(readable_criterion(Transaction, current_user, viewable))
+    seen = viewable_account_ids(db, current_user, roles=VIEW_ROLES)
+    grants = household_grants(db, current_user)
+    query = db.query(Transaction).filter(
+        readable_criterion(Transaction, current_user, viewable, grants))
 
     if account_ids:
         # Only accounts the caller can view: any other id (hidden or nonexistent)
         # matches nothing, so a guessed id never reveals the account behind a
         # neutral reference.
         query = query.filter(touches_accounts(
-            Transaction, [i for i in account_ids if i in viewable]))
+            Transaction, [i for i in account_ids if i in seen]))
     # Categories and allocations are never shared: they filter the caller's own rows.
     if category_ids:
         query = query.filter(Transaction.category_id.in_(category_ids),
@@ -590,13 +596,13 @@ def get_transactions(
         # Not in the limited model: filter only the rows the caller sees in full.
         query = query.filter(
             Transaction.is_reconciled == is_reconciled,
-            full_view_criterion(Transaction, current_user, viewable,
+            full_view_criterion(Transaction, current_user, seen,
                                 editable_account_ids(db, current_user)))
     if search:
         # Displayed text only: a row whose description the caller is shown as a
         # neutral label never matches its stored description.
         query = query.filter(Transaction.description.ilike(f"%{search}%"),
-                             displayed_description_criterion(viewable))
+                             displayed_description_criterion(seen))
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(Transaction, tag_id))
@@ -1236,11 +1242,15 @@ def get_transaction_summary(
         Transaction.transaction_date >= start_date,
         Transaction.transaction_date <= end_date,
     )
-    # The accounts the caller holds a role on (inactive ones included: this is
-    # history). Rows touching them, whoever entered them; summarize_period's
-    # source-scope guard decides what a transfer from outside counts for.
-    scope_ids = viewable_account_ids(db, current_user)
-    query = query.filter(touches_accounts(Transaction, scope_ids))
+    # The accounts the caller sees (inactive ones included: this is history).
+    # Rows touching them that the caller may read: with a direct role that is
+    # whoever entered them; through a tag share, only the sharer's own (the
+    # tag-share invariant). summarize_period's source-scope guard decides
+    # what a transfer from outside counts for.
+    scope_ids = viewable_account_ids(db, current_user, roles=VIEW_ROLES)
+    query = query.filter(touches_accounts(Transaction, scope_ids), readable_criterion(
+        Transaction, current_user, viewable_account_ids(db, current_user),
+        household_grants(db, current_user)))
     
     if account_id:
         # An account the caller can't view matches nothing, as a nonexistent one.
