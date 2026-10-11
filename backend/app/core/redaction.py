@@ -24,7 +24,9 @@ kind. A payment into a loan or card the caller can't view shows no interest:
 ``transfer_fee`` is null and ``amount`` is the whole payment. A transfer drawn
 from a loan or card the caller can't view shows no fee either (it is charged to
 that account): ``transfer_fee`` is null and ``amount`` is what the other side
-received.
+received. The exception is a transfer into a loan the caller can view: its fee
+is that loan's interest, which the loan's schedule and balance history already
+show them, so ``transfer_fee`` is shown and the source stays a neutral reference.
 
 Tags are only ever the caller's own (``attach_visible_tags``). Every record
 carries ``view``, ``permissions`` (``RecordAccess.permissions``) and
@@ -184,6 +186,15 @@ class Redactor:
         """The loan or card a transfer draws from, when the caller can't view it."""
         return self._hidden_liability(record, "transfer_from_account_id")
 
+    def _into_viewable_loan(self, record) -> bool:
+        """Whether a transfer pays into a loan the caller can view (its fee is
+        that loan's interest)."""
+        if getattr(record, "transaction_type", None) != TransactionType.TRANSFER:
+            return False
+        target = self.access.account(record.transfer_to_account_id)
+        return (target is not None and target.account_type == AccountType.LOAN
+                and self.can_view(target.id))
+
     def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
         """The stored description when every touched account is viewable, else a label."""
         f = facts or self.access.facts(record)
@@ -234,9 +245,10 @@ class Redactor:
         facts = facts or self.access.facts(txn)
         shown = facts["view_all"] and bool(facts["ids"])
         amount, fee = txn.amount, txn.transfer_fee
-        if self._hidden_source_liability(txn) is not None:
+        if self._hidden_source_liability(txn) is not None and not self._into_viewable_loan(txn):
             # Drawn from a hidden loan or card: its fee is that account's charge,
-            # so only what the visible side received is shown.
+            # so only what the visible side received is shown. Into a viewable
+            # loan the fee is that loan's interest, shown as in its schedule.
             fee = None
         elif self._hidden_liability(txn) is not None:
             # No interest shown: the whole payment, no split.

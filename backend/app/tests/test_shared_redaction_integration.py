@@ -517,7 +517,8 @@ def test_a_transfer_from_a_hidden_liability_shows_no_fee(sw, sw_client, source):
     """The only row in the window: the owner draws from their private card (a cash
     advance) or loan (a disbursement) into the joint account, with a fee charged to
     the hidden source. Nobody else is shown that fee, or the amount plus it, in the
-    record list or get, the period summary, or the JSON, CSV and ZIP exports."""
+    record list or get, the period summary, or the JSON, CSV and ZIP exports. (Into
+    a loan the caller can view, the fee is that loan's interest: see the next test.)"""
     from app.tests.test_shared_export_integration import _all_exports
 
     a = sw["a"]
@@ -553,3 +554,73 @@ def test_a_transfer_from_a_hidden_liability_shows_no_fee(sw, sw_client, source):
     # The owner, who sees the source, still gets the fee.
     own = _get(sw_client, a, f"/transactions/{txn}")
     assert (own["amount"], own["transfer_fee"]) == (4000.0, INTEREST)
+
+
+def test_a_transfer_from_a_hidden_card_into_a_shared_loan_shows_its_interest(
+        sw, sw_client, sw_db):
+    """The owner pays a loan shared with everyone from their private card. The fee
+    is the shared loan's own interest, which its schedule (rows for an editor or
+    admin, principal + interest for a viewer) and its balance history already
+    give away, so the record and the exports show it too; only the card stays a
+    neutral reference. The period summary counts only money leaving the caller's
+    scope, so for them this payment (amount and interest) is not spending, as
+    for any payment into a visible loan from an account outside their scope; the
+    owner, whose card it is, gets the interest under the loan."""
+    from app.tests.test_shared_export_integration import _all_exports
+
+    a = sw["a"]
+    loan = sw_post(sw_client, a, "/accounts/", {
+        "name": "Shared loan", "account_type": "loan", "loan_kind": "personal",
+        "balance": -12_000, "loan_annual_rate": 9.75, "loan_term_months": 12,
+        "loan_payment_amount": 1_050, "loan_first_payment_date": "2026-12-15",
+        "payment_account_id": sw["a_private"]})["id"]
+    for who, role in (("b", "editor"), ("v", "viewer"), ("d", "admin")):
+        sw_share(sw_db, loan, sw[who]["id"], role, a["id"])
+    txn = sw_post(sw_client, a, "/transactions/", {
+        "account_id": sw["a_card"], "transfer_from_account_id": sw["a_card"],
+        "transfer_to_account_id": loan, "amount": 4000, "transfer_fee": INTEREST,
+        "transaction_type": "transfer", "description": f"{PRIVATE} loan payment",
+        "transaction_date": "2026-11-03T12:00:00"})["id"]
+    def interest_only(breakdown):
+        return {k: (float(v["income"]), round(float(v["expenses"]), 2))
+                for k, v in breakdown.items()} == {"Interest: Shared loan": (0.0, INTEREST)}
+
+    for who in ("b", "v", "d"):
+        caller = sw[who]
+        got = _get(sw_client, caller, f"/transactions/{txn}")
+        listed = {t["id"]: t for t in _get(sw_client, caller, "/transactions/",
+                                           limit=100)["items"]}
+        assert listed[txn] == got
+        assert got["view"] == "limited"
+        assert (got["amount"], got["transfer_fee"]) == (4000.0, INTEREST), (who, got)
+        assert got["account"] == {"id": None, "name": "Card payment"}
+        assert got["counterpart"] == {"id": loan, "name": "Shared loan"}
+        # The schedule: the same interest for an editor or admin, the same total
+        # (principal + interest) for a viewer.
+        schedule = _get(sw_client, caller, f"/accounts/{loan}/loan-schedule")
+        if who == "v":
+            paid = [r["amount"] for r in schedule["rows"] if r["status"] == "paid"]
+            assert paid == [4000 + INTEREST], schedule
+        else:
+            paid = [p for p in schedule["payments"] if p["transaction_id"] == txn]
+            assert [(p["principal"], p["interest"]) for p in paid] == [(4000.0, INTEREST)]
+        # The balance history: the loan moved by the principal alone.
+        history = _get(sw_client, caller, f"/accounts/{loan}/balance")["balance_history"]
+        assert [h["amount"] for h in history] == [4000.0], (who, history)
+        summary = _get(sw_client, caller, "/transactions/summary/period", **ALONE)
+        assert summary["summary"]["total_expenses"] == 0.0, (who, summary)
+        assert summary["category_breakdown"] == {}, (who, summary)
+        body, texts = _all_exports(sw_client, caller)
+        exported = {t["id"]: t for t in body["others_transactions"]}[txn]
+        assert (exported["amount"], exported["transfer_fee"]) == ("4000.00", "777.77")
+        assert exported["account"] == {"id": None, "name": "Card payment"}
+        for tree in (got, listed, schedule, history, summary, body):
+            assert sw_leaks(tree, private_ids=[sw["a_card"]]) == [], who
+        for text in texts:
+            assert PRIVATE not in text
+    # The owner sees the same interest, under the same loan.
+    own = _get(sw_client, a, f"/transactions/{txn}")
+    assert (own["amount"], own["transfer_fee"]) == (4000.0, INTEREST)
+    own_summary = _get(sw_client, a, "/transactions/summary/period", **ALONE)
+    assert own_summary["summary"]["total_expenses"] == pytest.approx(INTEREST)
+    assert interest_only(own_summary["category_breakdown"]), own_summary
