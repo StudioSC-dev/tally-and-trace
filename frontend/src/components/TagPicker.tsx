@@ -5,7 +5,7 @@ const FALLBACK_COLOR = '#9ca3af'
 
 /**
  * Multi-select of the caller's tags. With `warnHousehold` (the account form) it says what
- * tagging an account Household will mean once Household sharing exists.
+ * tagging an account Household means for the people holding the owner's Household share.
  */
 export function TagPicker({
   value,
@@ -62,8 +62,9 @@ export function TagPicker({
       )}
       {warnHousehold && householdSelected && (
         <p role="note" className="mt-2 border border-line bg-sunken p-3 text-sm text-body" data-testid="household-account-notice">
-          Once Household sharing exists, tagging an account Household will show your own transactions on it to
-          Household viewers. Other people&apos;s transactions on this account will not be shown.
+          Tagging an account Household exposes your own transactions on it, and its balance, to anyone you share your
+          Household with (they see them read-only). Other people&apos;s transactions on this account are not shown to
+          them.
         </p>
       )}
     </div>
