@@ -251,7 +251,10 @@ export default function AccountsScreen() {
                       </Text>
                       {acc.my_role !== 'owner' && (
                         <Text className="text-sky-400 text-xs">
-                          Shared by {acc.owner_name} · {acc.my_role}
+                          {/* An account seen only through a Household share is read-only and shows little more than its balance. */}
+                          {acc.my_role === 'tag_viewer'
+                            ? `Household · shared by ${acc.owner_name}`
+                            : `Shared by ${acc.owner_name} · ${acc.my_role}`}
                         </Text>
                       )}
                     </View>
