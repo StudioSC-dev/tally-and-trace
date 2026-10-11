@@ -106,9 +106,11 @@ def _post(client, who, path, body):
 
 
 @pytest.fixture
-def world(client, people, tmp_path, monkeypatch):
+def world(client, db, people, tmp_path, monkeypatch):
     """An owner with one of every kind of record, and a stranger with a bank of their own."""
     from app.core.config import settings
+    from app.core.tags import ensure_household_tag
+    from app.models.tag_share import TagShare
 
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
     owner, stranger = people(), people()
@@ -143,11 +145,16 @@ def world(client, people, tmp_path, monkeypatch):
     tag = _post(client, owner, "/tags/", {"name": f"{MARK} Tag"})
     stranger_bank = _post(client, stranger, "/accounts/", {
         "name": "Stranger bank", "account_type": "checking", "balance": 1_000})
+    # The owner's Household tag, shared with a third user (not the stranger).
+    tag_share = TagShare(tag_id=ensure_household_tag(db, owner["id"]).id, user_id=people()["id"])
+    db.add(tag_share)
+    db.commit()
     return {
         "owner": owner, "stranger": stranger, "bank": bank["id"], "card": card["id"],
         "loan": loan["id"], "category": category["id"], "allocation": allocation["id"],
         "transaction": txn["id"], "entry": entry["id"], "accountless": accountless["id"],
         "wish": wish["id"], "tag": tag["id"], "stranger_bank": stranger_bank["id"],
+        "tag_share": tag_share.id,
     }
 
 
@@ -199,6 +206,8 @@ def _id_routes(w):
         ("patch", f"/accounts/{w['bank']}/shares/{w['bank']}", {"json": {"role": "viewer"}}),
         ("delete", f"/accounts/{w['bank']}/shares/{w['bank']}", {}),
         ("delete", f"/shares/received/{w['bank']}", {}),
+        ("delete", f"/tags/household/shares/{w['tag_share']}", {}),
+        ("delete", f"/shares/received/household/{w['tag_share']}", {}),
     ]
     return routes
 
@@ -268,7 +277,7 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
     from app.main import app
 
     w = {k: 0 for k in ("bank", "card", "loan", "transaction", "category", "allocation",
-                        "entry", "accountless", "wish", "tag", "stranger_bank")}
+                        "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share")}
     swept = {(m.upper(), p.replace("/0", "/{id}")) for m, p, _ in _id_routes(w)}
     for path, ops in app.openapi()["paths"].items():
         if "{" not in path or not path.startswith(API) or "/entities/" in path:
