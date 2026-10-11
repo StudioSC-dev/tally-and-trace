@@ -1090,8 +1090,10 @@ def collect_events(
     # Household occurrences: each sharer's explicitly Household-tagged records
     # outside the scope (a bill on their private card or wallet), listed with
     # no leg and de-duplicated against in-scope card payments (services/household.py).
+    # Outside the active scope: an account the caller also sees directly is in
+    # the normal projection's scope, so a record on it is never listed twice.
     for grant in ([household] if household is not None else grants):
-        events.extend(_household_events(db, redactor, user_id, grant, start, end))
+        events.extend(_household_events(db, redactor, user_id, grant, accounts, start, end))
 
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
@@ -1249,9 +1251,14 @@ def collect_events(
     return events
 
 
-def _household_events(db: Session, redactor, user_id: int, grant, start: datetime,
-                      end: datetime) -> List[dict]:
+def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
+                      start: datetime, end: datetime) -> List[dict]:
     """Household occurrences (``services/household.py``) as listed events.
+
+    ``scope`` is the projection's active scope (``collect_events``'s
+    ``accounts``): the Household view scope in a Household view, every account
+    the caller can view otherwise. A record touching any of it is an ordinary
+    event there, never also an occurrence, so each record appears once.
 
     No legs and ``counts_as_cash`` False: ``cash_delta`` 0, never cash and
     never in unassigned cash. ``face_amount`` is the occurrence's remainder.
@@ -1260,9 +1267,8 @@ def _household_events(db: Session, redactor, user_id: int, grant, start: datetim
     full (their own, in their own Household view) carries
     ``household_occurrence``.
     """
-    from app.services.household import household_accounts, household_occurrences
+    from app.services.household import household_occurrences
 
-    scope = household_accounts(db, user_id, grant)
     out = []
     viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
     for occ in household_occurrences(db, grant, scope, start, end, recorded=False,

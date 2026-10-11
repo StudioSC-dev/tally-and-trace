@@ -234,3 +234,32 @@ def test_transaction_and_recurring_household_charges_in_the_engines_order(hh, sw
         ("2026-10-13", "Household cable", 100.0)]
     totals = _monthly_totals(sw_db, c, a)
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (120.0, 100.0)
+
+
+# --- A direct share and a tag share together: each occurrence once ------------------------------
+
+def test_a_record_seen_directly_and_through_the_tag_share_appears_once(hh, sw_client, sw_db):
+    from app.services.forecast import collect_events, project_running_balance
+    from app.services.household import household_events, household_view
+    from app.tests.conftest import sw_share
+
+    a, c = hh["a"], hh["c"]
+    sw_share(sw_db, hh["a_private"], c["id"], "viewer", a["id"])  # plus A's Household tag share
+    _txn(sw_client, a, hh["a_private"], 25, "2026-10-12T00:00:00", tags=[hh["hh_a"]],
+         description="Household groceries")
+    sw_db.expire_all()
+
+    def named(rows, key):
+        return [r for r in rows if r.get(key) == "Household groceries"]
+
+    # The normal views: an ordinary expense on an account C sees, once.
+    [item] = named(_upcoming(sw_db, c), "display_name")
+    assert (item["cash_delta"], item["kind"]) == (-25.0, "expense")
+    [event] = named(collect_events(sw_db, REF, datetime(2026, 12, 9), user_id=c["id"]), "name")
+    assert event["amount"] == Decimal("-25.00") and not event.get("household_occurrence")
+    timeline = project_running_balance(sw_db, c["id"], days=60, reference=REF)
+    assert len(named(timeline["events"], "name")) == 1
+    # The Household view (the joint account only): a Household occurrence, once.
+    grant = household_view(sw_db, c["id"], a["id"])
+    [occ] = named(household_events(sw_db, c["id"], grant, REF, datetime(2026, 12, 9)), "name")
+    assert occ["amount"] == 0 and occ["household_occurrence"] and occ["face_amount"] == 25
