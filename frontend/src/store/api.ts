@@ -296,6 +296,17 @@ export const accountingApi = createApi({
       },
       invalidatesTags: ['Transaction'],
     }),
+    // A receipt is served only behind auth (GET /transactions/{id}/receipt), so it is
+    // fetched as a blob and shown through an object URL; the caller revokes the URL.
+    fetchReceipt: builder.mutation<{ url: string; type: string }, number>({
+      query: (transactionId) => ({
+        url: `transactions/${transactionId}/receipt`,
+        cache: 'no-store',
+        responseHandler: (response: Response) =>
+          response.ok ? response.blob() : response.json().catch(() => null),
+      }),
+      transformResponse: (blob: Blob) => ({ url: URL.createObjectURL(blob), type: blob.type }),
+    }),
     getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number; tag?: number }>({
       query: (params) => ({ url: 'transactions/summary/period', params }),
       providesTags: ['Transaction'],
@@ -443,6 +454,7 @@ export const {
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
+  useFetchReceiptMutation,
   useGetTransactionSummaryQuery,
 
   // Tag hooks

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -234,6 +234,13 @@ export function TransactionsPage() {
   const [editingTransaction, setEditingTransaction] = useState<DetailedTransaction | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionTransaction, setActionTransaction] = useState<Transaction | null>(null)
+  const [fetchReceipt, { isLoading: isReceiptLoading }] = useFetchReceiptMutation()
+  const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
+  const receiptFor = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (receipt) URL.revokeObjectURL(receipt.url)
+  }, [receipt])
   const [postingFormState, setPostingFormState] = useState<PostingFormState>({
     visible: false,
     amount: '',
@@ -832,6 +839,9 @@ export function TransactionsPage() {
 
   const openActionModal = (transaction: Transaction) => {
     resetPostingFormState()
+    setReceipt(null)
+    setReceiptError(null)
+    receiptFor.current = transaction.id
     setActionTransaction(transaction)
     setIsActionModalOpen(true)
   }
@@ -839,7 +849,28 @@ export function TransactionsPage() {
   const closeActionModal = () => {
     setIsActionModalOpen(false)
     setActionTransaction(null)
+    setReceipt(null)
+    setReceiptError(null)
+    receiptFor.current = null
     resetPostingFormState()
+  }
+
+  // The receipt is fetched with the auth header and shown from an object URL,
+  // revoked when it is replaced, the modal closes or the page unmounts.
+  const handleViewReceipt = async (transactionId: number) => {
+    setReceiptError(null)
+    try {
+      const result = await fetchReceipt(transactionId).unwrap()
+      if (receiptFor.current !== transactionId) {
+        URL.revokeObjectURL(result.url)
+        return
+      }
+      setReceipt({ ...result, transactionId })
+    } catch (error) {
+      if (receiptFor.current === transactionId) {
+        setReceiptError(apiErrorMessage(error) || 'Could not load the receipt.')
+      }
+    }
   }
 
   const resetForm = () => {
@@ -1886,6 +1917,29 @@ export function TransactionsPage() {
             </div>
 
             <div className="mt-6 space-y-4">
+              {isOwnerFull(actionTransaction) && actionTransaction.receipt_url?.startsWith('/api/') && (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleViewReceipt(actionTransaction.id)}
+                    disabled={isReceiptLoading}
+                    data-testid="view-receipt"
+                    className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
+                  >
+                    {isReceiptLoading ? 'Loading receipt…' : 'View receipt'}
+                  </button>
+                  {receiptError && <p className="text-sm text-danger">{receiptError}</p>}
+                  {receipt && receipt.transactionId === actionTransaction.id && (
+                    receipt.type.startsWith('image/') ? (
+                      <img src={receipt.url} alt="Receipt" data-testid="receipt-preview" className="max-h-80 border border-line" />
+                    ) : (
+                      <a href={receipt.url} download={`receipt-${actionTransaction.id}`} data-testid="receipt-download" className="text-sm text-ink underline">
+                        Download receipt
+                      </a>
+                    )
+                  )}
+                </div>
+              )}
               {actionLoanStatus === 'pending' && (
                 <p className="text-sm text-muted">Checking this transfer&apos;s destination account…</p>
               )}
