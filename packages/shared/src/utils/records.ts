@@ -1,4 +1,6 @@
-import type { BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, Transaction } from '../types/api'
+import type {
+  BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, Transaction, UpcomingItemOrEvent,
+} from '../types/api'
 
 /**
  * Field readers that work on every record shape. A Limited record has `date` and
@@ -30,4 +32,21 @@ export function timelineEventName(event: CashflowTimelineEvent | LimitedTimeline
 /** The signed effect of a timeline event on cash (a limited event's `cash_delta`). */
 export function timelineEventAmount(event: CashflowTimelineEvent | LimitedTimelineEvent): number {
   return event.view === 'limited' ? event.cash_delta : event.amount
+}
+
+/**
+ * An upcoming item as listed: its amount, and whether money comes in or goes out.
+ * A limited event lists its `face_amount`, not its `cash_delta`: that is only the
+ * cash effect, which is 0 for a card charge billed on a later statement. Its
+ * direction comes from its kind; a transfer's from the side of it the caller holds.
+ */
+export function upcomingItemAmount(item: UpcomingItemOrEvent): { amount: number; direction: 'in' | 'out' | null } {
+  if (item.view === 'limited') {
+    let direction: 'in' | 'out' | null = item.kind === 'income' ? 'in' : 'out'
+    if (item.kind === 'transfer') direction = item.cash_delta > 0 ? 'in' : item.cash_delta < 0 ? 'out' : null
+    return { amount: item.face_amount, direction }
+  }
+  const type = item.entry_type
+  const direction = type === 'income' || type === 'credit' ? 'in' : type === 'expense' || type === 'debit' ? 'out' : null
+  return { amount: item.amount, direction }
 }

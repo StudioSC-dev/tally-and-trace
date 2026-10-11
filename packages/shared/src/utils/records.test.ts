@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import type { BudgetEntry, FullTransaction, LimitedTransaction, RecordPermissions, SharedFullTransaction } from '../index'
+import type {
+  BudgetEntry, FullTransaction, LimitedEvent, LimitedTransaction, RecordPermissions, SharedFullTransaction,
+} from '../index'
 import { isDetailed, isLimited, isLimitedEvent, isOwnerFull, isSharedFull } from '../index'
-import { entryName, timelineEventAmount, timelineEventName, transactionDate, transactionDescription } from './records'
+import {
+  entryName, timelineEventAmount, timelineEventName, transactionDate, transactionDescription, upcomingItemAmount,
+} from './records'
 
 const none: RecordPermissions = { can_edit: false, can_delete: false, can_post: false, can_revert: false, can_tag: false }
 
@@ -112,5 +116,30 @@ describe('timeline event readers', () => {
     expect(timelineEventAmount(fullEvent)).toBe(-500)
     expect(timelineEventName(limitedEvent)).toBe('Loan payment')
     expect(timelineEventAmount(limitedEvent)).toBe(-300)
+  })
+})
+
+describe('upcoming item amounts', () => {
+  const limited: LimitedEvent = {
+    view: 'limited', public_id: 'e1', date: '2026-10-20', original_date: null, overdue: false,
+    display_name: 'Expense', face_amount: 300, cash_delta: 0, currency: 'PHP',
+    account: { id: 5, name: 'Shared card' }, kind: 'expense',
+  }
+
+  it('lists a limited card charge billed later at its face amount, as money out', () => {
+    expect(upcomingItemAmount(limited)).toEqual({ amount: 300, direction: 'out' })
+  })
+
+  it('reads income and transfers by their kind and cash side', () => {
+    expect(upcomingItemAmount({ ...limited, kind: 'income' as const, cash_delta: 300 })).toEqual({ amount: 300, direction: 'in' })
+    expect(upcomingItemAmount({ ...limited, kind: 'transfer' as const, cash_delta: 250 })).toEqual({ amount: 300, direction: 'in' })
+    expect(upcomingItemAmount({ ...limited, kind: 'transfer' as const, cash_delta: -300 })).toEqual({ amount: 300, direction: 'out' })
+    expect(upcomingItemAmount({ ...limited, kind: 'card_payment' as const, cash_delta: -300 })).toEqual({ amount: 300, direction: 'out' })
+  })
+
+  it('keeps a full item as before', () => {
+    const full = { name: 'Rent', amount: 500, due_date: '2026-11-01', entry_type: 'expense', source: 'budget_entry' as const, source_id: 7 }
+    expect(upcomingItemAmount(full)).toEqual({ amount: 500, direction: 'out' })
+    expect(upcomingItemAmount({ ...full, entry_type: 'income' })).toEqual({ amount: 500, direction: 'in' })
   })
 })
