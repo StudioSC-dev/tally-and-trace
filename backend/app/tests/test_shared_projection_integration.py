@@ -616,3 +616,66 @@ def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
         events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
         assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
         assert sw_leaks(unbilled, {card}) == []
+
+
+# --- A hidden card's billing settings change no statement (audit round 4, 2) -------------
+
+def test_a_hidden_cards_billing_settings_change_no_shared_statement(sw, sw_client, sw_db):
+    """A shared card with a 1,000 charge and a 100 payment from the owner's private
+    card. A sharee always sees the payment net the statement (900 due), and
+    flipping only the private card's cycle settings leaves their statements,
+    upcoming items, payables, timeline, cash flow and dashboard unchanged. The
+    owner, who can view the private card, still sees it as before: without cycle
+    settings its payment is not netted."""
+    from app.models.account import Account
+
+    a, private_card = sw["a"], sw["a_card"]
+    card = _card(sw_client, sw, sw_db, payment=sw["joint"], share=("b",))
+    sw_share(sw_db, card, sw["v"]["id"], "viewer", a["id"])
+    sw_share(sw_db, card, sw["d"]["id"], "admin", a["id"])
+    today = datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    _txn(sw_client, a, card, 1000, today.isoformat(), posted=True,
+         description="Groceries")
+    _transfer(sw_client, a, private_card, card, 100, today.isoformat(), posted=True,
+              description=f"{PRIVATE} card payment")
+
+    def shown(who):
+        sw_db.expire_all()
+        out = {}
+        for path in (f"/accounts/{card}/statements", "/forecast/disposable",
+                     "/forecast/upcoming?days=60", "/forecast/timeline?days=90",
+                     "/forecast/cashflow?months=4", "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def cycle(billed):
+        account = sw_db.get(Account, private_card)
+        account.billing_cycle_start = 15 if billed else None
+        account.due_date = None
+        sw_db.commit()
+
+    def due(body):
+        return sum(s["amount_due"] for s in body[f"/accounts/{card}/statements"]["statements"])
+
+    def payable(who):
+        return [e["amount"] for e in _events(sw_db, sw[who])
+                if e["counts_as_cash"] and e["date"] > today]
+
+    for who in ("b", "v", "d"):
+        cycle(True)
+        billed = shown(who)
+        assert due(billed) == 900.0, (who, billed[f"/accounts/{card}/statements"])
+        assert payable(who) == [Decimal("-900.00")], who
+        cycle(False)
+        unbilled = shown(who)
+        for path in billed:
+            assert unbilled[path] == billed[path], (who, path)
+        assert payable(who) == [Decimal("-900.00")], who
+        assert sw_leaks(unbilled, {private_card}) == []
+
+    cycle(True)
+    assert due(shown("a")) == 900.0
+    cycle(False)
+    assert due(shown("a")) == 1000.0

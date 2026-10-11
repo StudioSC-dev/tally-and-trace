@@ -50,7 +50,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterable, Iterator, List, Optional, Tuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -299,7 +299,8 @@ def build_statement_payables(
     ignored, see ``_split_card_rows``). Such a source is any card in ``cards``
     without cycle settings, plus the ids in ``unbilled_sources``: the caller
     names those from the source account itself, so a card outside ``cards``
-    (one the caller holds no role on, or an inactive one) counts too.
+    (an inactive one) counts too. ``_card_rows`` names only cards the caller
+    can view: one they can't view counts as billed.
 
     ``projected_by_card`` holds line items that have no transaction yet (budget
     entries scheduled on the card), which the caller projects only up to ``end``.
@@ -368,8 +369,15 @@ def build_statement_payables(
     return events
 
 
-def _card_rows(db: Session, card_ids: List[int]):
-    """Every row touching each card (whoever entered it) and the unbilled payment sources."""
+def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
+    """Every row touching each card (whoever entered it) and the unbilled payment sources.
+
+    ``viewable_ids`` are the accounts the caller can view: a source card outside
+    them counts as billed whatever its cycle settings, so its payment always
+    nets the statement and those hidden settings change nothing the caller is
+    shown (as ``collect_events`` treats it). For a user with no shares every
+    source card is their own, so nothing changes.
+    """
     txns = (
         db.query(Transaction)
         .filter(or_(
@@ -396,12 +404,13 @@ def _card_rows(db: Session, card_ids: List[int]):
     # about this view: it is loaded by id, outside the card scope above, so a
     # payment from an out-of-scope or inactive card without cycle settings
     # still does not net the statement it was paid into.
+    viewable = set(viewable_ids)
     source_ids = {
         txn.transfer_from_account_id or txn.account_id
         for txn in txns
         if txn.transaction_type == TransactionType.TRANSFER
         and txn.transfer_to_account_id in card_ids
-    }
+    } & viewable
     unbilled_sources = frozenset()
     if source_ids:
         unbilled_sources = frozenset(
@@ -411,7 +420,8 @@ def _card_rows(db: Session, card_ids: List[int]):
     return by_card, unbilled_sources
 
 
-def statement_history(db: Session, card: Account, today: datetime) -> List[dict]:
+def statement_history(db: Session, card: Account, today: datetime,
+                      viewable_ids: Iterable[int]) -> List[dict]:
     """The card's recorded statements, oldest first, through the cycle open on ``today``.
 
     Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
@@ -420,11 +430,12 @@ def statement_history(db: Session, card: Account, today: datetime) -> List[dict]
     "overdue" (owed and due before ``today``) or "open", and ``lines`` the
     charges and refunds in its window as ``{date, amount, transaction}``
     (a refund negative; a cash advance its amount plus fee). Recorded rows
-    only: nothing is projected.
+    only: nothing is projected. ``viewable_ids`` are the caller's viewable
+    accounts (see ``_card_rows``).
     """
     if resolve_cycle_fields(card) is None:
         return []
-    by_card, unbilled_sources = _card_rows(db, [card.id])
+    by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
     rows = by_card.get(card.id, [])
     lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
     if not lines:
@@ -468,6 +479,8 @@ def get_statement_payables(
     start: datetime,
     end: datetime,
     projected_charges: Optional[dict] = None,
+    *,
+    viewable_ids: Iterable[int],
 ) -> List[dict]:
     """DB wrapper: build the statement payables of ``cards``.
 
@@ -478,7 +491,8 @@ def get_statement_payables(
     ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
     transaction yet (budget entries scheduled on a card); each is billed on the
     cycle containing its date, after the recorded rows are settled (see
-    ``build_statement_payables``).
+    ``build_statement_payables``). ``viewable_ids`` are the caller's viewable
+    accounts (see ``_card_rows``).
     """
     cards = [c for c in cards if c.account_type == AccountType.CREDIT]
     if not cards:
@@ -488,6 +502,6 @@ def get_statement_payables(
     # is already in the caller's scope, and a statement must include every
     # charge on it and every payment into it, whoever entered it, including a
     # transfer from an account outside the caller's scope.
-    by_card, unbilled_sources = _card_rows(db, [c.id for c in cards])
+    by_card, unbilled_sources = _card_rows(db, [c.id for c in cards], viewable_ids)
     return build_statement_payables(cards, by_card, start, end, unbilled_sources,
                                     projected_by_card=projected_charges)

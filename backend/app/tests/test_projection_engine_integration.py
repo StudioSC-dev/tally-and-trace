@@ -1129,10 +1129,19 @@ def _assert_billed_debt_is_still_paid_in_cash(db, user):
     ]
 
 
-def test_payment_from_another_users_unbilled_card_does_not_net_the_statement(db, owners):
+def test_payment_from_a_card_the_caller_cant_view_nets_the_statement(db, owners):
+    """Card D is another user's, which owner B can't view: it counts as billed
+    whatever its cycle settings (STU-232), so its payment nets the statement and
+    nothing is left to pay in cash."""
+    from app.services.forecast import get_payables, project_running_balance
+
     owner_a, owner_b = owners
     _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
-    _assert_billed_debt_is_still_paid_in_cash(db, owner_b)
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, owner_b.id, days=30, reference=reference)
+    assert _cash_events(r) == []
+    assert r["closing_balance"] == Decimal("10000.00")
+    assert get_payables(db, owner_b.id, days=30, reference=reference) == []
 
 
 def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):

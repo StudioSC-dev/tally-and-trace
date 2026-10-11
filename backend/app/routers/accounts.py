@@ -14,6 +14,7 @@ from app.core.access import (
     can_edit_account,
     can_view_account,
     get_account_or_404,
+    viewable_account_ids,
     viewable_accounts,
 )
 from app.core.redaction import serialize_account, serialize_accounts
@@ -494,7 +495,8 @@ def get_card_statements(
         raise HTTPException(status_code=400, detail="Account is not a credit card")
     role = account_role(current_user, card)
     limited = role not in EDIT_ROLES
-    history = statement_history(db, card, naive_utc_now())
+    history = statement_history(db, card, naive_utc_now(),
+                                viewable_account_ids(db, current_user))
     redactor = Redactor(db, current_user)
     redactor.prepare([line["transaction"] for s in history for line in s["lines"]])
     statements = []

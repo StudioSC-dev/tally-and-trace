@@ -1059,7 +1059,8 @@ def collect_events(
     # inactive, as before shared accounts, so a user with no shares projects
     # exactly as then.
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
-                                    projected_charges=projected_charges):
+                                    projected_charges=projected_charges,
+                                    viewable_ids=viewable_ids):
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
@@ -1094,7 +1095,8 @@ def collect_events(
         ).all()
         hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None)
         for p in get_statement_payables(db, outside_cards, start, end,
-                                        projected_charges=hidden_charges):
+                                        projected_charges=hidden_charges,
+                                        viewable_ids=viewable_ids):
             card = hidden_cards[p["source_id"]]
             primary = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
             overflow = (p["overflow_account_id"]
