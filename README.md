@@ -213,7 +213,18 @@ An account's owner can share it with another user as `viewer`, `editor` or
   you see in full.
 - **Projections** include shared accounts. Events you can't see in full are
   `limited` (`public_id`, `date`, `original_date`, `overdue`, `display_name`,
-  `face_amount`, `cash_delta`, `currency`, `account`, `kind`).
+  `face_amount`, `cash_delta`, `currency`, `account`, `kind`). They depend on
+  your scope: a card or wallet you can't view counts as billed or as ordinary
+  cash, whatever its settings, so a transfer or card payment involving one can
+  project differently for you than for its owner (on a shared card's
+  statements, or on a joint account's transfers).
+- **Attachments:** uploaded receipts are never served as public files. Fetch
+  one from `GET /transactions/{id}/receipt` with your bearer token; it is
+  returned only to a caller who sees the transaction in `full` view, and
+  everyone else gets the same 404 as for a missing transaction. A stored
+  upload's `receipt_url` (older rows included) is shown as that route; an
+  external link is returned as entered. `invoice_url` has no upload and is
+  returned as entered.
 - **Removing, leaving or demoting a share** to viewer deactivates the former
   sharee's recurring entries on that account; their transactions stay.
 - Demo users can neither share nor be shared with (403).
@@ -243,6 +254,8 @@ An account's owner can share it with another user as `viewer`, `editor` or
 - `GET    /transactions/{id}` — Get transaction details
 - `PUT    /transactions/{id}` — Update a transaction
 - `DELETE /transactions/{id}` — Delete a transaction
+- `POST   /transactions/{id}/upload-receipt` — Upload a receipt (the creator; saved under a random name)
+- `GET    /transactions/{id}/receipt` — The receipt file (only in `full` view; see Attachments)
 
 ### Categories
 - `GET    /categories/` — List categories
