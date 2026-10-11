@@ -273,8 +273,11 @@ def get_upcoming_items(
     payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
-    events = collect_events(db, start, end, user_id=user_id, tag_id=tag_id)
+    return upcoming_items(collect_events(db, start, end, user_id=user_id, tag_id=tag_id))
 
+
+def upcoming_items(events: List[dict]) -> List[dict]:
+    """``collect_events`` events as upcoming items (``get_upcoming_items``), sorted by date."""
     items = [
         {
             "name": e["name"],
@@ -771,6 +774,8 @@ def collect_events(
     user_id: int,
     accounts: Optional[list] = None,
     tag_id: Optional[int] = None,
+    household=None,
+    keep_origin: bool = False,
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
@@ -840,6 +845,16 @@ def collect_events(
     whose source carries the tag effectively are kept (``_keep_tagged``). The
     scope does not change: the same accounts, opening balances and legs, so
     closings are today's balances plus the tagged events alone.
+
+    With ``household`` (a ``HouseholdGrant``; ``accounts`` must then be its
+    Household view scope, ``services/household.household_accounts``) this is
+    that sharer's Household view: only records touching a scope account
+    (the caller's own private records are outside it), only that sharer's
+    Household occurrences, statement legs only on scope accounts, and every
+    card outside the scope that a scope account pays (primary or overflow)
+    discovered as a neutral "Card payment", whatever the caller's role on it.
+    ``keep_origin`` keeps each event's internal ``origin`` (model, id) for
+    callers in this service layer; it never reaches a response.
     """
     start = _naive(start)
     end = _naive(end)
@@ -870,6 +885,9 @@ def collect_events(
     grants = list(access.grants.values())
 
     def disclosed(model):
+        if household is not None:
+            return (readable_criterion(model, user_id, direct_ids, grants),
+                    touches_accounts(model, scope_account_ids))
         return (readable_criterion(model, user_id, direct_ids, grants),
                 or_(model.user_id == user_id, touches_accounts(model, scope_account_ids)))
 
@@ -937,7 +955,7 @@ def collect_events(
                 Account.payment_overflow_account_id.in_(scoped_ids)),
         ).all()
         if a.id not in card_ids and resolve_cycle_fields(a) is not None
-        and account_role(user_id, a) == NONE
+        and (household is not None or account_role(user_id, a) == NONE)
     ] if scoped_ids else []
     # Cards outside the scope that transfers pay into (or draw from): a payment
     # into a billed one is a card payment; one without cycle settings moves no cash.
@@ -1072,7 +1090,7 @@ def collect_events(
     # Household occurrences: each sharer's explicitly Household-tagged records
     # outside the scope (a bill on their private card or wallet), listed with
     # no leg and de-duplicated against in-scope card payments (services/household.py).
-    for grant in grants:
+    for grant in ([household] if household is not None else grants):
         events.extend(_household_events(db, redactor, user_id, grant, start, end))
 
     # Each credit card contributes one dated payable per billing cycle due in the
@@ -1082,6 +1100,8 @@ def collect_events(
     # is never emitted (STU-227). One they can view keeps its leg even when
     # inactive, as before shared accounts, so a user with no shares projects
     # exactly as then.
+    # In a Household view only scope accounts get legs.
+    leg_ids = scoped_ids if household is not None else viewable_ids
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges,
                                     viewable_ids=viewable_ids):
@@ -1089,8 +1109,8 @@ def collect_events(
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
-        funding = p["funding_account_id"] if p["funding_account_id"] in viewable_ids else None
-        overflow = p["overflow_account_id"] if p["overflow_account_id"] in viewable_ids else None
+        funding = p["funding_account_id"] if p["funding_account_id"] in leg_ids else None
+        overflow = p["overflow_account_id"] if p["overflow_account_id"] in leg_ids else None
         statement = _event(
             date=p["date"],
             name=p["name"],
@@ -1223,8 +1243,9 @@ def collect_events(
 
     if tag_id is not None:
         events = _keep_tagged(db, events, tag_id)
-    for e in events:
-        del e["origin"]
+    if not keep_origin:
+        for e in events:
+            del e["origin"]
     return events
 
 

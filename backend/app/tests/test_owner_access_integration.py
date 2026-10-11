@@ -154,7 +154,7 @@ def world(client, db, people, tmp_path, monkeypatch):
         "loan": loan["id"], "category": category["id"], "allocation": allocation["id"],
         "transaction": txn["id"], "entry": entry["id"], "accountless": accountless["id"],
         "wish": wish["id"], "tag": tag["id"], "stranger_bank": stranger_bank["id"],
-        "tag_share": tag_share.id,
+        "tag_share": tag_share.id, "owner_id": owner["id"],
     }
 
 
@@ -208,6 +208,10 @@ def _id_routes(w):
         ("delete", f"/shares/received/{w['bank']}", {}),
         ("delete", f"/tags/household/shares/{w['tag_share']}", {}),
         ("delete", f"/shares/received/household/{w['tag_share']}", {}),
+        ("get", f"/household/{w['owner_id']}/transactions", {}),
+        ("get", f"/household/{w['owner_id']}/upcoming", {}),
+        ("get", f"/household/{w['owner_id']}/monthly", {}),
+        ("get", f"/household/{w['owner_id']}/dashboard", {}),
     ]
     return routes
 
@@ -277,14 +281,15 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
     from app.main import app
 
     w = {k: 0 for k in ("bank", "card", "loan", "transaction", "category", "allocation",
-                        "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share")}
+                        "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share",
+                        "owner_id")}
     swept = {(m.upper(), p.replace("/0", "/{id}")) for m, p, _ in _id_routes(w)}
     for path, ops in app.openapi()["paths"].items():
         if "{" not in path or not path.startswith(API) or "/entities/" in path:
             continue
         generic = path[len(API):]
         for name in ("account_id", "transaction_id", "category_id", "allocation_id",
-                     "entry_id", "item_id", "tag_id", "share_id"):
+                     "entry_id", "item_id", "tag_id", "share_id", "sharer_id"):
             generic = generic.replace("{" + name + "}", "{id}")
         for method in ops:
             assert (method.upper(), generic) in swept, (method, path)

@@ -18,7 +18,8 @@ statements oldest first with every other payment and credit, as
 ``statements.py`` allocates them. A virtual overflow move is not cash and
 never counts. When the card's primary payment account is in the view scope,
 its routed statement payment pays whatever the statement still owes, so that
-counts as covered too. The in-scope part allocated to a statement covers its
+counts as covered too (in the projection; a recorded month counts only the
+payments actually posted). The in-scope part allocated to a statement covers its
 Household lines first, in date order, capped at their total; each line's
 remainder is ``max(0, line - its covered part)`` and only a remainder above 0
 is returned, as the occurrence's ``face_amount``. Any other occurrence
@@ -253,7 +254,8 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 in_scope[i] += paid
             if remaining[i] == 0:
                 i += 1
-    routed = card.payment_account_id in cash_ids
+    # Projected only: in a recorded month only posted payments cover anything.
+    routed = not recorded and card.payment_account_id in cash_ids
 
     out: Dict[tuple, Decimal] = {}
     for idx, c in enumerate(cycles):
@@ -281,3 +283,201 @@ def _household_ids(db: Session, model, ids: List[int], owner_id: int) -> set:
         model, model.id == link.c[column]).filter(
         link.c[column].in_(ids), Tag.is_system.is_(True), Tag.user_id == owner_id,
         model.user_id == owner_id)}
+
+
+# ---------------------------------------------------------------------------
+# Household views (``routers/household.py``): one sharer at a time.
+# ---------------------------------------------------------------------------
+
+def household_view(db: Session, user, sharer_id: int) -> Optional[HouseholdGrant]:
+    """The grant behind the caller's Household view of ``sharer_id``, or None.
+
+    ``sharer_id`` is the caller themselves for their own Household view (their
+    own Household-tagged accounts), otherwise a sharer whose Household tag
+    share they hold. Anyone else: None (the routes answer 404).
+    """
+    from app.core.access import household_grants, own_household_grant
+
+    uid = _uid(user)
+    if sharer_id == uid:
+        return own_household_grant(db, uid)
+    return next((g for g in household_grants(db, uid) if g.sharer_id == sharer_id), None)
+
+
+def household_events(db: Session, user, grant: HouseholdGrant, start: datetime, end: datetime,
+                     *, keep_origin: bool = False) -> List[dict]:
+    """``collect_events`` in Household mode: the Household view of ``grant``'s sharer."""
+    from app.services.forecast import collect_events
+
+    return collect_events(db, start, end, user_id=_uid(user),
+                          accounts=household_accounts(db, user, grant), household=grant,
+                          keep_origin=keep_origin)
+
+
+def household_transactions_criterion(db: Session, user, grant: HouseholdGrant,
+                                     scope_ids: Iterable[int]):
+    """Criterion: the transactions in the Household view: readable by the
+    caller (§1) and touching a scope account, or the sharer's Household
+    occurrences (rule (c) records outside the scope). Never the caller's own
+    private records."""
+    from sqlalchemy import and_, or_
+
+    from app.core.access import (
+        household_grants, readable_criterion, touches_accounts, viewable_account_ids,
+    )
+
+    uid = _uid(user)
+    readable = readable_criterion(Transaction, uid, viewable_account_ids(db, uid),
+                                  household_grants(db, uid))
+    return and_(readable, or_(touches_accounts(Transaction, list(scope_ids)),
+                              household_explicit_criterion(Transaction, grant)))
+
+
+MONTH_FIELDS = ("income", "expense", "fees", "moved_in", "moved_out", "paid_from_other_accounts")
+LIABILITIES = (AccountType.CREDIT, AccountType.LOAN)
+
+
+def _month_key(when) -> str:
+    return f"{when.year:04d}-{when.month:02d}"
+
+
+def _next_month(day: datetime) -> datetime:
+    return day.replace(year=day.year + day.month // 12, month=day.month % 12 + 1, day=1)
+
+
+def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime, last: datetime,
+                      reference: Optional[datetime] = None) -> List[dict]:
+    """Monthly totals of ``grant``'s Household view, per currency, no conversion.
+
+    ``first`` and ``last`` are month starts (inclusive). Recorded months (and
+    the current month up to today) come from posted transactions; the current
+    month from today and later months from the projection (``household_events``).
+
+    Per month and currency (the record's; a statement or loan payable's is its
+    card's or loan's):
+
+    - ``income`` / ``expense``: credits and debits on scope cash accounts,
+      projected statement and loan payables from them, transfers between a
+      scope cash account and a liability (a card or loan, in scope or not) or
+      a scope non-cash account (a spending wallet);
+    - ``fees``: transfer fees paid from a scope cash account;
+    - ``moved_in`` / ``moved_out``: transfers between a scope cash account and
+      a non-liability account outside the scope (the viewer's own deposit from
+      their private account is "Moved in");
+    - ``paid_from_other_accounts``: the remainders of the sharer's Household
+      expense occurrences outside the scope (see the module docstring).
+
+    Transfers between two scope cash accounts count only their fee. A card
+    charge in scope counts when the card is paid, not when it is made.
+    """
+    from app.core.access import household_grants, readable_criterion, touches_accounts
+    from app.core.access import viewable_account_ids
+    from app.core.redaction import Redactor
+    from app.core.time import naive_utc_now
+    from app.services.forecast import is_projection_cash
+
+    uid = _uid(user)
+    now = reference or naive_utc_now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    current = today.replace(day=1)
+    end = _next_month(last)
+
+    scope = household_accounts(db, user, grant)
+    scope_ids = {a.id for a in scope}
+    cash_ids = {a.id for a in scope if is_projection_cash(a)}
+    totals: Dict[Tuple[str, str], Dict[str, Decimal]] = {}
+
+    def add(when, currency, field_name: str, amount) -> None:
+        amount = _money(amount)
+        if not amount:
+            return
+        key = (_month_key(when), getattr(currency, "value", currency))
+        row = totals.setdefault(key, dict.fromkeys(MONTH_FIELDS, ZERO))
+        row[field_name] += amount
+
+    types: Dict[int, AccountType] = {}
+
+    def liability(account_id) -> bool:
+        if account_id is None:
+            return False
+        if account_id not in types:
+            account = db.get(Account, account_id)
+            types[account_id] = account.account_type if account else None
+        return types[account_id] in LIABILITIES
+
+    def transfer(when, currency, src, dst, amount, fee) -> None:
+        src_in, dst_in = src in cash_ids, dst in cash_ids
+        if src_in:
+            add(when, currency, "fees", fee)
+        if src_in and not dst_in:
+            spent = dst in scope_ids or liability(dst)
+            add(when, currency, "expense" if spent else "moved_out", amount)
+        elif dst_in and not src_in:
+            earned = src in scope_ids or liability(src)
+            add(when, currency, "income" if earned else "moved_in", amount)
+
+    access = Redactor(db, uid).access
+    # Recorded: posted transactions in the months up to and including the current one.
+    recorded_end = min(end, _next_month(current))
+    if first < recorded_end and scope_ids:
+        posted = db.query(Transaction).filter(
+            readable_criterion(Transaction, uid, viewable_account_ids(db, uid),
+                               household_grants(db, uid)),
+            touches_accounts(Transaction, list(scope_ids)),
+            Transaction.is_posted.is_(True),
+            Transaction.transaction_date >= first,
+            Transaction.transaction_date < recorded_end,
+        ).all()
+        for t in posted:
+            if not access.readable(t):
+                continue
+            when = _naive(t.transaction_date)
+            if t.transaction_type == TransactionType.TRANSFER:
+                transfer(when, t.currency, t.transfer_from_account_id or t.account_id,
+                         t.transfer_to_account_id, t.amount, t.transfer_fee)
+            elif t.account_id in cash_ids:
+                add(when, t.currency,
+                    "income" if t.transaction_type == TransactionType.CREDIT else "expense",
+                    t.amount)
+    if first < recorded_end:
+        for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True):
+            if occ.record.transaction_type == TransactionType.DEBIT:
+                add(occ.date, occ.record.currency, "paid_from_other_accounts", occ.remainder)
+
+    # Projected: from today to the end of the last month.
+    if end > today:
+        for e in household_events(db, user, grant, today, end, keep_origin=True):
+            when = _naive(e["date"])
+            if when < first:
+                continue
+            model, record_id = e["origin"]
+            source = db.get(model, record_id)
+            if e.get("household_occurrence"):
+                if e["type"] in (TransactionType.DEBIT.value, BudgetEntryType.EXPENSE.value):
+                    add(when, source.currency, "paid_from_other_accounts", e["face_amount"])
+                continue
+            if not e["counts_as_cash"]:
+                continue
+            if e["type"] == TransactionType.TRANSFER.value and model is not Account:
+                if model is Transaction:
+                    src, dst, fee = (source.transfer_from_account_id or source.account_id,
+                                     source.transfer_to_account_id, source.transfer_fee)
+                else:
+                    src, dst, fee = source.account_id, source.transfer_to_account_id, ZERO
+                transfer(when, source.currency, src, dst, source.amount, fee)
+                continue
+            amount = e["amount"]
+            add(when, source.currency, "income" if amount > 0 else "expense", abs(amount))
+
+    months = []
+    day = first
+    while day < end:
+        key = _month_key(day)
+        kind = "recorded" if day < current else "current" if day == current else "projected"
+        currencies = [
+            {"currency": currency, **{k: float(v) for k, v in row.items()}}
+            for (month, currency), row in sorted(totals.items()) if month == key
+        ]
+        months.append({"month": key, "kind": kind, "currencies": currencies})
+        day = _next_month(day)
+    return months
