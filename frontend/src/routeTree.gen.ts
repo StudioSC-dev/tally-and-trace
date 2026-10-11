@@ -15,6 +15,7 @@ import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as HouseholdRouteImport } from './routes/household'
 import { Route as ForecastRouteImport } from './routes/forecast'
 import { Route as AllocationsRouteImport } from './routes/allocations'
 import { Route as AccountsRouteImport } from './routes/accounts'
@@ -50,6 +51,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HouseholdRoute = HouseholdRouteImport.update({
+  id: '/household',
+  path: '/household',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ForecastRoute = ForecastRouteImport.update({
   id: '/forecast',
   path: '/forecast',
@@ -76,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AccountsRoute
   '/allocations': typeof AllocationsRoute
   '/forecast': typeof ForecastRoute
+  '/household': typeof HouseholdRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
@@ -88,6 +95,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AccountsRoute
   '/allocations': typeof AllocationsRoute
   '/forecast': typeof ForecastRoute
+  '/household': typeof HouseholdRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
@@ -101,6 +109,7 @@ export interface FileRoutesById {
   '/accounts': typeof AccountsRoute
   '/allocations': typeof AllocationsRoute
   '/forecast': typeof ForecastRoute
+  '/household': typeof HouseholdRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/allocations'
     | '/forecast'
+    | '/household'
     | '/login'
     | '/register'
     | '/settings'
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/allocations'
     | '/forecast'
+    | '/household'
     | '/login'
     | '/register'
     | '/settings'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/allocations'
     | '/forecast'
+    | '/household'
     | '/login'
     | '/register'
     | '/settings'
@@ -152,6 +164,7 @@ export interface RootRouteChildren {
   AccountsRoute: typeof AccountsRoute
   AllocationsRoute: typeof AllocationsRoute
   ForecastRoute: typeof ForecastRoute
+  HouseholdRoute: typeof HouseholdRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   SettingsRoute: typeof SettingsRoute
@@ -204,6 +217,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/household': {
+      id: '/household'
+      path: '/household'
+      fullPath: '/household'
+      preLoaderRoute: typeof HouseholdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/forecast': {
       id: '/forecast'
       path: '/forecast'
@@ -240,6 +260,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountsRoute: AccountsRoute,
   AllocationsRoute: AllocationsRoute,
   ForecastRoute: ForecastRoute,
+  HouseholdRoute: HouseholdRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   SettingsRoute: SettingsRoute,
