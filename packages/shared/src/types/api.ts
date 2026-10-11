@@ -804,46 +804,89 @@ export interface CashflowTimeline {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
+/** One account in the dashboard's balances: every active account the caller can view. */
+export interface DashboardAccountBalance {
+  id: number
+  name: string
+  balance: number
+  currency: CurrencyCode
+  /** Shown, but not counted in available cash or projections. */
+  is_spending_wallet: boolean
+}
+
+/** A virtual pull from an overflow account to cover a shortfall on its primary. */
+export interface OverflowMove {
+  date: string
+  name: string
+  from_account_id: number
+  from_account_name: string | null
+  to_account_id: number
+  to_account_name: string | null
+  amount: number
+}
+
+/** One projection-cash account's closing balance at the end of a forecast period. */
+export interface AccountClosing {
+  account_id: number
+  account_name: string | null
+  closing_balance: number
+}
+
+/** One period of the month-by-month cash-flow projection. */
+export interface ForecastPeriod {
+  period_label: string
+  period_start: string
+  period_end: string
+  opening_balance: number
+  income: number
+  expenses: number
+  unposted_expenses: number
+  statement_payables: number
+  net: number
+  closing_balance: number
+  by_account: AccountClosing[]
+  unassigned_closing: number
+  overflow_moves: OverflowMove[]
+}
+
+/** Monthly income and expenses, normalised from each recurring entry's cadence. */
+export interface MonthlyDisposable {
+  monthly_income: number
+  monthly_expenses: number
+  monthly_disposable: number
+}
+
+/** GET /dashboard/snapshot, exactly as the backend returns it. */
 export interface DashboardSnapshot {
-  account_balances: Array<{
+  balances: {
+    total: number
+    by_account: DashboardAccountBalance[]
+  }
+  /** Everything due in the next 30 days; limited events have `view: 'limited'`. */
+  upcoming_this_month: UpcomingItemOrEvent[]
+  monthly_summary: MonthlyDisposable
+  forecast_next_3_months: ForecastPeriod[]
+  goals_progress: Array<{
     id: number
     name: string
-    type: AccountType
-    balance: number
-    currency: CurrencyCode
-  }>
-  total_balance: number
-  allocations_summary: Array<{
-    id: number
-    name: string
-    type: AllocationType
+    target_amount: number | null
     current_amount: number
-    target_amount?: number
-    currency: CurrencyCode
-    progress_percent: number
-    target_date?: string
+    progress_pct: number
+    remaining: number
   }>
-  recent_transactions: Array<{
-    id: number
-    description?: string
-    amount: number
-    currency: CurrencyCode
-    type: TransactionType
-    date: string
-    account_name?: string
-    category_name?: string
-  }>
-  upcoming_events: Array<UpcomingBill | LimitedEvent>
-  cash_flow_forecast: CashFlowProjection
-  net_disposable_income: NetDisposableIncome
-  wishlist_summary: Array<{
+  /** The top three unpurchased wishlist items, with when they could be afforded. */
+  wishlist_next_up: Array<{
     id: number
     name: string
-    estimated_cost: number
-    currency: CurrencyCode
+    cost: number
     priority: WishlistItemPriority
-    target_date?: string
-    is_ready: boolean
-    readiness_reason: string
+    affordable_by: string
   }>
+  /** Pooled projection cash (card balances are owed, not held). */
+  available_cash: number
+  account_closings: Array<Pick<ForecastPeriod,
+    'period_label' | 'period_start' | 'period_end' | 'by_account' | 'unassigned_closing'
+    | 'overflow_moves'>>
+  /** Cash outflows due in the next 30 days; limited events have `view: 'limited'`. */
+  payables: PayableOrEvent[]
 }
