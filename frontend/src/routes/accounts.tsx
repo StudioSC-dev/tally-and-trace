@@ -46,6 +46,12 @@ const todayInput = (): string => {
   return `${now.getFullYear()}-${month}-${day}`
 }
 
+/**
+ * Whether the account is active. An account reached only through someone's Household
+ * share (`tag_viewer`) doesn't say, and the Household view lists active accounts only.
+ */
+const isAccountActive = (account: Pick<Account, 'is_active'>): boolean => account.is_active !== false
+
 const blankForm = (currency: CurrencyCode) => ({
   name: '',
   account_type: 'checking' as Account['account_type'],
@@ -279,10 +285,10 @@ export function AccountsPage() {
 
   const orderedAccounts = useMemo(() => {
     return [...accounts].sort((a, b) => {
-      if (a.is_active === b.is_active) {
+      if (isAccountActive(a) === isAccountActive(b)) {
         return a.name.localeCompare(b.name)
       }
-      return Number(b.is_active) - Number(a.is_active)
+      return Number(isAccountActive(b)) - Number(isAccountActive(a))
     })
   }, [accounts])
 
@@ -373,7 +379,7 @@ export function AccountsPage() {
       days_until_due_date: account.days_until_due_date ?? 21,
       payment_account_id: account.payment_account_id ?? undefined,
       payment_overflow_account_id: account.payment_overflow_account_id ?? undefined,
-      is_spending_wallet: account.is_spending_wallet,
+      is_spending_wallet: account.is_spending_wallet ?? false,
       loan_kind: account.loan_kind ?? undefined,
       loan_annual_rate: account.loan_annual_rate ?? undefined,
       loan_term_months: account.loan_term_months ?? undefined,
@@ -381,7 +387,7 @@ export function AccountsPage() {
       loan_first_payment_date: account.loan_first_payment_date ?? undefined,
       loan_amortization: account.loan_amortization ?? undefined,
       loan_payments_made_offset: account.loan_payments_made_offset ?? undefined,
-      is_active: account.is_active,
+      is_active: isAccountActive(account),
       tag_ids: tagIdsOf(account.tags),
     })
     setAmortizationTouched(true)
@@ -416,7 +422,7 @@ export function AccountsPage() {
 
   const handleToggleActive = async (account: Account) => {
     try {
-      const nextIsActive = !account.is_active
+      const nextIsActive = !isAccountActive(account)
       await updateAccount({ id: account.id, data: { is_active: nextIsActive } }).unwrap()
       const updatedAccount: Account = { ...account, is_active: nextIsActive }
       setAccounts((prev) => prev.map((item) => (item.id === account.id ? updatedAccount : item)))
@@ -479,7 +485,7 @@ export function AccountsPage() {
             {orderedAccounts.map((account) => (
               <article
                 key={account.id}
-                className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${account.is_active ? '' : 'opacity-60'}`}
+                className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${isAccountActive(account) ? '' : 'opacity-60'}`}
                 onClick={() => openActionModal(account)}
                 role="button"
                 tabIndex={0}
@@ -501,13 +507,13 @@ export function AccountsPage() {
                         )}
                       </div>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ account.is_active ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
                       >
-                        {account.is_active ? 'Active' : 'Inactive'}
+                        {isAccountActive(account) ? 'Active' : 'Inactive'}
                       </span>
                     </div>
 
-                    {account.account_type === 'loan' && <LoanSummary account={account} />}
+                    {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
 
                     <div className="flex flex-wrap gap-2 text-xs text-body">
                       <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
@@ -539,8 +545,8 @@ export function AccountsPage() {
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-2">
-                    <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${account.is_active ? 'text-ink' : 'bg-sunken text-body'}`}>
-                      {account.is_active ? 'Active' : 'Inactive'}
+                    <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body'}`}>
+                      {isAccountActive(account) ? 'Active' : 'Inactive'}
                     </span>
                   </div>
                 </div>
@@ -627,8 +633,8 @@ export function AccountsPage() {
 
               <div className="border border-line bg-surface/50 p-4">
                 <h3 className="text-sm font-semibold text-body">Status</h3>
-                <p className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${actionAccount.is_active ? 'text-ink' : 'bg-sunken text-body'}`}>
-                  {actionAccount.is_active ? 'Active' : 'Inactive'}
+                <p className={`mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${isAccountActive(actionAccount) ? 'text-ink' : 'bg-sunken text-body'}`}>
+                  {isAccountActive(actionAccount) ? 'Active' : 'Inactive'}
                 </p>
                 {actionAccount.account_type === 'credit' && actionAccount.due_date && (
                   <p className="mt-2 text-sm text-muted">Statement closes every {actionAccount.due_date}th</p>
@@ -639,7 +645,15 @@ export function AccountsPage() {
               </div>
             </div>
 
-            {actionAccount.account_type === 'loan' && (
+            {actionAccount.my_role === 'tag_viewer' && (
+              <p className="mt-6 border border-line bg-sunken p-3 text-sm text-body" data-testid="tag-viewer-note">
+                {actionAccount.owner_name ?? 'Its owner'} shares this account through their Household. You can see its
+                balance and the Household-tagged records on it, read-only.
+              </p>
+            )}
+
+            {/* A Household share shows no loan terms, schedule or statements (the API answers 404). */}
+            {actionAccount.account_type === 'loan' && actionAccount.my_role !== 'tag_viewer' && (
               <div className="mt-6 space-y-4">
                 <LoanSummary account={actionAccount} />
                 {actionAccount.permissions.can_add_transactions && (
@@ -663,7 +677,7 @@ export function AccountsPage() {
               </div>
             )}
 
-            {actionAccount.account_type === 'credit' && (
+            {actionAccount.account_type === 'credit' && actionAccount.my_role !== 'tag_viewer' && (
               <div className="mt-6">
                 <StatementsPanel account={actionAccount} />
               </div>
@@ -673,14 +687,14 @@ export function AccountsPage() {
               {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleToggleActive(actionAccount)}
-                className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ actionAccount.is_active ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
+                className={`flex items-center justify-between gap-3 px-4 py-3 text-sm font-semibold transition-colors duration-200 ${ isAccountActive(actionAccount) ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
               >
-                <span>{actionAccount.is_active ? 'Mark as inactive' : 'Activate account'}</span>
+                <span>{isAccountActive(actionAccount) ? 'Mark as inactive' : 'Activate account'}</span>
                 <span
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${ actionAccount.is_active ? 'bg-ink' : 'bg-sunken' }`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${ isAccountActive(actionAccount) ? 'bg-ink' : 'bg-sunken' }`}
                 >
                   <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-surface transition-transform duration-200 ${ actionAccount.is_active ? 'translate-x-5' : 'translate-x-1' }`}
+                    className={`inline-block h-4 w-4 transform rounded-full bg-surface transition-transform duration-200 ${ isAccountActive(actionAccount) ? 'translate-x-5' : 'translate-x-1' }`}
                   />
                 </span>
               </button>
