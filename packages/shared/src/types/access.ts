@@ -15,8 +15,12 @@ export interface RecordPermissions {
   can_tag: boolean
 }
 
-/** The caller's role on an account. */
-export type AccountRole = 'owner' | 'admin' | 'editor' | 'viewer'
+/**
+ * The caller's role on an account. `tag_viewer`: reached only through someone's
+ * Household tag share; read-only, with every permission false and only the account's
+ * name, type, currency, balance, owner and tags.
+ */
+export type AccountRole = 'owner' | 'admin' | 'editor' | 'viewer' | 'tag_viewer'
 
 /** What the caller may do on one account. */
 export interface AccountPermissions {
@@ -91,6 +95,42 @@ export interface ReceivedShare {
   account_name: string
   owner_name: string | null
   role: ShareRole
+  created_at: string | null
+}
+
+// ─── Household tag shares ────────────────────────────────────────────────────
+
+/**
+ * POST /tags/household/shares. The person is named by exact email, through the same
+ * rate-limited lookup as GET /users/lookup: no match answers 404 "No matching user",
+ * yourself or a duplicate 409, and too many lookups 429. Demo users get 403.
+ */
+export interface HouseholdShareCreate {
+  email: string
+}
+
+/** One person who holds the caller's Household tag (read-only access to what it tags). */
+export interface HouseholdShare {
+  id: number
+  tag_id: number
+  user_id: number
+  display_name: string | null
+  created_at: string | null
+}
+
+/** GET /tags/household/shares (the tag's owner only). */
+export interface HouseholdShares {
+  tag_id: number
+  shares: HouseholdShare[]
+}
+
+/** GET /shares/received/household: a Household tag someone shared with the caller. */
+export interface ReceivedHouseholdShare {
+  id: number
+  tag_id: number
+  /** Opens that person's Household view: GET /household/{sharer_id}/... */
+  sharer_id: number
+  sharer_name: string | null
   created_at: string | null
 }
 

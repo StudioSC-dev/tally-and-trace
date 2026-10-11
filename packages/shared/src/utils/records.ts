@@ -39,11 +39,14 @@ export function timelineEventAmount(event: CashflowTimelineEvent | LimitedTimeli
  * A limited event lists its `face_amount`, not its `cash_delta`: that is only the
  * cash effect, which is 0 for a card charge billed on a later statement. Its
  * direction comes from its kind; a transfer's from the side of it the caller holds.
+ * A Household occurrence (kind `household`) moves none of the caller's cash and does not
+ * say which way it goes, so it has no direction.
  */
 export function upcomingItemAmount(item: UpcomingItemOrEvent): { amount: number; direction: 'in' | 'out' | null } {
   if (item.view === 'limited') {
     let direction: 'in' | 'out' | null = item.kind === 'income' ? 'in' : 'out'
     if (item.kind === 'transfer') direction = item.cash_delta > 0 ? 'in' : item.cash_delta < 0 ? 'out' : null
+    if (item.kind === 'household') direction = null
     return { amount: item.face_amount, direction }
   }
   const type = item.entry_type

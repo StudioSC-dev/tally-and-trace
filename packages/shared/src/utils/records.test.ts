@@ -137,6 +137,11 @@ describe('upcoming item amounts', () => {
     expect(upcomingItemAmount({ ...limited, kind: 'card_payment' as const, cash_delta: -300 })).toEqual({ amount: 300, direction: 'out' })
   })
 
+  it('lists a Household occurrence at its face amount, not its zero cash effect, with no direction', () => {
+    const occurrence: LimitedEvent = { ...limited, kind: 'household', face_amount: 1200, cash_delta: 0, account: { id: null, name: 'Card payment' } }
+    expect(upcomingItemAmount(occurrence)).toEqual({ amount: 1200, direction: null })
+  })
+
   it('keeps a full item as before', () => {
     const full = { name: 'Rent', amount: 500, due_date: '2026-11-01', entry_type: 'expense', source: 'budget_entry' as const, source_id: 7 }
     expect(upcomingItemAmount(full)).toEqual({ amount: 500, direction: 'out' })
