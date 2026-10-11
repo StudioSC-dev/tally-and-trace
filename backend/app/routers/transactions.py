@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
 from app.core.database import get_db
@@ -22,8 +23,11 @@ from app.core.tags import (
 from app.models.transaction import Transaction, TransactionType
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
 from app.core.redaction import (
-    displayed_description_criterion, full_view_criterion, serialize_transaction,
-    serialize_transactions,
+    FULL, Redactor, displayed_description_criterion, full_view_criterion,
+    serialize_transaction, serialize_transactions,
+)
+from app.core.attachments import (
+    RECEIPTS, STORED_PREFIX, new_receipt_filename, public_receipt_url, stored_receipt_path,
 )
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
@@ -871,6 +875,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     update_data.pop("is_recurring", None)
     update_data.pop("recurrence_frequency", None)
     update_data.pop("tag_ids", None)
+    # A stored receipt is shown as its route: sending that back leaves it as is.
+    if update_data.get("receipt_url") is not None and update_data["receipt_url"] == \
+            public_receipt_url(db_transaction.id, db_transaction.receipt_url):
+        update_data.pop("receipt_url")
 
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
@@ -1008,7 +1016,11 @@ async def upload_receipt(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Upload a receipt for a transaction"""
+    """Upload a receipt for a transaction.
+
+    Saved under a random name and served only by ``GET .../receipt``
+    (see ``app/core/attachments.py``); ``file_url`` is that route.
+    """
     # The receipt is the creator's: only they may set it, and only while they
     # may still change the row's accounts.
     db_transaction = get_record_or_404(
@@ -1024,11 +1036,11 @@ async def upload_receipt(
         )
     
     # Create upload directory if it doesn't exist
-    upload_dir = os.path.join(settings.UPLOAD_DIR, "receipts")
+    upload_dir = os.path.join(settings.UPLOAD_DIR, RECEIPTS)
     os.makedirs(upload_dir, exist_ok=True)
     
     # Save file
-    filename = f"receipt_{transaction_id}_{utc_now().strftime('%Y%m%d_%H%M%S')}.{file_extension}"
+    filename = new_receipt_filename(transaction_id, file_extension)
     file_path = os.path.join(upload_dir, filename)
     
     with open(file_path, "wb") as buffer:
@@ -1036,10 +1048,36 @@ async def upload_receipt(
         buffer.write(content)
     
     # Update transaction with receipt URL
-    db_transaction.receipt_url = f"/uploads/receipts/{filename}"
+    db_transaction.receipt_url = f"{STORED_PREFIX}{RECEIPTS}/{filename}"
     db.commit()
     
-    return {"message": "Receipt uploaded successfully", "file_url": db_transaction.receipt_url}
+    return {"message": "Receipt uploaded successfully",
+            "file_url": public_receipt_url(transaction_id, db_transaction.receipt_url)}
+
+
+@router.get("/{transaction_id}/receipt")
+def get_receipt(
+    transaction_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """A transaction's uploaded receipt file.
+
+    Only for a caller who sees the transaction in ``full`` view (its creator,
+    while they can view every account it touches): the same rule that gives
+    ``receipt_url``. Anyone else, and a missing, foreign or out-of-place file,
+    gets the record routes' "Transaction not found".
+    """
+    not_found = HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    if Redactor(db, current_user).view(db_transaction) != FULL:
+        raise not_found
+    path = stored_receipt_path(db_transaction.id, db_transaction.receipt_url)
+    if path is None:
+        raise not_found
+    return FileResponse(path, headers={"Cache-Control": "private, no-store",
+                                       "X-Content-Type-Options": "nosniff"})
 
 UNCATEGORIZED = "Uncategorized"
 TRANSFER_FEES = "Transfer fees"

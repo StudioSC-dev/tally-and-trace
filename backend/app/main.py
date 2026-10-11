@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -9,7 +8,6 @@ from app.core.seed import seed_database
 from app.core.tags import backfill_household_tags
 from app.core.observability import init_sentry
 from contextlib import asynccontextmanager
-import os
 import logging
 import sys
 
@@ -101,9 +99,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for uploads
-if os.path.exists(settings.UPLOAD_DIR):
-    app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+# Uploads are never served as static files: a receipt is fetched from
+# GET /api/v1/transactions/{id}/receipt, behind the record access rules
+# (see app/core/attachments.py).
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)

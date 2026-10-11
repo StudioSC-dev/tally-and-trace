@@ -38,6 +38,7 @@ from typing import Dict, Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.access import DIRECT_ROLES, EDIT_ROLES, RecordAccess, record_account_ids
+from app.core.attachments import public_receipt_url
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.category import Category
@@ -237,6 +238,9 @@ class Redactor:
                 for field in OWNER_PRIVATE_FIELDS:
                     data.pop(field, None)
                 data["category_name"] = self.category_name(txn)
+            else:
+                # A stored upload is fetched from its authenticated route.
+                data["receipt_url"] = public_receipt_url(txn.id, data.get("receipt_url"))
             return data
         return self.limited_transaction(txn, facts)
 

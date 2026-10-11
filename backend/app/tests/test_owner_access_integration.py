@@ -106,8 +106,11 @@ def _post(client, who, path, body):
 
 
 @pytest.fixture
-def world(client, people):
+def world(client, people, tmp_path, monkeypatch):
     """An owner with one of every kind of record, and a stranger with a bank of their own."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
     owner, stranger = people(), people()
     bank = _post(client, owner, "/accounts/", {
         "name": f"{MARK} Bank", "account_type": "checking", "balance": 50_000})
@@ -127,6 +130,9 @@ def world(client, people):
         "account_id": bank["id"], "amount": 1_234, "transaction_type": "debit",
         "transaction_date": WHEN, "description": f"{MARK} groceries",
         "category_id": category["id"]})
+    r = client.post(f"{API}/transactions/{txn['id']}/upload-receipt", headers=owner["headers"],
+                    files={"file": ("r.png", f"{MARK} receipt".encode(), "image/png")})
+    assert r.status_code == 200, r.text
     entry = _post(client, owner, "/budget-entries/", {
         "name": f"{MARK} Rent", "entry_type": "expense", "amount": 9_876,
         "next_occurrence": WHEN, "account_id": bank["id"], "category_id": category["id"]})
@@ -164,6 +170,7 @@ def _id_routes(w):
         ("delete", f"/transactions/{w['transaction']}", {}),
         ("post", f"/transactions/{w['transaction']}/upload-receipt",
          {"files": {"file": ("r.png", b"x", "image/png")}}),
+        ("get", f"/transactions/{w['transaction']}/receipt", {}),
         ("get", f"/categories/{w['category']}", {}),
         ("put", f"/categories/{w['category']}", {"json": {"name": "Taken"}}),
         ("delete", f"/categories/{w['category']}", {}),
@@ -252,7 +259,7 @@ def _snapshot(client, w):
     for p in paths:
         r = client.get(f"{API}{p}", headers=owner["headers"])
         assert r.status_code == 200, (p, r.text)
-        out[p] = r.json()
+        out[p] = r.content if p.endswith("/receipt") else r.json()
     return out
 
 
