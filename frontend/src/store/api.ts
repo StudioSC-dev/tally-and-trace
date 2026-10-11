@@ -334,12 +334,14 @@ export const accountingApi = createApi({
       query: (accountId) => `accounts/${accountId}/shares`,
       providesTags: ['Share'],
     }),
+    // An account's first share changes which rows count as paid installments of its
+    // recurring entries, and any share changes how its records read, so every share
+    // change refreshes like leaveShare. Demoting or removing a share also deactivates
+    // the recurring entries that person kept on the account.
     createAccountShare: builder.mutation<AccountShare, { accountId: number; data: ShareCreate }>({
       query: ({ accountId, data }) => ({ url: `accounts/${accountId}/shares`, method: 'POST', body: data }),
-      invalidatesTags: ['Share', 'Account'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
     }),
-    // Demoting or removing a share deactivates the recurring entries that person kept on
-    // the account and changes how its records read, so these refresh like leaveShare.
     updateAccountShare: builder.mutation<AccountShare, { accountId: number; shareId: number; data: ShareUpdate }>({
       query: ({ accountId, shareId, data }) => ({
         url: `accounts/${accountId}/shares/${shareId}`,
