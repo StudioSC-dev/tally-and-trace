@@ -12,6 +12,7 @@ from app.models.wishlist_item import WishlistItem as WishlistItem, WishlistPrior
 from app.models.demo_state import DemoState as DemoState
 from app.models.tag import Tag as Tag
 from app.models.account_share import AccountShare as AccountShare
+from app.models.tag_share import TagShare as TagShare
 
 # ---------------------------------------------------------------------------
 # User relationships

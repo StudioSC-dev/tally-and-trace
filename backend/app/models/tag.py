@@ -4,12 +4,14 @@ A tag belongs to one user (``user_id``) and is unique per user by
 ``lower(name)``. Every user has exactly one system tag, "Household"
 (``is_system``), created at registration; it can't be renamed or deleted.
 The three link tables tie a tag to a record; deleting either side deletes the
-link (``ON DELETE CASCADE``). See ``app/core/tags.py`` for the rules.
+link (``ON DELETE CASCADE``). A Household tag can be shared, read-only, with
+another user (``tag_shares``, STU-233). See ``app/core/tags.py`` for the rules.
 """
 
 from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, func, text,
 )
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -31,6 +33,11 @@ class Tag(Base):
         Index("uq_tags_user_id_system", "user_id", unique=True,
               postgresql_where=text("is_system")),
     )
+
+    # Who holds a share of this tag (only ever a Household system tag; see
+    # app/models/tag_share.py). app/core/access.py reads it.
+    shares = relationship("TagShare", back_populates="tag", lazy="selectin",
+                          cascade="all, delete-orphan", passive_deletes=True)
 
 
 def _link_table(name: str, record_column: str, record_table: str) -> Table:
