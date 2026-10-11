@@ -239,13 +239,18 @@ export function TransactionsPage() {
   const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const receiptFor = useRef<number | null>(null)
-  useEffect(() => () => {
-    if (receipt) URL.revokeObjectURL(receipt.url)
-  }, [receipt])
+  // The object URL is owned here, not by `receipt` state, so one accepted
+  // before its state commits is still revoked.
+  const receiptUrl = useRef<string | null>(null)
+  const releaseReceiptUrl = useCallback(() => {
+    if (receiptUrl.current) URL.revokeObjectURL(receiptUrl.current)
+    receiptUrl.current = null
+  }, [])
   // A result that lands after the page unmounts must find no pending request.
   useEffect(() => () => {
     receiptFor.current = null
-  }, [])
+    releaseReceiptUrl()
+  }, [releaseReceiptUrl])
   const [postingFormState, setPostingFormState] = useState<PostingFormState>({
     visible: false,
     amount: '',
@@ -844,6 +849,7 @@ export function TransactionsPage() {
 
   const openActionModal = (transaction: Transaction) => {
     resetPostingFormState()
+    releaseReceiptUrl()
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = transaction.id
@@ -854,6 +860,7 @@ export function TransactionsPage() {
   const closeActionModal = () => {
     setIsActionModalOpen(false)
     setActionTransaction(null)
+    releaseReceiptUrl()
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = null
@@ -871,6 +878,8 @@ export function TransactionsPage() {
         URL.revokeObjectURL(result.url)
         return
       }
+      releaseReceiptUrl()
+      receiptUrl.current = result.url
       setReceipt({ ...result, transactionId })
     } catch (error) {
       if (receiptFor.current === transactionId) {
