@@ -281,3 +281,45 @@ def test_monthly_endpoint_shape(hh, sw_client, sw_db):
     assert (body["from"], body["to"]) == ("2026-09", "2026-12")
     assert [m["month"] for m in body["months"]] == ["2026-09", "2026-10", "2026-11", "2026-12"]
     assert all(m["kind"] in ("recorded", "current", "projected") for m in body["months"])
+
+
+# --- Hidden loans and cards: no interest in the totals (plan §2) --------------------------------
+
+def _loan_payment(client, hh, mode, when="2026-10-20T00:00:00"):
+    posted, _ = MODES[mode]
+    _transfer(client, hh["a"], hh["joint"], hh["a_loan"], 400, when, posted=posted,
+              transfer_fee=50, description="Loan payment")
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+def test_payment_into_a_hidden_loan_is_one_whole_expense(hh, sw_client, sw_db, mode):
+    _loan_payment(sw_client, hh, mode)
+    months = _monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])
+    lines = [(m["month"], line) for m in months for line in m["currencies"]]
+    assert lines == [("2026-10", {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                  "expense": 450.0})]
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+def test_payment_into_a_visible_loan_keeps_its_fee(hh, sw_client, sw_db, mode):
+    # A sees their own loan: the payment's principal and interest stay apart.
+    _loan_payment(sw_client, hh, mode)
+    months = _monthly(sw_db, hh["a"], hh["a"], MODES[mode][1])
+    lines = [(m["month"], line) for m in months for line in m["currencies"]]
+    assert lines == [("2026-10", {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                  "expense": 400.0, "fees": 50.0})]
+
+
+@pytest.mark.parametrize("viewer,expected", [
+    ("c", {"expense": 450.0}), ("a", {"expense": 400.0, "fees": 50.0})])
+def test_dashboard_month_hides_a_hidden_loans_interest(hh, sw_client, sw_db, viewer, expected):
+    from app.core.time import naive_utc_now
+
+    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    _transfer(sw_client, hh["a"], hh["joint"], hh["a_loan"], 400, today.isoformat(),
+              posted=True, transfer_fee=50, description="Loan payment")
+    body = _get(sw_client, hh[viewer], f"/household/{hh['a']['id']}/dashboard")
+    assert body["month"]["currencies"] == [
+        {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0), **expected}]
+    if viewer == "c":
+        assert sw_leaks(body, numbers=(50,)) == []

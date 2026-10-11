@@ -360,7 +360,10 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
       projected statement and loan payables from them, transfers between a
       scope cash account and a liability (a card or loan, in scope or not) or
       a scope non-cash account (a spending wallet);
-    - ``fees``: transfer fees paid from a scope cash account;
+    - ``fees``: transfer fees paid from a scope cash account, except on a
+      payment into a loan or card the caller can't view: that payment is one
+      whole ``expense`` (principal and interest), as its Limited transaction
+      shows it, so no interest is revealed;
     - ``moved_in`` / ``moved_out``: transfers between a scope cash account and
       a non-liability account outside the scope (the viewer's own deposit from
       their private account is "Moved in");
@@ -405,8 +408,15 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             types[account_id] = account.account_type if account else None
         return types[account_id] in LIABILITIES
 
+    redactor = Redactor(db, uid)
+
     def transfer(when, currency, src, dst, amount, fee) -> None:
         src_in, dst_in = src in cash_ids, dst in cash_ids
+        if src_in and not dst_in and liability(dst) and not redactor.can_view(dst):
+            # Into a loan or card the caller can't view: one whole expense, as
+            # its Limited transaction shows it (no fee, so no interest shown).
+            add(when, currency, "expense", _money(amount) + _money(fee))
+            return
         if src_in:
             add(when, currency, "fees", fee)
         if src_in and not dst_in:
@@ -416,7 +426,7 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             earned = src in scope_ids or liability(src)
             add(when, currency, "income" if earned else "moved_in", amount)
 
-    access = Redactor(db, uid).access
+    access = redactor.access
     # Recorded: posted transactions in the months up to and including the current one.
     recorded_end = min(end, _next_month(current))
     if first < recorded_end and scope_ids:
