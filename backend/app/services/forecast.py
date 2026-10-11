@@ -1264,7 +1264,9 @@ def _household_events(db: Session, redactor, user_id: int, grant, start: datetim
 
     scope = household_accounts(db, user_id, grant)
     out = []
-    for occ in household_occurrences(db, grant, scope, start, end, recorded=False):
+    viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    for occ in household_occurrences(db, grant, scope, start, end, recorded=False,
+                                     viewable_ids=viewable_ids):
         record = occ.record
         is_txn = isinstance(record, Transaction)
         event = _event(

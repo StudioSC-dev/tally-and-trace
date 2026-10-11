@@ -177,3 +177,60 @@ def test_a_household_tagged_card_in_scope_projects_its_statement_without_detail(
     assert statement["amount"] == Decimal("-100.00") and statement["source_id"] is None
     assert "statement_balance" not in statement and "statement_close" not in statement
     assert _household(_upcoming(sw_db, c)) == []
+
+
+# --- Household coverage follows the statement engine's settlement order ---------------------------
+
+def _card_entry(client, hh, amount, when, name="Household cable"):
+    """A one-off Household charge scheduled on A's private card (a recurring entry)."""
+    sw_post(client, hh["a"], "/budget-entries/", {
+        "name": name, "entry_type": "expense", "amount": amount, "account_id": hh["a_card"],
+        "next_occurrence": when, "end_date": "2026-10-31T00:00:00", "tag_ids": [hh["hh_a"]]})
+
+
+def _monthly_totals(db, who, sharer):
+    from app.services.household import household_monthly, household_view
+
+    db.expire_all()
+    grant = household_view(db, who["id"], sharer["id"])
+    months = household_monthly(db, who["id"], grant, datetime(2026, 10, 1),
+                               datetime(2026, 11, 1), reference=REF)
+    out: dict = {}
+    for month in months:
+        for line in month["currencies"]:
+            for k, v in line.items():
+                if k != "currency":
+                    out[k] = round(out.get(k, 0.0) + v, 2)
+    return out
+
+
+def test_a_recurring_household_charge_is_settled_after_the_transaction_rows(hh, sw_client,
+                                                                           sw_db):
+    # The engine settles the rows first: the joint payment pays the private
+    # November charge, so the October Household charge stays payable on
+    # November 5 from A's private bank, and is paid from other accounts.
+    a, c = hh["a"], hh["c"]
+    _txn(sw_client, a, hh["a_card"], 100, "2026-11-01T00:00:00", description=f"{PRIVATE} gift")
+    _transfer(sw_client, a, hh["joint"], hh["a_card"], 100, "2026-10-20T00:00:00")
+    _card_entry(sw_client, hh, 100, "2026-10-12T00:00:00")
+    items = _household(_upcoming(sw_db, c))
+    assert [(i["date"], i["face_amount"]) for i in items] == [("2026-10-12", 100.0)]
+    totals = _monthly_totals(sw_db, c, a)
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (100.0, 100.0)
+
+
+def test_transaction_and_recurring_household_charges_in_the_engines_order(hh, sw_client, sw_db):
+    # Rows: October 50 (Household), November 100 (private); the joint 120 pays
+    # 50 of October and 70 of November. The October Household entry of 100 is
+    # added after, so it is left whole.
+    a, c = hh["a"], hh["c"]
+    _txn(sw_client, a, hh["a_card"], 50, "2026-10-12T00:00:00", tags=[hh["hh_a"]],
+         description="Household internet")
+    _txn(sw_client, a, hh["a_card"], 100, "2026-11-01T00:00:00", description=f"{PRIVATE} gift")
+    _transfer(sw_client, a, hh["joint"], hh["a_card"], 120, "2026-10-20T00:00:00")
+    _card_entry(sw_client, hh, 100, "2026-10-13T00:00:00")
+    items = _household(_upcoming(sw_db, c))
+    assert [(i["date"], i["display_name"], i["face_amount"]) for i in items] == [
+        ("2026-10-13", "Household cable", 100.0)]
+    totals = _monthly_totals(sw_db, c, a)
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (120.0, 100.0)

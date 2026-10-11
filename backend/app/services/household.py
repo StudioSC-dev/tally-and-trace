@@ -13,10 +13,14 @@ appears once.
 
 An occurrence on a credit card is de-duplicated against the in-scope CASH
 payments into that card: every transfer into it from a projection-cash
-account of the view scope (posted, planned or recurring), allocated to its
-statements oldest first with every other payment and credit, as
-``statements.py`` allocates them. A virtual overflow move is not cash and
-never counts. When the card's primary payment account is in the view scope,
+account of the view scope (posted, planned or recurring), settled with every
+other payment and credit in the statement engine's order
+(``_settle_with_sources``, mirroring ``statements.build_statement_payables``):
+the transaction rows are balanced and paid oldest statement first, and only
+then are the projected entry charges added and paid from what is left, so
+a payment the rows already used never covers a charge projected later.
+Recurring transfers into the card, which the engine does not net, are
+applied last. A virtual overflow move is not cash and never counts. When the card's primary payment account is in the view scope,
 its routed statement payment pays whatever the statement still owes, so that
 counts as covered too (in the projection; a recorded month counts only the
 payments actually posted). The in-scope part allocated to a statement covers its
@@ -85,14 +89,16 @@ def _naive(dt: datetime) -> datetime:
 
 
 def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Account],
-                          start: datetime, end: datetime, *, recorded: bool) -> List[Occurrence]:
+                          start: datetime, end: datetime, *, recorded: bool,
+                          viewable_ids: Iterable[int]) -> List[Occurrence]:
     """The Household occurrences of ``grant``'s sharer in ``[start, end)`` (module docstring).
 
     ``scope`` is the Household view scope (``household_accounts``). Projected
     (``recorded`` False): unposted transactions dated before ``end`` (one
     dated before ``start`` is listed at ``start``, overdue) and active
     recurring entries' occurrences in the window. Recorded: posted
-    transactions dated in the window.
+    transactions dated in the window. ``viewable_ids`` are the caller's
+    viewable accounts (``statements._card_rows``).
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
 
@@ -159,49 +165,40 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
 
     for card_id, lines in card_lines.items():
         covered = _card_household_cover(db, billed[card_id], cash_ids, start, end,
-                                        recorded=recorded)
+                                        recorded=recorded, viewable_ids=viewable_ids)
         for occ, key in lines:
             occ.remainder = covered.get(key, occ.face)
     return [o for o in out if o.remainder > 0]
 
 
 def _card_household_cover(db: Session, card: Account, cash_ids: set, start: datetime,
-                          end: datetime, *, recorded: bool) -> Dict[tuple, Decimal]:
+                          end: datetime, *, recorded: bool,
+                          viewable_ids: Iterable[int]) -> Dict[tuple, Decimal]:
     """``{line key: remainder}`` for every Household line on ``card`` (module docstring).
 
     Line keys are ``("t", transaction id)`` and ``("e", entry id, occurrence)``;
-    a line whose key is missing has no statement (remainder = face).
+    a line whose key is missing has no statement (remainder = face). The card's
+    rows are read and split as the statement engine reads them (``_card_rows``,
+    ``_split_card_rows``, with ``viewable_ids`` the caller's viewable accounts)
+    and settled in its order (``_settle_with_sources``).
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
+    from app.services.statements import _card_rows, _split_card_rows
 
-    rows = db.query(Transaction).filter(
-        (Transaction.account_id == card.id)
-        | ((Transaction.transaction_type == TransactionType.TRANSFER)
-           & ((Transaction.transfer_to_account_id == card.id)
-              | (Transaction.transfer_from_account_id == card.id)))
-    ).all()
+    by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
+    rows = by_card.get(card.id, [])
     if recorded:
         rows = [r for r in rows if r.is_posted]
+    lines, payments = _split_card_rows(card.id, rows, unbilled, payment_sources=True)
     household_txns = _household_ids(db, Transaction, [r.id for r in rows], card.user_id)
+    keys: Dict[int, tuple] = {}  # id(line) -> line key
+    for line in lines:
+        if (isinstance(line, Transaction) and line.transaction_type == TransactionType.DEBIT
+                and line.id in household_txns):
+            keys[id(line)] = ("t", line.id)
 
-    lines: List[Tuple[datetime, Decimal, Optional[tuple]]] = []
-    payments: List[Tuple[datetime, Decimal, bool]] = []
-    for row in rows:
-        when = _naive(row.transaction_date)
-        amount = _money(row.amount)
-        if row.transaction_type == TransactionType.TRANSFER:
-            source = row.transfer_from_account_id or row.account_id
-            if row.transfer_to_account_id == card.id:
-                payments.append((when, amount, source in cash_ids))
-            elif source == card.id:
-                lines.append((when, amount + _money(row.transfer_fee), None))
-            continue
-        if row.transaction_type == TransactionType.DEBIT:
-            key = ("t", row.id) if row.id in household_txns else None
-            lines.append((when, amount, key))
-        elif row.transaction_type == TransactionType.CREDIT:
-            lines.append((when, -amount, None))
-
+    projected: list = []
+    recurring: List[Tuple[datetime, Decimal, bool]] = []
     if not recorded:
         entries = db.query(BudgetEntry).filter(
             BudgetEntry.account_id == card.id, BudgetEntry.is_active.is_(True),
@@ -209,66 +206,127 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
         household_entries = _household_ids(db, BudgetEntry, [e.id for e in entries],
                                            card.user_id)
         for entry in entries:
-            income = entry.entry_type == BudgetEntryType.INCOME
             for line in _card_entry_charges(db, [entry], {card.id: card}, start, end,
                                             None).get(card.id, []):
-                amount = _money(line.amount)
-                key = (("e", entry.id, line.transaction_date)
-                       if entry.id in household_entries and not income else None)
-                lines.append((line.transaction_date, -amount if income else amount, key))
+                projected.append(line)
+                if (entry.id in household_entries
+                        and entry.entry_type != BudgetEntryType.INCOME):
+                    keys[id(line)] = ("e", entry.id, line.transaction_date)
         # Recurring transfers into the card: payments on their occurrences.
-        recurring = db.query(BudgetEntry).filter(
+        transfers = db.query(BudgetEntry).filter(
             BudgetEntry.transfer_to_account_id == card.id,
             BudgetEntry.is_active.is_(True)).all()
-        linked = _linked_occurrence_days(db, [e.id for e in recurring])
-        for entry in recurring:
+        linked = _linked_occurrence_days(db, [e.id for e in transfers])
+        for entry in transfers:
             for when in iter_occurrences(entry, start, end):
                 key = (entry.id, when.date())
                 if linked[key]:
                     linked[key] -= 1
                     continue
-                payments.append((when, _money(entry.amount), entry.account_id in cash_ids))
+                recurring.append((when, _money(entry.amount), entry.account_id in cash_ids))
 
-    if not lines:
+    if not keys:
         return {}
-    days = [when.date() for when, _, _ in lines]
+    days = [line.transaction_date.date() for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
-    balances = []
-    for c in cycles:
-        lo, hi = c["window_start"].date(), c["close"].date()
-        balances.append(sum((amt for when, amt, _ in lines if lo < when.date() <= hi), ZERO))
-
-    # Every payment and credit, oldest statement first; track the in-scope part.
-    remaining = [max(b, ZERO) for b in balances]
-    in_scope = [ZERO] * len(cycles)
-    pool = [(amt, flag) for _, amt, flag in sorted(payments, key=lambda p: p[0])]
-    pool += [(-b, False) for b in balances if b < 0]
-    i = 0
-    for amount, flag in pool:
-        left = amount
-        while left > 0 and i < len(remaining):
-            paid = min(left, remaining[i])
-            remaining[i] -= paid
-            left -= paid
-            if flag:
-                in_scope[i] += paid
-            if remaining[i] == 0:
-                i += 1
+    owed, in_scope = _settle_with_sources(
+        cycles, lines, [(when, amount, src in cash_ids) for when, amount, src in payments],
+        projected, recurring)
     # Projected only: in a recorded month only posted payments cover anything.
     routed = not recorded and card.payment_account_id in cash_ids
 
     out: Dict[tuple, Decimal] = {}
     for idx, c in enumerate(cycles):
-        cover = in_scope[idx] + (remaining[idx] if routed else ZERO)
+        cover = in_scope[idx] + (owed[idx] if routed else ZERO)
         lo, hi = c["window_start"].date(), c["close"].date()
-        household = sorted(((when, amt, key) for when, amt, key in lines
-                            if key is not None and lo < when.date() <= hi),
-                           key=lambda line: (line[0], str(line[2])))
+        household = sorted(((line.transaction_date, _money(line.amount), keys[id(line)])
+                            for line in [*lines, *projected]
+                            if id(line) in keys and lo < line.transaction_date.date() <= hi),
+                           key=lambda line: (line[0].date(), str(line[2])))
         for _, amt, key in household:
             part = min(cover, amt)
             cover -= part
             out[key] = amt - part
     return out
+
+
+def _settle_with_sources(cycles: List[dict], lines: list,
+                         payments: List[Tuple[datetime, Decimal, bool]], projected: list,
+                         recurring: List[Tuple[datetime, Decimal, bool]] = ()
+                         ) -> Tuple[List[Decimal], List[Decimal]]:
+    """``(owed, in_scope)`` per cycle: the statement engine's settlement, by payment source.
+
+    The same sequence as ``statements.build_statement_payables``: the
+    transaction rows (``lines``) are balanced per cycle and every payment into
+    the card and every net credit is allocated oldest statement first
+    (``allocate_payments``); the projected entry charges are then added and
+    what the pool left unspent pays outstanding cycles oldest first, and each
+    projected credit pays from the first statement due on or after its date
+    (``settle_projected``). ``owed`` is what each cycle still owes, exactly
+    as the engine computes it. ``in_scope`` is the part of each cycle paid by
+    a payment flagged True (an in-scope cash payment); credits are never in
+    scope. Recurring transfers into the card, which the engine does not net,
+    are applied last, in date order, oldest statement first.
+    """
+    from app.services.statements import statement_balance
+
+    balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+    owed = [max(b, ZERO) for b in balances]
+    in_scope = [ZERO] * len(cycles)
+
+    def spend(amount: Decimal, flag: bool, i: int) -> Tuple[Decimal, int]:
+        while amount > 0 and i < len(owed):
+            paid = min(amount, owed[i])
+            owed[i] -= paid
+            amount -= paid
+            if flag:
+                in_scope[i] += paid
+            if owed[i] == 0:
+                i += 1
+        return amount, i
+
+    # allocate_payments: payments in date order, then the net credits.
+    pool = [(amount, flag) for _, amount, flag in sorted(payments, key=lambda p: p[0].date())]
+    pool += [(-b, False) for b in balances if b < 0]
+    unspent: List[Tuple[Decimal, bool]] = []
+    i = 0
+    for amount, flag in pool:
+        left, i = spend(amount, flag, i)
+        if left > 0:
+            unspent.append((left, flag))
+
+    # settle_projected: projected charges, then the unspent pool, then projected credits.
+    credits = []
+    for row in projected:
+        day = row.transaction_date.date()
+        if row.transaction_type == TransactionType.CREDIT:
+            credits.append((day, Decimal(str(row.amount))))
+        elif row.transaction_type == TransactionType.DEBIT:
+            for idx, c in enumerate(cycles):
+                if c["window_start"].date() < day <= c["close"].date():
+                    owed[idx] += Decimal(str(row.amount))
+                    break
+    for amount, flag in unspent:
+        _spend_from(owed, in_scope, amount, flag, 0)
+    for day, amount in sorted(credits, key=lambda c: c[0]):
+        first = next((idx for idx, c in enumerate(cycles) if c["due"].date() >= day),
+                     len(cycles))
+        _spend_from(owed, in_scope, amount, False, first)
+    for _, amount, flag in sorted(recurring, key=lambda p: p[0]):
+        _spend_from(owed, in_scope, amount, flag, 0)
+    return owed, in_scope
+
+
+def _spend_from(owed: List[Decimal], in_scope: List[Decimal], amount: Decimal, flag: bool,
+               i: int) -> None:
+    """``settle_projected``'s ``spend``: pay outstanding cycles from ``i`` on, in order."""
+    while amount > 0 and i < len(owed):
+        paid = min(amount, owed[i])
+        owed[i] -= paid
+        amount -= paid
+        if flag:
+            in_scope[i] += paid
+        i += 1
 
 
 def _household_ids(db: Session, model, ids: List[int], owner_id: int) -> set:
@@ -450,7 +508,9 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
                     "income" if t.transaction_type == TransactionType.CREDIT else "expense",
                     t.amount)
     if first < recorded_end:
-        for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True):
+        for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True,
+                                         viewable_ids=viewable_account_ids(
+                                             db, uid, roles=VIEW_ROLES)):
             if occ.record.transaction_type == TransactionType.DEBIT:
                 add(occ.date, occ.record.currency, "paid_from_other_accounts", occ.remainder)
 

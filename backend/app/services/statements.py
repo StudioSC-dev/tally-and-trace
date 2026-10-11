@@ -222,7 +222,8 @@ def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
 
 
 def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
-                     keep_source: bool = False) -> Tuple[list, List[Tuple[datetime, Decimal]]]:
+                     keep_source: bool = False, payment_sources: bool = False
+                     ) -> Tuple[list, List[tuple]]:
     """Separate a card's rows into statement line items and payments into the card.
 
     Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
@@ -235,6 +236,7 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
     and netting it would make the debt it moved disappear.
 
     With ``keep_source`` a cash advance's line keeps its row as ``source``.
+    With ``payment_sources`` each payment is ``(date, amount, paying account id)``.
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
@@ -244,7 +246,8 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
             if getattr(row, "transfer_to_account_id", None) == card_id:
                 source = getattr(row, "transfer_from_account_id", None) or row.account_id
                 if source not in unbilled_ids:
-                    payments.append((row.transaction_date, amount))
+                    payments.append((row.transaction_date, amount, source)
+                                    if payment_sources else (row.transaction_date, amount))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
                 fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
                 extra = {"source": row} if keep_source else {}
