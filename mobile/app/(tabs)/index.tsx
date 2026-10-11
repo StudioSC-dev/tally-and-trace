@@ -4,7 +4,7 @@ import { useGetDashboardSnapshotQuery } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
-import { formatRelativeDate, isLimitedEvent } from '@tally-trace/shared'
+import { formatRelativeDate, isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
 import { Card, SectionHeader, LoadingSpinner, Badge, AmountText } from '../../src/components/ui'
 
 export default function HomeScreen() {
@@ -100,18 +100,15 @@ export default function HomeScreen() {
             <SectionHeader title="Upcoming Bills" />
             <Card className="gap-3">
               {snapshot.upcoming_this_month.slice(0, 5).map((event, idx) => {
-                // Limited events (shared accounts) carry a neutral name and a signed cash_delta only.
+                // Limited events (shared accounts) carry a neutral name; they list their
+                // face amount, since a card charge billed later has a cash_delta of 0.
                 const limited = isLimitedEvent(event)
                 const full = isLimitedEvent(event) ? null : event
                 const name = limited ? event.display_name : (full?.name ?? '')
-                const amount = limited ? Math.abs(event.cash_delta) : (full?.amount ?? 0)
+                const { amount, direction } = upcomingItemAmount(event)
                 const date = limited ? event.date : (full?.due_date ?? '')
-                const isIncome = limited
-                  ? event.cash_delta > 0
-                  : full?.entry_type === 'income' || full?.entry_type === 'credit'
-                const isExpense = limited
-                  ? event.cash_delta < 0
-                  : full?.entry_type === 'expense' || full?.entry_type === 'debit'
+                const isIncome = direction === 'in'
+                const isExpense = direction === 'out'
                 const kindLabel = limited ? event.kind.replace('_', ' ') : (full?.entry_type ?? '')
                 return (
                 <View key={idx}>
