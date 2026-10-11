@@ -319,6 +319,25 @@ def touches_only(model, account_ids: Iterable[int]):
                   for c in TOUCHED_COLUMNS[model]))
 
 
+def touches_none(model, account_ids: Iterable[int]):
+    """Criterion: the record touches none of ``account_ids`` (null columns count for nothing)."""
+    ids = list(account_ids)
+    return and_(*(or_(~_counted(model, c), ~getattr(model, c).in_(ids))
+                  for c in TOUCHED_COLUMNS[model]))
+
+
+def own_household_grant(db: Session, user) -> Optional[HouseholdGrant]:
+    """The caller's own Household tag in the shape of a grant (their own Household view)."""
+    uid = _uid(user)
+    tag_id = db.query(Tag.id).filter(Tag.user_id == uid, Tag.is_system.is_(True)).scalar()
+    if tag_id is None:
+        return None
+    owned = frozenset(row[0] for row in db.query(Account.id).filter(Account.user_id == uid))
+    tagged = frozenset(row[0] for row in db.query(account_tags.c.account_id).filter(
+        account_tags.c.tag_id == tag_id, account_tags.c.account_id.in_(owned)))
+    return HouseholdGrant(uid, tag_id, owned, tagged)
+
+
 def explicit_tag_criterion(model, tag_id: int):
     """Criterion: the record carries ``tag_id`` as an explicit tag."""
     link, column = TAG_LINKS[model]
