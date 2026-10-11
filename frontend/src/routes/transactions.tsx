@@ -13,6 +13,7 @@ import { isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescr
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
+import { currentSessionGeneration } from '../store/baseQuery'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
@@ -241,6 +242,10 @@ export function TransactionsPage() {
   useEffect(() => () => {
     if (receipt) URL.revokeObjectURL(receipt.url)
   }, [receipt])
+  // A result that lands after the page unmounts must find no pending request.
+  useEffect(() => () => {
+    receiptFor.current = null
+  }, [])
   const [postingFormState, setPostingFormState] = useState<PostingFormState>({
     visible: false,
     amount: '',
@@ -859,9 +864,10 @@ export function TransactionsPage() {
   // revoked when it is replaced, the modal closes or the page unmounts.
   const handleViewReceipt = async (transactionId: number) => {
     setReceiptError(null)
+    const generation = currentSessionGeneration()
     try {
       const result = await fetchReceipt(transactionId).unwrap()
-      if (receiptFor.current !== transactionId) {
+      if (receiptFor.current !== transactionId || generation !== currentSessionGeneration()) {
         URL.revokeObjectURL(result.url)
         return
       }
