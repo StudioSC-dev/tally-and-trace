@@ -567,3 +567,52 @@ def test_a_hidden_wallet_flag_changes_nothing_the_sharee_is_shown(sw, sw_client,
     sw_db.expire_all()
     own = sw_client.get(f"{API}/forecast/disposable", headers=a["headers"]).json()
     assert own["monthly_expenses"] == 100.0
+
+
+# --- A hidden card's billing settings change nothing (audit round 3, 2) ------------------
+
+@pytest.mark.parametrize("direction", ["into_card", "from_card"])
+def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
+        sw, sw_client, sw_db, direction):
+    """A planned transfer of 100 between the joint account and the owner's private
+    card, either way: the joint leg always moves cash for a sharee (-100 into the
+    card, +100 from it), and flipping the hidden card's cycle settings leaves
+    upcoming items, payables, the timeline, the cash flow and the whole dashboard
+    snapshot unchanged."""
+    from app.models.account import Account
+
+    a, joint, card = sw["a"], sw["joint"], sw["a_card"]
+    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    frm, to = (joint, card) if direction == "into_card" else (card, joint)
+    _transfer(sw_client, a, frm, to, 100, soon, description=f"{PRIVATE} card move")
+    expected = -100.0 if direction == "into_card" else 100.0
+
+    def shown(who):
+        sw_db.expire_all()
+        out = {}
+        for path in ("/forecast/disposable", "/forecast/upcoming?days=30",
+                     "/forecast/timeline?days=60", "/forecast/cashflow?months=3",
+                     "/dashboard/snapshot"):
+            r = sw_client.get(f"{API}{path}", headers=sw[who]["headers"])
+            assert r.status_code == 200, (path, r.text)
+            out[path] = r.json()
+        return out
+
+    def cycle(billed):
+        account = sw_db.get(Account, card)
+        account.billing_cycle_start = 15 if billed else None
+        account.due_date = None
+        sw_db.commit()
+
+    for who in ("b", "v", "d"):
+        cycle(True)
+        billed = shown(who)
+        events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
+        assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
+        cycle(False)
+        unbilled = shown(who)
+        for path in billed:
+            assert unbilled[path] == billed[path], (who, path)
+        events = [e for e in _events(sw_db, sw[who]) if e["counts_as_cash"]]
+        assert [e["amount"] for e in events] == [Decimal(str(expected))], (who, events)
+        assert sw_leaks(unbilled, {card}) == []

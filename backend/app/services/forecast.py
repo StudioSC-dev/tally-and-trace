@@ -688,8 +688,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     "Loan payment": no description, ``source_id`` or ``transfer_fee`` (the
     interest), only its amounts, date and in-scope legs.
 
-    ``unbilled_ids`` are cards outside the scope without cycle settings: a
-    transfer touching one moves no cash, as for a scoped one.
+    ``unbilled_ids`` are cards outside the scope without cycle settings that the
+    caller can view (an inactive one): a transfer touching one moves no cash, as
+    for a scoped one. A card the caller can't view is never in it.
 
     ``source`` and ``overflow_account_id`` let a recurring transfer budget entry
     reuse this: its occurrences are transfers whose source leg routes to the
@@ -706,7 +707,9 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     card, so the statement payable repays it later.
 
     Both rules need the card's statements to be modelled. ``billed_ids`` are the
-    cards that have them (cycle settings; default: every card). A transfer
+    cards that have them (cycle settings; default: every card); ``collect_events``
+    passes a card the caller can't view as billed whatever its settings, so those
+    settings never decide what moves their cash. A transfer
     touching a card without cycle settings moves no projection cash at all: no
     statement bills an advance from it or is netted by a payment into it, so
     counting either side would leave cash that nothing balances. A payment into
@@ -929,8 +932,12 @@ def collect_events(
             Account.account_type == AccountType.CREDIT,
         ).all() if a.id not in card_ids
     }
+    # A card the caller can't view counts as billed whatever its cycle settings,
+    # so the visible leg of a transfer touching it always moves cash and those
+    # hidden settings change nothing they are shown. For a user with no shares
+    # every referenced card is their own, so nothing changes.
     outside_billed = {cid for cid, a in referenced_cards.items()
-                      if resolve_cycle_fields(a) is not None}
+                      if cid not in viewable_ids or resolve_cycle_fields(a) is not None}
     outside_unbilled = frozenset(set(referenced_cards) - outside_billed)
     transfer_billed_ids = billed_ids | outside_billed
 
