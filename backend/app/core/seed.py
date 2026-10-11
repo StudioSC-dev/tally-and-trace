@@ -18,6 +18,13 @@ their own and a deposit from it into the joint account (``partner`` and
 ``shares`` in ``constants/seed_data.json``). Demo users can't change shares
 (``app/routers/shares.py``), so the share comes only from this seed.
 
+Shape 4 (STU-233): the demo owner also shares their Household tag with the
+Demo Partner (a ``tag_shares`` row), so the partner has the owner's Household
+view. The owner's credit card is routed to the joint account
+(``payment_account_id``), and its Household bill is paid from there by a
+posted card payment, so that bill counts once in the Household monthly totals.
+A missing tag share is restored like a missing account share.
+
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
 
@@ -39,6 +46,7 @@ from app.models.account import AccountType
 from app.models.allocation import AllocationType, BudgetPeriodFrequency
 from app.models.budget_entry import BudgetEntryType
 from app.models.demo_state import DemoState
+from app.models.tag_share import TagShare
 from app.models.transaction import RecurrenceFrequency, TransactionType
 from app.models.user import CurrencyType
 from app.models.wishlist_item import WishlistItem
@@ -50,7 +58,9 @@ DEMO_PARTNER_EMAIL = "demo.partner@example.com"
 # Demo users can neither share nor be shared with (app/routers/shares.py).
 DEMO_EMAILS = frozenset({DEMO_EMAIL, DEMO_PARTNER_EMAIL})
 DEMO_PASSWORD = "password123"
-DEMO_SHAPE_VERSION = 3  # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232)
+# 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232); 4: the Household
+# tag share and the card routed to the joint account (STU-233)
+DEMO_SHAPE_VERSION = 4
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
@@ -113,7 +123,8 @@ def _ensure_demo_shares(db: Session, owner: User, partner: User) -> int:
 
     The no-op path's check: it reseeds nothing. Each share names an owner
     account by its 1-based index in the seed file, found by that account's
-    name; one the owner no longer has is skipped.
+    name; one the owner no longer has is skipped. The owner's Household tag
+    share to the partner is re-added too.
     """
     with open(_SEED_FILE, "r") as f:
         seed_data = json.load(f)
@@ -131,6 +142,11 @@ def _ensure_demo_shares(db: Session, owner: User, partner: User) -> int:
             db.add(AccountShare(account_id=account.id, user_id=partner.id, role=share["role"],
                                 created_by=owner.id))
             added += 1
+    household = ensure_household_tag(db, owner)
+    if db.query(TagShare.id).filter(TagShare.tag_id == household.id,
+                                    TagShare.user_id == partner.id).first() is None:
+        db.add(TagShare(tag_id=household.id, user_id=partner.id))
+        added += 1
     if added:
         db.flush()
     return added
@@ -151,7 +167,7 @@ def _delete_demo_data(db: Session, users) -> None:
     """Everything the demo users own, children first; the user rows stay.
 
     So does each Household system tag, as every user keeps theirs; its links go
-    with the records they tag. Every user's transactions go before any account,
+    with the records they tag, and its tag shares are deleted. Every user's transactions go before any account,
     since the partner's deposit lands on the owner's joint account.
     """
     ids = [u.id for u in users]
@@ -159,6 +175,10 @@ def _delete_demo_data(db: Session, users) -> None:
         db.query(model).filter(model.user_id.in_(ids)).delete(synchronize_session=False)
     db.query(Tag).filter(Tag.user_id.in_(ids), Tag.is_system.is_(False)).delete(
         synchronize_session=False)
+    db.query(TagShare).filter(or_(
+        TagShare.tag_id.in_(select(Tag.id).where(Tag.user_id.in_(ids))),
+        TagShare.user_id.in_(ids),
+    )).delete(synchronize_session=False)
     owned = select(Account.id).where(Account.user_id.in_(ids))
     db.query(AccountShare).filter(or_(
         AccountShare.account_id.in_(owned), AccountShare.user_id.in_(ids),
@@ -171,8 +191,9 @@ def _delete_demo_data(db: Session, users) -> None:
 
 
 def _load_partner_data(db: Session, owner: User, partner: User, seed_data: dict,
-                       owner_accounts: dict) -> None:
-    """The Demo Partner's accounts and transactions, and the owner's shares to them.
+                       owner_accounts: dict, household: Tag) -> None:
+    """The Demo Partner's accounts and transactions, and the owner's shares to them:
+    the seeded account shares and the owner's Household tag share.
 
     Partner transactions name the partner's accounts by 1-based index
     (``account_id``) and an owner account by ``transfer_to_owner_account_id``.
@@ -203,6 +224,7 @@ def _load_partner_data(db: Session, owner: User, partner: User, seed_data: dict,
     for share in seed_data.get("shares", []):
         db.add(AccountShare(account_id=owner_accounts[share["account_id"]], user_id=partner.id,
                             role=share["role"], created_by=owner.id))
+    db.add(TagShare(tag_id=household.id, user_id=partner.id))
     db.flush()
 
 
@@ -228,6 +250,7 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
     accounts = []
     account_id_mapping = {}  # Map original index to actual ID
     account_obj_mapping = {}
+    routes = []
     for i, account_data in enumerate(seed_data["accounts"]):
         # Convert account_type string to enum (convert uppercase to lowercase)
         account_type_str = account_data["account_type"].lower()
@@ -238,6 +261,9 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
         if account_data.get("days_until_due_date") is None:
             account_data["days_until_due_date"] = 21
         names = account_data.pop("tags", [])
+        # Routing names other seed accounts by 1-based index: set once they have ids.
+        routes.append({k: account_data.pop(k) for k in (
+            "payment_account_id", "payment_overflow_account_id") if k in account_data})
         account = Account(**account_data)
         db.add(account)
         accounts.append(account)
@@ -249,6 +275,10 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
         db.refresh(account)
         account_id_mapping[i + 1] = account.id  # Original seed data uses 1-based indexing
         account_obj_mapping[i + 1] = account
+    for account, route in zip(accounts, routes):
+        for column, index in route.items():
+            setattr(account, column, account_id_mapping[index])
+    db.flush()
 
     # Create categories associated with the default user
     categories = []
@@ -415,4 +445,4 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
             db.execute(table.insert().values({"tag_id": tag_ids[name], column: record.id}))
     db.flush()
 
-    _load_partner_data(db, default_user, partner, seed_data, account_id_mapping)
+    _load_partner_data(db, default_user, partner, seed_data, account_id_mapping, household)
