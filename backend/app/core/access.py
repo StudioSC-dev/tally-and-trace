@@ -195,14 +195,19 @@ def role_map(db: Session, user) -> Dict[int, str]:
     return roles
 
 
-def _tag_viewer_ids(uid):
-    """Select: the accounts whose owner put their Household tag on them and shared it with ``uid``."""
+def tag_shared_account_ids():
+    """Select: the accounts whose owner put their Household tag on them and shared
+    it with anyone (the accounts some user sees as ``tag_viewer``)."""
     return (select(account_tags.c.account_id)
             .join(Tag, Tag.id == account_tags.c.tag_id)
             .join(TagShare, TagShare.tag_id == Tag.id)
             .join(Account, Account.id == account_tags.c.account_id)
-            .where(TagShare.user_id == uid, Tag.is_system.is_(True),
-                   Tag.user_id == Account.user_id))
+            .where(Tag.is_system.is_(True), Tag.user_id == Account.user_id))
+
+
+def _tag_viewer_ids(uid):
+    """Select: the accounts whose owner put their Household tag on them and shared it with ``uid``."""
+    return tag_shared_account_ids().where(TagShare.user_id == uid)
 
 
 def can_view_account(user, account) -> bool:

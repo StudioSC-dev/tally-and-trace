@@ -263,3 +263,81 @@ def test_a_record_seen_directly_and_through_the_tag_share_appears_once(hh, sw_cl
     grant = household_view(sw_db, c["id"], a["id"])
     [occ] = named(household_events(sw_db, c["id"], grant, REF, datetime(2026, 12, 9)), "name")
     assert occ["amount"] == 0 and occ["household_occurrence"] and occ["face_amount"] == 25
+
+
+# --- A recorded occurrence on an account shared only through the tag share (STU-266) -----------
+
+def _tag_shared_bill(client, hh):
+    """A's checking account carrying A's Household tag (shared with C through the
+    tag share, with no ``AccountShare``) and a monthly 500 bill on it, due 15 Oct
+    and 15 Nov."""
+    a = hh["a"]
+    account = sw_post(client, a, "/accounts/", {
+        "name": "Household checking", "account_type": "checking", "balance": 4_000,
+        "tag_ids": [hh["hh_a"]]})["id"]
+    entry = sw_post(client, a, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": account, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    return account, entry
+
+
+def _bill_days(db, who, end=datetime(2026, 11, 9)):
+    from app.services.forecast import collect_events
+
+    db.expire_all()
+    return [(e["date"], e["amount"]) for e in collect_events(db, REF, end, user_id=who["id"])
+            if e["source"] == "budget_entry" and e["name"] == "Household water"]
+
+
+def _closing(db, who):
+    from app.services.forecast import project_running_balance
+
+    db.expire_all()
+    return project_running_balance(db, who["id"], days=30, reference=REF)["closing_balance"]
+
+
+def test_a_private_row_linked_to_a_tag_shared_entry_never_suppresses_the_viewers_occurrence(
+        hh, sw_client, sw_db):
+    # The 15 Oct row is on A's private, untagged bank, which C cannot read: C's
+    # projection is unchanged by it, and the occurrence is still listed.
+    a, c = hh["a"], hh["c"]
+    _, entry = _tag_shared_bill(sw_client, hh)
+    before = _closing(sw_db, c)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _txn(sw_client, a, hh["a_private"], 500, "2026-10-15T00:00:00",
+         description=f"{PRIVATE} water", budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    assert _closing(sw_db, c) == before
+    # A's own view follows the same rule as for an AccountShare: the entry's
+    # account is shared, so only a row on that account stands for an occurrence,
+    # and A sees the occurrence next to the private row.
+    assert _bill_days(sw_db, a) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+
+
+def test_a_row_on_the_tag_shared_entrys_own_account_suppresses_for_viewer_and_owner(
+        hh, sw_client, sw_db):
+    a, c = hh["a"], hh["c"]
+    account, entry = _tag_shared_bill(sw_client, hh)
+    before = _closing(sw_db, c)
+    _txn(sw_client, a, account, 500, "2026-10-15T00:00:00", description="Household water",
+         budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == []
+    assert _bill_days(sw_db, a) == []
+    assert _closing(sw_db, c) == before  # the unposted row is the one movement
+
+
+def test_the_household_view_keeps_a_tag_shared_occurrence_recorded_on_a_private_account(
+        hh, sw_client, sw_db):
+    from app.services.household import household_events, household_view
+
+    a, c = hh["a"], hh["c"]
+    _, entry = _tag_shared_bill(sw_client, hh)
+    _txn(sw_client, a, hh["a_private"], 500, "2026-10-15T00:00:00",
+         description=f"{PRIVATE} water", budget_entry_id=entry)
+    sw_db.expire_all()
+    grant = household_view(sw_db, c["id"], a["id"])
+    events = household_events(sw_db, c["id"], grant, REF, datetime(2026, 11, 9))
+    assert [(e["date"], e["amount"]) for e in events
+            if e["source"] == "budget_entry" and e["name"] == "Household water"] == [
+        (datetime(2026, 10, 15), Decimal("-500.00"))]

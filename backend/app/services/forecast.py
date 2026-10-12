@@ -14,12 +14,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, touches_accounts,
-    viewable_account_ids, viewable_accounts,
+    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, tag_shared_account_ids,
+    touches_accounts, viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
@@ -1410,7 +1410,9 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
     For an entry touching no shared account the creator's row counts on
     whichever account it was recorded (as before shared accounts, so a user
     with no shares gets exactly the same result as then). For an entry touching
-    an account with any share, only a row on the entry's own account counts
+    an account with any share (an ``AccountShare``, or its owner's Household tag
+    on it shared with anyone, the ``tag_viewer`` path in ``app/core/access.py``),
+    only a row on the entry's own account counts
     (for a recurring transfer, one from its source into its destination):
     everyone who can see that account sees the entry, and a row on the
     creator's private account, which they cannot read, must change nothing
@@ -1431,8 +1433,10 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
         .all()
     )
     touched = {acc for row in rows for acc in row[6:] if acc is not None}
-    shared = {acc for (acc,) in db.query(AccountShare.account_id).filter(
-        AccountShare.account_id.in_(touched)).distinct()} if touched else set()
+    shared = {acc for (acc,) in db.query(Account.id).filter(
+        Account.id.in_(touched),
+        or_(Account.id.in_(select(AccountShare.account_id)),
+            Account.id.in_(tag_shared_account_ids())))} if touched else set()
 
     def on_entry_accounts(row) -> bool:
         _, _, kind, account, src, dst, entry_account, entry_dst, _ = row
