@@ -69,7 +69,7 @@ def _entry(client, who, account_id, **fields):
         **fields}, expect=(201,))["id"]
 
 
-def _pay_card_in_full(client, who, bank, card, charged):
+def _pay_card(client, who, bank, card, charged):
     _transfer(client, who, bank, card, charged, posted=True)
 
 
@@ -103,7 +103,7 @@ def test_a_card_funding_a_loan_payment_is_freed_once_it_is_posted_and_billed_pai
 
     body = posted.json()
     charged = Decimal(str(body["amount"])) + Decimal(str(body.get("transfer_fee") or 0))
-    _pay_card_in_full(sw_client, a, sw["a_private"], card, float(charged))
+    _pay_card(sw_client, a, sw["a_private"], card, float(charged))
     r = _deactivate(sw_client, a, card, "put")
     assert r.status_code == 200, r.text
 
@@ -164,10 +164,10 @@ def test_a_card_with_an_unpaid_statement_is_refused_until_it_is_paid(
     assert _is_active(sw_client, a, card) is True
 
     # A part payment still leaves the statement open.
-    _pay_card_in_full(sw_client, a, sw["a_private"], card, 1_000)
+    _pay_card(sw_client, a, sw["a_private"], card, 1_000)
     _refused(_deactivate(sw_client, a, card, how), CARD_OPEN_STATEMENT_DETAIL)
 
-    _pay_card_in_full(sw_client, a, sw["a_private"], card, 1_500)
+    _pay_card(sw_client, a, sw["a_private"], card, 1_500)
     r = _deactivate(sw_client, a, card, how)
     assert r.status_code == 200, r.text
     assert _is_active(sw_client, a, card) is False

@@ -53,6 +53,22 @@ def test_non_owners_cannot_deactivate_and_never_see_an_obligation(sw, sw_client,
 
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
+@pytest.mark.parametrize("who", ["d", "b", "v", "s"])
+def test_non_owners_probing_a_loan_with_a_pending_payment_get_404(sw, sw_client, sw_db,
+                                                                  who, how):
+    a, loan = sw["a"], sw["a_loan"]
+    for role_holder, role in (("d", "admin"), ("b", "editor"), ("v", "viewer")):
+        sw_share(sw_db, loan, sw[role_holder]["id"], role, a["id"])
+    sw_post(sw_client, a, f"/accounts/{loan}/loan-payment",
+            {"amount": 5_000, "is_posted": False, "transaction_date": DAY})
+
+    r = _deactivate(sw_client, sw[who], loan, how)
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Account not found"
+    assert _is_active(sw_client, a, loan) is True
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
 def test_a_tag_viewer_cannot_deactivate(hh, sw_client, how):
     a, c, joint = hh["a"], hh["c"], hh["joint"]  # C holds A's Household tag share
     assert _call(sw_client, c, "GET", f"/accounts/{joint}").json()["my_role"] == "tag_viewer"
