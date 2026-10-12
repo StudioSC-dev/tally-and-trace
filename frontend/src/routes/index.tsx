@@ -69,7 +69,7 @@ type PayableRow = {
   overdue: boolean
   budgetEntryId: number | null
   /** What kind of payable this is; only scheduled entries have a known autopay state. */
-  kind: 'scheduled' | 'statement' | 'loan' | 'shared'
+  kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned'
 }
 
 const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow => {
@@ -97,7 +97,7 @@ const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow 
     detail: `${label}${pays}${overflow}`,
     overdue: false,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
-    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : 'scheduled',
+    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? 'planned' : 'scheduled',
   }
 }
 
@@ -205,7 +205,7 @@ export function Dashboard() {
       .filter((value): value is { allocation: Allocation; limit: number; spent: number; remaining: number; usagePercentage: number } => value !== null)
   }, [budgetAllocations])
 
-  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared'
+  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared' | 'planned'
   const STATUS_LABELS: Record<PayableStatus, string> = {
     danger: 'Overdue',
     autopay: 'Autopay',
@@ -213,6 +213,7 @@ export function Dashboard() {
     statement: 'Statement',
     loan: 'Loan payment',
     shared: 'Shared item',
+    planned: 'Planned',
   }
 
   const renderPlannedExpenseIcon = (status: PayableStatus) => {
@@ -247,7 +248,7 @@ export function Dashboard() {
         </span>
       )
     }
-    // Statements, loan payments and shared items: no autopay state is known, so a neutral mark, not the manual warning.
+    // Statements, loan payments, planned transactions and shared items: no autopay state is known, so a neutral mark, not the manual warning.
     return (
       <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line text-muted">
         <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -257,13 +258,17 @@ export function Dashboard() {
     )
   }
 
+  // Shares are of the rows listed: the ring and table list spending-wallet debits that the period expenses figure nets out.
+  const listedTotal = useMemo(
+    () => Object.values(periodSummary?.category_breakdown ?? {}).reduce((sum, row) => sum + Math.max(row.expenses, 0), 0),
+    [periodSummary],
+  )
+
   // The wallet-aware backend summary names categories; the chart colours them from the caller's own.
   const expenditureInsights = useMemo<ExpenditureInsight[]>(() => {
     if (!periodSummary) return []
     const categories = categoriesData ?? []
     const positive = Object.entries(periodSummary.category_breakdown).filter(([, row]) => row.expenses > 0)
-    // Shares are of the rows listed: spending-wallet debits appear here but not in total_expenses.
-    const listedTotal = positive.reduce((sum, [, row]) => sum + row.expenses, 0)
     if (listedTotal <= 0) return []
     return positive
       .sort(([, a], [, b]) => b.expenses - a.expenses)
@@ -278,7 +283,7 @@ export function Dashboard() {
           percentage: (row.expenses / listedTotal) * 100,
         }
       })
-  }, [periodSummary, categoriesData])
+  }, [periodSummary, categoriesData, listedTotal])
 
   const expenditureChartStyle = useMemo(() => {
     if (expenditureInsights.length === 0) return { backgroundImage: 'conic-gradient(#334155 0% 100%)' }
@@ -288,7 +293,7 @@ export function Dashboard() {
       cumulative += item.percentage
       return `${item.displayColor} ${start}% ${Math.min(cumulative, 100)}%`
     })
-    // Whatever the top five leave out is drawn neutral so the ring still adds up to the period's spend.
+    // Whatever the top five leave out is drawn neutral so the ring still adds up to the listed spend.
     if (cumulative < 100) segments.push(`#334155 ${cumulative}% 100%`)
     return { backgroundImage: `conic-gradient(${segments.join(', ')})` }
   }, [expenditureInsights])
@@ -373,18 +378,19 @@ export function Dashboard() {
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
         <div className="flex flex-col gap-1">
-        <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
-          {(['week', 'month', 'year'] as const).map((period) => (
-            <button
-              key={period}
-              onClick={() => setSelectedPeriod(period)}
-              className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
-            >
-              {period}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-muted" data-testid="period-note">Period applies to actual totals only.</p>
+          <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
+            {(['week', 'month', 'year'] as const).map((period) => (
+              <button
+                key={period}
+                aria-pressed={selectedPeriod === period}
+                onClick={() => setSelectedPeriod(period)}
+                className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
+              >
+                {period}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted" data-testid="period-note">Period applies to actuals (totals and categories), not the projection.</p>
         </div>
       </div>
 
@@ -398,9 +404,7 @@ export function Dashboard() {
             <div>
               <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
               <p className="text-sm text-muted">
-                {selectedPeriod === 'year'
-                  ? 'Tracking year-to-date performance.'
-                  : 'Actuals cover the selected period; the projection runs from today to month end.'}
+                {`Actuals cover ${selectedPeriod === 'year' ? 'year to date' : selectedPeriod === 'month' ? 'month to date' : 'week to date'}; the projection runs from today to month end.`}
               </p>
             </div>
             <span className="badge badge-info capitalize">{periodHeadingLabel}</span>
@@ -432,7 +436,7 @@ export function Dashboard() {
                 </div>
               </dl>
               <p className="mt-1 text-xs text-muted">
-                All your accounts and shared accounts, cards and loans included. Not the same as available cash.
+                All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.
               </p>
             </div>
           </div>
@@ -626,13 +630,13 @@ export function Dashboard() {
               <div className="flex justify-center">
                 <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-full border border-line shadow-inner" style={expenditureChartStyle}>
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm">
-                    <span className="text-xs uppercase tracking-wide text-muted">Total spend</span>
-                    <span className="text-base font-semibold text-ink">{format(periodExpenses)}</span>
+                    <span className="text-xs uppercase tracking-wide text-muted">Spend by category</span>
+                    <span className="text-base font-semibold text-ink">{format(listedTotal)}</span>
                   </div>
                 </div>
               </div>
               <div className="overflow-x-auto">
-                <p className="mb-2 text-xs text-muted" data-testid="category-note">Categories include spending from wallets.</p>
+                <p className="mb-2 text-xs text-muted" data-testid="category-note">Includes spending from wallets; may differ from period expenses, which net wallet top-ups and returns.</p>
                 <table className="min-w-full divide-y divide-line text-sm">
                   <thead>
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
