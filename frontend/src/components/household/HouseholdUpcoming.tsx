@@ -8,8 +8,8 @@ import { formatDay, money } from './format'
 /**
  * Upcoming items, each at its face amount (a Household bill on an account outside the view
  * moves none of the viewer's cash, so its cash effect is 0 and is never what is listed).
- * A full item has no currency of its own (the same as the dashboard's upcoming list), so
- * it shows in the caller's default currency.
+ * Each item shows in its own currency; the caller's default currency is only a fallback
+ * for a full item from an older API that sends none.
  */
 export function UpcomingList({ items }: { items: UpcomingItemOrEvent[] }) {
   const { currencyCode } = useCurrency()
@@ -23,7 +23,7 @@ export function UpcomingList({ items }: { items: UpcomingItemOrEvent[] }) {
         const name = limited ? item.display_name : item.name
         const date = limited ? item.date : item.due_date
         const { amount, direction } = upcomingItemAmount(item)
-        const itemCurrency = limited ? item.currency : currencyCode
+        const itemCurrency = item.currency ?? currencyCode
         const occurrence = limited ? item.kind === 'household' : item.household_occurrence === true
         // A Household bill's account is a neutral label, so only its note is shown.
         const account = limited && !occurrence ? item.account : null
