@@ -289,8 +289,10 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       it, hence the check above. A card without cycle settings has no
       statements, so nothing here refuses it.
     - A loan with a pending payment: an unposted transfer into it (a planned
-      payment or prepayment), or an active recurring entry paying into it;
-      both are projected against its due dates (services/loans.py).
+      payment or prepayment), or an active recurring entry paying into it that
+      still has an occurrence from today on (``_has_future_occurrence``; an
+      entry whose schedule has ended projects nothing); both are projected
+      against its due dates (services/loans.py).
     """
     from app.models.budget_entry import BudgetEntry
     from app.services.statements import statement_history
@@ -325,10 +327,10 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
             Transaction.transfer_to_account_id == account.id,
             Transaction.is_posted.is_(False),
         ).first()
-        recurring = db.query(BudgetEntry.id).filter(
+        recurring = any(_has_future_occurrence(entry) for entry in db.query(BudgetEntry).filter(
             BudgetEntry.transfer_to_account_id == account.id,
             BudgetEntry.is_active.is_(True),
-        ).first()
+        ).all())
         if pending or recurring:
             raise HTTPException(status_code=400, detail=LOAN_PENDING_PAYMENT_DETAIL)
 

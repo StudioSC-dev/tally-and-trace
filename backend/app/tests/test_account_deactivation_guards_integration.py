@@ -224,6 +224,29 @@ def test_a_loan_with_an_active_recurring_payment_is_refused_until_it_is_ended(
     assert r.status_code == 200, r.text
 
 
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_loan_whose_recurring_payment_ended_by_date_deactivates(sw, sw_client, how):
+    a, loan = sw["a"], sw["a_loan"]
+    _entry(sw_client, a, sw["a_private"], name="Loan payment", amount=5_000,
+           transfer_to_account_id=loan, next_occurrence=_days_from_today(-60),
+           end_mode="on_date", end_date=_days_from_today(-5))
+
+    r = _deactivate(sw_client, a, loan, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, loan) is False
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_loan_whose_recurring_payment_runs_on_is_still_refused(sw, sw_client, how):
+    a, loan = sw["a"], sw["a_loan"]
+    _entry(sw_client, a, sw["a_private"], name="Loan payment", amount=5_000,
+           transfer_to_account_id=loan, next_occurrence=_days_from_today(-60),
+           end_mode="on_date", end_date=_days_from_today(40))
+
+    _refused(_deactivate(sw_client, a, loan, how), LOAN_PENDING_PAYMENT_DETAIL)
+    assert _is_active(sw_client, a, loan) is True
+
+
 # --- No obligations ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
