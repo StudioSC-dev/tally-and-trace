@@ -26,8 +26,12 @@ with the caller (STU-233). Otherwise a neutral label for its kind. A payment int
 from a loan or card the caller can't view shows no fee either (it is charged to
 that account): ``transfer_fee`` is null and ``amount`` is what the other side
 received. The exception is a transfer into a loan the caller can view: its fee
-is that loan's interest, which the loan's schedule and balance history already
-show them, so ``transfer_fee`` is shown and the source stays a neutral reference.
+is that loan's interest, and a loan they can view is one whose interest they
+may see, so ``transfer_fee`` is shown and the source stays a neutral reference.
+With a direct role the loan's schedule and balance history show it too. A
+``tag_viewer`` of a Household-tagged loan gets no schedule (404), but such a
+loan is visible by the Household share (plan §1), so its interest is shown to
+them deliberately.
 
 Tags are the caller's own, plus a sharer's Household tag where rule (c)
 applies (``attach_visible_tags``). Every record
@@ -262,7 +266,8 @@ class Redactor:
         if self._hidden_source_liability(txn) is not None and not self._into_viewable_loan(txn):
             # Drawn from a hidden loan or card: its fee is that account's charge,
             # so only what the visible side received is shown. Into a viewable
-            # loan the fee is that loan's interest, shown as in its schedule.
+            # loan the fee is that loan's interest, which the caller may see
+            # (see the module docstring).
             fee = None
         elif self._hidden_liability(txn) is not None:
             # No interest shown: the whole payment, no split.
