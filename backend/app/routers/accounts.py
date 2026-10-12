@@ -254,19 +254,6 @@ def _start_of_today() -> datetime:
     return naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _has_future_occurrence(entry) -> bool:
-    """Whether a budget entry still occurs from the start of today on.
-
-    Read with the projection's own occurrence walk (``iter_occurrences``, which
-    honours ``end_date`` and ``max_occurrences``) from the start of today, the
-    projection's window start (``_upcoming_window``), so an entry that has run
-    out projects nothing and blocks nothing.
-    """
-    from app.services.forecast import iter_occurrences
-
-    return next(iter_occurrences(entry, _start_of_today(), datetime.max), None) is not None
-
-
 def _validate_deactivation(db: Session, current_user: User, data: dict,
                            account: Account) -> None:
     """Refuse deactivating a card or loan that still has an obligation on it.
@@ -303,12 +290,15 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       settings has no statements, so nothing here refuses it.
     - A loan with a pending payment: an unposted transfer into it (a planned
       payment or prepayment), or an active recurring entry paying into it that
-      still has an occurrence from today on (``_has_future_occurrence``; an
-      entry whose schedule has ended projects nothing); both are projected
-      against its due dates (services/loans.py).
+      still has an occurrence from today on that no linked transaction stands
+      for (``has_unsuppressed_occurrence``, the loan-cover walk in
+      ``collect_events``, which starts at today: an entry whose schedule has
+      ended, or whose last occurrence was recorded without advancing it,
+      projects nothing); both are projected against its due dates
+      (services/loans.py).
     """
     from app.models.budget_entry import BudgetEntry
-    from app.services.forecast import card_entries_still_bill
+    from app.services.forecast import card_entries_still_bill, has_unsuppressed_occurrence
     from app.services.statements import statement_history
 
     if not (data.get("is_active") is False and account.is_active):
@@ -341,10 +331,10 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
             Transaction.transfer_to_account_id == account.id,
             Transaction.is_posted.is_(False),
         ).first()
-        recurring = any(_has_future_occurrence(entry) for entry in db.query(BudgetEntry).filter(
+        recurring = has_unsuppressed_occurrence(db, db.query(BudgetEntry).filter(
             BudgetEntry.transfer_to_account_id == account.id,
             BudgetEntry.is_active.is_(True),
-        ).all())
+        ).all(), _start_of_today())
         if pending or recurring:
             raise HTTPException(status_code=400, detail=LOAN_PENDING_PAYMENT_DETAIL)
 

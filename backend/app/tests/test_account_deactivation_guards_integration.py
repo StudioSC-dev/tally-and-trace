@@ -337,6 +337,25 @@ def test_a_loan_whose_recurring_payment_runs_on_is_still_refused(sw, sw_client, 
     assert _is_active(sw_client, a, loan) is True
 
 
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_loan_whose_final_payment_was_recorded_without_advancing_deactivates(
+        sw, sw_client, how):
+    # The entry stays active on its last occurrence (today), but the posted
+    # payment stands for it, so the loan-cover walk projects nothing more.
+    a, loan = sw["a"], sw["a_loan"]
+    entry = _entry(sw_client, a, sw["a_private"], name="Loan payment", amount=5_000,
+                   transfer_to_account_id=loan, next_occurrence="2026-10-12T00:00:00",
+                   end_mode="on_date", end_date="2026-10-12T00:00:00")
+    _refused(_deactivate(sw_client, a, loan, how), LOAN_PENDING_PAYMENT_DETAIL)
+
+    r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize",
+              {"advance": False})
+    assert r.status_code == 201, r.text
+    r = _deactivate(sw_client, a, loan, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, loan) is False
+
+
 # --- No obligations ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
