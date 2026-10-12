@@ -231,6 +231,114 @@ def _validate_loan_payer(db: Session, current_user: User, data: dict, account: A
         )
 
 
+# Refusals for deactivating an account that still carries an obligation. Only the
+# owner may deactivate (OWNER_ROLES, checked first), and none of these names a
+# record, an account or an amount: a pending payment may have been entered by
+# a sharee, or go to an account the owner cannot see.
+CARD_PENDING_PAYMENT_DETAIL = (
+    "This card funds a pending payment; post or remove that payment "
+    "before deactivating the card")
+CARD_RECURRING_ENTRY_DETAIL = (
+    "This card has an active recurring entry; end it or move it to another account "
+    "before deactivating the card")
+CARD_OPEN_STATEMENT_DETAIL = (
+    "This card has an unpaid statement balance; pay it in full "
+    "before deactivating the card")
+LOAN_PENDING_PAYMENT_DETAIL = (
+    "This loan has a pending or recurring payment; post or remove the pending payment "
+    "and end the recurring one before deactivating the loan")
+
+
+def _start_of_today() -> datetime:
+    """The projection's window start (``_upcoming_window``): today at midnight."""
+    return naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _validate_deactivation(db: Session, current_user: User, data: dict,
+                           account: Account) -> None:
+    """Refuse deactivating a card or loan that still has an obligation on it.
+
+    Applies when ``is_active`` goes from True to False (an update or the soft
+    delete); the caller is already known to be the owner. Judged by the
+    account's stored type, which is what the obligations were recorded against.
+
+    - A card funding a pending payment into a loan: an unposted transfer from
+      the card into a loan, whoever entered it and whatever the loan's state
+      (``_validate_card_loan_payments`` reads the same rows). Recurring entries
+      are not checked: a recurring transfer cannot be funded from a card
+      (``_validate_transfer_destination`` in routers/budget_entries.py).
+    - A card with an active recurring entry: an active budget entry scheduled
+      on the card (not a recurring transfer), an expense or an income (a credit
+      or cashback), that the projection still bills, as the projection itself
+      computes it (``card_entries_still_bill`` in services/forecast.py, from the
+      start of today and with no window end). On a card with cycle settings
+      that is ``_card_entry_charges``: an occurrence before today still billed
+      on a statement not yet due (an entry that ended recently still owes it),
+      or any occurrence from today on, either way unless a linked transaction
+      stands for it (a materialised occurrence is a recorded row, judged by the
+      statement check below). On a card without cycle settings, where the
+      projection lists each occurrence as an event on the card, it is any
+      occurrence from today on that no linked transaction stands for. Once the
+      card is inactive their legs drop, so either is refused.
+    - A card with an open statement: any statement in ``statement_history``
+      that still owes something after payments ("open" or "overdue"). That
+      includes the cycle open today and later ones, posted and unposted
+      recorded charges alike; recurring occurrences not yet recorded are not
+      in it, hence the check above. Payments are netted as ``allocate_payments``
+      nets them, planned ones included, so an unposted transfer into the card
+      that covers what is owed counts as paying it. A card without cycle
+      settings has no statements, so nothing here refuses it.
+    - A loan with a pending payment: an unposted transfer into it (a planned
+      payment or prepayment), or an active recurring entry paying into it that
+      still has an occurrence from today on that no linked transaction stands
+      for (``has_unsuppressed_occurrence``, the loan-cover walk in
+      ``collect_events``, which starts at today: an entry whose schedule has
+      ended, or whose last occurrence was recorded without advancing it,
+      projects nothing); both are projected against its due dates
+      (services/loans.py).
+    """
+    from app.models.budget_entry import BudgetEntry
+    from app.services.forecast import card_entries_still_bill, has_unsuppressed_occurrence
+    from app.services.statements import statement_history
+
+    if not (data.get("is_active") is False and account.is_active):
+        return
+    if account.account_type == AccountType.CREDIT:
+        pending = db.query(Transaction.id).join(
+            Account, Account.id == Transaction.transfer_to_account_id,
+        ).filter(
+            Account.account_type == AccountType.LOAN,
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            Transaction.transfer_from_account_id == account.id,
+            Transaction.is_posted.is_(False),
+        ).first()
+        if pending:
+            raise HTTPException(status_code=400, detail=CARD_PENDING_PAYMENT_DETAIL)
+        entries = db.query(BudgetEntry).filter(
+            BudgetEntry.account_id == account.id,
+            BudgetEntry.transfer_to_account_id.is_(None),
+            BudgetEntry.is_active.is_(True),
+        ).all()
+        if card_entries_still_bill(db, account, entries, _start_of_today()):
+            raise HTTPException(status_code=400, detail=CARD_RECURRING_ENTRY_DETAIL)
+        history = statement_history(db, account, naive_utc_now(),
+                                    viewable_account_ids(db, current_user))
+        if any(statement["owed"] > 0 for statement in history):
+            raise HTTPException(status_code=400, detail=CARD_OPEN_STATEMENT_DETAIL)
+    elif account.account_type == AccountType.LOAN:
+        pending = db.query(Transaction.id).filter(
+            Transaction.transaction_type == TransactionType.TRANSFER,
+            Transaction.transfer_to_account_id == account.id,
+            Transaction.is_posted.is_(False),
+        ).first()
+        recurring = has_unsuppressed_occurrence(db, db.query(BudgetEntry).filter(
+            BudgetEntry.transfer_to_account_id == account.id,
+            BudgetEntry.is_active.is_(True),
+        ).all(), _start_of_today())
+        if pending or recurring:
+            raise HTTPException(status_code=400, detail=LOAN_PENDING_PAYMENT_DETAIL)
+
+
 LOAN_FIELDS = (
     "loan_kind", "loan_annual_rate", "loan_term_months", "loan_payment_amount",
     "loan_first_payment_date", "loan_amortization", "loan_payments_made_offset",
@@ -388,6 +496,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_payment_routing(db, current_user, update_data, account=db_account,
                               owner=db_account.user)
     _validate_loan_payer(db, current_user, update_data, db_account)
+    _validate_deactivation(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
@@ -406,6 +515,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db), current_user:
     """Soft delete an account (mark as inactive). Owner only."""
     db_account = get_account_or_404(db, current_user, account_id, roles=OWNER_ROLES)
     _validate_loan_payer(db, current_user, {"is_active": False}, db_account)
+    _validate_deactivation(db, current_user, {"is_active": False}, db_account)
 
     db_account.is_active = False
     db_account.updated_at = utc_now()

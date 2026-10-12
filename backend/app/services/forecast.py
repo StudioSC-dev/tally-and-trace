@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
@@ -480,6 +480,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
     - Respects ``end_date`` (``end_mode == "on_date"``) and caps future occurrences
       at ``max_occurrences`` (``end_mode == "after_occurrences"``; counted from
       ``next_occurrence`` forward — best-effort, since elapsed count isn't stored).
+    - Stops at the last date ``datetime`` can hold rather than raising, so an
+      unbounded walk (``end`` of ``datetime.max``) ends there.
     """
     start = _naive(start)
     end = _naive(end)
@@ -496,7 +498,7 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
         guard = 0
         while guard < 600:
             guard += 1
-            if datetime(y, m, 1) > end:
+            if y > MAXYEAR or datetime(y, m, 1) > end:
                 break
             for day in days:
                 occ = datetime(y, m, _clamp_day(y, m, day),
@@ -527,7 +529,10 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
         produced += 1
         if occ >= start:
             yield occ
-        occ = _next_occurrence(occ, entry.cadence)
+        try:
+            occ = _next_occurrence(occ, entry.cadence)
+        except (OverflowError, ValueError):
+            return  # past the last date datetime can hold
 
 
 def build_timeline(opening, events: List[dict]) -> dict:
@@ -1470,11 +1475,36 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     """
     if not entries:
         return {}
-    linked = _linked_occurrence_days(db, [e.id for e in entries])
     charges: dict = {}
-    for entry in entries:
+    for entry, occ in _billed_card_occurrences(db, entries, cards, start, end):
         income = entry.entry_type == BudgetEntryType.INCOME
         amount = Decimal(str(entry.amount))
+        charges.setdefault(entry.account_id, []).append(SimpleNamespace(
+            transaction_date=occ,
+            amount=amount,
+            transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
+        ))
+        if occ >= start and events is not None:
+            events.append(_event(
+                date=occ,
+                name=entry.name,
+                type=entry.entry_type.value,
+                source="budget_entry",
+                source_id=entry.id,
+                face_amount=entry.amount,
+                legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
+                origin=(BudgetEntry, entry.id),
+            ))
+    return charges
+
+
+def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: datetime,
+                             end: datetime) -> Iterator[tuple]:
+    """Lazily yield ``(entry, occurrence)`` for each card-backed occurrence before
+    ``end`` that ``_card_entry_charges`` bills, in its order: linked occurrences
+    suppressed and lapsed ones (statement due before ``start``) dropped."""
+    linked = _linked_occurrence_days(db, [e.id for e in entries])
+    for entry in entries:
         card = cards[entry.account_id]
         for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
             key = (entry.id, occ.date())
@@ -1483,23 +1513,44 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
                 continue
             if occ < start and statement_due_date(card, occ.date()) < start:
                 continue  # lapsed: its statement fell due before the window
-            charges.setdefault(entry.account_id, []).append(SimpleNamespace(
-                transaction_date=occ,
-                amount=amount,
-                transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
-            ))
-            if occ >= start and events is not None:
-                events.append(_event(
-                    date=occ,
-                    name=entry.name,
-                    type=entry.entry_type.value,
-                    source="budget_entry",
-                    source_id=entry.id,
-                    face_amount=entry.amount,
-                    legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
-                    origin=(BudgetEntry, entry.id),
-                ))
-    return charges
+            yield entry, occ
+
+
+def has_unsuppressed_occurrence(db: Session, entries: list, start: datetime) -> bool:
+    """Whether any of ``entries`` still occurs on or after ``start``, at any
+    horizon, once each occurrence a linked transaction stands for is suppressed
+    (``_linked_occurrence_days``, as the loan-cover and card-charge walks do)."""
+    if not entries:
+        return False
+    linked = _linked_occurrence_days(db, [e.id for e in entries])
+    for entry in entries:
+        for occ in iter_occurrences(entry, start, datetime.max):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue
+            return True
+    return False
+
+
+def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -> bool:
+    """Whether budget entries scheduled on ``card`` still bill it from ``start`` on.
+
+    On a card with cycle settings this is the projection's own computation:
+    ``_card_entry_charges`` with ``start`` as the window start and no window
+    end, so it is True when an occurrence before ``start`` is still billed on a
+    statement not yet due, or when any later occurrence is, with materialised
+    occurrences suppressed; it stops at the first billed occurrence. A card
+    without cycle settings bills no statements, so it is
+    ``has_unsuppressed_occurrence`` (which suppresses recorded occurrences
+    where ``collect_events`` does not yet: STU-266).
+    """
+    if resolve_cycle_fields(card) is None:
+        return has_unsuppressed_occurrence(db, entries, start)
+    if not entries:
+        return False
+    billed = _billed_card_occurrences(db, entries, {card.id: card}, start, datetime.max)
+    return next(billed, None) is not None
 
 
 def _route_legs(
