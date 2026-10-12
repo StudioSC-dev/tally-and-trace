@@ -1079,6 +1079,30 @@ def test_accountless_entry_occurrence_linked_by_hand_is_projected_once(db, user,
         (datetime(2026, 9, 5), True)]
 
 
+def test_a_posted_occurrence_before_the_window_suppresses_nothing_in_it(db, user, client):
+    """The 5 Aug occurrence is materialised (posted) without advancing the schedule,
+    and the projection starts on 10 Aug. That row stands for 5 Aug only, outside the
+    window: the 5 Sep occurrence is still projected, and nothing else is listed."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    entry = _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "2000.00",
+                   datetime(2026, 8, 5), account=checking)
+    r = client.post(f"/api/v1/budget-entries/{entry.id}/materialize",
+                    headers=_login(client, user), json={"advance": False})
+    assert r.status_code == 201, r.text
+
+    db.expire_all()
+    reference = datetime(2026, 8, 10)
+    assert _entry_events(db, user, reference, datetime(2026, 9, 10)) == [
+        (datetime(2026, 9, 5), True)]
+    r = project_running_balance(db, user.id, days=31, reference=reference)
+    assert _cash_events(r) == [("2026-09-05", "Rent", Decimal("-2000.00"))]
+    assert r["closing_balance"] == Decimal("6000.00")
+
+
 def test_card_installment_dated_before_the_window_is_still_billed(db, user):
     """next_occurrence 20 Jul, not yet materialised: it is on the 24 Jul statement."""
     from app.models.account import AccountType
