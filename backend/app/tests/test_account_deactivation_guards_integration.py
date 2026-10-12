@@ -173,6 +173,17 @@ def test_a_card_with_an_unpaid_statement_is_refused_until_it_is_paid(
     assert _is_active(sw_client, a, card) is False
 
 
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_an_unposted_payment_covering_the_statement_counts_as_paying_it(sw, sw_client, how):
+    a, card = sw["a"], sw["a_card"]
+    _charge(sw_client, a, card, 2_500)
+    _transfer(sw_client, a, sw["a_private"], card, 2_500, posted=False)
+
+    r = _deactivate(sw_client, a, card, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, card) is False
+
+
 def test_a_card_whose_only_charge_is_deleted_deactivates(sw, sw_client):
     a, card = sw["a"], sw["a_card"]
     txn = _charge(sw_client, a, card, 2_500, posted=False)["id"]

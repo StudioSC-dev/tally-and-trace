@@ -286,8 +286,10 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       that still owes something after payments ("open" or "overdue"). That
       includes the cycle open today and later ones, posted and unposted
       recorded charges alike; recurring charges not yet recorded are not in
-      it, hence the check above. A card without cycle settings has no
-      statements, so nothing here refuses it.
+      it, hence the check above. Payments are netted as ``allocate_payments``
+      nets them, planned ones included, so an unposted transfer into the card
+      that covers what is owed counts as paying it. A card without cycle
+      settings has no statements, so nothing here refuses it.
     - A loan with a pending payment: an unposted transfer into it (a planned
       payment or prepayment), or an active recurring entry paying into it that
       still has an occurrence from today on (``_has_future_occurrence``; an
