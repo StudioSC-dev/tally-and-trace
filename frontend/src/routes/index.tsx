@@ -68,6 +68,8 @@ type PayableRow = {
   detail: string
   overdue: boolean
   budgetEntryId: number | null
+  /** What kind of payable this is; only scheduled entries have a known autopay state. */
+  kind: 'scheduled' | 'statement' | 'loan' | 'shared'
 }
 
 const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow => {
@@ -81,6 +83,7 @@ const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow 
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
       overdue: payable.overdue,
       budgetEntryId: null,
+      kind: 'shared',
     }
   }
   const pays = payable.account_name ? ` · from ${payable.account_name}` : ''
@@ -94,6 +97,7 @@ const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow 
     detail: `${label}${pays}${overflow}`,
     overdue: false,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
+    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : 'scheduled',
   }
 }
 
@@ -181,7 +185,12 @@ export function Dashboard() {
   const periodNet = periodSummary?.summary.net_flow ?? 0
   const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to Date' : selectedPeriod === 'month' ? 'Month to Date' : 'Week to Date'
   const periodTag = selectedPeriod === 'year' ? 'YTD' : selectedPeriod === 'month' ? 'MTD' : 'WTD'
-  const projectionEnd = nextPeriod ? new Date(parseCalendarDay(nextPeriod.period_end).getTime() - MS_PER_DAY) : null
+  // period_end is exclusive (the 1st of next month); step back a calendar day, immune to DST.
+  const projectionEnd = (() => {
+    if (!nextPeriod) return null
+    const end = parseCalendarDay(nextPeriod.period_end)
+    return new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1)
+  })()
 
   const budgetEnvelopeSummaries = useMemo(() => {
     return budgetAllocations
@@ -196,11 +205,22 @@ export function Dashboard() {
       .filter((value): value is { allocation: Allocation; limit: number; spent: number; remaining: number; usagePercentage: number } => value !== null)
   }, [budgetAllocations])
 
-  const renderPlannedExpenseIcon = (status: 'danger' | 'autopay' | 'manual') => {
+  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared'
+  const STATUS_LABELS: Record<PayableStatus, string> = {
+    danger: 'Overdue',
+    autopay: 'Autopay',
+    manual: 'Pay manually',
+    statement: 'Statement',
+    loan: 'Loan payment',
+    shared: 'Shared item',
+  }
+
+  const renderPlannedExpenseIcon = (status: PayableStatus) => {
+    const label = STATUS_LABELS[status]
     if (status === 'danger') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <polygon points="10,1 18,6 18,14 10,19 2,14 2,6" />
             <rect x="9" y="7" width="2" height="5" fill="white" rx="1" />
             <rect x="9" y="13" width="2" height="2" fill="white" rx="1" />
@@ -210,18 +230,28 @@ export function Dashboard() {
     }
     if (status === 'autopay') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
           </svg>
         </span>
       )
     }
+    if (status === 'manual') {
+      return (
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
+            <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
+          </svg>
+        </span>
+      )
+    }
+    // Statements, loan payments and shared items: no autopay state is known, so a neutral mark, not the manual warning.
     return (
-      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
-        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
-          <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
+      <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line text-muted">
+        <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 12H9V9h2v5zm0-6H9V6h2v2z" />
         </svg>
       </span>
     )
@@ -340,7 +370,8 @@ export function Dashboard() {
           <p className="text-sm text-muted mt-1">Your financial overview</p>
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
-        <div className="flex space-x-1 bg-sunken p-1">
+        <div className="flex flex-col gap-1">
+        <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
           {(['week', 'month', 'year'] as const).map((period) => (
             <button
               key={period}
@@ -350,6 +381,8 @@ export function Dashboard() {
               {period}
             </button>
           ))}
+        </div>
+        <p className="text-xs text-muted" data-testid="period-note">Period applies to actual totals only.</p>
         </div>
       </div>
 
@@ -365,7 +398,7 @@ export function Dashboard() {
               <p className="text-sm text-muted">
                 {selectedPeriod === 'year'
                   ? 'Tracking year-to-date performance.'
-                  : 'Comparing actuals with projections for the current period.'}
+                  : 'Actuals cover the selected period; the projection runs from today to month end.'}
               </p>
             </div>
             <span className="badge badge-info capitalize">{periodHeadingLabel}</span>
@@ -389,10 +422,13 @@ export function Dashboard() {
               ))}
             </dl>
             <div className="border-t border-line pt-3">
-              <div className="flex items-center justify-between">
-                <dt className="text-sm text-muted">Net worth</dt>
-                <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(snapshot?.balances.total ?? 0)}</dd>
-              </div>
+              <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Today</h4>
+              <dl>
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-muted">Net worth</dt>
+                  <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(snapshot?.balances.total ?? 0)}</dd>
+                </div>
+              </dl>
               <p className="mt-1 text-xs text-muted">
                 All your accounts and shared accounts, cards and loans included. Not the same as available cash.
               </p>
@@ -406,9 +442,9 @@ export function Dashboard() {
               {[
                 { id: 'available-cash', label: 'Available cash', value: format(snapshot?.available_cash ?? 0), color: 'text-ink' },
                 ...(nextPeriod ? [
-                  { id: 'projected-income', label: 'Projected income', value: format(nextPeriod.income), color: 'text-ok' },
-                  { id: 'projected-net-flow', label: 'Projected net flow', value: format(nextPeriod.net), color: nextPeriod.net >= 0 ? 'text-ok' : 'text-danger' },
-                  { id: 'projected-balance', label: 'Projected balance', value: format(nextPeriod.closing_balance), color: nextPeriod.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
+                  { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriod.income), color: 'text-ok' },
+                  { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriod.net), color: nextPeriod.net >= 0 ? 'text-ok' : 'text-danger' },
+                  { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriod.closing_balance), color: nextPeriod.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
                 ] : []),
               ].map(({ id, label, value, color }) => (
                 <div key={id} className="flex items-center justify-between">
@@ -418,7 +454,7 @@ export function Dashboard() {
               ))}
             </dl>
             <p className="text-xs text-muted">
-              Starts from available cash: spendable accounts only, with cards, loans and spending wallets left out.
+              Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.
               {selectedTag !== undefined ? ' With a tag filter, only tagged events move the projection; balances stay whole.' : ''}
             </p>
             {closings && closings.by_account.length > 0 && (
@@ -498,7 +534,7 @@ export function Dashboard() {
           ) : (
             <div className="divide-y divide-line" data-testid="payables">
               {payableRows.slice(0, MAX_PAYABLES_SHOWN).map((row) => {
-                const status = row.overdue ? 'danger' : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
+                const status: PayableStatus = row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
                 const remaining = daysUntil(row.day)
                 return (
                   <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
