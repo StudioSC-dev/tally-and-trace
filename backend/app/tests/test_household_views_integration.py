@@ -471,3 +471,27 @@ def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw
               "2026-11-01T00:00:00")
     totals = _sum(_monthly(sw_db, hh["c"], hh["a"], PROJECTED))
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
+
+
+# --- Cover never crosses currencies --------------------------------------------------------------
+
+@pytest.mark.parametrize("mode", list(MODES))
+@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
+def test_cover_never_crosses_currencies(hh, sw_client, sw_db, mode, currency, remainder):
+    # A PHP 40 joint payment covers a PHP bill, never a USD one (no conversion).
+    _charge(sw_client, hh, mode, currency=currency)
+    _pay(sw_client, hh, 40, mode)
+    months = _monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])
+    assert _sum(months, currency)["paid_from_other_accounts"] == remainder
+    assert _sum(months, "PHP")["expense"] == 40.0
+    if currency == "USD":
+        assert _sum(months, "PHP")["paid_from_other_accounts"] == 0.0
+
+
+@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
+def test_recurring_cover_never_crosses_currencies(hh, sw_client, sw_db, currency, remainder):
+    _charge(sw_client, hh, "projected", currency=currency)
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 40, datetime(2026, 11, 1))
+    months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED)
+    assert _sum(months, currency)["paid_from_other_accounts"] == remainder
+    assert _sum(months, "PHP")["expense"] == 40.0

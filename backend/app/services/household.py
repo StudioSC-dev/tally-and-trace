@@ -16,8 +16,9 @@ payments into that card: every transfer into it from a projection-cash
 account of the view scope (posted, planned or recurring) that the caller can
 read, so that it is among the cash the caller's Household totals count (a
 payment they can't read still settles the statement, but never covers a
-Household line for them), settled with every
-other payment and credit in the statement engine's order
+Household line for them), and only a line in its own currency (no
+conversion), settled with every other payment and credit in the statement
+engine's order
 (``_settle_with_sources``, mirroring ``statements.build_statement_payables``):
 the transaction rows are balanced and paid oldest statement first, and only
 then are the projected entry charges added and paid from what is left, so
@@ -25,8 +26,8 @@ a payment the rows already used never covers a charge projected later.
 Recurring transfers into the card, which the engine does not net, are
 applied last. A virtual overflow move is not cash and never counts. When the
 card's primary payment account is in the view scope, its routed statement
-payment pays whatever the statement still owes, so that counts as covered
-too (in the projection). The in-scope part allocated to a statement covers
+payment pays whatever the statement still owes, in the card's currency, so
+that counts as covered too (in the projection). The in-scope part allocated to a statement covers
 its Household lines first, in date order, capped at their total; each line's
 remainder is ``max(0, line - its covered part)`` and only a remainder above 0
 is returned, as the occurrence's ``face_amount``. Any other occurrence
@@ -217,7 +218,10 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     ``_split_card_rows``, with ``viewable_ids`` the caller's viewable accounts)
     and settled in its order (``_settle_with_sources``). A payment is in scope
     when it comes from a cash account of ``cash_ids`` and ``readable`` (the
-    caller's read rule) accepts its record.
+    caller's read rule) accepts its record, and it covers only the lines in
+    its own currency: the settlement is run once per line currency, each run
+    flagging the in-scope payments in that currency (``owed`` is the same in
+    every run, the engine's).
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
     from app.services.statements import _card_rows, _split_card_rows
@@ -229,13 +233,15 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     lines, payments = _split_card_rows(card.id, rows, unbilled, payment_sources=True)
     household_txns = _household_ids(db, Transaction, [r.id for r in rows], card.user_id)
     keys: Dict[int, tuple] = {}  # id(line) -> line key
+    currencies: Dict[int, str] = {}  # id(line) -> the line's currency
     for line in lines:
         if (isinstance(line, Transaction) and line.transaction_type == TransactionType.DEBIT
                 and line.id in household_txns):
             keys[id(line)] = ("t", line.id)
+            currencies[id(line)] = _currency(line.currency)
 
     projected: list = []
-    recurring: List[Tuple[datetime, Decimal, bool]] = []
+    recurring: List[Tuple[datetime, Decimal, Optional[str]]] = []
     if not recorded:
         entries = db.query(BudgetEntry).filter(
             BudgetEntry.account_id == card.id, BudgetEntry.is_active.is_(True),
@@ -249,6 +255,7 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 if (entry.id in household_entries
                         and entry.entry_type != BudgetEntryType.INCOME):
                     keys[id(line)] = ("e", entry.id, line.transaction_date)
+                    currencies[id(line)] = _currency(entry.currency)
         # Recurring transfers into the card: payments on their occurrences.
         transfers = db.query(BudgetEntry).filter(
             BudgetEntry.transfer_to_account_id == card.id,
@@ -260,33 +267,45 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 if linked[key]:
                     linked[key] -= 1
                     continue
-                recurring.append((when, _money(entry.amount),
-                                  entry.account_id in cash_ids and readable(entry)))
+                recurring.append((when, _money(entry.amount), _currency(entry.currency)
+                                  if entry.account_id in cash_ids and readable(entry) else None))
 
     if not keys:
         return {}
     days = [line.transaction_date.date() for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
-    owed, in_scope = _settle_with_sources(
-        cycles, lines, [(when, amount, src in cash_ids and readable(row))
-                        for when, amount, src, row in payments],
-        projected, recurring)
+    paying = [(when, amount, _currency(row.currency)
+               if src in cash_ids and readable(row) else None)
+              for when, amount, src, row in payments]
+    in_scope: Dict[str, List[Decimal]] = {}  # currency -> in-scope part per cycle
+    for currency in sorted(set(currencies.values())):
+        owed, in_scope[currency] = _settle_with_sources(
+            cycles, lines, [(when, amount, flag == currency) for when, amount, flag in paying],
+            projected, [(when, amount, flag == currency) for when, amount, flag in recurring])
     # Projected only: in a recorded month only posted payments cover anything.
-    routed = not recorded and card.payment_account_id in cash_ids
+    routed = _currency(card.currency) if (
+        not recorded and card.payment_account_id in cash_ids) else None
 
     out: Dict[tuple, Tuple[Decimal, bool]] = {}
     for idx, c in enumerate(cycles):
-        cover = in_scope[idx] + (owed[idx] if routed else ZERO)
+        cover = {currency: parts[idx] for currency, parts in in_scope.items()}
+        if routed in cover:
+            cover[routed] += owed[idx]
         lo, hi = c["window_start"].date(), c["close"].date()
-        household = sorted(((line.transaction_date, _money(line.amount), keys[id(line)])
+        household = sorted(((line.transaction_date, _money(line.amount), keys[id(line)],
+                             currencies[id(line)])
                             for line in [*lines, *projected]
                             if id(line) in keys and lo < line.transaction_date.date() <= hi),
                            key=lambda line: (line[0].date(), str(line[2])))
-        for _, amt, key in household:
-            part = min(cover, amt)
-            cover -= part
+        for _, amt, key, currency in household:
+            part = min(cover[currency], amt)
+            cover[currency] -= part
             out[key] = (amt - part, owed[idx] > 0)
     return out
+
+
+def _currency(value) -> str:
+    return getattr(value, "value", value)
 
 
 def _settle_with_sources(cycles: List[dict], lines: list,

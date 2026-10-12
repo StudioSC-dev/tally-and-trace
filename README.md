@@ -294,12 +294,14 @@ joint account is "Moved in", and your private spending never appears).
 "Paid from other accounts" is the remainder of the sharer's Household bills
 outside the scope, after the payments into them from the Household's accounts
 that you can read (a payment you can't read still settles the card, but never
-covers a bill in your view, since it isn't in your expense). A posted Household charge on a card statement that is not
-yet settled is left to the projection: it counts as covered by the planned
-and routed payments from the Household's accounts, which the projection shows
-as expense, so the joint outflow plus the remainder is always the charge,
-across recorded and projected months together. A statement already settled,
-or past due with no further planned payment, counts only posted payments.
+covers a bill in your view, since it isn't in your expense). A payment covers
+only bills in its own currency, never converted. A posted Household charge on
+a card statement that is not yet settled is left to the projection: it counts
+as covered by the planned and routed payments from the Household's accounts,
+which the projection shows as expense, so the joint outflow plus the
+remainder is always the charge, across recorded and projected months
+together. A statement already settled, or past due with no further planned
+payment, counts only posted payments.
 
 ### Accounts
 - `GET    /accounts/` — List the accounts you own or that are shared with you
