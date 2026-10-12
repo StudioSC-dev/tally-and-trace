@@ -327,6 +327,42 @@ def test_a_row_on_the_tag_shared_entrys_own_account_suppresses_for_viewer_and_ow
     assert _closing(sw_db, c) == before  # the unposted row is the one movement
 
 
+def test_a_linked_transfer_to_another_users_account_never_suppresses_the_viewers_occurrence(
+        hh, sw_client, sw_db):
+    # B gives A editor on B's bank; A records the 15 Oct bill as an unposted
+    # transfer from the tag-shared account into it. The transfer touches B's
+    # account, so C cannot read it (rule (b2) needs every touched account to be
+    # A's): C's occurrence and closing balance stay as they were.
+    from app.tests.conftest import sw_share
+
+    a, c = hh["a"], hh["c"]
+    account, entry = _tag_shared_bill(sw_client, hh)
+    sw_share(sw_db, hh["b_private"], a["id"], "editor", hh["b"]["id"])
+    before = _closing(sw_db, c)
+    _transfer(sw_client, a, account, hh["b_private"], 500, "2026-10-15T00:00:00",
+              description="Household water", budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    assert _closing(sw_db, c) == before
+
+
+def test_a_linked_transfer_on_an_unshared_entry_still_suppresses_the_occurrence(
+        sw_client, sw_db, sw_people):
+    # With no share at all the creator's row counts whatever its type or account.
+    d = sw_people("Dan", "Solo")
+    checking = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo checking", "account_type": "checking", "balance": 4_000})["id"]
+    savings = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo savings", "account_type": "checking", "balance": 1_000})["id"]
+    entry = sw_post(sw_client, d, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": checking, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    assert _bill_days(sw_db, d) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _transfer(sw_client, d, checking, savings, 500, "2026-10-15T00:00:00",
+              description="Household water", budget_entry_id=entry)
+    assert _bill_days(sw_db, d) == []
+
+
 def test_the_household_view_keeps_a_tag_shared_occurrence_recorded_on_a_private_account(
         hh, sw_client, sw_db):
     from app.services.household import household_events, household_view

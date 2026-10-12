@@ -1412,11 +1412,13 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
     with no shares gets exactly the same result as then). For an entry touching
     an account with any share (an ``AccountShare``, or its owner's Household tag
     on it shared with anyone, the ``tag_viewer`` path in ``app/core/access.py``),
-    only a row on the entry's own account counts
-    (for a recurring transfer, one from its source into its destination):
-    everyone who can see that account sees the entry, and a row on the
-    creator's private account, which they cannot read, must change nothing
-    they are shown.
+    only a row touching nothing but the entry's own accounts counts: for an
+    ordinary entry a debit or credit (never a transfer) on its account, which is
+    what ``materialize`` records; for a recurring transfer a transfer from its
+    source into its destination. Everyone who can see that account sees the
+    entry, and a row touching any other account (the creator's private one, or
+    another user's they hold a role on), which a viewer may not be able to read,
+    must change nothing they are shown.
     """
     entry_ids = list(entry_ids)
     if not entry_ids:
@@ -1443,7 +1445,7 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
         if entry_dst is not None:
             return (kind == TransactionType.TRANSFER and (src or account) == entry_account
                     and dst == entry_dst)
-        return account == entry_account
+        return kind != TransactionType.TRANSFER and account == entry_account
 
     return [(row[0], row[1]) for row in rows
             if not shared.intersection(row[6:]) or on_entry_accounts(row)]
