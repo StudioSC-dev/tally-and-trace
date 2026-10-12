@@ -571,3 +571,37 @@ def test_projected_month_does_not_depend_on_the_requested_range(hh, sw_client, s
         assert shown == ([remainder] if remainder else []), days
     upcoming = [i["face_amount"] for i in dashboard["upcoming"] if i.get("kind") == "household"]
     assert upcoming == ([remainder] if remainder else [])
+
+
+def test_two_statements_with_different_due_dates_each_keep_their_remainder(
+        hh, sw_client, sw_db, monkeypatch):
+    # Household charges on two statements in one call: October 14 (due
+    # November 5) and November 14 (due December 5), each with a recurring joint
+    # payment before its due date (November 3 and December 3). Each line keeps
+    # its own remainder whatever the range, and the dashboard agrees.
+    import app.core.time as time_module
+    import app.routers.household as household_router
+    import app.services.forecast as forecast_module
+
+    _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
+    _charge(sw_client, hh, "projected", when="2026-11-14T00:00:00")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 100, datetime(2026, 11, 3))
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 60, datetime(2026, 12, 3))
+
+    def lines(last):
+        months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED, OCT, last)
+        return {m["month"]: m["currencies"] for m in months}
+
+    to_nov, to_dec = lines(NOV), lines(DEC)
+    assert to_nov["2026-10"] == to_dec["2026-10"] == []
+    assert to_nov["2026-11"] == to_dec["2026-11"] == [
+        {"currency": "PHP", **dict.fromkeys(FIELDS, 0.0), "expense": 100.0,
+         "paid_from_other_accounts": 40.0}]
+    assert to_dec["2026-12"] == [{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                  "expense": 60.0}]
+
+    for module in (time_module, household_router, forecast_module):
+        monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
+    dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
+    assert dashboard["month"]["month"] == "2026-10"
+    assert dashboard["month"]["currencies"] == to_dec["2026-10"]
