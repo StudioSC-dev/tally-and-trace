@@ -1502,6 +1502,38 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     return charges
 
 
+def has_unsuppressed_occurrence(db: Session, entries: list, start: datetime) -> bool:
+    """Whether any of ``entries`` still occurs on or after ``start``, at any
+    horizon, once each occurrence a linked transaction stands for is suppressed
+    (``_linked_occurrence_days``, as the loan-cover and card-charge walks do)."""
+    if not entries:
+        return False
+    linked = _linked_occurrence_days(db, [e.id for e in entries])
+    for entry in entries:
+        for occ in iter_occurrences(entry, start, datetime.max):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue
+            return True
+    return False
+
+
+def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -> bool:
+    """Whether budget entries scheduled on ``card`` still bill it from ``start`` on.
+
+    On a card with cycle settings this is the projection's own computation:
+    ``_card_entry_charges`` with ``start`` as the window start and no window
+    end, so it is True when an occurrence before ``start`` is still billed on a
+    statement not yet due, or when any later occurrence is, with materialised
+    occurrences suppressed. A card without cycle settings bills no statements,
+    so it is ``has_unsuppressed_occurrence``.
+    """
+    if resolve_cycle_fields(card) is None:
+        return has_unsuppressed_occurrence(db, entries, start)
+    return bool(_card_entry_charges(db, entries, {card.id: card}, start, datetime.max, None))
+
+
 def _route_legs(
     opening_by_account: dict,
     events: List[dict],

@@ -1,28 +1,38 @@
 """Deactivating an account with obligations on it (STU-234).
 
-A card that funds a pending payment into a loan, or still owes on a
-statement, and a loan with a pending or recurring payment, cannot be
-deactivated (``PUT`` with ``is_active`` false, or the soft ``DELETE``) until
-the obligation is cleared.
+A card that funds a pending payment into a loan, that the projection still
+bills a recurring entry on, or that still owes on a statement, and a loan with
+a pending or recurring payment, cannot be deactivated (``PUT`` with
+``is_active`` false, or the soft ``DELETE``) until the obligation is cleared.
+
+"Today" is frozen at ``TODAY`` for the guard, so nothing here depends on the
+run date. The fixture card (``sw["a_card"]``) closes on the 15th and is due 21
+days later: on ``TODAY`` (Oct 12) the open cycle closes Oct 15 and is due Nov 5.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
+import app.routers.accounts as accounts_router
 from app.routers.accounts import (
     CARD_OPEN_STATEMENT_DETAIL,
     CARD_PENDING_PAYMENT_DETAIL,
-    CARD_RECURRING_CHARGE_DETAIL,
+    CARD_RECURRING_ENTRY_DETAIL,
     LOAN_PENDING_PAYMENT_DETAIL,
 )
-from app.core.time import naive_utc_now
 from app.tests.conftest import API, sw_db_reachable, sw_post
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
+TODAY = datetime(2026, 10, 12, 9, 30)
 DAY = "2026-10-01T00:00:00"
 DEACTIVATIONS = ["put", "delete"]
+
+
+@pytest.fixture(autouse=True)
+def _frozen_today(monkeypatch):
+    monkeypatch.setattr(accounts_router, "naive_utc_now", lambda: TODAY)
 
 
 def _call(client, who, method, path, body=None):
@@ -58,7 +68,7 @@ def _charge(client, who, card, amount, posted=True):
 
 
 def _days_from_today(days):
-    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = TODAY.replace(hour=0, minute=0, second=0, microsecond=0)
     return (today + timedelta(days=days)).isoformat()
 
 
@@ -108,7 +118,7 @@ def test_a_card_funding_a_loan_payment_is_freed_once_it_is_posted_and_billed_pai
     assert r.status_code == 200, r.text
 
 
-# --- Card: an active recurring charge ---------------------------------------------------
+# --- Card: an active recurring entry ---------------------------------------------------
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
 @pytest.mark.parametrize("clear", ["end", "delete"])
@@ -117,7 +127,7 @@ def test_a_card_with_an_active_recurring_charge_is_refused_until_it_is_cleared(
     a, card = sw["a"], sw["a_card"]
     entry = _entry(sw_client, a, card)
 
-    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_CHARGE_DETAIL)
+    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_ENTRY_DETAIL)
     assert _is_active(sw_client, a, card) is True
 
     if clear == "end":
@@ -131,24 +141,93 @@ def test_a_card_with_an_active_recurring_charge_is_refused_until_it_is_cleared(
 
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
-def test_a_card_without_a_cycle_with_a_recurring_charge_is_refused(sw, sw_client, how):
-    a = sw["a"]
-    card = sw_post(sw_client, a, "/accounts/", {
-        "name": "Store card", "account_type": "credit", "balance": 0})["id"]
-    _entry(sw_client, a, card)
+def test_a_card_with_a_recurring_income_entry_is_refused(sw, sw_client, how):
+    a, card = sw["a"], sw["a_card"]
+    _entry(sw_client, a, card, name="Cashback", entry_type="income")
 
-    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_CHARGE_DETAIL)
+    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_ENTRY_DETAIL)
     assert _is_active(sw_client, a, card) is True
 
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
-def test_a_card_whose_recurring_charge_ended_by_date_deactivates(sw, sw_client, how):
+@pytest.mark.parametrize("clear", ["delete", "record_and_pay"])
+def test_a_recently_ended_charge_still_billed_on_an_unpaid_statement_is_refused(
+        sw, sw_client, how, clear):
+    # Its last occurrence (Oct 7) is before today but on the cycle due Nov 5,
+    # so the projection still bills it although nothing occurs from today on.
     a, card = sw["a"], sw["a_card"]
-    _entry(sw_client, a, card, next_occurrence=_days_from_today(-60),
-           end_mode="on_date", end_date=_days_from_today(-5))
+    entry = _entry(sw_client, a, card, next_occurrence="2026-10-07T00:00:00",
+                   end_mode="on_date", end_date="2026-10-07T00:00:00")
+
+    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_ENTRY_DETAIL)
+    assert _is_active(sw_client, a, card) is True
+
+    if clear == "delete":
+        r = _call(sw_client, a, "DELETE", f"/budget-entries/{entry}")
+        assert r.status_code in (200, 204), r.text
+    else:
+        # Recorded (the entry runs out and goes inactive), it is a charge on the
+        # statement, owed until that is paid.
+        r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize", {})
+        assert r.status_code == 201, r.text
+        _refused(_deactivate(sw_client, a, card, how), CARD_OPEN_STATEMENT_DETAIL)
+        _pay_card(sw_client, a, sw["a_private"], card, 500)
+    r = _deactivate(sw_client, a, card, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, card) is False
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_charge_whose_statement_fell_due_before_today_deactivates(sw, sw_client, how):
+    # Its last occurrence (Sep 7) was billed on the cycle due Oct 6: the
+    # projection drops it as lapsed, so nothing is owed for it.
+    a, card = sw["a"], sw["a_card"]
+    _entry(sw_client, a, card, next_occurrence="2026-08-07T00:00:00",
+           end_mode="on_date", end_date="2026-09-07T00:00:00")
 
     r = _deactivate(sw_client, a, card, how)
     assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_final_occurrence_recorded_without_advancing_and_paid_deactivates(
+        sw, sw_client, how):
+    # The entry stays active on its last occurrence (today), but the recorded
+    # transaction stands for it, so the projection bills nothing more.
+    a, card = sw["a"], sw["a_card"]
+    entry = _entry(sw_client, a, card, next_occurrence="2026-10-12T00:00:00",
+                   end_mode="on_date", end_date="2026-10-12T00:00:00")
+    r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize",
+              {"advance": False})
+    assert r.status_code == 201, r.text
+    _refused(_deactivate(sw_client, a, card, how), CARD_OPEN_STATEMENT_DETAIL)
+
+    _pay_card(sw_client, a, sw["a_private"], card, 500)
+    r = _deactivate(sw_client, a, card, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, card) is False
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_a_card_without_a_cycle_is_refused_until_its_recurring_charge_ends(
+        sw, sw_client, how):
+    a = sw["a"]
+    card = sw_post(sw_client, a, "/accounts/", {
+        "name": "Store card", "account_type": "credit", "balance": 0})["id"]
+    entry = _entry(sw_client, a, card, next_occurrence="2026-09-20T00:00:00",
+                   end_mode="on_date", end_date="2026-12-31T00:00:00")
+
+    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_ENTRY_DETAIL)
+    assert _is_active(sw_client, a, card) is True
+
+    # Ended yesterday: it occurred before today, but a card without a cycle
+    # has no statement to bill that on.
+    r = _call(sw_client, a, "PUT", f"/budget-entries/{entry}",
+              {"end_date": "2026-10-11T00:00:00"})
+    assert r.status_code == 200, r.text
+    r = _deactivate(sw_client, a, card, how)
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, card) is False
 
 
 # --- Card: an open statement ------------------------------------------------------------
