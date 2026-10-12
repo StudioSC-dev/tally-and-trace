@@ -340,7 +340,7 @@ export const accountingApi = createApi({
     }),
     getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number; tag?: number }>({
       query: (params) => ({ url: 'transactions/summary/period', params }),
-      providesTags: ['Transaction'],
+      providesTags: ['Transaction', 'Account', 'Category'],
     }),
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
