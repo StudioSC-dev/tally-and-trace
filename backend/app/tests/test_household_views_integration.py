@@ -495,3 +495,41 @@ def test_recurring_cover_never_crosses_currencies(hh, sw_client, sw_db, currency
     months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED)
     assert _sum(months, currency)["paid_from_other_accounts"] == remainder
     assert _sum(months, "PHP")["expense"] == 40.0
+
+
+# --- A recorded month's figure does not depend on the requested range ---------------------------
+
+SEP, DEC = datetime(2026, 9, 1), datetime(2026, 12, 1)
+
+
+def test_recorded_month_does_not_depend_on_the_requested_range(hh, sw_client, sw_db,
+                                                               monkeypatch):
+    # Two posted Household charges on the statement closing October 15 (due
+    # November 5), paid by a recurring joint payment on November 3; today is
+    # October 20. Each month's lines are the same whatever the range's end,
+    # before today or after it, and on the dashboard.
+    import app.core.time as time_module
+    import app.routers.household as household_router
+
+    _charge(sw_client, hh, "recorded", when="2026-09-20T00:00:00")
+    _charge(sw_client, hh, "recorded", when="2026-10-12T00:00:00")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 200, datetime(2026, 11, 3))
+
+    def lines(last):
+        months = _monthly(sw_db, hh["c"], hh["a"], MIXED, SEP, last)
+        return {m["month"]: m["currencies"] for m in months}
+
+    sep_only, to_oct, to_dec = lines(SEP), lines(OCT), lines(DEC)
+    assert sep_only["2026-09"] == to_oct["2026-09"] == to_dec["2026-09"] == []
+    assert to_oct["2026-10"] == to_dec["2026-10"] == []
+    # The payment that covers them is the Household's outflow in its own month.
+    assert to_dec["2026-11"] == [{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                  "expense": 200.0}]
+
+    monkeypatch.setattr(time_module, "naive_utc_now", lambda: MIXED)
+    monkeypatch.setattr(household_router, "naive_utc_now", lambda: MIXED)
+    dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
+    assert dashboard["month"]["month"] == "2026-10"
+    assert dashboard["month"]["currencies"] == to_dec["2026-10"]
+    monthly = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/monthly?from=2026-10")
+    assert monthly["months"][0]["currencies"] == to_dec["2026-10"]

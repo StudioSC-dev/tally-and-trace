@@ -300,8 +300,11 @@ a card statement that is not yet settled is left to the projection: it counts
 as covered by the planned and routed payments from the Household's accounts,
 which the projection shows as expense, so the joint outflow plus the
 remainder is always the charge, across recorded and projected months
-together. A statement already settled, or past due with no further planned
-payment, counts only posted payments.
+together. The payments counted are those up to the statement's due date,
+whatever range you ask for, so a month's figure is the same in every range
+and on the dashboard (a payment in a month outside the range still covers
+the charge). A statement already settled, or past due with no further
+planned payment, counts only posted payments.
 
 ### Accounts
 - `GET    /accounts/` — List the accounts you own or that are shared with you
