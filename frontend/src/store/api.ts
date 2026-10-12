@@ -100,6 +100,7 @@ import type {
   GoalsSummary,
   TransactionSummary,
   CashflowTimeline,
+  DashboardSnapshot,
   WishlistItem,
   WishlistPlan,
   LoanPaymentRequest,
@@ -342,6 +343,13 @@ export const accountingApi = createApi({
       providesTags: ['Transaction'],
     }),
 
+    // ── Dashboard ─────────────────────────────────────────────────────────────
+    // The backend's projection in one call (available cash, payables, closings).
+    getDashboardSnapshot: builder.query<DashboardSnapshot, { tag?: number } | void>({
+      query: (params) => ({ url: 'dashboard/snapshot', params: params ?? {} }),
+      providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation'],
+    }),
+
     // ── Forecast ──────────────────────────────────────────────────────────────
     getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number } | void>({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
@@ -578,6 +586,8 @@ export const {
   useGetHouseholdUpcomingQuery,
   useGetHouseholdMonthlyQuery,
 
+  // Dashboard hooks
+  useGetDashboardSnapshotQuery,
   // Forecast hooks
   useGetForecastTimelineQuery,
 
