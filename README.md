@@ -300,10 +300,12 @@ a card statement that is not yet settled is left to the projection: it counts
 as covered by the planned and routed payments from the Household's accounts,
 which the projection shows as expense, so the joint outflow plus the
 remainder is always the charge, across recorded and projected months
-together. The payments counted are those up to the statement's due date,
-whatever range you ask for, so a month's figure is the same in every range,
-on the dashboard and in Upcoming (a payment in a month outside the range
-still covers the charge); a planned Household card charge is covered the
+together. Planned recurring payments are counted up to the statement's due
+date; recorded and planned one-off payments count whenever they are dated, as
+in the statement engine, so a late payment still covers the bill once. This
+holds whatever range you ask for, so a month's figure is the same in every
+range, on the dashboard and in Upcoming (a payment in a month outside the
+range still covers the charge); a planned Household card charge is covered the
 same way. A statement already settled, or past due with no further
 planned payment, counts only posted payments.
 
