@@ -197,12 +197,14 @@ def role_map(db: Session, user) -> Dict[int, str]:
 
 def tag_shared_account_ids():
     """Select: the accounts whose owner put their Household tag on them and shared
-    it with anyone (the accounts some user sees as ``tag_viewer``)."""
+    it with anyone else (the accounts some user sees as ``tag_viewer``). A share with
+    the tag's own owner grants nothing and is ignored."""
     return (select(account_tags.c.account_id)
             .join(Tag, Tag.id == account_tags.c.tag_id)
             .join(TagShare, TagShare.tag_id == Tag.id)
             .join(Account, Account.id == account_tags.c.account_id)
-            .where(Tag.is_system.is_(True), Tag.user_id == Account.user_id))
+            .where(Tag.is_system.is_(True), Tag.user_id == Account.user_id,
+                   TagShare.user_id != Tag.user_id))
 
 
 def _tag_viewer_ids(uid):

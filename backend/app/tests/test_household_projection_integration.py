@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
+from app.tests.conftest import API, PRIVATE, hh_household, sw_db_reachable, sw_leaks, sw_post
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -341,3 +341,28 @@ def test_the_household_view_keeps_a_tag_shared_occurrence_recorded_on_a_private_
     assert [(e["date"], e["amount"]) for e in events
             if e["source"] == "budget_entry" and e["name"] == "Household water"] == [
         (datetime(2026, 10, 15), Decimal("-500.00"))]
+
+
+def test_a_tag_share_with_its_own_owner_does_not_count_as_sharing(sw_client, sw_db, sw_people):
+    # The API refuses a self-share, the table does not. Nobody gains access from
+    # it, so the owner's row on another account still stands for the occurrence,
+    # exactly as with no share at all.
+    from app.models.tag_share import TagShare
+
+    d = sw_people("Dan", "Solo")
+    tag = hh_household(sw_db, d)
+    sw_db.add(TagShare(tag_id=tag, user_id=d["id"]))
+    sw_db.commit()
+    tagged = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo checking", "account_type": "checking", "balance": 4_000,
+        "tag_ids": [tag]})["id"]
+    other = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo savings", "account_type": "checking", "balance": 1_000})["id"]
+    entry = sw_post(sw_client, d, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": tagged, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    assert _bill_days(sw_db, d) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _txn(sw_client, d, other, 500, "2026-10-15T00:00:00", description="Household water",
+         budget_entry_id=entry)
+    assert _bill_days(sw_db, d) == []
