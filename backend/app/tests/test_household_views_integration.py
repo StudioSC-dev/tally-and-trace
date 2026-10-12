@@ -533,3 +533,41 @@ def test_recorded_month_does_not_depend_on_the_requested_range(hh, sw_client, sw
     assert dashboard["month"]["currencies"] == to_dec["2026-10"]
     monthly = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/monthly?from=2026-10")
     assert monthly["months"][0]["currencies"] == to_dec["2026-10"]
+
+
+@pytest.mark.parametrize("paid,remainder", [(100, 0.0), (60, 40.0)])
+def test_projected_month_does_not_depend_on_the_requested_range(hh, sw_client, sw_db,
+                                                                monkeypatch, paid, remainder):
+    # A planned Household charge on October 14 (statement due November 5), a
+    # recurring joint payment on November 3; today is October 10. October's
+    # lines, the dashboard and Upcoming agree whatever the range or window.
+    import app.core.time as time_module
+    import app.routers.household as household_router
+    import app.services.forecast as forecast_module
+
+    _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], paid, datetime(2026, 11, 3))
+
+    def lines(last):
+        months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED, OCT, last)
+        return {m["month"]: m["currencies"] for m in months}
+
+    to_oct, to_dec = lines(OCT), lines(DEC)
+    october = ([{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                 "paid_from_other_accounts": remainder}] if remainder else [])
+    assert to_oct["2026-10"] == to_dec["2026-10"] == october
+    assert to_dec["2026-11"] == [{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
+                                  "expense": float(paid)}]
+
+    for module in (time_module, household_router, forecast_module):
+        monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
+    sharer = hh["a"]["id"]
+    dashboard = _get(sw_client, hh["c"], f"/household/{sharer}/dashboard")
+    assert dashboard["month"]["month"] == "2026-10"
+    assert dashboard["month"]["currencies"] == october
+    for days in (7, 60):
+        items = _get(sw_client, hh["c"], f"/household/{sharer}/upcoming?days={days}")["items"]
+        shown = [i["face_amount"] for i in items if i.get("kind") == "household"]
+        assert shown == ([remainder] if remainder else []), days
+    upcoming = [i["face_amount"] for i in dashboard["upcoming"] if i.get("kind") == "household"]
+    assert upcoming == ([remainder] if remainder else [])

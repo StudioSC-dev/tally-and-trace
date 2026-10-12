@@ -38,22 +38,26 @@ accountless entry) is returned at its face amount.
 recorded month), or every row plus projected entry charges against posted,
 planned and recurring payments plus the routed payment (the projection).
 
+**The projection's horizon is the statement's, never the request's.** A
+line's projected cover counts the recurring payments and projected entry
+charges from the projection's first day (today) through the due date of the
+statement holding the line (plus one day), whatever range, window or
+dashboard asks for it, so a month's figure, the dashboard and Upcoming
+agree. A payment counted there is the joint outflow of its own month when
+that month is in range, and otherwise still covers.
+
 **A posted charge on an open statement is left to the projection.** In a
 recorded month, a posted Household charge whose statement the posted
 payments have not settled is covered as the projection covers it: by the
 posted, planned and recurring in-scope cash payments and the routed payment,
-with recurring payments counted from today (``projection_start``) through
-the latest due date of the open statements holding such charges. That
-horizon is the statements', never the requested range's, so a recorded
-month's figure is the same whatever range (or dashboard) asks for it; a
-payment counted there is the joint outflow of its own month when that month
-is in range, and otherwise still covers. Those planned payments are counted
-as joint outflow by the projection, so the charge is counted once: the joint
-outflow plus its remainder is the charge, across the recorded and projected
-months together. A statement the posted payments settled keeps the
-posted-only rule, and so does one past due with no further planned payment
-(the projection then adds nothing in scope; a routed overdue statement is
-still projected, from the joint account, and so still covers).
+over the projection's horizon (above), from today (``projection_start``).
+Those planned payments are counted as joint outflow by the projection, so
+the charge is counted once: the joint outflow plus its remainder is the
+charge, across the recorded and projected months together. A statement the
+posted payments settled keeps the posted-only rule, and so does one past due
+with no further planned payment (the projection then adds nothing in scope;
+a routed overdue statement is still projected, from the joint account, and
+so still covers).
 """
 
 from __future__ import annotations
@@ -125,9 +129,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     ``RecordAccess``: only a payment it reads covers a line.
     ``projection_start`` (recorded only) is the day the projection starts
     (today): a posted charge on a statement the posted payments have not
-    settled is covered as the projection covers it, from then through the
-    latest due date of those statements (module docstring); without it,
-    posted payments only.
+    settled is covered as the projection covers it, from then through that
+    statement's due date (module docstring); without it, posted payments
+    only. A projected line's cover runs from ``start`` through its
+    statement's due date, whatever ``end`` is.
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
 
@@ -196,20 +201,26 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
         covered = _card_household_cover(db, billed[card_id], cash_ids, start, end,
                                         recorded=recorded, viewable_ids=viewable_ids,
                                         readable=access.readable)
-        projected: Dict[tuple, tuple] = {}
-        dues = [covered[key][2] for _, key in lines if key in covered and covered[key][1]]
-        if recorded and projection_start is not None and dues:
-            # Open statements: left to the projection (module docstring),
-            # through their latest due date, whatever the requested range.
-            begin = _naive(projection_start)
-            horizon = max(begin, _naive(max(dues)) + timedelta(days=1))
-            projected = _card_household_cover(db, billed[card_id], cash_ids, begin, horizon,
-                                              recorded=False, viewable_ids=viewable_ids,
-                                              readable=access.readable)
+        # Projected cover, per statement: from the projection's first day through
+        # that statement's due date, whatever the requested range (module
+        # docstring). In a recorded month only for a statement still open.
+        begin = start if not recorded else (
+            _naive(projection_start) if projection_start is not None else None)
+        by_due: Dict[datetime, dict] = {}
+        if begin is not None:
+            for _, key in lines:
+                if key not in covered or (recorded and not covered[key][1]):
+                    continue
+                due = covered[key][2]
+                if due not in by_due:
+                    horizon = max(begin, _naive(due) + timedelta(days=1))
+                    by_due[due] = _card_household_cover(
+                        db, billed[card_id], cash_ids, begin, horizon, recorded=False,
+                        viewable_ids=viewable_ids, readable=access.readable)
         for occ, key in lines:
-            remainder, still_owed, _ = covered.get(key, (occ.face, False, None))
-            if still_owed and key in projected:
-                remainder = projected[key][0]
+            remainder, _, due = covered.get(key, (occ.face, False, None))
+            if key in by_due.get(due, {}):
+                remainder = by_due[due][key][0]
             occ.remainder = remainder
     return [o for o in out if o.remainder > 0]
 
