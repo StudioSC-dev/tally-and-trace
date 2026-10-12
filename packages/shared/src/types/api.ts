@@ -734,6 +734,8 @@ export interface UpcomingItem {
    * is still unpaid by the view's accounts.
    */
   household_occurrence?: true
+  /** The item's own currency: present in a Household view (`/household/{id}/upcoming`, dashboard). */
+  currency?: CurrencyCode
 }
 
 export type UpcomingItemOrEvent = UpcomingItem | LimitedEvent
@@ -829,8 +831,11 @@ export interface DashboardAccountBalance {
   name: string
   balance: number
   currency: CurrencyCode
-  /** Shown, but not counted in available cash or projections. */
-  is_spending_wallet: boolean
+  /**
+   * Shown, but not counted in available cash or projections. Absent on an account
+   * seen only through a Household tag share (`tag_viewer`), which shows no settings.
+   */
+  is_spending_wallet?: boolean
 }
 
 /** A virtual pull from an overflow account to cover a shortfall on its primary. */

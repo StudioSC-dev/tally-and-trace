@@ -36,7 +36,7 @@ const dashboard = {
       display_name: 'Electric Bill', face_amount: 1200.0, cash_delta: 0.0, currency: 'PHP',
       account: { id: null, name: 'Other account' }, kind: 'household',
     },
-    { name: 'Rent', amount: 2500.0, due_date: '2026-11-01', entry_type: 'expense', source: 'budget_entry', source_id: 6 },
+    { name: 'Rent', amount: 2500.0, due_date: '2026-11-01', entry_type: 'expense', source: 'budget_entry', source_id: 6, currency: 'USD' },
   ],
 } satisfies HouseholdDashboard
 
@@ -76,6 +76,10 @@ describe('Household response types', () => {
     expect(occurrence && isLimitedEvent(occurrence) ? occurrence.cash_delta : null).toBe(0)
     expect(occurrence && upcomingItemAmount(occurrence)).toEqual({ amount: 1200, direction: null })
     expect(rent && upcomingItemAmount(rent)).toEqual({ amount: 2500, direction: 'out' })
+  })
+
+  it('carry each upcoming item\'s own currency, full or limited', () => {
+    expect(dashboard.upcoming.map((item) => item.currency)).toEqual(['PHP', 'USD'])
   })
 
   it('give one line per currency and never a total across them', () => {
