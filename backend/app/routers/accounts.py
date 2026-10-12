@@ -238,12 +238,29 @@ def _validate_loan_payer(db: Session, current_user: User, data: dict, account: A
 CARD_PENDING_PAYMENT_DETAIL = (
     "This card funds a pending payment; post or remove that payment "
     "before deactivating the card")
+CARD_RECURRING_CHARGE_DETAIL = (
+    "This card has an active recurring charge; end it or move it to another account "
+    "before deactivating the card")
 CARD_OPEN_STATEMENT_DETAIL = (
     "This card has an unpaid statement balance; pay it in full "
     "before deactivating the card")
 LOAN_PENDING_PAYMENT_DETAIL = (
     "This loan has a pending or recurring payment; post or remove the pending payment "
     "and end the recurring one before deactivating the loan")
+
+
+def _has_future_occurrence(entry) -> bool:
+    """Whether a budget entry still occurs from the start of today on.
+
+    Read with the projection's own occurrence walk (``iter_occurrences``, which
+    honours ``end_date`` and ``max_occurrences``) from the start of today, the
+    projection's window start (``_upcoming_window``), so an entry that has run
+    out projects nothing and blocks nothing.
+    """
+    from app.services.forecast import iter_occurrences
+
+    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return next(iter_occurrences(entry, today, datetime.max), None) is not None
 
 
 def _validate_deactivation(db: Session, current_user: User, data: dict,
@@ -259,11 +276,18 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       (``_validate_card_loan_payments`` reads the same rows). Recurring entries
       are not checked: a recurring transfer cannot be funded from a card
       (``_validate_transfer_destination`` in routers/budget_entries.py).
+    - A card with an active recurring charge: an active budget entry scheduled
+      on the card (not a recurring transfer) that still has an occurrence from
+      today on (``_has_future_occurrence``). The projection bills each one on
+      the card (``_card_entry_charges``), or, on a card without cycle settings,
+      lists it as a cash event on the card; either way its legs drop once the
+      card is inactive, so it is refused whether or not the card has a cycle.
     - A card with an open statement: any statement in ``statement_history``
       that still owes something after payments ("open" or "overdue"). That
       includes the cycle open today and later ones, posted and unposted
-      charges alike, as the projection bills them. A card without cycle
-      settings has no statements, so nothing here refuses it.
+      recorded charges alike; recurring charges not yet recorded are not in
+      it, hence the check above. A card without cycle settings has no
+      statements, so nothing here refuses it.
     - A loan with a pending payment: an unposted transfer into it (a planned
       payment or prepayment), or an active recurring entry paying into it;
       both are projected against its due dates (services/loans.py).
@@ -284,6 +308,13 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
         ).first()
         if pending:
             raise HTTPException(status_code=400, detail=CARD_PENDING_PAYMENT_DETAIL)
+        charges = db.query(BudgetEntry).filter(
+            BudgetEntry.account_id == account.id,
+            BudgetEntry.transfer_to_account_id.is_(None),
+            BudgetEntry.is_active.is_(True),
+        ).all()
+        if any(_has_future_occurrence(entry) for entry in charges):
+            raise HTTPException(status_code=400, detail=CARD_RECURRING_CHARGE_DETAIL)
         history = statement_history(db, account, naive_utc_now(),
                                     viewable_account_ids(db, current_user))
         if any(statement["owed"] > 0 for statement in history):
