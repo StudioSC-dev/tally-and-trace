@@ -831,11 +831,13 @@ def collect_events(
     ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on its scoped accounts.
-    An occurrence already materialised is suppressed: a transaction of the
-    entry's creator with this ``budget_entry_id`` dated the same calendar day
-    stands in for it (each transaction suppresses at most one occurrence; see
-    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``
-    does not move the money twice.
+    An occurrence already recorded is suppressed, for every kind of entry
+    (cash account, no account, card with or without cycle settings, recurring
+    transfer): a transaction of the entry's creator with this
+    ``budget_entry_id`` dated the same calendar day stands in for it (each
+    transaction suppresses at most one occurrence; see
+    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``,
+    or a row linked to the entry by hand, does not move the money twice.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -984,13 +986,16 @@ def collect_events(
     outside_unbilled = frozenset(set(referenced_cards) - outside_billed)
     transfer_billed_ids = billed_ids | outside_billed
 
-    # Transactions already materialised from a recurring transfer entry, by day:
-    # each stands in for one occurrence on its calendar day (as in
-    # _card_entry_charges), since the posted transfer has already moved the balance.
-    transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
+    # Transactions already recorded for an entry's occurrences, by day: each stands
+    # in for one occurrence on its calendar day (as in _card_entry_charges), since
+    # the transaction itself is the movement (posted: already in the balance;
+    # unposted: listed below). Fetched once for every entry walked here; entries on
+    # billed cards are suppressed in _billed_card_occurrences instead.
+    walked_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None
+                        or (e.account_id not in wallet_ids and e.account_id not in billed_ids)]
     records = {(BudgetEntry, e.id): e for e in entries}
     records.update(((Transaction, t.id), t) for t in txns)
-    linked = _linked_occurrence_days(db, transfer_entry_ids)
+    linked = _linked_occurrence_days(db, walked_entry_ids)
 
     card_entries = []
     for entry in entries:
@@ -1037,6 +1042,10 @@ def collect_events(
         else:
             legs = []
         for occ in iter_occurrences(entry, start, end):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue  # already recorded (e.g. advance=False)
             events.append(_event(
                 date=occ,
                 name=entry.name,
@@ -1542,8 +1551,8 @@ def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -
     statement not yet due, or when any later occurrence is, with materialised
     occurrences suppressed; it stops at the first billed occurrence. A card
     without cycle settings bills no statements, so it is
-    ``has_unsuppressed_occurrence`` (which suppresses recorded occurrences
-    where ``collect_events`` does not yet: STU-266).
+    ``has_unsuppressed_occurrence``, which suppresses recorded occurrences as
+    ``collect_events`` does for the occurrences it lists on such a card.
     """
     if resolve_cycle_fields(card) is None:
         return has_unsuppressed_occurrence(db, entries, start)

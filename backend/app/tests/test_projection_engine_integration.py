@@ -971,6 +971,114 @@ def test_card_installment_occurrence_with_a_linked_transaction_is_suppressed(db,
     assert [e["date"] for e in listed] == [datetime(2026, 9, 1)]
 
 
+def _login(client, user):
+    login = client.post("/api/v1/auth/login",
+                        json={"email": user.email, "password": "password123"})
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _entry_events(db, user, start, end):
+    from app.services.forecast import collect_events
+
+    return [(e["date"], e["counts_as_cash"])
+            for e in collect_events(db, start, end, user_id=user.id)
+            if e["source"] == "budget_entry"]
+
+
+@pytest.mark.parametrize("posted", [True, False])
+def test_cash_entry_occurrence_recorded_without_advancing_is_projected_once(
+        db, user, client, posted):
+    """A monthly 2,000 bill on Checking, due 5 Aug and 5 Sep. The 5 Aug occurrence
+    is recorded without advancing the schedule: posted through ``materialize``
+    (already out of the balance), or as an unposted row linked by hand (listed as a
+    planned transaction). Either way it leaves cash once, as the transaction."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    entry = _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "2000.00",
+                   datetime(2026, 8, 5), account=checking)
+    if posted:
+        r = client.post(f"/api/v1/budget-entries/{entry.id}/materialize",
+                        headers=_login(client, user), json={"advance": False})
+        assert r.status_code == 201, r.text
+    else:
+        _txn(db, user, checking, TransactionType.DEBIT, "2000.00", datetime(2026, 8, 5),
+             description="Rent", budget_entry_id=entry.id)
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, days=31, reference=reference)
+    expected = [] if posted else [("2026-08-05", "Rent", Decimal("-2000.00"))]
+    assert _cash_events(r) == expected
+    assert r["closing_balance"] == Decimal("8000.00")
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert aug["closing_balance"] == 8000.0
+    assert aug["expenses"] == 0.0
+    assert _entry_events(db, user, reference, datetime(2026, 9, 6)) == [
+        (datetime(2026, 9, 5), True)]
+
+
+def test_unbilled_card_occurrence_recorded_without_advancing_is_projected_once(
+        db, user, client):
+    """On a card without cycle settings the schedule is cash on its own date, and a
+    recorded charge on the card moves no projection cash (no statement is modelled).
+    The 5 Aug occurrence materialised without advancing is the recorded charge,
+    so only 5 Sep is still projected."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    card = _account(db, user, "Card D", AccountType.CREDIT, "0.00",
+                    payment_account_id=checking.id)
+    entry = _entry(db, user, "Card subscription", BudgetEntryType.EXPENSE, "2000.00",
+                   datetime(2026, 8, 5), account=card)
+    r = client.post(f"/api/v1/budget-entries/{entry.id}/materialize",
+                    headers=_login(client, user), json={"advance": False})
+    assert r.status_code == 201, r.text
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    assert _cash_events(project_running_balance(db, user.id, days=31, reference=reference)) == []
+    assert _entry_events(db, user, reference, datetime(2026, 9, 6)) == [
+        (datetime(2026, 9, 5), True)]
+
+
+def test_accountless_entry_occurrence_linked_by_hand_is_projected_once(db, user, client):
+    """An entry with no account can't be materialised, but a transaction can be
+    linked to it by hand. That unposted row stands in for the 5 Aug occurrence: the
+    bill leaves cash once, from Checking, not also from unassigned cash."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    entry = _entry(db, user, "Utilities", BudgetEntryType.EXPENSE, "300.00",
+                   datetime(2026, 8, 5))
+    auth = _login(client, user)
+    assert client.post(f"/api/v1/budget-entries/{entry.id}/materialize", headers=auth,
+                       json={"advance": False}).status_code == 400
+    r = client.post("/api/v1/transactions/", headers=auth, json={
+        "account_id": checking.id, "amount": 300.0, "transaction_type": "debit",
+        "transaction_date": "2026-08-05T00:00:00", "description": "Utilities",
+        "budget_entry_id": entry.id, "is_posted": False,
+    })
+    assert r.status_code in (200, 201), r.text
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    r = project_running_balance(db, user.id, days=31, reference=reference)
+    assert _cash_events(r) == [("2026-08-05", "Utilities", Decimal("-300.00"))]
+    assert r["closing_balance"] == Decimal("9700.00")
+    assert r["unassigned_closing"] == Decimal("0")
+    assert _entry_events(db, user, reference, datetime(2026, 9, 6)) == [
+        (datetime(2026, 9, 5), True)]
+
+
 def test_card_installment_dated_before_the_window_is_still_billed(db, user):
     """next_occurrence 20 Jul, not yet materialised: it is on the 24 Jul statement."""
     from app.models.account import AccountType
