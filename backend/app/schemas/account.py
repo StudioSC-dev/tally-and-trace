@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Literal, Optional, List
+from typing import Annotated, Literal, Optional, List, Union
 from datetime import date, datetime
 from app.models.account import AccountType
 from app.models.user import CurrencyType
@@ -106,8 +106,8 @@ class AccountFields(AccountBase):
         from_attributes = True
 
 
-class AccountResponse(AccountFields):
-    """An account as the caller sees it.
+class DirectAccountResponse(AccountFields):
+    """An account as a caller with a direct role sees it.
 
     ``description``, ``credit_limit``, the routing ids and the loan terms are
     null unless ``my_role`` is "owner" or "admin".
@@ -115,6 +115,28 @@ class AccountResponse(AccountFields):
     my_role: Literal["owner", "admin", "editor", "viewer"]
     permissions: AccountPermissions
     owner_name: Optional[str] = None
+
+
+class TagViewerAccountResponse(BaseModel):
+    """An account reached only through a Household tag share (STU-233).
+
+    Only ``id``, ``name``, ``account_type``, ``currency`` and ``balance``, plus
+    the access fields; every permission is false.
+    """
+    id: int
+    name: str
+    account_type: AccountType
+    currency: CurrencyType
+    balance: float
+    my_role: Literal["tag_viewer"]
+    permissions: AccountPermissions
+    owner_name: Optional[str] = None
+    tags: TagSummaries = Field(default_factory=list)
+
+
+# Discriminated on ``my_role``: "tag_viewer" is the minimal shape.
+AccountResponse = Annotated[Union[DirectAccountResponse, TagViewerAccountResponse],
+                            Field(discriminator="my_role")]
 
 
 class AccountListResponse(BaseModel):

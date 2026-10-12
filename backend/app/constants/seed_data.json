@@ -29,6 +29,7 @@
       "due_date": 15,
       "billing_cycle_start": 1,
       "days_until_due_date": 21,
+      "payment_account_id": 6,
       "currency": "PHP"
     },
     {
@@ -484,6 +485,16 @@
       "transaction_date": "2025-08-23T11:00:00",
       "is_posted": true,
       "tags": ["Household"]
+    },
+    {
+      "account_id": 6,
+      "amount": 235.00,
+      "description": "Credit card payment",
+      "transaction_type": "TRANSFER",
+      "transaction_date": "2025-09-21T09:00:00",
+      "transfer_from_account_id": 6,
+      "transfer_to_account_id": 3,
+      "is_posted": true
     }
   ],
   "partner": {

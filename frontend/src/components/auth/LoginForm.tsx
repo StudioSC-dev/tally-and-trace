@@ -77,11 +77,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
     }
   }
 
-  const handleDemoLogin = async () => {
+  const handleDemoLogin = async (demoEmail: string) => {
     setIsLoading(true)
     setError('')
     try {
-      await login('demo@example.com', 'password123')
+      await login(demoEmail, 'password123')
       onSuccess?.()
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null) {
@@ -294,16 +294,28 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
           <div className="mt-8 border-t border-line pt-6">
             <p className="label mb-1">Or jump in quickly</p>
             <p className="mb-4 text-sm text-body">
-              Explore with pre-loaded demo data.
+              Explore with pre-loaded demo data. The Demo Partner is the second person in the
+              household: they share a joint account with the Demo User and can see the Demo
+              User&apos;s Household.
             </p>
-            <button
-              type="button"
-              onClick={handleDemoLogin}
-              disabled={isLoading}
-              className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Sign in as Demo User
-            </button>
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('demo@example.com')}
+                disabled={isLoading}
+                className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Sign in as Demo User
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDemoLogin('demo.partner@example.com')}
+                disabled={isLoading}
+                className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Sign in as Demo Partner
+              </button>
+            </div>
           </div>
         </div>
       </div>

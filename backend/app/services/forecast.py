@@ -18,8 +18,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    NONE, account_role, can_read_record, readable_criterion, viewable_account_ids,
-    viewable_accounts,
+    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, touches_accounts,
+    viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
@@ -136,8 +136,9 @@ def _loan_ids_of(db: Session, account_ids) -> frozenset:
 
 
 def get_account_balances(db: Session, user_id: int):
-    """The projection's scope: every active account the user holds a role on."""
-    return viewable_accounts(db, user_id, active_only=True).all()
+    """The projection's scope: every active account the user sees (any role,
+    ``tag_viewer`` included: a sharer's Household-tagged accounts)."""
+    return viewable_accounts(db, user_id, active_only=True, roles=VIEW_ROLES).all()
 
 
 def project_cashflow(
@@ -272,8 +273,11 @@ def get_upcoming_items(
     payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
     """
     start, end = _upcoming_window(days, reference)
-    events = collect_events(db, start, end, user_id=user_id, tag_id=tag_id)
+    return upcoming_items(collect_events(db, start, end, user_id=user_id, tag_id=tag_id))
 
+
+def upcoming_items(events: List[dict]) -> List[dict]:
+    """``collect_events`` events as upcoming items (``get_upcoming_items``), sorted by date."""
     items = [
         {
             "name": e["name"],
@@ -282,6 +286,10 @@ def get_upcoming_items(
             "entry_type": e["type"],
             "source": e["source"],
             "source_id": e["source_id"],
+            # Only on a Household occurrence the caller sees in full (their own).
+            **({"household_occurrence": True} if e.get("household_occurrence") else {}),
+            # Only in a Household view (services/household.household_upcoming).
+            **({"currency": e["currency"]} if "currency" in e else {}),
         }
         for e in events if e.get("view") != LIMITED
     ]
@@ -377,14 +385,18 @@ def get_disposable_income(
     With ``tag_id`` only entries carrying that tag effectively count
     (``app/core/tags.py``), each once.
     """
-    # The accounts the caller holds a role on (inactive ones included), as in the
-    # period summary: a top-up counts only when its source is one of them, and a
-    # return only when both the wallet and the destination are.
-    scope_ids = viewable_account_ids(db, user_id)
-    # Every entry the caller may read: their own, plus any touching one of those
-    # accounts, whoever created it.
+    # The accounts the caller sees (inactive ones included, ``tag_viewer`` too),
+    # as in the period summary: a top-up counts only when its source is one of
+    # them, and a return only when both the wallet and the destination are.
+    from app.core.access import household_grants
+
+    scope_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    # Every entry the caller may read: their own, any touching an account they
+    # hold a direct role on, whoever created it, and through a tag share the
+    # sharer's own (rules (b2) and (c)).
     query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, scope_ids),
+        readable_criterion(BudgetEntry, user_id, viewable_account_ids(db, user_id),
+                           household_grants(db, user_id)),
         BudgetEntry.is_active.is_(True),
     )
     if tag_id is not None:
@@ -764,6 +776,8 @@ def collect_events(
     user_id: int,
     accounts: Optional[list] = None,
     tag_id: Optional[int] = None,
+    household=None,
+    keep_origin: bool = False,
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
@@ -833,6 +847,16 @@ def collect_events(
     whose source carries the tag effectively are kept (``_keep_tagged``). The
     scope does not change: the same accounts, opening balances and legs, so
     closings are today's balances plus the tagged events alone.
+
+    With ``household`` (a ``HouseholdGrant``; ``accounts`` must then be its
+    Household view scope, ``services/household.household_accounts``) this is
+    that sharer's Household view: only records touching a scope account
+    (the caller's own private records are outside it), only that sharer's
+    Household occurrences, statement legs only on scope accounts, and every
+    card outside the scope that a scope account pays (primary or overflow)
+    discovered as a neutral "Card payment", whatever the caller's role on it.
+    ``keep_origin`` keeps each event's internal ``origin`` (model, id) for
+    callers in this service layer; it never reaches a response.
     """
     start = _naive(start)
     end = _naive(end)
@@ -853,24 +877,38 @@ def collect_events(
     redactor = Redactor(db, user_id)
 
     # Every record of any type the caller created or that touches an account
-    # in the scope (loans included), kept only when the caller may read it.
+    # in the scope (loans included), kept only when the caller may read it
+    # (rules (a), (b), and through a tag share (b2) and (c): never another
+    # user's records on a sharer's account). With no tag shares this is the
+    # creator's records plus those touching a scoped account.
     scope_account_ids = {a.id for a in accounts}
+    access = redactor.access
+    direct_ids = viewable_account_ids(db, user_id)
+    grants = list(access.grants.values())
+
+    def disclosed(model):
+        if household is not None:
+            return (readable_criterion(model, user_id, direct_ids, grants),
+                    touches_accounts(model, scope_account_ids))
+        return (readable_criterion(model, user_id, direct_ids, grants),
+                or_(model.user_id == user_id, touches_accounts(model, scope_account_ids)))
+
     entries = [e for e in db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, scope_account_ids),
+        *disclosed(BudgetEntry),
         BudgetEntry.is_active.is_(True),
-    ).all() if can_read_record(db, user_id, e)]
+    ).all() if access.readable(e)]
 
     txns = [t for t in db.query(Transaction).filter(
-        readable_criterion(Transaction, user_id, scope_account_ids),
+        *disclosed(Transaction),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).all() if can_read_record(db, user_id, t)]
+    ).all() if access.readable(t)]
 
     # Every wallet any event references among the accounts the caller can view
     # (inactive ones included). Whether an account they can't view is a wallet
     # never changes what they are shown; for a user with no shares every
     # referenced account is their own, so nothing changes.
-    viewable_ids = viewable_account_ids(db, user_id)
+    viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
     wallet_ids = scoped_wallet_ids | wallet_ids_of(db, (acc for acc in (
         *(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id)),
         *(acc for t in txns
@@ -919,7 +957,7 @@ def collect_events(
                 Account.payment_overflow_account_id.in_(scoped_ids)),
         ).all()
         if a.id not in card_ids and resolve_cycle_fields(a) is not None
-        and account_role(user_id, a) == NONE
+        and (household is not None or account_role(user_id, a) == NONE)
     ] if scoped_ids else []
     # Cards outside the scope that transfers pay into (or draw from): a payment
     # into a billed one is a card payment; one without cycle settings moves no cash.
@@ -1051,6 +1089,14 @@ def collect_events(
     cards = {a.id: a for a in accounts if a.id in billed_ids}
     projected_charges = _card_entry_charges(db, card_entries, cards, start, end, events)
 
+    # Household occurrences: each sharer's explicitly Household-tagged records
+    # outside the scope (a bill on their private card or wallet), listed with
+    # no leg and de-duplicated against in-scope card payments (services/household.py).
+    # Outside the active scope: an account the caller also sees directly is in
+    # the normal projection's scope, so a record on it is never listed twice.
+    for grant in ([household] if household is not None else grants):
+        events.extend(_household_events(db, redactor, user_id, grant, accounts, start, end))
+
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
     # the projected charges of budget entries scheduled on it.
@@ -1058,6 +1104,8 @@ def collect_events(
     # is never emitted (STU-227). One they can view keeps its leg even when
     # inactive, as before shared accounts, so a user with no shares projects
     # exactly as then.
+    # In a Household view only scope accounts get legs.
+    leg_ids = scoped_ids if household is not None else viewable_ids
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges,
                                     viewable_ids=viewable_ids):
@@ -1065,9 +1113,9 @@ def collect_events(
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
-        funding = p["funding_account_id"] if p["funding_account_id"] in viewable_ids else None
-        overflow = p["overflow_account_id"] if p["overflow_account_id"] in viewable_ids else None
-        events.append(_event(
+        funding = p["funding_account_id"] if p["funding_account_id"] in leg_ids else None
+        overflow = p["overflow_account_id"] if p["overflow_account_id"] in leg_ids else None
+        statement = _event(
             date=p["date"],
             name=p["name"],
             type=p["type"],
@@ -1078,7 +1126,14 @@ def collect_events(
                   if funding is not None else []),
             origin=(Account, p["source_id"]),  # the card
             **extra,
-        ))
+        )
+        card = cards.get(p["source_id"]) or next(
+            a for a in accounts if a.id == p["source_id"])
+        if access.role(card.id) == TAG_VIEWER:
+            # Seen through a tag share: no statement detail (as a hidden card's).
+            _limit(statement, redactor, name=p["name"], currency=card.currency,
+                   kind="card_payment")
+        events.append(statement)
 
     # Discovered cards: neutral "Card payment" events from internal inputs. A
     # leg only when the statement's primary payment account is in scope (with
@@ -1173,6 +1228,10 @@ def collect_events(
         if hidden:
             event = _limit(event, redactor, name=LOAN_PAYMENT,
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
+        elif access.role(p["source_id"]) == TAG_VIEWER:
+            # Seen through a tag share: the loan's name, no schedule detail.
+            event = _limit(event, redactor, name=p["name"],
+                           currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
         events.append(event)
 
     # Records the caller sees Limited (see app/core/redaction.py) become limited
@@ -1188,9 +1247,55 @@ def collect_events(
 
     if tag_id is not None:
         events = _keep_tagged(db, events, tag_id)
-    for e in events:
-        del e["origin"]
+    if not keep_origin:
+        for e in events:
+            del e["origin"]
     return events
+
+
+def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
+                      start: datetime, end: datetime) -> List[dict]:
+    """Household occurrences (``services/household.py``) as listed events.
+
+    ``scope`` is the projection's active scope (``collect_events``'s
+    ``accounts``): the Household view scope in a Household view, every account
+    the caller can view otherwise. A record touching any of it is an ordinary
+    event there, never also an occurrence, so each record appears once.
+
+    No legs and ``counts_as_cash`` False: ``cash_delta`` 0, never cash and
+    never in unassigned cash. ``face_amount`` is the occurrence's remainder.
+    One the caller sees Limited (anyone but its creator) is a limited event
+    of kind "household" with a neutral account reference; one they see in
+    full (their own, in their own Household view) carries
+    ``household_occurrence``.
+    """
+    from app.services.household import household_occurrences
+
+    out = []
+    viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    for occ in household_occurrences(db, grant, scope, start, end, recorded=False,
+                                     viewable_ids=viewable_ids, access=redactor.access):
+        record = occ.record
+        is_txn = isinstance(record, Transaction)
+        event = _event(
+            date=occ.date,
+            name=record.description if is_txn else record.name,
+            type=record.transaction_type.value if is_txn else record.entry_type.value,
+            source="transaction" if is_txn else "budget_entry",
+            source_id=record.id,
+            face_amount=occ.remainder,
+            legs=[],
+            counts_as_cash=False,
+            origin=(type(record), record.id),
+            household_occurrence=True,
+            **occ.extra,
+        )
+        if redactor.view(record) == LIMITED:
+            _limit(event, redactor, name=redactor.display_description(record),
+                   currency=record.currency, kind="household")
+            event["account"] = redactor.account_ref(record.account_id)
+        out.append(event)
+    return out
 
 
 # Keys a limited event never carries: the hidden source's id and details.

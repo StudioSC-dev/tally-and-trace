@@ -9,14 +9,18 @@ Version 2 (STU-232, shared accounts):
 - ``accounts``: the accounts the caller owns, in full. ``shared_accounts``: the
   accounts shared with them, as a reference (id, name, type, currency, their
   role and the owner's display name), nothing an owner keeps to managers.
+  Accounts reached through a Household tag share are listed here too, with
+  ``my_role`` "tag_viewer" (STU-233).
 - ``transactions`` / ``budget_entries``: the caller's own records whose view is
   ``full`` (they can view every account the record touches).
 - ``others_transactions`` / ``others_budget_entries``: every other record the
   caller can read, through the Limited models (``app/core/redaction.py``):
   another user's records on accounts the caller holds a role on, and the
   caller's own records that touch an account they can no longer view (after a
-  revocation). Accounts are references; a hidden one is neutral, and a payment
-  into a hidden loan or card shows no interest.
+  revocation), and through a Household tag share the sharer's records readable
+  under rules (b2) and (c), never another user's records on the sharer's
+  accounts (STU-233). Accounts are references; a hidden one is neutral, and a
+  payment into a hidden loan or card shows no interest.
 
 Tags (STU-231): the caller's own tags, and the links from those tags to the
 caller's own accounts and the records in ``transactions`` and
@@ -34,7 +38,9 @@ from sqlalchemy.orm import Session
 
 from app.core.access import (
     OWNER,
+    VIEW_ROLES,
     account_role,
+    household_grants,
     owned_criterion,
     readable_criterion,
     viewable_account_ids,
@@ -160,9 +166,10 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
     """The caller's export, as plain JSON-ready data (see the module docstring)."""
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
     owned = [a for a in owned if account_role(user, a) == OWNER]
-    shared = [a for a in viewable_accounts(db, user).order_by(Account.id).all()
+    shared = [a for a in viewable_accounts(db, user, roles=VIEW_ROLES).order_by(Account.id).all()
               if account_role(user, a) != OWNER]
     scope_ids = viewable_account_ids(db, user)
+    grants = household_grants(db, user)
     redactor = Redactor(db, user)
 
     def own(model):
@@ -170,7 +177,7 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
 
     def split(model):
         """(own records in full, every other readable record) for ``model``."""
-        rows = (db.query(model).filter(readable_criterion(model, user, scope_ids))
+        rows = (db.query(model).filter(readable_criterion(model, user, scope_ids, grants))
                 .order_by(model.id).all())
         redactor.prepare(rows)
         full = [r for r in rows if r.user_id == user.id and redactor.view(r) == FULL]

@@ -109,7 +109,12 @@ export default function HomeScreen() {
                 const date = limited ? event.date : (full?.due_date ?? '')
                 const isIncome = direction === 'in'
                 const isExpense = direction === 'out'
-                const kindLabel = limited ? event.kind.replace('_', ' ') : (full?.entry_type ?? '')
+                // A Household occurrence (a Household bill on an account outside this view) lists its
+                // face amount and has no direction, so it is neither an income nor an expense badge.
+                const isHouseholdBill = limited ? event.kind === 'household' : full?.household_occurrence === true
+                const kindLabel = isHouseholdBill
+                  ? 'household bill'
+                  : limited ? event.kind.replace('_', ' ') : (full?.entry_type ?? '')
                 return (
                 <View key={idx}>
                   {idx > 0 && <View className="h-px bg-slate-700" />}
@@ -129,7 +134,7 @@ export default function HomeScreen() {
                       />
                       <Badge
                         label={kindLabel}
-                        color={isIncome ? 'green' : 'red'}
+                        color={isHouseholdBill ? 'slate' : isIncome ? 'green' : 'red'}
                       />
                     </View>
                   </View>

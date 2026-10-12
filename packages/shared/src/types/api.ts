@@ -48,6 +48,13 @@ export type LoanKind = 'personal' | 'auto' | 'home'
 export type LoanAmortization = 'fixed' | 'reduce_term'
 export type LoanPaymentKind = 'scheduled' | 'prepayment'
 
+/**
+ * An account as the API returns it. One reached only through a Household tag share
+ * (`my_role: 'tag_viewer'`) carries just `id`, `name`, `account_type`, `currency`,
+ * `balance`, `owner_name`, `tags` and all-false `permissions`; `is_active`,
+ * `is_spending_wallet` and `created_at` are absent on it, and its statements, loan
+ * schedule, shares and settings answer 404.
+ */
 export interface Account {
   id: number
   name: string
@@ -74,7 +81,7 @@ export interface Account {
    * Spending wallet (cash on hand, e-wallet): the balance is shown but not counted
    * in available cash or projections. Topping it up is the expense.
    */
-  is_spending_wallet: boolean
+  is_spending_wallet?: boolean
   /** Loans only (balance is negative while owed; owed = -balance). */
   loan_kind?: LoanKind | null
   /** Loans: nominal annual rate in percent (6.5 = 6.5%). */
@@ -93,10 +100,10 @@ export interface Account {
    * it, so it is counted again).
    */
   loan_payments_made_offset?: number | null
-  is_active: boolean
+  is_active?: boolean
   /** The caller's tags on the account. */
   tags: TagRef[]
-  created_at: string
+  created_at?: string
   updated_at?: string
   /** The caller's role on the account. */
   my_role: AccountRole
@@ -678,8 +685,13 @@ export interface UpcomingBill {
   is_autopay: boolean
 }
 
-/** What a limited event is, without naming its (possibly hidden) source. */
-export type LimitedEventKind = 'expense' | 'income' | 'transfer' | 'loan_payment' | 'card_payment'
+/**
+ * What a limited event is, without naming its (possibly hidden) source. `household` is
+ * the sharer's Household-tagged bill on an account outside the Household view: it has
+ * `cash_delta` 0 (it moves none of the viewer's cash), so list its `face_amount`, and
+ * it does not say whether it is money in or out.
+ */
+export type LimitedEventKind = 'expense' | 'income' | 'transfer' | 'loan_payment' | 'card_payment' | 'household'
 
 /**
  * A projected event the caller sees Limited (upcoming, payables, timeline, dashboard).
@@ -716,6 +728,14 @@ export interface UpcomingItem {
   entry_type: string
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
+  /**
+   * Present (true) on the caller's own Household occurrence in their own Household
+   * view: a Household-tagged bill on an account outside the view. `amount` is what
+   * is still unpaid by the view's accounts.
+   */
+  household_occurrence?: true
+  /** The item's own currency: present in a Household view (`/household/{id}/upcoming`, dashboard). */
+  currency?: CurrencyCode
 }
 
 export type UpcomingItemOrEvent = UpcomingItem | LimitedEvent
@@ -811,8 +831,11 @@ export interface DashboardAccountBalance {
   name: string
   balance: number
   currency: CurrencyCode
-  /** Shown, but not counted in available cash or projections. */
-  is_spending_wallet: boolean
+  /**
+   * Shown, but not counted in available cash or projections. Absent on an account
+   * seen only through a Household tag share (`tag_viewer`), which shows no settings.
+   */
+  is_spending_wallet?: boolean
 }
 
 /** A virtual pull from an overflow account to cover a shortfall on its primary. */

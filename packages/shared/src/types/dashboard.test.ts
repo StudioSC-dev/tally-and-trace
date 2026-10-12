@@ -12,6 +12,8 @@ const snapshot = {
     by_account: [
       { id: 6, name: 'Joint Account', balance: 4000.0, currency: 'PHP', is_spending_wallet: false },
       { id: 7, name: 'Partner Checking', balance: 3000.0, currency: 'PHP', is_spending_wallet: false },
+      // Seen through a Household tag share: no settings.
+      { id: 8, name: 'Household Savings', balance: 0.0, currency: 'USD' },
     ],
   },
   upcoming_this_month: [
@@ -68,6 +70,11 @@ describe('DashboardSnapshot', () => {
       'account_closings', 'available_cash', 'balances', 'forecast_next_3_months', 'goals_progress',
       'monthly_summary', 'payables', 'upcoming_this_month', 'wishlist_next_up',
     ])
+  })
+
+  it('omits the spending-wallet setting on an account seen through a tag share', () => {
+    const typed: DashboardSnapshot = snapshot
+    expect(typed.balances.by_account.map((a) => a.is_spending_wallet)).toEqual([false, false, undefined])
   })
 
   it('narrows upcoming items into limited and full events', () => {

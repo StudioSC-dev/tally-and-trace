@@ -5,11 +5,13 @@ const ROLE_LABELS: Record<Account['my_role'], string> = {
   admin: 'Admin',
   editor: 'Editor',
   viewer: 'Viewer',
+  tag_viewer: 'Household',
 }
 
 /**
  * Marks an account somebody shared with the caller: the caller's role and the
- * owner's name. Renders nothing for the caller's own accounts.
+ * owner's name. An account reached only through someone's Household share reads
+ * "Household" (it is read-only, and shows little more than its balance). Renders nothing for the caller's own accounts.
  */
 export function AccountRoleBadge({ account }: { account: Pick<Account, 'my_role' | 'owner_name'> }) {
   if (account.my_role === 'owner') return null

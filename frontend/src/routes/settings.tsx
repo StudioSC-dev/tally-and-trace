@@ -13,6 +13,7 @@ import {
 } from '../store/api'
 import type { Category, Tag } from '../store/api'
 import { downloadAuthed } from '../utils/download'
+import { HouseholdShares } from '../components/HouseholdShares'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -233,6 +234,8 @@ function SettingsPage() {
           </ul>
         )}
       </section>
+
+      <HouseholdShares />
 
       {/* Tag modal */}
       {tagModal && (

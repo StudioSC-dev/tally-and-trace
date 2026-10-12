@@ -110,3 +110,7 @@ class Account(Base):
     # Who else holds a role on the account (app/core/access.py reads it).
     shares = relationship("AccountShare", back_populates="account", lazy="selectin",
                           cascade="all, delete-orphan", passive_deletes=True)
+    # Every tag on the account, whoever's: app/core/access.py reads the owner's
+    # shared Household tag from it (``tag_viewer``). Never serialized; responses
+    # read ``visible_tags``.
+    tag_links = relationship("Tag", secondary="account_tags", viewonly=True, lazy="selectin")

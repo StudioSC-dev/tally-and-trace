@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.access import (
+    VIEW_ROLES,
     RecordAccess,
     can_edit_account,
     editable_account_ids,
     get_record_or_404,
+    household_grants,
     readable_criterion,
     require_account,
     require_owned_ref,
@@ -269,7 +271,8 @@ def list_budget_entries(
     offset: int = Query(0, ge=0),
 ):
     viewable = viewable_account_ids(db, current_user)
-    query = db.query(BudgetEntry).filter(readable_criterion(BudgetEntry, current_user, viewable))
+    query = db.query(BudgetEntry).filter(readable_criterion(
+        BudgetEntry, current_user, viewable, household_grants(db, current_user)))
 
     if entry_type:
         query = query.filter(BudgetEntry.entry_type == entry_type)
@@ -277,7 +280,8 @@ def list_budget_entries(
         # Not in the limited model: filter only the entries the caller sees in full.
         query = query.filter(
             BudgetEntry.is_active == is_active,
-            full_view_criterion(BudgetEntry, current_user, viewable,
+            full_view_criterion(BudgetEntry, current_user,
+                                viewable_account_ids(db, current_user, roles=VIEW_ROLES),
                                 editable_account_ids(db, current_user)))
     if before is not None:
         query = query.filter(BudgetEntry.next_occurrence <= before)

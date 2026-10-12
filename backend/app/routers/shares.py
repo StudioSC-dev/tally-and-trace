@@ -5,6 +5,13 @@
   else with a role on the account gets 403; anyone without one, 404.
 - ``GET /shares/received`` and ``DELETE /shares/received/{id}``: the shares the
   caller holds, and leaving one.
+- ``GET/POST /tags/household/shares`` and ``DELETE /tags/household/shares/{id}``
+  (STU-233): the caller's own Household system tag, so only its owner. No
+  other tag can be shared: the route names no tag.
+- ``GET /shares/received/household`` and ``DELETE
+  /shares/received/household/{id}``: the Household tag shares the caller
+  holds, and leaving one. Separate from the account-share routes because the
+  two tables' ids overlap.
 - ``GET /users/lookup?email=``: ``{id, display_name}`` on an exact,
   case-insensitive match. Every other case (no such user, the caller, an
   inactive or demo user) is the same 404 "No matching user". Rate-limited per
@@ -18,6 +25,9 @@ grants admin, and an admin can't change or remove another admin's share.
 Removing a share, leaving one, or demoting it to viewer deactivates the
 sharee's recurring entries that touch the account, so they leave the
 projection; their transactions stay (stranded records, ``app/core/access.py``).
+A tag share is read-only (``tag_viewer``, ``app/core/access.py``): removing or
+leaving one has no entries to deactivate, and access, computed per request,
+ends with the row.
 Demo users get 403 on every route here and can't be share targets.
 """
 
@@ -38,18 +48,23 @@ from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.redaction import display_name
 from app.core.seed import DEMO_EMAILS
+from app.core.tags import ensure_household_tag
 from app.models.account import Account
 from app.models.account_share import AccountShare
 from app.models.budget_entry import BudgetEntry
+from app.models.tag import Tag
+from app.models.tag_share import TagShare
 from app.models.user import User
 from app.schemas.share import (
-    AccountOwner, AccountSharesResponse, ReceivedShare, ShareCreate, ShareResponse,
-    ShareUpdate, UserMatch,
+    AccountOwner, AccountSharesResponse, HouseholdSharesResponse, ReceivedShare,
+    ReceivedTagShare, ShareCreate, ShareResponse, ShareUpdate, TagShareCreate,
+    TagShareResponse, UserMatch,
 )
 
 account_router = APIRouter()
 received_router = APIRouter()
 users_router = APIRouter()
+tag_router = APIRouter()
 
 NO_MATCH = "No matching user"
 SHARE_NOT_FOUND = "Share not found"
@@ -59,6 +74,8 @@ ADMIN_GRANT_FORBIDDEN = "Only the account's owner can grant admin"
 ADMIN_TOUCH_FORBIDDEN = "An admin can't change or remove another admin"
 ALREADY_SHARED = "This user already has access to the account"
 OWNER_TARGET = "The owner already has full access"
+SELF_TAG_TARGET = "You can't share your Household tag with yourself"
+ALREADY_TAG_SHARED = "This user already has your Household tag"
 
 # The picker's per-caller rate limit: LOOKUP_LIMIT calls in LOOKUP_WINDOW seconds.
 LOOKUP_LIMIT = 10
@@ -203,6 +220,95 @@ def leave_share(share_id: int, db: Session = Depends(get_db),
     if share is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=SHARE_NOT_FOUND)
     deactivate_entries(db, current_user.id, share.account_id)
+    db.delete(share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@received_router.get("/received/household", response_model=List[ReceivedTagShare])
+def list_received_tag_shares(db: Session = Depends(get_db),
+                             current_user: User = Depends(no_demo)):
+    shares = (db.query(TagShare).filter(TagShare.user_id == current_user.id)
+              .order_by(TagShare.created_at, TagShare.id).all())
+    return [{"id": s.id, "tag_id": s.tag_id, "sharer_id": s.tag.user_id,
+             "sharer_name": display_name(db.get(User, s.tag.user_id)),
+             "created_at": s.created_at}
+            for s in shares]
+
+
+@received_router.delete("/received/household/{share_id}",
+                        status_code=status.HTTP_204_NO_CONTENT)
+def leave_tag_share(share_id: int, db: Session = Depends(get_db),
+                    current_user: User = Depends(no_demo)):
+    share = (db.query(TagShare)
+             .filter(TagShare.id == share_id, TagShare.user_id == current_user.id)
+             .first())
+    if share is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=SHARE_NOT_FOUND)
+    db.delete(share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- /tags/household/shares ----------------------------------------------------------------
+
+def _household_tag(db: Session, user: User) -> Tag:
+    """The caller's own Household system tag: the only tag that can be shared.
+
+    Every user has one; one missing (a user made outside registration) is
+    created and committed here.
+    """
+    tag = ensure_household_tag(db, user)
+    db.commit()
+    return tag
+
+
+def _tag_share_out(share: TagShare) -> dict:
+    return {"id": share.id, "tag_id": share.tag_id, "user_id": share.user_id,
+            "display_name": display_name(share.user), "created_at": share.created_at}
+
+
+@tag_router.get("/household/shares", response_model=HouseholdSharesResponse)
+def list_tag_shares(db: Session = Depends(get_db), current_user: User = Depends(no_demo)):
+    tag = _household_tag(db, current_user)
+    shares = (db.query(TagShare).filter(TagShare.tag_id == tag.id)
+              .order_by(TagShare.created_at, TagShare.id).all())
+    return {"tag_id": tag.id, "shares": [_tag_share_out(s) for s in shares]}
+
+
+@tag_router.post("/household/shares", response_model=TagShareResponse,
+                 status_code=status.HTTP_201_CREATED)
+def create_tag_share(body: TagShareCreate, db: Session = Depends(get_db),
+                     current_user: User = Depends(no_demo)):
+    # Every request counts against the picker's limit, whatever it then answers.
+    _check_rate(current_user)
+    tag = _household_tag(db, current_user)
+    target = _match(db, body.email)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_MATCH)
+    if target.id == current_user.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=SELF_TAG_TARGET)
+    share = TagShare(tag_id=tag.id, user_id=target.id)
+    db.add(share)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=ALREADY_TAG_SHARED) from exc
+    db.refresh(share)
+    return _tag_share_out(share)
+
+
+@tag_router.delete("/household/shares/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tag_share(share_id: int, db: Session = Depends(get_db),
+                     current_user: User = Depends(no_demo)):
+    tag = _household_tag(db, current_user)
+    share = (db.query(TagShare)
+             .filter(TagShare.id == share_id, TagShare.tag_id == tag.id)
+             .first())
+    if share is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=SHARE_NOT_FOUND)
     db.delete(share)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

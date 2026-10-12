@@ -32,6 +32,21 @@ export type {
   AccountShare,
   AccountShares,
   ReceivedShare,
+  HouseholdShareCreate,
+  HouseholdShare,
+  HouseholdShares,
+  ReceivedHouseholdShare,
+  HouseholdView,
+  HouseholdSharer,
+  HouseholdMonthCurrency,
+  HouseholdMonthKind,
+  HouseholdMonthRow,
+  HouseholdDashboard,
+  HouseholdTransactions,
+  HouseholdUpcoming,
+  HouseholdMonthly,
+  UpcomingItem,
+  UpcomingItemOrEvent,
   WishlistItem,
   WishlistItemPriority,
   PaginatedResponse,
@@ -94,6 +109,15 @@ import type {
   AccountShares,
   AccountShare,
   ReceivedShare,
+  HouseholdShareCreate,
+  HouseholdShare,
+  HouseholdShares,
+  ReceivedHouseholdShare,
+  HouseholdView,
+  HouseholdDashboard,
+  HouseholdTransactions,
+  HouseholdUpcoming,
+  HouseholdMonthly,
   ShareCreate,
   ShareUpdate,
   UserMatch,
@@ -107,10 +131,16 @@ import type {
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
 
+// Creating, revoking or leaving a Household tag share changes which accounts, records,
+// recurring entries and projections the holder sees, and which Household views exist.
+const HOUSEHOLD_SHARE_CHANGED = [
+  'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'Account', 'Transaction', 'BudgetEntry', 'Allocation',
+] as const
+
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
@@ -375,6 +405,68 @@ export const accountingApi = createApi({
       query: (shareId) => ({ url: `shares/received/${shareId}`, method: 'DELETE' }),
       invalidatesTags: ['ReceivedShare', 'Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
     }),
+    // ── Household tag shares ──────────────────────────────────────────────────
+    // The sharer's side (the Household tag's owner only; demo users get 403). A holder
+    // sees Household-tagged accounts and records read-only, so any change here
+    // refreshes every list a Household record can appear in, and the Household views.
+    getHouseholdShares: builder.query<HouseholdShares, void>({
+      query: () => 'tags/household/shares',
+      providesTags: ['HouseholdShare'],
+    }),
+    // By exact email, through the same rate-limited lookup as lookupUser: 404 "No
+    // matching user", 409 for yourself or a duplicate, 429 when over the limit.
+    createHouseholdShare: builder.mutation<HouseholdShare, HouseholdShareCreate>({
+      query: (body) => ({ url: 'tags/household/shares', method: 'POST', body }),
+      invalidatesTags: HOUSEHOLD_SHARE_CHANGED,
+    }),
+    deleteHouseholdShare: builder.mutation<void, number>({
+      query: (shareId) => ({ url: `tags/household/shares/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: HOUSEHOLD_SHARE_CHANGED,
+    }),
+    // The holder's side: Household tags other people shared with the caller.
+    getReceivedHouseholdShares: builder.query<ReceivedHouseholdShare[], void>({
+      query: () => 'shares/received/household',
+      providesTags: ['ReceivedHouseholdShare'],
+    }),
+    // Leaving drops that person's Household accounts and records from every list.
+    leaveHouseholdShare: builder.mutation<void, number>({
+      query: (shareId) => ({ url: `shares/received/household/${shareId}`, method: 'DELETE' }),
+      invalidatesTags: HOUSEHOLD_SHARE_CHANGED,
+    }),
+
+    // ── Household views ───────────────────────────────────────────────────────
+    // One sharer's Household at a time; read-only. The caller's own view is first.
+    getHouseholdViews: builder.query<HouseholdView[], void>({
+      query: () => 'household/',
+      providesTags: ['Household'],
+    }),
+    getHouseholdDashboard: builder.query<HouseholdDashboard, number>({
+      query: (sharerId) => `household/${sharerId}/dashboard`,
+      providesTags: ['Household', 'Account', 'Transaction', 'BudgetEntry'],
+    }),
+    getHouseholdTransactions: builder.query<HouseholdTransactions, {
+      sharerId: number
+      start_date?: string
+      end_date?: string
+      limit?: number
+      offset?: number
+    }>({
+      query: ({ sharerId, ...params }) => ({ url: `household/${sharerId}/transactions`, params }),
+      providesTags: ['Household', 'Transaction'],
+    }),
+    getHouseholdUpcoming: builder.query<HouseholdUpcoming, { sharerId: number; days?: number }>({
+      query: ({ sharerId, days }) => ({ url: `household/${sharerId}/upcoming`, params: days ? { days } : {} }),
+      providesTags: ['Household', 'Account', 'Transaction', 'BudgetEntry'],
+    }),
+    // from/to are YYYY-MM (both default to this month; at most 36 months, else 422).
+    getHouseholdMonthly: builder.query<HouseholdMonthly, { sharerId: number; from?: string; to?: string }>({
+      query: ({ sharerId, from, to }) => ({
+        url: `household/${sharerId}/monthly`,
+        params: { ...(from ? { from } : {}), ...(to ? { to } : {}) },
+      }),
+      providesTags: ['Household', 'Account', 'Transaction', 'BudgetEntry'],
+    }),
+
     // Exact, case-insensitive email match; 404 "No matching user" otherwise; 429 when
     // the caller looks up too often (10 per 60 seconds).
     lookupUser: builder.query<UserMatch, string>({
@@ -471,6 +563,20 @@ export const {
   useGetReceivedSharesQuery,
   useLeaveShareMutation,
   useLazyLookupUserQuery,
+
+  // Household tag share hooks
+  useGetHouseholdSharesQuery,
+  useCreateHouseholdShareMutation,
+  useDeleteHouseholdShareMutation,
+  useGetReceivedHouseholdSharesQuery,
+  useLeaveHouseholdShareMutation,
+
+  // Household view hooks
+  useGetHouseholdViewsQuery,
+  useGetHouseholdDashboardQuery,
+  useGetHouseholdTransactionsQuery,
+  useGetHouseholdUpcomingQuery,
+  useGetHouseholdMonthlyQuery,
 
   // Forecast hooks
   useGetForecastTimelineQuery,

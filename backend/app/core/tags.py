@@ -5,8 +5,10 @@ system tag, "Household" (``is_system``), created with the user and never
 renamed or deleted.
 
 ``usable_tag_ids`` is the one place that decides which tags a caller may use
-to filter and see. Today that is their own tags; tag shares add the sharer's
-Household tag there later, and nothing else needs to change for it.
+to filter and see: their own, plus the Household tag of each user who shared
+it with them (STU-233). A shared tag is never one to tag with
+(``own_tag_ids``), and it is shown only where read rule (c) applies
+(``attach_visible_tags``).
 
 A miss on another user's tag is the same 404 as an unknown id, so a tag id
 never confirms that it exists.
@@ -18,7 +20,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import and_, delete, exists, func, insert, literal, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.core.access import TRANSFER_ONLY_COLUMNS
+from app.core.access import TRANSFER_ONLY_COLUMNS, household_grants, record_account_ids
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry
 from app.models.tag import (
@@ -69,11 +71,10 @@ def backfill_household_tags(db: Session) -> int:
 
 
 def usable_tag_ids(db: Session, user) -> Set[int]:
-    """The tags the caller may filter by and see on records: their own.
-
-    The seam for tag shares: a shared Household tag is added here.
-    """
-    return {row[0] for row in db.query(Tag.id).filter(Tag.user_id == _uid(user))}
+    """The tags the caller may filter by and see on records: their own, plus each
+    Household tag shared with them."""
+    own = {row[0] for row in db.query(Tag.id).filter(Tag.user_id == _uid(user))}
+    return own | {g.tag_id for g in household_grants(db, user)}
 
 
 def get_own_tag_or_404(db: Session, user, tag_id: int) -> Tag:
@@ -150,9 +151,24 @@ def copy_explicit_tags(db: Session, entry_id: int, transaction_id: int) -> None:
     ))
 
 
+def _shows_shared_tag(record, grant) -> bool:
+    """Whether a sharer's Household tag on ``record`` is shown to the holder.
+
+    Only where read rule (c) applies: the sharer's own record on the sharer's
+    accounts only (or none); for an account, the sharer's own account.
+    """
+    if record.user_id != grant.sharer_id:
+        return False
+    if isinstance(record, Account):
+        return True
+    return all(i in grant.owned_ids for i in record_account_ids(record))
+
+
 def attach_visible_tags(db: Session, user, records):
     """Set ``visible_tags`` on each record: its explicit tags the caller may see.
 
+    Those are the caller's own tags, plus a sharer's Household tag where read
+    rule (c) applies (``_shows_shared_tag``); never another user's private tag.
     Responses read it as ``tags``. Accepts one record or a list; returns it.
     """
     items = records if isinstance(records, list) else [records]
@@ -160,7 +176,9 @@ def attach_visible_tags(db: Session, user, records):
     for record in items:
         record.visible_tags = []
         by_model.setdefault(type(record), []).append(record)
-    usable = usable_tag_ids(db, user)
+    own = {row[0] for row in db.query(Tag.id).filter(Tag.user_id == _uid(user))}
+    shared = {g.tag_id: g for g in household_grants(db, user)}
+    usable = own | set(shared)
     if not usable:
         return records
     for model, group in by_model.items():
@@ -172,7 +190,9 @@ def attach_visible_tags(db: Session, user, records):
         for record_id, tag in rows:
             tags_by_record.setdefault(record_id, []).append(tag)
         for record in group:
-            record.visible_tags = tags_by_record.get(record.id, [])
+            record.visible_tags = [
+                t for t in tags_by_record.get(record.id, [])
+                if t.id in own or _shows_shared_tag(record, shared[t.id])]
     return records
 
 

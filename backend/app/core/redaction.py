@@ -18,17 +18,23 @@ A record that touches no account is ``full`` for its creator and ``limited``
 for anyone else.
 
 ``display_description`` (and a recurring entry's ``display_name``, and the
-category name a limited record shows) is the stored text only when the caller
-can view every account the record touches; otherwise a neutral label for its
-kind. A payment into a loan or card the caller can't view shows no interest:
+category name a limited record shows) is the stored text only when (i) the
+caller can view every account the record touches, or (ii) read rule (c)
+applies: the record carries, explicitly, the Household tag its owner shared
+with the caller (STU-233). Otherwise a neutral label for its kind. A payment into a loan or card the caller can't view shows no interest:
 ``transfer_fee`` is null and ``amount`` is the whole payment. A transfer drawn
 from a loan or card the caller can't view shows no fee either (it is charged to
 that account): ``transfer_fee`` is null and ``amount`` is what the other side
 received. The exception is a transfer into a loan the caller can view: its fee
-is that loan's interest, which the loan's schedule and balance history already
-show them, so ``transfer_fee`` is shown and the source stays a neutral reference.
+is that loan's interest, and a loan they can view is one whose interest they
+may see, so ``transfer_fee`` is shown and the source stays a neutral reference.
+With a direct role the loan's schedule and balance history show it too. A
+``tag_viewer`` of a Household-tagged loan gets no schedule (404), but such a
+loan is visible by the Household share (plan §1), so its interest is shown to
+them deliberately.
 
-Tags are only ever the caller's own (``attach_visible_tags``). Every record
+Tags are the caller's own, plus a sharer's Household tag where rule (c)
+applies (``attach_visible_tags``). Every record
 carries ``view``, ``permissions`` (``RecordAccess.permissions``) and
 ``created_by`` (the creator's display name).
 """
@@ -37,7 +43,7 @@ from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.access import DIRECT_ROLES, EDIT_ROLES, RecordAccess, record_account_ids
+from app.core.access import EDIT_ROLES, VIEW_ROLES, RecordAccess, record_account_ids
 from app.core.attachments import public_receipt_url
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -109,6 +115,7 @@ class Redactor:
                 if value is not None:
                     ids.add(value)
         self.access.load(ids)
+        self.access.load_explicit(records)
         self._load_users({r.user_id for r in records})
         self._load_categories({r.category_id for r in records if r.category_id})
 
@@ -145,7 +152,8 @@ class Redactor:
     # --- rules -----------------------------------------------------------------------
 
     def can_view(self, account_id: Optional[int]) -> bool:
-        return self.access.role(account_id) in DIRECT_ROLES
+        """Whether the caller sees the account (any role, ``tag_viewer`` included)."""
+        return self.access.role(account_id) in VIEW_ROLES
 
     def account_ref(self, account_id: Optional[int]) -> Optional[dict]:
         """``{id, name}`` for a viewable account, a neutral ``{id: null, name}`` otherwise."""
@@ -196,10 +204,16 @@ class Redactor:
         return (target is not None and target.account_type == AccountType.LOAN
                 and self.can_view(target.id))
 
-    def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
-        """The stored description when every touched account is viewable, else a label."""
+    def shows_text(self, record, facts: Optional[dict] = None) -> bool:
+        """Whether the caller is shown the record's stored text: rule (i) or (ii)."""
         f = facts or self.access.facts(record)
         if f["view_all"] and record_account_ids(record):
+            return True
+        return self.access.household(record) == "c"
+
+    def display_description(self, record, facts: Optional[dict] = None) -> Optional[str]:
+        """The stored description under rule (i) or (ii) (``shows_text``), else a label."""
+        if self.shows_text(record, facts):
             return record.description if isinstance(record, Transaction) else record.name
         hidden = self._hidden_liability(record) if isinstance(record, Transaction) else None
         if hidden is None and isinstance(record, BudgetEntry) and record.transfer_to_account_id:
@@ -247,12 +261,13 @@ class Redactor:
     def limited_transaction(self, txn: Transaction, facts: Optional[dict] = None) -> dict:
         """The ``LimitedTransaction`` body, whatever the caller's view (exports use it)."""
         facts = facts or self.access.facts(txn)
-        shown = facts["view_all"] and bool(facts["ids"])
+        shown = self.shows_text(txn, facts)
         amount, fee = txn.amount, txn.transfer_fee
         if self._hidden_source_liability(txn) is not None and not self._into_viewable_loan(txn):
             # Drawn from a hidden loan or card: its fee is that account's charge,
             # so only what the visible side received is shown. Into a viewable
-            # loan the fee is that loan's interest, shown as in its schedule.
+            # loan the fee is that loan's interest, which the caller may see
+            # (see the module docstring).
             fee = None
         elif self._hidden_liability(txn) is not None:
             # No interest shown: the whole payment, no split.
@@ -297,7 +312,7 @@ class Redactor:
     def limited_entry(self, entry: BudgetEntry, facts: Optional[dict] = None) -> dict:
         """The ``LimitedRecurringEntry`` body, whatever the caller's view (exports use it)."""
         facts = facts or self.access.facts(entry)
-        shown = facts["view_all"] and bool(facts["ids"])
+        shown = self.shows_text(entry, facts)
         return {
             **self._common(entry, LIMITED),
             "id": entry.id,
@@ -318,16 +333,20 @@ class Redactor:
         return [self.entry(e) for e in entries]
 
 
-def displayed_description_criterion(viewable_ids: Iterable[int]):
+def displayed_description_criterion(viewable_ids: Iterable[int], grants: Iterable = ()):
     """Criterion: a transaction whose stored description the caller is shown.
 
-    That is one whose every touched account is viewable (``display_description``).
-    Search matches displayed text only, so it is combined with this.
+    That is one whose every touched account is viewable (rule (i);
+    ``viewable_ids`` include ``tag_viewer`` accounts), or, through a Household
+    tag share (``grants``, ``household_grants``), one read rule (c) reads
+    (rule (ii)). Search matches displayed text only, so it is combined with this.
     """
     from sqlalchemy import and_, or_
 
+    from app.core.access import household_explicit_criterion
+
     ids = list(viewable_ids)
-    return and_(
+    return or_(*(household_explicit_criterion(Transaction, g) for g in grants), and_(
         Transaction.account_id.in_(ids),
         or_(
             Transaction.transaction_type != TransactionType.TRANSFER,
@@ -338,7 +357,7 @@ def displayed_description_criterion(viewable_ids: Iterable[int]):
                     Transaction.transfer_to_account_id.in_(ids)),
             ),
         ),
-    )
+    ))
 
 
 def full_view_criterion(model, user, viewable_ids: Iterable[int], editable_ids: Iterable[int]):
@@ -416,11 +435,18 @@ MANAGER_ONLY_ACCOUNT_FIELDS = (
 )
 
 
+# All an account reached only through a Household tag share shows (``tag_viewer``).
+TAG_VIEWER_ACCOUNT_FIELDS = ("id", "name", "account_type", "currency", "balance")
+
+
 def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]:
     """Accounts as ``user`` sees them: ``my_role``, ``permissions``, ``owner_name``,
     and the owner-or-admin fields nulled for everyone else. ``can_delete``
-    (deleting or deactivating the account) is the owner's alone."""
-    from app.core.access import MANAGE_ROLES, OWNER_ROLES, account_role
+    (deleting or deactivating the account) is the owner's alone. An account
+    the caller reaches only through a Household tag share (``tag_viewer``)
+    shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
+    (every permission false) and ``tags``."""
+    from app.core.access import MANAGE_ROLES, OWNER_ROLES, TAG_VIEWER, account_role
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
@@ -431,7 +457,9 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
     for account in accounts:
         role = account_role(user, account)
         data = AccountFields.model_validate(account).model_dump()
-        if role not in MANAGE_ROLES:
+        if role == TAG_VIEWER:
+            data = {k: data[k] for k in (*TAG_VIEWER_ACCOUNT_FIELDS, "tags")}
+        elif role not in MANAGE_ROLES:
             for field in MANAGER_ONLY_ACCOUNT_FIELDS:
                 data[field] = None
         data.update({

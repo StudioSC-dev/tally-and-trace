@@ -209,7 +209,7 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
 def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
     from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD, DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 3  # shape 3 (STU-232) keeps shape 2's tags
+    assert DEMO_SHAPE_VERSION == 4  # shapes 3 and 4 (STU-232, STU-233) keep shape 2's tags
     seed.seed_database()
     r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -352,8 +352,9 @@ def _login(client, email):
 def _partner_snapshot(db):
     """The Demo Partner's id, accounts, transactions and the shares they hold."""
     from app.core.seed import DEMO_PARTNER_EMAIL
-    from app.models import Account, Transaction, User
+    from app.models import Account, Tag, Transaction, User
     from app.models.account_share import AccountShare
+    from app.models.tag_share import TagShare
 
     db.expire_all()
     partner = db.query(User).filter(User.email == DEMO_PARTNER_EMAIL).one()
@@ -364,6 +365,9 @@ def _partner_snapshot(db):
             t.id for t in db.query(Transaction).filter(Transaction.user_id == partner.id)),
         "shares": sorted((s.id, s.account_id, s.role) for s in db.query(AccountShare).filter(
             AccountShare.user_id == partner.id)),
+        "tag_shares": sorted((s.id, s.tag_id, tag.user_id, tag.is_system) for s, tag in db.query(
+            TagShare, Tag).join(Tag, Tag.id == TagShare.tag_id).filter(
+            TagShare.user_id == partner.id)),
     }
 
 
@@ -374,7 +378,9 @@ def test_shape_3_shares_the_joint_account_with_the_demo_partner(client, db, seed
     owner, partner = _login(client, DEMO_EMAIL), _login(client, DEMO_PARTNER_EMAIL)
     accounts = {a["name"]: a for a in client.get(
         f"{API}/accounts/", headers=partner, params={"limit": 100}).json()["items"]}
-    assert set(accounts) == {"Partner Checking", "Joint Account"}
+    # Shape 4: the owner's Household-tagged Cash Wallet, through the tag share.
+    assert set(accounts) == {"Partner Checking", "Joint Account", "Cash Wallet"}
+    assert accounts["Cash Wallet"]["my_role"] == "tag_viewer"
     joint = accounts["Joint Account"]
     assert (joint["my_role"], joint["owner_name"]) == ("editor", "Demo U.")
     assert joint["permissions"] == {"can_edit_settings": False, "can_manage_shares": False,
@@ -390,10 +396,13 @@ def test_shape_3_shares_the_joint_account_with_the_demo_partner(client, db, seed
     assert (deposit["view"], deposit["amount"]) == ("full", 1500.0)
     assert deposit["transfer_to_account_id"] == joint["id"]
     assert mine["Water bill"]["view"] == "shared_full"
-    assert "Household groceries" not in mine  # on the owner's private card
+    # Shape 4: the owner's Household records on the private card, Limited (rule (c)).
+    assert mine["Household groceries"]["view"] == "limited"
     assert "Rent" in [e.get("name") for e in rows(partner, "/budget-entries/")]
-    assert "Internet" not in [e.get("name") or e.get("display_name")
-                              for e in rows(partner, "/budget-entries/")]
+    entries = {e.get("name") or e.get("display_name"): e
+               for e in rows(partner, "/budget-entries/")}
+    assert entries["Internet"]["view"] == "limited"
+    assert "Streaming Subscription" not in entries
     # The owner sees the deposit limited: the partner's account is not shared with them.
     theirs = {t["id"]: t for t in rows(owner, "/transactions/")}
     seen = theirs[deposit["id"]]
@@ -443,6 +452,10 @@ def test_a_shape_bump_replaces_the_demo_partners_data(db, seed, monkeypatch):
     [(_, account_id, role)] = after["shares"]
     assert role == "editor" and account_id in owner_after["owned"]["accounts"]
     assert account_id not in owner_before["owned"]["accounts"]
+    # The owner's Household tag share (shape 4), on the kept Household tag.
+    [(share_id, tag_id, sharer, system)] = after["tag_shares"]
+    assert (tag_id, sharer, system) == (owner_after["tags"]["Household"], owner_after["user"], True)
+    assert share_id not in [s[0] for s in before["tag_shares"]]
 
 
 def test_a_missing_state_row_replaces_the_demo_partners_data(db, seed):
@@ -455,7 +468,7 @@ def test_a_missing_state_row_replaces_the_demo_partners_data(db, seed):
     after = _partner_snapshot(db)
     assert after["user"] == before["user"]
     assert not set(after["accounts"]) & set(before["accounts"])
-    assert len(after["shares"]) == 1
+    assert len(after["shares"]) == 1 and len(after["tag_shares"]) == 1
 
 
 def test_a_missing_demo_partner_is_recreated(client, db, seed):
@@ -516,3 +529,55 @@ def test_registration_refuses_the_demo_emails_as_taken(client, db, email):
     assert db.query(User).filter(User.email == email, User.first_name == "Not").count() == 0
     db.query(User).filter(User.id == taken.json()["id"]).delete()
     db.commit()
+
+
+# --- Shape 4: the Household tag share (STU-233) -------------------------------------------
+
+def test_shape_4_gives_the_partner_the_owners_household_view(client, db, seed):
+    from app.core.seed import DEMO_EMAIL, DEMO_PARTNER_EMAIL
+
+    seed.seed_database()
+    owner, partner = _login(client, DEMO_EMAIL), _login(client, DEMO_PARTNER_EMAIL)
+    me = client.get(f"{API}/auth/me", headers=owner).json()
+    views = client.get(f"{API}/household/", headers=partner).json()
+    assert [(v["sharer_id"], v["sharer_name"]) for v in views if not v["is_self"]] == [
+        (me["id"], "Demo U.")]
+    accounts = {a["name"]: a for a in client.get(
+        f"{API}/accounts/", headers=owner, params={"limit": 100}).json()["items"]}
+    assert accounts["Credit Card"]["payment_account_id"] == accounts["Joint Account"]["id"]
+    # The Household bill on the owner's card is paid from the joint account and
+    # counts once: as that card payment, never as "Paid from other accounts".
+    body = client.get(f"{API}/household/{me['id']}/monthly", headers=partner,
+                      params={"from": "2025-08", "to": "2025-09"}).json()
+    zero = dict.fromkeys(("income", "expense", "fees", "moved_in", "moved_out",
+                          "paid_from_other_accounts"), 0.0)
+    assert [m["currencies"] for m in body["months"]] == [
+        # Water bill 40; the partner's deposit 1500 and the ATM cash 500 into the
+        # Household Cash Wallet; Whole Foods 45.5 on Main Checking. The 85 groceries
+        # on the card are covered by the September card payment from the joint account.
+        [{**zero, "currency": "PHP", "expense": 40.0, "moved_in": 2000.0,
+          "paid_from_other_accounts": 45.5}],
+        [{**zero, "currency": "PHP", "expense": 235.0}],
+    ]
+    upcoming = client.get(f"{API}/household/{me['id']}/transactions", headers=partner,
+                          params={"limit": 100}).json()["items"]
+    groceries = [t for t in upcoming if t.get("display_description") == "Household groceries"]
+    assert [t["view"] for t in groceries] == ["limited"]
+    assert groceries[0]["permissions"]["can_delete"] is False
+
+
+def test_a_current_startup_restores_a_missing_tag_share_without_reseeding(db, seed):
+    from app.models.tag_share import TagShare
+
+    owner_before, partner_before = _snapshot(db), _partner_snapshot(db)
+    [(share_id, tag_id, _, _)] = partner_before["tag_shares"]
+    db.query(TagShare).filter(TagShare.id == share_id).delete()
+    db.commit()
+    seed.seed_database()
+    owner_after, partner_after = _snapshot(db), _partner_snapshot(db)
+    assert owner_after == owner_before
+    [(new_id, new_tag, _, _)] = partner_after["tag_shares"]
+    assert new_tag == tag_id and new_id != share_id
+    assert partner_after["shares"] == partner_before["shares"]
+    seed.seed_database()
+    assert (_snapshot(db), _partner_snapshot(db)) == (owner_after, partner_after)

@@ -201,7 +201,8 @@ export function Dashboard() {
       .sort((a, b) => a.occurrence.getTime() - b.occurrence.getTime())
   }, [budgetEntries])
 
-  const totalBalance = accounts.reduce((sum, account) => sum + account.balance, 0)
+  // An account visible only through someone's Household share is theirs to total, not yours.
+  const totalBalance = accounts.reduce((sum, account) => (account.my_role === 'tag_viewer' ? sum : sum + account.balance), 0)
 
   const { periodIncome, periodExpenses, periodNet } = useMemo(() => {
     const start = new Date(dateRange.start_date)

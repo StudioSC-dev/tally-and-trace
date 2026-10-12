@@ -12,6 +12,7 @@ from app.routers import (
     data_portability,
     tags,
     shares,
+    household,
 )
 
 # Central API router. Every router module below is registered here; adding a
@@ -31,4 +32,6 @@ api_router.include_router(wishlist.router, prefix="/wishlist", tags=["wishlist"]
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(forecast.router, prefix="/forecast", tags=["forecast"])
 api_router.include_router(data_portability.router, prefix="/data", tags=["data-portability"])
+api_router.include_router(shares.tag_router, prefix="/tags", tags=["shares"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
+api_router.include_router(household.router, prefix="/household", tags=["household"])

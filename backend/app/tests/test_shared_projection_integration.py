@@ -266,9 +266,27 @@ def test_accountless_entries_never_reach_a_sharees_cash(sw, sw_client, sw_db):
         assert result["unassigned_closing"] == 0
 
 
-@pytest.mark.skip(reason="T5: needs tag shares (the Household tag share is STU-233)")
-def test_t5_partner_records_on_joint_seen_through_owners_tag_share():
+def test_t5_partner_records_on_joint_seen_through_owners_tag_share(sw, sw_client, sw_db):
     """Partner B's records on A's joint account, seen by C through A's tag share."""
+    from app.tests.conftest import hh_household, hh_tag_share
+
+    c = sw["s"]  # the stranger becomes C: A shares the Household tag with them
+    _put(sw_client, sw["a"], f"/accounts/{sw['joint']}", {"tag_ids": [hh_household(sw_db, sw["a"])]})
+    hh_tag_share(sw_db, sw["a"], c)
+    _txn(sw_client, sw["a"], sw["joint"], 120, "2026-10-15T00:00:00", description="Rent")
+    _txn(sw_client, sw["b"], sw["joint"], 66.61, "2026-10-16T00:00:00",
+         description=f"{PRIVATE} Bea lunch")
+    _transfer(sw_client, sw["b"], sw["b_private"], sw["joint"], 311.37, "2026-10-17T00:00:00")
+    sw_post(sw_client, sw["b"], "/budget-entries/", {
+        "name": f"{PRIVATE} Bea bill", "entry_type": "expense", "amount": 42.42,
+        "next_occurrence": "2026-10-21T00:00:00", "account_id": sw["joint"]})
+    events = _events(sw_db, c)
+    assert [(e["date"], e["name"], e["amount"]) for e in events] == [
+        (datetime(2026, 10, 15), "Rent", Decimal("-120.00"))]
+    assert sw_leaks(events, numbers=(66.61, 311.37, 42.42)) == []
+    # B's records are on the joint account in A's projection.
+    assert len([e for e in _events(sw_db, sw["a"]) if e["legs"] and
+                e["legs"][0]["account_id"] == sw["joint"]]) >= 4
 
 
 # --- Public shapes -----------------------------------------------------------------------
