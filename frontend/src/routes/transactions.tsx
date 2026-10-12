@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription } from '@tally-trace/shared'
+import { isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
@@ -977,12 +977,12 @@ export function TransactionsPage() {
             : undefined,
         is_posted: formData.is_posted,
         transfer_fee: transferFee,
-        transfer_from_account_id:
-          formData.transaction_type === 'transfer'
-            ? formData.transfer_from_account_id ?? formData.account_id
-            : undefined,
-        transfer_to_account_id:
-          formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined,
+        // Any other type sends both as null, so an edit away from a transfer clears them.
+        ...transferAccountFields(
+          formData.transaction_type,
+          formData.transfer_from_account_id ?? formData.account_id,
+          formData.transfer_to_account_id,
+        ),
         category_id: formData.category_id,
         allocation_id: formData.transaction_type === 'transfer' ? undefined : formData.allocation_id,
         budget_entry_id: formData.transaction_type === 'transfer' ? undefined : formData.budget_entry_id,
