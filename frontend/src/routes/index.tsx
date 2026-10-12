@@ -1,22 +1,23 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetTransactionsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useMaterializeBudgetEntryMutation } from '../store/api'
-import type { Transaction, Allocation } from '../store/api'
+import { useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
+import type { Allocation } from '../store/api'
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
-import { formatCurrency } from '../utils/currency'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { apiErrorMessage } from '../utils/apiError'
-import { generateOccurrences, isDetailed, isOwnerFull, transactionDate } from '@tally-trace/shared'
+import { isDetailed, isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
+import type { LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
 
 const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
+const MAX_PAYABLES_SHOWN = 6
+const MAX_OTHER_UPCOMING_SHOWN = 4
 
 type ExpenditureInsight = {
-  id: number
+  id: string
   name: string
   amount: number
-  transactions: Transaction[]
   displayColor: string
   percentage: number
 }
@@ -26,12 +27,6 @@ export const Route = createFileRoute('/')({
 })
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
-
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date.getTime())
-  next.setDate(next.getDate() + days)
-  return next
-}
 
 const getOrdinalSuffix = (day: number) => {
   if (day % 100 >= 11 && day % 100 <= 13) return 'th'
@@ -52,10 +47,70 @@ const formatDateWithOrdinal = (value: Date) => {
   return `${month} ${day}${getOrdinalSuffix(day)}, ${year}`
 }
 
+/** A backend ISO date or datetime ("2026-10-31", "2026-10-31T00:00:00") as a local calendar day. */
+const parseCalendarDay = (iso: string): Date => {
+  const [year = 0, month = 1, day = 1] = iso.slice(0, 10).split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+/** Whole days from today to a calendar day, never below 0. */
+const daysUntil = (day: Date): number => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.max(0, Math.round((day.getTime() - today.getTime()) / MS_PER_DAY))
+}
+
+type PayableRow = {
+  key: string
+  name: string
+  day: Date
+  amount: number
+  detail: string
+  overdue: boolean
+  budgetEntryId: number | null
+  /** What kind of payable this is; only scheduled entries have a known autopay state. */
+  kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned'
+}
+
+const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow => {
+  if (isLimitedEvent(payable)) {
+    // Face amount, never `cash_delta` (0 for a charge billed on a later statement).
+    return {
+      key: `${payable.public_id}-${index}`,
+      name: payable.display_name,
+      day: parseCalendarDay(payable.date),
+      amount: payable.face_amount,
+      detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
+      overdue: payable.overdue,
+      budgetEntryId: null,
+      kind: 'shared',
+    }
+  }
+  const pays = payable.account_name ? ` · from ${payable.account_name}` : ''
+  const overflow = payable.overflow_account_name ? ` (overflow: ${payable.overflow_account_name})` : ''
+  const label = payable.source === 'statement' ? 'Card statement' : payable.source === 'loan' ? 'Loan payment' : payable.source === 'budget_entry' ? 'Scheduled' : 'Planned'
+  return {
+    key: `${payable.source}-${payable.source_id ?? 'x'}-${payable.due_date}-${index}`,
+    name: payable.name,
+    day: parseCalendarDay(payable.due_date),
+    amount: payable.amount,
+    detail: `${label}${pays}${overflow}`,
+    overdue: false,
+    budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
+    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? 'planned' : 'scheduled',
+  }
+}
+
+/** An upcoming item that is not a cash outflow listed in the payables: a Household bill or money coming in. */
+const isOtherUpcoming = (item: UpcomingItemOrEvent): boolean => {
+  const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
+  return household || upcomingItemAmount(item).direction === 'in'
+}
+
 export function Dashboard() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { format, currencyCode } = useCurrency()
+  const { format } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -81,29 +136,6 @@ export function Dashboard() {
     }
   }
 
-  const { data: accountsData, isLoading: accountsLoading, error: accountsError } =
-    useGetAccountsQuery({ is_active: true, limit: 1000 }, { skip: !isAuthenticated })
-  const { data: transactionsData, isLoading: transactionsLoading, error: transactionsError } =
-    useGetTransactionsQuery({ limit: 1000, ...tagParam }, { skip: !isAuthenticated })
-  const { data: categoriesData, isLoading: categoriesLoading, error: categoriesError } =
-    useGetCategoriesQuery({ is_active: true }, { skip: !isAuthenticated })
-  const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
-    useGetBudgetEntriesQuery({ is_active: true, limit: 200, ...tagParam }, { skip: !isAuthenticated })
-  const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
-    useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
-
-  const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
-  const transactions = useMemo(() => transactionsData?.items ?? [], [transactionsData])
-  const categories = categoriesData ?? []
-  // A Limited entry (someone else's, on an account touching a private one) has no schedule
-  // fields to project from, so only entries the caller sees in full are planned here.
-  const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isDetailed), [budgetEntriesData])
-  const allocations = useMemo(() => allocationsData?.items ?? [], [allocationsData])
-  const budgetAllocations = useMemo(
-    () => allocations.filter((a) => a.allocation_type === 'budget' && a.is_active),
-    [allocations]
-  )
-
   const dateRange = useMemo(() => {
     const now = new Date()
     const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -116,142 +148,49 @@ export function Dashboard() {
     return { start_date: startDate.toISOString(), end_date: now.toISOString() }
   }, [selectedPeriod])
 
-  const currentMonthStart = useMemo(() => {
-    const base = new Date()
-    return new Date(base.getFullYear(), base.getMonth(), 1)
-  }, [])
+  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError } =
+    useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
+  const { data: periodSummary, isLoading: summaryLoading, error: summaryError } =
+    useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
+  const { data: categoriesData, isLoading: categoriesLoading, error: categoriesError } =
+    useGetCategoriesQuery({ is_active: true }, { skip: !isAuthenticated })
+  // Only for "Mark paid": the payables carry no permissions, so the entries the caller may post are looked up here.
+  const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
+    useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
+  const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
+    useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
 
-  const currentMonthEnd = useMemo(() => {
-    const base = new Date()
-    return new Date(base.getFullYear(), base.getMonth() + 1, 0, 23, 59, 59, 999)
-  }, [])
+  const postableEntryIds = useMemo(
+    () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.permissions.can_post).map((e) => e.id)),
+    [budgetEntriesData]
+  )
+  const autopayEntryIds = useMemo(
+    () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.is_autopay).map((e) => e.id)),
+    [budgetEntriesData]
+  )
+  const allocations = useMemo(() => allocationsData?.items ?? [], [allocationsData])
+  const budgetAllocations = useMemo(
+    () => allocations.filter((a) => a.allocation_type === 'budget' && a.is_active),
+    [allocations]
+  )
 
-  const monthTransactionsBySchedule = useMemo(() => {
-    const map = new Map<number, Transaction[]>()
-    transactions.forEach((transaction) => {
-      if (!isOwnerFull(transaction) || !transaction.budget_entry_id || !transaction.is_posted) return
-      const txDate = new Date(transactionDate(transaction))
-      if (txDate < currentMonthStart || txDate > currentMonthEnd) return
-      const key = transaction.budget_entry_id
-      const existing = map.get(key)
-      if (existing) existing.push(transaction)
-      else map.set(key, [transaction])
-    })
-    return map
-  }, [transactions, currentMonthStart, currentMonthEnd])
+  // The backend's projection: month 0 runs from today to the 1st of next month, opening at available cash.
+  const nextPeriod = snapshot?.forecast_next_3_months[0]
+  const closings = snapshot?.account_closings[0]
+  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow), [snapshot])
+  const otherUpcoming = useMemo(() => (snapshot?.upcoming_this_month ?? []).filter(isOtherUpcoming), [snapshot])
 
-  const scheduleSummaries = useMemo(() => {
-    return budgetEntries
-      .filter((entry) => entry.is_active)
-      .map((entry) => {
-        const occurrences = generateOccurrences(entry,currentMonthStart, currentMonthEnd)
-        const forecastTotal = occurrences.length * entry.amount
-        const actualTransactions = monthTransactionsBySchedule.get(entry.id) ?? []
-        const actualTotal = actualTransactions.reduce((sum, t) => sum + t.amount, 0)
-        const nextOccurrence =
-          occurrences.length > 0
-            ? occurrences[0]
-            : entry.next_occurrence
-            ? new Date(entry.next_occurrence)
-            : null
-        return { entry, occurrences, forecastTotal, actualTotal, currency: entry.currency, entryType: entry.entry_type, nextOccurrence, actualTransactions }
-      })
-      .filter((summary) => summary.occurrences.length > 0 || summary.actualTotal > 0)
-  }, [budgetEntries, currentMonthStart, currentMonthEnd, monthTransactionsBySchedule])
-
-  const projectionsSummary = useMemo(() => {
-    const totals = { income: { forecast: 0, actual: 0 }, expense: { forecast: 0, actual: 0 } }
-    scheduleSummaries.forEach((summary) => {
-      if (summary.currency !== currencyCode) return
-      if (summary.entryType === 'income') {
-        totals.income.forecast += summary.forecastTotal
-        totals.income.actual += summary.actualTotal
-      } else {
-        totals.expense.forecast += summary.forecastTotal
-        totals.expense.actual += summary.actualTotal
-      }
-    })
-    return totals
-  }, [scheduleSummaries, currencyCode])
-
-  const projectedIncome = projectionsSummary.income.forecast
-  const projectedExpenses = projectionsSummary.expense.forecast
-  const projectedNetFlow = projectedIncome - projectedExpenses
-
-  const upcomingReminders = useMemo(() => {
-    const start = new Date()
-    const end = addDays(start, 30)
-    return budgetEntries
-      .filter((entry) => entry.is_active)
-      .flatMap((entry) => {
-        const occurrences = generateOccurrences(entry,start, end)
-        return occurrences.map((occurrence) => {
-          const rawReminder = entry.lead_time_days && entry.lead_time_days > 0
-            ? addDays(occurrence, -entry.lead_time_days)
-            : new Date(occurrence.getTime())
-          const reminderDate = rawReminder < start ? start : rawReminder
-          return {
-            entry,
-            occurrence,
-            reminderDate,
-            daysUntil: Math.max(0, Math.ceil((occurrence.getTime() - start.getTime()) / MS_PER_DAY)),
-          }
-        })
-      })
-      .sort((a, b) => a.occurrence.getTime() - b.occurrence.getTime())
-  }, [budgetEntries])
-
-  // An account visible only through someone's Household share is theirs to total, not yours.
-  const totalBalance = accounts.reduce((sum, account) => (account.my_role === 'tag_viewer' ? sum : sum + account.balance), 0)
-
-  const { periodIncome, periodExpenses, periodNet } = useMemo(() => {
-    const start = new Date(dateRange.start_date)
-    const end = new Date(dateRange.end_date)
-    let income = 0
-    let expenses = 0
-    transactions.forEach((transaction) => {
-      if (!transaction.is_posted) return
-      const txDate = new Date(transactionDate(transaction))
-      if (txDate < start || txDate > end) return
-      if (transaction.transaction_type === 'credit') income += transaction.amount
-      else if (transaction.transaction_type === 'debit') expenses += transaction.amount
-    })
-    return { periodIncome: income, periodExpenses: expenses, periodNet: income - expenses }
-  }, [transactions, dateRange])
-
-  const projectedBalanceEnd = totalBalance + (projectedNetFlow - periodNet)
-  const showProjections = selectedPeriod !== 'year' && scheduleSummaries.length > 0
-  const projectionPeriodLabel = selectedPeriod === 'week' ? 'week' : 'month'
+  const periodIncome = periodSummary?.summary.total_income ?? 0
+  const periodExpenses = periodSummary?.summary.total_expenses ?? 0
+  const periodNet = periodSummary?.summary.net_flow ?? 0
   const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to Date' : selectedPeriod === 'month' ? 'Month to Date' : 'Week to Date'
   const periodTag = selectedPeriod === 'year' ? 'YTD' : selectedPeriod === 'month' ? 'MTD' : 'WTD'
-
-  const upcomingPlannedExpenses = useMemo(() => {
-    const reference = new Date()
-    const targetMonth = reference.getMonth()
-    const targetYear = reference.getFullYear()
-    return upcomingReminders
-      .filter((reminder) => reminder.entry.entry_type === 'expense')
-      .filter((reminder) => {
-        const occ = reminder.occurrence
-        return occ.getMonth() === targetMonth && occ.getFullYear() === targetYear
-      })
-      .slice(0, 6)
-      .map((reminder) => {
-        const entry = reminder.entry
-        const account = entry.account_id ? accounts.find((acc) => acc.id === entry.account_id) : undefined
-        const projectedBalance = account ? account.balance - entry.amount : null
-        let willOverdraw = false
-        if (account) {
-          if (account.account_type === 'credit' && typeof account.credit_limit === 'number' && account.credit_limit > 0) {
-            willOverdraw = account.balance + entry.amount > account.credit_limit
-          } else if (account.account_type !== 'credit' && projectedBalance !== null) {
-            willOverdraw = projectedBalance < 0
-          }
-        }
-        const status: 'danger' | 'autopay' | 'manual' = willOverdraw ? 'danger' : entry.is_autopay ? 'autopay' : 'manual'
-        return { reminder, account, projectedBalance, status }
-      })
-  }, [upcomingReminders, accounts])
+  // period_end is exclusive (the 1st of next month); step back a calendar day, immune to DST.
+  const projectionEnd = (() => {
+    if (!nextPeriod) return null
+    const end = parseCalendarDay(nextPeriod.period_end)
+    return new Date(end.getFullYear(), end.getMonth(), end.getDate() - 1)
+  })()
 
   const budgetEnvelopeSummaries = useMemo(() => {
     return budgetAllocations
@@ -266,11 +205,23 @@ export function Dashboard() {
       .filter((value): value is { allocation: Allocation; limit: number; spent: number; remaining: number; usagePercentage: number } => value !== null)
   }, [budgetAllocations])
 
-  const renderPlannedExpenseIcon = (status: 'danger' | 'autopay' | 'manual') => {
+  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared' | 'planned'
+  const STATUS_LABELS: Record<PayableStatus, string> = {
+    danger: 'Overdue',
+    autopay: 'Autopay',
+    manual: 'Pay manually',
+    statement: 'Statement',
+    loan: 'Loan payment',
+    shared: 'Shared item',
+    planned: 'Planned',
+  }
+
+  const renderPlannedExpenseIcon = (status: PayableStatus) => {
+    const label = STATUS_LABELS[status]
     if (status === 'danger') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-danger text-danger">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <polygon points="10,1 18,6 18,14 10,19 2,14 2,6" />
             <rect x="9" y="7" width="2" height="5" fill="white" rx="1" />
             <rect x="9" y="13" width="2" height="2" fill="white" rx="1" />
@@ -280,88 +231,74 @@ export function Dashboard() {
     }
     if (status === 'autopay') {
       return (
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-ok text-paper">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
           </svg>
         </span>
       )
     }
+    if (status === 'manual') {
+      return (
+        <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
+            <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
+          </svg>
+        </span>
+      )
+    }
+    // Statements, loan payments, planned transactions and shared items: no autopay state is known, so a neutral mark, not the manual warning.
     return (
-      <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-warn">
-        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
-          <path d="M9 13h2v2H9v-2zm0-6h2v5H9V7z" fill="white" />
+      <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line text-muted">
+        <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 12H9V9h2v5zm0-6H9V6h2v2z" />
         </svg>
       </span>
     )
   }
 
-  const getTransactionsForPeriod = () => {
-    return transactions.filter(transaction => {
-      const date = new Date(transactionDate(transaction))
-      const startDate = new Date(dateRange.start_date)
-      const endDate = new Date(dateRange.end_date)
-      return date >= startDate && date <= endDate
-    })
-  }
-
-  const periodTransactions = getTransactionsForPeriod()
-
-  const getExpenditureByCategory = () => {
-    if (periodTransactions.length === 0 || categories.length === 0) return []
-    const filteredTransactions = periodTransactions.filter(t => t.transaction_type === 'debit')
-    const categoryTotals = new Map()
-    const categoryTransactions = new Map()
-    filteredTransactions.forEach(transaction => {
-      // Categories are the caller's own, so only their own records carry a category id.
-      if (isOwnerFull(transaction) && transaction.category_id) {
-        const category = categories.find(cat => cat.id === transaction.category_id)
-        if (category) {
-          categoryTotals.set(category.id, (categoryTotals.get(category.id) || 0) + transaction.amount)
-          if (!categoryTransactions.has(category.id)) categoryTransactions.set(category.id, [])
-          categoryTransactions.get(category.id).push(transaction)
-        }
-      }
-    })
-    return Array.from(categoryTotals.entries())
-      .map(([categoryId, total]) => {
-        const category = categories.find(cat => cat.id === categoryId)
-        const topTransactions: Transaction[] = [...(categoryTransactions.get(categoryId) || [])]
-          .sort((a, b) => b.amount - a.amount)
-          .slice(0, 3)
-        return { id: categoryId, name: category?.name || 'Unknown', color: category?.color || '#6B7280', amount: total, transactions: topTransactions }
-      })
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5)
-  }
-
-  const topExpenditureCategories = getExpenditureByCategory()
-  const totalExpenditureAmount = useMemo(
-    () => topExpenditureCategories.reduce((sum, category) => sum + category.amount, 0),
-    [topExpenditureCategories]
+  // Shares are of the rows listed: the ring and table list spending-wallet debits that the period expenses figure nets out.
+  const listedTotal = useMemo(
+    () => Object.values(periodSummary?.category_breakdown ?? {}).reduce((sum, row) => sum + Math.max(row.expenses, 0), 0),
+    [periodSummary],
   )
+
+  // The wallet-aware backend summary names categories; the chart colours them from the caller's own.
   const expenditureInsights = useMemo<ExpenditureInsight[]>(() => {
-    if (topExpenditureCategories.length === 0 || totalExpenditureAmount <= 0) return []
-    return topExpenditureCategories.map((category, index) => {
-      const color = category.color && category.color.trim() ? category.color : FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length]
-      return { ...category, displayColor: color, percentage: (category.amount / totalExpenditureAmount) * 100 }
-    })
-  }, [topExpenditureCategories, totalExpenditureAmount])
+    if (!periodSummary) return []
+    const categories = categoriesData ?? []
+    const positive = Object.entries(periodSummary.category_breakdown).filter(([, row]) => row.expenses > 0)
+    if (listedTotal <= 0) return []
+    return positive
+      .sort(([, a], [, b]) => b.expenses - a.expenses)
+      .slice(0, 5)
+      .map(([name, row], index) => {
+        const color = categories.find((cat) => cat.name === name)?.color?.trim()
+        return {
+          id: name,
+          name,
+          amount: row.expenses,
+          displayColor: color || FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length] || '#6B7280',
+          percentage: (row.expenses / listedTotal) * 100,
+        }
+      })
+  }, [periodSummary, categoriesData, listedTotal])
 
   const expenditureChartStyle = useMemo(() => {
     if (expenditureInsights.length === 0) return { backgroundImage: 'conic-gradient(#334155 0% 100%)' }
     let cumulative = 0
-    const segments = expenditureInsights.map((item, index) => {
+    const segments = expenditureInsights.map((item) => {
       const start = cumulative
       cumulative += item.percentage
-      if (index === expenditureInsights.length - 1 || cumulative > 100) cumulative = 100
-      return `${item.displayColor} ${start}% ${cumulative}%`
+      return `${item.displayColor} ${start}% ${Math.min(cumulative, 100)}%`
     })
+    // Whatever the top five leave out is drawn neutral so the ring still adds up to the listed spend.
+    if (cumulative < 100) segments.push(`#334155 ${cumulative}% 100%`)
     return { backgroundImage: `conic-gradient(${segments.join(', ')})` }
   }, [expenditureInsights])
 
-  const allLoading = accountsLoading && transactionsLoading && categoriesLoading && budgetEntriesLoading && allocationsLoading
+  const allLoading = snapshotLoading && summaryLoading && categoriesLoading && budgetEntriesLoading && allocationsLoading
 
   if (authLoading) {
     return (
@@ -373,8 +310,8 @@ export function Dashboard() {
 
   if (!isAuthenticated) return null
 
-  if (accountsError) console.error('Accounts error:', accountsError)
-  if (transactionsError) console.error('Transactions error:', transactionsError)
+  if (snapshotError) console.error('Snapshot error:', snapshotError)
+  if (summaryError) console.error('Summary error:', summaryError)
   if (categoriesError) console.error('Categories error:', categoriesError)
   if (allocationsError) console.error('Allocations error:', allocationsError)
 
@@ -402,7 +339,7 @@ export function Dashboard() {
     )
   }
 
-  if (accountsError || transactionsError || categoriesError || budgetEntriesError || allocationsError) {
+  if (snapshotError || summaryError || categoriesError || budgetEntriesError || allocationsError) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -414,8 +351,8 @@ export function Dashboard() {
           <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>
           <div className="text-sm text-muted space-y-1">
-            {accountsError && <p>• Accounts: {getErrorDetail(accountsError) ?? 'Failed to load'}</p>}
-            {transactionsError && <p>• Transactions: {getErrorDetail(transactionsError) ?? 'Failed to load'}</p>}
+            {snapshotError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
+            {summaryError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
             {categoriesError && <p>• Categories: {getErrorDetail(categoriesError) ?? 'Failed to load'}</p>}
             {budgetEntriesError && <p>• Schedules: {getErrorDetail(budgetEntriesError) ?? 'Failed to load'}</p>}
             {allocationsError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
@@ -440,16 +377,20 @@ export function Dashboard() {
           <p className="text-sm text-muted mt-1">Your financial overview</p>
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
-        <div className="flex space-x-1 bg-sunken p-1">
-          {(['week', 'month', 'year'] as const).map((period) => (
-            <button
-              key={period}
-              onClick={() => setSelectedPeriod(period)}
-              className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
-            >
-              {period}
-            </button>
-          ))}
+        <div className="flex flex-col gap-1">
+          <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
+            {(['week', 'month', 'year'] as const).map((period) => (
+              <button
+                key={period}
+                aria-pressed={selectedPeriod === period}
+                onClick={() => setSelectedPeriod(period)}
+                className={`px-4 py-1.5 text-sm font-medium transition-colors duration-200 capitalize ${ selectedPeriod === period ? 'bg-surface text-ink' : 'text-body hover:text-ink' }`}
+              >
+                {period}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted" data-testid="period-note">Period applies to actuals (totals and categories), not the projection.</p>
         </div>
       </div>
 
@@ -463,59 +404,85 @@ export function Dashboard() {
             <div>
               <h2 className="text-lg font-semibold text-ink">Financial Snapshot</h2>
               <p className="text-sm text-muted">
-                {selectedPeriod === 'year'
-                  ? 'Tracking year-to-date performance.'
-                  : 'Comparing actuals with projections for the current period.'}
+                {`Actuals cover ${selectedPeriod === 'year' ? 'year to date' : selectedPeriod === 'month' ? 'month to date' : 'week to date'}; the projection runs from today to month end.`}
               </p>
             </div>
             <span className="badge badge-info capitalize">{periodHeadingLabel}</span>
           </div>
         </div>
-        <div className={`p-4 sm:p-6 grid gap-6 ${showProjections ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
+        <div className="p-4 sm:p-6 grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
             <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
               Actual Totals ({periodHeadingLabel})
             </h3>
-            <dl className="space-y-3">
+            <dl className="space-y-3" data-testid="actual-totals">
               {[
-                { label: 'Total balance', value: format(totalBalance), color: '' },
-                { label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
-                { label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
-                { label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="flex items-center justify-between">
+                { id: 'income', label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
+                { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
+                { id: 'net-flow', label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
+              ].map(({ id, label, value, color }) => (
+                <div key={id} className="flex items-center justify-between">
                   <dt className="text-sm text-muted">{label}</dt>
-                  <dd className={`text-base font-semibold ${color || 'text-ink'}`}>{value}</dd>
+                  <dd className={`text-base font-semibold ${color}`} data-testid={`period-${id}`}>{value}</dd>
                 </div>
               ))}
             </dl>
-          </div>
-          {showProjections && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
-                Projected End of {projectionPeriodLabel}
-              </h3>
-              <dl className="space-y-3">
-                {[
-                  { label: 'Projected balance', value: format(projectedBalanceEnd), color: '' },
-                  { label: 'Projected income', value: format(projectedIncome), color: 'text-ok' },
-                  { label: 'Projected expenses', value: format(projectedExpenses), color: 'text-danger' },
-                  { label: 'Projected net flow', value: format(projectedNetFlow), color: projectedNetFlow >= 0 ? 'text-ok' : 'text-danger' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="flex items-center justify-between">
-                    <dt className="text-sm text-muted">{label}</dt>
-                    <dd className={`text-base font-semibold ${color || 'text-ink'}`}>{value}</dd>
-                  </div>
-                ))}
+            <div className="border-t border-line pt-3">
+              <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Today</h4>
+              <dl>
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-muted">Net worth</dt>
+                  <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(snapshot?.balances.total ?? 0)}</dd>
+                </div>
               </dl>
-              <p className="text-xs text-muted">
-                Net realized so far:{' '}
-                <span className={`font-medium ${periodNet >= 0 ? 'text-ok' : 'text-danger'}`}>
-                  {format(periodNet)}
-                </span>
+              <p className="mt-1 text-xs text-muted">
+                All your accounts, shared and Household accounts, cards and loans included. Not the same as available cash.
               </p>
             </div>
-          )}
+          </div>
+          <div className="space-y-4">
+            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
+              Projected{projectionEnd ? ` to ${formatDateWithOrdinal(projectionEnd)}` : ''}
+            </h3>
+            <dl className="space-y-3" data-testid="projection">
+              {[
+                { id: 'available-cash', label: 'Available cash', value: format(snapshot?.available_cash ?? 0), color: 'text-ink' },
+                ...(nextPeriod ? [
+                  { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriod.income), color: 'text-ok' },
+                  { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriod.net), color: nextPeriod.net >= 0 ? 'text-ok' : 'text-danger' },
+                  { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriod.closing_balance), color: nextPeriod.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
+                ] : []),
+              ].map(({ id, label, value, color }) => (
+                <div key={id} className="flex items-center justify-between">
+                  <dt className="text-sm text-muted">{label}</dt>
+                  <dd className={`text-base font-semibold ${color}`} data-testid={id}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-muted">
+              Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.
+              {selectedTag !== undefined ? ' With a tag filter, only tagged events move the projection; balances stay whole.' : ''}
+            </p>
+            {closings && (closings.by_account.length > 0 || closings.unassigned_closing !== 0) && (
+              <div data-testid="account-closings">
+                <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Closing balance by account</h4>
+                <dl className="space-y-2">
+                  {closings.by_account.map((closing) => (
+                    <div key={closing.account_id} className="flex items-center justify-between">
+                      <dt className="text-sm text-muted">{closing.account_name ?? `Account ${closing.account_id}`}</dt>
+                      <dd className="text-sm font-medium text-ink" data-testid={`closing-${closing.account_id}`}>{format(closing.closing_balance)}</dd>
+                    </div>
+                  ))}
+                  {closings.unassigned_closing !== 0 && (
+                    <div className="flex items-center justify-between">
+                      <dt className="text-sm text-muted">Unassigned</dt>
+                      <dd className="text-sm font-medium text-ink" data-testid="closing-unassigned">{format(closings.unassigned_closing)}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -557,60 +524,81 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Upcoming Planned Expenses */}
+        {/* Upcoming payables */}
         <div className="bg-surface border border-line" data-onboarding="upcoming-expenses">
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Upcoming Planned Expenses</h2>
-                <p className="text-sm text-muted">Recurring expenses scheduled for the remainder of this month.</p>
+                <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
+                <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
-              <span className="badge badge-info">{upcomingPlannedExpenses.length}</span>
+              <span className="badge badge-info" data-testid="payables-count">{payableRows.length}</span>
             </div>
           </div>
-          {upcomingPlannedExpenses.length === 0 ? (
-            <div className="p-4 sm:p-6 text-sm text-muted">No upcoming planned expenses detected.</div>
+          {payableRows.length === 0 ? (
+            <div className="p-4 sm:p-6 text-sm text-muted">No upcoming payables in the next 30 days.</div>
           ) : (
-            <div className="divide-y divide-line">
-              {upcomingPlannedExpenses.map(({ reminder, account, projectedBalance, status }) => {
-                const entry = reminder.entry
+            <div className="divide-y divide-line" data-testid="payables">
+              {payableRows.slice(0, MAX_PAYABLES_SHOWN).map((row) => {
+                const status: PayableStatus = row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
+                const remaining = daysUntil(row.day)
                 return (
-                  <div key={`${entry.id}-${reminder.occurrence.toISOString()}`} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
                     <div className="flex items-start gap-3">
                       {renderPlannedExpenseIcon(status)}
                       <div>
-                        <p className="font-medium text-ink">{entry.name}</p>
+                        <p className="font-medium text-ink">{row.name}</p>
                         <p className="text-sm text-muted">
-                          {formatDateWithOrdinal(reminder.occurrence)} · {formatCurrency(entry.amount, entry.currency)}
+                          {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount">{format(row.amount)}</span>
                         </p>
-                        <p className="text-xs text-muted">
-                          {entry.is_autopay ? 'Autopay enabled' : 'Manual payment required'}
-                          {account ? ` · ${account.name}` : ''}
-                        </p>
+                        <p className="text-xs text-muted">{row.detail}</p>
                       </div>
                     </div>
                     <div className="text-right space-y-1 flex-shrink-0">
-                      {account && projectedBalance !== null && (
-                        <p className={`text-sm font-semibold ${projectedBalance < 0 ? 'text-danger' : 'text-ink'}`}>
-                          After: {formatCurrency(projectedBalance, account.currency)}
-                        </p>
-                      )}
                       <p className="text-xs text-muted">
-                        {reminder.daysUntil === 0 ? 'Due today' : `${reminder.daysUntil} day${reminder.daysUntil === 1 ? '' : 's'} remaining`}
+                        {row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`}
                       </p>
-                      {entry.permissions.can_post && (
+                      {row.budgetEntryId !== null && postableEntryIds.has(row.budgetEntryId) && (
                         <button
-                          onClick={() => handleMarkPaid(entry.id)}
-                          disabled={postingId === entry.id}
+                          onClick={() => handleMarkPaid(row.budgetEntryId as number)}
+                          disabled={postingId === row.budgetEntryId}
                           className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
                         >
-                          {postingId === entry.id ? 'Posting…' : 'Mark paid'}
+                          {postingId === row.budgetEntryId ? 'Posting…' : 'Mark paid'}
                         </button>
                       )}
                     </div>
                   </div>
                 )
               })}
+              {payableRows.length > MAX_PAYABLES_SHOWN && (
+                <p className="p-4 text-xs text-muted">+{payableRows.length - MAX_PAYABLES_SHOWN} more in the next 30 days</p>
+              )}
+            </div>
+          )}
+          {otherUpcoming.length > 0 && (
+            <div className="border-t border-line p-4 sm:p-6 space-y-3" data-testid="other-upcoming">
+              <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">Also coming up</h3>
+              {otherUpcoming.slice(0, MAX_OTHER_UPCOMING_SHOWN).map((item, index) => {
+                // The face amount, never a limited event's `cash_delta` (0 for a Household bill).
+                const { amount, direction } = upcomingItemAmount(item)
+                const name = isLimitedEvent(item) ? item.display_name : item.name
+                const day = parseCalendarDay(isLimitedEvent(item) ? item.date : item.due_date)
+                const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
+                const note = household ? 'Household bill, not paid from your cash' : direction === 'in' ? 'Money in' : ''
+                return (
+                  <div key={`${name}-${index}`} className="flex items-start justify-between gap-3" data-testid="other-upcoming-row">
+                    <div>
+                      <p className="text-sm font-medium text-ink">{name}</p>
+                      <p className="text-xs text-muted">{formatDateWithOrdinal(day)}{note ? ` · ${note}` : ''}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-ink flex-shrink-0" data-testid="other-upcoming-amount">{format(amount)}</p>
+                  </div>
+                )
+              })}
+              {otherUpcoming.length > MAX_OTHER_UPCOMING_SHOWN && (
+                <p className="text-xs text-muted">+{otherUpcoming.length - MAX_OTHER_UPCOMING_SHOWN} more</p>
+              )}
             </div>
           )}
         </div>
@@ -621,7 +609,7 @@ export function Dashboard() {
         <div className="p-4 sm:p-6 border-b border-line">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-ink">
-              Top Expenditure Categories ({selectedPeriod === 'year' ? 'YTD' : 'Current period'})
+              Top Expenditure Categories ({periodTag})
             </h2>
             <span className="badge badge-info">{expenditureInsights.length} categories</span>
           </div>
@@ -642,12 +630,13 @@ export function Dashboard() {
               <div className="flex justify-center">
                 <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-full border border-line shadow-inner" style={expenditureChartStyle}>
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm">
-                    <span className="text-xs uppercase tracking-wide text-muted">Total spend</span>
-                    <span className="text-base font-semibold text-ink">{format(totalExpenditureAmount)}</span>
+                    <span className="text-xs uppercase tracking-wide text-muted">Spend by category</span>
+                    <span className="text-base font-semibold text-ink">{format(listedTotal)}</span>
                   </div>
                 </div>
               </div>
               <div className="overflow-x-auto">
+                <p className="mb-2 text-xs text-muted" data-testid="category-note">Includes spending from wallets; may differ from period expenses, which net wallet top-ups and returns.</p>
                 <table className="min-w-full divide-y divide-line text-sm">
                   <thead>
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
