@@ -18,7 +18,8 @@ no write routes here, and a tag share grants none elsewhere.
   the ``/forecast/upcoming`` shape, each full item with its ``currency``.
 - ``GET /household/{sharer_id}/monthly?from=YYYY-MM&to=YYYY-MM``: monthly
   totals per currency (``services/household.household_monthly``); each bound
-  defaults to the current month, and the range is at most 36 months.
+  defaults to the current month, the range is at most 36 months, and each
+  bound lies in 1900-01 through 2999-12 (422 otherwise).
 """
 from datetime import datetime
 from typing import List, Optional
@@ -42,6 +43,7 @@ router = APIRouter()
 
 MONTH = r"^\d{4}-(0[1-9]|1[0-2])$"
 MAX_MONTHS = 36
+MIN_YEAR, MAX_YEAR = 1900, 2999
 
 
 def _grant(db: Session, user: User, sharer_id: int):
@@ -56,8 +58,17 @@ def _sharer(db: Session, sharer_id: int) -> dict:
 
 
 def _month(value: str) -> datetime:
-    year, month = value.split("-")
-    return datetime(int(year), int(month), 1)
+    """A ``YYYY-MM`` bound as its first day; 422 outside the supported years.
+
+    The bounds keep every date the service derives from the range (the month
+    after ``to``, statement cycles and loan dues past it) inside the years
+    ``datetime`` can hold.
+    """
+    year, month = (int(part) for part in value.split("-"))
+    if not MIN_YEAR <= year <= MAX_YEAR:
+        raise HTTPException(status_code=422,
+                            detail=f"Months must be between {MIN_YEAR}-01 and {MAX_YEAR}-12")
+    return datetime(year, month, 1)
 
 
 @router.get("/", response_model=List[HouseholdViewOut])

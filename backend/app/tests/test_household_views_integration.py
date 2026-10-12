@@ -101,6 +101,19 @@ def test_monthly_rejects_a_bad_range(hh, sw_client):
     _get(sw_client, c, f"/household/{a['id']}/monthly?from=2020-01&to=2026-10", expect=422)
 
 
+@pytest.mark.parametrize("bounds", ["from=0000-01&to=0000-02", "from=9999-12&to=9999-12",
+                                    "from=9999-01&to=9999-12", "from=1899-12&to=1900-01",
+                                    "from=2999-12&to=3000-01"])
+def test_monthly_rejects_months_outside_the_supported_years(hh, sw_client, bounds):
+    _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/monthly?{bounds}", expect=422)
+
+
+def test_monthly_accepts_the_supported_edges(hh, sw_client):
+    for bounds in ("from=1900-01&to=1900-02", "from=2999-11&to=2999-12"):
+        body = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/monthly?{bounds}")
+        assert len(body["months"]) == 2
+
+
 def test_revoking_or_leaving_closes_the_view(hh, sw_client, sw_db):
     a, b, c = hh["a"], hh["b"], hh["c"]
     r = sw_client.delete(f"{API}/tags/household/shares/{hh['a_to_c']}", headers=a["headers"])
