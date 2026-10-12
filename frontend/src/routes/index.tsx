@@ -259,11 +259,13 @@ export function Dashboard() {
 
   // The wallet-aware backend summary names categories; the chart colours them from the caller's own.
   const expenditureInsights = useMemo<ExpenditureInsight[]>(() => {
-    const totalExpenses = periodSummary?.summary.total_expenses ?? 0
-    if (!periodSummary || totalExpenses <= 0) return []
+    if (!periodSummary) return []
     const categories = categoriesData ?? []
-    return Object.entries(periodSummary.category_breakdown)
-      .filter(([, row]) => row.expenses > 0)
+    const positive = Object.entries(periodSummary.category_breakdown).filter(([, row]) => row.expenses > 0)
+    // Shares are of the rows listed: spending-wallet debits appear here but not in total_expenses.
+    const listedTotal = positive.reduce((sum, [, row]) => sum + row.expenses, 0)
+    if (listedTotal <= 0) return []
+    return positive
       .sort(([, a], [, b]) => b.expenses - a.expenses)
       .slice(0, 5)
       .map(([name, row], index) => {
@@ -273,7 +275,7 @@ export function Dashboard() {
           name,
           amount: row.expenses,
           displayColor: color || FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length] || '#6B7280',
-          percentage: (row.expenses / totalExpenses) * 100,
+          percentage: (row.expenses / listedTotal) * 100,
         }
       })
   }, [periodSummary, categoriesData])
@@ -457,7 +459,7 @@ export function Dashboard() {
               Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.
               {selectedTag !== undefined ? ' With a tag filter, only tagged events move the projection; balances stay whole.' : ''}
             </p>
-            {closings && closings.by_account.length > 0 && (
+            {closings && (closings.by_account.length > 0 || closings.unassigned_closing !== 0) && (
               <div data-testid="account-closings">
                 <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Closing balance by account</h4>
                 <dl className="space-y-2">
@@ -630,6 +632,7 @@ export function Dashboard() {
                 </div>
               </div>
               <div className="overflow-x-auto">
+                <p className="mb-2 text-xs text-muted" data-testid="category-note">Categories include spending from wallets.</p>
                 <table className="min-w-full divide-y divide-line text-sm">
                   <thead>
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
