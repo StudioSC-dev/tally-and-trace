@@ -11,7 +11,9 @@ from datetime import datetime
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, hh_tag_share, sw_db_reachable, sw_leaks, sw_post
+from app.tests.conftest import (
+    API, PRIVATE, hh_tag_share, sw_db_reachable, sw_leaks, sw_post, sw_share,
+)
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -404,3 +406,68 @@ def test_household_upcoming_items_carry_their_currency(hh, sw_client, sw_db):
     plain = _get(sw_client, a, "/forecast/upcoming")["items"]
     assert {i["name"] for i in plain} >= {"Dollar bill", "Household rent"}
     assert all("currency" not in i for i in plain if i.get("view") != "limited")
+
+
+# --- Cover counts only the payments the viewer can read -----------------------------------------
+
+def _recurring_payment(db, who, frm, to, amount, when, currency="PHP"):
+    """A one-off recurring transfer into a card, written directly (the API refuses one into
+    a card, but converting its destination into a card later reaches this state)."""
+    from decimal import Decimal
+
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.user import CurrencyType
+
+    entry = BudgetEntry(user_id=who["id"], name="Card top-up", entry_type=BudgetEntryType.EXPENSE,
+                        amount=Decimal(amount), currency=CurrencyType(currency),
+                        next_occurrence=when, account_id=frm, transfer_to_account_id=to,
+                        end_mode="after_occurrences", max_occurrences=1)
+    db.add(entry)
+    db.commit()
+    return entry.id
+
+
+def _card_payer(db, hh, payer):
+    """``payer`` (A, or B given an editor share on A's card so B may pay into it)."""
+    if payer == "b":
+        sw_share(db, hh["a_card"], hh["b"]["id"], "editor", hh["a"]["id"])
+    return hh[payer]
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+@pytest.mark.parametrize("payer,expense,remainder", [("b", 0.0, 100.0), ("a", 40.0, 60.0)])
+def test_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw_db, mode, payer,
+                                                        expense, remainder):
+    # B (an editor on the joint account) pays 40 into A's card: C can't read that
+    # payment, so it never covers A's Household bill in C's view. A's own payment
+    # (which C reads) does.
+    posted, ref = MODES[mode]
+    _charge(sw_client, hh, mode)
+    paid = _transfer(sw_client, _card_payer(sw_db, hh, payer), hh["joint"], hh["a_card"], 40,
+                     "2026-11-01T00:00:00", posted=posted)
+    _get(sw_client, hh["c"], f"/transactions/{paid}", expect=404 if payer == "b" else 200)
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], ref))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
+    assert totals["expense"] + totals["paid_from_other_accounts"] == 100
+
+
+@pytest.mark.parametrize("payer,expense,remainder", [("b", 0.0, 100.0), ("a", 40.0, 60.0)])
+def test_recurring_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw_db, payer,
+                                                                  expense, remainder):
+    _charge(sw_client, hh, "projected")
+    _recurring_payment(sw_db, hh[payer], hh["joint"], hh["a_card"], 40, datetime(2026, 11, 1))
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], PROJECTED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
+
+
+@pytest.mark.parametrize("payer,expense,remainder", [("b", 60.0, 40.0), ("a", 100.0, 0.0)])
+def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw_db, payer,
+                                                               expense, remainder):
+    # Routed to the joint account: the statement payment pays what is left (60),
+    # and only a payment C reads covers the rest.
+    _put(sw_client, hh["a"], f"/accounts/{hh['a_card']}", {"payment_account_id": hh["joint"]})
+    _charge(sw_client, hh, "projected")
+    _transfer(sw_client, _card_payer(sw_db, hh, payer), hh["joint"], hh["a_card"], 40,
+              "2026-11-01T00:00:00")
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], PROJECTED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)

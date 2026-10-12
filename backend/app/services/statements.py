@@ -236,7 +236,7 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
     and netting it would make the debt it moved disappear.
 
     With ``keep_source`` a cash advance's line keeps its row as ``source``.
-    With ``payment_sources`` each payment is ``(date, amount, paying account id)``.
+    With ``payment_sources`` each payment is ``(date, amount, paying account id, row)``.
     """
     lines: list = []
     payments: List[Tuple[datetime, Decimal]] = []
@@ -246,7 +246,7 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
             if getattr(row, "transfer_to_account_id", None) == card_id:
                 source = getattr(row, "transfer_from_account_id", None) or row.account_id
                 if source not in unbilled_ids:
-                    payments.append((row.transaction_date, amount, source)
+                    payments.append((row.transaction_date, amount, source, row)
                                     if payment_sources else (row.transaction_date, amount))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
                 fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))

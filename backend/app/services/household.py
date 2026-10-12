@@ -13,7 +13,10 @@ appears once.
 
 An occurrence on a credit card is de-duplicated against the in-scope CASH
 payments into that card: every transfer into it from a projection-cash
-account of the view scope (posted, planned or recurring), settled with every
+account of the view scope (posted, planned or recurring) that the caller can
+read, so that it is among the cash the caller's Household totals count (a
+payment they can't read still settles the statement, but never covers a
+Household line for them), settled with every
 other payment and credit in the statement engine's order
 (``_settle_with_sources``, mirroring ``statements.build_statement_payables``):
 the transaction rows are balanced and paid oldest statement first, and only
@@ -102,7 +105,7 @@ def _naive(dt: datetime) -> datetime:
 
 def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Account],
                           start: datetime, end: datetime, *, recorded: bool,
-                          viewable_ids: Iterable[int],
+                          viewable_ids: Iterable[int], access,
                           projection: Optional[Tuple[datetime, datetime]] = None
                           ) -> List[Occurrence]:
     """The Household occurrences of ``grant``'s sharer in ``[start, end)`` (module docstring).
@@ -112,7 +115,8 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     dated before ``start`` is listed at ``start``, overdue) and active
     recurring entries' occurrences in the window. Recorded: posted
     transactions dated in the window. ``viewable_ids`` are the caller's
-    viewable accounts (``statements._card_rows``). ``projection`` (recorded
+    viewable accounts (``statements._card_rows``); ``access`` is the caller's
+    ``RecordAccess``: only a payment it reads covers a line. ``projection`` (recorded
     only) is the projection's ``[start, end)``: a posted charge on a
     statement the posted payments have not settled is covered as that
     projection covers it (module docstring); without it, posted payments only.
@@ -182,14 +186,16 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
 
     for card_id, lines in card_lines.items():
         covered = _card_household_cover(db, billed[card_id], cash_ids, start, end,
-                                        recorded=recorded, viewable_ids=viewable_ids)
+                                        recorded=recorded, viewable_ids=viewable_ids,
+                                        readable=access.readable)
         projected: Dict[tuple, tuple] = {}
         if recorded and projection is not None and any(
                 covered[key][1] for _, key in lines if key in covered):
             # Open statements: left to the projection (module docstring).
             projected = _card_household_cover(db, billed[card_id], cash_ids,
                                               *map(_naive, projection), recorded=False,
-                                              viewable_ids=viewable_ids)
+                                              viewable_ids=viewable_ids,
+                                              readable=access.readable)
         for occ, key in lines:
             remainder, still_owed = covered.get(key, (occ.face, False))
             if still_owed and key in projected:
@@ -199,8 +205,8 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
 
 
 def _card_household_cover(db: Session, card: Account, cash_ids: set, start: datetime,
-                          end: datetime, *, recorded: bool,
-                          viewable_ids: Iterable[int]) -> Dict[tuple, Tuple[Decimal, bool]]:
+                          end: datetime, *, recorded: bool, viewable_ids: Iterable[int],
+                          readable) -> Dict[tuple, Tuple[Decimal, bool]]:
     """``{line key: (remainder, open)}`` for every Household line on ``card``
     (module docstring); ``open`` is True when the line's statement still owes
     something after the payments counted.
@@ -209,7 +215,9 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     a line whose key is missing has no statement (remainder = face). The card's
     rows are read and split as the statement engine reads them (``_card_rows``,
     ``_split_card_rows``, with ``viewable_ids`` the caller's viewable accounts)
-    and settled in its order (``_settle_with_sources``).
+    and settled in its order (``_settle_with_sources``). A payment is in scope
+    when it comes from a cash account of ``cash_ids`` and ``readable`` (the
+    caller's read rule) accepts its record.
     """
     from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
     from app.services.statements import _card_rows, _split_card_rows
@@ -252,14 +260,16 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 if linked[key]:
                     linked[key] -= 1
                     continue
-                recurring.append((when, _money(entry.amount), entry.account_id in cash_ids))
+                recurring.append((when, _money(entry.amount),
+                                  entry.account_id in cash_ids and readable(entry)))
 
     if not keys:
         return {}
     days = [line.transaction_date.date() for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
     owed, in_scope = _settle_with_sources(
-        cycles, lines, [(when, amount, src in cash_ids) for when, amount, src in payments],
+        cycles, lines, [(when, amount, src in cash_ids and readable(row))
+                        for when, amount, src, row in payments],
         projected, recurring)
     # Projected only: in a recorded month only posted payments cover anything.
     routed = not recorded and card.payment_account_id in cash_ids
@@ -563,6 +573,7 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
         for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True,
                                          viewable_ids=viewable_account_ids(
                                              db, uid, roles=VIEW_ROLES),
+                                         access=access,
                                          projection=(today, max(end, today))):
             if occ.record.transaction_type == TransactionType.DEBIT:
                 add(occ.date, occ.record.currency, "paid_from_other_accounts", occ.remainder)

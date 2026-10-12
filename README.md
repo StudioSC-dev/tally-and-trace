@@ -292,7 +292,9 @@ scope account and an account outside the scope that is not a card or loan is
 "Moved in" or "Moved out" (your own deposit from a private account into the
 joint account is "Moved in", and your private spending never appears).
 "Paid from other accounts" is the remainder of the sharer's Household bills
-outside the scope. A posted Household charge on a card statement that is not
+outside the scope, after the payments into them from the Household's accounts
+that you can read (a payment you can't read still settles the card, but never
+covers a bill in your view, since it isn't in your expense). A posted Household charge on a card statement that is not
 yet settled is left to the projection: it counts as covered by the planned
 and routed payments from the Household's accounts, which the projection shows
 as expense, so the joint outflow plus the remainder is always the charge,
