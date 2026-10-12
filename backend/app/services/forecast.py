@@ -14,12 +14,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Iterator, List, Optional, Sequence
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, touches_accounts,
-    viewable_account_ids, viewable_accounts,
+    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, tag_shared_account_ids,
+    touches_accounts, viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
@@ -831,11 +831,13 @@ def collect_events(
     ``_transfer_event``): it keeps its amounts, date and in-scope legs only.
     A budget entry with ``transfer_to_account_id`` is a recurring transfer: each
     occurrence is a transfer event with legs on its scoped accounts.
-    An occurrence already materialised is suppressed: a transaction of the
-    entry's creator with this ``budget_entry_id`` dated the same calendar day
-    stands in for it (each transaction suppresses at most one occurrence; see
-    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``
-    does not move the money twice.
+    An occurrence already recorded is suppressed, for every kind of entry
+    (cash account, no account, card with or without cycle settings, recurring
+    transfer): a transaction of the entry's creator with this
+    ``budget_entry_id`` dated the same calendar day stands in for it (each
+    transaction suppresses at most one occurrence; see
+    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``,
+    or a row linked to the entry by hand, does not move the money twice.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -984,13 +986,16 @@ def collect_events(
     outside_unbilled = frozenset(set(referenced_cards) - outside_billed)
     transfer_billed_ids = billed_ids | outside_billed
 
-    # Transactions already materialised from a recurring transfer entry, by day:
-    # each stands in for one occurrence on its calendar day (as in
-    # _card_entry_charges), since the posted transfer has already moved the balance.
-    transfer_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None]
+    # Transactions already recorded for an entry's occurrences, by day: each stands
+    # in for one occurrence on its calendar day (as in _card_entry_charges), since
+    # the transaction itself is the movement (posted: already in the balance;
+    # unposted: listed below). Fetched once for every entry walked here; entries on
+    # billed cards are suppressed in _billed_card_occurrences instead.
+    walked_entry_ids = [e.id for e in entries if e.transfer_to_account_id is not None
+                        or (e.account_id not in wallet_ids and e.account_id not in billed_ids)]
     records = {(BudgetEntry, e.id): e for e in entries}
     records.update(((Transaction, t.id), t) for t in txns)
-    linked = _linked_occurrence_days(db, transfer_entry_ids)
+    linked = _linked_occurrence_days(db, walked_entry_ids)
 
     card_entries = []
     for entry in entries:
@@ -1037,6 +1042,10 @@ def collect_events(
         else:
             legs = []
         for occ in iter_occurrences(entry, start, end):
+            key = (entry.id, occ.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue  # already recorded (e.g. advance=False)
             events.append(_event(
                 date=occ,
                 name=entry.name,
@@ -1401,11 +1410,15 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
     For an entry touching no shared account the creator's row counts on
     whichever account it was recorded (as before shared accounts, so a user
     with no shares gets exactly the same result as then). For an entry touching
-    an account with any share, only a row on the entry's own account counts
-    (for a recurring transfer, one from its source into its destination):
-    everyone who can see that account sees the entry, and a row on the
-    creator's private account, which they cannot read, must change nothing
-    they are shown.
+    an account with any share (an ``AccountShare``, or its owner's Household tag
+    on it shared with anyone, the ``tag_viewer`` path in ``app/core/access.py``),
+    only a row touching nothing but the entry's own accounts counts: for an
+    ordinary entry a debit or credit (never a transfer) on its account, which is
+    what ``materialize`` records; for a recurring transfer a transfer from its
+    source into its destination. Everyone who can see that account sees the
+    entry, and a row touching any other account (the creator's private one, or
+    another user's they hold a role on), which a viewer may not be able to read,
+    must change nothing they are shown.
     """
     entry_ids = list(entry_ids)
     if not entry_ids:
@@ -1422,15 +1435,17 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
         .all()
     )
     touched = {acc for row in rows for acc in row[6:] if acc is not None}
-    shared = {acc for (acc,) in db.query(AccountShare.account_id).filter(
-        AccountShare.account_id.in_(touched)).distinct()} if touched else set()
+    shared = {acc for (acc,) in db.query(Account.id).filter(
+        Account.id.in_(touched),
+        or_(Account.id.in_(select(AccountShare.account_id)),
+            Account.id.in_(tag_shared_account_ids())))} if touched else set()
 
     def on_entry_accounts(row) -> bool:
         _, _, kind, account, src, dst, entry_account, entry_dst, _ = row
         if entry_dst is not None:
             return (kind == TransactionType.TRANSFER and (src or account) == entry_account
                     and dst == entry_dst)
-        return account == entry_account
+        return kind != TransactionType.TRANSFER and account == entry_account
 
     return [(row[0], row[1]) for row in rows
             if not shared.intersection(row[6:]) or on_entry_accounts(row)]
@@ -1542,8 +1557,8 @@ def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -
     statement not yet due, or when any later occurrence is, with materialised
     occurrences suppressed; it stops at the first billed occurrence. A card
     without cycle settings bills no statements, so it is
-    ``has_unsuppressed_occurrence`` (which suppresses recorded occurrences
-    where ``collect_events`` does not yet: STU-266).
+    ``has_unsuppressed_occurrence``, which suppresses recorded occurrences as
+    ``collect_events`` does for the occurrences it lists on such a card.
     """
     if resolve_cycle_fields(card) is None:
         return has_unsuppressed_occurrence(db, entries, start)

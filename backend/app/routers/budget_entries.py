@@ -499,12 +499,14 @@ def materialize_budget_entry(
     deltas stay consistent), then moves ``next_occurrence`` to the following one —
     deactivating the entry when it passes its end date or exhausts its occurrences.
 
-    With ``advance`` False the schedule stays put, so for an entry on a credit card
-    the projection would bill that occurrence AND the new transaction. It doesn't:
-    a transaction linked to the entry suppresses one occurrence dated the same
-    calendar day (see ``_card_entry_charges`` in services/forecast.py). A custom
-    ``transaction_date`` on another day suppresses nothing, so with ``advance``
-    False the occurrence is still projected alongside the transaction.
+    With ``advance`` False the schedule stays put, so the projection would list
+    that occurrence AND the new transaction. It doesn't, for every entry type
+    (cash, card, accountless or transfer): a transaction linked to the entry
+    suppresses one occurrence dated the same calendar day (see
+    ``_linked_occurrence_days`` and its use in ``collect_events`` in
+    services/forecast.py). A custom ``transaction_date`` on another day
+    suppresses nothing, so with ``advance`` False the occurrence is still
+    projected alongside the transaction.
 
     A recurring transfer into a loan posts as a scheduled loan payment
     (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in

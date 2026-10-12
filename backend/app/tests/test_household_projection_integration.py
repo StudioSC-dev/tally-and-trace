@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
+from app.tests.conftest import API, PRIVATE, hh_household, sw_db_reachable, sw_leaks, sw_post
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -263,3 +263,142 @@ def test_a_record_seen_directly_and_through_the_tag_share_appears_once(hh, sw_cl
     grant = household_view(sw_db, c["id"], a["id"])
     [occ] = named(household_events(sw_db, c["id"], grant, REF, datetime(2026, 12, 9)), "name")
     assert occ["amount"] == 0 and occ["household_occurrence"] and occ["face_amount"] == 25
+
+
+# --- A recorded occurrence on an account shared only through the tag share (STU-266) -----------
+
+def _tag_shared_bill(client, hh):
+    """A's checking account carrying A's Household tag (shared with C through the
+    tag share, with no ``AccountShare``) and a monthly 500 bill on it, due 15 Oct
+    and 15 Nov."""
+    a = hh["a"]
+    account = sw_post(client, a, "/accounts/", {
+        "name": "Household checking", "account_type": "checking", "balance": 4_000,
+        "tag_ids": [hh["hh_a"]]})["id"]
+    entry = sw_post(client, a, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": account, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    return account, entry
+
+
+def _bill_days(db, who, end=datetime(2026, 11, 9)):
+    from app.services.forecast import collect_events
+
+    db.expire_all()
+    return [(e["date"], e["amount"]) for e in collect_events(db, REF, end, user_id=who["id"])
+            if e["source"] == "budget_entry" and e["name"] == "Household water"]
+
+
+def _closing(db, who):
+    from app.services.forecast import project_running_balance
+
+    db.expire_all()
+    return project_running_balance(db, who["id"], days=30, reference=REF)["closing_balance"]
+
+
+def test_a_private_row_linked_to_a_tag_shared_entry_never_suppresses_the_viewers_occurrence(
+        hh, sw_client, sw_db):
+    # The 15 Oct row is on A's private, untagged bank, which C cannot read: C's
+    # projection is unchanged by it, and the occurrence is still listed.
+    a, c = hh["a"], hh["c"]
+    _, entry = _tag_shared_bill(sw_client, hh)
+    before = _closing(sw_db, c)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _txn(sw_client, a, hh["a_private"], 500, "2026-10-15T00:00:00",
+         description=f"{PRIVATE} water", budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    assert _closing(sw_db, c) == before
+    # A's own view follows the same rule as for an AccountShare: the entry's
+    # account is shared, so only a row on that account stands for an occurrence,
+    # and A sees the occurrence next to the private row.
+    assert _bill_days(sw_db, a) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+
+
+def test_a_row_on_the_tag_shared_entrys_own_account_suppresses_for_viewer_and_owner(
+        hh, sw_client, sw_db):
+    a, c = hh["a"], hh["c"]
+    account, entry = _tag_shared_bill(sw_client, hh)
+    before = _closing(sw_db, c)
+    _txn(sw_client, a, account, 500, "2026-10-15T00:00:00", description="Household water",
+         budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == []
+    assert _bill_days(sw_db, a) == []
+    assert _closing(sw_db, c) == before  # the unposted row is the one movement
+
+
+def test_a_linked_transfer_to_another_users_account_never_suppresses_the_viewers_occurrence(
+        hh, sw_client, sw_db):
+    # B gives A editor on B's bank; A records the 15 Oct bill as an unposted
+    # transfer from the tag-shared account into it. The transfer touches B's
+    # account, so C cannot read it (rule (b2) needs every touched account to be
+    # A's): C's occurrence and closing balance stay as they were.
+    from app.tests.conftest import sw_share
+
+    a, c = hh["a"], hh["c"]
+    account, entry = _tag_shared_bill(sw_client, hh)
+    sw_share(sw_db, hh["b_private"], a["id"], "editor", hh["b"]["id"])
+    before = _closing(sw_db, c)
+    _transfer(sw_client, a, account, hh["b_private"], 500, "2026-10-15T00:00:00",
+              description="Household water", budget_entry_id=entry)
+    assert _bill_days(sw_db, c) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    assert _closing(sw_db, c) == before
+
+
+def test_a_linked_transfer_on_an_unshared_entry_still_suppresses_the_occurrence(
+        sw_client, sw_db, sw_people):
+    # With no share at all the creator's row counts whatever its type or account.
+    d = sw_people("Dan", "Solo")
+    checking = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo checking", "account_type": "checking", "balance": 4_000})["id"]
+    savings = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo savings", "account_type": "checking", "balance": 1_000})["id"]
+    entry = sw_post(sw_client, d, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": checking, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    assert _bill_days(sw_db, d) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _transfer(sw_client, d, checking, savings, 500, "2026-10-15T00:00:00",
+              description="Household water", budget_entry_id=entry)
+    assert _bill_days(sw_db, d) == []
+
+
+def test_the_household_view_keeps_a_tag_shared_occurrence_recorded_on_a_private_account(
+        hh, sw_client, sw_db):
+    from app.services.household import household_events, household_view
+
+    a, c = hh["a"], hh["c"]
+    _, entry = _tag_shared_bill(sw_client, hh)
+    _txn(sw_client, a, hh["a_private"], 500, "2026-10-15T00:00:00",
+         description=f"{PRIVATE} water", budget_entry_id=entry)
+    sw_db.expire_all()
+    grant = household_view(sw_db, c["id"], a["id"])
+    events = household_events(sw_db, c["id"], grant, REF, datetime(2026, 11, 9))
+    assert [(e["date"], e["amount"]) for e in events
+            if e["source"] == "budget_entry" and e["name"] == "Household water"] == [
+        (datetime(2026, 10, 15), Decimal("-500.00"))]
+
+
+def test_a_tag_share_with_its_own_owner_does_not_count_as_sharing(sw_client, sw_db, sw_people):
+    # The API refuses a self-share, the table does not. Nobody gains access from
+    # it, so the owner's row on another account still stands for the occurrence,
+    # exactly as with no share at all.
+    from app.models.tag_share import TagShare
+
+    d = sw_people("Dan", "Solo")
+    tag = hh_household(sw_db, d)
+    sw_db.add(TagShare(tag_id=tag, user_id=d["id"]))
+    sw_db.commit()
+    tagged = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo checking", "account_type": "checking", "balance": 4_000,
+        "tag_ids": [tag]})["id"]
+    other = sw_post(sw_client, d, "/accounts/", {
+        "name": "Solo savings", "account_type": "checking", "balance": 1_000})["id"]
+    entry = sw_post(sw_client, d, "/budget-entries/", {
+        "name": "Household water", "entry_type": "expense", "amount": 500,
+        "account_id": tagged, "next_occurrence": "2026-10-15T00:00:00",
+        "cadence": "monthly"})["id"]
+    assert _bill_days(sw_db, d) == [(datetime(2026, 10, 15), Decimal("-500.00"))]
+    _txn(sw_client, d, other, 500, "2026-10-15T00:00:00", description="Household water",
+         budget_entry_id=entry)
+    assert _bill_days(sw_db, d) == []
