@@ -230,6 +230,49 @@ def test_a_card_without_a_cycle_is_refused_until_its_recurring_charge_ends(
     assert _is_active(sw_client, a, card) is False
 
 
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+def test_an_indefinite_charge_starting_centuries_ahead_is_refused(sw, sw_client, how):
+    # The guard stops at the first billed occurrence instead of walking the
+    # schedule to the last date a datetime can hold.
+    a, card = sw["a"], sw["a_card"]
+    _entry(sw_client, a, card, cadence="annual", next_occurrence="9000-10-20T00:00:00")
+
+    _refused(_deactivate(sw_client, a, card, how), CARD_RECURRING_ENTRY_DETAIL)
+    assert _is_active(sw_client, a, card) is True
+
+
+@pytest.mark.parametrize("how", DEACTIVATIONS)
+@pytest.mark.parametrize("which", ["a_card", "store_card", "a_loan"])
+def test_a_recorded_occurrence_in_the_last_representable_year_ends_the_walk(
+        sw, sw_client, how, which):
+    # Its only unrecorded occurrence would fall after year 9999: the walk stops
+    # there rather than failing, so only the recorded row is judged.
+    a = sw["a"]
+    if which == "store_card":
+        account = sw_post(sw_client, a, "/accounts/", {
+            "name": "Store card", "account_type": "credit", "balance": 0})["id"]
+        entry = _entry(sw_client, a, account, cadence="annual",
+                       next_occurrence="9999-01-20T00:00:00")
+    elif which == "a_card":
+        account = sw["a_card"]
+        entry = _entry(sw_client, a, account, cadence="annual",
+                       next_occurrence="9999-01-20T00:00:00")
+    else:
+        account = sw["a_loan"]
+        entry = _entry(sw_client, a, sw["a_private"], name="Loan payment", cadence="annual",
+                       transfer_to_account_id=account, next_occurrence="9999-01-20T00:00:00")
+    r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize", {"advance": False})
+    assert r.status_code == 201, r.text
+
+    r = _deactivate(sw_client, a, account, how)
+    if which == "a_card":
+        # The recorded charge is on a statement still owed.
+        _refused(r, CARD_OPEN_STATEMENT_DETAIL)
+    else:
+        assert r.status_code == 200, r.text
+        assert _is_active(sw_client, a, account) is False
+
+
 # --- Card: an open statement ------------------------------------------------------------
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)
