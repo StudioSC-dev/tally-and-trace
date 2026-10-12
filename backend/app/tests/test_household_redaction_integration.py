@@ -124,3 +124,19 @@ def test_the_holder_filters_by_the_shared_household_tag(hh, world, sw_client):
     assert [e["id"] for e in entries] == [world["entry"]]
     # A tag C holds no share of filters to nothing, like an unknown id.
     assert _get(sw_client, c, "/transactions/", tag=world["a_private_tag"])["items"] == []
+
+
+def test_snapshot_accounts_seen_through_a_tag_share_carry_no_settings(hh, sw_client):
+    # A marks the joint account a spending wallet: a setting C never sees.
+    r = sw_client.put(f"{API}/accounts/{hh['joint']}", json={"is_spending_wallet": True},
+                      headers=hh["a"]["headers"])
+    assert r.status_code == 200, r.text
+    by_account = _get(sw_client, hh["c"], "/dashboard/snapshot")["balances"]["by_account"]
+    assert sorted((x["id"], tuple(sorted(x))) for x in by_account) == sorted([
+        (hh["joint"], ("balance", "currency", "id", "name")),
+        (hh["c_private"], ("balance", "currency", "id", "is_spending_wallet", "name")),
+    ])
+    # The owner, and a direct editor, still get the setting.
+    for who in ("a", "b"):
+        rows = _get(sw_client, hh[who], "/dashboard/snapshot")["balances"]["by_account"]
+        assert [x["is_spending_wallet"] for x in rows if x["id"] == hh["joint"]] == [True]
