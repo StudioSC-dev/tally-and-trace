@@ -357,3 +357,37 @@ def test_posted_charge_on_a_settled_statement_keeps_the_posted_rule(hh, sw_clien
     _pay(sw_client, hh, 100, "projected")
     totals = _sum(_monthly(sw_db, hh["c"], hh["a"], MIXED))
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (100.0, 100.0)
+
+
+# --- Upcoming items carry their own currency ----------------------------------------------------
+
+def test_household_upcoming_items_carry_their_currency(hh, sw_client, sw_db):
+    from datetime import timedelta
+
+    from app.core.time import naive_utc_now
+    from app.models.user import CurrencyType, User
+
+    a, b = hh["a"], hh["b"]
+    sw_db.get(User, a["id"]).default_currency = CurrencyType.EUR  # neither item's currency
+    sw_db.commit()
+    usd = sw_post(sw_client, a, "/accounts/", {
+        "name": "Household dollars", "account_type": "savings", "balance": 500,
+        "currency": "USD", "tag_ids": [hh["hh_a"]]})["id"]
+    soon = (naive_utc_now() + timedelta(days=3)).replace(hour=0, minute=0, second=0,
+                                                        microsecond=0)
+    _txn(sw_client, a, usd, 25, soon.isoformat(), currency="USD", description="Dollar bill")
+    _txn(sw_client, a, hh["joint"], 120, soon.isoformat(), description="Household rent")
+    _txn(sw_client, b, hh["joint"], 30, soon.isoformat(), description="Bea gas")
+    expected = {("Dollar bill", 25.0, "USD"), ("Household rent", 120.0, "PHP"),
+                ("Bea gas", 30.0, "PHP")}
+    for body in (_get(sw_client, a, f"/household/{a['id']}/upcoming")["items"],
+                 _get(sw_client, a, f"/household/{a['id']}/dashboard")["upcoming"]):
+        assert {(i["name"], i["amount"], i["currency"]) for i in body} == expected
+    # A limited item keeps its own currency too (C sees A's records Limited).
+    items = _get(sw_client, hh["c"], f"/household/{a['id']}/upcoming")["items"]
+    assert {(i["display_name"], i["currency"]) for i in items} == {
+        ("Dollar bill", "USD"), ("Household rent", "PHP")}
+    # The ordinary upcoming list is unchanged: no currency on a full item.
+    plain = _get(sw_client, a, "/forecast/upcoming")["items"]
+    assert {i["name"] for i in plain} >= {"Dollar bill", "Household rent"}
+    assert all("currency" not in i for i in plain if i.get("view") != "limited")

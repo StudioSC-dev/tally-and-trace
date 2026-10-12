@@ -288,6 +288,8 @@ def upcoming_items(events: List[dict]) -> List[dict]:
             "source_id": e["source_id"],
             # Only on a Household occurrence the caller sees in full (their own).
             **({"household_occurrence": True} if e.get("household_occurrence") else {}),
+            # Only in a Household view (services/household.household_upcoming).
+            **({"currency": e["currency"]} if "currency" in e else {}),
         }
         for e in events if e.get("view") != LIMITED
     ]

@@ -401,6 +401,26 @@ def household_events(db: Session, user, grant: HouseholdGrant, start: datetime, 
                           keep_origin=keep_origin)
 
 
+def household_upcoming(db: Session, user, grant: HouseholdGrant, start: datetime,
+                       end: datetime) -> List[dict]:
+    """The Household view's upcoming items (``forecast.upcoming_items``).
+
+    Each full item also carries its ``currency`` (the record's; a statement's
+    or loan payable's is its card's or loan's), as a limited one does, since a
+    Household can hold accounts in several currencies.
+    """
+    from app.core.redaction import LIMITED
+    from app.services.forecast import upcoming_items
+
+    events = household_events(db, user, grant, start, end, keep_origin=True)
+    for e in events:
+        model, record_id = e.pop("origin")
+        if e.get("view") != LIMITED:
+            currency = getattr(db.get(model, record_id), "currency", None)
+            e["currency"] = getattr(currency, "value", currency)
+    return upcoming_items(events)
+
+
 def household_transactions_criterion(db: Session, user, grant: HouseholdGrant,
                                      scope_ids: Iterable[int]):
     """Criterion: the transactions in the Household view: readable by the

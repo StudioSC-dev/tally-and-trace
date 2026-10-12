@@ -15,7 +15,7 @@ no write routes here, and a tag share grants none elsewhere.
   caller may read, plus the sharer's Household occurrences outside the scope,
   newest first, in the ``/transactions/`` shape.
 - ``GET /household/{sharer_id}/upcoming?days=``: the view's projection, in
-  the ``/forecast/upcoming`` shape.
+  the ``/forecast/upcoming`` shape, each full item with its ``currency``.
 - ``GET /household/{sharer_id}/monthly?from=YYYY-MM&to=YYYY-MM``: monthly
   totals per currency (``services/household.household_monthly``); each bound
   defaults to the current month, and the range is at most 36 months.
@@ -36,7 +36,7 @@ from app.models.user import User
 from app.schemas.household import HouseholdMonthlyResponse, HouseholdViewOut
 from app.schemas.transaction import TransactionListResponse
 from app.services import household as household_svc
-from app.services.forecast import _upcoming_window, upcoming_items
+from app.services.forecast import _upcoming_window
 
 router = APIRouter()
 
@@ -106,8 +106,8 @@ def household_upcoming(
 ):
     grant = _grant(db, current_user, sharer_id)
     start, end = _upcoming_window(days, None)
-    events = household_svc.household_events(db, current_user, grant, start, end)
-    return {"sharer": _sharer(db, sharer_id), "items": upcoming_items(events), "days": days}
+    items = household_svc.household_upcoming(db, current_user, grant, start, end)
+    return {"sharer": _sharer(db, sharer_id), "items": items, "days": days}
 
 
 @router.get("/{sharer_id}/monthly", response_model=HouseholdMonthlyResponse)
@@ -143,10 +143,9 @@ def household_dashboard(
     month = naive_utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     [current] = household_svc.household_monthly(db, current_user, grant, month, month)
     start, end = _upcoming_window(30, None)
-    events = household_svc.household_events(db, current_user, grant, start, end)
     return {
         "sharer": _sharer(db, sharer_id),
         "accounts": serialize_accounts(db, current_user, accounts),
         "month": current,
-        "upcoming": upcoming_items(events),
+        "upcoming": household_svc.household_upcoming(db, current_user, grant, start, end),
     }
