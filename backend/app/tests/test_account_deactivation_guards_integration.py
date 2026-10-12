@@ -257,6 +257,22 @@ def test_an_account_with_no_obligations_still_deactivates(sw, sw_client, how, wh
     assert _is_active(sw_client, sw["a"], sw[which]) is False
 
 
+def test_a_null_is_active_is_rejected_and_omitting_it_still_works(sw, sw_client):
+    a, card = sw["a"], sw["a_card"]
+    _charge(sw_client, a, card, 2_500)
+
+    r = _call(sw_client, a, "PUT", f"/accounts/{card}", {"is_active": None})
+    assert r.status_code == 422, r.text
+    detail = _call(sw_client, a, "GET", f"/accounts/{card}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["is_active"] is True
+
+    r = _call(sw_client, a, "PUT", f"/accounts/{card}", {"name": "Renamed card"})
+    assert r.status_code == 200, r.text
+    assert r.json()["is_active"] is True
+    assert r.json()["name"] == "Renamed card"
+
+
 def test_reactivating_and_resending_an_inactive_value_skip_the_guards(sw, sw_client):
     a, card = sw["a"], sw["a_card"]
     assert _deactivate(sw_client, a, card, "put").status_code == 200

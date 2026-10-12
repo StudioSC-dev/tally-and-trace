@@ -94,6 +94,15 @@ class AccountUpdate(BaseModel):
             raise ValueError("is_spending_wallet cannot be null")
         return v
 
+    @field_validator("is_active")
+    @classmethod
+    def _active_flag_not_null(cls, v):
+        # Omit the field to leave it unchanged; an explicit null would skip the
+        # deactivation guards and store a NULL the response schema rejects.
+        if v is None:
+            raise ValueError("is_active cannot be null")
+        return v
+
 class AccountFields(AccountBase):
     """An account's stored fields (no access fields)."""
     id: int
