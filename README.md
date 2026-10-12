@@ -249,17 +249,22 @@ shares. It gives them your Household, never write access and never
   Another user's records on your accounts are never shown to them, in lists,
   search, balance history, summaries, projections or exports. Tagging an
   account Household exposes your own transactions on it.
-- **Display:** records are `limited`. A description is shown when the record
-  carries your Household tag explicitly (a tag the record inherits from its
-  account doesn't count), and your Household tag is listed in its `tags` only
-  then. A Household bill on your private card or wallet shows its description
-  with the account neutral.
+- **Display:** records are `limited`. A description is shown for records on
+  accounts they can see, and for records carrying your Household tag
+  explicitly. A tag inherited from an account doesn't reveal the text of a
+  record on one of your private accounts. Your Household tag is listed in a
+  record's `tags` only when the record carries it explicitly. A Household bill
+  on your private card or wallet shows its description with the account
+  neutral.
 - **Projections** include your Household-tagged accounts. Your explicitly
   Household-tagged records outside them (a bill on a private card or wallet,
   or a recurring entry with no account) are listed as Household occurrences:
   `cash_delta` 0, never in unassigned cash, and on a card only the part not
-  already covered by payments from Household accounts (allocated to
-  statements oldest first, Household lines first).
+  already covered by payments from Household accounts (settled in the
+  statement engine's order: transaction rows first, oldest statement first,
+  then projected charges; Household lines first). A record on an account they
+  also see directly is an ordinary event in their normal projection, never
+  also an occurrence.
 - **Revoking or leaving** removes access at once. Demo users can neither share
   nor be shared with (403).
 
@@ -274,18 +279,25 @@ accounts are outside it.
 - `GET    /household/` — The views you can open: `[{sharer_id, sharer_name, is_self}]`, your own first
 - `GET    /household/{sharer_id}/dashboard` — `{sharer, accounts, month, upcoming}`: the scope accounts (as `/accounts/` returns them), this month's totals and the next 30 days
 - `GET    /household/{sharer_id}/transactions` — The scope's transactions you may read and the sharer's Household occurrences, newest first, as `/transactions/` (`start_date`, `end_date`, `limit`, `offset`)
-- `GET    /household/{sharer_id}/upcoming?days=` — `{sharer, items, days}`, items as `/forecast/upcoming`
-- `GET    /household/{sharer_id}/monthly?from=YYYY-MM&to=YYYY-MM` — Monthly totals (each bound defaults to this month; at most 36 months): `{sharer, from, to, months: [{month, kind, currencies}]}` with `kind` `recorded`, `current` or `projected`, and one line per currency, never converted: `income`, `expense`, `fees`, `moved_in`, `moved_out`, `paid_from_other_accounts`
+- `GET    /household/{sharer_id}/upcoming?days=` — `{sharer, items, days}`, items as `/forecast/upcoming`, each full item also with its `currency`
+- `GET    /household/{sharer_id}/monthly?from=YYYY-MM&to=YYYY-MM` — Monthly totals (each bound defaults to this month and lies in 1900-01 through 2999-12; at most 36 months; 422 otherwise): `{sharer, from, to, months: [{month, kind, currencies}]}` with `kind` `recorded`, `current` or `projected`, and one line per currency, never converted: `income`, `expense`, `fees`, `moved_in`, `moved_out`, `paid_from_other_accounts`
 
 Recorded months use posted transactions; the current month adds the projection
 from today, and later months are projected. Income, expense and fees come from
 the scope's cash accounts: credits and debits, card and loan payments (a card
-charge counts when the card is paid), and transfer fees. A transfer between a
+charge counts when the card is paid), and transfer fees. A payment into a loan
+or card the viewer can't see is one whole expense (principal and interest),
+with no fee line, so its interest is never shown. A transfer between a
 scope account and an account outside the scope that is not a card or loan is
 "Moved in" or "Moved out" (your own deposit from a private account into the
 joint account is "Moved in", and your private spending never appears).
 "Paid from other accounts" is the remainder of the sharer's Household bills
-outside the scope.
+outside the scope. A posted Household charge on a card statement that is not
+yet settled is left to the projection: it counts as covered by the planned
+and routed payments from the Household's accounts, which the projection shows
+as expense, so the joint outflow plus the remainder is always the charge,
+across recorded and projected months together. A statement already settled,
+or past due with no further planned payment, counts only posted payments.
 
 ### Accounts
 - `GET    /accounts/` — List the accounts you own or that are shared with you

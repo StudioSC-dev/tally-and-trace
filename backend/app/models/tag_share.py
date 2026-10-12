@@ -2,7 +2,7 @@
 
 A share gives one user (``user_id``) a viewer-only share of one tag
 (``tag_id``). Only the sharer's own Household system tag can be shared; that
-is enforced by the application (``app/routers/tags.py``), not by the
+is enforced by the application (``app/routers/shares.py``), not by the
 database. A user holds at most one share per tag
 (``uq_tag_shares_tag_id_user_id``). Deleting the tag or the user deletes the
 share. See ``app/core/access.py`` for what a share lets its holder read (the
