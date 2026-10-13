@@ -843,8 +843,9 @@ def test_household_occurrence_off_a_billed_card_is_estimated_in_full_view(hh, sw
 
 def test_a_limited_reader_who_views_the_card_keeps_the_record_face(hh, sw_client, sw_db):
     """C, a viewer on A's PHP card, reads A's pending USD 80 Household charge
-    Limited: it keeps its face and record currency (PHP 80), never the card
-    figure (4,640) under the record's label, in the listing and the month."""
+    Limited: its listed row keeps its face and record currency (PHP 80, plan
+    G1), but the month buckets it as D4 does for a caller who views the card:
+    in the card's currency at the card figure's remainder (PHP 4,640)."""
     from app.services.household import household_monthly, household_upcoming, household_view
 
     from app.tests.conftest import sw_post
@@ -861,9 +862,49 @@ def test_a_limited_reader_who_views_the_card_keeps_the_record_face(hh, sw_client
     months = household_monthly(sw_db, hh["c"]["id"], grant, datetime(2026, 10, 1),
                                datetime(2026, 11, 1), reference=reference)
     assert {line["currency"]: line["paid_from_other_accounts"]
-            for month in months for line in month["currencies"]} == {"PHP": 80.0}
+            for month in months for line in month["currencies"]} == {"PHP": 4_640.0}
     (item,) = [i for i in household_upcoming(sw_db, hh["c"]["id"], grant, reference,
                                              datetime(2026, 11, 1))
                if i.get("display_name") == "Household streaming"]
     assert (item["view"], item["face_amount"], item["currency"]) == ("limited", 80.0, "PHP")
     assert not set(item) & set(LABELS)
+
+
+def test_full_household_credits_and_income_on_a_card_are_estimated(hh, sw_client, sw_db):
+    """A pending projected USD 10 refund and a USD 10 recurring income on A's
+    private PHP card, both Household: A, who reads them in full, sees each as
+    PHP 580 est., like a debit; C, who reads them Limited, keeps their faces."""
+    from app.services.household import household_upcoming, household_view
+
+    from app.tests.conftest import sw_post
+
+    reference = datetime(2026, 10, 10)
+    sw_post(sw_client, hh["a"], "/transactions/", {
+        "account_id": hh["a_card"], "transaction_type": "credit", "amount": 10,
+        "currency": "PHP", "projected_amount": 10, "projected_currency": "USD",
+        "transaction_date": "2026-10-12T00:00:00", "is_posted": False,
+        "description": "Household refund", "tag_ids": [hh["hh_a"]]})
+    sw_post(sw_client, hh["a"], "/budget-entries/", {
+        "name": "Household cashback", "entry_type": "income", "amount": 10, "currency": "USD",
+        "next_occurrence": "2026-10-14T00:00:00", "account_id": hh["a_card"],
+        "end_mode": "after_occurrences", "max_occurrences": 1, "tag_ids": [hh["hh_a"]]})
+
+    def items(who):
+        sw_db.expire_all()
+        grant = household_view(sw_db, who["id"], hh["a"]["id"])
+        return {i.get("name") or i.get("display_name"): i for i in household_upcoming(
+            sw_db, who["id"], grant, reference, datetime(2026, 11, 1))}
+
+    full = items(hh["a"])
+    for name in ("Household refund", "Household cashback"):
+        item = full[name]
+        assert (item["amount"], item["currency"], item["estimated"], item["original_amount"],
+                item["original_currency"], item["rate"]) == (580.0, "PHP", True, 10.0, "USD",
+                                                             RATE_TO_PHP), name
+    limited = items(hh["c"])
+    assert (limited["Household refund"]["face_amount"],
+            limited["Household refund"]["currency"]) == (10.0, "PHP")
+    assert (limited["Household cashback"]["face_amount"],
+            limited["Household cashback"]["currency"]) == (10.0, "USD")
+    for name in ("Household refund", "Household cashback"):
+        assert not set(limited[name]) & set(LABELS), name

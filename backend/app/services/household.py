@@ -32,9 +32,10 @@ projection). The in-scope part allocated to a statement covers its Household
 lines first, in date order, capped at their total; each line's remainder is
 ``max(0, line - its covered part)`` and only a remainder above 0 is
 returned, as the occurrence's ``face_amount``. Any other occurrence (a
-wallet, a bank, a card without cycle settings, a refund, a transfer, or an
-accountless entry) is not covered. A debit, credit or non-transfer entry on
-such an account that the caller reads in full is counted in that account's
+wallet, a bank, a card without cycle settings, a refund or income on any
+card, a transfer, or an accountless entry) is not covered. A debit, credit
+or non-transfer entry on such an account (a billed card's credit or income
+included) that the caller reads in full is counted in that account's
 currency: its face (``pending_face`` for a pending row, the posted
 ``amount``, an entry's ``amount``) estimated at the stored rate, or
 unconverted (no figure, in no total) with no stored rate. Every other one
@@ -42,11 +43,16 @@ unconverted (no figure, in no total) with no stored rate. Every other one
 amount, in the record's currency.
 
 **Which currency a covered line is counted in.** When the caller reads the
-record in full, the card's currency, at the card figure's remainder.
-Otherwise (a Limited record, even one on a card the caller views) the
-record's currency, as its Limited value shows it, at ``face x remainder /
-card figure``: the face when nothing is covered and today's figure for a
-same-currency line, so no rate or converted figure is disclosed.
+record in full, the card's currency, at the card figure's remainder, in the
+listing and the month. Otherwise (a Limited record, even one on a card the
+caller views) the listing keeps the record's currency, as its Limited value
+shows it, at ``face x remainder / card figure``: the face when nothing is
+covered and today's figure for a same-currency line, so no rate or converted
+figure is disclosed. The monthly ``paid_from_other_accounts`` bucket follows
+plan D4: a caller who views the card counts the line in the card's currency
+at the card figure's remainder (an aggregate of an account they view; with
+no stored rate it is in no total), and anyone else at the listing's figure
+in the record's currency (``Occurrence.month``).
 
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
@@ -124,10 +130,20 @@ class Occurrence:
     # that face has no stored rate (the remainder then stays the face).
     estimate: Optional[dict] = None
     unconverted: bool = False
+    # The monthly ``paid_from_other_accounts`` bucket, when it differs from the
+    # listing (module docstring: a Limited record on a card the caller views):
+    # ``(currency, amount)``, amount None when it has no figure (no rate).
+    bucket: Optional[Tuple[str, Optional[Decimal]]] = None
 
     def __post_init__(self):
         if self.currency is None:
             self.currency = _currency(self.record.currency)
+
+    def month(self) -> Tuple[str, Optional[Decimal]]:
+        """``(currency, amount)`` of the monthly bucket; amount None: in no total."""
+        if self.bucket is not None:
+            return self.bucket
+        return self.currency, None if self.unconverted else self.remainder
 
 
 def _money(value) -> Decimal:
@@ -199,11 +215,17 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     redactor = Redactor(db, access.uid, access)
     estimates: Dict[int, dict] = {}  # id(occurrence) -> its card line's estimate
 
-    def in_card_currency(occ: Occurrence, card: Account) -> bool:
+    def in_card_currency(occ: Occurrence) -> bool:
         """The caller reads the record in full (module docstring). A Limited
-        reader keeps the record's face and currency, as its Limited value
-        shows them, even when they view the card."""
+        reader keeps the record's face and currency in the listing, as its
+        Limited value shows them, even when they view the card."""
         return redactor.view(occ.record) != LIMITED
+
+    def card_bucket(occ: Occurrence, card: Account) -> bool:
+        """A Limited record on a card the caller views: its monthly bucket is
+        the card's currency at the card figure's remainder (plan D4), while
+        its listing keeps the record's face (module docstring)."""
+        return not in_card_currency(occ) and card.id in viewable_ids
 
     def account_fx(occ: Occurrence, face, face_currency) -> None:
         """An occurrence on no billed card, read in full (module docstring):
@@ -232,9 +254,11 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
         """
         figure, estimate = money.to(face, face_currency, card.currency)
         if figure is None:
-            if in_card_currency(occ, card):
+            if in_card_currency(occ):
                 occ.currency, occ.unconverted, occ.estimate = (
                     _currency(card.currency), True, estimate)
+            elif card_bucket(occ, card):
+                occ.bucket = (_currency(card.currency), None)
             return False
         if estimate is not None:
             estimates[id(occ)] = estimate
@@ -253,8 +277,8 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
         if txn.transaction_type == TransactionType.DEBIT and txn.account_id in billed:
             if card_fx(occ, billed[txn.account_id], face, face_currency):
                 card_lines.setdefault(txn.account_id, []).append((occ, ("t", txn.id)))
-        elif (txn.account_id not in billed
-              and txn.transaction_type in (TransactionType.DEBIT, TransactionType.CREDIT)):
+        elif txn.transaction_type in (TransactionType.DEBIT, TransactionType.CREDIT):
+            # A credit on a billed card is never covered: in its account's currency.
             account_fx(occ, face, face_currency)
 
     linked = _linked_occurrence_days(db, [e.id for e in entries])
@@ -266,8 +290,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
                     continue  # billed on its statement, but not listed: before the window
                 occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount))
                 out.append(occ)
-                if (card_fx(occ, card, entry.amount, entry.currency)
-                        and entry.entry_type == BudgetEntryType.EXPENSE):
+                if entry.entry_type != BudgetEntryType.EXPENSE:
+                    # Income on a billed card is never covered: in its account's currency.
+                    account_fx(occ, entry.amount, entry.currency)
+                elif card_fx(occ, card, entry.amount, entry.currency):
                     card_lines.setdefault(entry.account_id, []).append(
                         (occ, ("e", entry.id, when)))
             continue
@@ -308,10 +334,13 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             remainder, _, due, figure = covered[key]
             if key in by_due.get(due, {}):
                 remainder, _, _, figure = by_due[due][key]
-            if in_card_currency(occ, card):
+            if in_card_currency(occ):
                 occ.currency, occ.remainder = _currency(card.currency), remainder
                 occ.estimate = estimates.get(id(occ))
-            elif figure:
+                continue
+            if card_bucket(occ, card):
+                occ.bucket = (_currency(card.currency), remainder)
+            if figure:
                 occ.remainder = _money(occ.face * remainder / figure)
     return [o for o in out if o.remainder > 0]
 
@@ -740,8 +769,9 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
                                          viewable_ids=viewable_account_ids(
                                              db, uid, roles=VIEW_ROLES),
                                          access=access, projection_start=today, fx=fx):
-            if occ.record.transaction_type == TransactionType.DEBIT and not occ.unconverted:
-                add(occ.date, occ.currency, "paid_from_other_accounts", occ.remainder)
+            currency, amount = occ.month()
+            if occ.record.transaction_type == TransactionType.DEBIT and amount is not None:
+                add(occ.date, currency, "paid_from_other_accounts", amount)
 
     # Projected: from today to the end of the last month.
     if end > today:
@@ -752,11 +782,12 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             model, record_id = e["origin"]
             source = db.get(model, record_id)
             if e.get("household_occurrence"):
-                # An unconverted occurrence (no figure in its row) is in no total.
+                # Its monthly bucket (``Occurrence.month``); one with no figure
+                # (unconverted) is in no total.
+                currency, amount = e["household_bucket"]
                 if (e["type"] in (TransactionType.DEBIT.value, BudgetEntryType.EXPENSE.value)
-                        and e["rows"][0]["amount"] is not None):
-                    add(when, e["rows"][0]["currency"], "paid_from_other_accounts",
-                        e["face_amount"])
+                        and amount is not None):
+                    add(when, currency, "paid_from_other_accounts", amount)
                 continue
             if not e["counts_as_cash"]:
                 continue

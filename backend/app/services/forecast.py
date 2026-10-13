@@ -843,7 +843,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
 # Internal per-currency keys every event carries inside this module; collect_events
 # drops them unless asked (``detail``), so a default caller's events are unchanged.
 DETAIL_KEYS = ("leg_currencies", "rows", "cash_by_currency", "moved_by_currency",
-               "estimate", "face_currency", "unconverted")
+               "estimate", "face_currency", "unconverted", "household_bucket")
 
 
 def _row(currency, amount, estimate=None) -> dict:
@@ -1677,6 +1677,7 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
             counts_as_cash=False,
             origin=(type(record), record.id),
             household_occurrence=True,
+            household_bucket=occ.month(),
             **occ.extra,
         ), [], [row], record.currency)
         if limited:
