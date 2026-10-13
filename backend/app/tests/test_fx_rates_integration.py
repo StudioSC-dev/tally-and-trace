@@ -10,6 +10,7 @@ provider (the B8 override is in place).
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -186,3 +187,58 @@ def test_the_suite_never_reaches_the_provider(sw_client):
         fx._refresher.provider.fetch()
     assert fx._refresher.clock() == FX_REF
     assert FX_REF == datetime(2026, 11, 2, 0, 0)
+
+
+def test_the_refresh_runs_only_after_the_request_session_is_closed(monkeypatch):
+    """The background refresh never runs while the request's session holds a
+    transaction: reading a stored rate opens one, and the task closes that
+    session before it fetches (whatever order FastAPI runs background tasks
+    and dependency exits in)."""
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.core.database import SessionLocal, get_db
+    from app.services import fx
+
+    sessions = []
+
+    def request_db():
+        db = SessionLocal()
+        sessions.append(db)
+        try:
+            yield db
+        finally:
+            db.close()
+
+    observed = []
+
+    class Provider:
+        def fetch(self):
+            (db,) = sessions
+            observed.append(db.in_transaction())
+            return {c.value: (Decimal("1"), date(2026, 11, 1)) for c in CurrencyType}
+
+    store = fx.MemoryRateStore()
+
+    @contextmanager
+    def memory_store():
+        yield store
+
+    now = datetime(2026, 11, 2, 0, 0)
+    monkeypatch.setattr(fx, "_refresher", fx.Refresher(
+        provider=Provider(), clock=lambda: now, store_factory=memory_store))
+
+    mini = FastAPI()
+    mini.dependency_overrides[get_db] = request_db
+
+    @mini.get("/convert")
+    def convert(rates: fx.FxRates = Depends(fx.get_fx), db=Depends(get_db)):
+        assert rates.store.db is db  # one session per request
+        # The migration's seed rows are stale (epoch ``fetched_at``): a refresh is scheduled.
+        assert rates.rate("PHP", "USD").stale is True
+        assert db.in_transaction()
+        return {}
+
+    with TestClient(mini) as client:
+        assert client.get("/convert").status_code == 200
+    assert observed == [False]

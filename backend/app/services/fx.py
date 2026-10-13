@@ -16,8 +16,10 @@ A request with nothing to convert never asks for a rate, so it never
 schedules a fetch. In a request, ``get_fx`` wires ``on_stale`` to
 ``schedule_refresh``, which adds at most one background task per process at
 a time (a 60 s lease) and none for 15 minutes after a failed or partial
-fetch. The task runs after the response, on its own session, so no request
-transaction is ever held across the network call.
+fetch. The task runs after the response: it first closes the request's
+session (``Refresher.schedule``), then works on its own, so no request
+session or transaction is held across the network call. The fetch itself has
+one overall deadline, body included (``CurrencyApiProvider``).
 
 Services called without a request use ``FxRates.offline(db)``: stored rates
 only, nothing scheduled. It is built by the module hook ``_offline_factory``
@@ -25,6 +27,7 @@ so the test suite can replace it.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -132,19 +135,54 @@ class CurrencyApiProvider:
     def fetch(self) -> dict[str, tuple[Decimal, date]]:
         deadline = self.monotonic() + self.budget
         errors = []
-        with httpx.Client(transport=self.transport) as client:
-            for url in self.urls:
-                remaining = deadline - self.monotonic()
-                if remaining <= 0:
-                    errors.append(f"{url}: no time left")
-                    break
-                try:
-                    response = client.get(url, timeout=httpx.Timeout(remaining))
-                    response.raise_for_status()
-                    return self.parse(response.json())
-                except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-                    errors.append(f"{url}: {exc!r}")
+        for url in self.urls:
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                errors.append(f"{url}: no time left")
+                break
+            try:
+                return self.parse(json.loads(self._get(url, remaining)))
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, TimeoutError) as exc:
+                errors.append(f"{url}: {exc!r}")
         raise FxFetchError("; ".join(errors))
+
+    def _get(self, url: str, remaining: float) -> bytes:
+        """``url``'s body, within ``remaining`` seconds overall.
+
+        HTTPX timeouts bound each connect, read or write, not the whole
+        response, so a body that trickles in would outlast them. The attempt
+        (request and body) runs on a worker thread instead, and is abandoned
+        once ``remaining`` has passed: its client is closed, and the worker
+        stops at the next chunk.
+        """
+        result: dict = {}
+        cancelled = threading.Event()
+        client = httpx.Client(transport=self.transport)
+
+        def attempt() -> None:
+            try:
+                with client.stream("GET", url, timeout=httpx.Timeout(remaining)) as response:
+                    response.raise_for_status()
+                    chunks = []
+                    for chunk in response.iter_bytes():
+                        if cancelled.is_set():
+                            return
+                        chunks.append(chunk)
+                    result["body"] = b"".join(chunks)
+            except Exception as exc:  # re-raised on the caller's thread
+                result["error"] = exc
+
+        worker = threading.Thread(target=attempt, name="fx-fetch", daemon=True)
+        worker.start()
+        worker.join(remaining)
+        if worker.is_alive():
+            cancelled.set()
+            client.close()
+            raise TimeoutError(f"no complete response within {remaining:.1f} s")
+        client.close()
+        if "error" in result:
+            raise result["error"]
+        return result["body"]
 
     @staticmethod
     def parse(payload: dict) -> dict[str, tuple[Decimal, date]]:
@@ -366,7 +404,16 @@ class Refresher:
     def _backing_off(self, now: datetime) -> bool:
         return self.failed_at is not None and now - self.failed_at < BACKOFF
 
-    def schedule(self, background_tasks: BackgroundTasks) -> bool:
+    def schedule(self, background_tasks: BackgroundTasks,
+                 release: Optional[Session] = None) -> bool:
+        """Add one refresh task, unless one is leased or a failure is backing off.
+
+        ``release`` is the request's session: the task closes it before it
+        does anything else, so no request session or transaction is open
+        across the network call, whichever order the installed FastAPI runs
+        background tasks and dependency exits in (the request is answered by
+        then; closing a closed session again is harmless).
+        """
         with self._lock:
             now = self.clock()
             if self.in_flight is not None and now - self.in_flight < LEASE:
@@ -374,8 +421,17 @@ class Refresher:
             if self._backing_off(now):
                 return False
             self.in_flight = now
-        background_tasks.add_task(self.run)
+        if release is None:
+            background_tasks.add_task(self.run)
+        else:
+            background_tasks.add_task(self.run_after_release, release)
         return True
+
+    def run_after_release(self, session: Session) -> None:
+        try:
+            session.close()
+        finally:
+            self.run()
 
     def run(self) -> None:
         try:
@@ -434,7 +490,7 @@ def get_fx(background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> 
     """The request's rates; a stale or missing rate schedules a refresh."""
     refresher = _refresher
     return FxRates(DbRateStore(db), refresher.provider, refresher.clock,
-                   on_stale=lambda: refresher.schedule(background_tasks))
+                   on_stale=lambda: refresher.schedule(background_tasks, release=db))
 
 
 def _default_offline_factory(db: Session) -> FxRates:

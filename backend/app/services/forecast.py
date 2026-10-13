@@ -486,7 +486,8 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
     its amount estimated into that currency when it differs; one with no
     stored rate is left out. A recurring transfer between two projection-cash
     accounts in different currencies is money moved: ``moved_out`` in the
-    source's currency and ``moved_in`` in the destination's.
+    source's currency and ``moved_in`` in the destination's, each leg counted
+    on its own (a leg with no stored rate is left out, the other kept).
     """
     buckets: dict = {}
 
@@ -524,9 +525,12 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
             elif src in cash_ids and dst in cash_ids:
                 dst_cur = money.currency_of(dst)
                 if dst_cur != src_cur:
+                    # Each leg on its own: one with no stored rate is left out,
+                    # never the other, whose figure is known.
                     out, got = monthly(entry, src_cur), monthly(entry, dst_cur)
-                    if out is not None and got is not None:
+                    if out is not None:
                         bucket(src_cur).moved_out += out
+                    if got is not None:
                         bucket(dst_cur).moved_in += got
             continue
         if entry.user_id != user_id and src not in scope_ids:
@@ -1645,6 +1649,13 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
                                      fx=money.fx if money is not None else None):
         record = occ.record
         is_txn = isinstance(record, Transaction)
+        limited = redactor.view(record) == LIMITED
+        # The listing row keeps the occurrence's FX state (plan B5): an
+        # estimate, or no figure when unconverted (so in no total). Only a full
+        # row shows it; a Limited event shows its approved face and currency,
+        # with no new fields (plan G).
+        row = _row(occ.currency, None if occ.unconverted else occ.remainder,
+                   None if limited else occ.estimate)
         event = _meta(_event(
             date=occ.date,
             name=record.description if is_txn else record.name,
@@ -1657,8 +1668,8 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
             origin=(type(record), record.id),
             household_occurrence=True,
             **occ.extra,
-        ), [], [_row(occ.currency, occ.remainder)], record.currency)
-        if redactor.view(record) == LIMITED:
+        ), [], [row], record.currency)
+        if limited:
             _limit(event, redactor, name=redactor.display_description(record),
                    currency=record.currency, kind="household")
             event["account"] = redactor.account_ref(record.account_id)
@@ -2263,14 +2274,17 @@ def row_labels(row: dict) -> dict:
     def num(x):
         return round(float(x), 2) if x is not None else None
 
+    # No single original figure (a statement over lines in several currencies):
+    # the keys are left out, never sent as null.
+    original = ({"original_amount": num(estimate["original_amount"]),
+                 "original_currency": estimate["original_currency"]}
+                if estimate.get("original_currency") is not None else {})
     if row["amount"] is None:
-        return {"unconverted": True, "original_amount": num(estimate["original_amount"]),
-                "original_currency": estimate["original_currency"]}
+        return {"unconverted": True, **original}
     rate = estimate["rate"]
     return {
         "estimated": True,
-        "original_amount": num(estimate["original_amount"]),
-        "original_currency": estimate["original_currency"],
+        **original,
         "rate": float(rate.rate),
         "rate_as_of": rate.as_of.isoformat(),
         "rate_stale": rate.stale,

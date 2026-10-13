@@ -264,6 +264,32 @@ def test_a_posted_create_with_the_actual_figure_fills_the_provenance(sw_client, 
     assert _balance(db, fp["php"]) == Decimal("45300.00")
 
 
+@pytest.mark.parametrize("actor", ["owner", "editor"])
+def test_reverting_a_posted_create_with_only_a_foreign_currency_keeps_the_amount(
+        sw_client, sw_db, fp, actor):
+    """Created posted with ``currency`` USD and no ``projected_amount``: the
+    actual PHP 4,700 is all there is. Reverting records the account's currency
+    as the face currency, so the forecast reads the retained 4,700 as PHP and
+    never converts it again (4,700 read as USD would be 272,600)."""
+    client, db = sw_client, sw_db
+    who = fp["a"] if actor == "owner" else fp["b"]
+    txn = sw_post(client, fp["a"], "/transactions/", {
+        "account_id": fp["php"], "transaction_type": "debit", "amount": 4_700,
+        "currency": "USD", "description": "Foreign purchase", "transaction_date": DAY,
+        "is_posted": True})["id"]
+    assert _balance(db, fp["php"]) == Decimal("45300.00")
+
+    r = _put(client, who, txn, {"is_posted": False})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("50000.00")
+    row = _row(db, txn)
+    assert (row.amount, row.projected_amount, row.projected_currency.value) == (
+        Decimal("4700.00"), None, "PHP")
+    item = _forecast_row(client, who, txn)
+    assert (item["amount"], item["currency"]) == (4_700.0, "PHP")
+    assert not set(item) & {"estimated", "original_amount", "rate", "unconverted"}
+
+
 # --- F2: refusals --------------------------------------------------------------------------
 
 def test_posting_a_foreign_pending_debit_status_only_is_refused(sw_client, sw_db, fp):

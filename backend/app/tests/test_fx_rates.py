@@ -8,6 +8,7 @@ runs only when the endpoint returns, and never when it raises.
 """
 import json
 import threading
+import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -474,6 +475,40 @@ def test_provider_shares_one_overall_budget():
     with pytest.raises(fx.FxFetchError):
         provider.fetch()
     assert timeouts == [5.0, 1.5]  # the mirror gets only what the first try left
+
+
+class SlowBody(httpx.SyncByteStream):
+    """A response body that trickles in: each chunk after ``delay`` seconds."""
+
+    def __init__(self, chunks, delay):
+        self.chunks = chunks
+        self.delay = delay
+
+    def __iter__(self):
+        for chunk in self.chunks:
+            time.sleep(self.delay)
+            yield chunk
+
+
+def test_provider_deadline_covers_the_response_body():
+    """One overall deadline across both URLs, reading the body included: a body
+    that would take 2 s is abandoned at the 0.3 s budget, and the mirror gets no
+    time. (HTTPX's own timeouts bound each read, not the whole response; the mock
+    transport applies none at all.)"""
+    body = _payload(php=60)
+    chunks = [body[i:i + 4] for i in range(0, len(body), 4)]
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(200, stream=SlowBody(chunks, 2.0 / len(chunks)))
+
+    provider = CurrencyApiProvider(transport=httpx.MockTransport(handler), budget=0.3)
+    started = time.monotonic()
+    with pytest.raises(fx.FxFetchError, match="no time left"):
+        provider.fetch()
+    assert time.monotonic() - started < 1.0
+    assert seen == [fx.PRIMARY_URL]
 
 
 # --- the clock ----------------------------------------------------------------------------

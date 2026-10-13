@@ -323,14 +323,17 @@ def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
     """A statement's estimate label from its estimated lines, or None.
 
     ``original_amount`` is the sum of the estimated lines' faces when they
-    share one currency (else None), with that conversion's rate.
+    share one currency, with that conversion's rate. Lines in several
+    currencies have no single original figure: the label then carries no
+    ``original_*`` keys at all, only the rate (the statement is still an
+    estimate).
     """
     found = [estimates[id(line)] for line in lines if id(line) in estimates]
     if not found:
         return None
     currencies = {e["original_currency"] for e in found}
     if len(currencies) != 1:
-        return {"original_amount": None, "original_currency": None, "rate": found[0]["rate"]}
+        return {"rate": found[0]["rate"]}
     return {"original_amount": sum((e["original_amount"] for e in found), Decimal("0")),
             "original_currency": currencies.pop(), "rate": found[0]["rate"]}
 

@@ -420,6 +420,53 @@ def test_payables_carry_currency_and_estimates(sw_client, cx, frozen):
         ("2026-11-30", "USD Card statement", 300.0, "USD", False)]
 
 
+def test_a_statement_estimated_from_several_currencies_names_no_original(sw_client, sw_db, cx,
+                                                                          frozen):
+    """Pending USD 10 and EUR 9 on the PHP card: one estimated PHP 1,160 statement,
+    with no single original figure, so ``original_*`` are left out (not null)."""
+    from app.main import app
+    from app.services import fx
+    from app.tests.conftest import FX_STORE, FxNoNetwork, fx_clock, fx_rates
+
+    fetched = FX_REF - timedelta(hours=1)
+    with_eur = fx.MemoryRateStore([*FX_STORE.all().values(), fx.StoredRate(
+        "EUR", Decimal("0.9"), fetched.date(), fetched, "test")])
+    _txn(sw_db, cx["a"]["id"], cx["php_card"], "debit", 9, _d(4), "PHP", projected_amount=9,
+         projected_currency="EUR", description="Euro charge")
+    app.dependency_overrides[fx.get_fx] = lambda: fx.FxRates(
+        with_eur, provider=FxNoNetwork(), clock=fx_clock, on_stale=lambda: None)
+    try:
+        payables = _get(sw_client, cx["a"], "/dashboard/snapshot")["payables"]
+        timeline = _get(sw_client, cx["a"], "/forecast/timeline", days=30)
+    finally:
+        app.dependency_overrides[fx.get_fx] = fx_rates
+    (payable,) = [p for p in payables if p["name"] == "PHP Card statement"]
+    (event,) = [e for e in _row(timeline, "PHP")["events"] if e["name"] == "PHP Card statement"]
+    assert payable["amount"] == 1_160.0 and event["amount"] == -1_160.0
+    for row in (payable, event):
+        assert (row["currency"], row["estimated"], row["rate_stale"]) == ("PHP", True, False)
+        assert "original_amount" not in row and "original_currency" not in row
+
+
+def test_disposable_keeps_the_leg_it_can_convert(sw_db, cx):
+    """The recurring USD 500 -> PHP transfer with no PHP row: USD still moves 500
+    out; only the PHP leg (and the USD 20 subscription in PHP) is left out."""
+    from app.services.forecast import disposable_by_currency
+    from app.services.fx import FxRates, MemoryRateStore
+    from app.tests.conftest import FX_STORE, FxNoNetwork, fx_clock
+
+    no_php = MemoryRateStore([r for c, r in FX_STORE.all().items() if c != "PHP"])
+    body = disposable_by_currency(sw_db, cx["a"]["id"],
+                                  fx=FxRates(no_php, FxNoNetwork(), fx_clock, lambda: None))
+    usd, php = _row(body, "USD"), _row(body, "PHP")
+    assert (usd["monthly_expenses"], usd["moved_out"], usd["monthly_disposable"]) == (
+        1_550.0, 500.0, -2_050.0)
+    assert (php["monthly_income"], php["monthly_expenses"], php["moved_in"]) == (
+        40_000.0, 25_000.0, 0.0)
+    for row in body["by_currency"]:
+        check_disposable_row(row)
+
+
 # --- criterion 10 (integration): no stored rate ------------------------------------------
 
 @pytest.fixture

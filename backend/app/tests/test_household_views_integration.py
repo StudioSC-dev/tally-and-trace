@@ -410,6 +410,66 @@ def test_household_upcoming_items_carry_their_currency(hh, sw_client, sw_db):
     assert (currency["Dollar bill"], currency["Household rent"]) == ("USD", "PHP")
 
 
+G2_FIELDS = {"estimated", "original_amount", "original_currency", "rate", "rate_as_of",
+             "rate_stale", "unconverted", "received_amount", "unconverted_lines"}
+
+
+def test_household_occurrences_keep_their_fx_state(hh, sw_client, sw_db):
+    """On A's private PHP card, tagged Household: a pending USD 10 charge (the
+    form's convention) and a recurring JPY 1,000 bill, with no JPY rate stored.
+    A reads both in full: the charge is an estimate (PHP 580, with its labels),
+    the bill stays listed unconverted (no amount, counted, in no total). C reads
+    them Limited: the approved face and currency, no cash, no new fields."""
+    from datetime import timedelta
+
+    from app.core.time import naive_utc_now
+    from app.services import forecast
+    from app.services.household import household_events, household_monthly, household_view
+
+    a, c = hh["a"], hh["c"]
+    soon = (naive_utc_now() + timedelta(days=3)).replace(hour=0, minute=0, second=0,
+                                                        microsecond=0)
+    _txn(sw_client, a, hh["a_card"], 10, soon.isoformat(), currency="PHP", projected_amount=10,
+         projected_currency="USD", description="Dollar streaming", tags=[hh["hh_a"]])
+    sw_post(sw_client, a, "/budget-entries/", {
+        "name": "Yen bill", "entry_type": "expense", "amount": 1_000, "currency": "JPY",
+        "next_occurrence": soon.isoformat(), "account_id": hh["a_card"],
+        "tag_ids": [hh["hh_a"]]})
+
+    items = {i["name"]: i for i in _get(sw_client, a, f"/household/{a['id']}/upcoming")["items"]}
+    streaming, yen = items["Dollar streaming"], items["Yen bill"]
+    assert (streaming["amount"], streaming["currency"], streaming["estimated"],
+            streaming["original_amount"], streaming["original_currency"], streaming["rate"],
+            streaming["rate_stale"]) == (580.0, "PHP", True, 10.0, "USD", 58.0, False)
+    assert (yen["amount"], yen["unconverted"], yen["currency"], yen["original_amount"],
+            yen["original_currency"]) == (None, True, "PHP", 1_000.0, "JPY")
+    assert "estimated" not in yen
+
+    # Counted as unconverted where the response reports it, and in no total.
+    sw_db.expire_all()
+    grant = household_view(sw_db, a["id"], a["id"])
+    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    collector = forecast.FxCollector()
+    forecast.currency_upcoming_items(
+        household_events(sw_db, a["id"], grant, today, today + timedelta(days=30)), collector)
+    assert collector.as_dict()["unconverted_count"] == 1
+    first = soon.replace(day=1)
+    paid = [line for month in household_monthly(sw_db, a["id"], grant, first, first)
+            for line in month["currencies"]]
+    assert [(line["currency"], line["paid_from_other_accounts"]) for line in paid] == [
+        ("PHP", 580.0)]
+
+    # C reads both Limited: the approved face and currency, no cash, no new fields.
+    limited = {i["display_name"]: i
+               for i in _get(sw_client, c, f"/household/{a['id']}/upcoming")["items"]}
+    shape = set(limited["Dollar streaming"])
+    assert set(limited["Yen bill"]) == shape and not shape & G2_FIELDS
+    assert (limited["Yen bill"]["face_amount"], limited["Yen bill"]["currency"],
+            limited["Yen bill"]["cash_delta"]) == (1_000.0, "JPY", 0.0)
+    assert (limited["Dollar streaming"]["face_amount"], limited["Dollar streaming"]["currency"],
+            limited["Dollar streaming"]["cash_delta"]) == (10.0, "PHP", 0.0)
+
+
 # --- Cover counts only the payments the viewer can read -----------------------------------------
 
 def _recurring_payment(db, who, frm, to, amount, when, currency="PHP"):

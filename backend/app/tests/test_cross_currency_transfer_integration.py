@@ -435,19 +435,59 @@ def test_own_data_export_carries_the_received_amount(sw_client, xc):
 # --- inbound figures in summaries -------------------------------------------------------
 
 def test_period_summary_tops_a_wallet_up_by_the_received_amount(sw_client, xc):
+    """Every category figure stays in its bucket's currency: the PHP top-up is
+    PHP spending (its unallocated row is the PHP figure sent), and the USD
+    wallet's own spending nets against unallocated in the USD bucket."""
     client, a = sw_client, xc["a"]
     wallet = _account(client, a, "USD Wallet", "USD", 0, is_spending_wallet=True)
     _transfer(client, a, xc["php"], wallet, 10_000, transfer_fee=50, received_amount=170)
+    sw_post(client, a, "/transactions/", {
+        "account_id": wallet, "transaction_type": "debit", "amount": 30,
+        "transaction_date": "2026-10-08T00:00:00", "is_posted": True})
     r = client.get(f"{API}/transactions/summary/period", headers=a["headers"], params={
         "start_date": "2026-10-01T00:00:00", "end_date": "2026-10-31T23:59:59"})
     assert r.status_code == 200, r.text
     body = r.json()
-    # The top-up is spending of what left PHP (amount + fee) ...
+    rows = {row["currency"]: row for row in body["by_currency"]}
+
+    def figures(row):
+        return {name: Decimal(str(v["expenses"])) for name, v in row["category_breakdown"].items()}
+
+    # The top-up is spending of what left PHP (amount + fee), all in PHP.
+    php = rows["PHP"]
+    assert Decimal(str(php["total_expenses"])) == Decimal("10050")
+    assert figures(php) == {"Unallocated wallet spend": Decimal("10000"),
+                            "Transfer fees": Decimal("50")}
+    assert sum(figures(php).values()) == Decimal(str(php["total_expenses"]))
+    assert body["category_breakdown"] == php["category_breakdown"]
     assert Decimal(str(body["summary"]["total_expenses"])) == Decimal("10050")
-    # ... and what arrived in the wallet is its unallocated spend.
-    breakdown = body["category_breakdown"]
-    assert Decimal(str(breakdown["Unallocated wallet spend"]["expenses"])) == Decimal("170")
-    assert Decimal(str(breakdown["Transfer fees"]["expenses"])) == Decimal("50")
+    # The wallet's own spending nets in USD: it was already spent at the top-up.
+    usd = rows["USD"]
+    assert Decimal(str(usd["total_expenses"])) == Decimal("0")
+    assert figures(usd) == {"Uncategorized": Decimal("30"),
+                            "Unallocated wallet spend": Decimal("-30")}
+    assert sum(figures(usd).values()) == Decimal(str(usd["total_expenses"]))
+
+
+def test_period_summary_counts_add_up_for_a_single_currency_user(sw_client, sw_people):
+    """Each row counts once, in its bucket: a single-currency user's per-currency
+    ``transaction_count`` is the summary's."""
+    client = sw_client
+    a = sw_people("Pia", "Peso")
+    bank = _account(client, a, "Peso bank", "PHP", 5_000)
+    spare = _account(client, a, "Peso spare", "PHP", 0)
+    for kind, amount in (("debit", 100), ("credit", 300)):
+        sw_post(client, a, "/transactions/", {
+            "account_id": bank, "transaction_type": kind, "amount": amount,
+            "transaction_date": "2026-10-05T00:00:00", "is_posted": True})
+    _transfer(client, a, bank, spare, 1_000, transfer_fee=10)
+    r = client.get(f"{API}/transactions/summary/period", headers=a["headers"], params={
+        "start_date": "2026-10-01T00:00:00", "end_date": "2026-10-31T23:59:59"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [row["currency"] for row in body["by_currency"]] == ["PHP"]
+    assert sum(row["transaction_count"] for row in body["by_currency"]) == \
+        body["summary"]["transaction_count"] == 3
 
 
 def test_household_inbound_leg_uses_the_received_amount(sw_client, sw_db, sw_people):
@@ -473,6 +513,78 @@ def test_household_inbound_leg_uses_the_received_amount(sw_client, sw_db, sw_peo
     rows = {row["currency"]: row for row in october["currencies"]}
     assert set(rows) == {"USD"}
     assert rows["USD"]["moved_in"] == pytest.approx(170.0)
+
+
+def _household_world(client, db, sw_people):
+    """Owner A's Household: PHP joint 50,000, PHP joint 2 and USD joint 1,000, all tagged."""
+    from app.core.tags import ensure_household_tag
+
+    a = sw_people("Ana", "Owner")
+    hh = ensure_household_tag(db, a["id"])
+    db.commit()
+    return {"a": a, "hh": hh.id,
+            "php": _account(client, a, "PHP joint", "PHP", 50_000, tag_ids=[hh.id]),
+            "php2": _account(client, a, "PHP joint 2", "PHP", 0, tag_ids=[hh.id]),
+            "usd": _account(client, a, "USD joint", "USD", 1_000, tag_ids=[hh.id])}
+
+
+def _household_rows(db, a, first, last, reference):
+    from app.services.household import household_monthly, household_view
+
+    db.expire_all()
+    grant = household_view(db, a["id"], a["id"])
+    months = household_monthly(db, a["id"], grant, first, last, reference=reference)
+    out = {}
+    for month in months:
+        for row in month["currencies"]:
+            line = out.setdefault(row["currency"], {})
+            for key, value in row.items():
+                if key != "currency" and value:
+                    line[key] = round(line.get(key, 0.0) + value, 2)
+    return out
+
+
+def test_household_moves_money_between_its_own_currencies(sw_client, sw_db, sw_people):
+    """Recorded: a PHP 10,000 -> USD 170 transfer between two Household cash
+    accounts is money moved (out in PHP, in in USD) plus its fee; a same-currency
+    one between Household accounts is still its fee only."""
+    from datetime import datetime
+
+    w = _household_world(sw_client, sw_db, sw_people)
+    _transfer(sw_client, w["a"], w["php"], w["usd"], 10_000, transfer_fee=50,
+              received_amount=170, transaction_date="2026-10-07T00:00:00")
+    _transfer(sw_client, w["a"], w["php"], w["php2"], 1_000, transfer_fee=10,
+              transaction_date="2026-10-08T00:00:00")
+    rows = _household_rows(sw_db, w["a"], datetime(2026, 10, 1), datetime(2026, 10, 1),
+                           datetime(2026, 10, 20))
+    assert rows == {"PHP": {"fees": 60.0, "moved_out": 10_000.0},
+                    "USD": {"moved_in": 170.0}}
+
+
+def test_household_projected_moves_use_each_legs_own_figure(sw_client, sw_db, sw_people):
+    """Projected: a pending PHP 5,800 -> USD transfer (no received amount: USD 100
+    estimated at 58) and a recurring USD 50 transfer entry on the PHP joint (a
+    legacy face: PHP 2,900 leaves it) are moved out in PHP and in in USD, by each
+    leg's figure in its own currency, never the face figure."""
+    from datetime import datetime
+
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency
+    from app.models.user import CurrencyType
+
+    w = _household_world(sw_client, sw_db, sw_people)
+    _transfer(sw_client, w["a"], w["php"], w["usd"], 5_800, is_posted=False,
+              transaction_date="2026-11-09T00:00:00")
+    sw_db.add(BudgetEntry(user_id=w["a"]["id"], name="Dollars", entry_type=BudgetEntryType.EXPENSE,
+                          amount=Decimal("50"), currency=CurrencyType.USD,
+                          cadence=RecurrenceFrequency.MONTHLY,
+                          next_occurrence=datetime(2026, 11, 19), account_id=w["php"],
+                          transfer_to_account_id=w["usd"], end_mode="after_occurrences",
+                          max_occurrences=1))
+    sw_db.commit()
+    rows = _household_rows(sw_db, w["a"], datetime(2026, 11, 1), datetime(2026, 11, 1),
+                           datetime(2026, 10, 20))
+    assert rows == {"PHP": {"moved_out": 8_700.0}, "USD": {"moved_in": 150.0}}
 
 
 # --- loans stay as they were --------------------------------------------------------------

@@ -622,6 +622,33 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
     return filled
 
 
+def _revert_provenance(db: Session, txn: Transaction, requested: dict) -> dict:
+    """The fields reverting ``txn`` sets, so its retained ``amount`` is never converted.
+
+    Only an edit that reverts a posted debit or credit is judged. ``amount``
+    stays as posted (an actual figure in the account's currency). When no
+    ``projected_amount`` holds a face figure, ``pending_face`` reads that
+    ``amount`` as the face, in ``projected_currency`` or else ``currency``;
+    a row created posted with a foreign ``currency`` and no projected figure
+    would have its actual figure converted again. Its face currency is set
+    to the account's, so the forecast reads ``amount`` as it is.
+    """
+    if requested.get("is_posted", True) or not txn.is_posted:
+        return {}
+    if requested.get("transaction_type", txn.transaction_type) == TransactionType.TRANSFER:
+        return {}
+    if requested.get("projected_amount", txn.projected_amount) is not None:
+        return {}
+    account = db.get(Account, requested.get("account_id", txn.account_id))
+    if account is None:
+        return {}
+    face_currency = (requested.get("projected_currency", txn.projected_currency)
+                     or requested.get("currency", txn.currency))
+    if face_currency is None or face_currency == account.currency:
+        return {}
+    return {"projected_currency": account.currency}
+
+
 def _posting_figure(db: Session, txn: Transaction) -> Optional[str]:
     """The one figure posting ``txn`` needs: ``amount``, ``received_amount`` or None.
 
@@ -1042,6 +1069,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     received_changed, received_amount = _received_amount_for_update(
         db, db_transaction, requested)
     foreign_post = _foreign_post_on_update(db, db_transaction, requested)
+    revert = _revert_provenance(db, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
@@ -1111,7 +1139,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         setattr(db_transaction, field, value)
     for field, value in loan_stamp.items():
         setattr(db_transaction, field, value)
-    for field, value in foreign_post.items():
+    for field, value in {**foreign_post, **revert}.items():
         setattr(db_transaction, field, value)
     if received_changed:
         db_transaction.received_amount = received_amount
@@ -1365,9 +1393,11 @@ def summarize_period(
       for by wallet debits and wallet-funded fees. Returned money is not wallet
       spend, so it never reduces this row; it is shown on its own, negative,
       "Returned from wallets" row instead. Together they keep the expense column
-      of ``category_breakdown`` summing to ``total_expenses`` (within one
-      currency: a cross-currency top-up adds what arrived in the wallet, its
-      ``received_amount``, while the expense total counts what left the source);
+      of ``category_breakdown`` summing to ``total_expenses`` in every
+      currency bucket: a top-up adds what left the source (its ``amount``) to
+      the source's bucket, and the wallet's own debits net against
+      unallocated in the wallet's bucket, so a cross-currency top-up never
+      puts a wallet-currency figure in a source-currency row;
     - a transfer between two wallets moves no expense, and money leaving a
       wallet for an account outside the caller's scope stays wallet spend.
 
@@ -1424,7 +1454,8 @@ def summarize_period(
     for t in transactions:
         amount = _D(t.amount)
         b = bucket(t.account_id)
-        b["transaction_count"] += 1
+        if t.transaction_type != TransactionType.TRANSFER:
+            b["transaction_count"] += 1
         if t.transaction_type == TransactionType.CREDIT:
             b["total_income"] += amount
             row(b, category(t))["income"] += amount
@@ -1443,6 +1474,7 @@ def summarize_period(
             if source not in scope_ids:
                 continue  # inbound from outside the caller's scope
             b = bucket(source)
+            b["transaction_count"] += 1
             fee = _D(t.transfer_fee)
             destination = t.transfer_to_account_id
             if destination in hidden_liability_ids:
@@ -1461,8 +1493,11 @@ def summarize_period(
                     b["returned"] += amount
             elif to_wallet:
                 b["total_expenses"] += amount + fee
-                # What arrived in the wallet (the inbound leg), on the top-up's row.
-                b["unallocated"] += transfer_sides(t)[1]
+                # The top-up's row, in the source's currency: what left it. The
+                # wallet's own spending nets against unallocated in the wallet's
+                # bucket (above), so every category figure stays in its bucket's
+                # currency, whatever arrived in the wallet.
+                b["unallocated"] += amount
             else:
                 b["total_expenses"] += fee
                 if (currency_of is not None and source in cash_ids and destination in cash_ids
