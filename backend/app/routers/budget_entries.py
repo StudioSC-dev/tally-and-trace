@@ -547,6 +547,13 @@ def materialize_budget_entry(
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
 
+    An entry in another currency than its account's (for a transfer, the
+    source's) needs ``amount``, the figure charged in the account's currency,
+    or it is refused with a 400 "Enter the amount charged in {CUR}". The
+    transaction is recorded in the account's currency with the entry's figure
+    as ``projected_*`` and ``original_*``, and ``exchange_rate`` = ``amount``
+    / the entry's amount (6 places).
+
     A recurring transfer between accounts in different currencies needs
     ``received_amount`` (what the destination received, in its currency), or
     it is refused with a 400 "Enter the amount received".
@@ -560,7 +567,7 @@ def materialize_budget_entry(
     commit (never the tags it gets from its accounts); later changes to the
     entry's tags leave the transaction as it is.
     """
-    from app.routers.transactions import add_transaction
+    from app.routers.transactions import add_transaction, exchange_rate
     from app.schemas.transaction import TransactionCreate
 
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
@@ -570,6 +577,25 @@ def materialize_budget_entry(
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
 
     occurrence_date = payload.transaction_date or entry.next_occurrence
+    # An entry in another currency than its account's (for a transfer, the
+    # source's) posts the figure the account was actually charged, which only
+    # the caller knows; the entry's own figure is kept as the face.
+    account = db.get(Account, entry.account_id)
+    if account is not None and entry.currency != account.currency:
+        if payload.amount is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Enter the amount charged in {account.currency.value}")
+        currency_fields = {
+            "currency": account.currency,
+            "projected_amount": entry.amount,
+            "projected_currency": entry.currency,
+            "original_amount": entry.amount,
+            "original_currency": entry.currency,
+            "exchange_rate": exchange_rate(payload.amount, entry.amount),
+        }
+    else:
+        currency_fields = {"currency": entry.currency}
     amount = payload.amount if payload.amount is not None else entry.amount
     if entry.transfer_to_account_id:
         # A recurring transfer posts as a transfer: -(amount + fee) on the source,
@@ -595,7 +621,6 @@ def materialize_budget_entry(
     txn_create = TransactionCreate(
         account_id=entry.account_id,
         amount=amount,
-        currency=entry.currency,
         transaction_type=txn_type,
         transaction_date=occurrence_date,
         category_id=entry.category_id,
@@ -603,6 +628,7 @@ def materialize_budget_entry(
         budget_entry_id=entry.id,
         description=entry.name,
         is_posted=True,
+        **currency_fields,
         **transfer_fields,
     )
     # The entry's creator owns the transaction; the caller is its actor.

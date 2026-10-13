@@ -41,6 +41,22 @@ def transfer_sides(txn) -> tuple:
     return amount + fee, Decimal(str(received)) if received is not None else amount
 
 
+def pending_face(txn) -> tuple:
+    """``(figure, currency)``: an unposted debit's or credit's face.
+
+    The face currency is ``projected_currency``, else ``currency``. The face
+    figure is ``projected_amount``, else ``amount`` only when
+    ``projected_amount`` is null, so an actual figure kept in ``amount`` after
+    a revert is never read as the face. It applies no rate: converting a face
+    in another currency than its account's is the caller's job.
+    """
+    from decimal import Decimal
+
+    figure = txn.projected_amount if txn.projected_amount is not None else txn.amount
+    return (Decimal(str(figure)) if figure is not None else None,
+            txn.projected_currency or txn.currency)
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
