@@ -224,11 +224,27 @@ export type LoanScheduleResponse = LoanSchedule | LimitedLoanSchedule
 
 export type StatementStatus = 'paid' | 'overdue' | 'open'
 
-export interface StatementLine {
+export interface StatementLine extends Partial<Estimate> {
   /** ISO datetime. */
   date: string
   display_description: string | null
+  /** In the card's currency (signed: a credit is negative). Estimate labels appear when it was converted. */
   amount: number
+  transaction_id: number
+}
+
+/**
+ * A full-view statement line left out of the totals because no rate is stored for its
+ * currency. `amount` is null; `original_amount` and `original_currency` are the line's own.
+ */
+export interface UnconvertedStatementLine {
+  /** ISO datetime. */
+  date: string
+  amount: null
+  unconverted: true
+  original_amount: number
+  original_currency: CurrencyCode
+  display_description: string | null
   transaction_id: number
 }
 
@@ -241,6 +257,10 @@ export interface Statement {
   /** The statement's total before payments. */
   statement_balance: number
   lines: StatementLine[]
+  /** Lines left out of the totals (no stored rate); always present, usually empty. */
+  unconverted_lines: UnconvertedStatementLine[]
+  /** Present (true) only when a line was left out, so the totals are incomplete. */
+  incomplete?: true
 }
 
 /** GET /accounts/{id}/statements for an owner, admin or editor (credit accounts only). */
@@ -265,6 +285,8 @@ export interface LimitedStatement {
   currency: CurrencyCode
   status: StatementStatus
   lines: LimitedStatementLine[]
+  /** Present (true) only when a line was left out; carries no currency or figure. */
+  incomplete?: true
 }
 
 /** GET /accounts/{id}/statements for a viewer. */
@@ -445,6 +467,12 @@ interface TransactionDetail {
   original_amount?: number
   original_currency?: CurrencyCode
   exchange_rate?: number
+  /**
+   * Transfers: what the destination received, in its own currency. Null (or absent)
+   * means the same as `amount`; required to post a transfer between currencies.
+   * Not on `LimitedTransaction`.
+   */
+  received_amount?: number | null
   description?: string
   transaction_type: TransactionType
   transaction_date: string
@@ -530,6 +558,26 @@ export type TransactionInput = Partial<
   Omit<FullTransaction, 'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at'>
 > &
   TagIdsInput
+
+/** POST /budget-entries/{id}/materialize. */
+export interface BudgetEntryMaterializeInput {
+  /** Defaults to the entry's `next_occurrence`. */
+  transaction_date?: string
+  /**
+   * What was charged, in the account's currency. Required when the entry's currency
+   * differs from its account's.
+   */
+  amount?: number
+  /** Advance `next_occurrence` to the following one. Defaults to true. */
+  advance?: boolean
+  /** Transfer entries only: the fee charged on the source. */
+  transfer_fee?: number
+  /**
+   * Transfer entries only: what the destination received, in its own currency.
+   * Required when the destination's currency differs from the source's.
+   */
+  received_amount?: number
+}
 
 // ─── Wishlist ────────────────────────────────────────────────────────────────
 
@@ -654,15 +702,97 @@ export interface TransactionSummary {
     transaction_count: number
   }
   category_breakdown: Record<string, { income: number; expenses: number }>
+  /**
+   * The `summary` and `category_breakdown` above are the default currency only
+   * (`summary.transaction_count` stays the total). One row per currency, default first.
+   */
+  by_currency: TransactionSummaryCurrencyRow[]
+}
+
+/** One currency's row of GET /transactions/summary/period; a row counts in its account's currency. */
+export interface TransactionSummaryCurrencyRow {
+  currency: CurrencyCode
+  total_income: number
+  total_expenses: number
+  /** Cross-currency transfers between cash accounts: neither income nor expense. */
+  moved_in: number
+  moved_out: number
+  /** `total_income - total_expenses + moved_in - moved_out`. */
+  net_flow: number
+  transaction_count: number
+  category_breakdown: Record<string, { income: number; expenses: number }>
 }
 
 // ─── Forecast ────────────────────────────────────────────────────────────────
+
+/*
+ * Every projection is split by account currency (STU-236). On each response the bare
+ * scalars (`total`, `monthly_income`, a period's `income` and `closing_balance`, a
+ * timeline's `closing_balance`, `available_cash`, ...) mean the user's DEFAULT
+ * currency only, and `by_currency` carries one row per currency, default first. Never
+ * add a scalar to a figure in another currency. `currencies` lists the currencies to
+ * offer (select `currencies[0]`); `fx` describes the rates the full rows used.
+ */
+
+/**
+ * The labels on a full row whose figure was converted into the row's currency at a
+ * stored rate (`estimated`), or could not be (`unconverted`, no stored rate). They
+ * are absent from a row that needed no conversion, and from every Limited row.
+ */
+export interface Estimate {
+  /** The figure is an estimate at `rate`, not an actual charge. */
+  estimated: true
+  /** Instead of `estimated`: no rate is stored, so the row's `amount` is null or left out of totals. */
+  unconverted: true
+  /** The row's own figure, in `original_currency`. */
+  original_amount: number
+  original_currency: CurrencyCode
+  /** Units of the row's `currency` per unit of `original_currency`. */
+  rate: number
+  /** ISO date the rate is for. */
+  rate_as_of: string
+  /** The stored rate is more than 24 hours old. */
+  rate_stale: boolean
+}
+
+/** One pair in `fx.rates`: only pairs used by full rows. */
+export interface FxRate {
+  base: CurrencyCode
+  quote: CurrencyCode
+  /** Units of `quote` per unit of `base`. */
+  rate: number
+  /** ISO date. */
+  as_of: string
+  /** The rate provider, e.g. `currency-api`; show it as the attribution. */
+  source: string
+  stale: boolean
+}
+
+/** `fx` on a projection response. */
+export interface FxMeta {
+  rates: FxRate[]
+  /** Full rows with no stored rate; they are listed but moved no cash. */
+  unconverted_count: number
+}
+
+/** The keys every projection response adds next to its scalars. */
+export interface ProjectionMeta {
+  /** Viewable accounts' currencies plus those of full rows; no placeholder. Select `[0]`. */
+  currencies: CurrencyCode[]
+  fx: FxMeta
+}
 
 export interface MonthlySummary {
   month: string
   income: number
   expenses: number
   net_flow: number
+}
+
+/** GET /forecast/cashflow. Each period's scalars are the default currency only. */
+export interface CashflowResponse extends ProjectionMeta {
+  periods: ForecastPeriod[]
+  months: number
 }
 
 export interface CashFlowProjection {
@@ -720,10 +850,11 @@ export interface LimitedTimelineEvent extends LimitedEvent {
 }
 
 /** GET /forecast/upcoming: a full item has no `view` key. */
-export interface UpcomingItem {
+export interface UpcomingItem extends Partial<Estimate> {
   view?: undefined
   name: string
-  amount: number
+  /** In `currency`. Null only when `unconverted` (no stored rate). */
+  amount: number | null
   due_date: string
   entry_type: string
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
@@ -734,14 +865,23 @@ export interface UpcomingItem {
    * is still unpaid by the view's accounts.
    */
   household_occurrence?: true
-  /** The item's own currency: present in a Household view (`/household/{id}/upcoming`, dashboard). */
+  /**
+   * The currency of `amount`: the item's cash leg, or its in-scope account. A
+   * cross-currency event is one item per currency. Present on every full item.
+   */
   currency?: CurrencyCode
+}
+
+/** GET /forecast/upcoming. No `by_currency`: the list has no totals. */
+export interface UpcomingResponse extends ProjectionMeta {
+  items: UpcomingItemOrEvent[]
+  days: number
 }
 
 export type UpcomingItemOrEvent = UpcomingItem | LimitedEvent
 
 /** A payable (cash outflow) as GET /forecast/payables and the dashboard list it; a full one has no `view` key. */
-export interface Payable {
+export interface Payable extends Partial<Estimate> {
   view?: undefined
   due_date: string
   name: string
@@ -752,6 +892,8 @@ export interface Payable {
   account_name: string | null
   overflow_account_id: number | null
   overflow_account_name: string | null
+  /** The currency of `amount`. */
+  currency?: CurrencyCode
 }
 
 export type PayableOrEvent = Payable | LimitedEvent
@@ -770,11 +912,30 @@ export interface NetDisposableIncome {
   currency?: CurrencyCode
 }
 
+/** One currency's row of GET /forecast/disposable and the snapshot's `monthly_summary`. */
+export interface MonthlyDisposableCurrencyRow {
+  currency: CurrencyCode
+  monthly_income: number
+  monthly_expenses: number
+  /** Money moved across currencies between cash accounts: neither income nor expense. */
+  moved_in: number
+  moved_out: number
+  /** `monthly_income - monthly_expenses + moved_in - moved_out`. */
+  monthly_disposable: number
+}
+
+/** GET /forecast/disposable: the scalars are the default currency only. */
+export interface DisposableResponse extends MonthlyDisposable, ProjectionMeta {
+  by_currency: MonthlyDisposableCurrencyRow[]
+}
+
 // ─── Cash-flow timeline (pre-due-date solvency) ───────────────────────────────
 
-export interface CashflowTimelineEvent {
+export interface CashflowTimelineEvent extends Partial<Estimate> {
   /** A full event has no `view` key; a limited one is a `LimitedTimelineEvent`. */
   view?: undefined
+  /** The currency of `amount` and `running_balance`: the currency row the event sits in. */
+  currency?: CurrencyCode
   date: string
   name: string
   /** Signed: positive = inflow, negative = outflow. */
@@ -797,9 +958,12 @@ export interface CashflowShortfall {
   date: string
   name: string
   balance_after: number
+  /** Present on `by_currency` rows and on the default-currency scalars. */
+  currency?: CurrencyCode
 }
 
 export interface AccountShortfall {
+  currency?: CurrencyCode
   date: string
   name: string
   account_id: number
@@ -809,9 +973,8 @@ export interface AccountShortfall {
   overflow_used: number
 }
 
-export interface CashflowTimeline {
-  window_start: string
-  window_end: string
+/** What one currency's timeline holds (and, for the default currency, the response's scalars). */
+export interface CashflowTimelineBody {
   opening_balance: number
   lowest_balance: number
   /** null => the opening balance is the lowest point in the window. */
@@ -820,7 +983,35 @@ export interface CashflowTimeline {
   shortfall: boolean
   shortfalls: CashflowShortfall[]
   account_shortfalls: AccountShortfall[]
+  /** Each projection-cash account's opening and closing balance over the window. */
+  by_account: TimelineAccountBalance[]
+  unassigned_closing: number
+  overflow_moves: OverflowMove[]
   events: Array<CashflowTimelineEvent | LimitedTimelineEvent>
+}
+
+/** One account's opening and closing balance over a timeline window. */
+export interface TimelineAccountBalance {
+  account_id: number
+  account_name: string | null
+  opening_balance: number
+  closing_balance: number
+  currency?: CurrencyCode
+}
+
+/** One currency's timeline: every figure and event is in `currency`. */
+export interface CashflowTimelineCurrencyRow extends CashflowTimelineBody {
+  currency: CurrencyCode
+}
+
+/**
+ * GET /forecast/timeline. The scalars (balances, shortfalls, events) are the default
+ * currency's timeline only; `by_currency` has one row per currency, default first.
+ */
+export interface CashflowTimeline extends CashflowTimelineBody, ProjectionMeta {
+  window_start: string
+  window_end: string
+  by_currency: CashflowTimelineCurrencyRow[]
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
@@ -847,6 +1038,8 @@ export interface OverflowMove {
   to_account_id: number
   to_account_name: string | null
   amount: number
+  /** On `by_currency` rows; both accounts are in this currency. */
+  currency?: CurrencyCode
 }
 
 /** One projection-cash account's closing balance at the end of a forecast period. */
@@ -854,6 +1047,8 @@ export interface AccountClosing {
   account_id: number
   account_name: string | null
   closing_balance: number
+  /** On `by_currency` rows. */
+  currency?: CurrencyCode
 }
 
 /** One period of the month-by-month cash-flow projection. */
@@ -871,6 +1066,21 @@ export interface ForecastPeriod {
   by_account: AccountClosing[]
   unassigned_closing: number
   overflow_moves: OverflowMove[]
+  /** The scalars above are the default currency only; one row per currency, default first. */
+  by_currency: ForecastPeriodCurrencyRow[]
+}
+
+/**
+ * One currency's figures for a forecast period. `net` is `income - expenses -
+ * unposted_expenses - statement_payables + moved_in - moved_out + loan_payables`,
+ * where `loan_payables` is the signed (zero or negative) sum of loan payments.
+ */
+export interface ForecastPeriodCurrencyRow extends Omit<ForecastPeriod, 'period_label' | 'period_start' | 'period_end' | 'by_currency'> {
+  currency: CurrencyCode
+  /** Money moved across currencies between cash accounts: neither income nor expense. */
+  moved_in: number
+  moved_out: number
+  loan_payables: number
 }
 
 /** Monthly income and expenses, normalised from each recurring entry's cadence. */
@@ -880,15 +1090,34 @@ export interface MonthlyDisposable {
   monthly_disposable: number
 }
 
+/** One currency's balances in the snapshot. */
+export interface BalanceCurrencyRow {
+  currency: CurrencyCode
+  /** Every active account in `currency`, cards and loans included (owed is negative). */
+  total: number
+  /** Pooled projection cash in `currency`. */
+  available_cash: number
+}
+
+/** One currency's closings in the snapshot's `account_closings`. */
+export interface AccountClosingCurrencyRow {
+  currency: CurrencyCode
+  by_account: AccountClosing[]
+  unassigned_closing: number
+  overflow_moves: OverflowMove[]
+}
+
 /** GET /dashboard/snapshot, exactly as the backend returns it. */
 export interface DashboardSnapshot {
   balances: {
+    /** The default currency's total only; see `by_currency`. */
     total: number
     by_account: DashboardAccountBalance[]
+    by_currency: BalanceCurrencyRow[]
   }
   /** Everything due in the next 30 days; limited events have `view: 'limited'`. */
   upcoming_this_month: UpcomingItemOrEvent[]
-  monthly_summary: MonthlyDisposable
+  monthly_summary: MonthlyDisposable & { by_currency: MonthlyDisposableCurrencyRow[] }
   forecast_next_3_months: ForecastPeriod[]
   goals_progress: Array<{
     id: number
@@ -907,10 +1136,13 @@ export interface DashboardSnapshot {
     affordable_by: string
   }>
   /** Pooled projection cash (card balances are owed, not held). */
+  /** The default currency's pooled projection cash; see `balances.by_currency`. */
   available_cash: number
   account_closings: Array<Pick<ForecastPeriod,
     'period_label' | 'period_start' | 'period_end' | 'by_account' | 'unassigned_closing'
-    | 'overflow_moves'>>
+    | 'overflow_moves'> & { by_currency: AccountClosingCurrencyRow[] }>
   /** Cash outflows due in the next 30 days; limited events have `view: 'limited'`. */
   payables: PayableOrEvent[]
+  currencies: CurrencyCode[]
+  fx: FxMeta
 }

@@ -51,5 +51,7 @@ export function upcomingItemAmount(item: UpcomingItemOrEvent): { amount: number;
   }
   const type = item.entry_type
   const direction = type === 'income' || type === 'credit' ? 'in' : type === 'expense' || type === 'debit' ? 'out' : null
-  return { amount: item.amount, direction }
+  // An unconverted item (no stored rate) has a null amount; it reads 0 here, so a caller
+  // that lists it checks `item.unconverted` first.
+  return { amount: item.amount ?? 0, direction }
 }
