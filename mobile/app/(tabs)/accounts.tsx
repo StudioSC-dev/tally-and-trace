@@ -19,6 +19,7 @@ import type { Account } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
+import { totalsByCurrency } from '../../src/utils/currencyDisplay'
 import {
   Card,
   Button,
@@ -225,13 +226,12 @@ export default function AccountsScreen() {
         {/* Summary */}
         <Card className="mb-4">
           <Text className="text-slate-400 text-xs mb-1">Total Balance</Text>
-          <Text className="text-white text-3xl font-bold">
-            {formatCurrency(
-              // Accounts shared with you are not yours to total.
-              accounts.filter((a) => a.my_role === 'owner').reduce((s, a) => s + a.balance, 0),
-              currency
-            )}
-          </Text>
+          {/* Accounts shared with you are not yours to total; one line per currency. */}
+          {totalsByCurrency(accounts.filter((a) => a.my_role === 'owner')).map((row) => (
+            <Text key={row.currency} className="text-white text-3xl font-bold">
+              {formatCurrency(row.total, row.currency)}
+            </Text>
+          ))}
           <Text className="text-slate-500 text-xs mt-1">{accounts.length} active account(s)</Text>
         </Card>
 

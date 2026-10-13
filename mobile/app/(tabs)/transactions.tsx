@@ -22,6 +22,7 @@ import type { Transaction, Account, Category, FullTransaction, SharedFullTransac
 import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency, formatRelativeDate, transactionDate, transactionDescription } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
+import { isCrossCurrencyTransfer } from '../../src/utils/currencyDisplay'
 import { Card, Button, Input, LoadingSpinner, EmptyState, Badge, SectionHeader } from '../../src/components/ui'
 
 // ─── Transaction Item ─────────────────────────────────────────────────────────
@@ -170,7 +171,7 @@ function TransactionFormModal({
         account_id: parseInt(form.account_id),
         category_id: form.category_id ? parseInt(form.category_id) : undefined,
         transaction_date: new Date(form.transaction_date).toISOString(),
-        currency: defaultCurrency,
+        currency: (accounts.find((a) => String(a.id) === form.account_id)?.currency as CurrencyCode | undefined) ?? defaultCurrency,
       }
       // Another user's record: the server refuses references owned by someone else.
       if (isSharedEdit) delete payload.category_id
@@ -376,6 +377,10 @@ export default function TransactionsScreen() {
 
   const openEdit = (tx: Transaction) => {
     if (tx.view === 'limited' || !tx.permissions.can_edit) return
+    if (isCrossCurrencyTransfer(tx, accounts)) {
+      Alert.alert('Edit on the web', 'Edit this transfer on the web')
+      return
+    }
     setEditing(tx)
     setModalVisible(true)
   }
