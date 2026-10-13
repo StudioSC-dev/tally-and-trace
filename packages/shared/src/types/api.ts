@@ -744,11 +744,14 @@ export interface Estimate {
   estimated: true
   /** Instead of `estimated`: no rate is stored, so the row's `amount` is null or left out of totals. */
   unconverted: true
-  /** The row's own figure, in `original_currency`. */
-  original_amount: number
-  original_currency: CurrencyCode
+  /**
+   * The row's own figure, in `original_currency`. `original_amount`, `original_currency`
+   * and `rate` are absent on a statement estimated from more than one currency.
+   */
+  original_amount?: number
+  original_currency?: CurrencyCode
   /** Units of the row's `currency` per unit of `original_currency`. */
-  rate: number
+  rate?: number
   /** ISO date the rate is for. */
   rate_as_of: string
   /** The stored rate is more than 24 hours old. */
