@@ -14,7 +14,7 @@ Reading a rate never touches the network. ``FxRates.rate(a, b)``:
 
 A request with nothing to convert never asks for a rate, so it never
 schedules a fetch. In a request, ``get_fx`` wires ``on_stale`` to
-``schedule_refresh``, which adds at most one background task per process at
+``Refresher.schedule``, which adds at most one background task per process at
 a time (a 60 s lease) and none for 15 minutes after a failed or partial
 fetch. The task runs after the response: it first closes the request's
 session (``Refresher.schedule``), then works on its own, so no request
@@ -479,11 +479,6 @@ class Refresher:
 
 _refresher = Refresher(provider=CurrencyApiProvider(), clock=utcnow,
                        store_factory=db_store_session)
-
-
-def schedule_refresh(background_tasks: BackgroundTasks) -> bool:
-    """Add one refresh task unless one is leased or a failure is backing off."""
-    return _refresher.schedule(background_tasks)
 
 
 def get_fx(background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> FxRates:

@@ -33,14 +33,20 @@ lines first, in date order, capped at their total; each line's remainder is
 ``max(0, line - its covered part)`` and only a remainder above 0 is
 returned, as the occurrence's ``face_amount``. Any other occurrence (a
 wallet, a bank, a card without cycle settings, a refund, a transfer, or an
-accountless entry) is returned at its face amount, in the record's currency.
+accountless entry) is not covered. A debit, credit or non-transfer entry on
+such an account that the caller reads in full is counted in that account's
+currency: its face (``pending_face`` for a pending row, the posted
+``amount``, an entry's ``amount``) estimated at the stored rate, or
+unconverted (no figure, in no total) with no stored rate. Every other one
+(a Limited record, a transfer, an accountless entry) is returned at its face
+amount, in the record's currency.
 
-**Which currency a covered line is counted in.** When the caller can view
-the card or reads the record in full, the card's currency, at the card
-figure's remainder. Otherwise (a Limited record) the record's currency, as
-its Limited value shows it, at ``face x remainder / card figure``: the face
-when nothing is covered and today's figure for a same-currency line, so no
-rate or converted figure is disclosed.
+**Which currency a covered line is counted in.** When the caller reads the
+record in full, the card's currency, at the card figure's remainder.
+Otherwise (a Limited record, even one on a card the caller views) the
+record's currency, as its Limited value shows it, at ``face x remainder /
+card figure``: the face when nothing is covered and today's figure for a
+same-currency line, so no rate or converted figure is disclosed.
 
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
@@ -182,11 +188,11 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
         BudgetEntry.is_active.is_(True),
     ).order_by(BudgetEntry.id).all()
 
-    cards = {a.id: a for a in db.query(Account).filter(
+    accounts = {a.id: a for a in db.query(Account).filter(
         Account.id.in_({r.account_id for r in [*txns, *entries] if r.account_id}),
-        Account.account_type == AccountType.CREDIT,
     ).all()} if (txns or entries) else {}
-    billed = {cid: c for cid, c in cards.items() if resolve_cycle_fields(c) is not None}
+    billed = {cid: c for cid, c in accounts.items()
+              if c.account_type == AccountType.CREDIT and resolve_cycle_fields(c) is not None}
 
     out: List[Occurrence] = []
     card_lines: Dict[int, list] = {}  # card id -> [(occurrence, line key)]
@@ -194,8 +200,26 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     estimates: Dict[int, dict] = {}  # id(occurrence) -> its card line's estimate
 
     def in_card_currency(occ: Occurrence, card: Account) -> bool:
-        """The caller views the card or reads the record in full (module docstring)."""
-        return card.id in viewable_ids or redactor.view(occ.record) != LIMITED
+        """The caller reads the record in full (module docstring). A Limited
+        reader keeps the record's face and currency, as its Limited value
+        shows them, even when they view the card."""
+        return redactor.view(occ.record) != LIMITED
+
+    def account_fx(occ: Occurrence, face, face_currency) -> None:
+        """An occurrence on no billed card, read in full (module docstring):
+        its face in its account's currency, estimated at the stored rate, or
+        unconverted (no figure, in no total) with no stored rate. A Limited
+        one, or one with no account, keeps its face in the record's currency.
+        """
+        account = accounts.get(occ.record.account_id)
+        if account is None or redactor.view(occ.record) == LIMITED:
+            return
+        figure, estimate = money.to(face, face_currency, account.currency)
+        occ.currency, occ.estimate = _currency(account.currency), estimate
+        if figure is None:
+            occ.unconverted = True
+        else:
+            occ.remainder = figure
 
     def card_fx(occ: Occurrence, card: Account, face, face_currency) -> bool:
         """A card line's FX state; False when its face has no stored rate.
@@ -223,11 +247,15 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             when, extra = start, {"overdue": True, "original_date": when}
         occ = Occurrence(when, txn, _money(txn.amount), _money(txn.amount), extra)
         out.append(occ)
+        account = accounts.get(txn.account_id)
+        face, face_currency = (pending_face(txn) if not txn.is_posted
+                               else (txn.amount, account.currency if account else txn.currency))
         if txn.transaction_type == TransactionType.DEBIT and txn.account_id in billed:
-            face, face_currency = (pending_face(txn) if not txn.is_posted
-                                   else (txn.amount, billed[txn.account_id].currency))
             if card_fx(occ, billed[txn.account_id], face, face_currency):
                 card_lines.setdefault(txn.account_id, []).append((occ, ("t", txn.id)))
+        elif (txn.account_id not in billed
+              and txn.transaction_type in (TransactionType.DEBIT, TransactionType.CREDIT)):
+            account_fx(occ, face, face_currency)
 
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     for entry in entries:
@@ -248,7 +276,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             if linked[key]:
                 linked[key] -= 1
                 continue
-            out.append(Occurrence(when, entry, _money(entry.amount), _money(entry.amount)))
+            occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount))
+            out.append(occ)
+            if entry.account_id not in billed and entry.transfer_to_account_id is None:
+                account_fx(occ, entry.amount, entry.currency)
 
     for card_id, lines in card_lines.items():
         card = billed[card_id]

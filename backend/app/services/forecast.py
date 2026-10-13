@@ -304,7 +304,8 @@ def get_upcoming_items(
     reference: Optional[datetime] = None,
     tag_id: Optional[int] = None,
 ) -> List[dict]:
-    """
+    """Single-currency test reference; never called from routes.
+
     Return every dated event from ``collect_events`` within the next N days
     (budget-entry occurrences, unposted transactions, credit-card statement
     payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
@@ -314,7 +315,10 @@ def get_upcoming_items(
 
 
 def upcoming_items(events: List[dict]) -> List[dict]:
-    """``collect_events`` events as upcoming items (``get_upcoming_items``), sorted by date."""
+    """Single-currency test reference; never called from routes.
+
+    ``collect_events`` events as upcoming items (``get_upcoming_items``), sorted by date.
+    """
     items = [
         {
             "name": e["name"],
@@ -350,7 +354,9 @@ def get_payables(
     reference: Optional[datetime] = None,
     tag_id: Optional[int] = None,
 ) -> List[dict]:
-    """Cash outflows due within the next N days, with the account each draws on.
+    """Single-currency test reference; never called from routes.
+
+    Cash outflows due within the next N days, with the account each draws on.
 
     Same window and events as ``get_upcoming_items``, restricted to events that
     take cash out of the pool (bills, unposted debits, card statements, planned
@@ -1641,8 +1647,8 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
     of kind "household" with a neutral account reference; one they see in
     full (their own, in their own Household view) carries
     ``household_occurrence``. Its listing row is in the occurrence's
-    ``currency`` (services/household.py: the card's when the caller can view
-    the card or reads the record in full, else the record's).
+    ``currency`` (services/household.py: when the caller reads the record in
+    full, the card's or the account's, else the record's).
     """
     from app.services.household import household_occurrences
 
@@ -2340,9 +2346,15 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
     p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
     collector = FxCollector()
     rows = []
+    # Limited public ids are opaque and per response: numbered once across
+    # every row, so distinct rows never share one. The default row comes
+    # first, so a single-currency response keeps ``e1``, ``e2``, ... and the
+    # scalars (the default row) reuse its ids.
+    numbered = 0
     for currency in p.run_currencies():
-        row = serialize_currency_timeline(_timeline(p, currency, start, end, rows=True),
-                                          currency, collector)
+        result = _timeline(p, currency, start, end, rows=True)
+        row = serialize_currency_timeline(result, currency, collector, first_id=numbered + 1)
+        numbered += len(result["events"])
         rows.append(row)
     collect_unconverted(collector, p.events)
     default = {k: v for k, v in rows[0].items() if k != "currency"}
@@ -2356,10 +2368,12 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
     }
 
 
-def serialize_currency_timeline(result: dict, currency: str, collector: FxCollector) -> dict:
+def serialize_currency_timeline(result: dict, currency: str, collector: FxCollector,
+                                first_id: int = 1) -> dict:
     """One ``by_currency`` timeline row: ``serialize_timeline`` with ``currency``
-    on every full listed row and the labels on estimated events."""
-    body = serialize_timeline(result)
+    on every full listed row and the labels on estimated events. Its events
+    are numbered from ``first_id`` (``timeline_by_currency``)."""
+    body = serialize_timeline(result, first_id=first_id)
     tag = {"currency": currency}
     events = []
     for e, out in zip(result["events"], body["events"]):
@@ -2553,8 +2567,12 @@ def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
     ]
 
 
-def serialize_timeline(result: dict) -> dict:
-    """Convert a build_timeline/project_running_balance result to JSON-friendly types."""
+def serialize_timeline(result: dict, first_id: int = 1) -> dict:
+    """Convert a build_timeline/project_running_balance result to JSON-friendly types.
+
+    A limited event's ``public_id`` is ``e`` plus its position among the
+    events, counted from ``first_id``.
+    """
     def f(x):
         return float(x) if isinstance(x, Decimal) else x
 
@@ -2595,7 +2613,8 @@ def serialize_timeline(result: dict) -> dict:
         ],
         "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
         "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
-        "events": [_timeline_event(e, i) for i, e in enumerate(result["events"], start=1)],
+        "events": [_timeline_event(e, i)
+                   for i, e in enumerate(result["events"], start=first_id)],
     }
 
 

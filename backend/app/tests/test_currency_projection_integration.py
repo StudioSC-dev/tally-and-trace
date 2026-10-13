@@ -546,6 +546,32 @@ def test_an_entry_on_an_account_outside_the_scope_keeps_its_record_currency(
     assert "EUR" not in repr(disposable) and "EUR" not in repr(snapshot)
 
 
+def test_limited_public_ids_are_unique_across_currency_rows(sw_client, sw_db, sw_people,
+                                                           frozen):
+    """A viewer's timeline over the owner's PHP and USD bills: one Limited row
+    in each currency row, numbered once per response (never ``e1`` twice);
+    the scalars (the default row) reuse that row's ids."""
+    from app.models.user import CurrencyType, User
+
+    owner, viewer = sw_people("Oda", "Owner"), sw_people("Vic", "Viewer")
+    for who in (owner, viewer):
+        sw_db.get(User, who["id"]).default_currency = CurrencyType.PHP
+    sw_db.commit()
+    php = _acct(sw_db, owner["id"], "Peso bank", "checking", "PHP", 10_000)
+    usd = _acct(sw_db, owner["id"], "Dollar bank", "checking", "USD", 1_000)
+    for account in (php, usd):
+        sw_share(sw_db, account, viewer["id"], "viewer", owner["id"])
+    _entry(sw_db, owner["id"], "Peso bill", "expense", 500, "PHP", _d(5), php,
+           end_mode="after_occurrences", max_occurrences=1)
+    _entry(sw_db, owner["id"], "Dollar bill", "expense", 20, "USD", _d(6), usd,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    timeline = _get(sw_client, viewer, "/forecast/timeline", days=30)
+    ids = {r["currency"]: [e["public_id"] for e in r["events"]] for r in timeline["by_currency"]}
+    assert ids == {"PHP": ["e1"], "USD": ["e2"]}
+    assert [e["public_id"] for e in timeline["events"]] == ["e1"]
+
+
 # --- criterion 10 (integration): no stored rate ------------------------------------------
 
 @pytest.fixture
@@ -773,3 +799,71 @@ def test_household_cover_settles_in_the_card_currency(hh, sw_client, sw_db):
         "transaction_date": "2026-11-01T00:00:00", "is_posted": False})
     assert totals(hh["a"]) == {"PHP": {"expense": 40.0, "paid": 4_600.0}}
     assert totals(hh["c"]) == {"PHP": {"expense": 40.0, "paid": 79.31}}
+
+
+def test_household_occurrence_off_a_billed_card_is_estimated_in_full_view(hh, sw_client, sw_db):
+    """A pending USD 80 Household debit on A's private PHP wallet (no card to
+    settle on): A, who reads it in full, sees PHP 4,640 est. and counts 4,640
+    in the PHP month; C, who reads it Limited, keeps its face and record
+    currency (PHP 80) with no new fields, as before."""
+    from app.services.household import household_monthly, household_upcoming, household_view
+
+    from app.tests.conftest import sw_post
+
+    reference = datetime(2026, 10, 10)
+    sw_post(sw_client, hh["a"], "/transactions/", {
+        "account_id": hh["a_wallet"], "transaction_type": "debit", "amount": 80,
+        "currency": "PHP", "projected_amount": 80, "projected_currency": "USD",
+        "transaction_date": "2026-10-12T00:00:00", "is_posted": False,
+        "description": "Household delivery", "tag_ids": [hh["hh_a"]]})
+
+    def view(who):
+        sw_db.expire_all()
+        grant = household_view(sw_db, who["id"], hh["a"]["id"])
+        months = household_monthly(sw_db, who["id"], grant, datetime(2026, 10, 1),
+                                   datetime(2026, 11, 1), reference=reference)
+        paid = {line["currency"]: line["paid_from_other_accounts"]
+                for month in months for line in month["currencies"]}
+        (item,) = [i for i in household_upcoming(sw_db, who["id"], grant, reference,
+                                                 datetime(2026, 11, 1))
+                   if i.get("name") == "Household delivery"
+                   or i.get("display_name") == "Household delivery"]
+        return paid, item
+
+    paid, item = view(hh["a"])
+    assert paid == {"PHP": 4_640.0}
+    assert (item["amount"], item["currency"], item["estimated"], item["original_amount"],
+            item["original_currency"], item["rate"]) == (4_640.0, "PHP", True, 80.0, "USD",
+                                                         RATE_TO_PHP)
+    paid, item = view(hh["c"])
+    assert paid == {"PHP": 80.0}
+    assert (item["view"], item["face_amount"], item["currency"]) == ("limited", 80.0, "PHP")
+    assert not set(item) & set(LABELS)
+
+
+def test_a_limited_reader_who_views_the_card_keeps_the_record_face(hh, sw_client, sw_db):
+    """C, a viewer on A's PHP card, reads A's pending USD 80 Household charge
+    Limited: it keeps its face and record currency (PHP 80), never the card
+    figure (4,640) under the record's label, in the listing and the month."""
+    from app.services.household import household_monthly, household_upcoming, household_view
+
+    from app.tests.conftest import sw_post
+
+    reference = datetime(2026, 10, 10)
+    sw_share(sw_db, hh["a_card"], hh["c"]["id"], "viewer", hh["a"]["id"])
+    sw_post(sw_client, hh["a"], "/transactions/", {
+        "account_id": hh["a_card"], "transaction_type": "debit", "amount": 80,
+        "currency": "PHP", "projected_amount": 80, "projected_currency": "USD",
+        "transaction_date": "2026-10-12T00:00:00", "is_posted": False,
+        "description": "Household streaming", "tag_ids": [hh["hh_a"]]})
+    sw_db.expire_all()
+    grant = household_view(sw_db, hh["c"]["id"], hh["a"]["id"])
+    months = household_monthly(sw_db, hh["c"]["id"], grant, datetime(2026, 10, 1),
+                               datetime(2026, 11, 1), reference=reference)
+    assert {line["currency"]: line["paid_from_other_accounts"]
+            for month in months for line in month["currencies"]} == {"PHP": 80.0}
+    (item,) = [i for i in household_upcoming(sw_db, hh["c"]["id"], grant, reference,
+                                             datetime(2026, 11, 1))
+               if i.get("display_name") == "Household streaming"]
+    assert (item["view"], item["face_amount"], item["currency"]) == ("limited", 80.0, "PHP")
+    assert not set(item) & set(LABELS)
