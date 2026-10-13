@@ -132,8 +132,13 @@ const payableRow = (fallback: CurrencyCode) => (payable: Payable | LimitedEvent,
   }
 }
 
-/** An upcoming item that is not a cash outflow listed in the payables: a Household bill or money coming in. */
+/**
+ * An upcoming item that is not a cash outflow listed in the payables: a Household bill, money
+ * coming in, or a full row with no stored rate (it moves no cash and is counted nowhere, so
+ * it is listed here in its own currency whichever way it goes).
+ */
 const isOtherUpcoming = (item: UpcomingItemOrEvent): boolean => {
+  if (!isLimitedEvent(item) && item.unconverted === true) return true
   const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
   return household || upcomingItemAmount(item).direction === 'in'
 }

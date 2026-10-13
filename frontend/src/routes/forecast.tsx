@@ -53,6 +53,8 @@ function ForecastPage() {
   // A converted event reads "≈ PHP 4,640.00 (USD 80.00)"; a limited one has no labels to show.
   const signedEvent = (e: CashflowTimelineEvent | LimitedTimelineEvent) => {
     const amount = timelineEventAmount(e)
+    // A row with no stored rate is listed in its own currency; it has no direction in this one.
+    if (e.view !== 'limited' && e.unconverted) return estimateText(null, currency, e)
     const sign = amount >= 0 ? '+' : '−'
     return `${sign}${e.view === 'limited' ? format(Math.abs(amount)) : estimateText(Math.abs(amount), currency, e)}`
   }
@@ -168,7 +170,7 @@ function ForecastPage() {
                       <tr key={e.view === 'limited' ? e.public_id : `${e.source}-${e.source_id}-${i}`} className="hover:bg-sunken/50 transition-colors duration-150">
                         <td className="py-3 px-4 sm:px-6 whitespace-nowrap text-muted">{longDate(e.date)}</td>
                         <td className="py-3 px-4 text-ink">{timelineEventName(e)}</td>
-                        <td className={`py-3 px-4 text-right font-medium ${timelineEventAmount(e) >= 0 ? 'text-ok' : 'text-danger'}`}>
+                        <td className={`py-3 px-4 text-right font-medium ${e.view !== 'limited' && e.unconverted ? 'text-muted' : timelineEventAmount(e) >= 0 ? 'text-ok' : 'text-danger'}`}>
                           <span title={e.view === 'limited' ? undefined : estimateTitle(e)} data-testid="timeline-amount">{signedEvent(e)}</span>
                         </td>
                         <td className={`py-3 px-4 sm:px-6 text-right font-semibold ${e.running_balance < 0 ? 'text-danger' : 'text-ink'}`}>
