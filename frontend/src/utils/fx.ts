@@ -22,22 +22,24 @@ export type EstimateLabels = Partial<Estimate>
  * has no estimate to show, so it reads its own figure and says it is not counted.
  */
 export const estimateText = (amount: number | null, currency: CurrencyCode, labels: EstimateLabels): string => {
-  const hasOriginal = labels.original_amount !== undefined && labels.original_currency !== undefined
-  if (labels.unconverted && hasOriginal) {
-    return `${formatCoded(labels.original_amount as number, labels.original_currency as CurrencyCode)} (no rate yet)`
-  }
+  // The API leaves the original figure out (or null) when a statement mixes currencies.
+  const original =
+    labels.original_amount != null && labels.original_currency != null
+      ? formatCoded(labels.original_amount, labels.original_currency)
+      : null
+  if (labels.unconverted && original !== null) return `${original} (no rate yet)`
   if (amount === null) return '—'
-  if (labels.estimated && hasOriginal) {
-    return `≈ ${formatCoded(amount, currency)} (${formatCoded(labels.original_amount as number, labels.original_currency as CurrencyCode)})`
+  if (labels.estimated) {
+    return original !== null ? `≈ ${formatCoded(amount, currency)} (${original})` : `≈ ${formatCoded(amount, currency)}`
   }
   return formatCurrency(amount, currency)
 }
 
 /** Hover text for an estimate: the rate, the day it is for and whether it is stale. */
 export const estimateTitle = (labels: EstimateLabels): string | undefined => {
-  if (!labels.estimated || labels.rate === undefined) return undefined
+  if (!labels.estimated || labels.rate == null || labels.original_currency == null) return undefined
   const stale = labels.rate_stale ? ' (more than a day old)' : ''
-  return `Estimated at ${labels.rate} per ${labels.original_currency ?? ''}${labels.rate_as_of ? `, rate for ${labels.rate_as_of}` : ''}${stale}`
+  return `Estimated at ${labels.rate} per ${labels.original_currency}${labels.rate_as_of ? `, rate for ${labels.rate_as_of}` : ''}${stale}`
 }
 
 /** "Rates: currency-api" (the provider ids of the pairs used), or null when none were used. */

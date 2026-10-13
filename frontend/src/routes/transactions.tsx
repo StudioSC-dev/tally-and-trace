@@ -1181,7 +1181,11 @@ export function TransactionsPage() {
     }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
-    const payload: Record<string, unknown> = !transaction.permissions.can_edit
+    // A foreign debit or credit keeps its actual figure on revert: the API re-estimates the
+    // plan from `projected_amount`, so no amount, currency or rate is sent.
+    const face = (transaction.projected_currency as CurrencyCode | undefined) ?? (transaction.currency as CurrencyCode)
+    const isForeignFlow = transaction.transaction_type !== 'transfer' && face !== accountCurrency
+    const payload: Record<string, unknown> = !transaction.permissions.can_edit || isForeignFlow
       ? { is_posted: false }
       : {
           is_posted: false,
