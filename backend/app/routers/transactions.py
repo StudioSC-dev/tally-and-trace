@@ -22,7 +22,7 @@ from app.core.tags import (
     TAG_FILTER_HELP, effective_tag_criterion, filter_tag_id, own_tag_ids,
     replace_own_tags,
 )
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction, TransactionType, transfer_sides
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
 from app.core.redaction import (
     FULL, Redactor, displayed_description_criterion, full_view_criterion,
@@ -465,6 +465,83 @@ def _stamp_posted_legacy_loan_payment(db: Session, user: User, txn: Transaction,
         posted=True)
 
 
+RECEIVED_AMOUNT_REQUIRED = "Enter the amount received"
+
+
+def _received_amount(source: Account, destination: Account, *, amount, received,
+                     posted: bool) -> Optional[Decimal]:
+    """The ``received_amount`` to store on a transfer ``source`` -> ``destination``.
+
+    The only place a transfer's account currencies are read (balances use the
+    stored figures, ``transfer_sides``). Between accounts in one currency it is
+    stored as null: a value equal to ``amount`` is dropped, any other is
+    refused. Across currencies a credit card may not take part (cards are paid
+    and drawn in their own currency), and a posted transfer needs a figure
+    greater than 0; an unposted one may leave it empty until it is posted.
+    """
+    if source.currency == destination.currency:
+        if received is None or _D(received) == _D(amount):
+            return None
+        raise HTTPException(
+            status_code=400,
+            detail="Both accounts are in the same currency, so the amount received is the "
+                   "amount sent; leave it empty")
+    if AccountType.CREDIT in (source.account_type, destination.account_type):
+        raise HTTPException(
+            status_code=400,
+            detail="A credit card only sends or receives money in its own currency")
+    if received is None or _D(received) <= 0:
+        if posted:
+            raise HTTPException(status_code=400, detail=RECEIVED_AMOUNT_REQUIRED)
+        return None
+    return _D(received)
+
+
+def _received_amount_for_update(db: Session, txn: Transaction, requested: dict):
+    """``(changed, value)``: the ``received_amount`` an edit leaves on ``txn``.
+
+    Checked as for a new transfer (``_received_amount``) against the accounts,
+    amount and posting the edit leaves, with the request's figure, else the
+    stored one. A row that stops being a transfer keeps none. Between accounts
+    in one currency an edit that names no figure clears a stored one only when
+    it changes either account; one that keeps both leaves it alone (it can
+    exist only on a row whose account currency changed outside the API), so an
+    unrelated edit never moves a balance. Across currencies the rule is
+    checked only when the edit names a figure, changes either account, or
+    posts the row. Accounts that are missing are left for the later checks to
+    report.
+    """
+    if requested.get("transaction_type", txn.transaction_type) != TransactionType.TRANSFER:
+        return txn.received_amount is not None, None
+    source_id = requested.get("transfer_from_account_id", txn.transfer_from_account_id)
+    destination_id = requested.get("transfer_to_account_id", txn.transfer_to_account_id)
+    source = db.get(Account, source_id) if source_id else None
+    destination = db.get(Account, destination_id) if destination_id else None
+    if source is None or destination is None:
+        return False, None
+    given = "received_amount" in requested
+    retargeted = (txn.transaction_type != TransactionType.TRANSFER
+                  or source_id != txn.transfer_from_account_id
+                  or destination_id != txn.transfer_to_account_id)
+    if source.currency == destination.currency and not given:
+        # Retargeted into one currency: the stored figure no longer applies.
+        return retargeted and txn.received_amount is not None, None
+    posting = bool(requested.get("is_posted", txn.is_posted)) and not txn.is_posted
+    if not (given or retargeted or posting):
+        # Nothing the rule judges changes (a legacy row whose account currency
+        # changed outside the API still takes metadata edits).
+        return False, None
+    value = _received_amount(
+        source, destination,
+        amount=requested.get("amount", txn.amount),
+        received=requested["received_amount"] if given else txn.received_amount,
+        posted=bool(requested.get("is_posted", txn.is_posted)))
+    stored = txn.received_amount
+    changed = (value is None) != (stored is None) or (
+        value is not None and _D(value) != _D(stored))
+    return changed, value
+
+
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
     if transaction_type == TransactionType.DEBIT:
         return amount
@@ -691,9 +768,12 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
                                 primary_account, destination_account)
-        
-        if transaction_data.get("currency") is None:
-            transaction_data["currency"] = destination_account.currency
+        transaction_data["received_amount"] = _received_amount(
+            primary_account, destination_account, amount=transaction.amount,
+            received=transaction.received_amount, posted=transaction.is_posted)
+
+        # A transfer is recorded in its source account's currency.
+        transaction_data["currency"] = primary_account.currency
         if transaction_data.get("projected_currency") is None and transaction.projected_amount is not None:
             transaction_data["projected_currency"] = destination_account.currency
         if transaction_data.get("original_currency") is None and transaction.original_amount is not None:
@@ -703,6 +783,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         # credit is dropped, never stored unchecked (see TRANSFER_ONLY_COLUMNS).
         transaction_data["transfer_from_account_id"] = None
         transaction_data["transfer_to_account_id"] = None
+        transaction_data["received_amount"] = None
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
@@ -723,11 +804,11 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
         primary_account.balance = _D(primary_account.balance) - _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.TRANSFER and transaction.is_posted:
-        # The stored split: a loan payment's may differ from the request's.
-        principal, fee = transaction_data["amount"], transaction_data["transfer_fee"]
-        primary_account.balance = _D(primary_account.balance) - (_D(principal) + _D(fee))
+        # The stored figures: a loan payment's split may differ from the request's.
+        out, received = transfer_sides(db_transaction)
+        primary_account.balance = _D(primary_account.balance) - out
         if destination_account:
-            destination_account.balance = _D(destination_account.balance) + _D(principal)
+            destination_account.balance = _D(destination_account.balance) + received
 
     if transaction.is_posted:
         delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)
@@ -822,13 +903,15 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
+    received_changed, received_amount = _received_amount_for_update(
+        db, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
     old_type = db_transaction.transaction_type
     old_account_id = db_transaction.account_id
     old_is_posted = db_transaction.is_posted
-    old_transfer_fee = db_transaction.transfer_fee or 0.0
+    old_out, old_in = transfer_sides(db_transaction)
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
     old_category_id = db_transaction.category_id
@@ -849,11 +932,11 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             if old_transfer_from:
                 from_account = db.query(Account).filter(Account.id == old_transfer_from).first()
                 if from_account:
-                    from_account.balance = _D(from_account.balance) + _D(old_amount) + _D(old_transfer_fee)
+                    from_account.balance = _D(from_account.balance) + old_out
             if old_transfer_to:
                 to_account = db.query(Account).filter(Account.id == old_transfer_to).first()
                 if to_account:
-                    to_account.balance = _D(to_account.balance) - _D(old_amount)
+                    to_account.balance = _D(to_account.balance) - old_in
         old_budget_delta = _budget_delta_for_transaction(old_type, old_amount)
         if old_budget_delta:
             previous_budget_allocations = _get_budget_allocations_for_transaction(
@@ -886,10 +969,13 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             public_receipt_url(db_transaction.id, db_transaction.receipt_url):
         update_data.pop("receipt_url")
 
+    update_data.pop("received_amount", None)
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
     for field, value in loan_stamp.items():
         setattr(db_transaction, field, value)
+    if received_changed:
+        db_transaction.received_amount = received_amount
     if db_transaction.transaction_type != TransactionType.TRANSFER:
         # A debit or credit keeps no transfer accounts: a sent one is dropped, and
         # an edit away from a transfer clears the old ones.
@@ -922,8 +1008,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 raise HTTPException(status_code=404, detail="Destination account not found")
             
             db_transaction.account_id = db_transaction.transfer_from_account_id
-            if db_transaction.currency is None:
-                db_transaction.currency = destination_account.currency
+            # A transfer is recorded in its source account's currency.
+            db_transaction.currency = primary_account.currency
             if db_transaction.projected_amount is not None and db_transaction.projected_currency is None:
                 db_transaction.projected_currency = destination_account.currency
             if db_transaction.original_amount is not None and db_transaction.original_currency is None:
@@ -951,8 +1037,9 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         elif db_transaction.transaction_type == TransactionType.DEBIT and primary_account:
             primary_account.balance = _D(primary_account.balance) - _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER and primary_account and destination_account:
-            primary_account.balance = _D(primary_account.balance) - (_D(db_transaction.amount) + _D(db_transaction.transfer_fee))
-            destination_account.balance = _D(destination_account.balance) + _D(db_transaction.amount)
+            new_out, new_in = transfer_sides(db_transaction)
+            primary_account.balance = _D(primary_account.balance) - new_out
+            destination_account.balance = _D(destination_account.balance) + new_in
         new_budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if new_budget_delta:
             new_budget_allocations = _get_budget_allocations_for_transaction(
@@ -993,14 +1080,15 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
             if account:
                 account.balance = _D(account.balance) + _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER:
+            out, received = transfer_sides(db_transaction)
             if db_transaction.transfer_from_account_id:
                 from_account = db.query(Account).filter(Account.id == db_transaction.transfer_from_account_id).first()
                 if from_account:
-                    from_account.balance = _D(from_account.balance) + _D(db_transaction.amount) + _D(db_transaction.transfer_fee)
+                    from_account.balance = _D(from_account.balance) + out
             if db_transaction.transfer_to_account_id:
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
-                    to_account.balance = _D(to_account.balance) - _D(db_transaction.amount)
+                    to_account.balance = _D(to_account.balance) - received
         budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if budget_delta:
             budget_allocations = _get_budget_allocations_for_transaction(
@@ -1126,7 +1214,9 @@ def summarize_period(
       for by wallet debits and wallet-funded fees. Returned money is not wallet
       spend, so it never reduces this row; it is shown on its own, negative,
       "Returned from wallets" row instead. Together they keep the expense column
-      of ``category_breakdown`` summing to ``total_expenses``;
+      of ``category_breakdown`` summing to ``total_expenses`` (within one
+      currency: a cross-currency top-up adds what arrived in the wallet, its
+      ``received_amount``, while the expense total counts what left the source);
     - a transfer between two wallets moves no expense, and money leaving a
       wallet for an account outside the caller's scope stays wallet spend.
 
@@ -1212,7 +1302,8 @@ def summarize_period(
                     returned += amount
             elif to_wallet:
                 total_expenses += amount + fee
-                unallocated_wallet += amount
+                # What arrived in the wallet, in its own currency (the inbound leg).
+                unallocated_wallet += transfer_sides(t)[1]
             else:
                 total_expenses += fee
 

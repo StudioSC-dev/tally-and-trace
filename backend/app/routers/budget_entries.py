@@ -169,6 +169,25 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
         )
 
 
+def _validate_overflow_currency(db: Session, account_id: Optional[int],
+                                overflow_account_id: Optional[int], currency) -> None:
+    """An overflow account covers a shortfall in its own currency only.
+
+    It must be in the entry's account's currency (the entry's own currency when
+    it has no account). Run after the access checks on both accounts.
+    """
+    if not overflow_account_id:
+        return
+    overflow = db.get(Account, overflow_account_id)
+    account = db.get(Account, account_id) if account_id else None
+    expected = account.currency if account is not None else currency
+    if overflow is not None and expected is not None and overflow.currency != expected:
+        raise HTTPException(
+            status_code=400,
+            detail="overflow_account_id must be in the same currency as the entry's account",
+        )
+
+
 def _validate_entry_account(db: Session, account_id: Optional[int]) -> None:
     """An entry is paid from (or into) its account, so that cannot be a loan.
 
@@ -331,6 +350,8 @@ def create_budget_entry(
     )
     _validate_entry_account(db, entry_in.account_id)
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
+    _validate_overflow_currency(db, entry_in.account_id, entry_in.overflow_account_id,
+                                entry_in.currency)
     _validate_transfer_destination(
         db, current_user, entry_in.account_id, entry_in.transfer_to_account_id,
         entry_in.entry_type, entry_in.currency,
@@ -403,6 +424,14 @@ def update_budget_entry(
     if "overflow_account_id" in prospective_data:
         _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"],
                                    owner=owner)
+    if any(field in prospective_data
+           for field in ("account_id", "overflow_account_id", "currency")):
+        _validate_overflow_currency(
+            db,
+            prospective_data.get("account_id", entry.account_id),
+            prospective_data.get("overflow_account_id", entry.overflow_account_id),
+            prospective_data.get("currency") or entry.currency,
+        )
     _validate_transfer_destination(
         db,
         current_user,
@@ -518,6 +547,10 @@ def materialize_budget_entry(
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
 
+    A recurring transfer between accounts in different currencies needs
+    ``received_amount`` (what the destination received, in its currency), or
+    it is refused with a 400 "Enter the amount received".
+
     The transaction belongs to the entry's creator (``created_by_actor`` is the
     caller), so its category, allocation and tags stay one owner's. The caller
     needs the write rule on the entry: an edit role on every account it
@@ -550,6 +583,9 @@ def materialize_budget_entry(
             # Left out otherwise, so a loan payment is split into principal and
             # interest (``_loan_payment_stamp``); any other transfer has no fee.
             transfer_fields["transfer_fee"] = payload.transfer_fee
+        # Required across currencies (``_received_amount``): the entry stores no
+        # expected figure for the destination.
+        transfer_fields["received_amount"] = payload.received_amount
     else:
         txn_type = (
             TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT

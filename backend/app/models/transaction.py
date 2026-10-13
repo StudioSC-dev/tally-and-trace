@@ -25,6 +25,22 @@ def _enum_values(enum_cls):
     return [member.value for member in enum_cls]
 
 
+def transfer_sides(txn) -> tuple:
+    """``(out, in)``: a transfer's effect on its source and on its destination.
+
+    ``out`` is ``amount + transfer_fee`` (what left the source) and ``in`` is
+    ``received_amount`` when stored, else ``amount`` (what the destination got,
+    in its own currency). It reads only the row's stored figures, never the
+    accounts' currencies: those are checked once, when the row is written.
+    """
+    from decimal import Decimal
+
+    amount = Decimal(str(txn.amount or 0))
+    fee = Decimal(str(getattr(txn, "transfer_fee", None) or 0))
+    received = getattr(txn, "received_amount", None)
+    return amount + fee, Decimal(str(received)) if received is not None else amount
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
@@ -49,6 +65,9 @@ class Transaction(Base):
     original_currency = Column(Enum(CurrencyType), nullable=True)
     exchange_rate = Column(Numeric(15, 6), nullable=True)
     transfer_fee = Column(Numeric(15, 2), nullable=False, default=0)
+    # Transfers only: what the destination received, in its own currency. Null
+    # means the same as ``amount`` (always, between accounts in one currency).
+    received_amount = Column(Numeric(15, 2), nullable=True)
     description = Column(Text, nullable=True)
     transaction_type = Column(
         Enum(TransactionType, values_callable=_enum_values, name="transactiontype"),

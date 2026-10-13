@@ -570,7 +570,10 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
 
     redactor = Redactor(db, uid)
 
-    def transfer(when, currency, src, dst, amount, fee) -> None:
+    def transfer(when, currency, src, dst, amount, fee, received=None) -> None:
+        """One transfer's legs. ``received`` is a cross-currency transfer's
+        stored ``received_amount``: the inbound leg counts it, in the
+        destination's currency (``amount`` and ``currency`` otherwise)."""
         src_in, dst_in = src in cash_ids, dst in cash_ids
         if src_in and not dst_in and liability(dst) and not redactor.can_view(dst):
             # Into a loan or card the caller can't view: one whole expense, as
@@ -584,6 +587,8 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             add(when, currency, "expense" if spent else "moved_out", amount)
         elif dst_in and not src_in:
             earned = src in scope_ids or liability(src)
+            if received is not None:
+                currency, amount = db.get(Account, dst).currency, received
             add(when, currency, "income" if earned else "moved_in", amount)
 
     access = redactor.access
@@ -604,7 +609,7 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             when = _naive(t.transaction_date)
             if t.transaction_type == TransactionType.TRANSFER:
                 transfer(when, t.currency, t.transfer_from_account_id or t.account_id,
-                         t.transfer_to_account_id, t.amount, t.transfer_fee)
+                         t.transfer_to_account_id, t.amount, t.transfer_fee, t.received_amount)
             elif t.account_id in cash_ids:
                 add(when, t.currency,
                     "income" if t.transaction_type == TransactionType.CREDIT else "expense",
@@ -632,12 +637,14 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             if not e["counts_as_cash"]:
                 continue
             if e["type"] == TransactionType.TRANSFER.value and model is not Account:
+                received = None
                 if model is Transaction:
                     src, dst, fee = (source.transfer_from_account_id or source.account_id,
                                      source.transfer_to_account_id, source.transfer_fee)
+                    received = source.received_amount
                 else:
                     src, dst, fee = source.account_id, source.transfer_to_account_id, ZERO
-                transfer(when, source.currency, src, dst, source.amount, fee)
+                transfer(when, source.currency, src, dst, source.amount, fee, received)
                 continue
             amount = e["amount"]
             add(when, source.currency, "income" if amount > 0 else "expense", abs(amount))

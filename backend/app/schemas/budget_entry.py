@@ -192,4 +192,7 @@ class BudgetEntryMaterialize(BaseModel):
     amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
     advance: bool = True                          # advance next_occurrence to the following one
     transfer_fee: float = Field(0, ge=0)          # transfer entries only: fee charged on the source
+    # Transfer entries only: what the destination received, in its own currency.
+    # Required when the destination's currency differs from the source's.
+    received_amount: Optional[float] = Field(None, ge=0)
 

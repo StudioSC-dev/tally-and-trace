@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session
 
 
 from app.models.account import Account, AccountType
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction, TransactionType, transfer_sides
 
 DEFAULT_DAYS_UNTIL_DUE = 21
 
@@ -245,9 +245,12 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
             amount = Decimal(str(row.amount))
             if getattr(row, "transfer_to_account_id", None) == card_id:
                 source = getattr(row, "transfer_from_account_id", None) or row.account_id
+                # What the card received (card payments are same-currency by
+                # rule; a legacy row's stored received amount still wins).
+                received = transfer_sides(row)[1]
                 if source not in unbilled_ids:
-                    payments.append((row.transaction_date, amount, source, row)
-                                    if payment_sources else (row.transaction_date, amount))
+                    payments.append((row.transaction_date, received, source, row)
+                                    if payment_sources else (row.transaction_date, received))
             elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
                 fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
                 extra = {"source": row} if keep_source else {}

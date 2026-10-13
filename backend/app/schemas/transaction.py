@@ -22,6 +22,9 @@ class TransactionBase(BaseModel):
     original_currency: Optional[CurrencyType] = None
     exchange_rate: Optional[float] = Field(None, gt=0)
     transfer_fee: float = Field(0, ge=0)
+    # Transfers only: what the destination received, in its own currency (null:
+    # the same as ``amount``). Required to post a cross-currency transfer.
+    received_amount: Optional[float] = Field(None, ge=0)
     description: Optional[str] = None
     transaction_type: TransactionType
     is_posted: bool = True
@@ -55,6 +58,7 @@ class TransactionUpdate(BaseModel):
     original_currency: Optional[CurrencyType] = None
     exchange_rate: Optional[float] = Field(None, gt=0)
     transfer_fee: Optional[float] = Field(None, ge=0)
+    received_amount: Optional[float] = Field(None, ge=0)
     description: Optional[str] = None
     transaction_type: Optional[TransactionType] = None
     is_posted: Optional[bool] = None
@@ -116,6 +120,7 @@ class SharedFullTransaction(BaseModel):
     original_currency: Optional[CurrencyType] = None
     exchange_rate: Optional[float] = None
     transfer_fee: float = 0
+    received_amount: Optional[float] = None
     description: Optional[str] = None
     transaction_type: TransactionType
     is_posted: bool
