@@ -1,4 +1,4 @@
-import { formatCurrency } from '@tally-trace/shared'
+import { CURRENCY_CONFIGS, formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode, FxMeta, UpcomingItem } from '@tally-trace/shared'
 
 export interface CurrencyTotal {
@@ -16,6 +16,13 @@ export function totalsByCurrency(accounts: ReadonlyArray<{ currency: string; bal
   return Array.from(totals, ([currency, total]) => ({ currency, total }))
 }
 
+/** A figure written with its currency code ("PHP 869.42"), the form an estimate uses. */
+function formatCoded(amount: number, currency: CurrencyCode): string {
+  const decimals = CURRENCY_CONFIGS[currency]?.decimalPlaces ?? 2
+  const number = amount.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+  return `${currency} ${number}`
+}
+
 export interface FullItemAmountLabel {
   /** Null for an unconverted item: it has no figure to show, never 0. */
   primary: string | null
@@ -30,14 +37,12 @@ export interface FullItemAmountLabel {
 export function fullItemAmountLabel(item: UpcomingItem, fallback: CurrencyCode): FullItemAmountLabel {
   if (item.unconverted || item.amount === null) return { primary: null, original: null }
   const currency = item.currency ?? fallback
-  const primary = formatCurrency(item.amount, currency)
-  if (item.estimated && item.original_amount !== undefined && item.original_currency) {
-    return {
-      primary: `≈ ${primary}`,
-      original: `(${item.original_currency} ${item.original_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`,
-    }
+  if (item.estimated) {
+    const original =
+      item.original_amount != null && item.original_currency ? `(${formatCoded(item.original_amount, item.original_currency)})` : null
+    return { primary: `≈ ${formatCoded(item.amount, currency)}`, original }
   }
-  return { primary, original: null }
+  return { primary: formatCurrency(item.amount, currency), original: null }
 }
 
 /** "Rates: currency-api", or null when no stored rate was used. */
