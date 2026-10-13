@@ -172,6 +172,8 @@ type TransactionFormState = {
   original_amount?: number
   original_currency?: CurrencyCode
   exchange_rate?: number
+  // A transfer between currencies: what the destination received, in its own currency.
+  received_amount?: number
   // Undefined while the field is blank: a payment into a loan then leaves the
   // principal/interest split to the server.
   transfer_fee?: number
@@ -194,7 +196,28 @@ type PostingFormState = {
   projectedCurrency: CurrencyCode
   accountCurrency: CurrencyCode
   needsConversion: boolean
+  // A transfer into another currency also needs what the destination received.
+  needsReceived: boolean
+  destinationCurrency: CurrencyCode
+  received: string
+  // The caller may post but not edit (the owner resolving a creator's record): the only
+  // figure sent is the one the row needs, beside `is_posted`.
+  statusOnly: boolean
 }
+
+const emptyPostingForm = (currency: CurrencyCode): PostingFormState => ({
+  visible: false,
+  amount: '',
+  error: null,
+  projectedAmount: null,
+  projectedCurrency: currency,
+  accountCurrency: currency,
+  needsConversion: false,
+  needsReceived: false,
+  destinationCurrency: currency,
+  received: '',
+  statusOnly: false,
+})
 
 export function TransactionsPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth()
@@ -219,6 +242,7 @@ export function TransactionsPage() {
     original_amount: undefined,
     original_currency: undefined,
     exchange_rate: undefined,
+    received_amount: undefined,
     transfer_fee: undefined,
     description: '',
     transaction_type: 'debit',
@@ -251,15 +275,7 @@ export function TransactionsPage() {
     receiptFor.current = null
     releaseReceiptUrl()
   }, [releaseReceiptUrl])
-  const [postingFormState, setPostingFormState] = useState<PostingFormState>({
-    visible: false,
-    amount: '',
-    error: null,
-    projectedAmount: null,
-    projectedCurrency: fallbackCurrency,
-    accountCurrency: fallbackCurrency,
-    needsConversion: false,
-  })
+  const [postingFormState, setPostingFormState] = useState<PostingFormState>(emptyPostingForm(fallbackCurrency))
   const [searchTerm, setSearchTerm] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
@@ -267,15 +283,7 @@ export function TransactionsPage() {
   const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   const resetPostingFormState = useCallback(() => {
-    setPostingFormState({
-      visible: false,
-      amount: '',
-      error: null,
-      projectedAmount: null,
-      projectedCurrency: fallbackCurrency,
-      accountCurrency: fallbackCurrency,
-      needsConversion: false,
-    })
+    setPostingFormState(emptyPostingForm(fallbackCurrency))
   }, [fallbackCurrency])
   const defaultMonthStartRef = useRef(getMonthStart(new Date()))
   const defaultMonthEndRef = useRef(getMonthEnd(defaultMonthStartRef.current))
@@ -783,6 +791,13 @@ export function TransactionsPage() {
     return [...posted, ...pending]
   }, [transactions])
 
+  // A transfer between currencies sends one figure and receives another.
+  const crossCurrencyTransfer =
+    formData.transaction_type === 'transfer' &&
+    selectedFormAccount !== undefined &&
+    destinationFormAccount !== undefined &&
+    selectedFormAccount.currency !== destinationFormAccount.currency
+  const destinationCurrency = (destinationFormAccount?.currency as CurrencyCode | undefined) ?? formData.currency
   const formCurrencySymbol = getCurrencySymbol(formData.currency)
   const resolvedProjectedCurrency = formData.projected_currency ?? formData.currency
   const projectedCurrencySymbol = getCurrencySymbol(resolvedProjectedCurrency)
@@ -916,6 +931,15 @@ export function TransactionsPage() {
       const selectedAccount = accounts.find((account) => account.id === formData.account_id)
       const accountCurrency = (selectedAccount?.currency as CurrencyCode) || fallbackCurrency
       const projectedCurrency = formData.projected_currency ?? accountCurrency
+      const destinationAccount = accounts.find((account) => account.id === formData.transfer_to_account_id)
+      const crossing =
+        formData.transaction_type === 'transfer' &&
+        destinationAccount !== undefined &&
+        destinationAccount.currency !== accountCurrency
+      if (crossing && formData.is_posted && !(formData.received_amount !== undefined && formData.received_amount > 0)) {
+        alert(`Please enter the amount received in ${destinationAccount.currency}.`)
+        return
+      }
 
       let projectedAmount = formData.projected_amount
       if (!formData.is_posted) {
@@ -992,6 +1016,8 @@ export function TransactionsPage() {
           : { tag_ids: formData.tag_ids }),
         projected_amount: projectedAmount ?? undefined,
         projected_currency: projectedCurrency,
+        // Only a transfer between currencies carries what the destination received.
+        ...(crossing ? { received_amount: formData.received_amount ?? null } : {}),
       }
 
       // Someone else's transaction on a shared account keeps its creator's category,
@@ -1060,6 +1086,7 @@ export function TransactionsPage() {
         original_amount: transaction.original_amount ?? undefined,
         original_currency: (transaction.original_currency as CurrencyCode) ?? undefined,
         exchange_rate: transaction.exchange_rate ?? undefined,
+        received_amount: transaction.received_amount ?? undefined,
         transfer_fee: transaction.transfer_fee ?? 0,
       description: transaction.description || '',
       transaction_type: transaction.transaction_type,
@@ -1095,7 +1122,12 @@ export function TransactionsPage() {
     }
   }
 
-  const handleMarkPostedFromModal = async (transaction: Transaction, actualAmount: number, exchangeRate?: number) => {
+  const handleMarkPostedFromModal = async (
+    transaction: Transaction,
+    actualAmount: number,
+    exchangeRate?: number,
+    receivedAmount?: number,
+  ) => {
     if (isLimited(transaction)) {
       return
     }
@@ -1112,6 +1144,8 @@ export function TransactionsPage() {
       amount,
       currency: accountCurrency,
       exchange_rate: exchangeRate,
+      // A transfer between currencies posts with what the destination received.
+      ...(receivedAmount !== undefined ? { received_amount: receivedAmount } : {}),
     }
     // The response carries the row's fresh permissions (posting changes what may be reverted).
     const updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
@@ -1123,17 +1157,22 @@ export function TransactionsPage() {
   // Posting or reverting a record the caller may not edit (the account owner resolving
   // a record whose creator lost access) sends the status alone: the API refuses any
   // other field from them.
-  const handlePostStatusOnly = async (transaction: Transaction) => {
+  // The one figure the row needs besides the status goes with it: `amount` for a foreign
+  // pending debit or credit, `received_amount` for a transfer between currencies.
+  const handlePostStatusOnly = async (
+    transaction: Transaction,
+    figure: { amount: number } | { received_amount: number } | null = null,
+  ): Promise<string | null> => {
     let updatedTransaction: Transaction
     try {
-      updatedTransaction = await updateTransaction({ id: transaction.id, data: { is_posted: true } }).unwrap()
+      updatedTransaction = await updateTransaction({ id: transaction.id, data: { is_posted: true, ...(figure ?? {}) } }).unwrap()
     } catch (error) {
-      alert(apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.')
-      return
+      return apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.'
     }
     setActionTransaction(updatedTransaction)
     setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
     resetPostingFormState()
+    return null
   }
 
   const handleRevertPostedFromModal = async (transaction: Transaction) => {
@@ -1172,13 +1211,37 @@ export function TransactionsPage() {
     if (isLimited(transaction)) {
       return
     }
-    // No amount to confirm when only the status may change.
-    if (!transaction.permissions.can_edit) {
-      void handlePostStatusOnly(transaction)
-      return
-    }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
+    const destinationId = transaction.transaction_type === 'transfer' ? transaction.transfer_to_account_id : null
+    const destinationCurrency =
+      destinationId != null
+        ? ((accounts.find((item) => item.id === destinationId) ?? resolvedDestinations[destinationId])?.currency as CurrencyCode | undefined)
+        : undefined
+    const needsReceived = destinationCurrency !== undefined && destinationCurrency !== accountCurrency
+    // Only the status may change: the row's one missing figure is asked for, if it has one.
+    if (!transaction.permissions.can_edit) {
+      const face = (transaction.projected_currency as CurrencyCode | undefined) ?? (transaction.currency as CurrencyCode)
+      const needsAmount = transaction.transaction_type !== 'transfer' && face !== accountCurrency
+      const needsStoredReceived = needsReceived && !(transaction.received_amount != null && transaction.received_amount > 0)
+      if (!needsAmount && !needsStoredReceived) {
+        void handlePostStatusOnly(transaction).then((message) => {
+          if (message) alert(message)
+        })
+        return
+      }
+      setPostingFormState({
+        ...emptyPostingForm(accountCurrency),
+        visible: true,
+        projectedAmount: transaction.projected_amount ?? null,
+        projectedCurrency: face,
+        needsConversion: needsAmount,
+        needsReceived: needsStoredReceived,
+        destinationCurrency: destinationCurrency ?? accountCurrency,
+        statusOnly: true,
+      })
+      return
+    }
     // A loan payment is posted for its whole amount (principal + interest).
     const projectedAmount =
       transaction.projected_amount ??
@@ -1192,6 +1255,7 @@ export function TransactionsPage() {
       accountCurrency
     const needsConversion = projectedCurrency !== accountCurrency
     setPostingFormState({
+      ...emptyPostingForm(accountCurrency),
       visible: true,
       amount:
         !needsConversion && projectedAmount && projectedAmount > 0
@@ -1202,6 +1266,10 @@ export function TransactionsPage() {
       projectedCurrency,
       accountCurrency,
       needsConversion,
+      needsReceived,
+      destinationCurrency: destinationCurrency ?? accountCurrency,
+      received: needsReceived && transaction.received_amount != null ? String(transaction.received_amount) : '',
+      statusOnly: false,
     })
   }
 
@@ -1209,19 +1277,52 @@ export function TransactionsPage() {
     if (!actionTransaction) {
       return
     }
+    // A status-only post asks for just the one figure the row needs.
+    const askAmount = !postingFormState.statusOnly || postingFormState.needsConversion
     const parsed = parseFloat(postingFormState.amount)
-    if (Number.isNaN(parsed) || parsed <= 0) {
+    if (askAmount && (Number.isNaN(parsed) || parsed <= 0)) {
       setPostingFormState((prev) => ({
         ...prev,
-        error: 'Please enter a valid amount greater than zero.',
+        error: prev.needsConversion
+          ? `Enter the amount in ${prev.accountCurrency} to post this foreign purchase`
+          : 'Please enter a valid amount greater than zero.',
       }))
       return
     }
-    const projectedAmount = postingFormState.projectedAmount
-    const exchangeRate =
-      projectedAmount && projectedAmount > 0 ? parsed / projectedAmount : undefined
-    await handleMarkPostedFromModal(actionTransaction, parsed, exchangeRate)
-    resetPostingFormState()
+    const received = parseFloat(postingFormState.received)
+    if (postingFormState.needsReceived && (Number.isNaN(received) || received <= 0)) {
+      setPostingFormState((prev) => ({
+        ...prev,
+        error: `Enter the amount received in ${prev.destinationCurrency}.`,
+      }))
+      return
+    }
+    try {
+      if (postingFormState.statusOnly) {
+        const message = await handlePostStatusOnly(
+          actionTransaction,
+          postingFormState.needsConversion ? { amount: parsed } : { received_amount: received },
+        )
+        if (message) setPostingFormState((prev) => ({ ...prev, error: message }))
+        return
+      }
+      const projectedAmount = postingFormState.projectedAmount
+      const exchangeRate =
+        projectedAmount && projectedAmount > 0 ? parsed / projectedAmount : undefined
+      await handleMarkPostedFromModal(
+        actionTransaction,
+        parsed,
+        exchangeRate,
+        postingFormState.needsReceived ? received : undefined,
+      )
+      resetPostingFormState()
+    } catch (error) {
+      // The API's reason ("Enter the amount received", ...) stays in the form.
+      setPostingFormState((prev) => ({
+        ...prev,
+        error: apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.',
+      }))
+    }
   }
 
   const handleCancelPostingForm = () => {
@@ -2033,12 +2134,17 @@ export function TransactionsPage() {
                   </p>
                   <p className="text-xs text-ink">
                     {postingFormState.needsConversion
-                      ? `Enter the amount received in ${postingFormState.accountCurrency}. We will infer the exchange rate.`
+                      ? `Enter the amount actually posted in ${postingFormState.accountCurrency}. The projection only estimates it.`
+                      : postingFormState.statusOnly
+                      ? 'Enter the figure this transfer needs before it can be posted.'
                       : 'Verify the received amount. Update it only if the actual amount differs.'}
                   </p>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    {(!postingFormState.statusOnly || postingFormState.needsConversion) && (
                     <div className="flex-1">
-                      <label className="label text-ink">Amount in {postingFormState.accountCurrency}</label>
+                      <label className="label text-ink">
+                        {postingFormState.needsReceived ? `Amount sent (${postingFormState.accountCurrency})` : `Amount in ${postingFormState.accountCurrency}`}
+                      </label>
                       <div className="relative">
                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink text-sm">
                           {getCurrencySymbol(postingFormState.accountCurrency)}
@@ -2059,11 +2165,10 @@ export function TransactionsPage() {
                           placeholder="0.00"
                         />
                       </div>
-                      {postingFormState.error && (
-                        <p className="mt-1 text-xs text-danger">{postingFormState.error}</p>
-                      )}
-        </div>
-                    {!postingFormState.needsConversion &&
+                    </div>
+                    )}
+                    {!postingFormState.statusOnly &&
+                      !postingFormState.needsConversion &&
                       postingFormState.projectedAmount &&
                       postingFormState.projectedAmount > 0 && (
                         <button
@@ -2080,7 +2185,34 @@ export function TransactionsPage() {
                           Use projected amount
                         </button>
                       )}
-      </div>
+                  </div>
+                  {postingFormState.needsReceived && (
+                    <div>
+                      <label className="label text-ink" htmlFor="posting-received">
+                        Amount received ({postingFormState.destinationCurrency})
+                      </label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-ink text-sm">
+                          {getCurrencySymbol(postingFormState.destinationCurrency)}
+                        </span>
+                        <input
+                          id="posting-received"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={postingFormState.received}
+                          onChange={(e) =>
+                            setPostingFormState((prev) => ({ ...prev, received: e.target.value, error: null }))
+                          }
+                          className="input-field pl-7 focus-ring"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {postingFormState.error && (
+                    <p className="text-xs text-danger" role="alert" data-testid="posting-error">{postingFormState.error}</p>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -2317,7 +2449,7 @@ export function TransactionsPage() {
               {!formData.is_posted && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="label">Amount</label>
+                    <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                         {projectedCurrencySymbol}
@@ -2362,6 +2494,37 @@ export function TransactionsPage() {
                 </div>
               )}
               
+              {crossCurrencyTransfer && (
+              <div>
+                  <label className="label" htmlFor="transfer-received">Amount received ({destinationCurrency})</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
+                      {getCurrencySymbol(destinationCurrency)}
+                    </span>
+                    <input
+                      id="transfer-received"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.received_amount ?? ''}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value)
+                        setFormData((prev) => ({
+                          ...prev,
+                          received_amount: Number.isNaN(value) ? undefined : value,
+                        }))
+                      }}
+                      className="input-field pl-7 focus-ring"
+                      placeholder="0.00"
+                      required={formData.is_posted}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    What lands in the destination, in {destinationCurrency}. {formData.is_posted ? 'Required to post a transfer between currencies.' : 'Needed before this transfer can be posted; until then the projection estimates it.'}
+                  </p>
+                </div>
+              )}
+
               {formData.transaction_type === 'transfer' && (
               <div>
                   <label className="label">{transferIntoLoan ? 'Interest' : 'Transfer Fee'}</label>
@@ -2395,7 +2558,7 @@ export function TransactionsPage() {
               
               {formData.is_posted && (
               <div>
-                  <label className="label">Amount</label>
+                  <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">
                       {formCurrencySymbol}

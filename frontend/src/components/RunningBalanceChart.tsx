@@ -2,8 +2,14 @@ import { useMemo, useId } from 'react'
 import type { CashflowTimeline } from '../store/api'
 import { timelineEventName } from '@tally-trace/shared'
 
+/** The window, and one currency's timeline body (a `by_currency` row works). */
+export type ChartTimeline = Pick<
+  CashflowTimeline,
+  'window_start' | 'window_end' | 'opening_balance' | 'lowest_balance' | 'trough_date' | 'events'
+>
+
 interface Props {
-  timeline: CashflowTimeline
+  timeline: ChartTimeline
   format: (n: number) => string
   height?: number
   compact?: boolean

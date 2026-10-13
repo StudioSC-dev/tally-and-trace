@@ -1,9 +1,16 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
+import { useGetAccountsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
 import type { Allocation } from '../store/api'
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { formatCurrency, getCurrencySymbol } from '../utils/currency'
+import type { CurrencyCode } from '../utils/currency'
+import { estimateText, estimateTitle } from '../utils/fx'
+import type { EstimateLabels } from '../utils/fx'
+import { CurrencyControl } from '../components/CurrencyControl'
+import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
+import { FxNotice } from '../components/FxNotice'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { apiErrorMessage } from '../utils/apiError'
@@ -60,11 +67,31 @@ const daysUntil = (day: Date): number => {
   return Math.max(0, Math.round((day.getTime() - today.getTime()) / MS_PER_DAY))
 }
 
+/** The "Mark paid" dialog: which figures the API needs for this entry. */
+type PayDialogState = {
+  entryId: number
+  name: string
+  /** The row as listed, e.g. "≈ PHP 4,640.00 (USD 80.00)": a hint, never a default value. */
+  estimate: string
+  needsCharged: boolean
+  needsReceived: boolean
+  chargedCurrency: CurrencyCode
+  receivedCurrency: CurrencyCode
+  charged: string
+  received: string
+  error: string | null
+  submitting: boolean
+}
+
 type PayableRow = {
   key: string
   name: string
   day: Date
   amount: number
+  /** The currency of `amount`. */
+  currency: CurrencyCode
+  /** The estimate labels: the row was converted from another currency. */
+  labels: EstimateLabels
   detail: string
   overdue: boolean
   budgetEntryId: number | null
@@ -72,7 +99,7 @@ type PayableRow = {
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned'
 }
 
-const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow => {
+const payableRow = (fallback: CurrencyCode) => (payable: Payable | LimitedEvent, index: number): PayableRow => {
   if (isLimitedEvent(payable)) {
     // Face amount, never `cash_delta` (0 for a charge billed on a later statement).
     return {
@@ -80,6 +107,8 @@ const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow 
       name: payable.display_name,
       day: parseCalendarDay(payable.date),
       amount: payable.face_amount,
+      currency: payable.currency,
+      labels: {},
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
       overdue: payable.overdue,
       budgetEntryId: null,
@@ -94,6 +123,8 @@ const payableRow = (payable: Payable | LimitedEvent, index: number): PayableRow 
     name: payable.name,
     day: parseCalendarDay(payable.due_date),
     amount: payable.amount,
+    currency: payable.currency ?? fallback,
+    labels: payable,
     detail: `${label}${pays}${overflow}`,
     overdue: false,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
@@ -110,7 +141,7 @@ const isOtherUpcoming = (item: UpcomingItemOrEvent): boolean => {
 export function Dashboard() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { format } = useCurrency()
+  const { currencyCode: defaultCurrency } = useCurrency()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -123,6 +154,8 @@ export function Dashboard() {
   const tagParam = useMemo(() => (selectedTag !== undefined ? { tag: selectedTag } : {}), [selectedTag])
   const [postingId, setPostingId] = useState<number | null>(null)
   const [materializeEntry] = useMaterializeBudgetEntryMutation()
+  // The "Mark paid" dialog: open for a payable that needs the figure actually charged.
+  const [payDialog, setPayDialog] = useState<PayDialogState | null>(null)
 
   const handleMarkPaid = async (entryId: number) => {
     setPostingId(entryId)
@@ -133,6 +166,34 @@ export function Dashboard() {
       alert(apiErrorMessage(error) || 'Could not mark the entry as paid. Please try again.')
     } finally {
       setPostingId(null)
+    }
+  }
+
+  const handleSubmitPayDialog = async () => {
+    if (!payDialog) return
+    const charged = payDialog.needsCharged ? parseFloat(payDialog.charged) : undefined
+    const received = payDialog.needsReceived ? parseFloat(payDialog.received) : undefined
+    if (charged !== undefined && !(charged > 0)) {
+      setPayDialog({ ...payDialog, error: `Enter the amount charged in ${payDialog.chargedCurrency}` })
+      return
+    }
+    if (received !== undefined && !(received > 0)) {
+      setPayDialog({ ...payDialog, error: `Enter the amount received in ${payDialog.receivedCurrency}` })
+      return
+    }
+    setPayDialog({ ...payDialog, error: null, submitting: true })
+    try {
+      await materializeEntry({
+        id: payDialog.entryId,
+        data: {
+          ...(charged !== undefined ? { amount: charged } : {}),
+          ...(received !== undefined ? { received_amount: received } : {}),
+        },
+      }).unwrap()
+      setPayDialog(null)
+    } catch (error) {
+      // The API's reason ("Enter the amount charged in PHP", ...) stays in the dialog.
+      setPayDialog({ ...payDialog, submitting: false, error: apiErrorMessage(error) || 'Could not mark the entry as paid. Please try again.' })
     }
   }
 
@@ -159,6 +220,14 @@ export function Dashboard() {
     useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
   const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
     useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
+  // Only for "Mark paid": the currency of the account an entry pays from and into.
+  const { data: accountsData } = useGetAccountsQuery({ limit: 200 }, { skip: !isAuthenticated })
+
+  // The currency every total below is read in: the default one, or the first the user holds.
+  const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
+  const format = (amount: number) => formatCurrency(amount, currency)
+  // Budget envelopes are always in the default currency.
+  const formatDefault = (amount: number) => formatCurrency(amount, defaultCurrency)
 
   const postableEntryIds = useMemo(
     () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.permissions.can_post).map((e) => e.id)),
@@ -175,14 +244,56 @@ export function Dashboard() {
   )
 
   // The backend's projection: month 0 runs from today to the 1st of next month, opening at available cash.
+  // The scalars are the default currency only, so every figure is read from the selected currency's row.
   const nextPeriod = snapshot?.forecast_next_3_months[0]
-  const closings = snapshot?.account_closings[0]
-  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow), [snapshot])
+  const nextPeriodRow = nextPeriod?.by_currency.find((r) => r.currency === currency)
+  const closings = snapshot?.account_closings[0]?.by_currency.find((r) => r.currency === currency)
+  const balanceRow = snapshot?.balances.by_currency.find((r) => r.currency === currency)
+  const summaryRow = periodSummary?.by_currency.find((r) => r.currency === currency)
+  const periodCategories = useMemo(() => summaryRow?.category_breakdown ?? {}, [summaryRow])
+  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency)), [snapshot, defaultCurrency])
+  const accountCurrencies = useMemo(
+    () => new Map((accountsData?.items ?? []).map((a) => [a.id, a.currency as CurrencyCode])),
+    [accountsData]
+  )
+  const entriesById = useMemo(
+    () => new Map((budgetEntriesData?.items ?? []).filter(isDetailed).map((e) => [e.id, e])),
+    [budgetEntriesData]
+  )
+
+  // "Mark paid" posts at once, unless the entry is in another currency than the account it pays
+  // from (or moves money into another currency): then the figure actually charged is needed.
+  const startMarkPaid = (row: PayableRow) => {
+    if (row.budgetEntryId === null) return
+    const entry = entriesById.get(row.budgetEntryId)
+    const sourceCurrency = entry?.account_id !== undefined ? accountCurrencies.get(entry.account_id) : undefined
+    const destinationCurrency = entry?.transfer_to_account_id != null ? accountCurrencies.get(entry.transfer_to_account_id) : undefined
+    const chargedCurrency = sourceCurrency ?? row.currency
+    const needsCharged = entry !== undefined && sourceCurrency !== undefined ? entry.currency !== sourceCurrency : row.labels.estimated === true
+    const needsReceived = destinationCurrency !== undefined && destinationCurrency !== chargedCurrency
+    if (!needsCharged && !needsReceived) {
+      void handleMarkPaid(row.budgetEntryId)
+      return
+    }
+    setPayDialog({
+      entryId: row.budgetEntryId,
+      name: row.name,
+      estimate: estimateText(row.amount, row.currency, row.labels),
+      needsCharged,
+      needsReceived,
+      chargedCurrency,
+      receivedCurrency: destinationCurrency ?? chargedCurrency,
+      charged: '',
+      received: '',
+      error: null,
+      submitting: false,
+    })
+  }
   const otherUpcoming = useMemo(() => (snapshot?.upcoming_this_month ?? []).filter(isOtherUpcoming), [snapshot])
 
-  const periodIncome = periodSummary?.summary.total_income ?? 0
-  const periodExpenses = periodSummary?.summary.total_expenses ?? 0
-  const periodNet = periodSummary?.summary.net_flow ?? 0
+  const periodIncome = summaryRow?.total_income ?? 0
+  const periodExpenses = summaryRow?.total_expenses ?? 0
+  const periodNet = summaryRow?.net_flow ?? 0
   const periodHeadingLabel = selectedPeriod === 'year' ? 'Year to Date' : selectedPeriod === 'month' ? 'Month to Date' : 'Week to Date'
   const periodTag = selectedPeriod === 'year' ? 'YTD' : selectedPeriod === 'month' ? 'MTD' : 'WTD'
   // period_end is exclusive (the 1st of next month); step back a calendar day, immune to DST.
@@ -260,15 +371,15 @@ export function Dashboard() {
 
   // Shares are of the rows listed: the ring and table list spending-wallet debits that the period expenses figure nets out.
   const listedTotal = useMemo(
-    () => Object.values(periodSummary?.category_breakdown ?? {}).reduce((sum, row) => sum + Math.max(row.expenses, 0), 0),
-    [periodSummary],
+    () => Object.values(periodCategories).reduce((sum, row) => sum + Math.max(row.expenses, 0), 0),
+    [periodCategories],
   )
 
   // The wallet-aware backend summary names categories; the chart colours them from the caller's own.
   const expenditureInsights = useMemo<ExpenditureInsight[]>(() => {
     if (!periodSummary) return []
     const categories = categoriesData ?? []
-    const positive = Object.entries(periodSummary.category_breakdown).filter(([, row]) => row.expenses > 0)
+    const positive = Object.entries(periodCategories).filter(([, row]) => row.expenses > 0)
     if (listedTotal <= 0) return []
     return positive
       .sort(([, a], [, b]) => b.expenses - a.expenses)
@@ -283,7 +394,7 @@ export function Dashboard() {
           percentage: (row.expenses / listedTotal) * 100,
         }
       })
-  }, [periodSummary, categoriesData, listedTotal])
+  }, [periodSummary, periodCategories, categoriesData, listedTotal])
 
   const expenditureChartStyle = useMemo(() => {
     if (expenditureInsights.length === 0) return { backgroundImage: 'conic-gradient(#334155 0% 100%)' }
@@ -377,6 +488,7 @@ export function Dashboard() {
           <p className="text-sm text-muted mt-1">Your financial overview</p>
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
+        <CurrencyControl currencies={snapshot?.currencies} value={currency} onChange={setCurrency} />
         <div className="flex flex-col gap-1">
           <div className="flex space-x-1 bg-sunken p-1" role="group" aria-label="Period for actual totals">
             {(['week', 'month', 'year'] as const).map((period) => (
@@ -394,8 +506,10 @@ export function Dashboard() {
         </div>
       </div>
 
+      <FxNotice fx={snapshot?.fx} />
+
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
-      <CashflowTimelineCard tag={selectedTag} />
+      <CashflowTimelineCard tag={selectedTag} currency={currency} />
 
       {/* Financial Snapshot */}
       <div className="bg-surface border border-line" data-onboarding="financial-snapshot">
@@ -432,7 +546,7 @@ export function Dashboard() {
               <dl>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-muted">Net worth</dt>
-                  <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(snapshot?.balances.total ?? 0)}</dd>
+                  <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(balanceRow?.total ?? 0)}</dd>
                 </div>
               </dl>
               <p className="mt-1 text-xs text-muted">
@@ -446,11 +560,11 @@ export function Dashboard() {
             </h3>
             <dl className="space-y-3" data-testid="projection">
               {[
-                { id: 'available-cash', label: 'Available cash', value: format(snapshot?.available_cash ?? 0), color: 'text-ink' },
-                ...(nextPeriod ? [
-                  { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriod.income), color: 'text-ok' },
-                  { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriod.net), color: nextPeriod.net >= 0 ? 'text-ok' : 'text-danger' },
-                  { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriod.closing_balance), color: nextPeriod.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
+                { id: 'available-cash', label: 'Available cash', value: format(balanceRow?.available_cash ?? 0), color: 'text-ink' },
+                ...(nextPeriodRow ? [
+                  { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriodRow.income), color: 'text-ok' },
+                  { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriodRow.net), color: nextPeriodRow.net >= 0 ? 'text-ok' : 'text-danger' },
+                  { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriodRow.closing_balance), color: nextPeriodRow.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
                 ] : []),
               ].map(({ id, label, value, color }) => (
                 <div key={id} className="flex items-center justify-between">
@@ -513,8 +627,8 @@ export function Dashboard() {
                       )}
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold text-ink">Remaining {format(remaining)}</p>
-                      <p className="text-xs text-muted">Limit {format(limit)} · Spent {format(spent)}</p>
+                      <p className="text-sm font-semibold text-ink">Remaining {formatDefault(remaining)}</p>
+                      <p className="text-xs text-muted">Limit {formatDefault(limit)} · Spent {formatDefault(spent)}</p>
                     </div>
                   </div>
                   <BudgetUsageBar usagePercentage={usagePercentage} />
@@ -549,7 +663,7 @@ export function Dashboard() {
                       <div>
                         <p className="font-medium text-ink">{row.name}</p>
                         <p className="text-sm text-muted">
-                          {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount">{format(row.amount)}</span>
+                          {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
                         </p>
                         <p className="text-xs text-muted">{row.detail}</p>
                       </div>
@@ -560,7 +674,7 @@ export function Dashboard() {
                       </p>
                       {row.budgetEntryId !== null && postableEntryIds.has(row.budgetEntryId) && (
                         <button
-                          onClick={() => handleMarkPaid(row.budgetEntryId as number)}
+                          onClick={() => startMarkPaid(row)}
                           disabled={postingId === row.budgetEntryId}
                           className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
                         >
@@ -582,6 +696,12 @@ export function Dashboard() {
               {otherUpcoming.slice(0, MAX_OTHER_UPCOMING_SHOWN).map((item, index) => {
                 // The face amount, never a limited event's `cash_delta` (0 for a Household bill).
                 const { amount, direction } = upcomingItemAmount(item)
+                // Each item reads in its own currency. A full one may be an estimate, or have no rate (no figure).
+                const itemCurrency = item.currency ?? defaultCurrency
+                const itemLabels: EstimateLabels = isLimitedEvent(item) ? {} : item
+                const amountText = isLimitedEvent(item)
+                  ? formatCurrency(amount, itemCurrency)
+                  : estimateText(item.unconverted ? null : amount, itemCurrency, itemLabels)
                 const name = isLimitedEvent(item) ? item.display_name : item.name
                 const day = parseCalendarDay(isLimitedEvent(item) ? item.date : item.due_date)
                 const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
@@ -592,7 +712,7 @@ export function Dashboard() {
                       <p className="text-sm font-medium text-ink">{name}</p>
                       <p className="text-xs text-muted">{formatDateWithOrdinal(day)}{note ? ` · ${note}` : ''}</p>
                     </div>
-                    <p className="text-sm font-semibold text-ink flex-shrink-0" data-testid="other-upcoming-amount">{format(amount)}</p>
+                    <p className="text-sm font-semibold text-ink flex-shrink-0" data-testid="other-upcoming-amount" title={estimateTitle(itemLabels)}>{amountText}</p>
                   </div>
                 )
               })}
@@ -603,6 +723,70 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {payDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="pay-dialog-overlay">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pay-dialog-title"
+            className="w-full max-w-md bg-surface border border-line p-5 sm:p-6 space-y-4"
+            onKeyDown={(e) => { if (e.key === 'Escape') setPayDialog(null) }}
+          >
+            <div>
+              <h2 id="pay-dialog-title" className="text-lg font-semibold text-ink">Mark {payDialog.name} as paid</h2>
+              <p className="mt-1 text-sm text-muted" data-testid="pay-dialog-estimate">
+                Listed as {payDialog.estimate}. Enter what was actually {payDialog.needsCharged ? 'charged' : 'moved'}; the estimate is only a guide.
+              </p>
+            </div>
+            {payDialog.needsCharged && (
+              <div>
+                <label className="label" htmlFor="pay-charged">Amount charged ({payDialog.chargedCurrency})</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(payDialog.chargedCurrency)}</span>
+                  <input
+                    id="pay-charged"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    autoFocus
+                    value={payDialog.charged}
+                    onChange={(e) => setPayDialog({ ...payDialog, charged: e.target.value, error: null })}
+                    className="input-field pl-7 focus-ring"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            )}
+            {payDialog.needsReceived && (
+              <div>
+                <label className="label" htmlFor="pay-received">Amount received ({payDialog.receivedCurrency})</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(payDialog.receivedCurrency)}</span>
+                  <input
+                    id="pay-received"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    autoFocus={!payDialog.needsCharged}
+                    value={payDialog.received}
+                    onChange={(e) => setPayDialog({ ...payDialog, received: e.target.value, error: null })}
+                    className="input-field pl-7 focus-ring"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            )}
+            {payDialog.error && <p className="text-sm text-danger" role="alert" data-testid="pay-dialog-error">{payDialog.error}</p>}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={handleSubmitPayDialog} disabled={payDialog.submitting} className="btn-primary focus-ring disabled:opacity-50">
+                {payDialog.submitting ? 'Posting…' : 'Mark paid'}
+              </button>
+              <button type="button" onClick={() => setPayDialog(null)} className="btn-secondary focus-ring">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Expenditure Categories */}
       <div className="bg-surface border border-line" data-onboarding="top-categories">

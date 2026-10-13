@@ -1,6 +1,8 @@
 import { useGetAccountStatementsQuery } from '../store/api'
 import type { Account } from '../store/api'
 import { formatCurrency, CurrencyCode } from '../utils/currency'
+import { estimateText, estimateTitle, formatCoded } from '../utils/fx'
+import type { EstimateLabels } from '../utils/fx'
 
 /** A calendar date (YYYY-MM-DD, or an ISO datetime) shown without a timezone shift. */
 const formatDay = (value: string): string => {
@@ -11,6 +13,9 @@ const formatDay = (value: string): string => {
     year: 'numeric',
   })
 }
+
+/** A full line may carry the estimate labels; a limited one never does. */
+const lineLabels = (line: object): EstimateLabels => ('original_amount' in line ? (line as EstimateLabels) : {})
 
 const STATUS_STYLES = { paid: 'text-ok', overdue: 'text-danger', open: 'text-warn' } as const
 
@@ -54,10 +59,26 @@ export function StatementsPanel({ account }: { account: Account }) {
                   <span className="text-body">
                     {formatDay(line.date)} · {line.display_description ?? 'Charge'}
                   </span>
-                  <span className="text-ink">{formatCurrency(line.amount, currency)}</span>
+                  <span className="text-ink" title={estimateTitle(lineLabels(line))}>{estimateText(line.amount, currency, lineLabels(line))}</span>
                 </li>
               ))}
             </ul>
+          )}
+          {'unconverted_lines' in statement && statement.unconverted_lines.length > 0 && (
+            <div className="mt-2 text-xs text-warn" data-testid="statement-unconverted">
+              <p>Left out of this statement's total (no exchange rate yet):</p>
+              <ul className="divide-y divide-line">
+                {statement.unconverted_lines.map((line) => (
+                  <li key={line.transaction_id} className="flex justify-between gap-3 py-1">
+                    <span>{formatDay(line.date)} · {line.display_description ?? 'Charge'}</span>
+                    <span>{formatCoded(line.original_amount, line.original_currency)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {statement.incomplete && (
+            <p className="mt-2 text-xs text-warn">Some charges are left out because no exchange rate is stored, so this total is incomplete.</p>
           )}
         </details>
       ))}
