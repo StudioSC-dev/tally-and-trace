@@ -19,6 +19,7 @@ import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
+import { keepsRetainedActual } from '../utils/retainedActual'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -1041,7 +1042,25 @@ export function TransactionsPage() {
         payload.exchange_rate = undefined
         payload.posting_date = undefined
       }
-      
+
+      // A foreign pending row keeps its retained actual figure: only the projected figure
+      // is edited here, so no amount, currency or rate is sent.
+      if (
+        editingTransaction &&
+        keepsRetainedActual({
+          editing: true,
+          sameAccount: editingTransaction.account_id === formData.account_id,
+          isPosted: formData.is_posted,
+          transactionType: formData.transaction_type,
+          accountCurrency,
+          faceCurrency: projectedCurrency,
+        })
+      ) {
+        delete payload.amount
+        delete payload.currency
+        delete payload.exchange_rate
+      }
+
       if (editingTransaction) {
         await updateTransaction({ id: editingTransaction.id, data: payload }).unwrap()
         setEditingTransaction(null)
