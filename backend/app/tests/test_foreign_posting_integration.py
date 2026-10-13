@@ -76,6 +76,23 @@ def _entry(client, who, account, amount, currency, **extra):
         "next_occurrence": "2026-11-12T00:00:00", "account_id": account, **extra})
 
 
+def _forecast_row(client, who, txn_id):
+    """The pending row's upcoming item (a year ahead), as ``who`` sees it."""
+    r = client.get(f"{API}/forecast/upcoming", params={"days": 365}, headers=who["headers"])
+    assert r.status_code == 200, r.text
+    (item,) = [i for i in r.json()["items"]
+               if i.get("source") == "transaction" and i.get("source_id") == txn_id]
+    return item
+
+
+def _assert_reestimated(client, who, txn_id):
+    """After a revert the forecast re-estimates from the face (USD 80 at 58.00), never
+    from the retained amount (4,700 read as USD would be 272,600)."""
+    item = _forecast_row(client, who, txn_id)
+    assert (item["amount"], item["currency"], item["estimated"], item["original_amount"],
+            item["original_currency"], item["rate"]) == (4_640.0, "PHP", True, 80.0, "USD", 58.0)
+
+
 def _materialize(client, who, entry_id, body):
     return client.post(f"{API}/budget-entries/{entry_id}/materialize", json=body,
                        headers=who["headers"])
@@ -214,6 +231,7 @@ def test_post_revert_repost_keeps_the_face_figure(sw_client, sw_db, fp, actor):
     assert row.is_posted is False
     assert row.amount == Decimal("4700.00")
     assert row.projected_amount == Decimal("80.00")
+    _assert_reestimated(client, who, txn)
 
     # Repost with another actual figure: the face figure still drives the rate.
     r = _put(client, who, txn, {"is_posted": True, "amount": 4_650})
@@ -351,6 +369,7 @@ def test_owner_exemption_posts_a_foreign_debit_with_its_amount(sw_client, sw_db,
     assert _balance(db, fp["php"]) == Decimal("47100.00")
     row = _row(db, txn)
     assert (row.amount, row.projected_amount) == (Decimal("4700.00"), Decimal("80.00"))
+    _assert_reestimated(client, a, txn)
     r = _put(client, a, txn, {"is_posted": True, "amount": 4_650})
     assert r.status_code == 200, r.text
     assert _balance(db, fp["php"]) == Decimal("42450.00")

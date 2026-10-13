@@ -49,15 +49,20 @@ def test_timeline_endpoint_shape_and_excludes_credit(client):
     h = _auth_headers(client)
 
     # Expected opening = sum of active account balances that are neither credit
-    # cards nor spending wallets (user-scoped).
+    # cards nor spending wallets (user-scoped), in the default currency (PHP).
+    # Each other currency is projected on its own row (STU-236).
     accts = client.get(f"{API}/accounts/", headers=h, params={"limit": 1000}).json()
     items = accts["items"] if isinstance(accts, dict) else accts
-    expected_opening = round(
-        sum(a["balance"] for a in items
-            if a["account_type"] != "credit" and not a["is_spending_wallet"]
-            and a.get("is_active", True)),
-        2,
-    )
+
+    def opening_in(currency):
+        return round(
+            sum(a["balance"] for a in items
+                if a["account_type"] != "credit" and not a["is_spending_wallet"]
+                and a.get("is_active", True) and a["currency"] == currency),
+            2,
+        )
+
+    expected_opening = opening_in("PHP")
 
     r = client.get(f"{API}/forecast/timeline", headers=h, params={"days": 60})
     assert r.status_code == 200, r.text
@@ -71,6 +76,8 @@ def test_timeline_endpoint_shape_and_excludes_credit(client):
 
     # Credit-card balances must NOT count as available cash.
     assert body["opening_balance"] == pytest.approx(expected_opening, abs=0.01)
+    usd = next(r for r in body["by_currency"] if r["currency"] == "USD")
+    assert usd["opening_balance"] == pytest.approx(opening_in("USD"), abs=0.01)
 
     # Events are chronologically ordered and carry a running balance.
     dates = [e["date"] for e in body["events"]]

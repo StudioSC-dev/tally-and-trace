@@ -209,7 +209,7 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
 def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
     from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD, DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 4  # shapes 3 and 4 (STU-232, STU-233) keep shape 2's tags
+    assert DEMO_SHAPE_VERSION == 5  # shapes 3–5 (STU-232, STU-233, STU-236) keep shape 2's tags
     seed.seed_database()
     r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}

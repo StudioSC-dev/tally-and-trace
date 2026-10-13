@@ -228,7 +228,7 @@
     {
       "name": "Monthly Salary",
       "entry_type": "INCOME",
-      "amount": 3200.00,
+      "amount": 55.00,
       "currency": "USD",
       "cadence": "MONTHLY",
       "next_occurrence": "2025-09-11T09:00:00",
@@ -253,7 +253,8 @@
       "is_autopay": true,
       "description": "Netflix auto-pay each month",
       "end_mode": "on_date",
-      "end_date": "2026-03-05T08:00:00"
+      "end_date": "2026-03-05T08:00:00",
+      "is_active": false
     },
     {
       "name": "Electric Bill",
@@ -358,13 +359,13 @@
     {
       "account_id": 1,
       "category_id": 9,
-      "amount": 3000.00,
+      "amount": 2942.50,
       "description": "Monthly salary deposit (converted from USD)",
       "transaction_type": "CREDIT",
       "transaction_date": "2025-08-11T09:00:00",
-      "original_amount": 3200.00,
+      "original_amount": 55.00,
       "original_currency": "USD",
-      "projected_amount": 3200.00,
+      "projected_amount": 55.00,
       "projected_currency": "USD",
       "exchange_rate": 53.50,
       "is_posted": true,
@@ -373,15 +374,12 @@
     {
       "account_id": 1,
       "category_id": 9,
-      "amount": 2950.00,
+      "amount": 55.00,
       "description": "Projected salary deposit (awaiting conversion)",
       "transaction_type": "CREDIT",
       "transaction_date": "2025-09-11T09:00:00",
-      "projected_amount": 3200.00,
+      "projected_amount": 55.00,
       "projected_currency": "USD",
-      "original_amount": 3200.00,
-      "original_currency": "USD",
-      "exchange_rate": 53.20,
       "is_posted": false,
       "budget_entry_id": 1
     },
@@ -421,15 +419,12 @@
     {
       "account_id": 3,
       "category_id": 3,
-      "amount": 850.00,
+      "amount": 14.99,
       "description": "Netflix subscription (auto-pay)",
       "transaction_type": "DEBIT",
       "transaction_date": "2025-09-05T08:00:00",
       "projected_amount": 14.99,
       "projected_currency": "USD",
-      "original_amount": 14.99,
-      "original_currency": "USD",
-      "exchange_rate": 56.70,
       "is_posted": false,
       "budget_entry_id": 2
     },

@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session
 
 
 from app.models.account import Account, AccountType
-from app.models.transaction import Transaction, TransactionType, transfer_sides
+from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 
 DEFAULT_DAYS_UNTIL_DUE = 21
 
@@ -266,7 +266,77 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
     return lines, payments
 
 
-def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime) -> Decimal:
+def _row_amount(row) -> Decimal:
+    return Decimal(str(row.amount))
+
+
+def normalise_lines(db: Optional[Session], card: Account, lines: list, fx=None):
+    """A card's line items in the card's currency (STU-236, plan D5).
+
+    Returns ``(kept, amount_of, estimates, unconverted)``. A pending debit or
+    credit whose face (``pending_face``) is in another currency is estimated
+    at the stored rate (``fx``, offline when None); one with no stored rate is
+    left out of ``kept`` (so out of every balance) and listed in
+    ``unconverted`` as ``(line, face, face currency)``. Every other line keeps
+    its stored ``amount``, read in the card's currency (posted rows are actual
+    figures; a cash advance is the card's own). ``amount_of(line)`` is the
+    figure to use, and ``estimates`` maps ``id(line)`` to
+    ``{original_amount, original_currency, rate}`` for an estimated line.
+    Lines keep their identity, so callers can still key on them.
+    """
+    from app.services.fx import FxRates, convert
+
+    card_currency = getattr(card.currency, "value", card.currency)
+    amounts: dict = {}
+    estimates: dict = {}
+    kept: list = []
+    unconverted: list = []
+    rates = fx
+    for line in lines:
+        estimate = getattr(line, "estimate", None)
+        if estimate is not None:
+            estimates[id(line)] = estimate
+        if (isinstance(line, Transaction) and not line.is_posted
+                and line.transaction_type in (TransactionType.DEBIT, TransactionType.CREDIT)):
+            face, currency = pending_face(line)
+            currency = getattr(currency, "value", currency)
+            if currency is not None and currency != card_currency and face is not None:
+                if rates is None:
+                    rates = FxRates.offline(db)
+                rate = rates.rate(currency, card_currency)
+                if rate is None:
+                    unconverted.append((line, face, currency))
+                    continue
+                amounts[id(line)] = convert(face, rate.rate)
+                estimates[id(line)] = {"original_amount": face, "original_currency": currency,
+                                       "rate": rate}
+        kept.append(line)
+
+    def amount_of(row) -> Decimal:
+        figure = amounts.get(id(row))
+        return figure if figure is not None else _row_amount(row)
+
+    return kept, amount_of, estimates, unconverted
+
+
+def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
+    """A statement's estimate label from its estimated lines, or None.
+
+    ``original_amount`` is the sum of the estimated lines' faces when they
+    share one currency (else None), with that conversion's rate.
+    """
+    found = [estimates[id(line)] for line in lines if id(line) in estimates]
+    if not found:
+        return None
+    currencies = {e["original_currency"] for e in found}
+    if len(currencies) != 1:
+        return {"original_amount": None, "original_currency": None, "rate": found[0]["rate"]}
+    return {"original_amount": sum((e["original_amount"] for e in found), Decimal("0")),
+            "original_currency": currencies.pop(), "rate": found[0]["rate"]}
+
+
+def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime,
+                      amount_of=_row_amount) -> Decimal:
     """Sum a card's charges over the calendar days ``(window_start, close]``.
 
     Days, not instants: ``close`` is midnight of the closing day, but a charge at
@@ -283,9 +353,9 @@ def statement_balance(transactions: List[Transaction], window_start: datetime, c
         if not (first_excluded < txn.transaction_date.date() <= last_included):
             continue
         if txn.transaction_type == TransactionType.DEBIT:
-            total += Decimal(str(txn.amount))
+            total += amount_of(txn)
         elif txn.transaction_type == TransactionType.CREDIT:
-            total -= Decimal(str(txn.amount))
+            total -= amount_of(txn)
     return total
 
 
@@ -296,8 +366,14 @@ def build_statement_payables(
     end: datetime,
     unbilled_sources: frozenset = frozenset(),
     projected_by_card: Optional[dict] = None,
+    normalise=None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
+
+    ``normalise(card, lines)`` (``normalise_lines``) puts each card's line
+    items in the card's currency; by default every stored amount is used as
+    it is. A payable whose cycle holds an estimated line carries
+    ``line_estimate`` (``statement_estimate``); the key is absent otherwise.
 
     ``transactions_by_card`` holds every row touching each card: its own charges
     and refunds, transfers out of it (cash advances, billed as charges) and
@@ -341,17 +417,24 @@ def build_statement_payables(
         lines, payments = _split_card_rows(
             card.id, transactions_by_card.get(card.id, []), unbilled_ids)
         projected = (projected_by_card or {}).get(card.id, [])
+        amount_of, estimates = _row_amount, {}
+        if normalise is not None:
+            lines, amount_of, estimates, _ = normalise(card, lines)
+            estimates = {**estimates, **{id(row): row.estimate for row in projected
+                                         if getattr(row, "estimate", None) is not None}}
         if not lines and not projected:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
         days = [row.transaction_date.date() for row in [*lines, *projected]]
         cycles = list(iter_cycles_from(card, min(days), end, through=max(days)))
-        recorded = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+                    for c in cycles]
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
         remaining = settle_projected(
             cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
-        balances = [statement_balance([*lines, *projected], c["window_start"], c["close"])
+        balances = [statement_balance([*lines, *projected], c["window_start"], c["close"],
+                                      amount_of)
                     for c in cycles]
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0 or cycle["due"] >= end:
@@ -359,6 +442,14 @@ def build_statement_payables(
             overdue = {}
             if cycle["due"] < start:
                 overdue = {"overdue": True, "original_date": cycle["due"]}
+            labels = {}
+            if estimates:
+                lo, hi = cycle["window_start"].date(), cycle["close"].date()
+                estimate = statement_estimate(
+                    [row for row in [*lines, *projected]
+                     if lo < row.transaction_date.date() <= hi], estimates)
+                if estimate is not None:
+                    labels = {"line_estimate": estimate}
             events.append({
                 "date": start if overdue else cycle["due"],
                 "name": f"{card.name} statement",
@@ -371,6 +462,7 @@ def build_statement_payables(
                 "statement_close": cycle["close"],
                 "statement_balance": balance,
                 **overdue,
+                **labels,
             })
     return events
 
@@ -427,7 +519,7 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
 
 
 def statement_history(db: Session, card: Account, today: datetime,
-                      viewable_ids: Iterable[int]) -> List[dict]:
+                      viewable_ids: Iterable[int], fx=None) -> List[dict]:
     """The card's recorded statements, oldest first, through the cycle open on ``today``.
 
     Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
@@ -438,18 +530,26 @@ def statement_history(db: Session, card: Account, today: datetime,
     (a refund negative; a cash advance its amount plus fee). Recorded rows
     only: nothing is projected. ``viewable_ids`` are the caller's viewable
     accounts (see ``_card_rows``).
+
+    Lines are in the card's currency (``normalise_lines``, at the stored rates
+    of ``fx``, offline when None): a line estimated from a foreign face carries
+    ``estimate``, and one with no stored rate is left out of ``balance`` and
+    ``owed`` and listed in its statement's ``unconverted`` as
+    ``{date, original_amount, original_currency, transaction}``.
     """
     if resolve_cycle_fields(card) is None:
         return []
     by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
     rows = by_card.get(card.id, [])
     lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
-    if not lines:
+    lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
+    if not lines and not unconverted:
         return []
-    days = [row.transaction_date.date() for row in lines]
+    days = [row.transaction_date.date() for row in [*lines, *(u[0] for u in unconverted)]]
     last = max(max(days), today.date())
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last))
-    balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+                for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     history = []
     for cycle, balance, left in zip(cycles, balances, owed):
@@ -470,11 +570,20 @@ def statement_history(db: Session, card: Account, today: datetime,
             "status": status,
             "lines": [{
                 "date": row.transaction_date,
-                "amount": (-Decimal(str(row.amount))
+                "amount": (-amount_of(row)
                            if row.transaction_type == TransactionType.CREDIT
-                           else Decimal(str(row.amount))),
+                           else amount_of(row)),
                 "transaction": getattr(row, "source", row),
+                **({"estimate": estimates[id(row)]} if id(row) in estimates else {}),
             } for row in sorted(window, key=lambda r: r.transaction_date)],
+            "unconverted": [{
+                "date": line.transaction_date,
+                "original_amount": (-face if line.transaction_type == TransactionType.CREDIT
+                                    else face),
+                "original_currency": currency,
+                "transaction": line,
+            } for line, face, currency in sorted(unconverted, key=lambda u: u[0].transaction_date)
+                if first_excluded < line.transaction_date.date() <= last_included],
         })
     return history
 
@@ -487,6 +596,7 @@ def get_statement_payables(
     projected_charges: Optional[dict] = None,
     *,
     viewable_ids: Iterable[int],
+    fx=None,
 ) -> List[dict]:
     """DB wrapper: build the statement payables of ``cards``.
 
@@ -498,7 +608,8 @@ def get_statement_payables(
     transaction yet (budget entries scheduled on a card); each is billed on the
     cycle containing its date, after the recorded rows are settled (see
     ``build_statement_payables``). ``viewable_ids`` are the caller's viewable
-    accounts (see ``_card_rows``).
+    accounts (see ``_card_rows``). Lines are normalised into each card's
+    currency at the stored rates of ``fx`` (``normalise_lines``).
     """
     cards = [c for c in cards if c.account_type == AccountType.CREDIT]
     if not cards:
@@ -509,5 +620,11 @@ def get_statement_payables(
     # charge on it and every payment into it, whoever entered it, including a
     # transfer from an account outside the caller's scope.
     by_card, unbilled_sources = _card_rows(db, [c.id for c in cards], viewable_ids)
+    if fx is None:
+        from app.services.fx import FxRates
+
+        fx = FxRates.offline(db)
     return build_statement_payables(cards, by_card, start, end, unbilled_sources,
-                                    projected_by_card=projected_charges)
+                                    projected_by_card=projected_charges,
+                                    normalise=lambda card, lines: normalise_lines(
+                                        db, card, lines, fx))

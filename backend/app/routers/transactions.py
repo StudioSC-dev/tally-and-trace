@@ -1323,8 +1323,20 @@ def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
     hidden_liability_ids: Optional[Set[int]] = None,
+    currency_of=None, cash_ids: Optional[Set[int]] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
+
+    With ``currency_of`` ({account id: currency}.get) the totals are split by
+    account currency (STU-236, plan D3) and returned as ``{"by_currency":
+    {currency: totals}}``, each also carrying ``moved_in``, ``moved_out`` and
+    ``transaction_count``. A row counts in its account's currency, never
+    ``t.currency``; a transfer in its source's (a top-up's unallocated spend
+    too, at what arrived); a transfer between two of ``cash_ids`` (in-scope
+    projection-cash accounts) in different currencies is money moved:
+    ``moved_out`` in the source's currency and ``moved_in`` at what arrived
+    in the destination's, never income or expense. Without it, one set of
+    totals, as always.
 
     ``scope_ids`` are the caller's in-scope accounts. A transfer counts only when
     its source is one of them: a transfer in from an account outside the scope
@@ -1388,14 +1400,19 @@ def summarize_period(
     zero = Decimal("0")
     loan_names = loan_names or {}
     hidden_liability_ids = hidden_liability_ids or set()
-    total_income = zero
-    total_expenses = zero
-    unallocated_wallet = zero
-    returned = zero
-    breakdown: dict = {}
+    cash_ids = cash_ids or set()
+    buckets: dict = {}
 
-    def row(name: str) -> dict:
-        return breakdown.setdefault(name, {"income": zero, "expenses": zero})
+    def bucket(account_id) -> dict:
+        key = currency_of(account_id) if currency_of is not None else None
+        if key not in buckets:
+            buckets[key] = {"total_income": zero, "total_expenses": zero, "moved_in": zero,
+                            "moved_out": zero, "unallocated": zero, "returned": zero,
+                            "breakdown": {}, "transaction_count": 0}
+        return buckets[key]
+
+    def row(b: dict, name: str) -> dict:
+        return b["breakdown"].setdefault(name, {"income": zero, "expenses": zero})
 
     def category(t) -> str:
         if not t.category_id:
@@ -1406,23 +1423,26 @@ def summarize_period(
 
     for t in transactions:
         amount = _D(t.amount)
+        b = bucket(t.account_id)
+        b["transaction_count"] += 1
         if t.transaction_type == TransactionType.CREDIT:
-            total_income += amount
-            row(category(t))["income"] += amount
+            b["total_income"] += amount
+            row(b, category(t))["income"] += amount
             if t.account_id in wallet_ids:
                 # Income received into a wallet is also an implicit top-up.
-                total_expenses += amount
-                unallocated_wallet += amount
+                b["total_expenses"] += amount
+                b["unallocated"] += amount
         elif t.transaction_type == TransactionType.DEBIT:
-            row(category(t))["expenses"] += amount
+            row(b, category(t))["expenses"] += amount
             if t.account_id in wallet_ids:
-                unallocated_wallet -= amount
+                b["unallocated"] -= amount
             else:
-                total_expenses += amount
+                b["total_expenses"] += amount
         elif t.transaction_type == TransactionType.TRANSFER:
             source = t.transfer_from_account_id or t.account_id
             if source not in scope_ids:
                 continue  # inbound from outside the caller's scope
+            b = bucket(source)
             fee = _D(t.transfer_fee)
             destination = t.transfer_to_account_id
             if destination in hidden_liability_ids:
@@ -1433,29 +1453,46 @@ def summarize_period(
             if fee:
                 fee_row = (f"{LOAN_INTEREST_PREFIX}{loan_names[destination]}"
                            if destination in loan_names else TRANSFER_FEES)
-                row(fee_row)["expenses"] += fee
+                row(b, fee_row)["expenses"] += fee
             if from_wallet:
-                unallocated_wallet -= fee
+                b["unallocated"] -= fee
                 if destination in scope_ids and not to_wallet:
-                    total_expenses -= amount
-                    returned += amount
+                    b["total_expenses"] -= amount
+                    b["returned"] += amount
             elif to_wallet:
-                total_expenses += amount + fee
-                # What arrived in the wallet, in its own currency (the inbound leg).
-                unallocated_wallet += transfer_sides(t)[1]
+                b["total_expenses"] += amount + fee
+                # What arrived in the wallet (the inbound leg), on the top-up's row.
+                b["unallocated"] += transfer_sides(t)[1]
             else:
-                total_expenses += fee
+                b["total_expenses"] += fee
+                if (currency_of is not None and source in cash_ids and destination in cash_ids
+                        and currency_of(source) != currency_of(destination)):
+                    # Money moved across currencies: neither income nor expense
+                    # (STU-236, plan C3); the inbound leg counts what arrived.
+                    b["moved_out"] += amount
+                    inbound = bucket(destination)
+                    inbound["moved_in"] += transfer_sides(t)[1]
+                    inbound["transaction_count"] += 1
 
-    if unallocated_wallet:
-        row(UNALLOCATED_WALLET_SPEND)["expenses"] += unallocated_wallet
-    if returned:
-        row(RETURNED_FROM_WALLETS)["expenses"] -= returned
+    def result(b: dict) -> dict:
+        breakdown = b["breakdown"]
+        if b["unallocated"]:
+            row(b, UNALLOCATED_WALLET_SPEND)["expenses"] += b["unallocated"]
+        if b["returned"]:
+            row(b, RETURNED_FROM_WALLETS)["expenses"] -= b["returned"]
+        return {
+            "total_income": b["total_income"],
+            "total_expenses": b["total_expenses"],
+            "category_breakdown": breakdown,
+        }
 
-    return {
-        "total_income": total_income,
-        "total_expenses": total_expenses,
-        "category_breakdown": breakdown,
-    }
+    if currency_of is None:
+        return result(buckets.get(None) or bucket(None))
+    return {"by_currency": {
+        currency: {**result(b), "moved_in": b["moved_in"], "moved_out": b["moved_out"],
+                   "transaction_count": b["transaction_count"]}
+        for currency, b in buckets.items()
+    }}
 
 
 @router.get("/summary/period")
@@ -1520,12 +1557,37 @@ def get_transaction_summary(
     category_names = {c.id: c.name for c in categories}
     category_owners = {c.id: c.user_id for c in categories}
 
-    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
-                               category_owners=category_owners,
-                               hidden_liability_ids=hidden_liability_ids)
+    # Split by account currency (STU-236): the top-level totals and breakdown
+    # are the default currency's; ``by_currency`` carries each currency's.
+    from app.services.forecast import default_currency, is_projection_cash, ordered_currencies
+
+    currencies = {a.id: a.currency.value for a in referenced if a.id in scope_ids}
+    cash_ids = {a.id for a in referenced if a.id in scope_ids and is_projection_cash(a)}
+    split = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
+                             category_owners=category_owners,
+                             hidden_liability_ids=hidden_liability_ids,
+                             currency_of=currencies.get, cash_ids=cash_ids)["by_currency"]
+    default = default_currency(db, current_user.id)
+    empty = {"total_income": Decimal("0"), "total_expenses": Decimal("0"), "moved_in": Decimal("0"),
+             "moved_out": Decimal("0"), "transaction_count": 0, "category_breakdown": {}}
+    by_currency = []
+    for currency in ordered_currencies(split, default):
+        part = split.get(currency) or empty
+        by_currency.append({
+            "currency": currency,
+            "total_income": part["total_income"],
+            "total_expenses": part["total_expenses"],
+            "moved_in": part["moved_in"],
+            "moved_out": part["moved_out"],
+            "net_flow": (part["total_income"] - part["total_expenses"] + part["moved_in"]
+                         - part["moved_out"]),
+            "transaction_count": part["transaction_count"],
+            "category_breakdown": part["category_breakdown"],
+        })
+    summary = by_currency[0]
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
-    net_flow = total_income - total_expenses
+    net_flow = summary["net_flow"]
     category_summary = summary["category_breakdown"]
 
     return {
@@ -1539,5 +1601,6 @@ def get_transaction_summary(
             "net_flow": net_flow,
             "transaction_count": len(transactions)
         },
-        "category_breakdown": category_summary
+        "category_breakdown": category_summary,
+        "by_currency": by_currency,
     }

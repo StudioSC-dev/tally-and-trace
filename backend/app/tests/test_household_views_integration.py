@@ -402,10 +402,12 @@ def test_household_upcoming_items_carry_their_currency(hh, sw_client, sw_db):
     items = _get(sw_client, hh["c"], f"/household/{a['id']}/upcoming")["items"]
     assert {(i["display_name"], i["currency"]) for i in items} == {
         ("Dollar bill", "USD"), ("Household rent", "PHP")}
-    # The ordinary upcoming list is unchanged: no currency on a full item.
+    # The ordinary upcoming list: every full item carries its currency (STU-236).
     plain = _get(sw_client, a, "/forecast/upcoming")["items"]
     assert {i["name"] for i in plain} >= {"Dollar bill", "Household rent"}
-    assert all("currency" not in i for i in plain if i.get("view") != "limited")
+    assert all("currency" in i for i in plain if i.get("view") != "limited")
+    currency = {i["name"]: i["currency"] for i in plain if i.get("view") != "limited"}
+    assert (currency["Dollar bill"], currency["Household rent"]) == ("USD", "PHP")
 
 
 # --- Cover counts only the payments the viewer can read -----------------------------------------
@@ -473,12 +475,17 @@ def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
 
 
-# --- Cover never crosses currencies --------------------------------------------------------------
+# --- Cover settles in the card's currency (STU-236) ----------------------------------------------
 
 @pytest.mark.parametrize("mode", list(MODES))
-@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
-def test_cover_never_crosses_currencies(hh, sw_client, sw_db, mode, currency, remainder):
-    # A PHP 40 joint payment covers a PHP bill, never a USD one (no conversion).
+@pytest.mark.parametrize("currency,remainder", [("USD", None), ("PHP", 60.0)])
+def test_cover_settles_in_card_currency(hh, sw_client, sw_db, mode, currency, remainder):
+    # A PHP 40 joint payment covers the bill in the card's currency. C reads the
+    # USD-labelled bill Limited, so it sits in its record's bucket at
+    # face x remainder / card figure: recorded, the posted 100 is PHP (60.00);
+    # projected, the card figure is USD 100 x 58 = 5,800 (99.31).
+    if remainder is None:
+        remainder = 60.0 if mode == "recorded" else 99.31
     _charge(sw_client, hh, mode, currency=currency)
     _pay(sw_client, hh, 40, mode)
     months = _monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])
@@ -488,7 +495,7 @@ def test_cover_never_crosses_currencies(hh, sw_client, sw_db, mode, currency, re
         assert _sum(months, "PHP")["paid_from_other_accounts"] == 0.0
 
 
-@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
+@pytest.mark.parametrize("currency,remainder", [("USD", 99.31), ("PHP", 60.0)])
 def test_recurring_cover_never_crosses_currencies(hh, sw_client, sw_db, currency, remainder):
     _charge(sw_client, hh, "projected", currency=currency)
     _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 40, datetime(2026, 11, 1))

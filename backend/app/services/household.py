@@ -16,9 +16,10 @@ payments into that card: every transfer into it from a projection-cash
 account of the view scope (posted, planned or recurring) that the caller can
 read, so that it is among the cash the caller's Household totals count (a
 payment they can't read still settles the statement, but never covers a
-Household line for them), each covering only lines in its own currency (no
-conversion), settled with every other payment and credit in the statement
-engine's order (``_settle_with_sources``, mirroring
+Household line for them), settled once in the card's currency (STU-236, plan
+D4: a line in another currency is estimated at the stored rate, a pending
+one from its ``pending_face``) with every other payment and credit in the
+statement engine's order (``_settle_with_sources``, mirroring
 ``statements.build_statement_payables``): the transaction rows are balanced
 and paid oldest statement first, and only then are the projected entry
 charges added and paid from what is left, so a payment the rows already used
@@ -32,7 +33,14 @@ lines first, in date order, capped at their total; each line's remainder is
 ``max(0, line - its covered part)`` and only a remainder above 0 is
 returned, as the occurrence's ``face_amount``. Any other occurrence (a
 wallet, a bank, a card without cycle settings, a refund, a transfer, or an
-accountless entry) is returned at its face amount.
+accountless entry) is returned at its face amount, in the record's currency.
+
+**Which currency a covered line is counted in.** When the caller can view
+the card or reads the record in full, the card's currency, at the card
+figure's remainder. Otherwise (a Limited record) the record's currency, as
+its Limited value shows it, at ``face x remainder / card figure``: the face
+when nothing is covered and today's figure for a same-currency line, so no
+rate or converted figure is disclosed.
 
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
@@ -103,6 +111,11 @@ class Occurrence:
     face: Decimal           # the amount as entered
     remainder: Decimal      # what is left after in-scope payments (returned when > 0)
     extra: dict = field(default_factory=dict)  # overdue / original_date
+    currency: Optional[str] = None  # the remainder's (module docstring); the record's by default
+
+    def __post_init__(self):
+        if self.currency is None:
+            self.currency = _currency(self.record.currency)
 
 
 def _money(value) -> Decimal:
@@ -116,7 +129,7 @@ def _naive(dt: datetime) -> datetime:
 def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Account],
                           start: datetime, end: datetime, *, recorded: bool,
                           viewable_ids: Iterable[int], access,
-                          projection_start: Optional[datetime] = None
+                          projection_start: Optional[datetime] = None, fx=None
                           ) -> List[Occurrence]:
     """The Household occurrences of ``grant``'s sharer in ``[start, end)`` (module docstring).
 
@@ -132,11 +145,17 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     settled is covered as the projection covers it, from then through that
     statement's due date (module docstring); without it, posted payments
     only. A projected line's cover runs from ``start`` through its
-    statement's due date, whatever ``end`` is.
+    statement's due date, whatever ``end`` is. ``fx`` holds the request's
+    stored rates (offline ones when None).
     """
-    from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
+    from app.core.redaction import LIMITED, Redactor
+    from app.services.forecast import (
+        Money, _card_entry_charges, _linked_occurrence_days, iter_occurrences,
+    )
 
     start, end = _naive(start), _naive(end)
+    money = Money(db, fx)
+    viewable_ids = set(viewable_ids)
     scope = list(scope)
     scope_ids = {a.id for a in scope}
     cash_ids = {a.id for a in scope if a.account_type not in (AccountType.CREDIT, AccountType.LOAN)
@@ -178,8 +197,8 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     for entry in entries:
         if entry.account_id in billed and entry.transfer_to_account_id is None:
-            charges = _card_entry_charges(db, [entry], billed, start, end, None).get(
-                entry.account_id, [])
+            charges = _card_entry_charges(db, [entry], billed, start, end, None,
+                                          money=money).get(entry.account_id, [])
             for line in charges:
                 if line.transaction_date < start:
                     continue  # billed on its statement, but not listed: before the window
@@ -198,9 +217,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             out.append(Occurrence(when, entry, _money(entry.amount), _money(entry.amount)))
 
     for card_id, lines in card_lines.items():
-        covered = _card_household_cover(db, billed[card_id], cash_ids, start, end,
+        card = billed[card_id]
+        covered = _card_household_cover(db, card, cash_ids, start, end,
                                         recorded=recorded, viewable_ids=viewable_ids,
-                                        readable=access.readable)
+                                        readable=access.readable, money=money)
         # Projected cover, per statement: from the projection's first day through
         # that statement's due date, whatever the requested range (module
         # docstring). In a recorded month only for a statement still open.
@@ -215,23 +235,31 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
                 if due not in by_due:
                     horizon = max(begin, _naive(due) + timedelta(days=1))
                     by_due[due] = _card_household_cover(
-                        db, billed[card_id], cash_ids, begin, horizon, recorded=False,
-                        viewable_ids=viewable_ids, readable=access.readable)
+                        db, card, cash_ids, begin, horizon, recorded=False,
+                        viewable_ids=viewable_ids, readable=access.readable, money=money)
+        redactor = Redactor(db, access.uid, access)
         for occ, key in lines:
-            remainder, _, due = covered.get(key, (occ.face, False, None))
+            if key not in covered:
+                continue  # no statement holds it: its face, in the record's currency
+            remainder, _, due, figure = covered[key]
             if key in by_due.get(due, {}):
-                remainder = by_due[due][key][0]
-            occ.remainder = remainder
+                remainder, _, _, figure = by_due[due][key]
+            if card_id in viewable_ids or redactor.view(occ.record) != LIMITED:
+                occ.currency, occ.remainder = _currency(card.currency), remainder
+            elif figure:
+                occ.remainder = _money(occ.face * remainder / figure)
     return [o for o in out if o.remainder > 0]
 
 
 def _card_household_cover(db: Session, card: Account, cash_ids: set, start: datetime,
                           end: datetime, *, recorded: bool, viewable_ids: Iterable[int],
-                          readable) -> Dict[tuple, Tuple[Decimal, bool, datetime]]:
-    """``{line key: (remainder, open, due)}`` for every Household line on
-    ``card`` (module docstring); ``open`` is True when the line's statement
-    still owes something after the payments counted, and ``due`` is that
-    statement's due date.
+                          readable, money=None
+                          ) -> Dict[tuple, Tuple[Decimal, bool, datetime, Decimal]]:
+    """``{line key: (remainder, open, due, figure)}`` for every Household line
+    on ``card`` (module docstring), in the card's currency: ``figure`` is the
+    line in the card's currency and ``remainder`` what in-scope payments leave
+    of it; ``open`` is True when the line's statement still owes something
+    after the payments counted, and ``due`` is that statement's due date.
 
     Line keys are ``("t", transaction id)`` and ``("e", entry id, occurrence)``;
     a line whose key is missing has no statement (remainder = face). The card's
@@ -239,30 +267,36 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     ``_split_card_rows``, with ``viewable_ids`` the caller's viewable accounts)
     and settled in its order (``_settle_with_sources``). A payment is in scope
     when it comes from a cash account of ``cash_ids`` and ``readable`` (the
-    caller's read rule) accepts its record, and it covers only the lines in
-    its own currency: the settlement is run once per line currency, each run
-    flagging the in-scope payments in that currency (``owed`` is the same in
-    every run, the engine's).
+    caller's read rule) accepts its record. Everything is settled once, in
+    the card's currency (plan D4): a pending line's figure is its
+    ``pending_face`` estimated at the stored rate (``statements.normalise_lines``;
+    one with no stored rate is left out), a projected entry charge is the
+    entry's amount estimated likewise, and a recurring transfer into the card
+    its amount estimated into the card's currency. ``money`` holds the stored
+    rates (``forecast.Money``).
     """
-    from app.services.forecast import _card_entry_charges, _linked_occurrence_days, iter_occurrences
-    from app.services.statements import _card_rows, _split_card_rows
+    from app.services.forecast import (
+        Money, _card_entry_charges, _linked_occurrence_days, iter_occurrences,
+    )
+    from app.services.statements import _card_rows, _split_card_rows, normalise_lines
 
     by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
     rows = by_card.get(card.id, [])
     if recorded:
         rows = [r for r in rows if r.is_posted]
     lines, payments = _split_card_rows(card.id, rows, unbilled, payment_sources=True)
+    money = money or Money(db)
+    card_currency = _currency(card.currency)
+    lines, amount_of, _, _ = normalise_lines(db, card, lines, money.fx)
     household_txns = _household_ids(db, Transaction, [r.id for r in rows], card.user_id)
     keys: Dict[int, tuple] = {}  # id(line) -> line key
-    currencies: Dict[int, str] = {}  # id(line) -> the line's currency
     for line in lines:
         if (isinstance(line, Transaction) and line.transaction_type == TransactionType.DEBIT
                 and line.id in household_txns):
             keys[id(line)] = ("t", line.id)
-            currencies[id(line)] = _currency(line.currency)
 
     projected: list = []
-    recurring: List[Tuple[datetime, Decimal, Optional[str]]] = []
+    recurring: List[Tuple[datetime, Decimal, bool]] = []
     if not recorded:
         entries = db.query(BudgetEntry).filter(
             BudgetEntry.account_id == card.id, BudgetEntry.is_active.is_(True),
@@ -271,12 +305,11 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                                            card.user_id)
         for entry in entries:
             for line in _card_entry_charges(db, [entry], {card.id: card}, start, end,
-                                            None).get(card.id, []):
+                                            None, money=money).get(card.id, []):
                 projected.append(line)
                 if (entry.id in household_entries
                         and entry.entry_type != BudgetEntryType.INCOME):
                     keys[id(line)] = ("e", entry.id, line.transaction_date)
-                    currencies[id(line)] = _currency(entry.currency)
         # Recurring transfers into the card: payments on their occurrences.
         transfers = db.query(BudgetEntry).filter(
             BudgetEntry.transfer_to_account_id == card.id,
@@ -288,40 +321,34 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 if linked[key]:
                     linked[key] -= 1
                     continue
-                recurring.append((when, _money(entry.amount), _currency(entry.currency)
-                                  if entry.account_id in cash_ids and readable(entry) else None))
+                amount, _ = money.to(entry.amount, entry.currency, card_currency)
+                if amount is not None:
+                    recurring.append((when, amount,
+                                      entry.account_id in cash_ids and readable(entry)))
 
     if not keys:
         return {}
     days = [line.transaction_date.date() for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
-    paying = [(when, amount, _currency(row.currency)
-               if src in cash_ids and readable(row) else None)
+    paying = [(when, amount, src in cash_ids and readable(row))
               for when, amount, src, row in payments]
-    in_scope: Dict[str, List[Decimal]] = {}  # currency -> in-scope part per cycle
-    for currency in sorted(set(currencies.values())):
-        owed, in_scope[currency] = _settle_with_sources(
-            cycles, lines, [(when, amount, flag == currency) for when, amount, flag in paying],
-            projected, [(when, amount, flag == currency) for when, amount, flag in recurring])
+    owed, in_scope = _settle_with_sources(cycles, lines, paying, projected, recurring,
+                                          amount_of=amount_of)
     # Projected only: in a recorded month only posted payments cover anything.
-    routed = _currency(card.currency) if (
-        not recorded and card.payment_account_id in cash_ids) else None
+    routed = not recorded and card.payment_account_id in cash_ids
 
-    out: Dict[tuple, Tuple[Decimal, bool, datetime]] = {}
+    out: Dict[tuple, Tuple[Decimal, bool, datetime, Decimal]] = {}
     for idx, c in enumerate(cycles):
-        cover = {currency: parts[idx] for currency, parts in in_scope.items()}
-        if routed in cover:
-            cover[routed] += owed[idx]
+        cover = in_scope[idx] + (owed[idx] if routed else ZERO)
         lo, hi = c["window_start"].date(), c["close"].date()
-        household = sorted(((line.transaction_date, _money(line.amount), keys[id(line)],
-                             currencies[id(line)])
+        household = sorted(((line.transaction_date, _money(amount_of(line)), keys[id(line)])
                             for line in [*lines, *projected]
                             if id(line) in keys and lo < line.transaction_date.date() <= hi),
                            key=lambda line: (line[0].date(), str(line[2])))
-        for _, amt, key, currency in household:
-            part = min(cover[currency], amt)
-            cover[currency] -= part
-            out[key] = (amt - part, owed[idx] > 0, c["due"])
+        for _, amt, key in household:
+            part = min(cover, amt)
+            cover -= part
+            out[key] = (amt - part, owed[idx] > 0, c["due"], amt)
     return out
 
 
@@ -331,8 +358,8 @@ def _currency(value) -> str:
 
 def _settle_with_sources(cycles: List[dict], lines: list,
                          payments: List[Tuple[datetime, Decimal, bool]], projected: list,
-                         recurring: List[Tuple[datetime, Decimal, bool]] = ()
-                         ) -> Tuple[List[Decimal], List[Decimal]]:
+                         recurring: List[Tuple[datetime, Decimal, bool]] = (),
+                         amount_of=None) -> Tuple[List[Decimal], List[Decimal]]:
     """``(owed, in_scope)`` per cycle: the statement engine's settlement, by payment source.
 
     The same sequence as ``statements.build_statement_payables``: the
@@ -345,11 +372,14 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     as the engine computes it. ``in_scope`` is the part of each cycle paid by
     a payment flagged True (an in-scope cash payment); credits are never in
     scope. Recurring transfers into the card, which the engine does not net,
-    are applied last, in date order, oldest statement first.
+    are applied last, in date order, oldest statement first. ``amount_of``
+    reads a line's figure in the card's currency (``normalise_lines``).
     """
-    from app.services.statements import statement_balance
+    from app.services.statements import _row_amount, statement_balance
 
-    balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+    amount_of = amount_of or _row_amount
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+                for c in cycles]
     owed = [max(b, ZERO) for b in balances]
     in_scope = [ZERO] * len(cycles)
 
@@ -442,33 +472,27 @@ def household_view(db: Session, user, sharer_id: int) -> Optional[HouseholdGrant
 
 
 def household_events(db: Session, user, grant: HouseholdGrant, start: datetime, end: datetime,
-                     *, keep_origin: bool = False) -> List[dict]:
-    """``collect_events`` in Household mode: the Household view of ``grant``'s sharer."""
+                     *, keep_origin: bool = False, fx=None) -> List[dict]:
+    """``collect_events`` in Household mode: the Household view of ``grant``'s
+    sharer, with the per-currency detail (``collect_events(detail=True)``)."""
     from app.services.forecast import collect_events
 
     return collect_events(db, start, end, user_id=_uid(user),
                           accounts=household_accounts(db, user, grant), household=grant,
-                          keep_origin=keep_origin)
+                          keep_origin=keep_origin, fx=fx, detail=True)
 
 
 def household_upcoming(db: Session, user, grant: HouseholdGrant, start: datetime,
-                       end: datetime) -> List[dict]:
-    """The Household view's upcoming items (``forecast.upcoming_items``).
+                       end: datetime, fx=None) -> List[dict]:
+    """The Household view's upcoming items (``forecast.currency_upcoming_items``).
 
-    Each full item also carries its ``currency`` (the record's; a statement's
-    or loan payable's is its card's or loan's), as a limited one does, since a
-    Household can hold accounts in several currencies.
+    Each full item carries its ``currency`` (its listing row's: the cash
+    leg's, or the in-scope account's) and, when estimated, the B5 labels, as
+    in ``/forecast/upcoming``; a limited one keeps its own ``currency``.
     """
-    from app.core.redaction import LIMITED
-    from app.services.forecast import upcoming_items
+    from app.services.forecast import currency_upcoming_items
 
-    events = household_events(db, user, grant, start, end, keep_origin=True)
-    for e in events:
-        model, record_id = e.pop("origin")
-        if e.get("view") != LIMITED:
-            currency = getattr(db.get(model, record_id), "currency", None)
-            e["currency"] = getattr(currency, "value", currency)
-    return upcoming_items(events)
+    return currency_upcoming_items(household_events(db, user, grant, start, end, fx=fx))
 
 
 def household_transactions_criterion(db: Session, user, grant: HouseholdGrant,
@@ -503,15 +527,19 @@ def _next_month(day: datetime) -> datetime:
 
 
 def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime, last: datetime,
-                      reference: Optional[datetime] = None) -> List[dict]:
-    """Monthly totals of ``grant``'s Household view, per currency, no conversion.
+                      reference: Optional[datetime] = None, fx=None) -> List[dict]:
+    """Monthly totals of ``grant``'s Household view, per currency, never added
+    across currencies.
 
     ``first`` and ``last`` are month starts (inclusive). Recorded months (and
     the current month up to today) come from posted transactions; the current
     month from today and later months from the projection (``household_events``).
 
-    Per month and currency (the record's; a statement or loan payable's is its
-    card's or loan's):
+    Per month and currency (STU-236, plan D4): each leg's account currency,
+    an inbound cross-currency transfer at its ``in`` figure (the stored
+    ``received_amount``, or a projected one's estimate); a projected event's
+    cash per currency; an occurrence's currency (module docstring). ``fx``
+    holds the request's stored rates (offline ones when None):
 
     - ``income`` / ``expense``: credits and debits on scope cash accounts,
       projected statement and loan payables from them, transfers between a
@@ -570,11 +598,17 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
 
     redactor = Redactor(db, uid)
 
+    def currency_of(account_id, fallback):
+        account = db.get(Account, account_id) if account_id is not None else None
+        return account.currency if account is not None else fallback
+
     def transfer(when, currency, src, dst, amount, fee, received=None) -> None:
-        """One transfer's legs. ``received`` is a cross-currency transfer's
-        stored ``received_amount``: the inbound leg counts it, in the
-        destination's currency (``amount`` and ``currency`` otherwise)."""
+        """One transfer's legs, each in its scope account's currency.
+        ``received`` is the inbound leg's figure in the destination's currency
+        (a cross-currency transfer's ``in``); ``amount`` otherwise."""
         src_in, dst_in = src in cash_ids, dst in cash_ids
+        if src_in:
+            currency = currency_of(src, currency)
         if src_in and not dst_in and liability(dst) and not redactor.can_view(dst):
             # Into a loan or card the caller can't view: one whole expense, as
             # its Limited transaction shows it (no fee, so no interest shown).
@@ -588,8 +622,8 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
         elif dst_in and not src_in:
             earned = src in scope_ids or liability(src)
             if received is not None:
-                currency, amount = db.get(Account, dst).currency, received
-            add(when, currency, "income" if earned else "moved_in", amount)
+                amount = received
+            add(when, currency_of(dst, currency), "income" if earned else "moved_in", amount)
 
     access = redactor.access
     # Recorded: posted transactions in the months up to and including the current one.
@@ -611,20 +645,20 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
                 transfer(when, t.currency, t.transfer_from_account_id or t.account_id,
                          t.transfer_to_account_id, t.amount, t.transfer_fee, t.received_amount)
             elif t.account_id in cash_ids:
-                add(when, t.currency,
+                add(when, currency_of(t.account_id, t.currency),
                     "income" if t.transaction_type == TransactionType.CREDIT else "expense",
                     t.amount)
     if first < recorded_end:
         for occ in household_occurrences(db, grant, scope, first, recorded_end, recorded=True,
                                          viewable_ids=viewable_account_ids(
                                              db, uid, roles=VIEW_ROLES),
-                                         access=access, projection_start=today):
+                                         access=access, projection_start=today, fx=fx):
             if occ.record.transaction_type == TransactionType.DEBIT:
-                add(occ.date, occ.record.currency, "paid_from_other_accounts", occ.remainder)
+                add(occ.date, occ.currency, "paid_from_other_accounts", occ.remainder)
 
     # Projected: from today to the end of the last month.
     if end > today:
-        for e in household_events(db, user, grant, today, end, keep_origin=True):
+        for e in household_events(db, user, grant, today, end, keep_origin=True, fx=fx):
             when = _naive(e["date"])
             if when < first:
                 continue
@@ -632,22 +666,25 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             source = db.get(model, record_id)
             if e.get("household_occurrence"):
                 if e["type"] in (TransactionType.DEBIT.value, BudgetEntryType.EXPENSE.value):
-                    add(when, source.currency, "paid_from_other_accounts", e["face_amount"])
+                    add(when, e["rows"][0]["currency"], "paid_from_other_accounts",
+                        e["face_amount"])
                 continue
             if not e["counts_as_cash"]:
                 continue
             if e["type"] == TransactionType.TRANSFER.value and model is not Account:
-                received = None
                 if model is Transaction:
                     src, dst, fee = (source.transfer_from_account_id or source.account_id,
                                      source.transfer_to_account_id, source.transfer_fee)
-                    received = source.received_amount
                 else:
                     src, dst, fee = source.account_id, source.transfer_to_account_id, ZERO
+                # The inbound leg's figure: the stored ``received_amount``, or the
+                # estimate in the destination's currency.
+                received = next((leg["amount"] for leg in e["legs"]
+                                 if leg["account_id"] == dst), None)
                 transfer(when, source.currency, src, dst, source.amount, fee, received)
                 continue
-            amount = e["amount"]
-            add(when, source.currency, "income" if amount > 0 else "expense", abs(amount))
+            for currency, amount in e["cash_by_currency"].items():
+                add(when, currency, "income" if amount > 0 else "expense", abs(amount))
 
     months = []
     day = first

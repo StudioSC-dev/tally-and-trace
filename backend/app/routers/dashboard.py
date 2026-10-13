@@ -17,6 +17,7 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.services import forecast as forecast_svc
+from app.services.fx import FxRates, get_fx
 from app.core.time import utc_now
 
 router = APIRouter()
@@ -29,6 +30,7 @@ def get_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
+    fx: FxRates = Depends(get_fx),
 ):
     """
     Single-call snapshot returning:
@@ -45,13 +47,30 @@ def get_snapshot(
     With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
     payables keep only tagged records (see routers/forecast.py); balances,
     available cash, goals and the wishlist are not tagged and stay whole.
+
+    Split by account currency (STU-236): every scalar is the user's default
+    currency, ``by_currency`` rows carry each currency's (``balances``,
+    ``monthly_summary``, each forecast period and each closing), full list
+    rows carry their ``currency``, and ``currencies`` and ``fx`` describe the
+    response.
     """
     tag_id = filter_tag_id(db, current_user, tag)
+    default = forecast_svc.default_currency(db, current_user.id)
+    collector = forecast_svc.FxCollector()
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
     accounts = forecast_svc.get_account_balances(db, current_user.id)
-    total_balance = sum(a.balance for a in accounts)
+    total_balance = sum(a.balance for a in accounts if a.currency.value == default)
+    balance_rows = [
+        {
+            "currency": c,
+            "total": round(sum(a.balance for a in accounts if a.currency.value == c), 2),
+            "available_cash": round(float(forecast_svc.get_available_cash(
+                [a for a in accounts if a.currency.value == c])), 2),
+        }
+        for c in forecast_svc.ordered_currencies({a.currency.value for a in accounts}, default)
+    ]
     # By the caller's role: an account seen through a tag share shows only
     # what every role sees (no settings, so no spending-wallet flag).
     by_account = [
@@ -70,17 +89,20 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 2. Upcoming this month (next 30 days)
     # -----------------------------------------------------------------------
-    upcoming = forecast_svc.get_upcoming_items(db, current_user.id, days=30, tag_id=tag_id)
+    upcoming = forecast_svc.upcoming_by_currency(db, current_user.id, days=30, tag_id=tag_id,
+                                                 fx=fx, collector=collector)["items"]
 
     # -----------------------------------------------------------------------
     # 3. Monthly income/expense summary (disposable income)
     # -----------------------------------------------------------------------
-    disposable_data = forecast_svc.get_disposable_income(db, current_user.id, tag_id=tag_id)
+    disposable = forecast_svc.disposable_by_currency(db, current_user.id, tag_id=tag_id, fx=fx)
+    disposable_data = {k: v for k, v in disposable.items() if k not in ("currencies", "fx")}
 
     # -----------------------------------------------------------------------
     # 4. 3-month cash-flow forecast
     # -----------------------------------------------------------------------
-    forecast_3m = forecast_svc.project_cashflow(db, current_user.id, months=3, tag_id=tag_id)
+    forecast_3m = forecast_svc.cashflow_by_currency(db, current_user.id, months=3, tag_id=tag_id,
+                                                    fx=fx, collector=collector)["periods"]
 
     # -----------------------------------------------------------------------
     # 5. Goals progress
@@ -146,7 +168,8 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 7. Available cash, per-account closings, payables
     # -----------------------------------------------------------------------
-    available_cash = forecast_svc.get_available_cash(accounts)
+    available_cash = forecast_svc.get_available_cash(
+        [a for a in accounts if a.currency.value == default])
     account_closings = [
         {
             "period_label": p["period_label"],
@@ -155,15 +178,22 @@ def get_snapshot(
             "by_account": p["by_account"],
             "unassigned_closing": p["unassigned_closing"],
             "overflow_moves": p["overflow_moves"],
+            "by_currency": [
+                {k: row[k] for k in ("currency", "by_account", "unassigned_closing",
+                                     "overflow_moves")}
+                for row in p["by_currency"]
+            ],
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.get_payables(db, current_user.id, days=30, tag_id=tag_id)
+    payables = forecast_svc.payables_by_currency(db, current_user.id, days=30, tag_id=tag_id,
+                                                 fx=fx, collector=collector)
 
     return {
         "balances": {
             "total": round(total_balance, 2),
             "by_account": by_account,
+            "by_currency": balance_rows,
         },
         "upcoming_this_month": upcoming,
         "monthly_summary": disposable_data,
@@ -173,4 +203,7 @@ def get_snapshot(
         "available_cash": round(float(available_cash), 2),
         "account_closings": account_closings,
         "payables": payables,
+        "currencies": forecast_svc.response_currencies(
+            {a.currency.value for a in accounts}, collector, default),
+        "fx": collector.as_dict(),
     }

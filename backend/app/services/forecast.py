@@ -24,15 +24,16 @@ from app.core.access import (
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
 from app.core.time import naive_utc_now
-from app.services.loans import COVER_HORIZON, build_loan_payables
+from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
 )
 from app.models.account import Account, AccountType
 from app.models.account_share import AccountShare
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction, TransactionType, pending_face
 from app.models.transaction import RecurrenceFrequency
+from app.services.fx import FxMeta, FxRates, convert
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +148,7 @@ def project_cashflow(
     months: int = 6,
     reference: Optional[datetime] = None,
     tag_id: Optional[int] = None,
+    fx: Optional[FxRates] = None,
 ) -> List[dict]:
     """
     Generate a month-by-month cash-flow projection from the dated events
@@ -177,34 +179,62 @@ def project_cashflow(
     ``by_account`` is each projection-cash account's month-end closing, excluding
     virtual overflow pulls (reported in ``overflow_moves``).
     With ``tag_id`` only the tagged events count (see ``collect_events``).
+
+    Every figure is the user's default currency only (STU-236, plan D3); a
+    cross-currency transfer between two projection-cash accounts is money
+    moved (``cashflow_by_currency``), in no column here but in ``net``.
     """
+    boundaries = _month_boundaries(months, reference)
+    p = Projection(db, user_id, boundaries[0], boundaries[-1], tag_id=tag_id, fx=fx)
+    return [{k: v for k, v in period.items() if k in LEGACY_PERIOD_KEYS}
+            for period in _cashflow_periods(p, p.default, boundaries, rows=False)]
+
+
+LEGACY_PERIOD_KEYS = (
+    "period_label", "period_start", "period_end", "opening_balance", "income", "expenses",
+    "unposted_expenses", "statement_payables", "net", "closing_balance", "by_account",
+    "unassigned_closing", "overflow_moves",
+)
+
+
+def _month_boundaries(months: int, reference: Optional[datetime]) -> list:
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = start.replace(day=1)
-    boundaries = [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
-    end = boundaries[-1]
+    return [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
 
-    accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
+
+def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
+                      rows: bool) -> List[dict]:
+    """One currency's periods (see ``project_cashflow`` and ``cashflow_by_currency``).
+
+    Each period has the legacy keys plus ``moved_in``, ``moved_out`` and
+    ``loan_payables``; with ``rows`` its ``by_account`` and ``overflow_moves``
+    rows carry ``currency`` too.
+    """
+    opening_by_account, cash_events = p.run(currency)
     opening = sum(opening_by_account.values(), Decimal("0"))
-
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
-    cash_events = [e for e in events if e["counts_as_cash"]]
     routing = _route_legs(
-        opening_by_account, cash_events, account_names,
-        checkpoints=[b.date() for b in boundaries[1:]],
+        opening_by_account, cash_events, p.names,
+        checkpoints=[b.date() for b in boundaries[1:]], currency_of=p.currencies,
     )
 
     def f(x: Decimal) -> float:
         return round(float(x), 2)
 
+    tag = {"currency": currency} if rows else {}
     timeline = []
-    for i in range(months):
+    for i in range(len(boundaries) - 1):
         period_start, period_end = boundaries[i], boundaries[i + 1]
         in_period = [e for e in cash_events if period_start <= _naive(e["date"]) < period_end]
 
+        def regular(e) -> Decimal:
+            # Money moved across currencies is neither income nor expense (plan C3).
+            return e["amount"] - e["moved"]
+
         def total(source: str, sign: int = 0) -> Decimal:
-            amounts = (e["amount"] for e in in_period if e["source"] == source)
+            amounts = (regular(e) for e in in_period if e["source"] == source)
             if sign > 0:
                 amounts = (a for a in amounts if a > 0)
             elif sign < 0:
@@ -217,6 +247,9 @@ def project_cashflow(
             (e["amount"] for e in in_period if e.get("card_payment")), Decimal("0"))
         unposted = -(total("transaction") - card_payments)
         statements = -(total("statement") + card_payments)
+        moved_in = sum((e["moved"] for e in in_period if e["moved"] > 0), Decimal("0"))
+        moved_out = -sum((e["moved"] for e in in_period if e["moved"] < 0), Decimal("0"))
+        loans = total("loan")
         net = sum((e["amount"] for e in in_period), Decimal("0"))
         closing = opening + net
 
@@ -230,6 +263,9 @@ def project_cashflow(
             "expenses": f(expenses),
             "unposted_expenses": f(unposted),
             "statement_payables": f(statements),
+            "moved_in": f(moved_in),
+            "moved_out": f(moved_out),
+            "loan_payables": f(loans),
             "net": f(net),
             "closing_balance": f(closing),
             "by_account": [
@@ -237,14 +273,15 @@ def project_cashflow(
                     "account_id": a["account_id"],
                     "account_name": a["account_name"],
                     "closing_balance": f(a["closing_balance"]),
+                    **tag,
                 }
-                for a in account_closings(snapshot, opening_by_account, account_names)
+                for a in account_closings(snapshot, opening_by_account, p.names)
             ],
             "unassigned_closing": f(snapshot["unassigned"]),
-            "overflow_moves": serialize_overflow_moves([
+            "overflow_moves": [{**m, **tag} for m in serialize_overflow_moves([
                 m for m in routing["overflow_moves"]
                 if period_start.date() <= m["date"] < period_end.date()
-            ]),
+            ])],
         })
 
         opening = closing
@@ -365,6 +402,7 @@ def get_disposable_income(
     db: Session,
     user_id: int,
     tag_id: Optional[int] = None,
+    fx: Optional[FxRates] = None,
 ) -> dict:
     """
     Compute monthly net disposable income:
@@ -411,47 +449,137 @@ def get_disposable_income(
     }
     wallet_ids = set(wallet_ids_of(db, referenced))
 
-    monthly_income: float = 0.0
-    monthly_expenses: float = 0.0
+    buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, Money(db, fx))
+    row = buckets.get(default_currency(db, user_id)) or _DisposableBucket()
+    return {k: v for k, v in row.as_dict().items() if k in DISPOSABLE_KEYS}
+
+
+DISPOSABLE_KEYS = ("monthly_income", "monthly_expenses", "monthly_disposable")
+
+
+class _DisposableBucket:
+    """One currency's monthly figures (``get_disposable_income``)."""
+
+    def __init__(self):
+        self.income: float = 0.0
+        self.expenses: float = 0.0
+        self.moved_in: float = 0.0
+        self.moved_out: float = 0.0
+
+    def as_dict(self) -> dict:
+        # Money moved across currencies is neither income nor expense (plan C3).
+        disposable = self.income - self.expenses + self.moved_in - self.moved_out
+        return {
+            "monthly_income": round(self.income, 2),
+            "monthly_expenses": round(self.expenses, 2),
+            "moved_in": round(self.moved_in, 2),
+            "moved_out": round(self.moved_out, 2),
+            "monthly_disposable": round(disposable, 2),
+        }
+
+
+def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wallet_ids,
+                        money: Money) -> dict:
+    """``get_disposable_income``'s figures per currency (plan C3, D2).
+
+    An entry counts in its account's currency (an accountless one: its own),
+    its amount estimated into that currency when it differs; one with no
+    stored rate is left out. A recurring transfer between two projection-cash
+    accounts in different currencies is money moved: ``moved_out`` in the
+    source's currency and ``moved_in`` in the destination's.
+    """
+    buckets: dict = {}
+
+    def bucket(currency) -> _DisposableBucket:
+        return buckets.setdefault(currency, _DisposableBucket())
+
+    def monthly(entry, currency) -> Optional[float]:
+        if currency is None or _code(entry.currency) == currency:
+            return _monthly_equivalent(entry.amount, entry.cadence)
+        figure, _ = money.to(entry.amount, entry.currency, currency)
+        return None if figure is None else _monthly_equivalent(figure, entry.cadence)
+
+    cash_ids = {
+        a.id for a in db.query(Account).filter(Account.id.in_(set(scope_ids))).all()
+        if is_projection_cash(a)
+    } if scope_ids else set()
 
     for entry in entries:
-        monthly = _monthly_equivalent(entry.amount, entry.cadence)
+        src = entry.account_id
+        src_cur = money.currency_of(src) or _code(entry.currency)
         if entry.transfer_to_account_id is not None:
-            to_wallet = entry.transfer_to_account_id in wallet_ids
-            from_wallet = entry.account_id in wallet_ids
-            if entry.account_id not in scope_ids:
+            dst = entry.transfer_to_account_id
+            to_wallet = dst in wallet_ids
+            from_wallet = src in wallet_ids
+            if src not in scope_ids:
                 continue  # inbound from outside the caller's scope
             if to_wallet and not from_wallet:
-                monthly_expenses += monthly
-            elif from_wallet and not to_wallet and entry.transfer_to_account_id in scope_ids:
-                monthly_expenses -= monthly
+                amount = monthly(entry, src_cur)
+                if amount is not None:
+                    bucket(src_cur).expenses += amount
+            elif from_wallet and not to_wallet and dst in scope_ids:
+                amount = monthly(entry, src_cur)
+                if amount is not None:
+                    bucket(src_cur).expenses -= amount
+            elif src in cash_ids and dst in cash_ids:
+                dst_cur = money.currency_of(dst)
+                if dst_cur != src_cur:
+                    out, got = monthly(entry, src_cur), monthly(entry, dst_cur)
+                    if out is not None and got is not None:
+                        bucket(src_cur).moved_out += out
+                        bucket(dst_cur).moved_in += got
             continue
-        if entry.user_id != user_id and entry.account_id not in scope_ids:
+        if entry.user_id != user_id and src not in scope_ids:
             continue  # another user's entry paid from outside the caller's accounts
+        amount = monthly(entry, src_cur)
+        if amount is None:
+            continue
         if entry.entry_type == BudgetEntryType.INCOME:
-            monthly_income += monthly
-            if entry.account_id in wallet_ids:
-                monthly_expenses += monthly  # income into a wallet is a top-up
-        elif entry.account_id not in wallet_ids:
-            monthly_expenses += monthly
+            bucket(src_cur).income += amount
+            if src in wallet_ids:
+                bucket(src_cur).expenses += amount  # income into a wallet is a top-up
+        elif src not in wallet_ids:
+            bucket(src_cur).expenses += amount
+    return buckets
 
-    disposable = monthly_income - monthly_expenses
+
+def disposable_by_currency(db: Session, user_id: int, tag_id: Optional[int] = None,
+                           fx: Optional[FxRates] = None) -> dict:
+    """``/forecast/disposable``: the default currency's three figures, plus
+    ``by_currency`` rows (``moved_in``/``moved_out`` too) and ``currencies``.
+    Its rows are monthly equivalents of recurring entries; none is listed, so
+    ``fx`` reports no rows."""
+    from app.core.access import household_grants
+
+    scope_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    query = db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user_id, viewable_account_ids(db, user_id),
+                           household_grants(db, user_id)),
+        BudgetEntry.is_active.is_(True),
+    )
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
+    entries = query.all()
+    referenced = {
+        acc_id for e in entries
+        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
+    }
+    wallet_ids = set(wallet_ids_of(db, referenced))
+    money = Money(db, fx)
+    buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, money)
+    default = default_currency(db, user_id)
+    rows = [{"currency": c, **(buckets.get(c) or _DisposableBucket()).as_dict()}
+            for c in ordered_currencies(buckets, default)]
+    accounts = get_account_balances(db, user_id)
+    collector = FxCollector()
     return {
-        "monthly_income": round(monthly_income, 2),
-        "monthly_expenses": round(monthly_expenses, 2),
-        "monthly_disposable": round(disposable, 2),
+        **{k: rows[0][k] for k in DISPOSABLE_KEYS},
+        "by_currency": rows,
+        "currencies": response_currencies({_code(a.currency) for a in accounts}
+                                          | set(buckets), collector, default),
+        "fx": collector.as_dict(),
     }
 
-
-# ---------------------------------------------------------------------------
-# Dated running-balance timeline (pre-due-date solvency)
-#
-# The month-bucket projection above answers "does the month net out?". This
-# section answers the question that actually keeps you solvent: "at any point
-# WITHIN the window, does the running balance go negative before payday?".
-# It walks every income/payable in date order, carries a running balance, and
-# reports the trough (lowest point + date) and any shortfall.
-# ---------------------------------------------------------------------------
 
 _CENTS = Decimal("0.01")
 
@@ -463,6 +591,60 @@ def _money(x) -> Decimal:
 
 def _naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _code(currency) -> Optional[str]:
+    return getattr(currency, "value", currency)
+
+
+class Money:
+    """Figures in an account's currency, at one request's stored rates (plan B6, B7).
+
+    ``fx`` is the request's ``FxRates``; without one, ``FxRates.offline(db)``
+    is built the first time a figure actually needs converting, so a
+    projection with nothing to convert never asks for a rate.
+    """
+
+    def __init__(self, db: Session, fx: Optional[FxRates] = None):
+        self.db = db
+        self._fx = fx
+        self._currency: dict = {}
+
+    @property
+    def fx(self) -> FxRates:
+        if self._fx is None:
+            self._fx = FxRates.offline(self.db)
+        return self._fx
+
+    def seed(self, accounts) -> None:
+        for a in accounts:
+            self._currency[a.id] = _code(a.currency)
+
+    def currency_of(self, account_id) -> Optional[str]:
+        if account_id is None:
+            return None
+        if account_id not in self._currency:
+            account = self.db.get(Account, account_id) if self.db is not None else None
+            self._currency[account_id] = _code(account.currency) if account else None
+        return self._currency[account_id]
+
+    def to(self, amount, base, quote) -> tuple:
+        """``(figure in quote, estimate)``.
+
+        Same currency (or either unknown): ``amount`` itself and no estimate.
+        Otherwise ``estimate`` is ``{original_amount, original_currency, rate}``
+        and the figure is ``amount × rate``, or None when no rate is stored
+        (the item is unconverted; ``rate`` is then None too).
+        """
+        amount = _money(amount)
+        base, quote = _code(base), _code(quote)
+        if base is None or quote is None or base == quote:
+            return amount, None
+        rate = self.fx.rate(base, quote)
+        estimate = {"original_amount": amount, "original_currency": base, "rate": rate}
+        if rate is None:
+            return None, estimate
+        return convert(amount, rate.rate), estimate
 
 
 def _clamp_day(year: int, month: int, day: int) -> int:
@@ -572,6 +754,10 @@ def build_timeline(opening, events: List[dict]) -> dict:
             out_events[-1].update({k: e.get(k) for k in (
                 "view", "face_amount", "currency", "account", "kind", "overdue",
                 "original_date")})
+        for key in ("row", "cash_currency"):
+            if key in e:
+                # A per-currency run's listing row and currency, for serialisers.
+                out_events[-1][key] = e[key]
         if running < lowest:
             lowest = running
             trough_date = d
@@ -640,6 +826,48 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
     return ev
 
 
+# Internal per-currency keys every event carries inside this module; collect_events
+# drops them unless asked (``detail``), so a default caller's events are unchanged.
+DETAIL_KEYS = ("leg_currencies", "rows", "cash_by_currency", "moved_by_currency",
+               "estimate", "face_currency", "unconverted")
+
+
+def _row(currency, amount, estimate=None) -> dict:
+    """A listing row: an unsigned figure in ``currency`` (None: unconverted)."""
+    return {"currency": _code(currency), "amount": amount, "estimate": estimate}
+
+
+def _meta(ev: dict, leg_currencies: List[Optional[str]], rows: List[dict], face_currency,
+          moved: Optional[dict] = None) -> dict:
+    """Attach the per-currency detail (plan C1) to an event built by ``_event``.
+
+    ``leg_currencies`` runs parallel to ``ev["legs"]``: each leg's account
+    currency (a leg with no account: the entry's). ``cash_by_currency`` sums
+    the cash legs per currency, when the event moves cash; the raw ``amount``
+    sums them across currencies and is not a total for a mixed event.
+    ``rows`` are its listing rows, one per currency it shows in.
+    ``moved_by_currency`` is a cross-currency transfer between two
+    projection-cash accounts: the part of each leg that is money moved
+    (``moved_out`` in the source currency, ``moved_in`` in the destination's),
+    never income or expense.
+    """
+    cash: dict = {}
+    if ev["counts_as_cash"]:
+        for leg, currency in zip(ev["legs"], leg_currencies):
+            if leg["cash"]:
+                cash[currency] = cash.get(currency, Decimal("0")) + leg["amount"]
+    ev.update({
+        "leg_currencies": list(leg_currencies),
+        "rows": rows,
+        "cash_by_currency": cash,
+        "moved_by_currency": {c: m for c, m in (moved or {}).items() if c in cash},
+        "estimate": {r["currency"]: r["estimate"] for r in rows if r["estimate"] is not None},
+        "face_currency": _code(face_currency),
+        "unconverted": any(r["amount"] is None for r in rows),
+    })
+    return ev
+
+
 def _legs_of(e: dict) -> List[dict]:
     """An event's legs; events built without legs get one from funding_account_id."""
     legs = e.get("legs")
@@ -680,8 +908,16 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
                     hidden_loan_ids: frozenset = frozenset(),
                     unbilled_ids: frozenset = frozenset(),
                     source: str = "transaction",
-                    overflow_account_id: Optional[int] = None, **extra) -> dict:
+                    overflow_account_id: Optional[int] = None,
+                    money: Optional[Money] = None, face_currency=None, **extra) -> dict:
     """A transfer: -(amount + fee) on the source, +amount on the destination.
+
+    Each leg is in its own account's currency (plan A3, B6): the source moves
+    by ``amount + fee`` in the transfer's ``face_currency`` (the source's, by
+    rule; a legacy row in another is estimated into the source's), and the
+    destination by ``received_amount`` when stored, else by ``amount``
+    estimated at the stored rate into the destination's currency. A leg with
+    no rate is left out (unconverted).
 
     Legs are kept only for accounts in the projection's scope (``cash_ids``,
     ``card_ids`` and ``wallet_ids``); an account outside it (one the caller holds
@@ -745,11 +981,38 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     scoped = cash_ids | card_ids | wallet_ids
     via_unbilled = src in unbilled or dst in unbilled
     src_cash = src in cash_ids and not via_unbilled
-    legs = []
+    money = money or Money(None)
+    face = _code(face_currency)
+    src_cur = money.currency_of(src) if src in scoped else None
+    dst_cur = money.currency_of(dst) if dst in scoped else None
+    out, out_estimate = money.to(amount + fee, face, src_cur or face)
+    sent, _ = money.to(amount, face, src_cur or face)
+    received = getattr(txn, "received_amount", None)
+    if received is not None:
+        got, got_estimate = _money(received), None
+    else:
+        got, got_estimate = money.to(amount, face, dst_cur or face)
+    legs, leg_currencies, rows = [], [], []
     if src in scoped:
-        legs.append(_leg(src, -(amount + fee), overflow_account_id, cash=src_cash))
+        if out is not None:
+            legs.append(_leg(src, -out, overflow_account_id, cash=src_cash))
+            leg_currencies.append(src_cur)
+        rows.append(_row(src_cur, sent, out_estimate and {**out_estimate,
+                                                           "original_amount": _money(amount)}))
     if dst in scoped:
-        legs.append(_leg(dst, amount, cash=dst in cash_ids and not via_unbilled))
+        if got is not None:
+            legs.append(_leg(dst, got, cash=dst in cash_ids and not via_unbilled))
+            leg_currencies.append(dst_cur)
+        if src not in scoped or dst_cur != src_cur:
+            rows.append(_row(dst_cur, got, got_estimate))
+    if not rows:
+        rows.append(_row(face, _money(amount)))
+    moved = {}
+    if src_cash and dst in cash_ids and src_cur != dst_cur:
+        if sent is not None:
+            moved[src_cur] = -sent
+        if got is not None:
+            moved[dst_cur] = got
     if dst in billed_ids:
         extra = {**extra, "card_payment": True}
     if src_cash and dst in (known_wallet_ids | wallet_ids):
@@ -760,7 +1023,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
     hidden = dst in hidden_loan_ids
     if not hidden:
         extra = {**extra, "transfer_fee": _money(fee)}
-    return _event(
+    return _meta(_event(
         date=date or _naive(txn.transaction_date),
         name="Loan payment" if hidden else txn.description or "Unposted transfer",
         type=txn.transaction_type.value,
@@ -770,7 +1033,7 @@ def _transfer_event(txn, cash_ids: set, card_ids: set,
         legs=legs,
         counts_as_cash=False if via_unbilled else None,
         **extra,
-    )
+    ), leg_currencies, rows, face, moved)
 
 
 def collect_events(
@@ -783,6 +1046,8 @@ def collect_events(
     tag_id: Optional[int] = None,
     household=None,
     keep_origin: bool = False,
+    fx: Optional[FxRates] = None,
+    detail: bool = False,
 ) -> List[dict]:
     """Every dated event in ``[start, end)``, each with per-account legs.
 
@@ -864,11 +1129,25 @@ def collect_events(
     discovered as a neutral "Card payment", whatever the caller's role on it.
     ``keep_origin`` keeps each event's internal ``origin`` (model, id) for
     callers in this service layer; it never reaches a response.
+
+    Currencies (STU-236, plan B6, B7, C1): every leg's ``amount`` is in its
+    own account's currency. A figure in another currency (an unposted row's
+    foreign face, ``pending_face``; a recurring entry in another currency than
+    its account's; a transfer's destination with no ``received_amount``; a
+    legacy statement or loan payable funded from another currency) is
+    estimated at the stored rate (``fx``, offline when None) when its leg is
+    built, and a leg with no stored rate is left out (unconverted). With
+    ``detail`` each event also keeps the internal per-currency keys
+    (``DETAIL_KEYS``: ``cash_by_currency``, ``estimate``, ``face_currency``,
+    its listing ``rows``, ...); by default they are dropped, so a caller that
+    never asks gets exactly the events it always got.
     """
     start = _naive(start)
     end = _naive(end)
     if accounts is None:
         accounts = get_account_balances(db, user_id)
+    money = Money(db, fx)
+    money.seed(accounts)
     cash_ids = {a.id for a in accounts if is_projection_cash(a)}
     card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
     loans = [a for a in accounts if a.account_type == AccountType.LOAN]
@@ -1025,6 +1304,7 @@ def collect_events(
                     hidden_loan_ids=hidden_loan_ids, unbilled_ids=outside_unbilled,
                     source="budget_entry",
                     overflow_account_id=overflow_id, origin=(BudgetEntry, entry.id),
+                    money=money, face_currency=entry.currency,
                 ))
             continue
         if entry.account_id in wallet_ids:
@@ -1036,17 +1316,24 @@ def collect_events(
         # A leg on a scoped account; the caller's own entry with no account keeps
         # a cash leg with no account (unassigned cash). Any other account is
         # outside the scope, so the occurrence is listed with no leg.
+        # An entry in another currency than its account's is estimated (plan B6).
+        legs, leg_currencies = [], []
         if entry.account_id in scoped_ids or (
                 entry.account_id is None and entry.user_id == user_id):
-            legs = [_leg(entry.account_id, sign * Decimal(str(entry.amount)), overflow_id)]
+            leg_currency = money.currency_of(entry.account_id) or _code(entry.currency)
+            figure, estimate = money.to(entry.amount, entry.currency, leg_currency)
+            rows = [_row(leg_currency, figure, estimate)]
+            if figure is not None:
+                legs, leg_currencies = [_leg(entry.account_id, sign * figure, overflow_id)], [
+                    leg_currency]
         else:
-            legs = []
+            rows = [_row(entry.currency, _money(entry.amount))]
         for occ in iter_occurrences(entry, start, end):
             key = (entry.id, occ.date())
             if linked[key]:
                 linked[key] -= 1
                 continue  # already recorded (e.g. advance=False)
-            events.append(_event(
+            events.append(_meta(_event(
                 date=occ,
                 name=entry.name,
                 type=entry.entry_type.value,
@@ -1055,7 +1342,7 @@ def collect_events(
                 face_amount=entry.amount,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
-            ))
+            ), leg_currencies, rows, entry.currency))
 
     for txn in txns:
         if txn.transaction_type != TransactionType.TRANSFER and txn.account_id in wallet_ids:
@@ -1076,32 +1363,47 @@ def collect_events(
                                           known_loan_ids=known_loan_ids,
                                           hidden_loan_ids=hidden_loan_ids,
                                           unbilled_ids=outside_unbilled,
-                                          origin=(Transaction, txn.id), **overdue))
+                                          origin=(Transaction, txn.id), money=money,
+                                          face_currency=txn.currency, **overdue))
             continue
-        if txn.transaction_type == TransactionType.CREDIT:
-            amt = Decimal(str(txn.amount))       # inflow
-        elif txn.transaction_type == TransactionType.DEBIT:
-            amt = -Decimal(str(txn.amount))      # outflow
-        else:
-            continue
+        if txn.transaction_type not in (TransactionType.CREDIT, TransactionType.DEBIT):
+            continue  # a credit is an inflow, a debit an outflow
         # A charge on a credit card is NOT a cash outflow on its purchase date — the
         # cash leaves when that card's statement is paid, which is modelled as a
         # dated statement payable below. Its leg is therefore non-cash.
-        events.append(_event(
+        # A face in another currency than the account's is estimated from the
+        # face (pending_face), never from an actual figure kept in ``amount``.
+        legs, leg_currencies = [], []
+        face, face_currency = pending_face(txn)
+        if txn.account_id in scoped_ids:
+            leg_currency = money.currency_of(txn.account_id)
+            if _code(face_currency) != leg_currency and face is not None:
+                figure, estimate = money.to(face, face_currency, leg_currency)
+            else:
+                figure, estimate = _money(txn.amount), None
+            rows = [_row(leg_currency, figure, estimate)]
+            if figure is not None:
+                sign = (Decimal("1") if txn.transaction_type == TransactionType.CREDIT
+                        else Decimal("-1"))
+                legs = [_leg(txn.account_id, sign * figure, cash=txn.account_id in cash_ids)]
+                leg_currencies = [leg_currency]
+        else:
+            rows = [_row(txn.currency, _money(txn.amount))]
+        events.append(_meta(_event(
             date=when,
             name=txn.description or "Unposted transaction",
             type=txn.transaction_type.value,
             source="transaction",
             source_id=txn.id,
             face_amount=txn.amount,
-            legs=([_leg(txn.account_id, amt, cash=txn.account_id in cash_ids)]
-                  if txn.account_id in scoped_ids else []),
+            legs=legs,
             origin=(Transaction, txn.id),
             **overdue,
-        ))
+        ), leg_currencies, rows, face_currency))
 
     cards = {a.id: a for a in accounts if a.id in billed_ids}
-    projected_charges = _card_entry_charges(db, card_entries, cards, start, end, events)
+    projected_charges = _card_entry_charges(db, card_entries, cards, start, end, events,
+                                            money=money)
 
     # Household occurrences: each sharer's explicitly Household-tagged records
     # outside the scope (a bill on their private card or wallet), listed with
@@ -1109,7 +1411,8 @@ def collect_events(
     # Outside the active scope: an account the caller also sees directly is in
     # the normal projection's scope, so a record on it is never listed twice.
     for grant in ([household] if household is not None else grants):
-        events.extend(_household_events(db, redactor, user_id, grant, accounts, start, end))
+        events.extend(_household_events(db, redactor, user_id, grant, accounts, start, end,
+                                        money))
 
     # Each credit card contributes one dated payable per billing cycle due in the
     # window, derived from its own transactions (see services/statements.py) and
@@ -1122,27 +1425,30 @@ def collect_events(
     leg_ids = scoped_ids if household is not None else viewable_ids
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges,
-                                    viewable_ids=viewable_ids):
+                                    viewable_ids=viewable_ids, fx=money.fx):
+        line_estimate = p.pop("line_estimate", None)
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         }}
         funding = p["funding_account_id"] if p["funding_account_id"] in leg_ids else None
         overflow = p["overflow_account_id"] if p["overflow_account_id"] in leg_ids else None
-        statement = _event(
+        card = cards.get(p["source_id"]) or next(
+            a for a in accounts if a.id == p["source_id"])
+        legs, leg_currencies, rows = _payable_legs(
+            money, funding, overflow, p["amount"], card.currency, line_estimate,
+            cash=funding not in wallet_ids)
+        statement = _meta(_event(
             date=p["date"],
             name=p["name"],
             type=p["type"],
             source=p["source"],
             source_id=p["source_id"],
             face_amount=-p["amount"],
-            legs=([_leg(funding, p["amount"], overflow, cash=funding not in wallet_ids)]
-                  if funding is not None else []),
+            legs=legs,
             origin=(Account, p["source_id"]),  # the card
             **extra,
-        )
-        card = cards.get(p["source_id"]) or next(
-            a for a in accounts if a.id == p["source_id"])
+        ), leg_currencies, rows, card.currency)
         if access.role(card.id) == TAG_VIEWER:
             # Seen through a tag share: no statement detail (as a hidden card's).
             _limit(statement, redactor, name=p["name"], currency=card.currency,
@@ -1162,28 +1468,33 @@ def collect_events(
             BudgetEntry.is_active.is_(True),
             BudgetEntry.transfer_to_account_id.is_(None),
         ).all()
-        hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None)
+        hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None,
+                                             money=money)
         for p in get_statement_payables(db, outside_cards, start, end,
                                         projected_charges=hidden_charges,
-                                        viewable_ids=viewable_ids):
+                                        viewable_ids=viewable_ids, fx=money.fx):
+            line_estimate = p.pop("line_estimate", None)
             card = hidden_cards[p["source_id"]]
             primary = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
             overflow = (p["overflow_account_id"]
                         if primary is not None and p["overflow_account_id"] in scoped_ids
                         else None)
             overdue = {k: p[k] for k in ("overdue", "original_date") if k in p}
-            events.append(_limit(_event(
+            legs, leg_currencies, rows = _payable_legs(
+                money, primary, overflow, p["amount"], card.currency, line_estimate,
+                cash=primary not in wallet_ids)
+            events.append(_limit(_meta(_event(
                 date=p["date"],
                 name=CARD_PAYMENT,
                 type=p["type"],
                 source=p["source"],
                 source_id=None,
                 face_amount=0,
-                legs=([_leg(primary, p["amount"], overflow, cash=primary not in wallet_ids)]
-                      if primary is not None else []),
+                legs=legs,
                 origin=(Account, card.id),
                 **overdue,
-            ), redactor, name=CARD_PAYMENT, currency=card.currency, kind="card_payment"))
+            ), leg_currencies, rows, card.currency), redactor, name=CARD_PAYMENT,
+                currency=card.currency, kind="card_payment"))
 
     # Each loan contributes a dated payable per due date, less what the planned
     # payments into it cover (see services/loans.py). Recurring transfers into a
@@ -1216,29 +1527,43 @@ def collect_events(
                 linked_covers[key] -= 1
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
-                (occ.date(), _money(entry.amount)))
+                (occ.date(), _money(entry.amount), entry))
     loans_by_id = {a.id: a for a in payable_loans}
-    for p in build_loan_payables(db, payable_loans, start, end, projected_covers):
+    # A legacy cover from another currency is normalised into the loan's first;
+    # one with no stored rate is not netted (plan B6, services/loans.py).
+    for loan_id, covers in list(projected_covers.items()):
+        loan = loans_by_id[loan_id]
+        kept = []
+        for day, cash, entry in covers:
+            cash = normalise_cover(db, loan, cash, money.currency_of(entry.account_id)
+                                   or _code(entry.currency), money.fx)
+            if cash is not None:
+                kept.append((day, cash))
+        projected_covers[loan_id] = kept
+    for p in build_loan_payables(db, payable_loans, start, end, projected_covers,
+                                 fx=money.fx):
         hidden = p["source_id"] in hidden_loan_ids
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
             "funding_account_id", "overflow_account_id",
         } and not (hidden and k not in ("overdue", "original_date"))}
         payer = p["funding_account_id"]
-        event = _event(
+        # Cash only on a scoped projection-cash account; a scoped wallet's leg
+        # is kept as non-cash, and an account outside the scope has no leg.
+        legs, leg_currencies, rows = _payable_legs(
+            money, payer if payer in scoped_ids else None, None, p["amount"],
+            loans_by_id[p["source_id"]].currency, None, cash=payer in cash_ids)
+        event = _meta(_event(
             date=p["date"],
             name="Loan payment" if hidden else p["name"],
             type=p["type"],
             source=p["source"],
             source_id=None if hidden else p["source_id"],
             face_amount=-p["amount"],
-            # Cash only on a scoped projection-cash account; a scoped wallet's leg
-            # is kept as non-cash, and an account outside the scope has no leg.
-            legs=([_leg(payer, p["amount"], None, cash=payer in cash_ids)]
-                  if payer in scoped_ids else []),
+            legs=legs,
             origin=(Account, p["source_id"]),  # the loan
             **extra,
-        )
+        ), leg_currencies, rows, loans_by_id[p["source_id"]].currency)
         if hidden:
             event = _limit(event, redactor, name=LOAN_PAYMENT,
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
@@ -1261,14 +1586,40 @@ def collect_events(
 
     if tag_id is not None:
         events = _keep_tagged(db, events, tag_id)
-    if not keep_origin:
-        for e in events:
+    for e in events:
+        if not keep_origin:
             del e["origin"]
+        if not detail:
+            for key in DETAIL_KEYS:
+                e.pop(key, None)
     return events
 
 
+def _payable_legs(money: Money, funding, overflow, amount, currency, line_estimate,
+                  *, cash: bool) -> tuple:
+    """``(legs, leg_currencies, rows)`` of a statement or loan payable.
+
+    ``amount`` (negative) is in the card's or loan's ``currency``. Its leg is
+    on ``funding`` (None: no leg), in that account's currency: a legacy
+    payable funded from another currency is estimated there at the stored
+    rate (with no rate it has no leg: unconverted). ``line_estimate`` is a
+    statement's own estimate (from estimated lines), shown when the payable
+    itself needs no conversion.
+    """
+    owed = -_money(amount)
+    if funding is None:
+        return [], [], [_row(currency, owed, line_estimate)]
+    funding_currency = money.currency_of(funding)
+    figure, estimate = money.to(owed, currency, funding_currency)
+    rows = [_row(funding_currency, figure, estimate or line_estimate)]
+    if figure is None:
+        return [], [], rows
+    return [_leg(funding, -figure, overflow, cash=cash)], [funding_currency], rows
+
+
 def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
-                      start: datetime, end: datetime) -> List[dict]:
+                      start: datetime, end: datetime, money: Optional[Money] = None
+                      ) -> List[dict]:
     """Household occurrences (``services/household.py``) as listed events.
 
     ``scope`` is the projection's active scope (``collect_events``'s
@@ -1281,17 +1632,20 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
     One the caller sees Limited (anyone but its creator) is a limited event
     of kind "household" with a neutral account reference; one they see in
     full (their own, in their own Household view) carries
-    ``household_occurrence``.
+    ``household_occurrence``. Its listing row is in the occurrence's
+    ``currency`` (services/household.py: the card's when the caller can view
+    the card or reads the record in full, else the record's).
     """
     from app.services.household import household_occurrences
 
     out = []
     viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
     for occ in household_occurrences(db, grant, scope, start, end, recorded=False,
-                                     viewable_ids=viewable_ids, access=redactor.access):
+                                     viewable_ids=viewable_ids, access=redactor.access,
+                                     fx=money.fx if money is not None else None):
         record = occ.record
         is_txn = isinstance(record, Transaction)
-        event = _event(
+        event = _meta(_event(
             date=occ.date,
             name=record.description if is_txn else record.name,
             type=record.transaction_type.value if is_txn else record.entry_type.value,
@@ -1303,7 +1657,7 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
             origin=(type(record), record.id),
             household_occurrence=True,
             **occ.extra,
-        )
+        ), [], [_row(occ.currency, occ.remainder)], record.currency)
         if redactor.view(record) == LIMITED:
             _limit(event, redactor, name=redactor.display_description(record),
                    currency=record.currency, kind="household")
@@ -1360,13 +1714,19 @@ def limited_event(e: dict, public_id: str) -> dict:
     """The public shape of a limited event (``LimitedEvent``).
 
     ``public_id`` is opaque and per response; ``cash_delta`` is the sum of the
-    event's cash legs on scope accounts.
+    event's cash legs on scope accounts. A row split by currency (plan C4)
+    carries ``cash_currency``: its ``amount`` is that currency's cash, and a
+    payment to a hidden card or loan shows that cash as its face, in that
+    currency, so the hidden account's own currency is never shown.
     """
     def day(d):
         if d is None:
             return None
         return (d.date() if isinstance(d, datetime) else d).isoformat()
 
+    face, currency = e["face_amount"], e.get("currency")
+    if e.get("kind") in ("loan_payment", "card_payment") and e.get("cash_currency"):
+        face, currency = abs(e["amount"]), e["cash_currency"]
     return {
         "view": LIMITED,
         "public_id": public_id,
@@ -1374,9 +1734,9 @@ def limited_event(e: dict, public_id: str) -> dict:
         "original_date": day(e.get("original_date")),
         "overdue": bool(e.get("overdue")),
         "display_name": e["name"],
-        "face_amount": round(float(e["face_amount"]), 2),
+        "face_amount": round(float(face), 2),
         "cash_delta": round(float(e["amount"]), 2),
-        "currency": e.get("currency"),
+        "currency": currency,
         "account": e.get("account"),
         "kind": e.get("kind"),
     }
@@ -1460,7 +1820,8 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
 
 
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
-                        end: datetime, events: Optional[List[dict]]) -> dict:
+                        end: datetime, events: Optional[List[dict]],
+                        money: Optional[Money] = None) -> dict:
     """Projected statement charges for budget entries scheduled on a credit card.
 
     A card-backed occurrence is not a cash event: it is a charge on the card, so it
@@ -1487,29 +1848,41 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     In-window occurrences are appended to ``events`` as non-cash listings, like
     unposted card charges; with ``events`` None (a discovered card's internal
     inputs) nothing is listed. Returns ``{card_id: [line items]}``.
+
+    Each line item is in the card's currency: an entry in another currency is
+    estimated at the stored rate (``money``; offline rates when None) and
+    carries that ``estimate``; one with no stored rate bills nothing and is
+    listed unconverted.
     """
     if not entries:
         return {}
+    money = money or Money(db)
     charges: dict = {}
     for entry, occ in _billed_card_occurrences(db, entries, cards, start, end):
         income = entry.entry_type == BudgetEntryType.INCOME
-        amount = Decimal(str(entry.amount))
-        charges.setdefault(entry.account_id, []).append(SimpleNamespace(
-            transaction_date=occ,
-            amount=amount,
-            transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
-        ))
+        card_currency = _code(cards[entry.account_id].currency)
+        amount, estimate = money.to(entry.amount, entry.currency, card_currency)
+        if amount is not None:
+            charges.setdefault(entry.account_id, []).append(SimpleNamespace(
+                transaction_date=occ,
+                amount=amount,
+                transaction_type=TransactionType.CREDIT if income else TransactionType.DEBIT,
+                **({"estimate": estimate} if estimate is not None else {}),
+            ))
         if occ >= start and events is not None:
-            events.append(_event(
+            legs = ([_leg(entry.account_id, amount if income else -amount, cash=False)]
+                    if amount is not None else [])
+            events.append(_meta(_event(
                 date=occ,
                 name=entry.name,
                 type=entry.entry_type.value,
                 source="budget_entry",
                 source_id=entry.id,
                 face_amount=entry.amount,
-                legs=[_leg(entry.account_id, amount if income else -amount, cash=False)],
+                legs=legs,
                 origin=(BudgetEntry, entry.id),
-            ))
+            ), [card_currency] if legs else [], [_row(card_currency, amount, estimate)],
+                entry.currency))
     return charges
 
 
@@ -1573,8 +1946,13 @@ def _route_legs(
     events: List[dict],
     account_names: dict,
     checkpoints: Sequence[date] = (),
+    currency_of: Optional[dict] = None,
 ) -> dict:
     """Walk events' cash legs per account with primary → overflow routing.
+
+    With ``currency_of`` (account id -> currency) an overflow account in
+    another currency than the leg's is never pulled from (plan C2): the
+    shortfall stays on the primary account with ``overflow_used`` 0.
 
     Keeps two books:
 
@@ -1629,6 +2007,9 @@ def _route_legs(
 
             overflow_used = Decimal("0")
             ov = leg.get("overflow_account_id")
+            if (ov is not None and currency_of is not None
+                    and currency_of.get(ov) != currency_of.get(acc)):
+                ov = None  # no routing across currencies
             if routed[acc] < 0 and ov is not None:
                 need = -routed[acc]
                 ov_avail = routed.get(ov, Decimal("0"))
@@ -1710,34 +2091,419 @@ def project_running_balance(
     days: int = 60,
     reference: Optional[datetime] = None,
     tag_id: Optional[int] = None,
+    fx: Optional[FxRates] = None,
 ) -> dict:
     """Build the dated running-balance timeline over the next ``days`` days.
 
     With ``tag_id`` only the tagged events count (see ``collect_events``).
+    Every figure is the user's default currency only (STU-236, plan D3; the
+    other currencies are ``timeline_by_currency``'s).
     """
+    start, end = _timeline_window(days, reference)
+    p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
+    return _timeline(p, p.default, start, end, rows=False)
+
+
+def _timeline_window(days: int, reference: Optional[datetime]) -> tuple:
     # Naive: compared against the naive next_occurrence / transaction_date columns.
     now = reference or naive_utc_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=days)
+    return start, start + timedelta(days=days)
 
+
+def _timeline(p: "Projection", currency: str, start: datetime, end: datetime, *,
+              rows: bool) -> dict:
+    """One currency's running-balance timeline (``project_running_balance``)."""
     # Available cash is projection-cash accounts only (see is_projection_cash).
-    accounts, opening_by_account, account_names = _projection_accounts(db, user_id)
+    opening_by_account, cash_events = p.run(currency, rows=rows)
     opening = sum(opening_by_account.values(), Decimal("0"))
 
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
-    cash_events = [e for e in events if e["counts_as_cash"]]
-
     result = build_timeline(opening, cash_events)
-    routing = _route_legs(opening_by_account, cash_events, account_names)
+    routing = _route_legs(opening_by_account, cash_events, p.names, currency_of=p.currencies)
     result["account_shortfalls"] = routing["shortfalls"]
     # Per-account closings at window end exclude virtual overflow pulls; those
     # are reported separately so the closings stay a plain sum of scheduled legs.
-    result["by_account"] = account_closings(routing["final"], opening_by_account, account_names)
+    result["by_account"] = account_closings(routing["final"], opening_by_account, p.names)
     result["unassigned_closing"] = routing["final"]["unassigned"]
     result["overflow_moves"] = routing["overflow_moves"]
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
+
+
+# ---------------------------------------------------------------------------
+# Per-currency projections (STU-236, plan C, D)
+#
+# Each currency is projected on its own: an account's legs stay in its
+# currency, opening balances are split by account currency, and nothing is
+# ever added across currencies. The default currency's run supplies every
+# legacy scalar; ``by_currency`` rows carry every currency's, default first.
+# Full listed rows carry their ``currency`` and, when estimated, the B5
+# labels; Limited rows keep their epic shape (``limited_event``).
+# ---------------------------------------------------------------------------
+
+def default_currency(db: Session, user_id: int) -> str:
+    """The user's default currency, PHP when unset (plan C5)."""
+    from app.models.user import User
+
+    user = db.get(User, user_id)
+    return _code(getattr(user, "default_currency", None)) or "PHP"
+
+
+def ordered_currencies(currencies, default: str, *, keep_default: bool = True) -> List[str]:
+    """Default first (always, with ``keep_default``), then alphabetical."""
+    present = {c for c in currencies if c}
+    rest = sorted(present - {default})
+    return ([default] if keep_default or default in present else []) + rest
+
+
+class _CurrencyLookup:
+    """``currency_of`` for ``_route_legs``: any account id, looked up once."""
+
+    def __init__(self, money: Money):
+        self.money = money
+
+    def get(self, account_id, default=None):
+        return self.money.currency_of(account_id) or default
+
+
+class Projection:
+    """One caller's projection events and opening balances, split by currency."""
+
+    def __init__(self, db: Session, user_id: int, start: datetime, end: datetime, *,
+                 tag_id: Optional[int] = None, fx: Optional[FxRates] = None):
+        self.db = db
+        self.user_id = user_id
+        self.accounts, self.opening_by_account, self.names = _projection_accounts(db, user_id)
+        self.money = Money(db, fx)
+        self.money.seed(self.accounts)
+        self.currencies = _CurrencyLookup(self.money)
+        self.default = default_currency(db, user_id)
+        self.events = collect_events(db, start, end, user_id=user_id, accounts=self.accounts,
+                                     tag_id=tag_id, fx=self.money.fx if fx else None,
+                                     detail=True)
+        self.cash_events = [e for e in self.events if e["counts_as_cash"]]
+
+    def run(self, currency: str, *, rows: bool = True) -> tuple:
+        """``(opening_by_account, cash events)`` of one currency (plan C2).
+
+        Each event keeps only its legs in ``currency``, its ``amount`` is that
+        currency's cash, and ``moved`` its money moved; with ``rows`` it also
+        carries its listing ``row`` in that currency.
+        """
+        opening = {a: v for a, v in self.opening_by_account.items()
+                   if self.money.currency_of(a) == currency}
+        events = []
+        for e in self.cash_events:
+            if currency not in e["cash_by_currency"]:
+                continue
+            ev = {**e,
+                  "legs": [leg for leg, c in zip(e["legs"], e["leg_currencies"])
+                           if c == currency],
+                  "cash_currency": currency,
+                  "amount": e["cash_by_currency"][currency],
+                  "moved": e["moved_by_currency"].get(currency, Decimal("0"))}
+            if rows:
+                ev["row"] = next((r for r in e["rows"] if r["currency"] == currency),
+                                 _row(currency, abs(ev["amount"])))
+            events.append(ev)
+        return opening, events
+
+    def run_currencies(self) -> List[str]:
+        """Every currency with an opening account or cash, the default first."""
+        found = {self.money.currency_of(a) for a in self.opening_by_account}
+        found |= {c for e in self.cash_events for c in e["cash_by_currency"]}
+        return ordered_currencies(found, self.default)
+
+    def account_currencies(self) -> set:
+        """The currencies of the caller's viewable active accounts."""
+        return {_code(a.currency) for a in self.accounts}
+
+
+class FxCollector:
+    """A response's ``fx`` and ``currencies`` from the full rows it shows (plan G3).
+
+    Only full rows are added: a Limited row's estimate never adds its pair,
+    and only full rows count as unconverted. Each unconverted row is counted
+    once however many lists show it.
+    """
+
+    def __init__(self):
+        self.meta = FxMeta()
+        self.currencies: set = set()
+        self._unconverted: set = set()
+
+    def row(self, key, row: dict) -> dict:
+        """Record one full row (``key`` identifies it) and return its labels."""
+        if row["currency"]:
+            self.currencies.add(row["currency"])
+        if row["amount"] is None:
+            if key not in self._unconverted:
+                self._unconverted.add(key)
+                self.meta.add_unconverted()
+        elif row["estimate"] is not None:
+            self.meta.add(row["estimate"]["rate"])
+        return row_labels(row)
+
+    def as_dict(self) -> dict:
+        meta = self.meta.as_dict()
+        return {
+            "rates": [{**r, "rate": float(r["rate"]), "as_of": r["as_of"].isoformat()}
+                      for r in meta["rates"]],
+            "unconverted_count": meta["unconverted_count"],
+        }
+
+
+def row_labels(row: dict) -> dict:
+    """The B5 labels of a full row: none when it needed no conversion."""
+    estimate = row["estimate"]
+    if estimate is None:
+        return {}
+
+    def num(x):
+        return round(float(x), 2) if x is not None else None
+
+    if row["amount"] is None:
+        return {"unconverted": True, "original_amount": num(estimate["original_amount"]),
+                "original_currency": estimate["original_currency"]}
+    rate = estimate["rate"]
+    return {
+        "estimated": True,
+        "original_amount": num(estimate["original_amount"]),
+        "original_currency": estimate["original_currency"],
+        "rate": float(rate.rate),
+        "rate_as_of": rate.as_of.isoformat(),
+        "rate_stale": rate.stale,
+    }
+
+
+def _row_key(e: dict, currency) -> tuple:
+    day = e["date"]
+    day = _naive(day).date() if isinstance(day, datetime) else day
+    return (e["source"], e.get("source_id"), day, e["name"], currency)
+
+
+def collect_unconverted(collector: FxCollector, events: List[dict]) -> None:
+    """Count the full events with no stored rate: they move no cash, so no
+    per-currency run shows them, but the response still reports them."""
+    for e in events:
+        if e.get("view") == LIMITED:
+            continue
+        for row in e.get("rows") or ():
+            if row["amount"] is None:
+                collector.row(_row_key(e, row["currency"]), row)
+
+
+def response_currencies(p_currencies: set, collector: FxCollector, default: str) -> List[str]:
+    """``currencies``: viewable active accounts' plus full rows', no placeholder."""
+    return ordered_currencies(p_currencies | collector.currencies, default, keep_default=False)
+
+
+def timeline_by_currency(db: Session, user_id: int, days: int = 60,
+                         reference: Optional[datetime] = None, tag_id: Optional[int] = None,
+                         fx: Optional[FxRates] = None) -> dict:
+    """``/forecast/timeline``: the default currency's timeline as the scalars,
+    plus ``by_currency`` (one row per currency), ``currencies`` and ``fx``."""
+    start, end = _timeline_window(days, reference)
+    p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
+    collector = FxCollector()
+    rows = []
+    for currency in p.run_currencies():
+        row = serialize_currency_timeline(_timeline(p, currency, start, end, rows=True),
+                                          currency, collector)
+        rows.append(row)
+    collect_unconverted(collector, p.events)
+    default = {k: v for k, v in rows[0].items() if k != "currency"}
+    return {
+        "window_start": start.date().isoformat(),
+        "window_end": end.date().isoformat(),
+        **default,
+        "by_currency": rows,
+        "currencies": response_currencies(p.account_currencies(), collector, p.default),
+        "fx": collector.as_dict(),
+    }
+
+
+def serialize_currency_timeline(result: dict, currency: str, collector: FxCollector) -> dict:
+    """One ``by_currency`` timeline row: ``serialize_timeline`` with ``currency``
+    on every full listed row and the labels on estimated events."""
+    body = serialize_timeline(result)
+    tag = {"currency": currency}
+    events = []
+    for e, out in zip(result["events"], body["events"]):
+        if e.get("view") != LIMITED:
+            row = e.get("row") or _row(currency, abs(e["amount"]))
+            out = {**out, **tag, **collector.row(_row_key(e, currency), row)}
+        events.append(out)
+    return {
+        "currency": currency,
+        "opening_balance": body["opening_balance"],
+        "lowest_balance": body["lowest_balance"],
+        "trough_date": body["trough_date"],
+        "closing_balance": body["closing_balance"],
+        "shortfall": body["shortfall"],
+        "shortfalls": [{**s, **tag} for s in body["shortfalls"]],
+        "account_shortfalls": [{**s, **tag} for s in body["account_shortfalls"]],
+        "by_account": [{**a, **tag} for a in body["by_account"]],
+        "unassigned_closing": body["unassigned_closing"],
+        "overflow_moves": [{**m, **tag} for m in body["overflow_moves"]],
+        "events": events,
+    }
+
+
+def cashflow_by_currency(db: Session, user_id: int, months: int = 6,
+                         reference: Optional[datetime] = None, tag_id: Optional[int] = None,
+                         fx: Optional[FxRates] = None,
+                         collector: Optional[FxCollector] = None) -> dict:
+    """``/forecast/cashflow``: each period's default-currency scalars plus
+    ``by_currency`` rows; ``currencies`` and ``fx`` for the response.
+
+    A row's ``net`` is ``income - expenses - unposted_expenses -
+    statement_payables + moved_in - moved_out + loan_payables`` (plan C3).
+    """
+    boundaries = _month_boundaries(months, reference)
+    p = Projection(db, user_id, boundaries[0], boundaries[-1], tag_id=tag_id, fx=fx)
+    collector = collector or FxCollector()
+    per_currency = {c: _cashflow_periods(p, c, boundaries, rows=True)
+                    for c in p.run_currencies()}
+    # Full rows in the window (their pairs and currencies), as the timeline shows them.
+    for c in per_currency:
+        for e in p.run(c)[1]:
+            if e.get("view") != LIMITED:
+                collector.row(_row_key(e, c), e["row"])
+    collect_unconverted(collector, p.events)
+    periods = []
+    for i in range(months):
+        rows = [{"currency": c, **{k: v for k, v in periods_c[i].items()
+                                   if k not in ("period_label", "period_start", "period_end")}}
+                for c, periods_c in per_currency.items()]
+        default = per_currency[p.default][i]
+        periods.append({**{k: default[k] for k in LEGACY_PERIOD_KEYS}, "by_currency": rows})
+    return {"periods": periods,
+            "currencies": response_currencies(p.account_currencies(), collector, p.default),
+            "fx": collector.as_dict()}
+
+
+def upcoming_by_currency(db: Session, user_id: int, days: int = 30,
+                         reference: Optional[datetime] = None, tag_id: Optional[int] = None,
+                         fx: Optional[FxRates] = None,
+                         collector: Optional[FxCollector] = None) -> dict:
+    """``/forecast/upcoming``: every item with its ``currency`` (a full one), plus
+    ``currencies`` and ``fx``. No ``by_currency``: the list has no totals."""
+    start, end = _upcoming_window(days, reference)
+    accounts = get_account_balances(db, user_id)
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts,
+                            tag_id=tag_id, fx=fx, detail=True)
+    collector = collector or FxCollector()
+    items = currency_upcoming_items(events, collector)
+    default = default_currency(db, user_id)
+    return {"items": items,
+            "currencies": response_currencies({_code(a.currency) for a in accounts},
+                                              collector, default),
+            "fx": collector.as_dict()}
+
+
+def _limited_rows(e: dict) -> List[dict]:
+    """A limited event per currency it moves cash in (plan C4); one with no
+    cash (or unconverted) keeps ``cash_delta`` 0."""
+    cash = e.get("cash_by_currency") or {}
+    if len(cash) == 1:
+        ((currency, amount),) = cash.items()
+        return [{**e, "amount": amount, "cash_currency": currency}]
+    if not cash:
+        return [e]
+    return [{**e, "amount": amount, "cash_currency": currency}
+            for currency, amount in sorted(cash.items())]
+
+
+def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector] = None
+                            ) -> List[dict]:
+    """``collect_events(detail=True)`` events as upcoming items, one per currency.
+
+    A full event becomes one item per listing row (a cross-currency transfer:
+    one in each currency), each with ``currency``, its ``amount`` in that
+    currency (None when unconverted) and the B5 labels. A limited event keeps
+    the public shape (``limited_event``), split per currency it moves cash in,
+    and its public ids are assigned after the split.
+    """
+    collector = collector or FxCollector()
+    items = []
+    for e in events:
+        if e.get("view") == LIMITED:
+            continue
+        for row in e["rows"]:
+            amount = row["amount"]
+            items.append({
+                "name": e["name"],
+                "amount": round(float(amount), 2) if amount is not None else None,
+                "due_date": _naive(e["date"]).date().isoformat(),
+                "entry_type": e["type"],
+                "source": e["source"],
+                "source_id": e["source_id"],
+                **({"household_occurrence": True} if e.get("household_occurrence") else {}),
+                "currency": row["currency"],
+                **collector.row(_row_key(e, row["currency"]), row),
+            })
+    limited = [r for e in events if e.get("view") == LIMITED for r in _limited_rows(e)]
+    items += [limited_event(e, f"e{i}") for i, e in enumerate(
+        sorted(limited, key=_event_sort_key), start=1)]
+    items.sort(key=lambda x: x.get("due_date") or x["date"])
+    return items
+
+
+def payables_by_currency(db: Session, user_id: int, days: int = 30,
+                         reference: Optional[datetime] = None, tag_id: Optional[int] = None,
+                         fx: Optional[FxRates] = None,
+                         collector: Optional[FxCollector] = None) -> List[dict]:
+    """``get_payables`` split by currency (plan C4): each event's sign filter and
+    amount read its cash in each currency, never the raw ``amount``. A full
+    payable carries ``currency`` and the B5 labels; an unconverted one moves no
+    cash, so it is not a payable."""
+    start, end = _upcoming_window(days, reference)
+    accounts = get_account_balances(db, user_id)
+    names = {a.id: a.name for a in accounts}
+    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id,
+                            fx=fx, detail=True)
+    collector = collector or FxCollector()
+    payables = []
+    public = 0
+    split = []
+    for e in events:
+        if not e["counts_as_cash"]:
+            continue
+        for currency, amount in e["cash_by_currency"].items():
+            legs = [leg for leg, c in zip(e["legs"], e["leg_currencies"]) if c == currency]
+            split.append({**e, "amount": amount, "legs": legs, "cash_currency": currency})
+    for e in sorted(split, key=_event_sort_key):
+        if e["amount"] >= 0:
+            continue
+        if (e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment")
+                and not e.get("top_up") and not e.get("loan_payment")):
+            continue
+        if e.get("view") == LIMITED:
+            public += 1
+            payables.append(limited_event(e, f"e{public}"))
+            continue
+        currency = e["cash_currency"]
+        primary = e["legs"][0] if e["legs"] else {}
+        acc = primary.get("account_id")
+        ov = primary.get("overflow_account_id")
+        row = next((r for r in e["rows"] if r["currency"] == currency),
+                   _row(currency, -e["amount"]))
+        payables.append({
+            "due_date": _naive(e["date"]).date().isoformat(),
+            "name": e["name"],
+            "amount": round(float(-e["amount"]), 2),
+            "source": e["source"],
+            "source_id": e["source_id"],
+            "account_id": acc,
+            "account_name": names.get(acc),
+            "overflow_account_id": ov,
+            "overflow_account_name": names.get(ov),
+            "currency": currency,
+            **collector.row(_row_key(e, currency), row),
+        })
+    return payables
 
 
 def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
