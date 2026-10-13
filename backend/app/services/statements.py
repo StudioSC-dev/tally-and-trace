@@ -325,19 +325,25 @@ def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
     ``rates`` keeps every contributing rate (one per currency pair), so each
     pair can be reported and the label's freshness is that of all of them.
     ``original_amount`` is the sum of the estimated lines' faces when they
-    share one currency, with that conversion's ``rate``. Lines in several
+    share one currency (a credit line's face subtracted, as a refund lowers
+    the balance), with that conversion's ``rate``. Lines in several
     currencies have no single original figure or rate: the label then
     carries no ``original_*`` or ``rate`` keys at all, only ``rates`` (the
     statement is still an estimate).
     """
-    found = [estimates[id(line)] for line in lines if id(line) in estimates]
-    if not found:
+    estimated = [line for line in lines if id(line) in estimates]
+    if not estimated:
         return None
+    found = [estimates[id(line)] for line in estimated]
     rates = list({(e["rate"].base, e["rate"].quote): e["rate"] for e in found}.values())
     currencies = {e["original_currency"] for e in found}
     if len(currencies) != 1:
         return {"rates": rates}
-    return {"original_amount": sum((e["original_amount"] for e in found), Decimal("0")),
+    original = sum((-e["original_amount"]
+                    if getattr(line, "transaction_type", None) == TransactionType.CREDIT
+                    else e["original_amount"] for line, e in zip(estimated, found)),
+                   Decimal("0"))
+    return {"original_amount": original,
             "original_currency": currencies.pop(), "rate": found[0]["rate"], "rates": rates}
 
 

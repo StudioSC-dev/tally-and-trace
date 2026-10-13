@@ -991,3 +991,39 @@ def test_a_mixed_statement_with_an_unconverted_line(sw_client, sw_db, cx, frozen
     assert (payable["original_amount"], payable["original_currency"], payable["rate"]) == (
         10.0, "USD", RATE_TO_PHP)
     assert not any(p.get("name") == "Yen charge" for p in snapshot["payables"])
+
+
+def test_a_refund_nets_against_the_statement_original(sw_client, sw_db, cx, frozen):
+    """The PHP card's pending USD 10 charge and a pending USD 2 refund: the
+    payable is PHP 464 ((10 - 2) x 58), and its original is USD 8, the
+    refund's face subtracted, never added."""
+    _txn(sw_db, cx["a"]["id"], cx["php_card"], "credit", 2, _d(4), "PHP", projected_amount=2,
+         projected_currency="USD", description="Card refund")
+    snapshot = _get(sw_client, cx["a"], "/dashboard/snapshot")
+    timeline = _get(sw_client, cx["a"], "/forecast/timeline", days=30)
+    (payable,) = [p for p in snapshot["payables"] if p["name"] == "PHP Card statement"]
+    (event,) = [e for e in _row(timeline, "PHP")["events"] if e["name"] == "PHP Card statement"]
+    assert payable["amount"] == 464.0 and event["amount"] == -464.0
+    for row in (payable, event):
+        assert (row["currency"], row["estimated"], row["original_amount"],
+                row["original_currency"], row["rate"]) == ("PHP", True, 8.0, "USD", RATE_TO_PHP)
+
+
+def test_snapshot_currencies_list_the_monthly_summary_currencies(sw_client, sw_db, sw_people,
+                                                                 frozen):
+    """A PHP-only account and an accountless USD 50 recurring expense whose next
+    occurrence is past the forecast window: the monthly summary has a USD row,
+    so the snapshot's ``currencies`` names USD too. Nothing is listed, so
+    ``fx.rates`` stays empty."""
+    from app.models.user import CurrencyType, User
+
+    a = sw_people("Mona", "Monthly")
+    sw_db.get(User, a["id"]).default_currency = CurrencyType.PHP
+    sw_db.commit()
+    _acct(sw_db, a["id"], "Peso bank", "checking", "PHP", 1_000)
+    _entry(sw_db, a["id"], "Dollar dues", "expense", 50, "USD", _d(1, 6, 2027))
+    snapshot = _get(sw_client, a, "/dashboard/snapshot")
+    assert _row(snapshot["monthly_summary"], "USD")["monthly_expenses"] == 50.0
+    assert snapshot["upcoming_this_month"] == [] and snapshot["payables"] == []
+    assert snapshot["currencies"] == ["PHP", "USD"]
+    assert snapshot["fx"]["rates"] == []

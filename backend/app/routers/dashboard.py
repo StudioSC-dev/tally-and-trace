@@ -206,7 +206,10 @@ def get_snapshot(
         "available_cash": round(float(available_cash), 2),
         "account_closings": account_closings,
         "payables": payables,
+        # The monthly summary's currencies too (viewable accounts and entries'
+        # buckets, no placeholder); ``fx.rates`` stays the full listed rows'.
         "currencies": forecast_svc.response_currencies(
-            {a.currency.value for a in accounts}, collector, default),
+            {a.currency.value for a in accounts} | set(disposable["currencies"]),
+            collector, default),
         "fx": collector.as_dict(),
     }
