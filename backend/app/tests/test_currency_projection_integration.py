@@ -965,3 +965,29 @@ def test_limited_public_ids_are_shared_across_snapshot_lists(sw_client, sw_db, s
     alone = _get(sw_client, viewer, "/forecast/upcoming", days=30)["items"]
     assert [i["public_id"] for i in alone if i.get("view") == "limited"] == ["e1", "e2"]
 
+
+def test_a_mixed_statement_with_an_unconverted_line(sw_client, sw_db, cx, frozen):
+    """The PHP card's Nov 15 statement over a PHP 100 line, the USD 10 line
+    (estimated) and a JPY 1,000 line with no stored rate: the statement is
+    estimated over what it can convert (PHP 680), the yen line is listed in
+    ``unconverted_lines`` and left out of every total, and nothing fails."""
+    uid = cx["a"]["id"]
+    _txn(sw_db, uid, cx["php_card"], "debit", 100, _d(4), "PHP", description="Peso charge")
+    _txn(sw_db, uid, cx["php_card"], "debit", 1_000, _d(5), "PHP", projected_amount=1_000,
+         projected_currency="JPY", description="Yen charge")
+    history = _get(sw_client, cx["a"], f"/accounts/{cx['php_card']}/statements")
+    (nov,) = [s for s in history["statements"] if s["close_date"].startswith("2026-11-15")]
+    assert (nov["statement_balance"], nov["amount_due"], nov["incomplete"]) == (
+        680.0, 680.0, True)
+    assert sorted((line["amount"], bool(line.get("estimated"))) for line in nov["lines"]) == [
+        (100.0, False), (580.0, True)]
+    (yen,) = nov["unconverted_lines"]
+    assert (yen["original_amount"], yen["original_currency"], yen["unconverted"]) == (
+        1_000.0, "JPY", True)
+
+    snapshot = _get(sw_client, cx["a"], "/dashboard/snapshot")
+    (payable,) = [p for p in snapshot["payables"] if p["name"] == "PHP Card statement"]
+    assert (payable["amount"], payable["currency"], payable["estimated"]) == (680.0, "PHP", True)
+    assert (payable["original_amount"], payable["original_currency"], payable["rate"]) == (
+        10.0, "USD", RATE_TO_PHP)
+    assert not any(p.get("name") == "Yen charge" for p in snapshot["payables"])

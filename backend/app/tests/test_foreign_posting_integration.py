@@ -553,3 +553,27 @@ def test_a_pending_loan_payment_posts_as_before(sw_client, sw_db, fp):
     assert principal + fee == Decimal("5000")
     assert _balance(db, fp["php"]) == Decimal("45000.00")
     assert _balance(db, loan) == Decimal("-100000.00") + principal
+
+
+def test_a_post_that_moves_the_account_reads_the_requested_currency(sw_client, sw_db, fp):
+    """A pending local USD 10 on USD Savings, posted onto PHP Checking: the
+    face currency is the request's, never the stored one, once the account
+    changes. Sent as USD it is foreign there and needs the actual figure;
+    sent as PHP it is a PHP 10 purchase and posts status-only."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    txn = sw_post(client, a, "/transactions/", {
+        "account_id": fp["usd"], "transaction_type": "debit", "amount": 10,
+        "currency": "USD", "description": "Moved purchase", "transaction_date": DAY,
+        "is_posted": False})["id"]
+
+    r = _put(client, a, txn, {"is_posted": True, "account_id": fp["php"], "currency": "USD"})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == FOREIGN_POST
+
+    r = _put(client, a, txn, {"is_posted": True, "account_id": fp["php"], "currency": "PHP"})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("49990.00")
+    assert _balance(db, fp["usd"]) == Decimal("1000.00")
+    row = _row(db, txn)
+    assert (row.amount, row.currency.value, row.projected_amount, row.original_amount) == (
+        Decimal("10.00"), "PHP", None, None)

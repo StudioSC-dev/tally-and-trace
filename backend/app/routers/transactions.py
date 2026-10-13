@@ -586,7 +586,8 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
 
     Only an edit that posts an unposted debit or credit is judged. Its face
     (``pending_face``, with the request's ``projected_*`` and the stored
-    ``currency``, read before the request normalises it to the account's) is
+    ``currency``, read before the request normalises it to the account's; the
+    request's ``currency`` when the edit moves the row to another account) is
     compared with the account the edit leaves. When the face currency is
     not the account's, the request must carry ``amount`` greater than 0,
     else 400: that actual figure goes into ``amount``, ``projected_*`` keep
@@ -599,16 +600,19 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
         return {}
     if requested.get("transaction_type", txn.transaction_type) == TransactionType.TRANSFER:
         return {}
-    account = db.get(Account, requested.get("account_id", txn.account_id))
+    account_id = requested.get("account_id", txn.account_id)
+    account = db.get(Account, account_id)
     if account is None:
         return {}  # reported by the later checks
     edited = SimpleNamespace(
         projected_amount=requested.get("projected_amount", txn.projected_amount),
         projected_currency=requested.get("projected_currency", txn.projected_currency),
-        # The stored currency, never the request's: a client posting the
-        # actual figure sends the account's currency, which would erase a
-        # face held in ``currency`` alone.
-        currency=txn.currency,
+        # On the same account, the stored currency, never the request's: a
+        # client posting the actual figure sends the account's currency, which
+        # would erase a face held in ``currency`` alone. A post that also moves
+        # the row reads the request's: the stored one named the old account's.
+        currency=(txn.currency if account_id == txn.account_id
+                  else requested.get("currency", txn.currency)),
         amount=txn.amount)
     face, face_currency = pending_face(edited)
     if face_currency is None or face_currency == account.currency:
