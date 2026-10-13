@@ -467,6 +467,63 @@ def test_disposable_keeps_the_leg_it_can_convert(sw_db, cx):
         check_disposable_row(row)
 
 
+@pytest.fixture
+def eur_fx(monkeypatch):
+    """The suite's rates plus EUR (0.9 per USD), fresh unless ``stale`` names it:
+    ``eur_fx(stale=True)`` stores the EUR row a week old."""
+    from app.main import app
+    from app.services import fx
+    from app.tests.conftest import FX_STORE, FxNoNetwork, fx_clock, fx_rates
+
+    def install(stale=False):
+        fetched = FX_REF - (timedelta(days=7) if stale else timedelta(hours=1))
+        store = fx.MemoryRateStore([*FX_STORE.all().values(), fx.StoredRate(
+            "EUR", Decimal("0.9"), fetched.date(), fetched, "test")])
+
+        def rates():
+            return fx.FxRates(store, provider=FxNoNetwork(), clock=fx_clock,
+                              on_stale=lambda: None)
+
+        app.dependency_overrides[fx.get_fx] = rates
+        monkeypatch.setattr(fx, "_offline_factory", lambda db: rates())
+        return rates
+
+    yield install
+    app.dependency_overrides[fx.get_fx] = fx_rates
+
+
+def test_an_entry_on_an_account_outside_the_scope_keeps_its_record_currency(
+        sw_client, sw_db, sw_people, frozen, eur_fx):
+    """The creator's USD 80 entry on an EUR account they no longer view: its
+    account's currency is never read, so no EUR reaches ``currencies``,
+    ``by_currency`` or ``fx``; it counts at its face, under USD, as before."""
+    from app.models.account_share import AccountShare
+    from app.models.user import CurrencyType, User
+
+    eur_fx()
+    owner, creator = sw_people("Ola", "Owner"), sw_people("Cid", "Creator")
+    for who in (owner, creator):
+        sw_db.get(User, who["id"]).default_currency = CurrencyType.PHP
+    sw_db.commit()
+    eur = _acct(sw_db, owner["id"], "Euro bank", "checking", "EUR", 1_000)
+    _acct(sw_db, creator["id"], "Peso bank", "checking", "PHP", 1_000)
+    share = sw_share(sw_db, eur, creator["id"], "editor", owner["id"])
+    _entry(sw_db, creator["id"], "Revoked bill", "expense", 80, "USD", _d(10), eur)
+    sw_db.delete(sw_db.get(AccountShare, share))  # the creator loses access
+    sw_db.commit()
+
+    disposable = _get(sw_client, creator, "/forecast/disposable")
+    snapshot = _get(sw_client, creator, "/dashboard/snapshot")
+    for body in (disposable, snapshot["monthly_summary"]):
+        assert [r["currency"] for r in body["by_currency"]] == ["PHP", "USD"]
+        assert _row(body, "USD")["monthly_expenses"] == 80.0
+        assert body["monthly_expenses"] == 0.0
+    for body in (disposable, snapshot):
+        assert "EUR" not in body["currencies"]
+        assert not any("EUR" in (r["base"], r["quote"]) for r in body["fx"]["rates"])
+    assert "EUR" not in repr(disposable) and "EUR" not in repr(snapshot)
+
+
 # --- criterion 10 (integration): no stored rate ------------------------------------------
 
 @pytest.fixture

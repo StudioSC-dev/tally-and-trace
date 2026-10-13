@@ -482,9 +482,10 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
                         money: Money) -> dict:
     """``get_disposable_income``'s figures per currency (plan C3, D2).
 
-    An entry counts in its account's currency (an accountless one: its own),
-    its amount estimated into that currency when it differs; one with no
-    stored rate is left out. A recurring transfer between two projection-cash
+    An entry counts in its account's currency (an accountless one, or one
+    on an account outside the caller's scope: its own, at its face), its
+    amount estimated into that currency when it differs; one with no stored
+    rate is left out. A recurring transfer between two projection-cash
     accounts in different currencies is money moved: ``moved_out`` in the
     source's currency and ``moved_in`` in the destination's, each leg counted
     on its own (a leg with no stored rate is left out, the other kept).
@@ -507,7 +508,10 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
 
     for entry in entries:
         src = entry.account_id
-        src_cur = money.currency_of(src) or _code(entry.currency)
+        # An account outside the caller's scope (the creator who lost access
+        # to it) is never read: its entry counts in its own currency, at its
+        # face, so that account's currency never reaches a total (plan G3).
+        src_cur = (money.currency_of(src) if src in scope_ids else None) or _code(entry.currency)
         if entry.transfer_to_account_id is not None:
             dst = entry.transfer_to_account_id
             to_wallet = dst in wallet_ids
