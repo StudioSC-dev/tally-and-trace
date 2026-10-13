@@ -577,3 +577,40 @@ def test_a_post_that_moves_the_account_reads_the_requested_currency(sw_client, s
     row = _row(db, txn)
     assert (row.amount, row.currency.value, row.projected_amount, row.original_amount) == (
         Decimal("10.00"), "PHP", None, None)
+
+
+@pytest.mark.parametrize("path", ["editor", "exemption"])
+def test_a_posted_foreign_row_is_labelled_in_the_account_currency(sw_client, sw_db, fp, path):
+    """A pending currency-only USD 80 debit on PHP Checking, posted with
+    ``{is_posted: true, amount: 4700}`` and no ``currency`` (the owner
+    exemption cannot send one): the actual figure is PHP, so the row ends up
+    ``amount`` 4,700 in PHP with the face USD 80 in ``projected_*``. After a
+    revert the forecast re-estimates PHP 4,640, and a repost works."""
+    client, db = sw_client, sw_db
+    creator = fp["c"] if path == "exemption" else fp["a"]
+    txn = sw_post(client, creator, "/transactions/", {
+        "account_id": fp["php"], "transaction_type": "debit", "amount": 80,
+        "currency": "USD", "description": "Foreign purchase", "transaction_date": DAY,
+        "is_posted": False})["id"]
+    if path == "exemption":
+        _revoke_c(db, fp)
+    who = fp["a"] if path == "exemption" else fp["b"]
+
+    r = _put(client, who, txn, {"is_posted": True, "amount": 4_700})
+    assert r.status_code == 200, r.text
+    assert (r.json()["amount"], r.json()["currency"]) == (4_700, "PHP")
+    assert _balance(db, fp["php"]) == Decimal("45300.00")
+    row = _row(db, txn)
+    assert (row.amount, row.currency.value) == (Decimal("4700.00"), "PHP")
+    assert (row.projected_amount, row.projected_currency.value) == (Decimal("80.00"), "USD")
+
+    r = _put(client, who, txn, {"is_posted": False})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("50000.00")
+    _assert_reestimated(client, who, txn)
+
+    r = _put(client, who, txn, {"is_posted": True, "amount": 4_650})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("45350.00")
+    row = _row(db, txn)
+    assert (row.amount, row.currency.value) == (Decimal("4650.00"), "PHP")

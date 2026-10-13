@@ -590,9 +590,10 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
     request's ``currency`` when the edit moves the row to another account) is
     compared with the account the edit leaves. When the face currency is
     not the account's, the request must carry ``amount`` greater than 0,
-    else 400: that actual figure goes into ``amount``, ``projected_*`` keep
-    (or, when null, record) the face so a later revert never reads the actual
-    figure as the face, and ``original_*`` and ``exchange_rate`` are filled
+    else 400: that actual figure goes into ``amount``, ``currency`` becomes
+    the account's, ``projected_*`` keep (or, when null, record) the face so
+    a later revert never reads the actual figure as the face, and
+    ``original_*`` and ``exchange_rate`` are filled
     from the face where the request sent none. Reverting never comes here:
     it leaves ``amount`` as posted.
     """
@@ -620,7 +621,10 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
     actual = requested.get("amount")
     if actual is None or _D(actual) <= 0:
         raise HTTPException(status_code=400, detail=foreign_post_detail(account))
-    filled = {"projected_amount": face, "projected_currency": face_currency}
+    # The actual figure is in the account's currency, so the row is labelled
+    # in it; the face stays in ``projected_*``.
+    filled = {"projected_amount": face, "projected_currency": face_currency,
+              "currency": account.currency}
     if "original_amount" not in requested:
         filled["original_amount"] = face
     if "original_currency" not in requested:
