@@ -57,6 +57,9 @@ def get_snapshot(
     tag_id = filter_tag_id(db, current_user, tag)
     default = forecast_svc.default_currency(db, current_user.id)
     collector = forecast_svc.FxCollector()
+    # Limited public ids are numbered once per response: an occurrence keeps
+    # one id in upcoming and payables, and distinct ones never share one.
+    ids = forecast_svc.PublicIds()
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
@@ -90,7 +93,7 @@ def get_snapshot(
     # 2. Upcoming this month (next 30 days)
     # -----------------------------------------------------------------------
     upcoming = forecast_svc.upcoming_by_currency(db, current_user.id, days=30, tag_id=tag_id,
-                                                 fx=fx, collector=collector)["items"]
+                                                 fx=fx, collector=collector, ids=ids)["items"]
 
     # -----------------------------------------------------------------------
     # 3. Monthly income/expense summary (disposable income)
@@ -187,7 +190,7 @@ def get_snapshot(
         for p in forecast_3m
     ]
     payables = forecast_svc.payables_by_currency(db, current_user.id, days=30, tag_id=tag_id,
-                                                 fx=fx, collector=collector)
+                                                 fx=fx, collector=collector, ids=ids)
 
     return {
         "balances": {

@@ -908,3 +908,60 @@ def test_full_household_credits_and_income_on_a_card_are_estimated(hh, sw_client
             limited["Household cashback"]["currency"]) == (10.0, "USD")
     for name in ("Household refund", "Household cashback"):
         assert not set(limited[name]) & set(LABELS), name
+
+
+def test_a_legacy_payable_keeps_every_contributing_rate(sw_client, sw_db, cx, frozen, eur_fx):
+    """A legacy USD card paid from PHP Checking with a pending EUR 9 charge: the
+    statement is estimated EUR -> USD (a week-old rate), then the payable USD
+    -> PHP (a fresh one). It is stale, dated by the older rate, names no single
+    ``rate`` or original figure, and both pairs are in ``fx.rates``."""
+    eur_fx(stale=True)
+    uid = cx["a"]["id"]
+    legacy = _acct(sw_db, uid, "Legacy card", "credit", "USD", 0, billing_cycle_start=20,
+                   days_until_due_date=10, payment_account_id=cx["php"])
+    _txn(sw_db, uid, legacy, "debit", 9, _d(4), "USD", projected_amount=9,
+         projected_currency="EUR", description="Euro charge")
+    snapshot = _get(sw_client, cx["a"], "/dashboard/snapshot")
+    timeline = _get(sw_client, cx["a"], "/forecast/timeline", days=30)
+    (payable,) = [p for p in snapshot["payables"] if p["name"] == "Legacy card statement"]
+    (event,) = [e for e in _row(timeline, "PHP")["events"]
+                if e["name"] == "Legacy card statement"]
+    assert payable["amount"] == 580.0 and event["amount"] == -580.0
+    for row in (payable, event):
+        assert (row["currency"], row["estimated"], row["rate_stale"]) == ("PHP", True, True)
+        assert row["rate_as_of"] == (FX_REF - timedelta(days=7)).date().isoformat()
+        assert not set(row) & {"rate", "original_amount", "original_currency"}
+    for body in (snapshot, timeline):
+        pairs = {(r["base"], r["quote"]): r["stale"] for r in body["fx"]["rates"]}
+        assert pairs[("EUR", "USD")] is True and pairs[("USD", "PHP")] is False
+
+
+def test_limited_public_ids_are_shared_across_snapshot_lists(sw_client, sw_db, sw_people,
+                                                             frozen):
+    """A viewer's snapshot over the owner's income (Nov 5) and bill (Nov 6):
+    upcoming lists both, payables only the bill. Numbered once per response,
+    the bill keeps one id in both lists and the income has another."""
+    from app.models.user import CurrencyType, User
+
+    owner, viewer = sw_people("Ona", "Owner"), sw_people("Val", "Viewer")
+    for who in (owner, viewer):
+        sw_db.get(User, who["id"]).default_currency = CurrencyType.PHP
+    sw_db.commit()
+    php = _acct(sw_db, owner["id"], "Peso bank", "checking", "PHP", 10_000)
+    sw_share(sw_db, php, viewer["id"], "viewer", owner["id"])
+    _entry(sw_db, owner["id"], "Pay", "income", 900, "PHP", _d(5), php,
+           end_mode="after_occurrences", max_occurrences=1)
+    _entry(sw_db, owner["id"], "Bill", "expense", 300, "PHP", _d(6), php,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    snapshot = _get(sw_client, viewer, "/dashboard/snapshot")
+    upcoming = {i["date"]: i["public_id"] for i in snapshot["upcoming_this_month"]
+                if i.get("view") == "limited"}
+    payables = {p["date"]: p["public_id"] for p in snapshot["payables"]
+                if p.get("view") == "limited"}
+    assert upcoming == {"2026-11-05": "e1", "2026-11-06": "e2"}
+    assert payables == {"2026-11-06": "e2"}
+    # A single-list response keeps numbering from e1.
+    alone = _get(sw_client, viewer, "/forecast/upcoming", days=30)["items"]
+    assert [i["public_id"] for i in alone if i.get("view") == "limited"] == ["e1", "e2"]
+

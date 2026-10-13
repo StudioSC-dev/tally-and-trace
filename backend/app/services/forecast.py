@@ -12,7 +12,7 @@ from collections import Counter
 from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
-from typing import Iterator, List, Optional, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -1618,13 +1618,19 @@ def _payable_legs(money: Money, funding, overflow, amount, currency, line_estima
     payable funded from another currency is estimated there at the stored
     rate (with no rate it has no leg: unconverted). ``line_estimate`` is a
     statement's own estimate (from estimated lines), shown when the payable
-    itself needs no conversion.
+    itself needs no conversion. A payable estimated twice (its lines into the
+    card's currency, then the total into the funding account's) carries every
+    contributing rate, as a statement over several rates does
+    (``statements.statement_estimate``, ``row_labels``): no single ``rate``
+    or original figure, stale when any rate is, dated by the earliest.
     """
     owed = -_money(amount)
     if funding is None:
         return [], [], [_row(currency, owed, line_estimate)]
     funding_currency = money.currency_of(funding)
     figure, estimate = money.to(owed, currency, funding_currency)
+    if figure is not None and estimate is not None and line_estimate is not None:
+        estimate = {"rates": [*estimate_rates(line_estimate), estimate["rate"]]}
     rows = [_row(funding_currency, figure, estimate or line_estimate)]
     if figure is None:
         return [], [], rows
@@ -2434,15 +2440,17 @@ def cashflow_by_currency(db: Session, user_id: int, months: int = 6,
 def upcoming_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
-                         collector: Optional[FxCollector] = None) -> dict:
+                         collector: Optional[FxCollector] = None,
+                         ids: Optional["PublicIds"] = None) -> dict:
     """``/forecast/upcoming``: every item with its ``currency`` (a full one), plus
-    ``currencies`` and ``fx``. No ``by_currency``: the list has no totals."""
+    ``currencies`` and ``fx``. No ``by_currency``: the list has no totals.
+    ``ids`` numbers its limited items (``PublicIds``; a new one by default)."""
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id)
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts,
-                            tag_id=tag_id, fx=fx, detail=True)
+                            tag_id=tag_id, fx=fx, detail=True, keep_origin=True)
     collector = collector or FxCollector()
-    items = currency_upcoming_items(events, collector)
+    items = currency_upcoming_items(events, collector, ids)
     default = default_currency(db, user_id)
     return {"items": items,
             "currencies": response_currencies({_code(a.currency) for a in accounts},
@@ -2463,8 +2471,49 @@ def _limited_rows(e: dict) -> List[dict]:
             for currency, amount in sorted(cash.items())]
 
 
-def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector] = None
-                            ) -> List[dict]:
+class PublicIds:
+    """Limited public ids, numbered once per response across all its lists.
+
+    ``e1``, ``e2``, ... in the order occurrences are first numbered; the same
+    occurrence (its source record, date and cash currency) keeps its id in
+    every list of the response, and distinct occurrences never share one. A
+    response with one list gets one fresh allocator, so it numbers from ``e1``.
+    """
+
+    def __init__(self):
+        self._count = 0
+        self._ids: Dict[tuple, List[str]] = {}
+
+    def assign(self, events: List[dict]) -> List[str]:
+        """One id per event of one list, in order."""
+        seen: Dict[tuple, int] = {}
+        out = []
+        for e in events:
+            key = _occurrence_key(e)
+            n = seen.get(key, 0)
+            seen[key] = n + 1
+            ids = self._ids.setdefault(key, [])
+            if n == len(ids):  # a further occurrence with this key
+                self._count += 1
+                ids.append(f"e{self._count}")
+            out.append(ids[n])
+        return out
+
+
+def _occurrence_key(e: dict) -> tuple:
+    """What identifies a limited occurrence across a response's lists: its
+    source record (``origin``, internal only; the public fields when absent),
+    its date and the currency row it sits in."""
+    origin = e.get("origin")
+    if origin is not None:
+        origin = (origin[0].__name__, origin[1])
+    else:
+        origin = (e["source"], e["name"], e.get("kind"))
+    return (origin, _naive(e["date"]).date(), e.get("cash_currency"))
+
+
+def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector] = None,
+                            ids: Optional[PublicIds] = None) -> List[dict]:
     """``collect_events(detail=True)`` events as upcoming items, one per currency.
 
     A full event becomes one item per listing row (a cross-currency transfer:
@@ -2491,9 +2540,10 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
                 "currency": row["currency"],
                 **collector.row(_row_key(e, row["currency"]), row),
             })
-    limited = [r for e in events if e.get("view") == LIMITED for r in _limited_rows(e)]
-    items += [limited_event(e, f"e{i}") for i, e in enumerate(
-        sorted(limited, key=_event_sort_key), start=1)]
+    limited = sorted((r for e in events if e.get("view") == LIMITED for r in _limited_rows(e)),
+                     key=_event_sort_key)
+    items += [limited_event(e, public_id)
+              for e, public_id in zip(limited, (ids or PublicIds()).assign(limited))]
     items.sort(key=lambda x: x.get("due_date") or x["date"])
     return items
 
@@ -2501,19 +2551,21 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
 def payables_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
-                         collector: Optional[FxCollector] = None) -> List[dict]:
+                         collector: Optional[FxCollector] = None,
+                         ids: Optional[PublicIds] = None) -> List[dict]:
     """``get_payables`` split by currency (plan C4): each event's sign filter and
     amount read its cash in each currency, never the raw ``amount``. A full
     payable carries ``currency`` and the B5 labels; an unconverted one moves no
-    cash, so it is not a payable."""
+    cash, so it is not a payable. ``ids`` numbers its limited payables
+    (``PublicIds``, shared across a response's lists; a new one by default)."""
     start, end = _upcoming_window(days, reference)
     accounts = get_account_balances(db, user_id)
     names = {a.id: a.name for a in accounts}
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id,
-                            fx=fx, detail=True)
+                            fx=fx, detail=True, keep_origin=True)
     collector = collector or FxCollector()
     payables = []
-    public = 0
+    limited = []  # (position in payables, event): numbered together below
     split = []
     for e in events:
         if not e["counts_as_cash"]:
@@ -2528,8 +2580,8 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
                 and not e.get("top_up") and not e.get("loan_payment")):
             continue
         if e.get("view") == LIMITED:
-            public += 1
-            payables.append(limited_event(e, f"e{public}"))
+            limited.append((len(payables), e))
+            payables.append(None)
             continue
         currency = e["cash_currency"]
         primary = e["legs"][0] if e["legs"] else {}
@@ -2550,6 +2602,9 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
         })
+    public_ids = (ids or PublicIds()).assign([e for _, e in limited])
+    for (position, e), public_id in zip(limited, public_ids):
+        payables[position] = limited_event(e, public_id)
     return payables
 
 
