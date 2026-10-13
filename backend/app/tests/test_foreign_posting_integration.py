@@ -243,6 +243,33 @@ def test_post_revert_repost_keeps_the_face_figure(sw_client, sw_db, fp, actor):
     assert row.exchange_rate == Decimal("58.125000")
 
 
+def test_a_currency_only_foreign_face_survives_a_modal_post(sw_client, sw_db, fp):
+    """A pending USD 80 with no ``projected_*`` on PHP Checking, posted as the
+    web modal posts it (``currency`` normalised to the account's): the stored
+    face is kept in ``projected_*``, so after a revert the forecast still
+    re-estimates USD 80 (PHP 4,640), never reads the retained 4,700 as PHP."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    txn = sw_post(client, a, "/transactions/", {
+        "account_id": fp["php"], "transaction_type": "debit", "amount": 80,
+        "currency": "USD", "description": "Foreign purchase", "transaction_date": DAY,
+        "is_posted": False})["id"]
+    assert _row(db, txn).projected_amount is None
+
+    r = _put(client, a, txn, {"is_posted": True, "amount": 4_700, "currency": "PHP"})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("45300.00")
+    row = _row(db, txn)
+    assert (row.amount, row.currency.value) == (Decimal("4700.00"), "PHP")
+    assert (row.projected_amount, row.projected_currency.value) == (Decimal("80.00"), "USD")
+    assert (row.original_amount, row.original_currency.value) == (Decimal("80.00"), "USD")
+    assert row.exchange_rate == Decimal("58.750000")
+
+    r = _put(client, a, txn, {"is_posted": False})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("50000.00")
+    _assert_reestimated(client, a, txn)
+
+
 def test_a_client_rate_and_original_are_kept(sw_client, sw_db, fp):
     client, db, a = sw_client, sw_db, fp["a"]
     txn = _pending_foreign(client, a, fp["php"])

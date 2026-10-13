@@ -585,8 +585,9 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
     """The fields posting ``txn`` sets when its face is foreign, checked before any write.
 
     Only an edit that posts an unposted debit or credit is judged. Its face
-    (``pending_face``, with the request's ``projected_*`` and ``currency``)
-    is compared with the account the edit leaves. When the face currency is
+    (``pending_face``, with the request's ``projected_*`` and the stored
+    ``currency``, read before the request normalises it to the account's) is
+    compared with the account the edit leaves. When the face currency is
     not the account's, the request must carry ``amount`` greater than 0,
     else 400: that actual figure goes into ``amount``, ``projected_*`` keep
     (or, when null, record) the face so a later revert never reads the actual
@@ -604,7 +605,10 @@ def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> d
     edited = SimpleNamespace(
         projected_amount=requested.get("projected_amount", txn.projected_amount),
         projected_currency=requested.get("projected_currency", txn.projected_currency),
-        currency=requested.get("currency", txn.currency),
+        # The stored currency, never the request's: a client posting the
+        # actual figure sends the account's currency, which would erase a
+        # face held in ``currency`` alone.
+        currency=txn.currency,
         amount=txn.amount)
     face, face_currency = pending_face(edited)
     if face_currency is None or face_currency == account.currency:

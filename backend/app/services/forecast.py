@@ -2257,7 +2257,8 @@ class FxCollector:
                 self._unconverted.add(key)
                 self.meta.add_unconverted()
         elif row["estimate"] is not None:
-            self.meta.add(row["estimate"]["rate"])
+            for rate in estimate_rates(row["estimate"]):
+                self.meta.add(rate)
         return row_labels(row)
 
     def as_dict(self) -> dict:
@@ -2269,8 +2270,20 @@ class FxCollector:
         }
 
 
+def estimate_rates(estimate: dict) -> list:
+    """Every rate an estimate used: its ``rates`` (a statement over several
+    lines, ``statements.statement_estimate``), else its one ``rate``."""
+    rates = estimate.get("rates")
+    return list(rates) if rates else [estimate["rate"]]
+
+
 def row_labels(row: dict) -> dict:
-    """The B5 labels of a full row: none when it needed no conversion."""
+    """The B5 labels of a full row: none when it needed no conversion.
+
+    Over several rates (a statement whose lines span currencies) there is no
+    single ``rate``: it is left out, ``rate_stale`` is true when any rate is
+    stale and ``rate_as_of`` is the earliest.
+    """
     estimate = row["estimate"]
     if estimate is None:
         return {}
@@ -2285,13 +2298,14 @@ def row_labels(row: dict) -> dict:
                 if estimate.get("original_currency") is not None else {})
     if row["amount"] is None:
         return {"unconverted": True, **original}
-    rate = estimate["rate"]
+    rates = estimate_rates(estimate)
+    single = {"rate": float(estimate["rate"].rate)} if "rate" in estimate else {}
     return {
         "estimated": True,
         **original,
-        "rate": float(rate.rate),
-        "rate_as_of": rate.as_of.isoformat(),
-        "rate_stale": rate.stale,
+        **single,
+        "rate_as_of": min(r.as_of for r in rates).isoformat(),
+        "rate_stale": any(r.stale for r in rates),
     }
 
 

@@ -448,6 +448,28 @@ def test_a_statement_estimated_from_several_currencies_names_no_original(sw_clie
         assert "original_amount" not in row and "original_currency" not in row
 
 
+def test_a_statement_over_a_fresh_and_a_stale_rate_reports_both(sw_client, sw_db, cx,
+                                                                 frozen, eur_fx):
+    """Pending USD 10 (fresh rate) and EUR 9 (a week-old rate) on the PHP card:
+    the statement is stale because one of its rates is, it names no single
+    ``rate``, and both pairs are in ``fx.rates``."""
+    eur_fx(stale=True)
+    _txn(sw_db, cx["a"]["id"], cx["php_card"], "debit", 9, _d(4), "PHP", projected_amount=9,
+         projected_currency="EUR", description="Euro charge")
+    snapshot = _get(sw_client, cx["a"], "/dashboard/snapshot")
+    timeline = _get(sw_client, cx["a"], "/forecast/timeline", days=30)
+    (payable,) = [p for p in snapshot["payables"] if p["name"] == "PHP Card statement"]
+    (event,) = [e for e in _row(timeline, "PHP")["events"] if e["name"] == "PHP Card statement"]
+    assert payable["amount"] == 1_160.0 and event["amount"] == -1_160.0
+    for row in (payable, event):
+        assert (row["currency"], row["estimated"], row["rate_stale"]) == ("PHP", True, True)
+        assert row["rate_as_of"] == (FX_REF - timedelta(days=7)).date().isoformat()
+        assert not set(row) & {"rate", "original_amount", "original_currency"}
+    for body in (snapshot, timeline):
+        pairs = {(r["base"], r["quote"]): r["stale"] for r in body["fx"]["rates"]}
+        assert pairs[("USD", "PHP")] is False and pairs[("EUR", "PHP")] is True
+
+
 def test_disposable_keeps_the_leg_it_can_convert(sw_db, cx):
     """The recurring USD 500 -> PHP transfer with no PHP row: USD still moves 500
     out; only the PHP leg (and the USD 20 subscription in PHP) is left out."""
