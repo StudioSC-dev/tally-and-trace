@@ -1269,6 +1269,42 @@ def test_a_reset_report_that_exists_is_refused_before_connecting(tmp_path, owner
     assert counts(sw_db, owner["id"])["transactions"] == 13
 
 
+@pytest.mark.parametrize("edit", [False, True])
+def test_an_application_clock_five_minutes_ahead(edit, tmp_path, owner, sw_db, sw_client,
+                                                 monkeypatch):
+    """The routers stamp updated_at with the application's clock (utc_now). Five
+    minutes ahead, the loaded rows carry future timestamps, finished_at stays on
+    the database clock, and reset still decides by content: a no-op passes, a
+    real edit is refused."""
+    import app.routers.accounts as accounts_router
+    from app.core.time import utc_now
+    from app.models.tag import Tag
+
+    monkeypatch.setattr(accounts_router, "utc_now",
+                        lambda: utc_now() + timedelta(minutes=5))
+    _, record = load(tmp_path, fixture(), owner)
+    monkeypatch.undo()
+    rec = json.loads(record.read_text())
+    finished = datetime.fromisoformat(rec["finished_at"])
+    sw_db.rollback()
+    now = sw_db.execute(text("SELECT clock_timestamp()")).scalar()
+    newest = sw_db.execute(text("SELECT max(updated_at) FROM accounts WHERE user_id = :u"),
+                           {"u": owner["id"]}).scalar()
+    assert newest > now > finished  # future-stamped rows; finished_at on the DB clock
+    assert newest - finished > timedelta(minutes=4)
+    if edit:
+        tag = sw_db.query(Tag).filter(Tag.user_id == owner["id"],
+                                      Tag.name == "Utilities").one()
+        sw_client.put(f"{API}/tags/{tag.id}", json={"name": "Bills"},
+                      headers=owner["headers"])
+        with pytest.raises(Exception) as exc:
+            reset(record, owner["email"])
+        assert getattr(exc.value, "check", None) == "changed_after_load", exc.value
+    else:
+        assert reset(record, owner["email"]) == 0
+        assert counts(sw_db, owner["id"])["accounts"] == 0
+
+
 def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):
     _, record = load(tmp_path, fixture(), owner)
     before = table_counts(sw_db)
