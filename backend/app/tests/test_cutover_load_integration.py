@@ -1563,3 +1563,96 @@ def test_the_fixture_balances_and_amounts_are_round_numbers():
     values = [a["balance_at_cutover"] for a in data["accounts"]]
     values += [t.get("amount") or t.get("face_amount") for t in data["transactions"]]
     assert all(D(v) % 10 == 0 for v in values if v), values
+
+
+# --- End to end: the load, then the cutover check, then the sign-off -----------------------
+
+CHECK_SCRIPT = os.path.join(BACKEND, "scripts", "cutover_check.py")
+
+
+def test_the_load_and_the_check_share_one_lock_key():
+    from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY as check_key
+    from app.cutover_load.bootstrap import CUTOVER_LOCK_KEY as load_key
+
+    assert load_key == check_key == 2_024_020_204
+
+
+def run_check(tmp_path, frozen, report):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("PG") and k not in ("SECRET_KEY", "ENVIRONMENT")}
+    env["DATABASE_URL"] = TARGET["url"]
+    return subprocess.run([sys.executable, "-I", CHECK_SCRIPT, "--frozen", str(frozen),
+                           "--report", str(report), "--expect-host", TARGET["host"],
+                           "--expect-db", TARGET["db"], "--expect-server-addr", TARGET["addr"]],
+                          cwd=tmp_path, env=env, capture_output=True, text=True, timeout=300)
+
+
+def sign_off_args(record, check_report, confirm):
+    return ["--sign-off", "--run-record", str(record), "--check-report", str(check_report),
+            "--confirm", confirm]
+
+
+def test_the_load_then_the_check_then_the_sign_off_end_to_end(tmp_path, owner, sw_db):
+    """Both wrappers as real subprocesses: the load, then the read-only check against
+    frozen figures for the same fixture (``frozen.json``, invented round figures), then
+    the sign-off with the check's own report and edited copies of it."""
+    path = write_input(tmp_path, fixture(), owner)
+    report, record = tmp_path / "load-report.json", tmp_path / "record.json"
+    done = run_wrapper(["--input", path, "--report", str(report), "--run-record", str(record),
+                        *target_args(addr=TARGET["addr"])], cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert json.loads(record.read_text())["status"] == "complete"
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(json.dumps({**fixture("frozen"), "owner_email": owner["email"]}))
+    check_report = tmp_path / "check-report.json"
+    done = run_check(tmp_path, frozen, check_report)
+    checked = json.loads(check_report.read_text())
+    failures = {b["name"]: b["failures"] for b in checked["blocks"] if b["failures"]}
+    assert done.returncode == 0 and checked["overall"] == "pass", failures
+    assert all(b["checked"] > 0 for b in checked["blocks"]), checked["blocks"]
+    rec = json.loads(record.read_text())
+    for key in ("owner_id", "database", "server_addr", "session_timezone"):
+        assert checked[key] == rec[key], key
+    assert datetime.fromisoformat(checked["checked_at"]) >= datetime.fromisoformat(
+        rec["finished_at"])
+
+    def variant(name, **changes):
+        copy = tmp_path / f"check-{name}.json"
+        copy.write_text(json.dumps({**checked, **changes}))
+        return copy
+
+    early = (datetime.fromisoformat(rec["finished_at"]) - timedelta(seconds=1)).isoformat()
+    for copy in (variant("fail", overall="fail"),
+                 variant("owner", owner_id=checked["owner_id"] + 100000),
+                 variant("early", checked_at=early)):
+        done = run_wrapper(sign_off_args(record, copy, owner["email"]), cwd=tmp_path)
+        assert done.returncode == 1, (copy.name, done.stdout + done.stderr)
+        assert "refused: check_report" in done.stdout, copy.name
+        assert json.loads(record.read_text())["signed_off_at"] is None, copy.name
+
+    done = run_wrapper(sign_off_args(record, check_report, owner["email"]), cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "sign-off: pass" in done.stdout
+    assert json.loads(record.read_text())["signed_off_at"]
+
+
+def test_the_check_is_refused_while_a_load_holds_the_lock(tmp_path, owner):
+    """A holder connection takes the load's exclusive transaction lock on the shared
+    key, as ``run_load`` does; the check's shared lock is then refused."""
+    from app.cutover_load.bootstrap import CUTOVER_LOCK_KEY
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(json.dumps({**fixture("frozen"), "owner_email": owner["email"]}))
+    engine = create_engine(TARGET["url"])
+    try:
+        with engine.connect() as holder:
+            assert holder.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                                  {"k": CUTOVER_LOCK_KEY}).scalar() is True
+            done = run_check(tmp_path, frozen, tmp_path / "check-report.json")
+            holder.rollback()
+    finally:
+        engine.dispose()
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "refused: a cutover load or reset holds the lock" in done.stdout
+    assert not (tmp_path / "check-report.json").exists()

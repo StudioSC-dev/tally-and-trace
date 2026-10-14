@@ -1,0 +1,405 @@
+{
+ "schema_version": 1,
+ "owner_email": "owner@example.com",
+ "cutover_date": "2026-03-01",
+ "as_of": "2026-03-10",
+ "timezone": "Asia/Manila",
+ "checkpoints": [
+  {
+   "date": "2026-03-01",
+   "point": "start_of_day",
+   "balances": [
+    {
+     "account": {
+      "name": "Main Bank",
+      "account_type": "checking",
+      "currency": "PHP"
+     },
+     "amount": "50000.00"
+    },
+    {
+     "account": {
+      "name": "Joint Bank",
+      "account_type": "savings",
+      "currency": "PHP"
+     },
+     "amount": "20000.00"
+    },
+    {
+     "account": {
+      "name": "Dollar Bank",
+      "account_type": "savings",
+      "currency": "USD"
+     },
+     "amount": "1000.00"
+    },
+    {
+     "account": {
+      "name": "Cash Wallet",
+      "account_type": "cash",
+      "currency": "PHP"
+     },
+     "amount": "2000.00"
+    },
+    {
+     "account": {
+      "name": "Main Card",
+      "account_type": "credit",
+      "currency": "PHP"
+     },
+     "amount": "-120.00"
+    },
+    {
+     "account": {
+      "name": "Spare Card",
+      "account_type": "credit",
+      "currency": "PHP"
+     },
+     "amount": "0.00"
+    },
+    {
+     "account": {
+      "name": "Car Loan",
+      "account_type": "loan",
+      "currency": "PHP"
+     },
+     "amount": "-300000.00"
+    }
+   ]
+  },
+  {
+   "date": "2026-03-09",
+   "point": "end_of_day",
+   "balances": [
+    {
+     "account": {
+      "name": "Main Bank",
+      "account_type": "checking",
+      "currency": "PHP"
+     },
+     "amount": "29800.00"
+    },
+    {
+     "account": {
+      "name": "Joint Bank",
+      "account_type": "savings",
+      "currency": "PHP"
+     },
+     "amount": "25000.00"
+    },
+    {
+     "account": {
+      "name": "Dollar Bank",
+      "account_type": "savings",
+      "currency": "USD"
+     },
+     "amount": "850.00"
+    },
+    {
+     "account": {
+      "name": "Cash Wallet",
+      "account_type": "cash",
+      "currency": "PHP"
+     },
+     "amount": "3000.00"
+    },
+    {
+     "account": {
+      "name": "Main Card",
+      "account_type": "credit",
+      "currency": "PHP"
+     },
+     "amount": "-2210.00"
+    },
+    {
+     "account": {
+      "name": "Spare Card",
+      "account_type": "credit",
+      "currency": "PHP"
+     },
+     "amount": "0.00"
+    },
+    {
+     "account": {
+      "name": "Car Loan",
+      "account_type": "loan",
+      "currency": "PHP"
+     },
+     "amount": "-293000.00"
+    }
+   ]
+  }
+ ],
+ "card_statements": [
+  {
+   "card": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "close": "2026-02-15",
+   "due": "2026-03-07",
+   "balance": "100.00",
+   "owed": "60.00"
+  },
+  {
+   "card": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "close": "2026-03-15",
+   "due": "2026-04-04",
+   "balance": "2150.00",
+   "owed": "2150.00"
+  }
+ ],
+ "card_routing": [
+  {
+   "card": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "payment_account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "overflow_account": null
+  },
+  {
+   "card": {
+    "name": "Spare Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "payment_account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "overflow_account": null
+  }
+ ],
+ "loans": [
+  {
+   "loan": {
+    "name": "Car Loan",
+    "account_type": "loan",
+    "currency": "PHP"
+   },
+   "payment_account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "owed": "293000.00",
+   "payments_made": 8,
+   "payments_left": 28,
+   "next_due": "2026-04-20",
+   "next_rows": [
+    {
+     "due_date": "2026-04-20",
+     "payment": "10000.00"
+    },
+    {
+     "due_date": "2026-05-20",
+     "payment": "10000.00"
+    },
+    {
+     "due_date": "2026-06-20",
+     "payment": "10000.00"
+    }
+   ]
+  }
+ ],
+ "recurring": [
+  {
+   "name": "Rent",
+   "account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "destination": null,
+   "overflow_account": null,
+   "entry_type": "expense",
+   "amount": "15000.00",
+   "currency": "PHP",
+   "cadence": "monthly",
+   "next_occurrence": "2026-04-01",
+   "end_mode": "indefinite",
+   "end_date": null,
+   "max_occurrences": null,
+   "is_autopay": false,
+   "is_active": true,
+   "expected": {
+    "2026-03": 1,
+    "2026-04": 1
+   }
+  },
+  {
+   "name": "Car Loan Payment",
+   "account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "destination": {
+    "name": "Car Loan",
+    "account_type": "loan",
+    "currency": "PHP"
+   },
+   "overflow_account": null,
+   "entry_type": "expense",
+   "amount": "10000.00",
+   "currency": "PHP",
+   "cadence": "monthly",
+   "next_occurrence": "2026-04-20",
+   "end_mode": "indefinite",
+   "end_date": null,
+   "max_occurrences": null,
+   "is_autopay": true,
+   "is_active": true,
+   "expected": {
+    "2026-03": 1,
+    "2026-04": 1
+   }
+  },
+  {
+   "name": "Salary",
+   "account": {
+    "name": "Main Bank",
+    "account_type": "checking",
+    "currency": "PHP"
+   },
+   "destination": null,
+   "overflow_account": null,
+   "entry_type": "income",
+   "amount": "40000.00",
+   "currency": "PHP",
+   "cadence": "semi_monthly",
+   "next_occurrence": "2026-03-15",
+   "end_mode": "indefinite",
+   "end_date": null,
+   "max_occurrences": null,
+   "is_autopay": false,
+   "is_active": true,
+   "expected": {
+    "2026-03": 2,
+    "2026-04": 2
+   },
+   "semi_monthly_days": [
+    15,
+    30
+   ]
+  },
+  {
+   "name": "Streaming",
+   "account": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "destination": null,
+   "overflow_account": null,
+   "entry_type": "expense",
+   "amount": "10.00",
+   "currency": "USD",
+   "cadence": "monthly",
+   "next_occurrence": "2026-04-06",
+   "end_mode": "indefinite",
+   "end_date": null,
+   "max_occurrences": null,
+   "is_autopay": false,
+   "is_active": true,
+   "expected": {
+    "2026-03": 1,
+    "2026-04": 1
+   }
+  },
+  {
+   "name": "Laptop Installment",
+   "account": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "destination": null,
+   "overflow_account": null,
+   "entry_type": "expense",
+   "amount": "5000.00",
+   "currency": "PHP",
+   "cadence": "monthly",
+   "next_occurrence": "2026-04-15",
+   "end_mode": "after_occurrences",
+   "end_date": null,
+   "max_occurrences": 8,
+   "is_autopay": false,
+   "is_active": true,
+   "expected": {
+    "2026-03": 0,
+    "2026-04": 1
+   },
+   "installment": {
+    "n": 4,
+    "m": 12
+   }
+  },
+  {
+   "name": "Phone Installment",
+   "account": {
+    "name": "Main Card",
+    "account_type": "credit",
+    "currency": "PHP"
+   },
+   "destination": null,
+   "overflow_account": null,
+   "entry_type": "expense",
+   "amount": "2000.00",
+   "currency": "PHP",
+   "cadence": "monthly",
+   "next_occurrence": "2026-02-15",
+   "end_mode": "after_occurrences",
+   "end_date": null,
+   "max_occurrences": 0,
+   "is_autopay": false,
+   "is_active": false,
+   "expected": {
+    "2026-03": 0,
+    "2026-04": 0
+   },
+   "installment": {
+    "n": 6,
+    "m": 6
+   }
+  }
+ ],
+ "sheet": {
+  "account": {
+   "name": "Main Bank",
+   "account_type": "checking",
+   "currency": "PHP"
+  },
+  "currency": "PHP",
+  "first_month": "2026-03",
+  "months": [
+   "2026-03"
+  ],
+  "sheet_opening": "50000.00",
+  "month_end": {
+   "2026-03": "109440.00"
+  },
+  "opening_offset": "0.00",
+  "overflow_policy": "excluded",
+  "approved_differences": [],
+  "dated_items": [
+   {
+    "date": "2026-03-01",
+    "amount": "-15000.00",
+    "description_contains": "Rent March"
+   }
+  ]
+ }
+}
