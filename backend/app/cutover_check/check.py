@@ -418,7 +418,6 @@ def check_recurring(ctx: Context, block: Block) -> None:
             ("max_occurrences", f.max_occurrences, e.max_occurrences),
             ("is_autopay", f.is_autopay, bool(e.is_autopay)),
             ("is_active", f.is_active, bool(e.is_active)),
-            ("overflow_account", ctx.label(_id(overflow)), ctx.label(e.overflow_account_id)),
         ]
         if f.semi_monthly_days is not None:
             fields.append(("semi_monthly_days", list(f.semi_monthly_days),
@@ -432,6 +431,9 @@ def check_recurring(ctx: Context, block: Block) -> None:
             if want != got:
                 block.fail(f"recurring {field} differs", entry=f.label(), expected=want,
                            actual=got)
+        if _id(overflow) != e.overflow_account_id:  # by id; labels only name it
+            block.fail("recurring overflow_account differs", entry=f.label(),
+                       expected=ctx.label(_id(overflow)), actual=ctx.label(e.overflow_account_id))
 
 
 def row_matches(ctx: Context, row: Transaction, f: Recurring, entry: BudgetEntry) -> bool:

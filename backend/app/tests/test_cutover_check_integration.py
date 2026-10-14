@@ -129,6 +129,12 @@ def test_schema_refuses_a_sheet_currency_other_than_its_account():
     refused(raw, "sheet.currency must be the sheet account's currency")
 
 
+def test_schema_refuses_a_zero_dated_item():
+    raw = frozen_base()
+    raw["sheet"]["dated_items"][0]["amount"] = "0.00"
+    refused(raw, "dated item amount cannot be zero")
+
+
 # --- Bootstrap: URL validation (no connection) -------------------------------------------------
 
 LOCAL = "postgresql://u:secret@127.0.0.1:5432/c3db"
@@ -880,6 +886,28 @@ def test_a_frozen_entry_matching_two_owner_entries_fails(world, target):
     assert len(failures[0]["entry_ids"]) == 2
 
 
+@needs_db
+def test_a_lookalike_overflow_account_of_another_user_fails(world, target, sw_client, sw_people,
+                                                          sw_db):
+    from app.models.budget_entry import BudgetEntry
+    from app.tests.conftest import sw_post
+
+    other = sw_people("Otto", "Other")
+    twin = sw_post(sw_client, other, "/accounts/", {"name": "Second bank",
+                                                    "account_type": "savings",
+                                                    "balance": 0})["id"]
+    entry = sw_db.get(BudgetEntry, world["entries"]["utilities"])
+    entry.overflow_account_id = twin
+    sw_db.commit()
+    try:
+        failures = block(run_check(target, owner_frozen(world)), "recurring")["failures"]
+    finally:
+        entry.overflow_account_id = world["second"]
+        sw_db.commit()
+    assert [f["message"] for f in failures] == ["recurring overflow_account differs"], failures
+    assert failures[0]["expected"] == failures[0]["actual"] == "Second bank (savings, PHP)"
+
+
 # --- 4. Occurrences -------------------------------------------------------------------------
 
 def materialize(client, who, entry_id, **body):
@@ -1134,6 +1162,34 @@ def test_a_missing_dated_item_fails(world, target):
     assert failure["message"] == "dated item not found as a posted row on the sheet account"
     assert [r["transaction_id"] for r in failure["same_day_rows"]] == [
         world["rows"]["loan_payment"], world["rows"]["hardware"]]
+
+
+@needs_db
+def test_a_dated_item_matching_only_another_account_fails(world, target):
+    world["debit"](world["second"], 1000, "2031-03-06", "Paint hardware")
+    raw = owner_frozen(world)
+    raw["sheet"]["dated_items"].append(
+        {"date": "2031-03-06", "amount": "-1000.00", "description_contains": "paint"})
+    [failure] = block(run_check(target, raw, blocks=sheet_only()), "sheet")["failures"]
+    assert failure["message"] == "dated item not found as a posted row on the sheet account"
+    assert failure["same_day_rows"] == []
+
+
+@needs_db
+def test_a_first_month_after_as_of_refuses_the_sheet(sw_client, sw_people, target):
+    from app.tests.conftest import sw_post
+
+    o = sw_people("Fay", "Owner")
+    sw_post(sw_client, o, "/accounts/", {"name": "Only bank", "account_type": "checking",
+                                         "balance": 1000})
+    raw = small_frozen(o["email"], sel("Only bank", "checking"), ["2031-04"], "1000.00",
+                       {"2031-04": "1000.00"})
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "refused", sheet_block
+    assert sheet_block["refused"] == "first_month starts after as_of"
+    raw["as_of"] = "2031-04-01"  # the first of first_month is T itself: B(A, T) opens
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "pass", sheet_block
 
 
 # --- 7. Currency partitions and wallets in the Sheet ------------------------------------------

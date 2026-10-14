@@ -7,8 +7,8 @@ D(M) = the sum of a(m) for m <= M, and L the month of ``as_of``:
 - month L closes at the projection's period 0 closing for A (period 0 runs from T,
   opening at the stored balance, which the posted-after guard makes B(A, T));
 - a later month M closes at period (M - L);
-- the opening is the closing of the month before ``first_month`` by the same rule,
-  which is B(A, first of ``first_month``) whenever that day is on or before T.
+- the opening is B(A, first of ``first_month``) from the ledger; a ``first_month``
+  starting after T refuses the block (there is no ledger opening to read).
 
 Closings are read from the ``by_currency`` row whose ``currency`` is c, then its
 ``by_account`` entry for A; the partition's ``net`` is never used. With
@@ -30,7 +30,7 @@ def _cents(value) -> Decimal:
 
 
 def check_sheet(ctx, block) -> None:
-    from app.cutover_check.check import _day, effect_on, ledger_balance, row_ref
+    from app.cutover_check.check import _day, effect_on, ledger_balance, row_ref, touching
     from app.cutover_check.statements import naive
     from app.models.transaction import Transaction
     from app.services.forecast import cashflow_by_currency, is_projection_cash
@@ -48,6 +48,11 @@ def check_sheet(ctx, block) -> None:
         return
 
     T, L = ctx.T, month_of(ctx.frozen.as_of)
+    first = _day(month_start(s.first_month))
+    if first > T:
+        block.refused = "first_month starts after as_of"
+        block.fail("refused: first_month starts after as_of", first_month=s.first_month)
+        return
     last = s.months[-1]
     horizon = months_between(L, last) + 1 if last >= L else 0
     periods: List[dict] = []
@@ -87,9 +92,7 @@ def check_sheet(ctx, block) -> None:
     for diff in s.approved_differences:
         approved[diff.month] = approved.get(diff.month, Decimal("0")) + diff.amount
 
-    app_open = app_close(add_months(s.first_month, -1))
-    if app_open is None:
-        return
+    app_open = ledger_balance(ctx.db, account, first)
     block.checked += 1
     if app_open - s.opening_offset != s.sheet_opening:
         block.fail("sheet opening differs", month=add_months(s.first_month, -1),
@@ -119,9 +122,12 @@ def check_sheet(ctx, block) -> None:
     for item in s.dated_items:
         block.checked += 1
         start = _day(item.date)
+        # Candidates: the owner's posted rows on A (a transfer by either side).
         rows = ctx.db.query(Transaction).filter(
+            Transaction.user_id == ctx.owner.id, touching([account.id]),
             Transaction.is_posted.is_(True), Transaction.transaction_date >= start,
-            Transaction.transaction_date < start + timedelta(days=1)).all()
+            Transaction.transaction_date < start + timedelta(days=1)).order_by(
+            Transaction.transaction_date, Transaction.id).all()
         found = [r for r in rows
                  if naive(r.transaction_date).date() == item.date
                  and effect_on(r, account.id) == item.amount

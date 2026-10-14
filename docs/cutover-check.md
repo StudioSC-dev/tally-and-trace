@@ -103,10 +103,13 @@ accounts. The file never refers to the cutover input.
 | `card_routing[]` | `card`, `payment_account`, `overflow_account` (selector or null). Every owner card is listed. |
 | `loans[]` | `loan`, `payment_account`, `owed`, `payments_made`, `payments_left`, `next_due`, `next_rows[]` (up to 3: `due_date`, `payment`, optional `principal`, `interest`). Every owner loan is listed. |
 | `recurring[]` | `name`, `account`, `destination`, `overflow_account`, `entry_type`, `amount`, `currency`, `cadence`, `semi_monthly_days` (semi-monthly only), `next_occurrence`, `end_mode`, `end_date`, `max_occurrences`, `is_autopay`, `is_active`, optional `description_contains`, `installment` `{n, m}` (after-occurrences only), `expected` `{"YYYY-MM": count}` over contiguous months. Unique by (name, account, destination); every owner entry is listed. |
-| `sheet` | `account`, `currency` (the account's), `first_month`, `months[]` (contiguous, from `first_month`), `sheet_opening`, `month_end{}` (exactly `months`), `opening_offset`, `overflow_policy` (`excluded` or `included`), `approved_differences[]` (`month`, `amount`, `reason`), `dated_items[]` (`date` before `as_of`, `amount`, `description_contains`). |
+| `sheet` | `account`, `currency` (the account's), `first_month`, `months[]` (contiguous, from `first_month`), `sheet_opening`, `month_end{}` (exactly `months`), `opening_offset`, `overflow_policy` (`excluded` or `included`), `approved_differences[]` (`month`, `amount`, `reason`), `dated_items[]` (`date` before `as_of`, a non-zero `amount`, `description_contains`). |
 
 `sheet.first_month` must start on or after `cutover_date`: with a cutover on the 1st
 the cutover month is valid; a mid-month cutover starts the Sheet the month after.
+Its 1st must also be on or before `as_of`, because the opening is read from the
+ledger; a later `first_month` makes the sheet block refuse ("first_month starts
+after as_of").
 
 A wallet-funded recurring entry that is not a transfer is never projected, so it
 carries no `expected`; giving it one fails the occurrences block. Every other
@@ -146,12 +149,14 @@ subtracts; a transfer takes `amount + fee` from its source and adds
 7. **foreign_invariants**: every posted debit or credit is in its account's
    currency; every posted cross-currency transfer has `received_amount`.
 8. **sheet**: the opening, each month's closing and each month's net, with
-   approved differences applied cumulatively. Months ending on or before T close
+   approved differences applied cumulatively. The opening is B(A, 1st of
+   `first_month`), less `opening_offset`. Months ending on or before T close
    at B(A, first of the next month); the month holding T, and later ones, close at
    the projection's per-account closing for A in the Sheet's currency (never the
    currency partition's `net`). With `overflow_policy` `included`, overflow moves
    into A less those out of it are added cumulatively. Dated items must exist as
-   posted rows on A with that date, effect and description. The account must be
+   the owner's posted rows on A (either side of a transfer) with that date, effect
+   and description. The account must be
    projection cash (not a card, loan or spending wallet).
 
 **Posted-after guard.** If any posted row on an owner account is dated on or after

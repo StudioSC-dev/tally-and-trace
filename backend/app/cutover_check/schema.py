@@ -216,6 +216,12 @@ class DatedItem(_Strict):
     amount: Money
     description_contains: str
 
+    @model_validator(mode="after")
+    def _non_zero(self):
+        if self.amount == 0:
+            raise ValueError("dated item amount cannot be zero")
+        return self
+
 
 class Sheet(_Strict):
     account: Selector
