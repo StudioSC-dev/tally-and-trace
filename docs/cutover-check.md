@@ -126,6 +126,10 @@ Its 1st must also be on or before `as_of`, because the opening is read from the
 ledger; a later `first_month` makes the sheet block refuse ("first_month starts
 after as_of").
 
+**Mid-month cutover.** The Sheet then starts on the 1st of the next month, so the
+load date and `as_of` must be on or after that 1st. Loading earlier means the
+sheet block always refuses and sign-off can never pass: wait for the 1st.
+
 A wallet-funded recurring entry that is not a transfer is never projected, so it
 carries no `expected`; giving it one fails the occurrences block. Every other
 entry needs `expected`.
