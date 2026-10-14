@@ -773,6 +773,22 @@ def test_target_overrides_are_refused_before_importing_the_app(query, env, tmp_p
     assert "pw@" not in done.stdout + done.stderr  # never the password
 
 
+@pytest.mark.parametrize("url", [
+    # An unencoded "@" in a password: the parser takes "zq9xk@127.0.0.1" as the host.
+    "postgresql://u:pa@zq9xk@127.0.0.1:5432/db",
+    "postgresql://u:pw@127.0.0.1:5432/zq9xk",
+    "postgresql://u:pw@127.0.0.1:5432/db?zq9xk=1",
+    "zq9xk://u:pw@127.0.0.1:5432/db",
+])
+def test_a_refusal_never_echoes_a_part_of_the_url(url, tmp_path):
+    done = run_wrapper(["--input", str(tmp_path / "in.json"), "--report",
+                        str(tmp_path / "r.json"), "--dry-run",
+                        "--expect-host", "127.0.0.1", "--expect-db", "db"],
+                       cwd=tmp_path, url=url)
+    assert done.returncode == 1 and "refused:" in done.stdout
+    assert "zq9xk" not in done.stdout + done.stderr
+
+
 def test_the_transaction_pooler_port_is_refused(tmp_path, owner):
     """Port 6543 (a transaction pooler): the server address and session settings
     would describe whichever backend serves each transaction."""

@@ -19,8 +19,10 @@ target is verified right after connecting, before any write.
   ``host(inet_server_addr())`` equals ``--expect-server-addr`` when given; a
   null address (a Unix socket) is refused.
 
-Messages carry only the host, the database name and the server address,
-never the password or a raw driver error (``error_class``).
+Refusals never echo a part of the parsed URL: with an unencoded ``@`` in a
+password the parser takes the password's tail for the host, so messages carry
+only fixed text, the operator's own ``--expect-*`` values and what the server
+reports, never the password or a raw driver error (``error_class``).
 """
 
 import os
@@ -83,21 +85,22 @@ def validate_url(raw: str, *, expect_host: str, expect_db: str):
     except Exception as exc:  # the parser's message repeats the URL, password included
         raise Refused("url", f"DATABASE_URL does not parse ({error_class(exc)})") from None
     if url.drivername not in ALLOWED_DRIVERS:
-        raise Refused("url", f"driver {url.drivername!r} is not postgresql or postgresql+psycopg2")
+        raise Refused("url", "the URL's driver is not postgresql or postgresql+psycopg2")
     if not url.host or "," in url.host:
         raise Refused("url", "the URL needs exactly one host")
     if url.port in POOLER_PORTS:
-        raise Refused("url", f"port {url.port} is a transaction pooler; use a direct or "
-                             "session-mode connection (port 5432)")
+        raise Refused("url", "the URL's port is a transaction pooler's (6543); use a direct "
+                             "or session-mode connection (port 5432)")
     for key, value in url.query.items():
         if key not in ALLOWED_QUERY_KEYS:
-            raise Refused("url", f"query key {key!r} is not allowed")
+            raise Refused("url", "the URL has a query key outside "
+                                 f"{', '.join(sorted(ALLOWED_QUERY_KEYS))}")
         if isinstance(value, tuple):
-            raise Refused("url", f"query key {key!r} is repeated")
+            raise Refused("url", "the URL repeats a query key")
     if url.host != expect_host:
-        raise Refused("expect_host", f"the URL's host is {url.host!r}, not {expect_host!r}")
+        raise Refused("expect_host", f"the URL's host is not --expect-host {expect_host!r}")
     if url.database != expect_db:
-        raise Refused("expect_db", f"the URL's database is {url.database!r}, not {expect_db!r}")
+        raise Refused("expect_db", f"the URL's database is not --expect-db {expect_db!r}")
     return url
 
 
