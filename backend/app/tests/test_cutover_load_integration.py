@@ -1158,6 +1158,24 @@ def test_the_run_record_carries_the_loaded_state_fingerprint(tmp_path, owner, sw
     assert loader.owner_fingerprint(sw_db, owner["id"])["sha256"] == rec["fingerprint"]
 
 
+def test_the_fingerprint_does_not_depend_on_the_session_time_zone(tmp_path, owner):
+    from sqlalchemy.orm import Session
+
+    from app.cutover_load.loader import owner_fingerprint
+
+    _, record = load(tmp_path, fixture(), owner)
+    engine = create_engine(TARGET["url"])
+    try:
+        found = {}
+        for zone in ("UTC", "Asia/Manila"):
+            with engine.connect() as conn:
+                conn.execute(text(f"SET TIME ZONE '{zone}'"))
+                found[zone] = owner_fingerprint(Session(bind=conn), owner["id"])["sha256"]
+    finally:
+        engine.dispose()
+    assert found["UTC"] == found["Asia/Manila"] == json.loads(record.read_text())["fingerprint"]
+
+
 def test_reset_refuses_after_a_custom_tag_rename(tmp_path, owner, sw_db, sw_client):
     """A rename leaves the counts and the tag's created_at as they were."""
     from app.models.tag import Tag
