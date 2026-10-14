@@ -36,6 +36,14 @@ def outside_repo(path: str, what: str) -> str:
     return real
 
 
+def refuse_existing(*paths) -> None:
+    """Refuse before any connection when an output already exists, so a later
+    refusal can never leave a stale file (such as a ``prepared`` run record)."""
+    for path in paths:
+        if path and os.path.lexists(path):
+            raise Refused("path", f"{os.path.basename(path)} already exists; choose a new path")
+
+
 def create_private(path: str, data: bytes) -> None:
     """Create ``path`` (it must not exist) at mode 0600 and write ``data``."""
     try:

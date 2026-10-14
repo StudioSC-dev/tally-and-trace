@@ -45,7 +45,9 @@ from app.core.seed import DEMO_EMAILS
 from app.cutover_load.bootstrap import (
     CUTOVER_LOCK_KEY, Refused, check_target, error_class, observe_target,
 )
-from app.cutover_load.outputs import create_private, read_json, replace_private, repo_root, to_json
+from app.cutover_load.outputs import (
+    create_private, read_json, refuse_existing, replace_private, repo_root, to_json,
+)
 from app.cutover_load.schema import parse_input
 from app.cutover_load.validate import (
     InputInvalid, LoadPlan, Problem, card_cycles, day_start, is_card, is_loan, validate_input,
@@ -500,6 +502,7 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
              out: Callable[[str], None] = print) -> int:
     """Load (or dry-run) the input; 0 on success. Raises ``Refused``, ``InputInvalid``
     or ``CutoverError`` on any refusal, with nothing written."""
+    refuse_existing(report_path, run_record_path)
     with open(input_path, "rb") as fh:
         raw = fh.read()
     input_sha = hashlib.sha256(raw).hexdigest()

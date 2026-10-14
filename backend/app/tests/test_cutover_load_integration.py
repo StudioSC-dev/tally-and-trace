@@ -798,6 +798,29 @@ def test_a_failure_prints_only_check_names_and_writes_details_to_the_report(tmp_
     assert mode_of(report) == 0o600
 
 
+@pytest.mark.parametrize("existing", ["report", "record"])
+def test_an_existing_output_is_refused_before_connecting(existing, tmp_path, owner, sw_db):
+    """Checked first, so a refusal can never leave a stale prepared record."""
+    from app.cutover_load.bootstrap import Refused
+
+    (tmp_path / f"run-{existing}.json").write_text("{}")
+    shown = []
+    before = table_counts(sw_db)
+    from app.cutover_load.bootstrap import validate_url
+    from app.cutover_load.loader import run_load
+
+    url = validate_url(TARGET["url"], expect_host=TARGET["host"], expect_db=TARGET["db"])
+    with pytest.raises(Refused) as exc:
+        run_load(url=url, input_path=write_input(tmp_path, fixture(), owner),
+                 report_path=str(tmp_path / "run-report.json"),
+                 run_record_path=str(tmp_path / "run-record.json"), dry_run=False,
+                 expect_db=TARGET["db"], expect_server_addr=TARGET["addr"], out=shown.append)
+    assert exc.value.check == "path" and shown == []  # before connecting
+    assert table_counts(sw_db) == before
+    other = "record" if existing == "report" else "report"
+    assert not (tmp_path / f"run-{other}.json").exists()
+
+
 # --- A failure after the commit ------------------------------------------------------------
 
 def _complete(record, **kw):
