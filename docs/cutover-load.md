@@ -77,6 +77,10 @@ whichever backend answered, not one stable session. The tool refuses port
    owner's user already holds test rows, register a fresh user for the owner
    or clear those rows in the UI first; the guard refuses otherwise.
 2. Prepare the cutover input (`cutover-input` v1 JSON) in `~/cutover/`.
+   For each loan, confirm that **no due date is partly paid at the cutover**
+   (every due date before it is either fully paid or not paid at all) and
+   set `"no_partial_due_at_cutover": true` in that loan's terms. The load
+   refuses a loan without it, or with it false.
 3. Announce the maintenance window: Hermes and any other automation are off,
    the spouse does not use the app, and the owner does not use the UI until
    the cutover check is signed off.
@@ -123,7 +127,8 @@ Open `~/cutover/dry-run-report.json` and review:
 - per account: the opening, the balance at the cutover date and the final
   balance;
 - per card: the statements as of the cutover;
-- per loan: the schedule (payments made, next due date, amount owed);
+- per loan: the schedule (payments made, next due date, amount owed), with
+  `schedule_owed` beside `balance_at_cutover` to compare;
 - per installment: n of m;
 - the row counts.
 

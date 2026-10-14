@@ -270,6 +270,10 @@ class _Checker:
                     self.fail("currency", a.key, "a loan's payer must be in the loan's currency")
                 if a.loan.payments_made_offset > a.loan.term_months:
                     self.fail("loan", a.key, "payments_made_offset is more than term_months")
+                if a.loan.no_partial_due_at_cutover is not True:
+                    self.fail("loan_partial_due", a.key,
+                              "no_partial_due_at_cutover must be true: the owner confirms no "
+                              "due date of this loan is partly paid at the cutover")
 
     # --- Transactions: references, boundary (rule 2), currency (6), loans (7) -----------
 

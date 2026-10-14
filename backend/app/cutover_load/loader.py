@@ -453,7 +453,11 @@ def review(db: Session, owner: User, plan: LoadPlan, writer: Writer, database: s
             cards.append({"key": a.key,
                           "statements": stored_card_cycles(db, owner, account, boundary)})
         if a.account_type == AccountType.LOAN:
-            loans.append({"key": a.key, "schedule": build_schedule(db, account)})
+            schedule = build_schedule(db, account)
+            loans.append({"key": a.key, "balance_at_cutover": a.balance_at_cutover,
+                          "schedule_owed": Decimal(str(schedule["owed"])).quantize(
+                              Decimal("0.01")),
+                          "schedule": schedule})
     entries = [db.get(BudgetEntry, writer.entries[p.entry.key]) for p in plan.entries
                if p.end_mode == "after_occurrences"]
     installments = [{"key": next(k for k, v in writer.entries.items() if v == e.id),

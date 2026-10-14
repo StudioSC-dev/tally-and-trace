@@ -275,6 +275,25 @@ def test_loan_terms_are_checked():
     assert any("term_months" in d for d in found)
 
 
+@pytest.mark.parametrize("value", ["missing", False, None])
+def test_a_loan_without_the_partial_due_confirmation_is_refused(value):
+    """Decision 16: no loan due date may be partly paid at the cutover. The input
+    cannot show it, so C1 records the owner's confirmation per loan."""
+    data = base()
+    terms = account(data, "loan")["loan"]
+    if value == "missing":
+        terms.pop("no_partial_due_at_cutover", None)
+    else:
+        terms["no_partial_due_at_cutover"] = value
+    assert ("loan_partial_due", "loan") in checks(problems_of(data))
+
+
+def test_a_confirmed_loan_passes():
+    data = base()
+    account(data, "loan")["loan"]["no_partial_due_at_cutover"] = True
+    plan_of(data)
+
+
 def test_a_loan_row_before_the_cutover_is_refused():
     data = base()
     row(data, "loan_8")["date"] = "2026-02-20"

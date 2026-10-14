@@ -26,7 +26,8 @@
      "balance_at_cutover": "-300000.00",
      "loan": {"loan_kind": "auto", "annual_rate": "12", "term_months": 36,
               "payment_amount": "10000.00", "first_payment_date": "2025-08-20",
-              "payments_made_offset": 7, "payment_account_key": "bank"}}
+              "payments_made_offset": 7, "payment_account_key": "bank",
+              "no_partial_due_at_cutover": true}}
   ],
   "categories": [
     {"key": "groceries", "name": "Groceries", "kind": "expense"},

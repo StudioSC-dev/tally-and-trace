@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated, List, Literal, Optional
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool
 
 from app.models.account import AccountType
 from app.models.budget_entry import BudgetEntryType
@@ -80,6 +80,10 @@ class LoanTerms(_Model):
     amortization: Optional[Literal["fixed", "reduce_term"]] = None
     payments_made_offset: int = Field(0, ge=0)
     payment_account_key: Optional[Key] = None
+    # Decision 16: no due date of this loan is partly paid at the cutover. The
+    # other fields cannot show it, so C1 sets it from the owner's confirmation;
+    # validation refuses the load unless it is true.
+    no_partial_due_at_cutover: Optional[StrictBool] = None
 
 
 class AccountIn(_Model):

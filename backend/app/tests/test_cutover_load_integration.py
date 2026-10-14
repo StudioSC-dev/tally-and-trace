@@ -457,7 +457,10 @@ def test_a_dry_run_changes_nothing_and_writes_no_run_record(tmp_path, owner, sw_
     assert (body["database"], body["server_addr"]) == (TARGET["db"], TARGET["addr"])
     assert body["session_timezone"] == sw_db.execute(text("SHOW TimeZone")).scalar()
     assert by_key(body["accounts"], "card")["final"] == "-2210.00"
-    assert body["loans"][0]["schedule"]["payments_made"] == 8
+    loan = body["loans"][0]
+    assert loan["schedule"]["payments_made"] == 8
+    # The schedule's owed beside balance_at_cutover, for the owner to compare.
+    assert (loan["balance_at_cutover"], loan["schedule_owed"]) == ("-300000.00", "293000.00")
     assert {(i["key"], i["n"], i["m"]) for i in body["installments"]} == {
         ("e_laptop", 4, 12), ("e_phone", 6, 6)}
     assert body["row_counts"]["transactions"] == 13
