@@ -815,7 +815,10 @@ def test_the_transaction_pooler_port_is_refused(tmp_path, owner):
     """Port 6543 (a transaction pooler): the server address and session settings
     would describe whichever backend serves each transaction."""
     path = write_input(tmp_path, fixture(), owner)
-    pooled = TARGET["url"].replace(f":{make_url(TARGET['url']).port}/", ":6543/")
+    # Set, not replaced in the text: a URL without a port would otherwise stay as
+    # it is and run a dry run. Rendered only for the subprocess environment.
+    pooled = make_url(TARGET["url"]).set(port=6543).render_as_string(hide_password=False)
+    assert make_url(pooled).port == 6543
     done = run_wrapper(["--input", path, "--report", str(tmp_path / "r.json"), "--dry-run",
                         *target_args()], cwd=tmp_path, url=pooled)
     assert done.returncode == 1
