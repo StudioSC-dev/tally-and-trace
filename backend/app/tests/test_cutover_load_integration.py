@@ -914,6 +914,84 @@ def _load_failing_after_commit(tmp_path, owner, monkeypatch):
     return tmp_path / "run-record.json"
 
 
+def _commit_failing(monkeypatch, *, commits: bool):
+    """The load's COMMIT raises once: after committing (a connection lost on the
+    reply), or without committing."""
+    from sqlalchemy.engine.base import RootTransaction
+
+    real = RootTransaction.commit
+    calls = []
+
+    def flaky(self):
+        if calls:
+            return real(self)
+        calls.append(1)
+        if commits:
+            real(self)
+        else:
+            self.rollback()
+        raise ConnectionError("connection lost during COMMIT")
+
+    monkeypatch.setattr(RootTransaction, "commit", flaky)
+
+
+@pytest.mark.parametrize("committed", [True, False])
+def test_a_failed_commit_is_outcome_unknown_and_complete_record_decides(committed, tmp_path,
+                                                                        owner, sw_db,
+                                                                        monkeypatch):
+    from app.cutover_load import loader
+
+    _commit_failing(monkeypatch, commits=committed)
+    with pytest.raises(loader.CommitOutcomeUnknown):
+        load(tmp_path, fixture(), owner)
+    monkeypatch.undo()
+    record = tmp_path / "run-record.json"
+    assert json.loads(record.read_text())["status"] == "prepared"
+    assert counts(sw_db, owner["id"])["transactions"] == (13 if committed else 0)
+    if committed:
+        assert _complete(record) == 0
+        assert json.loads(record.read_text())["status"] == "complete"
+    else:
+        with pytest.raises(Exception) as exc:
+            _complete(record)
+        assert getattr(exc.value, "check", None) == "changed_after_load"
+        assert json.loads(record.read_text())["status"] == "prepared"
+
+
+@pytest.mark.parametrize("failing", ["report", "record"])
+def test_an_output_write_failure_leaves_no_stale_file(failing, tmp_path, owner, sw_db,
+                                                      monkeypatch):
+    from app.cutover_load import loader
+
+    real = loader.create_private
+
+    def broken(path, payload):
+        if path.endswith(f"run-{failing}.json"):
+            raise OSError("disk full")
+        real(path, payload)
+
+    monkeypatch.setattr(loader, "create_private", broken)
+    before = table_counts(sw_db)
+    with pytest.raises(OSError):
+        load(tmp_path, fixture(), owner)
+    assert not (tmp_path / "run-record.json").exists()
+    assert not (tmp_path / "run-report.json").exists()
+    assert table_counts(sw_db) == before
+
+
+def test_the_wrapper_exits_3_when_the_commit_outcome_is_unknown(capsys):
+    import importlib.util
+
+    from app.cutover_load.loader import CommitOutcomeUnknown
+
+    spec = importlib.util.spec_from_file_location("cutover_load_wrapper", SCRIPT)
+    wrapper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wrapper)
+    assert wrapper.refuse(CommitOutcomeUnknown("ConnectionError"), None) == 3
+    shown = capsys.readouterr().out
+    assert "commit outcome UNKNOWN" in shown and "--complete-record" in shown
+
+
 def test_a_failure_after_the_commit_is_reported_and_recovered(tmp_path, owner, sw_db,
                                                               monkeypatch):
     record = _load_failing_after_commit(tmp_path, owner, monkeypatch)

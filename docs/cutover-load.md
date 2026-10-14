@@ -55,7 +55,7 @@ Exit codes:
 | 0 | success |
 | 1 | a refusal or error before the commit: nothing changed |
 | 2 | a missing or wrong flag |
-| 3 | `load: COMMITTED; run record incomplete`: the load committed, but the run record could not be marked complete. Run `--complete-record` (step 4) |
+| 3 | `load: COMMITTED; run record incomplete` (the load committed, but the run record could not be marked complete), or `load: commit outcome UNKNOWN` (the COMMIT itself failed, for example on a lost connection, so it may or may not have committed). Either way run `--complete-record` (step 4) |
 
 ## Time zone
 
@@ -160,9 +160,8 @@ fingerprint of the owner's loaded state taken inside the load transaction.
 It is a report, not a rollback source. Keep it until the window
 closes; the reset and the sign-off both read it.
 
-**If the load exits with code 3** (`load: COMMITTED; run record incomplete`),
-the data is committed and the record is still `prepared`. Do not reload.
-Complete the record:
+**If the load exits with code 3**, or a failure leaves a run record at
+`prepared`, do not reload. Resolve the record:
 
 ```sh
 python backend/scripts/cutover_load.py --complete-record \
@@ -172,7 +171,10 @@ python backend/scripts/cutover_load.py --complete-record \
 
 It reads only. It refuses unless the target equals the record's and the
 owner's state still has the fingerprint taken inside the load; it then marks
-the record `complete` with the database clock's `finished_at`.
+the record `complete` with the database clock's `finished_at`. If it refuses
+with `changed_after_load` after `commit outcome UNKNOWN`, the commit did not
+happen: confirm the owner is still empty (the pre-load guard of a dry run),
+keep the old record for reference, and load again with new output paths.
 
 ## 5. Cutover check and sign-off
 

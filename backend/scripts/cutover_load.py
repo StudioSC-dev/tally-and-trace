@@ -15,8 +15,9 @@ the current directory, moves into an empty temporary directory (so no
 ``.env`` can load) and validates ``DATABASE_URL`` from the environment. The
 terminal shows only check names, counts, pass or fail and the target; the
 details go to the 0600 report file. Exit code 0 on success, 1 on any refusal
-or error (nothing changed), 3 when the load committed but its run record could
-not be marked complete (run ``--complete-record``).
+or error (nothing changed), 3 when the load committed (or its commit's outcome
+is unknown) but its run record could not be marked complete (run
+``--complete-record``, whose fingerprint check decides).
 """
 
 import argparse
@@ -121,6 +122,10 @@ def main(argv=None) -> int:
 def refuse(exc: Exception, report_path) -> int:
     from app.cutover_load.bootstrap import Refused, error_class
 
+    if getattr(exc, "check", None) == "commit_unknown":
+        print("load: commit outcome UNKNOWN; the run record is prepared")
+        print("decide with --complete-record --run-record PATH and the same target flags")
+        return 3
     if getattr(exc, "check", None) == "committed_incomplete":
         print("load: COMMITTED; run record incomplete")
         print("recover with --complete-record --run-record PATH and the same target flags")

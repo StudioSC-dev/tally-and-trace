@@ -99,6 +99,26 @@ class CommittedIncomplete(Exception):
         self.error = error
 
 
+class CommitOutcomeUnknown(Exception):
+    """COMMIT itself raised: the load may or may not have committed (a connection
+    lost on the reply). ``--complete-record`` decides, by the fingerprint."""
+
+    check = "commit_unknown"
+
+    def __init__(self, error: str):
+        super().__init__(f"the commit's outcome is unknown ({error})")
+        self.error = error
+
+
+def _discard(paths: List[str]) -> None:
+    """Remove output files this run created, so a rolled-back run leaves none."""
+    for path in paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 # --- Owner, Household tag, alembic head, guard --------------------------------------------
 
 def find_owner(db: Session, email: str) -> User:
@@ -561,14 +581,27 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                     "fingerprint_tables": fingerprint["tables"],
                     "finished_at": None, "signed_off_at": None,
                 }
-                create_private(run_record_path, to_json(record))
-                create_private(report_path, to_json({**report, "dry_run": False}))
-                db.close()
-                trans.commit()
+                # The report first and the prepared record last, both before the
+                # commit; a failure before the commit removes what this run wrote,
+                # so no prepared record outlives a rolled-back load.
+                written: List[str] = []
+                try:
+                    create_private(report_path, to_json({**report, "dry_run": False}))
+                    written.append(report_path)
+                    create_private(run_record_path, to_json(record))
+                    written.append(run_record_path)
+                    db.close()
+                except BaseException:
+                    _discard(written)
+                    raise
             except BaseException:
                 if trans.is_active:
                     trans.rollback()
                 raise
+            try:
+                trans.commit()
+            except Exception as exc:  # it may have committed: never "nothing changed"
+                raise CommitOutcomeUnknown(error_class(exc)) from None
             try:
                 # The database clock alone: the fingerprint, not this cutoff, is what
                 # reset compares, so an application clock ahead of it hides nothing.
