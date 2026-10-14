@@ -624,7 +624,9 @@ def readonly_session(url, expect_db: str, expect_server_addr: str) -> Iterator[t
                     trans.rollback()
             except BaseException as exc:
                 if not _release(conn):
-                    exc.add_note("the shared cutover lock was not released")
+                    note = getattr(exc, "add_note", None)  # Python 3.11+
+                    if callable(note):
+                        note("the shared cutover lock was not released")
                 raise
             if not _release(conn):
                 raise CheckRefused("the shared cutover lock was not released; no later "

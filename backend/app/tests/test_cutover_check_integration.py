@@ -804,6 +804,24 @@ def test_a_failing_unlock_never_hides_the_original_error(target, monkeypatch):
 
 
 @needs_db
+def test_an_unreleased_lock_after_an_error_keeps_the_error_without_add_note(target,
+                                                                           monkeypatch):
+    from app.cutover_check import check
+
+    class NoNotes(RuntimeError):
+        add_note = None  # as on Python 3.10, where exceptions have no add_note
+
+    url, database, addr = target
+    watch(monkeypatch, rewrite=lambda s: s.replace(
+        "SELECT pg_advisory_unlock_shared(%(key)s)",
+        "SELECT NOT pg_advisory_unlock_shared(%(key)s)"))
+    with pytest.raises(NoNotes, match="the original error"):
+        with check.readonly_session(url, database, addr):
+            raise NoNotes("the original error")
+    assert lock_is_free(url)
+
+
+@needs_db
 def test_the_fx_provider_is_never_reached(world, target, monkeypatch):
     from app.services import fx
 
