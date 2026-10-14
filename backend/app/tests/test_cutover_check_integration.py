@@ -748,16 +748,26 @@ def watch(monkeypatch, trace=None, rewrite=None):
     monkeypatch.setattr(check, "make_engine", make)
 
 
-def lock_is_free(url) -> bool:
+def lock_is_free(url, wait: float = 5.0) -> bool:
+    """Whether a load could take the lock now, retried for up to ``wait`` seconds: a
+    closed backend releases its locks as it exits, which can trail the close."""
+    import time
+
     from sqlalchemy import create_engine, text
 
     from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY
 
     engine = create_engine(url)
+    deadline = time.monotonic() + wait
     try:
-        with engine.connect() as conn, conn.begin():
-            return conn.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
-                                {"k": CUTOVER_LOCK_KEY}).scalar()
+        while True:
+            with engine.connect() as conn, conn.begin():
+                if conn.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                                {"k": CUTOVER_LOCK_KEY}).scalar():
+                    return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
     finally:
         engine.dispose()
 
@@ -783,7 +793,7 @@ def test_a_lock_that_is_not_released_is_reported(target, monkeypatch):
     # The unlock still runs, but reports false (as on another pooled backend).
     watch(monkeypatch, rewrite=lambda s: s.replace(
         "SELECT pg_advisory_unlock_shared(%(key)s)",
-        "SELECT pg_advisory_unlock_shared(%(key)s) AND false"))
+        "SELECT NOT pg_advisory_unlock_shared(%(key)s)"))
     with pytest.raises(check.CheckRefused, match="lock was not released"):
         with check.readonly_session(url, database, addr):
             pass
