@@ -12,8 +12,9 @@ target is verified right after connecting, before any write.
   ``port``, ``dbname``, ``service`` or ``options`` key would override the
   authority in libpq).
 - ``check_pg_environment``: none of ``PG_TARGET_ENV`` is set (libpq reads
-  them for any parameter the URL leaves out, and ``PGTZ`` sets the session
-  time zone).
+  them for any parameter the URL leaves out, ``PGTZ`` sets the session time
+  zone and ``PGOPTIONS`` any session setting).
+- ``validate_url`` also refuses a transaction pooler's port (``POOLER_PORTS``).
 - ``verify_target``: ``current_database()`` equals ``--expect-db`` and
   ``host(inet_server_addr())`` equals ``--expect-server-addr`` when given; a
   null address (a Unix socket) is refused.
@@ -29,8 +30,14 @@ ALLOWED_DRIVERS = frozenset({"postgresql", "postgresql+psycopg2"})
 ALLOWED_QUERY_KEYS = frozenset({"sslmode", "sslrootcert", "connect_timeout", "application_name"})
 # PGTZ too: libpq sends it as the session TimeZone, which decides every stored and
 # read date (the columns are timestamptz); the load runs in the server's default.
+# PGOPTIONS likewise: libpq sends it as startup options (``-c TimeZone=...``,
+# ``-c search_path=...``), changing what every query reads and writes.
 PG_TARGET_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE",
-                 "PGTZ")
+                 "PGTZ", "PGOPTIONS")
+# A transaction pooler (Supabase's runs on 6543) hands each transaction to any
+# backend, so inet_server_addr() and the session settings would not describe
+# one stable session; the cutover needs a direct or session-mode connection.
+POOLER_PORTS = frozenset({6543})
 
 # One cutover run at a time: the load and the reset take
 # pg_try_advisory_xact_lock on this key; the cutover check takes the shared form.
@@ -79,6 +86,9 @@ def validate_url(raw: str, *, expect_host: str, expect_db: str):
         raise Refused("url", f"driver {url.drivername!r} is not postgresql or postgresql+psycopg2")
     if not url.host or "," in url.host:
         raise Refused("url", "the URL needs exactly one host")
+    if url.port in POOLER_PORTS:
+        raise Refused("url", f"port {url.port} is a transaction pooler; use a direct or "
+                             "session-mode connection (port 5432)")
     for key, value in url.query.items():
         if key not in ALLOWED_QUERY_KEYS:
             raise Refused("url", f"query key {key!r} is not allowed")

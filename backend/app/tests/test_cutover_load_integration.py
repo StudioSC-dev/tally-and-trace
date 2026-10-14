@@ -9,8 +9,8 @@ lives in pytest's temporary directory, outside the repository.
 local database: the effective ``settings.DATABASE_URL`` must equal the exported
 ``DATABASE_URL``, the URL must pass the cutover's own URL validation with a
 host of ``localhost``, ``127.0.0.1`` or ``::1``, and the server must report a
-loopback or private address (a database in a local container reports its
-container address, never a loopback one).
+loopback address or one in the Docker bridge range 172.16.0.0/12 (a database
+in a local container reports its container address, never a loopback one).
 """
 import copy
 import ipaddress
@@ -33,7 +33,18 @@ DATA = os.path.join(HERE, "data", "cutover_load")
 BACKEND = os.path.dirname(os.path.dirname(HERE))
 SCRIPT = os.path.join(BACKEND, "scripts", "cutover_load.py")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+DOCKER_BRIDGE = ipaddress.ip_network("172.16.0.0/12")
 D = Decimal
+
+
+def gate_allows(host: str, address: str) -> bool:
+    """The gate's host and server-address rule: a loopback URL host, and a server
+    address that is loopback or in the Docker bridge range (a local container
+    reports its bridge address, such as 172.17.0.x)."""
+    if host not in LOCAL_HOSTS:
+        return False
+    ip = ipaddress.ip_address(address)
+    return ip.is_loopback or ip in DOCKER_BRIDGE
 
 
 def _gate():
@@ -63,9 +74,8 @@ def _gate():
         return False, "the database is not reachable", None
     if address is None:
         return False, "connected over a Unix socket", None
-    ip = ipaddress.ip_address(address)
-    if not (ip.is_loopback or ip.is_private):
-        return False, "the server address is neither loopback nor private", None
+    if not gate_allows(parsed.host, address):
+        return False, "the server address is neither loopback nor the Docker bridge", None
     return True, "", {"url": url, "host": parsed.host, "db": parsed.database, "addr": address}
 
 
@@ -714,6 +724,8 @@ def test_an_expect_host_mismatch_is_refused_before_connecting(tmp_path, owner):
 @pytest.mark.parametrize("query,env", [("host=db.invalid", {}), ("hostaddr=192.0.2.1", {}),
                                        ("", {"PGHOSTADDR": "192.0.2.1"}),
                                        ("", {"PGTZ": "Asia/Manila"}),
+                                       ("", {"PGOPTIONS": "-c TimeZone=Asia/Manila"}),
+                                       ("", {"PGOPTIONS": "-c search_path=elsewhere"}),
                                        ("options=-c%20search_path%3Dx", {}),
                                        ("sslmode=prefer&sslmode=disable", {})])
 def test_target_overrides_are_refused_before_importing_the_app(query, env, tmp_path, owner):
@@ -725,6 +737,28 @@ def test_target_overrides_are_refused_before_importing_the_app(query, env, tmp_p
     assert "refused:" in done.stdout and "observed:" not in done.stdout
     assert "APP_IMPORTED=False" in done.stdout
     assert "pw@" not in done.stdout + done.stderr  # never the password
+
+
+def test_the_transaction_pooler_port_is_refused(tmp_path, owner):
+    """Port 6543 (a transaction pooler): the server address and session settings
+    would describe whichever backend serves each transaction."""
+    path = write_input(tmp_path, fixture(), owner)
+    pooled = TARGET["url"].replace(f":{make_url(TARGET['url']).port}/", ":6543/")
+    done = run_wrapper(["--input", path, "--report", str(tmp_path / "r.json"), "--dry-run",
+                        *target_args()], cwd=tmp_path, url=pooled)
+    assert done.returncode == 1
+    assert "refused: url" in done.stdout and "6543" in done.stdout
+    assert "APP_IMPORTED=False" in done.stdout
+
+
+@pytest.mark.parametrize("host,address,allowed", [
+    ("127.0.0.1", "127.0.0.1", True), ("localhost", "::1", True),
+    ("127.0.0.1", "172.17.0.3", True), ("127.0.0.1", "172.31.255.1", True),
+    ("127.0.0.1", "10.0.0.5", False), ("127.0.0.1", "192.168.1.20", False),
+    ("127.0.0.1", "203.0.113.7", False), ("db.example.com", "172.17.0.3", False),
+])
+def test_the_gate_accepts_only_loopback_or_the_docker_bridge(host, address, allowed):
+    assert gate_allows(host, address) is allowed
 
 
 def test_an_allowed_query_key_passes(tmp_path, owner):

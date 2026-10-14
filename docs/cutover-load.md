@@ -33,8 +33,9 @@ Hosts, addresses and paths below are placeholders:
   `--expect-db`, the URL may carry only the query keys `sslmode`,
   `sslrootcert`, `connect_timeout` and `application_name`, and none of
   `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGSERVICE`,
-  `PGSERVICEFILE` or `PGTZ` may be set. After connecting, `current_database()` must
-  equal `--expect-db` and the server address must equal
+  `PGSERVICEFILE`, `PGTZ` or `PGOPTIONS` may be set. Port 6543 (a
+  transaction pooler) is refused. After connecting, `current_database()`
+  must equal `--expect-db` and the server address must equal
   `--expect-server-addr` (when given). A Unix-socket connection is refused.
 - **No `.env`.** The wrapper resolves every path, then moves into an empty
   temporary directory before importing the app, so no `.env` file is read.
@@ -55,10 +56,20 @@ The date columns are `timestamptz`. The load writes each date as midnight of
 that day **in the session time zone**, and the cutover check reads dates back
 in its own session time zone. Run the load and the check against the same
 server, both in the server's default time zone (the one the deployed app
-uses). `PGTZ` is refused by both scripts, and the URL may not carry an
-`options` key, so neither run can change its session time zone. The run record, the dry-run report and the
+uses). `PGTZ` and `PGOPTIONS` are refused by both scripts, and the URL may
+not carry an `options` key, so neither run can change its session time zone. The run record, the dry-run report and the
 check report each record `session_timezone`, and sign-off refuses unless the
 check's equals the load's.
+
+## Connection mode
+
+The load and the reset must use a **direct or
+session-mode connection (port 5432)**, never the transaction pooler (port
+6543) that the deployed app's `DATABASE_URL` may name. Through a transaction
+pooler each transaction can be served by a different backend, so the server
+address the tool pins and the session time zone it records would describe
+whichever backend answered, not one stable session. The tool refuses port
+6543.
 
 ## Before the window
 
