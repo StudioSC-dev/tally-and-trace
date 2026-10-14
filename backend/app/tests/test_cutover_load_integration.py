@@ -798,6 +798,80 @@ def test_a_failure_prints_only_check_names_and_writes_details_to_the_report(tmp_
     assert mode_of(report) == 0o600
 
 
+# --- A failure after the commit ------------------------------------------------------------
+
+def _complete(record, **kw):
+    from app.cutover_load.bootstrap import validate_url
+    from app.cutover_load.loader import complete_record
+
+    url = validate_url(TARGET["url"], expect_host=TARGET["host"], expect_db=TARGET["db"])
+    return complete_record(url=url, run_record_path=str(record), expect_db=TARGET["db"],
+                           expect_server_addr=kw.get("addr", TARGET["addr"]), out=quiet)
+
+
+def _load_failing_after_commit(tmp_path, owner, monkeypatch):
+    from app.cutover_load import loader
+
+    def broken(path, payload):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(loader, "replace_private", broken)
+    with pytest.raises(loader.CommittedIncomplete):
+        load(tmp_path, fixture(), owner)
+    monkeypatch.undo()
+    return tmp_path / "run-record.json"
+
+
+def test_a_failure_after_the_commit_is_reported_and_recovered(tmp_path, owner, sw_db,
+                                                              monkeypatch):
+    record = _load_failing_after_commit(tmp_path, owner, monkeypatch)
+    assert json.loads(record.read_text())["status"] == "prepared"
+    assert counts(sw_db, owner["id"])["transactions"] == 13  # committed
+    assert _complete(record) == 0
+    rec = json.loads(record.read_text())
+    assert rec["status"] == "complete" and rec["finished_at"]
+    assert mode_of(record) == 0o600
+    with pytest.raises(Exception) as exc:
+        _complete(record)  # only a prepared record
+    assert getattr(exc.value, "check", None) == "run_record"
+    assert reset(record, owner["email"]) == 0
+
+
+def test_complete_record_refuses_when_the_state_differs(tmp_path, owner, sw_db, monkeypatch):
+    record = _load_failing_after_commit(tmp_path, owner, monkeypatch)
+    sw_db.rollback()
+    sw_db.execute(text("UPDATE categories SET name = 'Renamed' WHERE id = "
+                       "(SELECT min(id) FROM categories WHERE user_id = :u)"), {"u": owner["id"]})
+    sw_db.commit()
+    with pytest.raises(Exception) as exc:
+        _complete(record)
+    assert getattr(exc.value, "check", None) == "changed_after_load"
+    assert json.loads(record.read_text())["status"] == "prepared"
+    with pytest.raises(Exception) as exc:
+        _complete(record, addr="192.0.2.1")
+    assert getattr(exc.value, "check", None) == "expect_server_addr"
+
+
+def test_the_wrapper_exits_3_when_the_load_committed_but_the_record_is_incomplete(capsys):
+    import importlib.util
+
+    from app.cutover_load.loader import CommittedIncomplete
+
+    spec = importlib.util.spec_from_file_location("cutover_load_wrapper", SCRIPT)
+    wrapper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wrapper)
+    assert wrapper.refuse(CommittedIncomplete("OSError"), None) == 3
+    shown = capsys.readouterr().out
+    assert "load: COMMITTED; run record incomplete" in shown and "--complete-record" in shown
+
+
+def test_complete_record_needs_the_target_flags(tmp_path):
+    done = run_wrapper(["--complete-record", "--run-record", str(tmp_path / "x.json")],
+                       cwd=tmp_path)
+    assert done.returncode == 2 and "this mode needs" in done.stderr
+    assert "--expect-server-addr" in done.stderr.split("this mode needs")[1]
+
+
 # --- Test 15: reset ------------------------------------------------------------------------
 
 def _demo_snapshot(db):

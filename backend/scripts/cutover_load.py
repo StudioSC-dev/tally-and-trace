@@ -5,6 +5,7 @@
         --report REPORT.json --expect-host HOST --expect-db DB --dry-run
     ... --run-record RECORD.json --expect-server-addr ADDR      (the real load)
     ... --reset --run-record RECORD.json --confirm OWNER_EMAIL [--dry-run]
+    ... --complete-record --run-record RECORD.json        (after exit code 3)
     python backend/scripts/cutover_load.py --sign-off --run-record RECORD.json \\
         --check-report CHECK.json --confirm OWNER_EMAIL
 
@@ -13,7 +14,9 @@ anything from the app is imported it resolves every path argument against
 the current directory, moves into an empty temporary directory (so no
 ``.env`` can load) and validates ``DATABASE_URL`` from the environment. The
 terminal shows only check names, counts, pass or fail and the target; the
-details go to the 0600 report file. Exit code 0 on success, 1 on any refusal.
+details go to the 0600 report file. Exit code 0 on success, 1 on any refusal
+or error (nothing changed), 3 when the load committed but its run record could
+not be marked complete (run ``--complete-record``).
 """
 
 import argparse
@@ -30,6 +33,8 @@ def parse_args(argv):
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--reset", action="store_true", help="undo the load inside the window")
     mode.add_argument("--sign-off", action="store_true", help="close the window after C3 passes")
+    mode.add_argument("--complete-record", action="store_true",
+                      help="mark a prepared run record complete after exit code 3")
     p.add_argument("--dry-run", action="store_true", help="validate and write, then roll back")
     p.add_argument("--input", help="the cutover-input v1 JSON file")
     p.add_argument("--report", help="where to write the review or failure report (new file)")
@@ -52,6 +57,8 @@ def main(argv=None) -> int:
     p, args = parse_args(sys.argv[1:] if argv is None else argv)
     if args.sign_off:
         required(p, args, "--run-record", "--check-report", "--confirm")
+    elif args.complete_record:
+        required(p, args, "--run-record", "--expect-host", "--expect-db", "--expect-server-addr")
     elif args.reset:
         required(p, args, "--run-record", "--confirm", "--expect-host", "--expect-db",
                  "--expect-server-addr")
@@ -83,6 +90,12 @@ def main(argv=None) -> int:
         bootstrap.check_pg_environment()
         url = bootstrap.validate_url(raw, expect_host=args.expect_host, expect_db=args.expect_db)
         print(bootstrap.target_line(url))
+        if args.complete_record:
+            from app.cutover_load.loader import complete_record
+
+            return complete_record(url=url, run_record_path=args.run_record,
+                                   expect_db=args.expect_db,
+                                   expect_server_addr=args.expect_server_addr)
         if args.reset:
             from app.cutover_load.reset import run_reset
 
@@ -101,6 +114,10 @@ def main(argv=None) -> int:
 def refuse(exc: Exception, report_path) -> int:
     from app.cutover_load.bootstrap import Refused, error_class
 
+    if getattr(exc, "check", None) == "committed_incomplete":
+        print("load: COMMITTED; run record incomplete")
+        print("recover with --complete-record --run-record PATH and the same target flags")
+        return 3
     problems = getattr(exc, "problems", None)
     if problems is not None:
         for problem in problems:

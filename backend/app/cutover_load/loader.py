@@ -42,8 +42,10 @@ from sqlalchemy.pool import NullPool
 
 from app.core.access import touches_accounts, viewable_account_ids
 from app.core.seed import DEMO_EMAILS
-from app.cutover_load.bootstrap import CUTOVER_LOCK_KEY, Refused, check_target, observe_target
-from app.cutover_load.outputs import create_private, replace_private, repo_root, to_json
+from app.cutover_load.bootstrap import (
+    CUTOVER_LOCK_KEY, Refused, check_target, error_class, observe_target,
+)
+from app.cutover_load.outputs import create_private, read_json, replace_private, repo_root, to_json
 from app.cutover_load.schema import parse_input
 from app.cutover_load.validate import (
     InputInvalid, LoadPlan, Problem, card_cycles, day_start, is_card, is_loan, validate_input,
@@ -83,6 +85,16 @@ class CutoverError(Exception):
     def __init__(self, check: str, key: str, detail: str):
         super().__init__(f"{check} [{key}]: {detail}")
         self.check, self.key, self.detail = check, key, detail
+
+
+class CommittedIncomplete(Exception):
+    """The load committed, but the run record could not be marked complete."""
+
+    check = "committed_incomplete"
+
+    def __init__(self, error: str):
+        super().__init__(f"the load committed; the run record is incomplete ({error})")
+        self.error = error
 
 
 # --- Owner, Household tag, alembic head, guard --------------------------------------------
@@ -554,18 +566,68 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                 if trans.is_active:
                     trans.rollback()
                 raise
-            # The database clock alone: the fingerprint, not this cutoff, is what
-            # reset compares, so an application clock ahead of it hides nothing.
-            finished_at = conn.execute(text("SELECT clock_timestamp()")).scalar()
-            conn.rollback()
-        replace_private(run_record_path, to_json(
-            {**record, "status": "complete", "finished_at": finished_at.isoformat()}))
+            try:
+                # The database clock alone: the fingerprint, not this cutoff, is what
+                # reset compares, so an application clock ahead of it hides nothing.
+                finished_at = conn.execute(text("SELECT clock_timestamp()")).scalar()
+                conn.rollback()
+                replace_private(run_record_path, to_json(
+                    {**record, "status": "complete", "finished_at": finished_at.isoformat()}))
+            except Exception as exc:  # committed: never report "nothing changed"
+                raise CommittedIncomplete(error_class(exc)) from None
         out("load: committed; run record complete")
         for table, count in sorted(counts.items()):
             out(f"  {table}: {count}")
         return 0
     finally:
         engine.dispose()
+
+
+def complete_record(*, url, run_record_path: str, expect_db: str,
+                    expect_server_addr: Optional[str],
+                    out: Callable[[str], None] = print) -> int:
+    """Mark a ``prepared`` run record ``complete`` after a failure that followed the
+    commit, only when the owner's state still has the fingerprint taken inside
+    the load (so the load did commit, and nothing changed since). Read-only."""
+    record = read_json(run_record_path, "run record")
+    if record.get("kind") != "cutover-load-run" or record.get("status") != "prepared":
+        raise Refused("run_record", "only a prepared cutover run record can be completed")
+    if not record.get("fingerprint"):
+        raise Refused("run_record", "the run record has no fingerprint of the loaded state")
+    engine = create_engine(url, poolclass=NullPool)
+    try:
+        with engine.connect() as conn:
+            trans = conn.begin()
+            try:
+                observed = observe_target(conn)
+                out(f"observed: db={observed[0]} server_addr={observed[1]}")
+                target = check_target(observed, expect_db=expect_db,
+                                      expect_server_addr=expect_server_addr)
+                if target != (record.get("database"), record.get("server_addr")):
+                    raise Refused("target", "the database or server address is not the "
+                                            "run record's")
+                take_lock(conn)
+                db = Session(bind=conn, autoflush=False)
+                fingerprint = owner_fingerprint(db, record["owner_id"])
+                if fingerprint["sha256"] != record["fingerprint"]:
+                    stored = record.get("fingerprint_tables", {})
+                    changed = sorted(t for t, h in fingerprint["tables"].items()
+                                     if stored.get(t) != h)
+                    raise CutoverError("changed_after_load", "owner",
+                                       "the owner's state is not the loaded one in: "
+                                       f"{', '.join(changed) or 'unknown tables'}")
+                finished_at = conn.execute(text("SELECT clock_timestamp()")).scalar()
+                db.close()
+            finally:
+                if trans.is_active:
+                    trans.rollback()
+    finally:
+        engine.dispose()
+    replace_private(run_record_path, to_json(
+        {**record, "status": "complete", "finished_at": finished_at.isoformat(),
+         "completed_by": "complete-record"}))
+    out("complete-record: the loaded state matches; run record complete")
+    return 0
 
 
 def failure_report(exc: BaseException) -> dict:

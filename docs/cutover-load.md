@@ -48,7 +48,14 @@ Hosts, addresses and paths below are placeholders:
   who owns nothing yet except the Household tag, and has received no shares.
   The Household tag must exist; the tool never creates it.
 
-Exit code 0 means success; 1 means a refusal or error, with nothing changed.
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | success |
+| 1 | a refusal or error before the commit: nothing changed |
+| 2 | a missing or wrong flag |
+| 3 | `load: COMMITTED; run record incomplete`: the load committed, but the run record could not be marked complete. Run `--complete-record` (step 4) |
 
 ## Time zone
 
@@ -63,7 +70,7 @@ check's equals the load's.
 
 ## Connection mode
 
-The load and the reset must use a **direct or
+The load, the reset and `--complete-record` must use a **direct or
 session-mode connection (port 5432)**, never the transaction pooler (port
 6543) that the deployed app's `DATABASE_URL` may name. Through a transaction
 pooler each transaction can be served by a different backend, so the server
@@ -152,6 +159,20 @@ alembic revision, the git sha, the input's sha256, the start and finish times
 fingerprint of the owner's loaded state taken inside the load transaction.
 It is a report, not a rollback source. Keep it until the window
 closes; the reset and the sign-off both read it.
+
+**If the load exits with code 3** (`load: COMMITTED; run record incomplete`),
+the data is committed and the record is still `prepared`. Do not reload.
+Complete the record:
+
+```sh
+python backend/scripts/cutover_load.py --complete-record \
+    --run-record ~/cutover/run-record.json \
+    --expect-host DB_HOST --expect-db DB_NAME --expect-server-addr SERVER_ADDR
+```
+
+It reads only. It refuses unless the target equals the record's and the
+owner's state still has the fingerprint taken inside the load; it then marks
+the record `complete` with the database clock's `finished_at`.
 
 ## 5. Cutover check and sign-off
 
