@@ -28,6 +28,10 @@ ALLOWED_DRIVERS = ("postgresql", "postgresql+psycopg2")
 ALLOWED_QUERY_KEYS = frozenset({"sslmode", "sslrootcert", "connect_timeout", "application_name"})
 # libpq reads these for any parameter the URL leaves out (PGHOSTADDR wins over host);
 # PGTZ sets the server session's TimeZone, which the timestamptz dates are read in.
+# Supabase's transaction pooler hands each transaction any backend: the check's
+# session-level lock and its unlock could land on different ones.
+POOLER_PORT = 6543
+
 FORBIDDEN_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE",
                  "PGTZ")
 
@@ -103,6 +107,11 @@ def validate_url(raw: Optional[str], expect_host: str, expect_db: str,
             raise BootstrapError(f"DATABASE_URL query key '{key}' is not allowed")
         if isinstance(value, tuple):
             raise BootstrapError(f"DATABASE_URL query key '{key}' is repeated")
+    if url.port == POOLER_PORT:
+        raise BootstrapError(
+            f"DATABASE_URL port {POOLER_PORT} is the transaction pooler: a session-level lock "
+            "can stay on one backend while its unlock runs on another; use a direct or "
+            "session-mode connection (port 5432)")
     if host != expect_host:
         raise BootstrapError(f"DATABASE_URL host '{host}' is not --expect-host '{expect_host}'")
     if (url.database or "") != expect_db:

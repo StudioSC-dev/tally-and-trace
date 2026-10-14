@@ -6,7 +6,9 @@ with ``create_savepoint``, so an internal ``commit()`` can neither end the snaps
 nor write. Rates are offline only.
 
 Every block lists its missing, extra or differing rows; nothing is absorbed. Any
-failure fails the run. ``T`` is ``as_of`` at 00:00 (naive, as the columns are).
+failure fails the run. ``T`` is ``as_of`` at 00:00. The date columns are
+``timestamptz``: they are read in the session time zone (recorded in the report)
+and compared without their zone.
 """
 
 from __future__ import annotations
@@ -590,21 +592,27 @@ def readonly_session(url, expect_db: str, expect_server_addr: str) -> Iterator[t
     The target is verified and a session-level shared lock taken before the
     snapshot transaction begins, so the snapshot cannot predate the lock (it
     conflicts with a load's or reset's exclusive transaction lock on the same key).
-    Everything is rolled back on exit, then the lock is released.
+    The snapshot must run on the backend that took the lock. Everything is rolled
+    back on exit, then the lock is released; an unlock that reports false is
+    refused, and an unlock failure never hides an error from inside the session.
     """
     engine = make_engine(url)
     try:
         with engine.connect() as conn:
             conn.execution_options(isolation_level="REPEATABLE READ")
             database, addr = verify_target(conn, expect_db, expect_server_addr)
-            locked = conn.execute(text("SELECT pg_try_advisory_lock_shared(:key)"),
-                                  {"key": CUTOVER_LOCK_KEY}).scalar()
+            locked, pid = conn.execute(
+                text("SELECT pg_try_advisory_lock_shared(:key), pg_backend_pid()"),
+                {"key": CUTOVER_LOCK_KEY}).one()
             conn.commit()  # ends the probe transaction; the session-level lock stays
             if not locked:
                 raise CheckRefused("a cutover load or reset holds the lock")
             try:
                 trans = conn.begin()
                 try:
+                    if conn.execute(text("SELECT pg_backend_pid()")).scalar() != pid:
+                        raise CheckRefused("the database backend changed after the lock "
+                                           "was taken; connect directly, not via a pooler")
                     conn.exec_driver_sql("SET TRANSACTION READ ONLY")
                     session = Session(bind=conn, join_transaction_mode="create_savepoint",
                                       autoflush=False)
@@ -614,12 +622,27 @@ def readonly_session(url, expect_db: str, expect_server_addr: str) -> Iterator[t
                         session.close()
                 finally:
                     trans.rollback()
-            finally:
-                conn.execute(text("SELECT pg_advisory_unlock_shared(:key)"),
-                             {"key": CUTOVER_LOCK_KEY})
-                conn.commit()
+            except BaseException as exc:
+                if not _release(conn):
+                    exc.add_note("the shared cutover lock was not released")
+                raise
+            if not _release(conn):
+                raise CheckRefused("the shared cutover lock was not released; no later "
+                                   "load or reset can run until this backend ends")
     finally:
         engine.dispose()
+
+
+def _release(conn) -> bool:
+    """Release the shared lock; False when the server says it was not held or the
+    unlock itself failed (the caller decides whether that is an error)."""
+    try:
+        released = conn.execute(text("SELECT pg_advisory_unlock_shared(:key)"),
+                                {"key": CUTOVER_LOCK_KEY}).scalar()
+        conn.commit()
+    except Exception:
+        return False
+    return bool(released)
 
 
 def frozen_sha256(path: str) -> str:

@@ -187,6 +187,15 @@ def test_url_validation_refuses_libpq_environment_overrides(name):
     assert name in str(caught.value)
 
 
+def test_url_validation_refuses_the_transaction_pooler_port():
+    with pytest.raises(bootstrap.BootstrapError, match="port 6543") as caught:
+        bootstrap.validate_url("postgresql://u:secret@db.example.com:6543/c3db",
+                               "db.example.com", "c3db", {})
+    assert "5432" in str(caught.value)
+    bootstrap.validate_url("postgresql://u:secret@db.example.com:5432/c3db",
+                           "db.example.com", "c3db", {})
+
+
 def test_url_validation_refuses_pgtz():
     # PGTZ would set the server session's TimeZone, which dates are read in.
     with pytest.raises(bootstrap.BootstrapError, match="PGTZ is set"):
@@ -682,6 +691,8 @@ def test_the_lock_is_taken_before_the_snapshot(target, sw_people, monkeypatch):
         return observed
 
     monkeypatch.setattr(check, "verify_target", verify_then_write)
+    trace = []
+    watch(monkeypatch, trace=trace)
     try:
         with check.readonly_session(url, database, addr) as (db, _, _):
             seen = db.execute(text("SELECT first_name FROM users WHERE id = :id"),
@@ -689,6 +700,92 @@ def test_the_lock_is_taken_before_the_snapshot(target, sw_people, monkeypatch):
     finally:
         writer.dispose()
     assert seen == "Marker"
+    lock = next(i for i, s in enumerate(trace) if "pg_try_advisory_lock_shared" in s)
+    snapshot = trace.index("SET TRANSACTION READ ONLY")
+    assert lock < trace.index("COMMIT", lock) < snapshot, trace
+
+
+def watch(monkeypatch, trace=None, rewrite=None):
+    """Wrap the check's engine: record each statement and commit into ``trace``, and
+    let ``rewrite`` replace a statement before it is sent."""
+    from sqlalchemy import event
+
+    from app.cutover_check import check
+
+    real = check.make_engine
+
+    def make(url):
+        engine = real(url)
+
+        @event.listens_for(engine, "before_cursor_execute", retval=True)
+        def _statement(conn, cursor, statement, params, context, executemany):
+            if trace is not None:
+                trace.append(statement)
+            return (rewrite(statement) if rewrite else statement), params
+
+        @event.listens_for(engine, "commit")
+        def _commit(conn):
+            if trace is not None:
+                trace.append("COMMIT")
+
+        return engine
+
+    monkeypatch.setattr(check, "make_engine", make)
+
+
+def lock_is_free(url) -> bool:
+    from sqlalchemy import create_engine, text
+
+    from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY
+
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn, conn.begin():
+            return conn.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                                {"k": CUTOVER_LOCK_KEY}).scalar()
+    finally:
+        engine.dispose()
+
+
+@needs_db
+def test_a_changed_backend_between_lock_and_snapshot_is_refused(target, monkeypatch):
+    from app.cutover_check import check
+
+    url, database, addr = target
+    watch(monkeypatch, rewrite=lambda s: "SELECT pg_backend_pid() + 1"
+          if s == "SELECT pg_backend_pid()" else s)
+    with pytest.raises(check.CheckRefused, match="backend changed"):
+        with check.readonly_session(url, database, addr):
+            pass
+    assert lock_is_free(url)
+
+
+@needs_db
+def test_a_lock_that_is_not_released_is_reported(target, monkeypatch):
+    from app.cutover_check import check
+
+    url, database, addr = target
+    # The unlock still runs, but reports false (as on another pooled backend).
+    watch(monkeypatch, rewrite=lambda s: s.replace(
+        "SELECT pg_advisory_unlock_shared(%(key)s)",
+        "SELECT pg_advisory_unlock_shared(%(key)s) AND false"))
+    with pytest.raises(check.CheckRefused, match="lock was not released"):
+        with check.readonly_session(url, database, addr):
+            pass
+    assert lock_is_free(url)
+
+
+@needs_db
+def test_a_failing_unlock_never_hides_the_original_error(target, monkeypatch):
+    from app.cutover_check import check
+
+    url, database, addr = target
+    watch(monkeypatch, rewrite=lambda s: "SELECT 1/0"
+          if s.startswith("SELECT pg_advisory_unlock_shared") else s)
+    with pytest.raises(RuntimeError, match="the original error"):
+        with check.readonly_session(url, database, addr):
+            raise RuntimeError("the original error")
+    assert lock_is_free(url)  # the backend closed with the engine, releasing it
 
 
 @needs_db

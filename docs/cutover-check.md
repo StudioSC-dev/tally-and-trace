@@ -38,6 +38,11 @@ python backend/scripts/cutover_check.py \
 ```
 
 - `DATABASE_URL` is read from the environment only; there is no URL flag.
+- Use a **direct or session-mode connection (port 5432)**, never the transaction
+  pooler (port 6543, the URL in `backend/env.example`). The check holds a
+  session-level lock across two transactions; under transaction pooling the lock
+  and its unlock can land on different backends, leaving the lock held so every
+  later load or reset refuses. Port 6543 is refused.
 - Relative paths are resolved against the directory you run it from.
 - `--frozen` and `--report` must resolve outside the repository (symlinks
   included). `--report` must be a new file; it is created at mode 0600.
@@ -51,6 +56,7 @@ python backend/scripts/cutover_check.py \
 - The URL has a query key other than `sslmode`, `sslrootcert`, `connect_timeout`
   or `application_name`, or repeats one. `host`, `hostaddr`, `port`, `dbname`,
   `service` and `options` are all refused.
+- The URL's port is 6543 (the transaction pooler).
 - After connecting: `current_database()` is not `--expect-db`, or
   `inet_server_addr()` is null (a Unix socket) or not `--expect-server-addr`.
 - The cutover lock is held, the owner email matches no user or several, or the
@@ -85,6 +91,10 @@ their class name, never their message.
   with `create_savepoint`, so an internal `commit()` neither ends the snapshot nor
   writes. Everything is rolled back at the end, then the lock is released with
   `pg_advisory_unlock_shared`.
+- The snapshot transaction first re-reads `pg_backend_pid()` and refuses if it is
+  not the backend that took the lock. If the unlock does not return true, the run
+  is refused ("the shared cutover lock was not released"): end that backend before
+  any load or reset. An unlock failure never hides an earlier error.
 - Exchange rates come from the stored rates only (`FxRates.offline`); the rate
   provider is never called.
 - **Time zone.** The date columns are `timestamptz` in the database, so dates are
