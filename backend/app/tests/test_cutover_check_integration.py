@@ -36,8 +36,40 @@ def test_schema_accepts_the_base_fixture():
 
 def test_schema_refuses_an_unknown_version():
     raw = frozen_base()
-    raw["schema_version"] = 2
-    refused(raw, "unknown schema_version 2")
+    raw["schema_version"] = 777
+    refused(raw, "unknown schema_version")
+    with pytest.raises(schema.FrozenError) as caught:
+        schema.parse_frozen(raw)
+    assert "777" not in str(caught.value)
+
+
+SENTINEL_FIGURE = "987654.321"
+SENTINEL_NAME = "Zanzibar Sentinel"
+
+
+def sentinel_frozen() -> dict:
+    """A frozen file whose errors would carry a figure, names and keys if echoed."""
+    raw = frozen_base()
+    raw["card_statements"][0]["owed"] = SENTINEL_FIGURE
+    raw["card_statements"][0]["card"]["name"] = SENTINEL_NAME
+    raw["recurring"][0]["name"] = SENTINEL_NAME
+    raw["recurring"][0]["semi_monthly_days"] = [1, 15]
+    raw["checkpoints"][0]["balances"].append(copy.deepcopy(raw["checkpoints"][0]["balances"][0]))
+    raw["checkpoints"][0]["balances"][0]["account"]["name"] = SENTINEL_NAME
+    raw["checkpoints"][0]["balances"][1]["account"]["name"] = SENTINEL_NAME
+    raw["sheet"]["month_end"]["2031-07"] = SENTINEL_FIGURE
+    raw["loans"][0][SENTINEL_NAME] = SENTINEL_FIGURE
+    return raw
+
+
+def test_schema_errors_carry_no_figures_names_or_keys():
+    with pytest.raises(schema.FrozenError) as caught:
+        schema.parse_frozen(sentinel_frozen())
+    text = str(caught.value)
+    assert "card_statements.0.owed" in text and "at most 2 places" in text, text
+    assert "Extra inputs are not permitted" in text, text
+    for leaked in (SENTINEL_FIGURE, "987654", SENTINEL_NAME, "2031-07", "input_value"):
+        assert leaked not in text, (leaked, text)
 
 
 def test_schema_refuses_unknown_keys():
@@ -726,6 +758,20 @@ def test_wrapper_refuses_an_expect_host_mismatch_before_connecting(tmp_path):
     assert out.returncode == 2
     assert "is not --expect-host 'db.example.com'" in out.stdout
     assert "target:" not in out.stdout
+
+
+def test_wrapper_never_prints_frozen_figures_or_names(tmp_path):
+    # The frozen file is refused before connecting: nothing listens on port 1.
+    frozen = write_frozen(tmp_path, sentinel_frozen())
+    out = run_wrapper(["--frozen", frozen, "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "frozen file is invalid" in out.stdout
+    for leaked in (SENTINEL_FIGURE, "987654", SENTINEL_NAME, "2031-07"):
+        assert leaked not in out.stdout + out.stderr, leaked
+    assert not (tmp_path / "r.json").exists()
 
 
 @pytest.mark.parametrize("url, extra_env, fragment", [

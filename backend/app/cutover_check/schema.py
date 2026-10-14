@@ -16,7 +16,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 from pydantic.functional_validators import BeforeValidator
 
 _MONEY = re.compile(r"^-?\d+(\.\d{1,2})?$")
@@ -108,7 +108,7 @@ class Checkpoint(_Strict):
     def _unique_accounts(self):
         keys = [b.account.key() for b in self.balances]
         if len(keys) != len(set(keys)):
-            raise ValueError(f"checkpoint {self.date} {self.point} lists an account twice")
+            raise ValueError("a checkpoint lists an account twice")
         return self
 
 
@@ -189,19 +189,19 @@ class Recurring(_Strict):
     @model_validator(mode="after")
     def _shape(self):
         if (self.cadence == "semi_monthly") != (self.semi_monthly_days is not None):
-            raise ValueError(f"{self.label()}: semi_monthly_days goes with a semi_monthly cadence")
+            raise ValueError("semi_monthly_days goes with a semi_monthly cadence")
         if (self.end_mode == "after_occurrences") != (self.installment is not None):
-            raise ValueError(f"{self.label()}: installment goes with end_mode after_occurrences")
+            raise ValueError("installment goes with end_mode after_occurrences")
         if self.description_contains is not None and not self.description_contains.strip():
-            raise ValueError(f"{self.label()}: description_contains is empty")
+            raise ValueError("description_contains is empty")
         if self.expected is not None:
             months = sorted(self.expected)
             if not months:
-                raise ValueError(f"{self.label()}: expected lists no month")
+                raise ValueError("expected lists no month")
             if not _contiguous(months):
-                raise ValueError(f"{self.label()}: expected months must be contiguous")
+                raise ValueError("expected months must be contiguous")
             if any(count < 0 for count in self.expected.values()):
-                raise ValueError(f"{self.label()}: expected counts cannot be negative")
+                raise ValueError("expected counts cannot be negative")
         return self
 
 
@@ -241,7 +241,7 @@ class Sheet(_Strict):
             raise ValueError("sheet.month_end must hold exactly the months in sheet.months")
         stray = {d.month for d in self.approved_differences} - set(self.months)
         if stray:
-            raise ValueError(f"approved differences outside sheet.months: {sorted(stray)}")
+            raise ValueError("an approved difference falls outside sheet.months")
         return self
 
 
@@ -271,7 +271,7 @@ class Frozen(_Strict):
         for s in self.card_statements:
             key = (s.card.key(), s.close)
             if key in seen:
-                raise ValueError(f"card statement {s.card.label()} {s.close} is listed twice")
+                raise ValueError("a card statement is listed twice (same card and close)")
             seen.add(key)
         for name, items in (("card_routing", [r.card for r in self.card_routing]),
                             ("loans", [x.loan for x in self.loans])):
@@ -302,8 +302,30 @@ def parse_frozen(raw) -> Frozen:
     if not isinstance(raw, dict):
         raise FrozenError("frozen file must be a JSON object")
     if raw.get("schema_version") != 1:
-        raise FrozenError(f"unknown schema_version {raw.get('schema_version')!r}")
+        raise FrozenError("unknown schema_version (only 1 is supported)")
     try:
         return Frozen.model_validate(raw)
-    except ValueError as exc:
-        raise FrozenError(f"frozen file is invalid: {exc}") from None
+    except ValidationError as exc:
+        raise FrozenError("frozen file is invalid: " + describe(exc)) from None
+
+
+def _field_names() -> set:
+    names, todo = set(), [_Strict]
+    while todo:
+        model = todo.pop()
+        names.update(getattr(model, "model_fields", {}))
+        todo.extend(model.__subclasses__())
+    return names
+
+
+def describe(exc: ValidationError) -> str:
+    """Each error as its location and message, never its input: field names and list
+    positions are shown, any other key (a month, an unknown key) as ``<key>``, and
+    validator messages are written without figures or names."""
+    known = _field_names()
+    parts = []
+    for err in exc.errors(include_input=False, include_url=False, include_context=False):
+        loc = ".".join(str(p) if isinstance(p, int) or p in known else "<key>"
+                       for p in err["loc"])
+        parts.append(f"{loc or '<file>'}: {err['msg']} [{err['type']}]")
+    return f"{len(parts)} error(s): " + "; ".join(parts)
