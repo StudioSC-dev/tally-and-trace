@@ -1042,6 +1042,43 @@ def test_wrapper_reports_an_app_import_failure_by_class_only(tmp_path):
     assert not (tmp_path / "r.json").exists()
 
 
+SENTINEL_DIR = "private-bank-987654.32"
+
+
+@needs_db
+def test_a_failed_report_write_prints_only_its_class(world, target, tmp_path):
+    frozen = write_frozen(tmp_path, owner_frozen(world))
+    report = tmp_path / SENTINEL_DIR / "report.json"  # its directory does not exist
+    out = run_wrapper(wrapper_args(target, frozen, str(report)), cwd=str(tmp_path))
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "refused: FileNotFoundError" in out.stdout
+    assert "Traceback" not in out.stderr
+    assert "987654" not in out.stdout + out.stderr
+
+
+def test_an_unexpected_bootstrap_error_prints_only_its_class(tmp_path):
+    import subprocess
+    import sys
+
+    backend = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    code = ("import runpy, sys\n"
+            f"sys.path.insert(0, {backend!r})\n"
+            "from app.cutover_check import bootstrap\n"
+            "def hermetic():\n"
+            f"    raise PermissionError(13, 'Permission denied', '/x/{SENTINEL_DIR}/tmp')\n"
+            "bootstrap.hermetic = hermetic\n"
+            f"sys.argv = {[WRAPPER, '--frozen', str(tmp_path / 'f.json'), '--report', str(tmp_path / 'r.json'), '--expect-host', '127.0.0.1', '--expect-db', 'c3db', '--expect-server-addr', '192.0.2.1']!r}\n"
+            f"runpy.run_path({WRAPPER!r}, run_name='__main__')\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
+    env["DATABASE_URL"] = "postgresql://u:pw@127.0.0.1:1/c3db"
+    out = subprocess.run([sys.executable, "-c", code], cwd=str(tmp_path), env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "refused: PermissionError" in out.stdout
+    assert "Traceback" not in out.stderr
+    assert "987654" not in out.stdout + out.stderr
+
+
 @pytest.mark.parametrize("url, extra_env, fragment", [
     ("postgresql://u:pw@127.0.0.1:1/c3db?host=10.0.0.9", {}, "query key is not allowed"),
     ("postgresql://u:pw@127.0.0.1:1/c3db?hostaddr=10.0.0.9", {}, "query key is not allowed"),

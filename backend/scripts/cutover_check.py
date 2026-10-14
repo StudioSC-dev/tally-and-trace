@@ -8,7 +8,7 @@
 The URL is read from the environment only. Paths are resolved against the
 directory you run it from, then the process moves into an empty temporary
 directory before any app module is imported, so no ``.env`` is ever read.
-Exit codes: 0 pass, 1 a blocking check failed, 2 refused before checking.
+Exit codes: 0 pass, 1 a blocking check failed, 2 refused (or the report unwritable).
 See docs/cutover-check.md.
 """
 
@@ -47,6 +47,9 @@ def main(argv=None) -> int:
     except bootstrap.BootstrapError as exc:
         print(f"refused: {exc}")
         return 2
+    except Exception as exc:  # e.g. a filesystem error: its message may carry a path
+        print(f"refused: {bootstrap.error_class(exc)}")
+        return 2
     print(bootstrap.target_line(url))
 
     # Only now: the rest of the app (settings read the environment, never a .env).
@@ -70,7 +73,11 @@ def main(argv=None) -> int:
         return 2
 
     print(f"server: db={report['database']} addr={report['server_addr']}")
-    bootstrap.create_private(report_path, check.dump(report) + "\n")
+    try:
+        bootstrap.create_private(report_path, check.dump(report) + "\n")
+    except Exception as exc:  # its message would carry the report path
+        print(f"refused: {bootstrap.error_class(exc)}")
+        return 2
     for line in check.summary_lines(report):
         print(line)
     return 0 if report["overall"] == "pass" else 1

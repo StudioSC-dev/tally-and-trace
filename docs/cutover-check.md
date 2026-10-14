@@ -76,7 +76,7 @@ their class name, never their message.
 |---|---|
 | 0 | Every block passed. |
 | 1 | At least one block failed or refused; read the report. |
-| 2 | Refused before checking; no report was written. |
+| 2 | Refused before checking, or the report could not be written; no report exists. |
 
 ## The session
 
