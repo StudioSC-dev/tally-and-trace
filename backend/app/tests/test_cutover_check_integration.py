@@ -967,14 +967,183 @@ def test_an_active_entry_due_before_as_of_fails(world, target):
 # --- 6. Posted-after guard ------------------------------------------------------------------
 
 @needs_db
-def test_a_posted_row_after_as_of_makes_the_loan_block_refuse(world, target):
+def test_a_posted_row_after_as_of_makes_the_loan_and_sheet_blocks_refuse(world, target):
     row = world["debit"](world["bank"], 100, "2031-03-12", "Too late")
     report = run_check(target, owner_frozen(world))
-    loans = block(report, "loans")
-    assert loans["status"] == "refused"
-    assert [f["transaction_id"] for f in loans["failures"]] == [row]
+    for name in ("loans", "sheet"):
+        refused_block = block(report, name)
+        assert refused_block["status"] == "refused"
+        assert [f["transaction_id"] for f in refused_block["failures"]] == [row]
     assert [r["transaction_id"] for r in report["posted_after"]] == [row]
     assert report["overall"] == "fail"
     # The balance and statement blocks still run on their own boundaries.
     assert block(report, "checkpoints")["status"] == "pass"
     assert block(report, "card_statements")["status"] == "pass"
+
+
+# --- 5. Sheet -------------------------------------------------------------------------------
+
+def sheet_only():
+    from app.cutover_check.sheet import check_sheet
+
+    return [("sheet", check_sheet)]
+
+
+@needs_db
+def test_the_sheet_reads_its_own_account_not_the_partition(world, target, sw_db):
+    from datetime import datetime
+    from decimal import Decimal
+
+    from app.services.forecast import cashflow_by_currency
+    from app.services.fx import FxRates
+
+    world["post"]("/budget-entries/", {
+        "name": "Allowance", "entry_type": "expense", "amount": 1000, "currency": "PHP",
+        "cadence": "semi_monthly", "account_id": world["second"],
+        "next_occurrence": day("2031-03-15")})
+    report = run_check(target, owner_frozen(world), blocks=sheet_only())
+    assert block(report, "sheet")["status"] == "pass", block(report, "sheet")
+    # The PHP partition's net moves with the second bank too: reading it would fail.
+    periods = cashflow_by_currency(sw_db, world["o"]["id"], months=2,
+                                   reference=datetime(2031, 3, 10),
+                                   fx=FxRates.offline(sw_db))["periods"]
+    php = next(r for r in periods[1]["by_currency"] if r["currency"] == "PHP")
+    bank = next(a for a in php["by_account"] if a["account_id"] == world["bank"])
+    assert Decimal(str(bank["closing_balance"])) - Decimal("74000") != Decimal(str(php["net"]))
+
+
+@needs_db
+def test_the_load_month_combines_realised_and_projected_movement(world, target):
+    raw = owner_frozen(world)
+    assert block(run_check(target, raw, blocks=sheet_only()), "sheet")["status"] == "pass"
+    # Projected movement alone from the opening (49600 + 27400) misses the realised -3000.
+    raw["sheet"]["month_end"]["2031-03"] = "77000.00"
+    failures = block(run_check(target, raw, blocks=sheet_only()), "sheet")["failures"]
+    assert [(f["message"], f["month"]) for f in failures] == [
+        ("sheet closing differs", "2031-03"), ("sheet net differs", "2031-03"),
+        ("sheet net differs", "2031-04")]
+    assert failures[0]["actual"] == "74000.00"
+
+
+@needs_db
+def test_an_approved_difference_applies_cumulatively(world, target):
+    raw = owner_frozen(world)
+    raw["sheet"]["approved_differences"] = [
+        {"month": "2031-03", "amount": "100.00", "reason": "a fee the Sheet does not track"}]
+    raw["sheet"]["month_end"] = {"2031-03": "73900.00", "2031-04": "96300.00",
+                                 "2031-05": "118300.00"}
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "pass", sheet_block
+    raw["sheet"]["month_end"] = {"2031-03": "73900.00", "2031-04": "96400.00",
+                                 "2031-05": "118400.00"}  # applied to month 1 only
+    failures = block(run_check(target, raw, blocks=sheet_only()), "sheet")["failures"]
+    assert [(f["message"], f["month"]) for f in failures] == [
+        ("sheet closing differs", "2031-04"), ("sheet net differs", "2031-04"),
+        ("sheet closing differs", "2031-05")]
+
+
+def small_frozen(email, account, months, opening, month_end, policy="excluded") -> dict:
+    return {"schema_version": 1, "owner_email": email, "cutover_date": "2031-03-01",
+            "as_of": "2031-03-10", "timezone": "Asia/Manila", "checkpoints": [],
+            "card_statements": [], "card_routing": [], "loans": [], "recurring": [],
+            "sheet": {"account": account, "currency": account["currency"],
+                      "first_month": months[0], "months": months, "sheet_opening": opening,
+                      "month_end": month_end, "opening_offset": "0.00",
+                      "overflow_policy": policy, "approved_differences": [],
+                      "dated_items": []}}
+
+
+@needs_db
+@pytest.mark.parametrize("policy, month_end", [
+    ("excluded", {"2031-03": "-900.00", "2031-04": "-1900.00"}),
+    ("included", {"2031-03": "0.00", "2031-04": "0.00"}),
+])
+def test_overflow_policy_included_and_excluded(sw_client, sw_people, target, policy, month_end):
+    from app.tests.conftest import sw_post
+
+    o = sw_people("Ola", "Owner")
+    low = sw_post(sw_client, o, "/accounts/", {"name": "Low bank", "account_type": "checking",
+                                               "balance": 100})["id"]
+    reserve = sw_post(sw_client, o, "/accounts/", {"name": "Reserve",
+                                                   "account_type": "savings",
+                                                   "balance": 10000})["id"]
+    sw_post(sw_client, o, "/budget-entries/", {
+        "name": "Rent", "entry_type": "expense", "amount": 1000, "currency": "PHP",
+        "account_id": low, "overflow_account_id": reserve,
+        "next_occurrence": day("2031-03-20")})
+    raw = small_frozen(o["email"], sel("Low bank", "checking"), ["2031-03", "2031-04"],
+                       "100.00", month_end, policy)
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "pass", sheet_block
+    other = "included" if policy == "excluded" else "excluded"
+    raw["sheet"]["overflow_policy"] = other
+    assert block(run_check(target, raw, blocks=sheet_only()), "sheet")["status"] == "fail"
+
+
+@needs_db
+def test_a_missing_dated_item_fails(world, target):
+    raw = owner_frozen(world)
+    raw["sheet"]["dated_items"][0]["amount"] = "-1001.00"
+    [failure] = block(run_check(target, raw, blocks=sheet_only()), "sheet")["failures"]
+    assert failure["message"] == "dated item not found as a posted row on the sheet account"
+    assert [r["transaction_id"] for r in failure["same_day_rows"]] == [
+        world["rows"]["loan_payment"], world["rows"]["hardware"]]
+
+
+# --- 7. Currency partitions and wallets in the Sheet ------------------------------------------
+
+@needs_db
+def test_a_usd_account_is_absent_from_the_php_row(world, target, sw_db):
+    from datetime import datetime
+
+    from app.services.forecast import cashflow_by_currency
+    from app.services.fx import FxRates
+
+    world["transfer"](world["usd"], world["bank"], 100, "2031-03-06", "Convert",
+                      received_amount=5000)
+    world["post"]("/budget-entries/", {
+        "name": "Dollar income", "entry_type": "income", "amount": 50, "currency": "USD",
+        "account_id": world["usd"], "next_occurrence": day("2031-03-20")})
+    periods = cashflow_by_currency(sw_db, world["o"]["id"], months=1,
+                                   reference=datetime(2031, 3, 10),
+                                   fx=FxRates.offline(sw_db))["periods"]
+    php = next(r for r in periods[0]["by_currency"] if r["currency"] == "PHP")
+    assert world["usd"] not in [a["account_id"] for a in php["by_account"]]
+    raw = owner_frozen(world)
+    # The conversion landed 5000 in the bank on Mar 6: every Sheet figure moves by it.
+    raw["sheet"]["sheet_opening"] = "49600.00"
+    raw["sheet"]["month_end"] = {"2031-03": "79000.00", "2031-04": "101400.00",
+                                 "2031-05": "123400.00"}
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "pass", sheet_block
+
+
+@needs_db
+@pytest.mark.parametrize("account", [sel("Pocket wallet", "cash"), sel("Main card", "credit")])
+def test_a_sheet_account_that_is_not_projection_cash_is_refused(world, target, account):
+    raw = owner_frozen(world)
+    raw["sheet"]["account"] = account
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "refused"
+    assert sheet_block["failures"][0]["message"].startswith(
+        "refused: the sheet account must be projection cash")
+
+
+@needs_db
+def test_as_of_on_the_first_reads_the_closed_month_from_the_ledger(sw_client, sw_people, target):
+    from app.tests.conftest import sw_post
+
+    o = sw_people("Ada", "Owner")
+    bank = sw_post(sw_client, o, "/accounts/", {"name": "Only bank", "account_type": "checking",
+                                                "balance": 1000})["id"]
+    sw_post(sw_client, o, "/transactions/", {
+        "account_id": bank, "amount": 300, "currency": "PHP", "transaction_type": "debit",
+        "transaction_date": day("2031-03-05"), "description": "Hardware"})
+    sw_post(sw_client, o, "/budget-entries/", {
+        "name": "Rent", "entry_type": "expense", "amount": 200, "currency": "PHP",
+        "account_id": bank, "next_occurrence": day("2031-04-20")})
+    raw = small_frozen(o["email"], sel("Only bank", "checking"), ["2031-03", "2031-04"],
+                       "1000.00", {"2031-03": "700.00", "2031-04": "500.00"})
+    raw["as_of"] = "2031-04-01"
+    sheet_block = block(run_check(target, raw, blocks=sheet_only()), "sheet")
+    assert sheet_block["status"] == "pass", sheet_block

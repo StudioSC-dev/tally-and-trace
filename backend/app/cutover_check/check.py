@@ -26,6 +26,7 @@ from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY, verify_target
 from app.cutover_check.schema import (
     Frozen, Recurring, Selector, add_months, month_of, month_start,
 )
+from app.cutover_check.sheet import check_sheet
 from app.cutover_check.statements import compared_set, computed_cycles, naive
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -541,6 +542,7 @@ BLOCKS: List[tuple] = [
     ("recurring", check_recurring),
     ("occurrences", check_occurrences),
     ("foreign_invariants", check_foreign),
+    ("sheet", check_sheet),
 ]
 
 
