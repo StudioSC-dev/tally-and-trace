@@ -69,6 +69,7 @@ and is at most half a month past it, and occurrences are projected
 own-due-date rule for this reason: filled oldest first, an occurrence past a
 short window's horizon would change an earlier due date in a longer window.)
 """
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -95,6 +96,7 @@ COVER_HORIZON = timedelta(days=31)
 # How far before its own date a one-off planned payment may reach back to cover
 # an open due date (one month at most; see ``cover_planned``).
 PLANNED_LOOKBACK = timedelta(days=31)
+logger = logging.getLogger(__name__)
 
 
 class LoanError(ValueError):
@@ -571,12 +573,17 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date
     return [r for r in rows if datetime(r[1].year, r[1].month, r[1].day) < end]
 
 
-def planned_covers(db: Session, loan: Account) -> List[Tuple[date, Decimal]]:
+def planned_covers(db: Session, loan: Account, fx=None) -> List[Tuple[date, Decimal]]:
     """``(date, cash)`` of every unposted non-prepayment transfer into the loan.
 
     Loaded by the loan alone, whatever the row's date or creator, so a payable
     does not depend on the window, and a payment another user recorded still
     covers this loan's due date.
+
+    Each cover's ``amount + transfer_fee`` is in its source account's
+    currency. A legacy cover from another currency is first normalised into
+    the loan's currency at the stored rate (``fx``, offline when None); one
+    with no rate is not netted at all (the due date stays whole) and is logged.
     """
     rows = (
         db.query(Transaction)
@@ -587,12 +594,40 @@ def planned_covers(db: Session, loan: Account) -> List[Tuple[date, Decimal]]:
         )
         .all()
     )
-    return [(t.transaction_date.date(), _money(t.amount) + _money(t.transfer_fee or 0))
-            for t in rows if t.loan_payment_kind != PREPAYMENT]
+    covers = []
+    for t in rows:
+        if t.loan_payment_kind == PREPAYMENT:
+            continue
+        cash = _money(t.amount) + _money(t.transfer_fee or 0)
+        source = db.get(Account, t.transfer_from_account_id or t.account_id)
+        cash = normalise_cover(db, loan, cash, getattr(source, "currency", None), fx)
+        if cash is not None:
+            covers.append((t.transaction_date.date(), cash))
+    return covers
+
+
+def normalise_cover(db: Session, loan: Account, cash: Decimal, currency, fx=None
+                    ) -> Optional[Decimal]:
+    """``cash`` (in ``currency``) in the loan's currency, or None with no stored rate.
+
+    Same currency (always, for a cover written under the loan rule): unchanged.
+    """
+    from app.services.fx import FxRates, convert
+
+    base = getattr(currency, "value", currency)
+    quote = getattr(loan.currency, "value", loan.currency)
+    if base is None or base == quote:
+        return cash
+    rate = (fx or FxRates.offline(db)).rate(base, quote)
+    if rate is None:
+        logger.warning("No exchange rate from %s to %s: a cover of loan %s is not netted",
+                       base, quote, loan.id)
+        return None
+    return convert(cash, rate.rate)
 
 
 def build_loan_payables(db: Session, loans: List[Account], start: datetime, end: datetime,
-                        projected_by_loan: dict) -> List[dict]:
+                        projected_by_loan: dict, fx=None) -> List[dict]:
     """Dated payable events for the loans' due dates before ``end``.
 
     A due date owes its payment less what the planned payments cover (see the
@@ -603,7 +638,9 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
     occurrences into each loan up to ``end`` plus ``COVER_HORIZON``, each from
     its own due date forward (``allocate_to_due_dates``). A due date before
     ``start`` is overdue: emitted on ``start`` with ``overdue`` True and its due
-    date as ``original_date``.
+    date as ``original_date``. Covers are in the loan's currency: the planned
+    ones are normalised here (``planned_covers``, with ``fx``), the projected
+    ones by the caller, and the payable is in the loan's currency.
 
     Each event names the paying account as ``funding_account_id``; the caller
     decides whether that leg is cash (``forecast.collect_events``). Its handling
@@ -619,7 +656,7 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
         if not dates:
             continue
         after_planned = cover_planned([(due, amount) for _, due, amount in dates],
-                                      planned_covers(db, loan))
+                                      planned_covers(db, loan, fx))
         dues = allocate_to_due_dates(
             loan.loan_first_payment_date,
             [(step, left) for (step, _, _), left in zip(dates, after_planned)],

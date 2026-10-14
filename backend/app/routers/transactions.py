@@ -22,7 +22,7 @@ from app.core.tags import (
     TAG_FILTER_HELP, effective_tag_criterion, filter_tag_id, own_tag_ids,
     replace_own_tags,
 )
-from app.models.transaction import Transaction, TransactionType
+from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
 from app.core.redaction import (
     FULL, Redactor, displayed_description_criterion, full_view_criterion,
@@ -44,7 +44,8 @@ from app.models.allocation import BudgetPeriodFrequency
 from app.core.time import naive_utc_now, utc_now
 from datetime import datetime, timedelta, timezone
 from calendar import monthrange
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+from types import SimpleNamespace
 import os
 from app.core.config import settings
 
@@ -465,6 +466,237 @@ def _stamp_posted_legacy_loan_payment(db: Session, user: User, txn: Transaction,
         posted=True)
 
 
+RECEIVED_AMOUNT_REQUIRED = "Enter the amount received"
+
+
+def _received_amount(source: Account, destination: Account, *, amount, received,
+                     posted: bool) -> Optional[Decimal]:
+    """The ``received_amount`` to store on a transfer ``source`` -> ``destination``.
+
+    The only place a transfer's account currencies are read (balances use the
+    stored figures, ``transfer_sides``). Between accounts in one currency it is
+    stored as null: a value equal to ``amount`` is dropped, any other is
+    refused. Across currencies a credit card may not take part (cards are paid
+    and drawn in their own currency), and a posted transfer needs a figure
+    greater than 0; an unposted one may leave it empty until it is posted.
+    """
+    if source.currency == destination.currency:
+        if received is None or _D(received) == _D(amount):
+            return None
+        raise HTTPException(
+            status_code=400,
+            detail="Both accounts are in the same currency, so the amount received is the "
+                   "amount sent; leave it empty")
+    if AccountType.CREDIT in (source.account_type, destination.account_type):
+        raise HTTPException(
+            status_code=400,
+            detail="A credit card only sends or receives money in its own currency")
+    if received is None or _D(received) <= 0:
+        if posted:
+            raise HTTPException(status_code=400, detail=RECEIVED_AMOUNT_REQUIRED)
+        return None
+    return _D(received)
+
+
+def _received_amount_for_update(db: Session, txn: Transaction, requested: dict):
+    """``(changed, value)``: the ``received_amount`` an edit leaves on ``txn``.
+
+    Checked as for a new transfer (``_received_amount``) against the accounts,
+    amount and posting the edit leaves, with the request's figure, else the
+    stored one. A row that stops being a transfer keeps none. Between accounts
+    in one currency an edit that names no figure clears a stored one only when
+    it changes either account; one that keeps both leaves it alone (it can
+    exist only on a row whose account currency changed outside the API), so an
+    unrelated edit never moves a balance. Across currencies the rule is
+    checked only when the edit names a figure, changes either account, or
+    posts the row. Accounts that are missing are left for the later checks to
+    report.
+    """
+    if requested.get("transaction_type", txn.transaction_type) != TransactionType.TRANSFER:
+        return txn.received_amount is not None, None
+    source_id = requested.get("transfer_from_account_id", txn.transfer_from_account_id)
+    destination_id = requested.get("transfer_to_account_id", txn.transfer_to_account_id)
+    source = db.get(Account, source_id) if source_id else None
+    destination = db.get(Account, destination_id) if destination_id else None
+    if source is None or destination is None:
+        return False, None
+    given = "received_amount" in requested
+    retargeted = (txn.transaction_type != TransactionType.TRANSFER
+                  or source_id != txn.transfer_from_account_id
+                  or destination_id != txn.transfer_to_account_id)
+    if source.currency == destination.currency and not given:
+        # Retargeted into one currency: the stored figure no longer applies.
+        return retargeted and txn.received_amount is not None, None
+    posting = bool(requested.get("is_posted", txn.is_posted)) and not txn.is_posted
+    if not (given or retargeted or posting):
+        # Nothing the rule judges changes (a legacy row whose account currency
+        # changed outside the API still takes metadata edits).
+        return False, None
+    value = _received_amount(
+        source, destination,
+        amount=requested.get("amount", txn.amount),
+        received=requested["received_amount"] if given else txn.received_amount,
+        posted=bool(requested.get("is_posted", txn.is_posted)))
+    stored = txn.received_amount
+    changed = (value is None) != (stored is None) or (
+        value is not None and _D(value) != _D(stored))
+    return changed, value
+
+
+def foreign_post_detail(account: Account) -> str:
+    return f"Enter the amount in {account.currency.value} to post this foreign purchase"
+
+
+def exchange_rate(actual, face) -> Optional[Decimal]:
+    """``actual / face`` to 6 places (the ``exchange_rate`` column), or None for no face."""
+    if face is None or _D(face) == 0:
+        return None
+    return (_D(actual) / _D(face)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
+def _foreign_post_on_create(transaction: TransactionCreate, data: dict,
+                            account: Account) -> None:
+    """Check and fill a debit or credit created posted with a foreign face.
+
+    The face currency is ``projected_currency``, else ``currency``. When it is
+    not the account's, the request's ``amount`` is the actual figure in the
+    account's currency and must be greater than 0, else 400. With a face
+    figure in ``projected_amount``, ``original_*`` and ``exchange_rate`` are
+    filled from it where the request sent none.
+    """
+    sent = transaction.model_fields_set
+    named = transaction.currency if "currency" in sent else None
+    face_currency = transaction.projected_currency or named or account.currency
+    if face_currency == account.currency:
+        return
+    if _D(transaction.amount) <= 0:
+        raise HTTPException(status_code=400, detail=foreign_post_detail(account))
+    if transaction.projected_amount is None:
+        return
+    if "original_amount" not in sent:
+        data["original_amount"] = transaction.projected_amount
+    if "original_currency" not in sent:
+        data["original_currency"] = face_currency
+    if "exchange_rate" not in sent:
+        data["exchange_rate"] = exchange_rate(transaction.amount, transaction.projected_amount)
+
+
+def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> dict:
+    """The fields posting ``txn`` sets when its face is foreign, checked before any write.
+
+    Only an edit that posts an unposted debit or credit is judged. Its face
+    (``pending_face``, with the request's ``projected_*`` and the stored
+    ``currency``, read before the request normalises it to the account's; the
+    request's ``currency`` when the edit moves the row to another account) is
+    compared with the account the edit leaves. When the face currency is
+    not the account's, the request must carry ``amount`` greater than 0,
+    else 400: that actual figure goes into ``amount``, ``currency`` becomes
+    the account's, ``projected_*`` keep (or, when null, record) the face so
+    a later revert never reads the actual figure as the face, and
+    ``original_*`` and ``exchange_rate`` are filled
+    from the face where the request sent none. Reverting never comes here:
+    it leaves ``amount`` as posted.
+    """
+    if not requested.get("is_posted") or txn.is_posted:
+        return {}
+    if requested.get("transaction_type", txn.transaction_type) == TransactionType.TRANSFER:
+        return {}
+    account_id = requested.get("account_id", txn.account_id)
+    account = db.get(Account, account_id)
+    if account is None:
+        return {}  # reported by the later checks
+    edited = SimpleNamespace(
+        projected_amount=requested.get("projected_amount", txn.projected_amount),
+        projected_currency=requested.get("projected_currency", txn.projected_currency),
+        # On the same account, the stored currency, never the request's: a
+        # client posting the actual figure sends the account's currency, which
+        # would erase a face held in ``currency`` alone. A post that also moves
+        # the row reads the request's: the stored one named the old account's.
+        currency=(txn.currency if account_id == txn.account_id
+                  else requested.get("currency", txn.currency)),
+        amount=txn.amount)
+    face, face_currency = pending_face(edited)
+    if face_currency is None or face_currency == account.currency:
+        return {}
+    actual = requested.get("amount")
+    if actual is None or _D(actual) <= 0:
+        raise HTTPException(status_code=400, detail=foreign_post_detail(account))
+    # The actual figure is in the account's currency, so the row is labelled
+    # in it; the face stays in ``projected_*``.
+    filled = {"projected_amount": face, "projected_currency": face_currency,
+              "currency": account.currency}
+    if "original_amount" not in requested:
+        filled["original_amount"] = face
+    if "original_currency" not in requested:
+        filled["original_currency"] = face_currency
+    if "exchange_rate" not in requested:
+        filled["exchange_rate"] = exchange_rate(actual, face)
+    return filled
+
+
+def _revert_provenance(db: Session, txn: Transaction, requested: dict) -> dict:
+    """The fields reverting ``txn`` sets, so its retained ``amount`` is never converted.
+
+    Only an edit that reverts a posted debit or credit is judged. ``amount``
+    stays as posted (an actual figure in the account's currency). When no
+    ``projected_amount`` holds a face figure, ``pending_face`` reads that
+    ``amount`` as the face, in ``projected_currency`` or else ``currency``;
+    a row created posted with a foreign ``currency`` and no projected figure
+    would have its actual figure converted again. Its face currency is set
+    to the account's, so the forecast reads ``amount`` as it is.
+    """
+    if requested.get("is_posted", True) or not txn.is_posted:
+        return {}
+    if requested.get("transaction_type", txn.transaction_type) == TransactionType.TRANSFER:
+        return {}
+    if requested.get("projected_amount", txn.projected_amount) is not None:
+        return {}
+    account = db.get(Account, requested.get("account_id", txn.account_id))
+    if account is None:
+        return {}
+    face_currency = (requested.get("projected_currency", txn.projected_currency)
+                     or requested.get("currency", txn.currency))
+    if face_currency is None or face_currency == account.currency:
+        return {}
+    return {"projected_currency": account.currency}
+
+
+def _posting_figure(db: Session, txn: Transaction) -> Optional[str]:
+    """The one figure posting ``txn`` needs: ``amount``, ``received_amount`` or None.
+
+    ``amount`` for a debit or credit whose face currency (``pending_face``) is
+    not its account's, ``received_amount`` for a transfer between accounts in
+    different currencies.
+    """
+    if txn.transaction_type == TransactionType.TRANSFER:
+        source = db.get(Account, txn.transfer_from_account_id) if txn.transfer_from_account_id else None
+        destination = db.get(Account, txn.transfer_to_account_id) if txn.transfer_to_account_id else None
+        if source is not None and destination is not None and source.currency != destination.currency:
+            return "received_amount"
+        return None
+    account = db.get(Account, txn.account_id) if txn.account_id else None
+    face_currency = pending_face(txn)[1]
+    if account is not None and face_currency is not None and face_currency != account.currency:
+        return "amount"
+    return None
+
+
+def _owner_exemption_allows(db: Session, txn: Transaction, requested: dict) -> bool:
+    """Whether a request fits the account owner exemption's narrow shape.
+
+    Exactly ``{is_posted}``; or, to post an unposted row, ``{is_posted: true}``
+    plus the one figure the row needs (``_posting_figure``). Reverting stays
+    ``{is_posted}`` only.
+    """
+    keys = set(requested)
+    if keys == {"is_posted"}:
+        return True
+    if "is_posted" not in keys or requested["is_posted"] is not True or txn.is_posted:
+        return False
+    figure = _posting_figure(db, txn)
+    return figure is not None and keys == {"is_posted", figure}
+
+
 def _budget_delta_for_transaction(transaction_type: TransactionType, amount: float) -> float:
     if transaction_type == TransactionType.DEBIT:
         return amount
@@ -691,9 +923,12 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
                                 primary_account, destination_account)
-        
-        if transaction_data.get("currency") is None:
-            transaction_data["currency"] = destination_account.currency
+        transaction_data["received_amount"] = _received_amount(
+            primary_account, destination_account, amount=transaction.amount,
+            received=transaction.received_amount, posted=transaction.is_posted)
+
+        # A transfer is recorded in its source account's currency.
+        transaction_data["currency"] = primary_account.currency
         if transaction_data.get("projected_currency") is None and transaction.projected_amount is not None:
             transaction_data["projected_currency"] = destination_account.currency
         if transaction_data.get("original_currency") is None and transaction.original_amount is not None:
@@ -703,11 +938,14 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         # credit is dropped, never stored unchecked (see TRANSFER_ONLY_COLUMNS).
         transaction_data["transfer_from_account_id"] = None
         transaction_data["transfer_to_account_id"] = None
+        transaction_data["received_amount"] = None
         primary_account = db.query(Account).filter(
             Account.id == transaction.account_id
         ).first()
         if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
+        if transaction.is_posted:
+            _foreign_post_on_create(transaction, transaction_data, primary_account)
         if transaction_data.get("currency") is None:
             transaction_data["currency"] = primary_account.currency
         if transaction_data.get("projected_currency") is None and transaction.projected_amount is not None:
@@ -723,11 +961,11 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
         primary_account.balance = _D(primary_account.balance) - _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.TRANSFER and transaction.is_posted:
-        # The stored split: a loan payment's may differ from the request's.
-        principal, fee = transaction_data["amount"], transaction_data["transfer_fee"]
-        primary_account.balance = _D(primary_account.balance) - (_D(principal) + _D(fee))
+        # The stored figures: a loan payment's split may differ from the request's.
+        out, received = transfer_sides(db_transaction)
+        primary_account.balance = _D(primary_account.balance) - out
         if destination_account:
-            destination_account.balance = _D(destination_account.balance) + _D(principal)
+            destination_account.balance = _D(destination_account.balance) + received
 
     if transaction.is_posted:
         delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)
@@ -759,7 +997,26 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     every account the row touches, before and after. Posting or reverting
     alone (a request with only ``is_posted``) is also open to the owner of
     every account the row touches when its creator has lost access (the
-    account owner exemption). Receipts and invoices are the creator's.
+    account owner exemption). A post under it may also carry the one figure
+    the row needs (``_posting_figure``): ``amount`` for a pending debit or
+    credit with a foreign face, ``received_amount`` for a cross-currency
+    transfer. Anything else is refused (404), and reverting stays
+    ``{is_posted}`` only. Receipts and invoices are the creator's.
+
+    ===========================  ==========================================
+    Caller                       Rule
+    ===========================  ==========================================
+    Owner, under the exemption   as above
+    Editor with ``can_edit``     the normal path
+    Viewer                       404
+    Creator who has lost access  404
+    ===========================  ==========================================
+
+    Posting a debit or credit whose face is in another currency than its
+    account's needs the actual ``amount`` (``_foreign_post_on_update``), and
+    posting a cross-currency transfer needs a ``received_amount``, sent or
+    stored (``_received_amount_for_update``). Reverting leaves ``amount`` as
+    posted.
     """
     db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
                                        "Transaction not found")
@@ -768,9 +1025,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     # Validate before any balance reversal or write.
     requested = transaction_update.dict(exclude_unset=True)
     permissions = RecordAccess(db, current_user).permissions(db_transaction)
-    status_only = set(requested) == {"is_posted"}
     if not permissions["can_edit"]:
-        resolving = status_only and (
+        resolving = _owner_exemption_allows(db, db_transaction, requested) and (
             permissions["can_post"] if requested["is_posted"] else permissions["can_revert"])
         if not resolving:
             raise HTTPException(status_code=404, detail="Transaction not found")
@@ -822,13 +1078,17 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
+    received_changed, received_amount = _received_amount_for_update(
+        db, db_transaction, requested)
+    foreign_post = _foreign_post_on_update(db, db_transaction, requested)
+    revert = _revert_provenance(db, db_transaction, requested)
 
     # Store old values for balance recalculation
     old_amount = db_transaction.amount
     old_type = db_transaction.transaction_type
     old_account_id = db_transaction.account_id
     old_is_posted = db_transaction.is_posted
-    old_transfer_fee = db_transaction.transfer_fee or 0.0
+    old_out, old_in = transfer_sides(db_transaction)
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
     old_category_id = db_transaction.category_id
@@ -849,11 +1109,11 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             if old_transfer_from:
                 from_account = db.query(Account).filter(Account.id == old_transfer_from).first()
                 if from_account:
-                    from_account.balance = _D(from_account.balance) + _D(old_amount) + _D(old_transfer_fee)
+                    from_account.balance = _D(from_account.balance) + old_out
             if old_transfer_to:
                 to_account = db.query(Account).filter(Account.id == old_transfer_to).first()
                 if to_account:
-                    to_account.balance = _D(to_account.balance) - _D(old_amount)
+                    to_account.balance = _D(to_account.balance) - old_in
         old_budget_delta = _budget_delta_for_transaction(old_type, old_amount)
         if old_budget_delta:
             previous_budget_allocations = _get_budget_allocations_for_transaction(
@@ -886,10 +1146,15 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             public_receipt_url(db_transaction.id, db_transaction.receipt_url):
         update_data.pop("receipt_url")
 
+    update_data.pop("received_amount", None)
     for field, value in update_data.items():
         setattr(db_transaction, field, value)
     for field, value in loan_stamp.items():
         setattr(db_transaction, field, value)
+    for field, value in {**foreign_post, **revert}.items():
+        setattr(db_transaction, field, value)
+    if received_changed:
+        db_transaction.received_amount = received_amount
     if db_transaction.transaction_type != TransactionType.TRANSFER:
         # A debit or credit keeps no transfer accounts: a sent one is dropped, and
         # an edit away from a transfer clears the old ones.
@@ -922,8 +1187,8 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 raise HTTPException(status_code=404, detail="Destination account not found")
             
             db_transaction.account_id = db_transaction.transfer_from_account_id
-            if db_transaction.currency is None:
-                db_transaction.currency = destination_account.currency
+            # A transfer is recorded in its source account's currency.
+            db_transaction.currency = primary_account.currency
             if db_transaction.projected_amount is not None and db_transaction.projected_currency is None:
                 db_transaction.projected_currency = destination_account.currency
             if db_transaction.original_amount is not None and db_transaction.original_currency is None:
@@ -951,8 +1216,9 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         elif db_transaction.transaction_type == TransactionType.DEBIT and primary_account:
             primary_account.balance = _D(primary_account.balance) - _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER and primary_account and destination_account:
-            primary_account.balance = _D(primary_account.balance) - (_D(db_transaction.amount) + _D(db_transaction.transfer_fee))
-            destination_account.balance = _D(destination_account.balance) + _D(db_transaction.amount)
+            new_out, new_in = transfer_sides(db_transaction)
+            primary_account.balance = _D(primary_account.balance) - new_out
+            destination_account.balance = _D(destination_account.balance) + new_in
         new_budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if new_budget_delta:
             new_budget_allocations = _get_budget_allocations_for_transaction(
@@ -993,14 +1259,15 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
             if account:
                 account.balance = _D(account.balance) + _D(db_transaction.amount)
         elif db_transaction.transaction_type == TransactionType.TRANSFER:
+            out, received = transfer_sides(db_transaction)
             if db_transaction.transfer_from_account_id:
                 from_account = db.query(Account).filter(Account.id == db_transaction.transfer_from_account_id).first()
                 if from_account:
-                    from_account.balance = _D(from_account.balance) + _D(db_transaction.amount) + _D(db_transaction.transfer_fee)
+                    from_account.balance = _D(from_account.balance) + out
             if db_transaction.transfer_to_account_id:
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
-                    to_account.balance = _D(to_account.balance) - _D(db_transaction.amount)
+                    to_account.balance = _D(to_account.balance) - received
         budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
         if budget_delta:
             budget_allocations = _get_budget_allocations_for_transaction(
@@ -1096,8 +1363,20 @@ def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
     hidden_liability_ids: Optional[Set[int]] = None,
+    currency_of=None, cash_ids: Optional[Set[int]] = None,
 ) -> dict:
     """Income, expense and per-category totals for posted transactions.
+
+    With ``currency_of`` ({account id: currency}.get) the totals are split by
+    account currency (STU-236, plan D3) and returned as ``{"by_currency":
+    {currency: totals}}``, each also carrying ``moved_in``, ``moved_out`` and
+    ``transaction_count``. A row counts in its account's currency, never
+    ``t.currency``; a transfer in its source's (a top-up's unallocated spend
+    too, at what arrived); a transfer between two of ``cash_ids`` (in-scope
+    projection-cash accounts) in different currencies is money moved:
+    ``moved_out`` in the source's currency and ``moved_in`` at what arrived
+    in the destination's, never income or expense. Without it, one set of
+    totals, as always.
 
     ``scope_ids`` are the caller's in-scope accounts. A transfer counts only when
     its source is one of them: a transfer in from an account outside the scope
@@ -1126,7 +1405,11 @@ def summarize_period(
       for by wallet debits and wallet-funded fees. Returned money is not wallet
       spend, so it never reduces this row; it is shown on its own, negative,
       "Returned from wallets" row instead. Together they keep the expense column
-      of ``category_breakdown`` summing to ``total_expenses``;
+      of ``category_breakdown`` summing to ``total_expenses`` in every
+      currency bucket: a top-up adds what left the source (its ``amount``) to
+      the source's bucket, and the wallet's own debits net against
+      unallocated in the wallet's bucket, so a cross-currency top-up never
+      puts a wallet-currency figure in a source-currency row;
     - a transfer between two wallets moves no expense, and money leaving a
       wallet for an account outside the caller's scope stays wallet spend.
 
@@ -1159,14 +1442,19 @@ def summarize_period(
     zero = Decimal("0")
     loan_names = loan_names or {}
     hidden_liability_ids = hidden_liability_ids or set()
-    total_income = zero
-    total_expenses = zero
-    unallocated_wallet = zero
-    returned = zero
-    breakdown: dict = {}
+    cash_ids = cash_ids or set()
+    buckets: dict = {}
 
-    def row(name: str) -> dict:
-        return breakdown.setdefault(name, {"income": zero, "expenses": zero})
+    def bucket(account_id) -> dict:
+        key = currency_of(account_id) if currency_of is not None else None
+        if key not in buckets:
+            buckets[key] = {"total_income": zero, "total_expenses": zero, "moved_in": zero,
+                            "moved_out": zero, "unallocated": zero, "returned": zero,
+                            "breakdown": {}, "transaction_count": 0}
+        return buckets[key]
+
+    def row(b: dict, name: str) -> dict:
+        return b["breakdown"].setdefault(name, {"income": zero, "expenses": zero})
 
     def category(t) -> str:
         if not t.category_id:
@@ -1177,23 +1465,28 @@ def summarize_period(
 
     for t in transactions:
         amount = _D(t.amount)
+        b = bucket(t.account_id)
+        if t.transaction_type != TransactionType.TRANSFER:
+            b["transaction_count"] += 1
         if t.transaction_type == TransactionType.CREDIT:
-            total_income += amount
-            row(category(t))["income"] += amount
+            b["total_income"] += amount
+            row(b, category(t))["income"] += amount
             if t.account_id in wallet_ids:
                 # Income received into a wallet is also an implicit top-up.
-                total_expenses += amount
-                unallocated_wallet += amount
+                b["total_expenses"] += amount
+                b["unallocated"] += amount
         elif t.transaction_type == TransactionType.DEBIT:
-            row(category(t))["expenses"] += amount
+            row(b, category(t))["expenses"] += amount
             if t.account_id in wallet_ids:
-                unallocated_wallet -= amount
+                b["unallocated"] -= amount
             else:
-                total_expenses += amount
+                b["total_expenses"] += amount
         elif t.transaction_type == TransactionType.TRANSFER:
             source = t.transfer_from_account_id or t.account_id
             if source not in scope_ids:
                 continue  # inbound from outside the caller's scope
+            b = bucket(source)
+            b["transaction_count"] += 1
             fee = _D(t.transfer_fee)
             destination = t.transfer_to_account_id
             if destination in hidden_liability_ids:
@@ -1204,28 +1497,49 @@ def summarize_period(
             if fee:
                 fee_row = (f"{LOAN_INTEREST_PREFIX}{loan_names[destination]}"
                            if destination in loan_names else TRANSFER_FEES)
-                row(fee_row)["expenses"] += fee
+                row(b, fee_row)["expenses"] += fee
             if from_wallet:
-                unallocated_wallet -= fee
+                b["unallocated"] -= fee
                 if destination in scope_ids and not to_wallet:
-                    total_expenses -= amount
-                    returned += amount
+                    b["total_expenses"] -= amount
+                    b["returned"] += amount
             elif to_wallet:
-                total_expenses += amount + fee
-                unallocated_wallet += amount
+                b["total_expenses"] += amount + fee
+                # The top-up's row, in the source's currency: what left it. The
+                # wallet's own spending nets against unallocated in the wallet's
+                # bucket (above), so every category figure stays in its bucket's
+                # currency, whatever arrived in the wallet.
+                b["unallocated"] += amount
             else:
-                total_expenses += fee
+                b["total_expenses"] += fee
+                if (currency_of is not None and source in cash_ids and destination in cash_ids
+                        and currency_of(source) != currency_of(destination)):
+                    # Money moved across currencies: neither income nor expense
+                    # (STU-236, plan C3); the inbound leg counts what arrived.
+                    b["moved_out"] += amount
+                    inbound = bucket(destination)
+                    inbound["moved_in"] += transfer_sides(t)[1]
+                    inbound["transaction_count"] += 1
 
-    if unallocated_wallet:
-        row(UNALLOCATED_WALLET_SPEND)["expenses"] += unallocated_wallet
-    if returned:
-        row(RETURNED_FROM_WALLETS)["expenses"] -= returned
+    def result(b: dict) -> dict:
+        breakdown = b["breakdown"]
+        if b["unallocated"]:
+            row(b, UNALLOCATED_WALLET_SPEND)["expenses"] += b["unallocated"]
+        if b["returned"]:
+            row(b, RETURNED_FROM_WALLETS)["expenses"] -= b["returned"]
+        return {
+            "total_income": b["total_income"],
+            "total_expenses": b["total_expenses"],
+            "category_breakdown": breakdown,
+        }
 
-    return {
-        "total_income": total_income,
-        "total_expenses": total_expenses,
-        "category_breakdown": breakdown,
-    }
+    if currency_of is None:
+        return result(buckets.get(None) or bucket(None))
+    return {"by_currency": {
+        currency: {**result(b), "moved_in": b["moved_in"], "moved_out": b["moved_out"],
+                   "transaction_count": b["transaction_count"]}
+        for currency, b in buckets.items()
+    }}
 
 
 @router.get("/summary/period")
@@ -1290,12 +1604,37 @@ def get_transaction_summary(
     category_names = {c.id: c.name for c in categories}
     category_owners = {c.id: c.user_id for c in categories}
 
-    summary = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
-                               category_owners=category_owners,
-                               hidden_liability_ids=hidden_liability_ids)
+    # Split by account currency (STU-236): the top-level totals and breakdown
+    # are the default currency's; ``by_currency`` carries each currency's.
+    from app.services.forecast import default_currency, is_projection_cash, ordered_currencies
+
+    currencies = {a.id: a.currency.value for a in referenced if a.id in scope_ids}
+    cash_ids = {a.id for a in referenced if a.id in scope_ids and is_projection_cash(a)}
+    split = summarize_period(transactions, wallet_ids, category_names, scope_ids, loan_names,
+                             category_owners=category_owners,
+                             hidden_liability_ids=hidden_liability_ids,
+                             currency_of=currencies.get, cash_ids=cash_ids)["by_currency"]
+    default = default_currency(db, current_user.id)
+    empty = {"total_income": Decimal("0"), "total_expenses": Decimal("0"), "moved_in": Decimal("0"),
+             "moved_out": Decimal("0"), "transaction_count": 0, "category_breakdown": {}}
+    by_currency = []
+    for currency in ordered_currencies(split, default):
+        part = split.get(currency) or empty
+        by_currency.append({
+            "currency": currency,
+            "total_income": part["total_income"],
+            "total_expenses": part["total_expenses"],
+            "moved_in": part["moved_in"],
+            "moved_out": part["moved_out"],
+            "net_flow": (part["total_income"] - part["total_expenses"] + part["moved_in"]
+                         - part["moved_out"]),
+            "transaction_count": part["transaction_count"],
+            "category_breakdown": part["category_breakdown"],
+        })
+    summary = by_currency[0]
     total_income = summary["total_income"]
     total_expenses = summary["total_expenses"]
-    net_flow = total_income - total_expenses
+    net_flow = summary["net_flow"]
     category_summary = summary["category_breakdown"]
 
     return {
@@ -1309,5 +1648,6 @@ def get_transaction_summary(
             "net_flow": net_flow,
             "transaction_count": len(transactions)
         },
-        "category_breakdown": category_summary
+        "category_breakdown": category_summary,
+        "by_currency": by_currency,
     }

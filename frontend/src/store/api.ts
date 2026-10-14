@@ -59,6 +59,7 @@ export type {
   UpcomingBill,
   NetDisposableIncome,
   DashboardSnapshot,
+  BudgetEntryMaterializeInput,
   CashflowTimeline,
   CashflowTimelineEvent,
   CashflowShortfall,
@@ -98,6 +99,7 @@ import type {
   AccountBalance,
   AllocationProgress,
   GoalsSummary,
+  BudgetEntryMaterializeInput,
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
@@ -267,7 +269,7 @@ export const accountingApi = createApi({
       query: (id) => ({ url: `budget-entries/${id}`, method: 'DELETE' }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
     }),
-    materializeBudgetEntry: builder.mutation<Transaction, { id: number; data?: { transaction_date?: string; amount?: number; advance?: boolean } }>({
+    materializeBudgetEntry: builder.mutation<Transaction, { id: number; data?: BudgetEntryMaterializeInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data ?? {} }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
     }),

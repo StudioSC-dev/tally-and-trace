@@ -31,6 +31,7 @@ from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, A
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
+from app.services.fx import FxRates, get_fx
 from app.services.statements import resolve_cycle_fields
 from app.core.time import naive_utc_now, utc_now
 from datetime import datetime, timezone
@@ -87,21 +88,81 @@ def _validate_payment_routing(db: Session, current_user: User, data: dict,
     default the caller), so a route never crosses owners. Without this, a caller
     could route a payment at an arbitrary account id and read that account's
     name back out of the timeline's ``account_shortfalls``. Also rejects
-    self-routing, which would make an account fund its own payment.
+    self-routing, which would make an account fund its own payment, and (except
+    for a loan, whose payer ``_validate_loan`` checks) a target in another
+    currency than the account's.
 
     On an update (``account``) only a target that changes is checked: an admin's
     form resending a stored route they may not use (the owner's private payer)
     still saves, and learns nothing it was not already shown.
     """
     account_id = account.id if account is not None else None
+    account_type = data.get("account_type", account.account_type if account else None)
+    currency = data.get("currency", account.currency if account else None)
     for field in ("payment_account_id", "payment_overflow_account_id"):
         target_id = data.get(field)
         if target_id is None:
             continue
         if account is not None and target_id == getattr(account, field):
             continue
-        _funding_account(db, current_user, target_id, field, account_id,
-                         owner=owner if owner is not None else current_user)
+        target = _funding_account(db, current_user, target_id, field, account_id,
+                                  owner=owner if owner is not None else current_user)
+        # A loan's payer has its own currency rule (_validate_loan).
+        if account_type != AccountType.LOAN and target.currency != currency:
+            raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
+
+
+# Payment and overflow routing never crosses currencies (a card is paid, and a
+# shortfall covered, in the paying account's own currency). Names no account:
+# the other side may be one the caller cannot access.
+ROUTING_CURRENCY_DETAIL = (
+    "Payment and overflow routing must stay within one currency: "
+    "this would pair accounts in different currencies")
+
+
+def _validate_currency_routing(db: Session, data: dict, account: Account) -> None:
+    """Refuse a currency change that would pair this account across currencies.
+
+    The pairings are a card's (or other non-loan account's) payment and
+    overflow accounts, and a recurring entry's account and overflow account,
+    whichever side this account is on (a loan's payer is ``_validate_loan`` and
+    ``_validate_loan_payer``). Only a change of currency is checked; the
+    routing fields themselves are checked when they change
+    (``_validate_payment_routing``, and the entry routes).
+    """
+    from app.models.budget_entry import BudgetEntry
+
+    currency = data.get("currency")
+    if currency is None or currency == account.currency:
+        return
+
+    def differs(account_id) -> bool:
+        other = db.get(Account, account_id) if account_id else None
+        return other is not None and other.currency != currency
+
+    if data.get("account_type", account.account_type) != AccountType.LOAN and any(
+            differs(data.get(field, getattr(account, field)))
+            for field in ("payment_account_id", "payment_overflow_account_id")):
+        raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
+    routed = db.query(Account).filter(
+        Account.account_type != AccountType.LOAN,
+        or_(Account.payment_account_id == account.id,
+            Account.payment_overflow_account_id == account.id),
+    ).all()
+    if any(other.currency != currency for other in routed):
+        raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
+    entries = db.query(BudgetEntry).filter(
+        BudgetEntry.overflow_account_id.isnot(None),
+        or_(BudgetEntry.account_id == account.id,
+            BudgetEntry.overflow_account_id == account.id),
+    ).all()
+    for entry in entries:
+        other = (entry.overflow_account_id if entry.account_id == account.id
+                 else entry.account_id)
+        if other == account.id:
+            continue
+        if differs(other) or (other is None and entry.currency != currency):
+            raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
 
 
 def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account] = None) -> None:
@@ -287,7 +348,9 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       in it, hence the check above. Payments are netted as ``allocate_payments``
       nets them, planned ones included, so an unposted transfer into the card
       that covers what is owed counts as paying it. A card without cycle
-      settings has no statements, so nothing here refuses it.
+      settings has no statements, so nothing here refuses it. A statement
+      with a line in a currency that has no stored rate (``unconverted``)
+      is refused too: its balance is not known (STU-236, plan D5).
     - A loan with a pending payment: an unposted transfer into it (a planned
       payment or prepayment), or an active recurring entry paying into it that
       still has an occurrence from today on that no linked transaction stands
@@ -323,7 +386,7 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
             raise HTTPException(status_code=400, detail=CARD_RECURRING_ENTRY_DETAIL)
         history = statement_history(db, account, naive_utc_now(),
                                     viewable_account_ids(db, current_user))
-        if any(statement["owed"] > 0 for statement in history):
+        if any(statement["owed"] > 0 or statement["unconverted"] for statement in history):
             raise HTTPException(status_code=400, detail=CARD_OPEN_STATEMENT_DETAIL)
     elif account.account_type == AccountType.LOAN:
         pending = db.query(Transaction.id).filter(
@@ -495,6 +558,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_payment_routing(db, current_user, update_data, account=db_account,
                               owner=db_account.user)
+    _validate_currency_routing(db, update_data, db_account)
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_deactivation(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
@@ -531,14 +595,15 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     balance_after, balance, transaction_id, display_description}``; any other
     is the limited allowlist ``{date, amount, balance_after,
     display_description}``. ``amount`` is the row's signed effect on this
-    account.
+    account: a transfer's source moves by ``amount + transfer_fee``, its
+    destination by ``received_amount`` (or ``amount`` when that is null).
 
     A ``tag_viewer`` (Household tag share) gets the history of the rows it may
     read only, the sharer's own (the tag-share invariant): ``balance_after``
     and ``calculated_balance`` then run over those rows alone.
     """
     from app.core.redaction import FULL, SHARED_FULL, Redactor
-    from app.models.transaction import Transaction, TransactionType
+    from app.models.transaction import Transaction, TransactionType, transfer_sides
 
     account = get_account_or_404(db, current_user, account_id, roles=VIEW_ROLES)
     transactions = db.query(Transaction).filter(
@@ -564,10 +629,12 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
         elif transaction.transaction_type == TransactionType.DEBIT and transaction.account_id == account_id:
             effect = -float(transaction.amount)
         elif transaction.transaction_type == TransactionType.TRANSFER:
+            # Each side by its own figure (a cross-currency transfer's differ).
+            out, received = transfer_sides(transaction)
             if transaction.transfer_from_account_id == account_id:
-                effect = -(float(transaction.amount) + float(transaction.transfer_fee or 0.0))
+                effect = -float(out)
             elif transaction.transfer_to_account_id == account_id:
-                effect = float(transaction.amount)
+                effect = float(received)
             else:
                 continue
         else:
@@ -602,6 +669,7 @@ def get_card_statements(
     account_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     """A credit card's statements, oldest first, through the one closing next.
 
@@ -611,8 +679,17 @@ def get_card_statements(
     status, lines: [{date, display_description, amount}]}``. Line descriptions
     follow the description rule (app/core/redaction.py). ``status`` is "paid",
     "open" or "overdue".
+
+    Lines are in the card's currency (STU-236, plan D5). In the full view a
+    line estimated from a foreign figure carries the estimate labels when the
+    caller reads its row in full, and a line with no stored rate is left out
+    of the totals and listed under ``unconverted_lines`` with its original
+    figure. In the limited view such a line is omitted. Either view's
+    statement carries ``incomplete: true`` when a line was left out for want
+    of a rate (the key is absent otherwise).
     """
-    from app.core.redaction import Redactor
+    from app.core.redaction import FULL, SHARED_FULL, Redactor
+    from app.services.forecast import _row, row_labels
     from app.services.statements import statement_history
 
     card = get_account_or_404(db, current_user, account_id)
@@ -621,9 +698,11 @@ def get_card_statements(
     role = account_role(current_user, card)
     limited = role not in EDIT_ROLES
     history = statement_history(db, card, naive_utc_now(),
-                                viewable_account_ids(db, current_user))
+                                viewable_account_ids(db, current_user), fx=fx)
     redactor = Redactor(db, current_user)
-    redactor.prepare([line["transaction"] for s in history for line in s["lines"]])
+    redactor.prepare([line["transaction"] for s in history
+                      for line in [*s["lines"], *s["unconverted"]]])
+    card_currency = card.currency.value
     statements = []
     for statement in history:
         lines = []
@@ -633,6 +712,9 @@ def get_card_statements(
                     "display_description": redactor.display_description(txn)}
             if not limited:
                 item["transaction_id"] = txn.id
+                if "estimate" in line and redactor.view(txn) in (FULL, SHARED_FULL):
+                    item.update(row_labels(_row(card_currency, abs(line["amount"]),
+                                                line["estimate"])))
             lines.append(item)
         row = {
             "close_date": statement["close"],
@@ -642,8 +724,21 @@ def get_card_statements(
             "status": statement["status"],
             "lines": lines,
         }
+        if statement["unconverted"]:
+            # Present only when a line was left out, so a statement with every
+            # line converted keeps the epic's shape.
+            row["incomplete"] = True
         if not limited:
             row["statement_balance"] = float(statement["balance"])
+            row["unconverted_lines"] = [{
+                "date": line["date"],
+                "amount": None,
+                "unconverted": True,
+                "original_amount": float(line["original_amount"]),
+                "original_currency": line["original_currency"],
+                "display_description": redactor.display_description(line["transaction"]),
+                "transaction_id": line["transaction"].id,
+            } for line in statement["unconverted"]]
         statements.append(row)
     body = {"view": "limited" if limited else "full", "name": card.name,
             "currency": card.currency, "statements": statements}

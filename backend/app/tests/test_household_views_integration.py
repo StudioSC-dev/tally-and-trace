@@ -402,10 +402,72 @@ def test_household_upcoming_items_carry_their_currency(hh, sw_client, sw_db):
     items = _get(sw_client, hh["c"], f"/household/{a['id']}/upcoming")["items"]
     assert {(i["display_name"], i["currency"]) for i in items} == {
         ("Dollar bill", "USD"), ("Household rent", "PHP")}
-    # The ordinary upcoming list is unchanged: no currency on a full item.
+    # The ordinary upcoming list: every full item carries its currency (STU-236).
     plain = _get(sw_client, a, "/forecast/upcoming")["items"]
     assert {i["name"] for i in plain} >= {"Dollar bill", "Household rent"}
-    assert all("currency" not in i for i in plain if i.get("view") != "limited")
+    assert all("currency" in i for i in plain if i.get("view") != "limited")
+    currency = {i["name"]: i["currency"] for i in plain if i.get("view") != "limited"}
+    assert (currency["Dollar bill"], currency["Household rent"]) == ("USD", "PHP")
+
+
+G2_FIELDS = {"estimated", "original_amount", "original_currency", "rate", "rate_as_of",
+             "rate_stale", "unconverted", "received_amount", "unconverted_lines"}
+
+
+def test_household_occurrences_keep_their_fx_state(hh, sw_client, sw_db):
+    """On A's private PHP card, tagged Household: a pending USD 10 charge (the
+    form's convention) and a recurring JPY 1,000 bill, with no JPY rate stored.
+    A reads both in full: the charge is an estimate (PHP 580, with its labels),
+    the bill stays listed unconverted (no amount, counted, in no total). C reads
+    them Limited: the approved face and currency, no cash, no new fields."""
+    from datetime import timedelta
+
+    from app.core.time import naive_utc_now
+    from app.services import forecast
+    from app.services.household import household_events, household_monthly, household_view
+
+    a, c = hh["a"], hh["c"]
+    soon = (naive_utc_now() + timedelta(days=3)).replace(hour=0, minute=0, second=0,
+                                                        microsecond=0)
+    _txn(sw_client, a, hh["a_card"], 10, soon.isoformat(), currency="PHP", projected_amount=10,
+         projected_currency="USD", description="Dollar streaming", tags=[hh["hh_a"]])
+    sw_post(sw_client, a, "/budget-entries/", {
+        "name": "Yen bill", "entry_type": "expense", "amount": 1_000, "currency": "JPY",
+        "next_occurrence": soon.isoformat(), "account_id": hh["a_card"],
+        "tag_ids": [hh["hh_a"]]})
+
+    items = {i["name"]: i for i in _get(sw_client, a, f"/household/{a['id']}/upcoming")["items"]}
+    streaming, yen = items["Dollar streaming"], items["Yen bill"]
+    assert (streaming["amount"], streaming["currency"], streaming["estimated"],
+            streaming["original_amount"], streaming["original_currency"], streaming["rate"],
+            streaming["rate_stale"]) == (580.0, "PHP", True, 10.0, "USD", 58.0, False)
+    assert (yen["amount"], yen["unconverted"], yen["currency"], yen["original_amount"],
+            yen["original_currency"]) == (None, True, "PHP", 1_000.0, "JPY")
+    assert "estimated" not in yen
+
+    # Counted as unconverted where the response reports it, and in no total.
+    sw_db.expire_all()
+    grant = household_view(sw_db, a["id"], a["id"])
+    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    collector = forecast.FxCollector()
+    forecast.currency_upcoming_items(
+        household_events(sw_db, a["id"], grant, today, today + timedelta(days=30)), collector)
+    assert collector.as_dict()["unconverted_count"] == 1
+    first = soon.replace(day=1)
+    paid = [line for month in household_monthly(sw_db, a["id"], grant, first, first)
+            for line in month["currencies"]]
+    assert [(line["currency"], line["paid_from_other_accounts"]) for line in paid] == [
+        ("PHP", 580.0)]
+
+    # C reads both Limited: the approved face and currency, no cash, no new fields.
+    limited = {i["display_name"]: i
+               for i in _get(sw_client, c, f"/household/{a['id']}/upcoming")["items"]}
+    shape = set(limited["Dollar streaming"])
+    assert set(limited["Yen bill"]) == shape and not shape & G2_FIELDS
+    assert (limited["Yen bill"]["face_amount"], limited["Yen bill"]["currency"],
+            limited["Yen bill"]["cash_delta"]) == (1_000.0, "JPY", 0.0)
+    assert (limited["Dollar streaming"]["face_amount"], limited["Dollar streaming"]["currency"],
+            limited["Dollar streaming"]["cash_delta"]) == (10.0, "PHP", 0.0)
 
 
 # --- Cover counts only the payments the viewer can read -----------------------------------------
@@ -473,12 +535,17 @@ def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
 
 
-# --- Cover never crosses currencies --------------------------------------------------------------
+# --- Cover settles in the card's currency (STU-236) ----------------------------------------------
 
 @pytest.mark.parametrize("mode", list(MODES))
-@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
-def test_cover_never_crosses_currencies(hh, sw_client, sw_db, mode, currency, remainder):
-    # A PHP 40 joint payment covers a PHP bill, never a USD one (no conversion).
+@pytest.mark.parametrize("currency,remainder", [("USD", None), ("PHP", 60.0)])
+def test_cover_settles_in_card_currency(hh, sw_client, sw_db, mode, currency, remainder):
+    # A PHP 40 joint payment covers the bill in the card's currency. C reads the
+    # USD-labelled bill Limited, so it sits in its record's bucket at
+    # face x remainder / card figure: recorded, the posted 100 is PHP (60.00);
+    # projected, the card figure is USD 100 x 58 = 5,800 (99.31).
+    if remainder is None:
+        remainder = 60.0 if mode == "recorded" else 99.31
     _charge(sw_client, hh, mode, currency=currency)
     _pay(sw_client, hh, 40, mode)
     months = _monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])
@@ -488,7 +555,7 @@ def test_cover_never_crosses_currencies(hh, sw_client, sw_db, mode, currency, re
         assert _sum(months, "PHP")["paid_from_other_accounts"] == 0.0
 
 
-@pytest.mark.parametrize("currency,remainder", [("USD", 100.0), ("PHP", 60.0)])
+@pytest.mark.parametrize("currency,remainder", [("USD", 99.31), ("PHP", 60.0)])
 def test_recurring_cover_never_crosses_currencies(hh, sw_client, sw_db, currency, remainder):
     _charge(sw_client, hh, "projected", currency=currency)
     _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 40, datetime(2026, 11, 1))

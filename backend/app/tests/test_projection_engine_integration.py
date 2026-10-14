@@ -1435,6 +1435,7 @@ def test_snapshot_returns_available_cash_closings_and_payables(db, user, client)
         "source": "budget_entry", "source_id": body["payables"][0]["source_id"],
         "account_id": checking_b.id, "account_name": "Checking B",
         "overflow_account_id": savings_a.id, "overflow_account_name": "Savings A",
+        "currency": "PHP",
     }]
 
     closings = body["account_closings"]

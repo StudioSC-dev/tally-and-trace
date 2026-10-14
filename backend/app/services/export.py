@@ -72,8 +72,8 @@ ACCOUNT_FIELDS = (
 TRANSACTION_FIELDS = (
     "id", "account_id", "category_id", "allocation_id", "budget_entry_id", "amount", "currency",
     "projected_amount", "projected_currency", "original_amount", "original_currency",
-    "exchange_rate", "transfer_fee", "description", "transaction_type", "is_posted",
-    "transfer_from_account_id", "transfer_to_account_id", "loan_payment_kind",
+    "exchange_rate", "transfer_fee", "received_amount", "description", "transaction_type",
+    "is_posted", "transfer_from_account_id", "transfer_to_account_id", "loan_payment_kind",
     "transaction_date", "posting_date", "receipt_url", "invoice_url", "is_reconciled",
     "is_recurring", "recurrence_frequency", "created_at", "updated_at",
 )

@@ -56,7 +56,12 @@ def test_materialize_posts_transaction_and_advances(client):
     h = _auth(client)
 
     entries = client.get(f"{API}/budget-entries/", headers=h, params={"is_active": True, "limit": 200}).json()["items"]
-    entry = next((e for e in entries if e.get("account_id")), None)
+    accounts = client.get(f"{API}/accounts/", headers=h, params={"limit": 1000}).json()
+    accounts = accounts["items"] if isinstance(accounts, dict) else accounts
+    currency_of = {a["id"]: a["currency"] for a in accounts}
+    # An entry in another currency than its account's needs the amount charged (F1).
+    entry = next((e for e in entries if e.get("account_id")
+                  and e["currency"] == currency_of.get(e["account_id"])), None)
     if entry is None:
         pytest.skip("no seeded budget entry with an account to post to")
 

@@ -25,6 +25,14 @@ view. The owner's credit card is routed to the joint account
 posted card payment, so that bill counts once in the Household monthly totals.
 A missing tag share is restored like a missing account share.
 
+Shape 5 (STU-236): foreign rows follow the form's convention. The USD
+"Monthly Salary" entry is USD 55.00 (about the PHP 3,000-3,200 the seed
+intended); its posted deposit is the PHP 2,942.50 actually credited (USD 55 at
+53.5), and its pending deposit and the pending Netflix charge hold their
+foreign figure (``amount`` = ``projected_amount``) with no rate, so the
+projection estimates them at the stored rate. The "Streaming Subscription"
+entry, which ended in March 2026, is inactive.
+
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
 
@@ -59,8 +67,9 @@ DEMO_PARTNER_EMAIL = "demo.partner@example.com"
 DEMO_EMAILS = frozenset({DEMO_EMAIL, DEMO_PARTNER_EMAIL})
 DEMO_PASSWORD = "password123"
 # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232); 4: the Household
-# tag share and the card routed to the joint account (STU-233)
-DEMO_SHAPE_VERSION = 4
+# tag share and the card routed to the joint account (STU-233); 5: foreign rows in the
+# form's convention, the ended streaming entry inactive (STU-236)
+DEMO_SHAPE_VERSION = 5
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")

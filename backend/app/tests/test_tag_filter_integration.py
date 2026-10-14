@@ -241,8 +241,11 @@ def test_disposable_income_counts_each_tagged_entry_once(client, world):
     # Annual entries: a twelfth a month. Home bill 50 + Home tagged 60; the transfer
     # into Home moves the caller's own money, so it is no expense.
     result = _get(client, owner, "/forecast/disposable", tag=world["household"])
-    assert result == {"monthly_income": 0.0, "monthly_expenses": round(110 / 12, 2),
-                      "monthly_disposable": round(-110 / 12, 2)}
+    scalars = ("monthly_income", "monthly_expenses", "monthly_disposable")
+    assert {k: result[k] for k in scalars} == {
+        "monthly_income": 0.0, "monthly_expenses": round(110 / 12, 2),
+        "monthly_disposable": round(-110 / 12, 2)}
+    assert [r["currency"] for r in result["by_currency"]] == ["PHP"]
 
 
 def _sources(items):

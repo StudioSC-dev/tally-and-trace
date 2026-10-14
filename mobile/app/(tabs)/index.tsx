@@ -5,6 +5,7 @@ import { useAuth } from '../../src/contexts/AuthContext'
 import { formatCurrency } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
 import { formatRelativeDate, isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
+import { fullItemAmountLabel, ratesAttribution } from '../../src/utils/currencyDisplay'
 import { Card, SectionHeader, LoadingSpinner, Badge, AmountText } from '../../src/components/ui'
 
 export default function HomeScreen() {
@@ -16,6 +17,7 @@ export default function HomeScreen() {
   if (isLoading) return <LoadingSpinner message="Loading dashboard…" />
 
   const snapshot = data
+  const attribution = ratesAttribution(snapshot?.fx)
 
   return (
     <SafeAreaView className="flex-1 bg-slate-900">
@@ -34,38 +36,44 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {/* Total Balance */}
+        {/* Total Balance: one line per currency, never added together */}
         <Card className="bg-gradient-to-br from-sky-600 to-sky-800">
           <Text className="text-sky-200 text-sm font-medium mb-1">Total Balance</Text>
-          <Text className="text-white text-4xl font-bold">
-            {formatCurrency(snapshot?.balances.total ?? 0, currency)}
-          </Text>
+          {(snapshot?.balances.by_currency ?? []).map((row) => (
+            <Text key={row.currency} className="text-white text-4xl font-bold">
+              {formatCurrency(row.total, row.currency)}
+            </Text>
+          ))}
           <Text className="text-sky-300 text-xs mt-2">
             Across {snapshot?.balances.by_account.length ?? 0} account(s)
           </Text>
         </Card>
 
-        {/* Quick Stats */}
+        {/* Quick Stats: one line per currency */}
         {snapshot?.monthly_summary && (
-          <View className="flex-row gap-3">
-            <Card className="flex-1">
-              <Text className="text-slate-400 text-xs mb-1">Monthly income</Text>
-              <AmountText
-                amount={snapshot.monthly_summary.monthly_income}
-                currency={currency}
-                positive
-                className="text-xl"
-              />
-            </Card>
-            <Card className="flex-1">
-              <Text className="text-slate-400 text-xs mb-1">Monthly expenses</Text>
-              <AmountText
-                amount={snapshot.monthly_summary.monthly_expenses}
-                currency={currency}
-                negative
-                className="text-xl"
-              />
-            </Card>
+          <View className="gap-3">
+            {snapshot.monthly_summary.by_currency.map((row) => (
+              <View key={row.currency} className="flex-row gap-3">
+                <Card className="flex-1">
+                  <Text className="text-slate-400 text-xs mb-1">Monthly income ({row.currency})</Text>
+                  <AmountText
+                    amount={row.monthly_income}
+                    currency={row.currency}
+                    positive
+                    className="text-xl"
+                  />
+                </Card>
+                <Card className="flex-1">
+                  <Text className="text-slate-400 text-xs mb-1">Monthly expenses ({row.currency})</Text>
+                  <AmountText
+                    amount={row.monthly_expenses}
+                    currency={row.currency}
+                    negative
+                    className="text-xl"
+                  />
+                </Card>
+              </View>
+            ))}
           </View>
         )}
 
@@ -106,6 +114,7 @@ export default function HomeScreen() {
                 const full = isLimitedEvent(event) ? null : event
                 const name = limited ? event.display_name : (full?.name ?? '')
                 const { amount, direction } = upcomingItemAmount(event)
+                const label = full ? fullItemAmountLabel(full, currency) : null
                 const date = limited ? event.date : (full?.due_date ?? '')
                 const isIncome = direction === 'in'
                 const isExpense = direction === 'out'
@@ -126,12 +135,31 @@ export default function HomeScreen() {
                       <Text className="text-slate-500 text-xs">{formatRelativeDate(date)}</Text>
                     </View>
                     <View className="items-end gap-1">
-                      <AmountText
-                        amount={amount}
-                        currency={limited ? event.currency : currency}
-                        negative={isExpense}
-                        positive={isIncome}
-                      />
+                      {full ? (
+                        label?.primary == null ? (
+                          <Text className="text-slate-400 text-sm">Unconverted</Text>
+                        ) : (
+                          <>
+                            <Text
+                              className={`font-semibold ${
+                                isIncome ? 'text-emerald-400' : isExpense ? 'text-red-400' : 'text-white'
+                              }`}
+                            >
+                              {label.primary}
+                            </Text>
+                            {label.original && (
+                              <Text className="text-slate-500 text-xs">{label.original}</Text>
+                            )}
+                          </>
+                        )
+                      ) : (
+                        <AmountText
+                          amount={amount}
+                          currency={limited ? event.currency : currency}
+                          negative={isExpense}
+                          positive={isIncome}
+                        />
+                      )}
                       <Badge
                         label={kindLabel}
                         color={isHouseholdBill ? 'slate' : isIncome ? 'green' : 'red'}
@@ -142,6 +170,7 @@ export default function HomeScreen() {
                 )
               })}
             </Card>
+            {attribution && <Text className="text-slate-500 text-xs mt-2">{attribution}</Text>}
           </View>
         )}
 

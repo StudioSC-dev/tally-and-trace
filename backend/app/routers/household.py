@@ -38,6 +38,7 @@ from app.schemas.household import HouseholdMonthlyResponse, HouseholdViewOut
 from app.schemas.transaction import TransactionListResponse
 from app.services import household as household_svc
 from app.services.forecast import _upcoming_window
+from app.services.fx import FxRates, get_fx
 
 router = APIRouter()
 
@@ -114,10 +115,11 @@ def household_upcoming(
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     grant = _grant(db, current_user, sharer_id)
     start, end = _upcoming_window(days, None)
-    items = household_svc.household_upcoming(db, current_user, grant, start, end)
+    items = household_svc.household_upcoming(db, current_user, grant, start, end, fx=fx)
     return {"sharer": _sharer(db, sharer_id), "items": items, "days": days}
 
 
@@ -130,6 +132,7 @@ def household_monthly(
                               description="Last month, YYYY-MM (default: this month)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     grant = _grant(db, current_user, sharer_id)
     this_month = naive_utc_now().strftime("%Y-%m")
@@ -139,7 +142,7 @@ def household_monthly(
     if span < 1 or span > MAX_MONTHS:
         raise HTTPException(status_code=422,
                             detail=f"'from' must not be after 'to', at most {MAX_MONTHS} months")
-    months = household_svc.household_monthly(db, current_user, grant, first, last)
+    months = household_svc.household_monthly(db, current_user, grant, first, last, fx=fx)
     return {"sharer": _sharer(db, sharer_id), "from": from_, "to": to, "months": months}
 
 
@@ -148,15 +151,17 @@ def household_dashboard(
     sharer_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
 ):
     grant = _grant(db, current_user, sharer_id)
     accounts = household_svc.household_accounts(db, current_user, grant)
     month = naive_utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    [current] = household_svc.household_monthly(db, current_user, grant, month, month)
+    [current] = household_svc.household_monthly(db, current_user, grant, month, month, fx=fx)
     start, end = _upcoming_window(30, None)
     return {
         "sharer": _sharer(db, sharer_id),
         "accounts": serialize_accounts(db, current_user, accounts),
         "month": current,
-        "upcoming": household_svc.household_upcoming(db, current_user, grant, start, end),
+        "upcoming": household_svc.household_upcoming(db, current_user, grant, start, end,
+                                                     fx=fx),
     }

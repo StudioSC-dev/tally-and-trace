@@ -9,6 +9,7 @@ private record carries ``PRIVATE``; tests assert it never reaches anyone else.
 """
 import os
 import secrets
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,6 +18,62 @@ from sqlalchemy import create_engine, text
 API = "/api/v1"
 PASSWORD = "Password123!"
 PRIVATE = "Zq9Priv"  # in every private name of the owner's; never in anyone else's view
+
+
+# --- Exchange rates (STU-236, plan B8) -------------------------------------------------------
+# Tests never touch the network or the wall clock. Every request's ``get_fx`` and every
+# offline service call reads FX_STORE (58.00 PHP per USD, fetched an hour before FX_REF)
+# through a clock frozen at FX_REF, so the rate never goes stale whatever the date.
+
+FX_REF = datetime(2026, 11, 2, 0, 0)  # naive UTC
+
+
+def fx_clock() -> datetime:
+    return FX_REF
+
+
+class FxNoNetwork:
+    """A rate provider that fails any test reaching it."""
+
+    def fetch(self):
+        raise AssertionError("the exchange-rate provider was reached from a test")
+
+
+def _fx_store():
+    from app.services.fx import MemoryRateStore, StoredRate
+
+    fetched = FX_REF - timedelta(hours=1)
+    return MemoryRateStore([
+        StoredRate("USD", Decimal("1"), fetched.date(), fetched, "test"),
+        StoredRate("PHP", Decimal("58.00"), fetched.date(), fetched, "test"),
+    ])
+
+
+FX_STORE = _fx_store()
+
+
+def fx_rates():
+    """A fresh ``FxRates`` over the fixture store: what ``get_fx`` returns in tests."""
+    from app.services.fx import FxRates
+
+    return FxRates(FX_STORE, provider=FxNoNetwork(), clock=fx_clock, on_stale=lambda: None)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def fx_fixture_rates():
+    from app.main import app
+    from app.services import fx
+
+    saved = (fx._offline_factory, fx._refresher.provider, fx._refresher.clock)
+    app.dependency_overrides[fx.get_fx] = fx_rates
+    fx._offline_factory = lambda db: fx_rates()
+    fx._refresher.provider = FxNoNetwork()
+    fx._refresher.clock = fx_clock
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(fx.get_fx, None)
+        fx._offline_factory, fx._refresher.provider, fx._refresher.clock = saved
 
 
 def sw_db_reachable() -> bool:

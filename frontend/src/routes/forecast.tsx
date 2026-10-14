@@ -2,11 +2,18 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { formatCurrency } from '../utils/currency'
+import { estimateText, estimateTitle } from '../utils/fx'
+import { CurrencyControl } from '../components/CurrencyControl'
+import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
+import { FxNotice } from '../components/FxNotice'
+import { ShortfallBanner } from '../components/ShortfallBanner'
 import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
 
 import { timelineEventAmount, timelineEventName } from '@tally-trace/shared'
+import type { CashflowTimelineEvent, LimitedTimelineEvent } from '@tally-trace/shared'
 export const Route = createFileRoute('/forecast')({
   component: ForecastPage,
 })
@@ -23,7 +30,7 @@ const DAY_OPTIONS = [30, 60, 90] as const
 function ForecastPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
-  const { format } = useCurrency()
+  const { currencyCode: defaultCurrency } = useCurrency()
   const [days, setDays] = useState<(typeof DAY_OPTIONS)[number]>(60)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
 
@@ -35,9 +42,20 @@ function ForecastPage() {
 
   const { data, isLoading, error } = useGetForecastTimelineQuery({ days, ...(selectedTag !== undefined ? { tag: selectedTag } : {}) }, { skip: !isAuthenticated })
 
+  const [currency, setCurrency] = useSelectedCurrency(data?.currencies, defaultCurrency)
+  const format = (amount: number) => formatCurrency(amount, currency)
+  const row = data?.by_currency.find((r) => r.currency === currency)
+  // Funding shortfalls in every currency, whichever one is selected.
+  const fundingShortfalls = data?.by_currency.flatMap((r) => r.account_shortfalls.map((sf) => ({ ...sf, currency: r.currency }))) ?? []
+
   if (!isAuthenticated) return null
 
-  const signed = (amount: number) => `${amount >= 0 ? '+' : '−'}${format(Math.abs(amount))}`
+  // A converted event reads "≈ PHP 4,640.00 (USD 80.00)"; a limited one has no labels to show.
+  const signedEvent = (e: CashflowTimelineEvent | LimitedTimelineEvent) => {
+    const amount = timelineEventAmount(e)
+    const sign = amount >= 0 ? '+' : '−'
+    return `${sign}${e.view === 'limited' ? format(Math.abs(amount)) : estimateText(Math.abs(amount), currency, e)}`
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-8 space-y-6">
@@ -49,6 +67,7 @@ function ForecastPage() {
           </p>
         </div>
         <TagFilter value={selectedTag} onChange={setSelectedTag} />
+        <CurrencyControl currencies={data?.currencies} value={currency} onChange={setCurrency} />
         <div className="flex space-x-1 bg-sunken p-1">
           {DAY_OPTIONS.map((d) => (
             <button
@@ -70,44 +89,26 @@ function ForecastPage() {
         <div className="bg-surface border border-line p-6 text-sm text-muted">
           Could not load the cash-flow timeline.
         </div>
+      ) : !row ? (
+        <>
+          <ShortfallBanner rows={data.by_currency} selected={currency} days={days} />
+          <FxNotice fx={data.fx} />
+          <div className="bg-surface border border-line p-6 text-sm text-muted">No {currency} cash is projected in this window.</div>
+        </>
       ) : (
         <>
-          {/* Solvency banner */}
-          {data.shortfall ? (
-            <div className="flex items-start gap-3 border border-danger bg-danger p-4">
-              <svg className="h-5 w-5 flex-shrink-0 text-danger" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10.894 2.553c-.346-.598-1.442-.598-1.788 0l-7 12.092c-.339.586.086 1.355.894 1.355h14c.808 0 1.233-.769.894-1.355l-7-12.092z" />
-                <path d="M9 8h2v4H9V8zm0 5h2v2H9v-2z" fill="white" />
-              </svg>
-              <div className="text-sm">
-                <p className="font-semibold text-danger">
-                  Projected shortfall: {format(data.lowest_balance)} on {longDate(data.trough_date)}
-                </p>
-                <p className="text-danger">
-                  The balance drops below zero at {data.shortfalls.length} point{data.shortfalls.length === 1 ? '' : 's'} before funds arrive. The {days}-day close is {format(data.closing_balance)} — healthy on paper, but you're short mid-window.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-start gap-3 border border-line p-4">
-              <svg className="h-5 w-5 flex-shrink-0 text-ok" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M16.704 5.29a1 1 0 00-1.408-1.42l-6.32 6.263-2.272-2.26a1 1 0 10-1.408 1.419l2.976 2.958a1 1 0 001.408 0l7.024-6.96z" clipRule="evenodd" />
-              </svg>
-              <p className="text-sm font-medium text-ok">
-                On track for the next {days} days — the lowest your balance reaches is {format(data.lowest_balance)}{data.trough_date ? ` on ${longDate(data.trough_date)}` : ''}.
-              </p>
-            </div>
-          )}
+          <ShortfallBanner rows={data.by_currency} selected={currency} days={days} />
+          <FxNotice fx={data.fx} />
 
           {/* Chart */}
           <div className="bg-surface border border-line p-4 sm:p-6">
-            <RunningBalanceChart timeline={data} format={format} height={320} />
+            <RunningBalanceChart timeline={{ window_start: data.window_start, window_end: data.window_end, ...row }} format={format} height={320} />
             <dl className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Opening', value: data.opening_balance, color: 'text-ink' },
-                { label: 'Lowest (trough)', value: data.lowest_balance, color: data.lowest_balance < 0 ? 'text-danger' : 'text-ink' },
-                { label: `Close (${days}d)`, value: data.closing_balance, color: data.closing_balance < 0 ? 'text-danger' : 'text-ok' },
-                { label: 'Net change', value: data.closing_balance - data.opening_balance, color: data.closing_balance - data.opening_balance >= 0 ? 'text-ok' : 'text-danger' },
+                { label: 'Opening', value: row.opening_balance, color: 'text-ink' },
+                { label: 'Lowest (trough)', value: row.lowest_balance, color: row.lowest_balance < 0 ? 'text-danger' : 'text-ink' },
+                { label: `Close (${days}d)`, value: row.closing_balance, color: row.closing_balance < 0 ? 'text-danger' : 'text-ok' },
+                { label: 'Net change', value: row.closing_balance - row.opening_balance, color: row.closing_balance - row.opening_balance >= 0 ? 'text-ok' : 'text-danger' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="bg-sunken/50 py-3 px-3">
                   <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
@@ -118,7 +119,7 @@ function ForecastPage() {
           </div>
 
           {/* Account funding shortfalls (UC1) */}
-          {data.account_shortfalls.length > 0 && (
+          {fundingShortfalls.length > 0 && (
             <div className="bg-surface border border-line">
               <div className="p-4 sm:p-6 border-b border-line">
                 <h2 className="text-lg font-semibold text-ink">Funding shortfalls</h2>
@@ -127,16 +128,16 @@ function ForecastPage() {
                 </p>
               </div>
               <ul className="divide-y divide-line/50">
-                {data.account_shortfalls.map((s, i) => (
-                  <li key={`${s.account_id}-${i}`} className="p-4 sm:px-6 flex items-center justify-between gap-4">
+                {fundingShortfalls.map((s, i) => (
+                  <li key={`${s.currency}-${s.account_id}-${i}`} className="p-4 sm:px-6 flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <p className="font-medium text-ink truncate">{s.name}</p>
                       <p className="text-xs text-muted">
                         {longDate(s.date)} · from {s.account_name ?? 'account'}
-                        {s.overflow_used > 0 ? ` · ${format(s.overflow_used)} pulled from overflow` : ''}
+                        {s.overflow_used > 0 ? ` · ${formatCurrency(s.overflow_used, s.currency)} pulled from overflow` : ''}
                       </p>
                     </div>
-                    <p className="text-sm font-semibold text-warn flex-shrink-0">short {format(s.short_amount)}</p>
+                    <p className="text-sm font-semibold text-warn flex-shrink-0">short {formatCurrency(s.short_amount, s.currency)}</p>
                   </li>
                 ))}
               </ul>
@@ -147,9 +148,9 @@ function ForecastPage() {
           <div className="bg-surface border border-line">
             <div className="p-4 sm:p-6 border-b border-line flex items-center justify-between">
               <h2 className="text-lg font-semibold text-ink">Scheduled items</h2>
-              <span className="badge badge-info">{data.events.length}</span>
+              <span className="badge badge-info">{row.events.length}</span>
             </div>
-            {data.events.length === 0 ? (
+            {row.events.length === 0 ? (
               <p className="p-4 sm:p-6 text-sm text-muted">No income or payables scheduled in this window.</p>
             ) : (
               <div className="overflow-x-auto">
@@ -163,12 +164,12 @@ function ForecastPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line/50">
-                    {data.events.map((e, i) => (
+                    {row.events.map((e, i) => (
                       <tr key={e.view === 'limited' ? e.public_id : `${e.source}-${e.source_id}-${i}`} className="hover:bg-sunken/50 transition-colors duration-150">
                         <td className="py-3 px-4 sm:px-6 whitespace-nowrap text-muted">{longDate(e.date)}</td>
                         <td className="py-3 px-4 text-ink">{timelineEventName(e)}</td>
                         <td className={`py-3 px-4 text-right font-medium ${timelineEventAmount(e) >= 0 ? 'text-ok' : 'text-danger'}`}>
-                          {signed(timelineEventAmount(e))}
+                          <span title={e.view === 'limited' ? undefined : estimateTitle(e)} data-testid="timeline-amount">{signedEvent(e)}</span>
                         </td>
                         <td className={`py-3 px-4 sm:px-6 text-right font-semibold ${e.running_balance < 0 ? 'text-danger' : 'text-ink'}`}>
                           {format(e.running_balance)}

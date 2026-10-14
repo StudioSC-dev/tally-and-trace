@@ -169,6 +169,25 @@ def _validate_overflow_account(db: Session, user: User, overflow_account_id: Opt
         )
 
 
+def _validate_overflow_currency(db: Session, account_id: Optional[int],
+                                overflow_account_id: Optional[int], currency) -> None:
+    """An overflow account covers a shortfall in its own currency only.
+
+    It must be in the entry's account's currency (the entry's own currency when
+    it has no account). Run after the access checks on both accounts.
+    """
+    if not overflow_account_id:
+        return
+    overflow = db.get(Account, overflow_account_id)
+    account = db.get(Account, account_id) if account_id else None
+    expected = account.currency if account is not None else currency
+    if overflow is not None and expected is not None and overflow.currency != expected:
+        raise HTTPException(
+            status_code=400,
+            detail="overflow_account_id must be in the same currency as the entry's account",
+        )
+
+
 def _validate_entry_account(db: Session, account_id: Optional[int]) -> None:
     """An entry is paid from (or into) its account, so that cannot be a loan.
 
@@ -331,6 +350,8 @@ def create_budget_entry(
     )
     _validate_entry_account(db, entry_in.account_id)
     _validate_overflow_account(db, current_user, entry_in.overflow_account_id)
+    _validate_overflow_currency(db, entry_in.account_id, entry_in.overflow_account_id,
+                                entry_in.currency)
     _validate_transfer_destination(
         db, current_user, entry_in.account_id, entry_in.transfer_to_account_id,
         entry_in.entry_type, entry_in.currency,
@@ -403,6 +424,14 @@ def update_budget_entry(
     if "overflow_account_id" in prospective_data:
         _validate_overflow_account(db, current_user, prospective_data["overflow_account_id"],
                                    owner=owner)
+    if any(field in prospective_data
+           for field in ("account_id", "overflow_account_id", "currency")):
+        _validate_overflow_currency(
+            db,
+            prospective_data.get("account_id", entry.account_id),
+            prospective_data.get("overflow_account_id", entry.overflow_account_id),
+            prospective_data.get("currency") or entry.currency,
+        )
     _validate_transfer_destination(
         db,
         current_user,
@@ -518,6 +547,17 @@ def materialize_budget_entry(
     final, smaller payment) it is refused with a 400 asking for the final
     ``amount`` (``loan_svc.split_payment``).
 
+    An entry in another currency than its account's (for a transfer, the
+    source's) needs ``amount``, the figure charged in the account's currency,
+    or it is refused with a 400 "Enter the amount charged in {CUR}". The
+    transaction is recorded in the account's currency with the entry's figure
+    as ``projected_*`` and ``original_*``, and ``exchange_rate`` = ``amount``
+    / the entry's amount (6 places).
+
+    A recurring transfer between accounts in different currencies needs
+    ``received_amount`` (what the destination received, in its currency), or
+    it is refused with a 400 "Enter the amount received".
+
     The transaction belongs to the entry's creator (``created_by_actor`` is the
     caller), so its category, allocation and tags stay one owner's. The caller
     needs the write rule on the entry: an edit role on every account it
@@ -527,7 +567,7 @@ def materialize_budget_entry(
     commit (never the tags it gets from its accounts); later changes to the
     entry's tags leave the transaction as it is.
     """
-    from app.routers.transactions import add_transaction
+    from app.routers.transactions import add_transaction, exchange_rate
     from app.schemas.transaction import TransactionCreate
 
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
@@ -537,6 +577,25 @@ def materialize_budget_entry(
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
 
     occurrence_date = payload.transaction_date or entry.next_occurrence
+    # An entry in another currency than its account's (for a transfer, the
+    # source's) posts the figure the account was actually charged, which only
+    # the caller knows; the entry's own figure is kept as the face.
+    account = db.get(Account, entry.account_id)
+    if account is not None and entry.currency != account.currency:
+        if payload.amount is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Enter the amount charged in {account.currency.value}")
+        currency_fields = {
+            "currency": account.currency,
+            "projected_amount": entry.amount,
+            "projected_currency": entry.currency,
+            "original_amount": entry.amount,
+            "original_currency": entry.currency,
+            "exchange_rate": exchange_rate(payload.amount, entry.amount),
+        }
+    else:
+        currency_fields = {"currency": entry.currency}
     amount = payload.amount if payload.amount is not None else entry.amount
     if entry.transfer_to_account_id:
         # A recurring transfer posts as a transfer: -(amount + fee) on the source,
@@ -550,6 +609,9 @@ def materialize_budget_entry(
             # Left out otherwise, so a loan payment is split into principal and
             # interest (``_loan_payment_stamp``); any other transfer has no fee.
             transfer_fields["transfer_fee"] = payload.transfer_fee
+        # Required across currencies (``_received_amount``): the entry stores no
+        # expected figure for the destination.
+        transfer_fields["received_amount"] = payload.received_amount
     else:
         txn_type = (
             TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
@@ -559,7 +621,6 @@ def materialize_budget_entry(
     txn_create = TransactionCreate(
         account_id=entry.account_id,
         amount=amount,
-        currency=entry.currency,
         transaction_type=txn_type,
         transaction_date=occurrence_date,
         category_id=entry.category_id,
@@ -567,6 +628,7 @@ def materialize_budget_entry(
         budget_entry_id=entry.id,
         description=entry.name,
         is_posted=True,
+        **currency_fields,
         **transfer_fields,
     )
     # The entry's creator owns the transaction; the caller is its actor.
