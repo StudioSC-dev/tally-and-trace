@@ -19,7 +19,7 @@ import os
 import stat
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -1058,8 +1058,6 @@ def test_an_edit_is_caught_even_with_finished_at_five_minutes_ahead(tmp_path, ow
                                                                     sw_client):
     """A run record whose finished_at is five minutes in the future (clock skew)
     hides nothing: the fingerprint, not the timestamps, decides."""
-    from datetime import timedelta
-
     from app.models.tag import Tag
 
     _, record = load(tmp_path, fixture(), owner)
@@ -1106,7 +1104,7 @@ def _check_report(tmp_path, record, name, **changes):
             "owner_id": rec["owner_id"], "database": rec["database"],
             "server_addr": rec["server_addr"], "host": TARGET["host"],
             "frozen_sha256": "0" * 64, "session_timezone": rec["session_timezone"],
-            "checked_at": "2026-03-10T12:00:00+00:00", "as_of": "2026-03-01",
+            "checked_at": rec["finished_at"], "as_of": "2026-03-01",
             "posted_after": [],
             "blocks": [{"name": "balances", "status": "pass", "checked": 7, "failures": []}],
             **changes}
@@ -1121,7 +1119,11 @@ def test_sign_off_refuses_a_failing_or_mismatched_check_then_closes_the_window(t
     from app.cutover_load.reset import sign_off
 
     _, record = load(tmp_path, fixture(), owner)
+    finished = datetime.fromisoformat(json.loads(record.read_text())["finished_at"])
     for name, changes in (("fail.json", {"overall": "fail"}),
+                          ("early.json", {"checked_at": (finished - timedelta(seconds=1))
+                                                         .isoformat()}),
+                          ("undated.json", {"checked_at": None}),
                           ("kind.json", {"report": "cutover-load-review"}),
                           ("version.json", {"version": 2}),
                           ("tz.json", {"session_timezone": "Asia/Manila"

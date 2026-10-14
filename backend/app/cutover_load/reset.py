@@ -18,7 +18,8 @@ pre-load guard passes again and every other user's row counts are unchanged.
 **Sign-off** makes no database connection: it writes ``signed_off_at`` into
 a ``complete`` run record once the cutover check's report (``report``
 "cutover-check", ``version`` 1) records an overall pass for the same owner
-id, database, server address and session time zone. Reset then refuses.
+id, database, server address and session time zone, with ``checked_at`` at or
+after the record's ``finished_at``. Reset then refuses.
 
 The database imports are made inside ``run_reset``, so a sign-off imports no
 database code.
@@ -66,6 +67,15 @@ def sign_off(*, run_record_path: str, check_report_path: str, confirm: str,
     for key in CHECK_TARGET_KEYS:
         if record.get(key) is None or report.get(key) != record.get(key):
             raise Refused("check_report", f"the check report's {key} is not the run record's")
+    try:  # the check must have read the loaded state, not an earlier one
+        checked = datetime.fromisoformat(report["checked_at"])
+        finished = datetime.fromisoformat(record["finished_at"])
+        early = checked < finished
+    except (KeyError, TypeError, ValueError):
+        raise Refused("check_report", "the check report or run record has no valid "
+                                      "checked_at or finished_at") from None
+    if early:
+        raise Refused("check_report", "the check ran before the load finished")
     signed = {**record, "signed_off_at": datetime.now(timezone.utc).isoformat()}
     replace_private(run_record_path, to_json(signed))
     out("sign-off: pass; the maintenance window is closed and reset now refuses")

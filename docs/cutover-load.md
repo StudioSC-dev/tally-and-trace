@@ -190,7 +190,8 @@ Sign-off makes no database connection. It refuses unless the run record is
 `complete` and not yet signed off, `--confirm` is the record's owner email,
 and the check report is a version 1 `cutover-check` report recording
 `overall: pass` for the record's owner id, database, server address and
-session time zone. It then writes `signed_off_at` into the run
+session time zone, with its `checked_at` at or after the record's
+`finished_at` (so the check read the loaded state). It then writes `signed_off_at` into the run
 record (an atomic replace, mode 0600). After sign-off the reset refuses.
 
 ## 6. On failure, before sign-off: reset
