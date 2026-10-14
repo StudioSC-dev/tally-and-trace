@@ -1132,6 +1132,69 @@ def test_reset_refuses(case, tmp_path, owner, sw_people, sw_db):
     assert counts(sw_db, owner["id"]) == before
 
 
+def _owner_allocation(db, who, record):
+    """An owner allocation, recorded as if the load had made it: the run record's
+    counts and fingerprint are taken again, so only the foreign row differs."""
+    from app.cutover_load.loader import owner_counts, owner_fingerprint
+    from app.models.allocation import Allocation, AllocationType
+
+    db.rollback()
+    held = Allocation(user_id=who["id"], account_id=account(db, who, "Main Bank").id,
+                      name="Rainy Day", allocation_type=AllocationType.SAVINGS)
+    db.add(held)
+    db.commit()
+    fingerprint = owner_fingerprint(db, who["id"])
+    edit_record(record, row_counts=owner_counts(db, who["id"]),
+                fingerprint=fingerprint["sha256"], fingerprint_tables=fingerprint["tables"])
+    db.commit()
+    return held.id
+
+
+FOREIGN_CASES = ("transaction_allocation", "entry_allocation", "wishlist_category",
+                 "payment_account", "payment_overflow_account")
+
+
+@pytest.mark.parametrize("case", FOREIGN_CASES)
+def test_reset_refuses_another_users_reference_to_the_owner(case, tmp_path, owner,
+                                                             sw_people, sw_db):
+    from app.models.account import Account, AccountType
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.category import Category
+    from app.models.transaction import Transaction, TransactionType
+    from app.models.wishlist_item import WishlistItem
+
+    other = sw_people("Rex", "Other")
+    _, record = load(tmp_path, fixture(), owner)
+    held = _owner_allocation(sw_db, owner, record) if case.endswith("allocation") else None
+    sw_db.rollback()
+    bank = account(sw_db, owner, "Main Bank")
+    wallet = Account(user_id=other["id"], name="Other Wallet", account_type=AccountType.CASH)
+    sw_db.add(wallet)
+    sw_db.flush()
+    if case == "transaction_allocation":
+        sw_db.add(Transaction(user_id=other["id"], account_id=wallet.id, allocation_id=held,
+                              amount=1, is_posted=False, transaction_type=TransactionType.DEBIT,
+                              transaction_date=datetime(2026, 3, 20)))
+    elif case == "entry_allocation":
+        sw_db.add(BudgetEntry(user_id=other["id"], entry_type=BudgetEntryType.EXPENSE,
+                              name="Other Bill", amount=1, allocation_id=held,
+                              next_occurrence=datetime(2026, 4, 1)))
+    elif case == "wishlist_category":
+        mine = sw_db.query(Category).filter(Category.user_id == owner["id"]).first()
+        sw_db.add(WishlistItem(user_id=other["id"], name="Other Wish", estimated_cost=1,
+                               category_id=mine.id))
+    elif case == "payment_account":
+        wallet.payment_account_id = bank.id
+    elif case == "payment_overflow_account":
+        wallet.payment_overflow_account_id = bank.id
+    sw_db.commit()
+    before = counts(sw_db, owner["id"])
+    with pytest.raises(Exception) as exc:
+        reset(record, owner["email"])
+    assert getattr(exc.value, "check", None) == "foreign_references", exc.value
+    assert counts(sw_db, owner["id"]) == before
+
+
 def test_the_run_record_carries_the_loaded_state_fingerprint(tmp_path, owner, sw_db,
                                                              monkeypatch):
     from app.cutover_load import loader

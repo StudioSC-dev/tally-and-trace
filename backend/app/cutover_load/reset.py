@@ -113,10 +113,13 @@ def _later_rows(db, owner_id: int, finished_at) -> Dict[str, int]:
 FOREIGN_REFERENCES = {
     "transactions": ("account_id IN ({a}) OR transfer_from_account_id IN ({a}) "
                      "OR transfer_to_account_id IN ({a}) OR category_id IN ({c}) "
-                     "OR budget_entry_id IN ({e})"),
+                     "OR budget_entry_id IN ({e}) OR allocation_id IN ({al})"),
     "budget_entries": ("account_id IN ({a}) OR overflow_account_id IN ({a}) "
-                       "OR transfer_to_account_id IN ({a}) OR category_id IN ({c})"),
+                       "OR transfer_to_account_id IN ({a}) OR category_id IN ({c}) "
+                       "OR allocation_id IN ({al})"),
     "allocations": "account_id IN ({a})",
+    "wishlist_items": "category_id IN ({c})",
+    "accounts": "payment_account_id IN ({a}) OR payment_overflow_account_id IN ({a})",
 }
 
 
@@ -125,7 +128,8 @@ def _foreign_references(db, owner_id: int) -> Dict[str, int]:
 
     owned = {"a": "SELECT id FROM accounts WHERE user_id = :owner",
              "c": "SELECT id FROM categories WHERE user_id = :owner",
-             "e": "SELECT id FROM budget_entries WHERE user_id = :owner"}
+             "e": "SELECT id FROM budget_entries WHERE user_id = :owner",
+             "al": "SELECT id FROM allocations WHERE user_id = :owner"}
     found = {}
     for table, criterion in FOREIGN_REFERENCES.items():
         n = db.execute(text(f"SELECT count(*) FROM {table} WHERE user_id <> :owner AND "
