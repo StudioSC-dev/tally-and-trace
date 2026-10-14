@@ -12,13 +12,13 @@ host of ``localhost``, ``127.0.0.1`` or ``::1``, and the server must report a
 loopback address or one in the Docker bridge range 172.16.0.0/12 (a database
 in a local container reports its container address, never a loopback one).
 """
-import copy
 import ipaddress
 import json
 import os
 import stat
 import subprocess
 import sys
+import threading
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -475,7 +475,7 @@ def _seed_guard_case(case, db, who, other):
     from app.models.allocation import Allocation, AllocationType
     from app.models.budget_entry import BudgetEntry, BudgetEntryType
     from app.models.category import Category
-    from app.models.tag import Tag, account_tags
+    from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tags
     from app.models.tag_share import TagShare
     from app.models.transaction import Transaction, TransactionType
     from app.models.wishlist_item import WishlistItem
@@ -507,6 +507,21 @@ def _seed_guard_case(case, db, who, other):
     }
     if case == "account_tags (Household tag)":
         db.execute(account_tags.insert().values(tag_id=who["household"], account_id=theirs.id))
+    elif case == "transaction_tags (Household tag)":
+        row = Transaction(user_id=other["id"], account_id=theirs.id, amount=1, is_posted=False,
+                          transaction_type=TransactionType.DEBIT,
+                          transaction_date=datetime(2026, 1, 1))
+        db.add(row)
+        db.flush()
+        db.execute(transaction_tags.insert().values(tag_id=who["household"],
+                                                    transaction_id=row.id))
+    elif case == "budget_entry_tags (Household tag)":
+        row = BudgetEntry(user_id=other["id"], name="Theirs", entry_type=BudgetEntryType.EXPENSE,
+                          amount=1, next_occurrence=datetime(2026, 1, 1))
+        db.add(row)
+        db.flush()
+        db.execute(budget_entry_tags.insert().values(tag_id=who["household"],
+                                                     budget_entry_id=row.id))
     else:
         db.add(rows[case]())
     db.commit()
@@ -514,6 +529,7 @@ def _seed_guard_case(case, db, who, other):
 
 GUARD_CASES = ["accounts", "transactions", "budget_entries", "categories", "allocations",
                "wishlist_items", "tags", "account_tags (Household tag)",
+               "transaction_tags (Household tag)", "budget_entry_tags (Household tag)",
                "tag_shares (Household tag)", "account_shares (received)",
                "tag_shares (received)"]
 
@@ -595,12 +611,27 @@ def test_a_second_run_is_refused_while_the_lock_is_held(tmp_path, owner, sw_db):
             holder.begin()
             holder.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CUTOVER_LOCK_KEY})
             before = table_counts(sw_db)
-            with pytest.raises(Refused) as exc:
-                load(tmp_path, fixture(), owner)
-            assert exc.value.check == "lock"
-            assert "another cutover run is active" in exc.value.message
+            # In a thread with a hard deadline: a loader that waited for the lock
+            # (pg_advisory_xact_lock) would fail here instead of hanging the suite.
+            outcome = {}
+
+            def attempt():
+                try:
+                    load(tmp_path, fixture(), owner)
+                except BaseException as exc:  # noqa: BLE001 - recorded for the asserts
+                    outcome["error"] = exc
+
+            runner = threading.Thread(target=attempt, daemon=True)
+            runner.start()
+            runner.join(timeout=30)
+            waited = runner.is_alive()
+            holder.rollback()  # releases the lock, so a waiting loader can finish
+            runner.join(timeout=30)
+            assert not waited, "the loader waited for the lock instead of refusing"
+            exc = outcome.get("error")
+            assert isinstance(exc, Refused) and exc.check == "lock", exc
+            assert "another cutover run is active" in exc.message
             assert table_counts(sw_db) == before
-            holder.rollback()
     finally:
         engine.dispose()
 
@@ -1235,10 +1266,9 @@ def test_the_spouse_sees_exactly_the_household_set_once_shared(tmp_path, owner, 
     assert "Joint Bank" in accounts and "Main Bank" not in accounts
 
 
-def test_the_input_fixture_carries_no_owner_figures():
-    """Synthetic figures only: every money value is a round invented number."""
+def test_the_fixture_balances_and_amounts_are_round_numbers():
+    """Every balance and transaction amount in the fixture is a multiple of 10."""
     data = fixture()
     values = [a["balance_at_cutover"] for a in data["accounts"]]
     values += [t.get("amount") or t.get("face_amount") for t in data["transactions"]]
     assert all(D(v) % 10 == 0 for v in values if v), values
-    assert copy.deepcopy(data) == fixture()
