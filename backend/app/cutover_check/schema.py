@@ -18,32 +18,94 @@ from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 from pydantic.functional_validators import BeforeValidator
+from pydantic_core import PydanticCustomError
 
-_MONEY = re.compile(r"^-?\d+(\.\d{1,2})?$")
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+# ASCII digits only, matched in full (``$`` would accept a trailing newline).
+_MONEY = re.compile(r"-?[0-9]+(\.[0-9]{1,2})?", re.ASCII)
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
+_MONTH = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])", re.ASCII)
+
+# Every message the file's validators raise, by error type. ``describe`` prints only
+# these and the fixed texts for pydantic's own types: never an error's ``msg``, which
+# for a parser or validator can carry the input.
+_MESSAGES = {
+    "cutover_as_of": "as_of cannot be before cutover_date",
+    "cutover_card_routing_duplicate": "card_routing lists an account twice",
+    "cutover_checkpoint_duplicate": "a checkpoint lists an account twice",
+    "cutover_date": "dates are YYYY-MM-DD strings",
+    "cutover_dated_late": "sheet.dated_items must be dated before as_of",
+    "cutover_dated_zero": "dated item amount cannot be zero",
+    "cutover_description_empty": "description_contains is empty",
+    "cutover_expected_empty": "expected lists no month",
+    "cutover_expected_gap": "expected months must be contiguous",
+    "cutover_expected_negative": "expected counts cannot be negative",
+    "cutover_first_month": "sheet.first_month must start on or after cutover_date",
+    "cutover_installment": "installment goes with end_mode after_occurrences",
+    "cutover_loans_duplicate": "loans lists an account twice",
+    "cutover_money": "money must be a decimal string with at most 2 places",
+    "cutover_month": "months are YYYY-MM strings",
+    "cutover_next_rows": "next_rows holds the first 3 upcoming rows at most",
+    "cutover_recurring_duplicate": "recurring entries must be unique by (name, account, destination)",
+    "cutover_semi_monthly": "semi_monthly_days goes with a semi_monthly cadence",
+    "cutover_sheet_currency": "sheet.currency must be the sheet account's currency",
+    "cutover_sheet_difference": "an approved difference falls outside sheet.months",
+    "cutover_sheet_gap": "sheet.months must be contiguous",
+    "cutover_sheet_month_end": "sheet.month_end must hold exactly the months in sheet.months",
+    "cutover_sheet_start": "sheet.months must start at sheet.first_month",
+    "cutover_statement_duplicate": "a card statement is listed twice (same card and close)",
+}
+
+_BUILTIN = {
+    "extra_forbidden": "Extra inputs are not permitted",
+    "missing": "Field required",
+    "literal_error": "not one of the allowed values",
+    "string_type": "must be a string",
+    "int_type": "must be an integer",
+    "int_parsing": "must be an integer",
+    "int_from_float": "must be an integer",
+    "bool_type": "must be true or false",
+    "bool_parsing": "must be true or false",
+    "list_type": "must be a list",
+    "tuple_type": "must be a list",
+    "dict_type": "must be an object",
+    "model_type": "must be an object",
+    "model_attributes_type": "must be an object",
+    "too_short": "has too few items",
+    "too_long": "has too many items",
+    "greater_than": "is too small",
+    "greater_than_equal": "is too small",
+    "less_than": "is too large",
+    "less_than_equal": "is too large",
+}
+
+
+def _fail(code: str) -> PydanticCustomError:
+    return PydanticCustomError(code, _MESSAGES[code])
 
 
 def _money(value) -> Decimal:
-    if not isinstance(value, str) or not _MONEY.match(value):
-        raise ValueError("money must be a decimal string with at most 2 places")
+    if not isinstance(value, str) or not _MONEY.fullmatch(value):
+        raise _fail("cutover_money")
     try:
         return Decimal(value)
     except InvalidOperation:  # pragma: no cover - the pattern already rules it out
-        raise ValueError("money must be a decimal string") from None
+        raise _fail("cutover_money") from None
 
 
 def _date(value) -> date:
     if isinstance(value, date):
         return value
-    if not isinstance(value, str) or not _DATE.match(value):
-        raise ValueError("dates are YYYY-MM-DD strings")
-    return date.fromisoformat(value)
+    if not isinstance(value, str) or not _DATE.fullmatch(value):
+        raise _fail("cutover_date")
+    try:
+        return date.fromisoformat(value)
+    except ValueError:  # e.g. day 30 of February; the parser's message echoes the input
+        raise _fail("cutover_date") from None
 
 
 def _month(value) -> str:
-    if not isinstance(value, str) or not _MONTH.match(value):
-        raise ValueError("months are YYYY-MM strings")
+    if not isinstance(value, str) or not _MONTH.fullmatch(value):
+        raise _fail("cutover_month")
     return value
 
 
@@ -108,7 +170,7 @@ class Checkpoint(_Strict):
     def _unique_accounts(self):
         keys = [b.account.key() for b in self.balances]
         if len(keys) != len(set(keys)):
-            raise ValueError("a checkpoint lists an account twice")
+            raise _fail("cutover_checkpoint_duplicate")
         return self
 
 
@@ -146,7 +208,7 @@ class Loan(_Strict):
     @classmethod
     def _first_three(cls, rows):
         if len(rows) > 3:
-            raise ValueError("next_rows holds the first 3 upcoming rows at most")
+            raise _fail("cutover_next_rows")
         return rows
 
 
@@ -189,19 +251,19 @@ class Recurring(_Strict):
     @model_validator(mode="after")
     def _shape(self):
         if (self.cadence == "semi_monthly") != (self.semi_monthly_days is not None):
-            raise ValueError("semi_monthly_days goes with a semi_monthly cadence")
+            raise _fail("cutover_semi_monthly")
         if (self.end_mode == "after_occurrences") != (self.installment is not None):
-            raise ValueError("installment goes with end_mode after_occurrences")
+            raise _fail("cutover_installment")
         if self.description_contains is not None and not self.description_contains.strip():
-            raise ValueError("description_contains is empty")
+            raise _fail("cutover_description_empty")
         if self.expected is not None:
             months = sorted(self.expected)
             if not months:
-                raise ValueError("expected lists no month")
+                raise _fail("cutover_expected_empty")
             if not _contiguous(months):
-                raise ValueError("expected months must be contiguous")
+                raise _fail("cutover_expected_gap")
             if any(count < 0 for count in self.expected.values()):
-                raise ValueError("expected counts cannot be negative")
+                raise _fail("cutover_expected_negative")
         return self
 
 
@@ -219,7 +281,7 @@ class DatedItem(_Strict):
     @model_validator(mode="after")
     def _non_zero(self):
         if self.amount == 0:
-            raise ValueError("dated item amount cannot be zero")
+            raise _fail("cutover_dated_zero")
         return self
 
 
@@ -238,16 +300,16 @@ class Sheet(_Strict):
     @model_validator(mode="after")
     def _shape(self):
         if self.currency != self.account.currency:
-            raise ValueError("sheet.currency must be the sheet account's currency")
+            raise _fail("cutover_sheet_currency")
         if not self.months or self.months[0] != self.first_month:
-            raise ValueError("sheet.months must start at sheet.first_month")
+            raise _fail("cutover_sheet_start")
         if not _contiguous(self.months):
-            raise ValueError("sheet.months must be contiguous")
+            raise _fail("cutover_sheet_gap")
         if set(self.month_end) != set(self.months):
-            raise ValueError("sheet.month_end must hold exactly the months in sheet.months")
+            raise _fail("cutover_sheet_month_end")
         stray = {d.month for d in self.approved_differences} - set(self.months)
         if stray:
-            raise ValueError("an approved difference falls outside sheet.months")
+            raise _fail("cutover_sheet_difference")
         return self
 
 
@@ -267,26 +329,26 @@ class Frozen(_Strict):
     @model_validator(mode="after")
     def _shape(self):
         if self.as_of < self.cutover_date:
-            raise ValueError("as_of cannot be before cutover_date")
+            raise _fail("cutover_as_of")
         if month_start(self.sheet.first_month) < self.cutover_date:
-            raise ValueError("sheet.first_month must start on or after cutover_date")
+            raise _fail("cutover_first_month")
         late = [d for d in self.sheet.dated_items if d.date >= self.as_of]
         if late:
-            raise ValueError("sheet.dated_items must be dated before as_of")
+            raise _fail("cutover_dated_late")
         seen = set()
         for s in self.card_statements:
             key = (s.card.key(), s.close)
             if key in seen:
-                raise ValueError("a card statement is listed twice (same card and close)")
+                raise _fail("cutover_statement_duplicate")
             seen.add(key)
         for name, items in (("card_routing", [r.card for r in self.card_routing]),
                             ("loans", [x.loan for x in self.loans])):
             keys = [s.key() for s in items]
             if len(keys) != len(set(keys)):
-                raise ValueError(f"{name} lists an account twice")
+                raise _fail(f"cutover_{name}_duplicate")
         keys = [r.key() for r in self.recurring]
         if len(keys) != len(set(keys)):
-            raise ValueError("recurring entries must be unique by (name, account, destination)")
+            raise _fail("cutover_recurring_duplicate")
         return self
 
 
@@ -327,11 +389,14 @@ def _field_names() -> set:
 def describe(exc: ValidationError) -> str:
     """Each error as its location and message, never its input: field names and list
     positions are shown, any other key (a month, an unknown key) as ``<key>``, and
-    validator messages are written without figures or names."""
+    the text is looked up by error type (``_MESSAGES``, ``_BUILTIN``), never taken
+    from the error, so no input reaches it."""
     known = _field_names()
     parts = []
     for err in exc.errors(include_input=False, include_url=False, include_context=False):
         loc = ".".join(str(p) if isinstance(p, int) or p in known else "<key>"
                        for p in err["loc"])
-        parts.append(f"{loc or '<file>'}: {err['msg']} [{err['type']}]")
+        kind = err["type"]
+        text = _MESSAGES.get(kind) or _BUILTIN.get(kind) or "invalid value"
+        parts.append(f"{loc or '<file>'}: {text} [{kind}]")
     return f"{len(parts)} error(s): " + "; ".join(parts)

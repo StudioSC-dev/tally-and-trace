@@ -129,6 +129,19 @@ def test_schema_refuses_a_sheet_currency_other_than_its_account():
     refused(raw, "sheet.currency must be the sheet account's currency")
 
 
+@pytest.mark.parametrize("value", ["2031-03-10\n", "\u0662\u0660\u0663\u0661-03-10",
+                                   "2031-02-30"])
+def test_schema_date_errors_never_echo_the_input(value):
+    raw = frozen_base()
+    raw["as_of"] = value
+    with pytest.raises(schema.FrozenError) as caught:
+        schema.parse_frozen(raw)
+    text = str(caught.value)
+    assert "as_of: " in text and "YYYY-MM-DD" in text, text
+    for leaked in (value, value.strip(), "isoformat", "\u0662"):
+        assert leaked not in text, (leaked, text)
+
+
 def test_schema_refuses_a_zero_dated_item():
     raw = frozen_base()
     raw["sheet"]["dated_items"][0]["amount"] = "0.00"
@@ -842,6 +855,20 @@ def test_wrapper_never_prints_frozen_figures_or_names(tmp_path):
     for leaked in (SENTINEL_FIGURE, "987654", SENTINEL_NAME, "2031-07"):
         assert leaked not in out.stdout + out.stderr, leaked
     assert not (tmp_path / "r.json").exists()
+
+
+def test_wrapper_never_prints_a_malformed_date(tmp_path):
+    raw = frozen_base()
+    raw["as_of"] = "2031-03-10\n"
+    frozen = write_frozen(tmp_path, raw)
+    out = run_wrapper(["--frozen", frozen, "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "frozen file is invalid" in out.stdout
+    for leaked in ("2031-03-10", "isoformat"):
+        assert leaked not in out.stdout + out.stderr, leaked
 
 
 @pytest.mark.parametrize("url, extra_env, fragment", [
