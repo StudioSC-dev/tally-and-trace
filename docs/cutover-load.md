@@ -199,9 +199,14 @@ record (an atomic replace, mode 0600). After sign-off the reset refuses.
 ```sh
 python backend/scripts/cutover_load.py --reset --dry-run \
     --run-record ~/cutover/run-record.json --confirm OWNER_EMAIL \
+    --report ~/cutover/reset-dry-run-report.json \
     --expect-host DB_HOST --expect-db DB_NAME --expect-server-addr SERVER_ADDR
-# then the same command without --dry-run
+# then the same command without --dry-run (and with a new --report path)
 ```
+
+`--report` is optional for the reset. When given (a new path), a refusal's
+details go there at mode 0600: which check failed and which tables or counts
+differ, never figures. The terminal shows only `FAIL <check> [<key>]`.
 
 The reset deletes everything the owner owns except the user and the
 Household tag, in one transaction. It refuses unless:

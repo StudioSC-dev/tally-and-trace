@@ -1087,6 +1087,38 @@ def test_finished_at_is_the_database_clock_after_the_commit(tmp_path, owner, sw_
         rec["finished_at"]) <= now
 
 
+def test_a_reset_refusal_writes_its_details_to_an_optional_report(tmp_path, owner, sw_people,
+                                                                 sw_db):
+    other = sw_people("Rex", "Other")
+    _, record = load(tmp_path, fixture(), owner)
+    _break("link_deleted", sw_db, owner, record, other)
+    report = tmp_path / "reset-report.json"
+    done = run_wrapper(["--reset", "--run-record", str(record), "--confirm", owner["email"],
+                        "--report", str(report), *target_args(addr=TARGET["addr"])],
+                       cwd=tmp_path)
+    assert done.returncode == 1
+    assert "FAIL row_counts [owner]" in done.stdout and "transaction_tags" not in done.stdout
+    problem = json.loads(report.read_text())["problems"][0]
+    assert problem["check"] == "row_counts" and "transaction_tags" in problem["detail"]
+    assert mode_of(report) == 0o600
+
+
+def test_a_reset_report_that_exists_is_refused_before_connecting(tmp_path, owner, sw_db):
+    from app.cutover_load.bootstrap import Refused, validate_url
+    from app.cutover_load.reset import run_reset
+
+    _, record = load(tmp_path, fixture(), owner)
+    (tmp_path / "old-report.json").write_text("{}")
+    url = validate_url(TARGET["url"], expect_host=TARGET["host"], expect_db=TARGET["db"])
+    shown = []
+    with pytest.raises(Refused) as exc:
+        run_reset(url=url, run_record_path=str(record), confirm=owner["email"], dry_run=False,
+                  expect_db=TARGET["db"], expect_server_addr=TARGET["addr"],
+                  report_path=str(tmp_path / "old-report.json"), out=shown.append)
+    assert exc.value.check == "path" and shown == []
+    assert counts(sw_db, owner["id"])["transactions"] == 13
+
+
 def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):
     _, record = load(tmp_path, fixture(), owner)
     before = table_counts(sw_db)

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
 from app.cutover_load.bootstrap import Refused
-from app.cutover_load.outputs import read_json, replace_private, to_json
+from app.cutover_load.outputs import read_json, refuse_existing, replace_private, to_json
 
 # The cutover check's report (STU-204) as sign-off reads it.
 CHECK_KIND, CHECK_VERSION = "cutover-check", 1
@@ -191,9 +191,12 @@ def delete_owner_rows(db, owner_id: int, household_id: int) -> None:
 
 
 def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_db: str,
-              expect_server_addr: Optional[str], out: Callable[[str], None] = print) -> int:
+              expect_server_addr: Optional[str], report_path: Optional[str] = None,
+              out: Callable[[str], None] = print) -> int:
     """Reset the owner (section 2.3); 0 on success. Raises ``Refused`` or
-    ``CutoverError`` on any refusal, with nothing changed."""
+    ``CutoverError`` on any refusal, with nothing changed. ``report_path``, when
+    given, is where the wrapper writes a refusal's details (tables and counts,
+    never figures); it must not exist yet."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from sqlalchemy.pool import NullPool
@@ -205,6 +208,7 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
     )
     from app.models.user import User
 
+    refuse_existing(report_path)
     record = _record(run_record_path)
     _window_open(record, confirm)
     if not record.get("fingerprint"):

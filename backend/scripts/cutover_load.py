@@ -4,7 +4,7 @@
     DATABASE_URL=... python backend/scripts/cutover_load.py --input IN.json \\
         --report REPORT.json --expect-host HOST --expect-db DB --dry-run
     ... --run-record RECORD.json --expect-server-addr ADDR      (the real load)
-    ... --reset --run-record RECORD.json --confirm OWNER_EMAIL [--dry-run]
+    ... --reset --run-record RECORD.json --confirm OWNER_EMAIL [--dry-run] [--report R.json]
     ... --complete-record --run-record RECORD.json        (after exit code 3)
     python backend/scripts/cutover_load.py --sign-off --run-record RECORD.json \\
         --check-report CHECK.json --confirm OWNER_EMAIL
@@ -101,7 +101,8 @@ def main(argv=None) -> int:
 
             return run_reset(url=url, run_record_path=args.run_record, confirm=args.confirm,
                              dry_run=args.dry_run, expect_db=args.expect_db,
-                             expect_server_addr=args.expect_server_addr)
+                             expect_server_addr=args.expect_server_addr,
+                             report_path=args.report)
         from app.cutover_load.loader import run_load
 
         return run_load(url=url, input_path=args.input, report_path=args.report,
