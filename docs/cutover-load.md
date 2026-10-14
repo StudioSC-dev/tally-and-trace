@@ -43,7 +43,9 @@ Hosts, addresses and paths below are placeholders:
   repository (symlinks are resolved), are created new at mode 0600, and an
   existing file is never overwritten. The terminal shows only the target,
   check names, keys, counts and pass or fail; figures and details go to the
-  report file.
+  report file. An unexpected error, including one while setting up or while
+  writing the report or the run record, prints only `error: <ErrorClass>`:
+  no traceback, no path, no environment value.
 - **Pre-load guard.** The owner must be one active, verified, non-demo user
   who owns nothing yet except the Household tag, and has received no shares.
   The Household tag must exist; the tool never creates it.
@@ -53,7 +55,7 @@ Exit codes:
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | a refusal or error before the commit: nothing changed |
+| 1 | a refusal or error before the commit (`refused: ...`, `FAIL ...` or `error: <ErrorClass>`): nothing changed |
 | 2 | a missing or wrong flag |
 | 3 | `load: COMMITTED; run record incomplete` (the load committed, but the run record could not be marked complete), or `load: commit outcome UNKNOWN` (the COMMIT itself failed, for example on a lost connection, so it may or may not have committed). Either way run `--complete-record` (step 4) |
 

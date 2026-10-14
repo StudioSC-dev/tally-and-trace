@@ -67,12 +67,16 @@ def main(argv=None) -> int:
         required(p, args, "--input", "--report", "--expect-host", "--expect-db")
         if not args.dry_run:
             required(p, args, "--run-record", "--expect-server-addr")
-    # Absolute paths first, against the directory the owner ran this from.
-    for name in PATH_ARGS:
-        if getattr(args, name):
-            setattr(args, name, os.path.realpath(getattr(args, name)))
-    # Hermetic import: an empty working directory, so no .env can load.
-    os.chdir(tempfile.mkdtemp(prefix="cutover-load-"))
+    try:
+        # Absolute paths first, against the directory the owner ran this from.
+        for name in PATH_ARGS:
+            if getattr(args, name):
+                setattr(args, name, os.path.realpath(getattr(args, name)))
+        # Hermetic import: an empty working directory, so no .env can load.
+        os.chdir(tempfile.mkdtemp(prefix="cutover-load-"))
+    except Exception as exc:  # a filesystem error's message would carry a path
+        print(f"error: {type(exc).__name__}")
+        return 1
     sys.path.insert(0, BACKEND)
     try:
         from app.cutover_load import bootstrap, outputs

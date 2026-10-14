@@ -761,6 +761,50 @@ def test_a_settings_error_prints_only_its_class(tmp_path, owner):
     assert "production" not in shown
 
 
+SENTINEL_DIR = "private-bank-987654.32"
+
+
+@pytest.mark.parametrize("output", ["report", "run_record"])
+def test_a_failed_output_write_prints_only_its_class(output, tmp_path, owner, sw_db):
+    """An output file that cannot be written: the class only, never the path."""
+    path = write_input(tmp_path, fixture(), owner)
+    missing = tmp_path / SENTINEL_DIR  # this directory does not exist
+    report = (missing if output == "report" else tmp_path) / "r.json"
+    record = (missing if output == "run_record" else tmp_path) / "record.json"
+    before = counts(sw_db, owner["id"])
+    done = run_wrapper(["--input", path, "--report", str(report), "--run-record", str(record),
+                        *target_args(addr=TARGET["addr"])], cwd=tmp_path)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "error: FileNotFoundError" in done.stdout
+    assert "Traceback" not in done.stderr
+    assert "987654" not in done.stdout + done.stderr
+    assert not os.path.exists(tmp_path / "record.json")
+    if output == "run_record":  # the review report is discarded; the failure report replaces it
+        written = json.loads((tmp_path / "r.json").read_text())
+        assert written["kind"] == "cutover-load-failure"
+        assert written["problems"] == [{"check": "error", "key": "-",
+                                        "detail": "FileNotFoundError"}]
+    sw_db.rollback()
+    assert counts(sw_db, owner["id"]) == before
+
+
+def test_an_unexpected_bootstrap_error_prints_only_its_class(tmp_path):
+    code = ("import runpy, sys, tempfile\n"
+            "def mkdtemp(*args, **kwargs):\n"
+            f"    raise PermissionError(13, 'Permission denied', '/x/{SENTINEL_DIR}/tmp')\n"
+            "tempfile.mkdtemp = mkdtemp\n"
+            f"sys.argv = {[SCRIPT, '--input', str(tmp_path / 'in.json'), '--report', str(tmp_path / 'r.json'), '--dry-run', '--expect-host', '127.0.0.1', '--expect-db', 'c2db']!r}\n"
+            f"runpy.run_path({SCRIPT!r}, run_name='__main__')\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
+    env["DATABASE_URL"] = "postgresql://u:pw@127.0.0.1:1/c2db"
+    done = subprocess.run([sys.executable, "-I", "-c", code], cwd=tmp_path, env=env,
+                          capture_output=True, text=True, timeout=120)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "error: PermissionError" in done.stdout
+    assert "Traceback" not in done.stderr
+    assert "987654" not in done.stdout + done.stderr
+
+
 def test_an_expect_host_mismatch_is_refused_before_connecting(tmp_path, owner):
     path = write_input(tmp_path, fixture(), owner)
     other = "localhost" if TARGET["host"] != "localhost" else "127.0.0.1"
