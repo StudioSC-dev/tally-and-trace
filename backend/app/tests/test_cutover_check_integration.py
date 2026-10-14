@@ -1266,6 +1266,47 @@ def test_a_dated_item_matching_only_another_account_fails(world, target):
     assert failure["same_day_rows"] == []
 
 
+def dated_failures(report) -> list:
+    return [f for f in block(report, "sheet")["failures"]
+            if f["message"] == "dated item not found as a posted row on the sheet account"]
+
+
+@needs_db
+def test_a_dated_item_matching_only_another_users_row_fails(world, target, sw_people, sw_db):
+    from datetime import datetime
+
+    from app.models.transaction import Transaction, TransactionType
+
+    other = sw_people("Uma", "Other")
+    row = Transaction(user_id=other["id"], account_id=world["bank"], amount=700,
+                      currency="PHP", transaction_type=TransactionType.DEBIT,
+                      transaction_date=datetime(2031, 3, 6), description="Paint store",
+                      is_posted=True)
+    sw_db.add(row)
+    sw_db.commit()
+    raw = owner_frozen(world)
+    raw["sheet"]["dated_items"].append(
+        {"date": "2031-03-06", "amount": "-700.00", "description_contains": "paint"})
+    try:
+        [failure] = dated_failures(run_check(target, raw, blocks=sheet_only()))
+    finally:
+        sw_db.delete(row)
+        sw_db.commit()
+    assert failure["date"] == "2031-03-06"
+    assert failure["same_day_rows"] == []
+
+
+@needs_db
+def test_a_dated_item_matching_only_an_unposted_row_fails(world, target):
+    world["debit"](world["bank"], 700, "2031-03-06", "Paint store", posted=False)
+    raw = owner_frozen(world)
+    raw["sheet"]["dated_items"].append(
+        {"date": "2031-03-06", "amount": "-700.00", "description_contains": "paint"})
+    [failure] = dated_failures(run_check(target, raw, blocks=sheet_only()))
+    assert failure["date"] == "2031-03-06"
+    assert failure["same_day_rows"] == []
+
+
 @needs_db
 def test_a_first_month_after_as_of_refuses_the_sheet(sw_client, sw_people, target):
     from app.tests.conftest import sw_post
