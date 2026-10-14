@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "owner_email": "owner@example.com",
+  "cutover_date": "2031-03-01",
+  "as_of": "2031-03-10",
+  "timezone": "Asia/Manila",
+  "checkpoints": [
+    {
+      "date": "2031-03-01",
+      "point": "start_of_day",
+      "balances": [
+        {"account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"}, "amount": "49600.00"},
+        {"account": {"name": "Second bank", "account_type": "savings", "currency": "PHP"}, "amount": "20000.00"},
+        {"account": {"name": "Main card", "account_type": "credit", "currency": "PHP"}, "amount": "-1200.00"},
+        {"account": {"name": "Car loan", "account_type": "loan", "currency": "PHP"}, "amount": "-100000.00"}
+      ]
+    },
+    {
+      "date": "2031-03-05",
+      "point": "end_of_day",
+      "balances": [
+        {"account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"}, "amount": "48600.00"},
+        {"account": {"name": "Main card", "account_type": "credit", "currency": "PHP"}, "amount": "-1200.00"}
+      ]
+    },
+    {
+      "date": "2031-03-10",
+      "point": "start_of_day",
+      "balances": [
+        {"account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"}, "amount": "46600.00"},
+        {"account": {"name": "Second bank", "account_type": "savings", "currency": "PHP"}, "amount": "22000.00"}
+      ]
+    }
+  ],
+  "card_statements": [
+    {"card": {"name": "Main card", "account_type": "credit", "currency": "PHP"},
+     "close": "2031-02-15", "due": "2031-03-07", "balance": "1000.00", "owed": "600.00"},
+    {"card": {"name": "Main card", "account_type": "credit", "currency": "PHP"},
+     "close": "2031-03-15", "due": "2031-04-04", "balance": "600.00", "owed": "600.00"}
+  ],
+  "card_routing": [
+    {"card": {"name": "Main card", "account_type": "credit", "currency": "PHP"},
+     "payment_account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+     "overflow_account": {"name": "Second bank", "account_type": "savings", "currency": "PHP"}}
+  ],
+  "loans": [
+    {"loan": {"name": "Car loan", "account_type": "loan", "currency": "PHP"},
+     "payment_account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+     "owed": "96000.00", "payments_made": 3, "payments_left": 21, "next_due": "2031-04-20",
+     "next_rows": [
+       {"due_date": "2031-04-20", "payment": "5000.00"},
+       {"due_date": "2031-05-20", "payment": "5000.00"},
+       {"due_date": "2031-06-20", "payment": "5000.00"}
+     ]}
+  ],
+  "recurring": [
+    {"name": "Salary",
+     "account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+     "destination": null, "overflow_account": null,
+     "entry_type": "income", "amount": "30000.00", "currency": "PHP", "cadence": "monthly",
+     "next_occurrence": "2031-03-25", "end_mode": "indefinite",
+     "is_autopay": false, "is_active": true,
+     "expected": {"2031-03": 1, "2031-04": 1}},
+    {"name": "Utilities",
+     "account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+     "destination": null,
+     "overflow_account": {"name": "Second bank", "account_type": "savings", "currency": "PHP"},
+     "entry_type": "expense", "amount": "2000.00", "currency": "PHP", "cadence": "monthly",
+     "next_occurrence": "2031-03-20", "end_mode": "indefinite",
+     "is_autopay": true, "is_active": true,
+     "expected": {"2031-03": 1, "2031-04": 1}},
+    {"name": "Car loan payment",
+     "account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+     "destination": {"name": "Car loan", "account_type": "loan", "currency": "PHP"},
+     "overflow_account": null,
+     "entry_type": "expense", "amount": "5000.00", "currency": "PHP", "cadence": "monthly",
+     "next_occurrence": "2031-04-20", "end_mode": "indefinite",
+     "is_autopay": false, "is_active": true,
+     "expected": {"2031-03": 1, "2031-04": 1}},
+    {"name": "Phone plan",
+     "account": {"name": "Main card", "account_type": "credit", "currency": "PHP"},
+     "destination": null, "overflow_account": null,
+     "entry_type": "expense", "amount": "1000.00", "currency": "PHP", "cadence": "monthly",
+     "next_occurrence": "2031-03-20", "end_mode": "after_occurrences", "max_occurrences": 4,
+     "is_autopay": false, "is_active": true,
+     "installment": {"n": 2, "m": 6},
+     "expected": {"2031-03": 1, "2031-04": 1}},
+    {"name": "Snacks",
+     "account": {"name": "Pocket wallet", "account_type": "cash", "currency": "PHP"},
+     "destination": null, "overflow_account": null,
+     "entry_type": "expense", "amount": "500.00", "currency": "PHP", "cadence": "monthly",
+     "next_occurrence": "2031-03-15", "end_mode": "indefinite",
+     "is_autopay": false, "is_active": true}
+  ],
+  "sheet": {
+    "account": {"name": "Main bank", "account_type": "checking", "currency": "PHP"},
+    "currency": "PHP",
+    "first_month": "2031-03",
+    "months": ["2031-03", "2031-04", "2031-05"],
+    "sheet_opening": "49600.00",
+    "month_end": {"2031-03": "74000.00", "2031-04": "96400.00", "2031-05": "118400.00"},
+    "opening_offset": "0.00",
+    "overflow_policy": "excluded",
+    "approved_differences": [],
+    "dated_items": [
+      {"date": "2031-03-05", "amount": "-1000.00", "description_contains": "hardware"}
+    ]
+  }
+}
