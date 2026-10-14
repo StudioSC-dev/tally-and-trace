@@ -202,6 +202,13 @@ def test_url_refusals_never_echo_parsed_url_parts(raw, expect_host, fragment):
     assert "Zq9tail" not in str(caught.value)
 
 
+def test_a_connected_database_refusal_never_echoes_the_server_name(monkeypatch):
+    monkeypatch.setattr(bootstrap, "observe_target", lambda conn: ("Zq9tail", "127.0.0.1"))
+    with pytest.raises(bootstrap.BootstrapError) as caught:
+        bootstrap.verify_target(object(), "c3db", "127.0.0.1")
+    assert str(caught.value) == "connected database is not --expect-db 'c3db'"
+
+
 def test_url_validation_refuses_the_transaction_pooler_port():
     with pytest.raises(bootstrap.BootstrapError, match="port 6543") as caught:
         bootstrap.validate_url("postgresql://u:secret@db.example.com:6543/c3db",
