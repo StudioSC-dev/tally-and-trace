@@ -27,6 +27,7 @@ check name and the input key, and the details go to the report file.
 """
 
 import hashlib
+import json
 import os
 import subprocess
 from datetime import datetime, timezone
@@ -184,6 +185,56 @@ def owner_counts(db: Session, owner_id: int) -> Dict[str, int]:
     counts["tag_shares"] = db.query(TagShare).filter(
         TagShare.tag_id.in_(own_tags) | (TagShare.user_id == owner_id)).count()
     return counts
+
+
+# --- Fingerprint ---------------------------------------------------------------------------
+
+FINGERPRINT_SKIP = frozenset({"created_at", "updated_at"})
+
+
+def _stable(value):
+    """A column value as fixed text: timestamps in UTC, decimals as written."""
+    if isinstance(value, datetime):
+        return (value.astimezone(timezone.utc) if value.tzinfo else value).isoformat()
+    return None if value is None else str(value)
+
+
+def owner_fingerprint(db: Session, owner_id: int) -> Dict[str, object]:
+    """SHA-256 of the owner's loaded state: ``{"sha256", "tables": {table: sha256}}``.
+
+    Covers every column but ``created_at`` and ``updated_at`` of the owner's rows
+    in the guard's tables and ``tags``, the (record, tag) pairs of the three link
+    tables on the owner's records or tags, and the ``account_shares`` and
+    ``tag_shares`` touching the owner; rows ordered by id. Any edit after the
+    load (a rename, a swapped tag link, a changed amount) changes it, whether or
+    not it moved a timestamp or a count.
+    """
+    p = {"owner": owner_id}
+    own = {"accounts": "SELECT id FROM accounts WHERE user_id = :owner",
+           "tags": "SELECT id FROM tags WHERE user_id = :owner"}
+    queries = {model.__tablename__: f"SELECT * FROM {model.__tablename__} "
+               "WHERE user_id = :owner ORDER BY id" for model in OWNED_TABLES}
+    queries["tags"] = "SELECT * FROM tags WHERE user_id = :owner ORDER BY id"
+    for link, column, model in LINKS:
+        queries[link.name] = (
+            f"SELECT {column}, tag_id FROM {link.name} WHERE {column} IN "
+            f"(SELECT id FROM {model.__tablename__} WHERE user_id = :owner) "
+            f"OR tag_id IN ({own['tags']}) ORDER BY {column}, tag_id")
+    queries["account_shares"] = (
+        f"SELECT * FROM account_shares WHERE user_id = :owner OR account_id IN "
+        f"({own['accounts']}) ORDER BY id")
+    queries["tag_shares"] = (
+        f"SELECT * FROM tag_shares WHERE user_id = :owner OR tag_id IN ({own['tags']}) "
+        "ORDER BY id")
+    tables = {}
+    for table, sql in queries.items():
+        result = db.execute(text(sql), p)
+        columns = [c for c in result.keys() if c not in FINGERPRINT_SKIP]
+        rows = [[_stable(row[c]) for c in columns] for row in result.mappings()]
+        payload = json.dumps([columns, rows], separators=(",", ":"))
+        tables[table] = hashlib.sha256(payload.encode()).hexdigest()
+    whole = json.dumps(sorted(tables.items()), separators=(",", ":"))
+    return {"sha256": hashlib.sha256(whole.encode()).hexdigest(), "tables": tables}
 
 
 # --- Ledger --------------------------------------------------------------------------------
@@ -426,23 +477,6 @@ def git_sha() -> str:
         return "unknown"
 
 
-def finished_clock(conn, owner_id: int):
-    """The database clock now, never earlier than the owner's newest row timestamp.
-
-    ``update_account`` stamps ``updated_at`` from the loader's own clock
-    (``utc_now``), not the database's, so a loader clock ahead of the
-    database's would otherwise leave a loaded row "after" ``finished_at``.
-    """
-    parts = ["SELECT clock_timestamp() AS t"]
-    for table in ("accounts", "transactions", "budget_entries", "categories", "allocations",
-                  "wishlist_items"):
-        parts.append(f"SELECT max(greatest(created_at, updated_at)) FROM {table} "
-                     "WHERE user_id = :owner")
-    parts.append("SELECT max(created_at) FROM tags WHERE user_id = :owner")
-    sql = f"SELECT max(t) FROM ({' UNION ALL '.join(parts)}) AS stamps"
-    return conn.execute(text(sql), {"owner": owner_id}).scalar()
-
-
 # --- The run -------------------------------------------------------------------------------
 
 def run_load(*, url, input_path: str, report_path: str, run_record_path: Optional[str],
@@ -488,6 +522,7 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                 out("assert: balances at the cutover and card statements pass")
                 report = review(db, owner, plan, writer, database, address, session_timezone)
                 counts = report["row_counts"]
+                fingerprint = owner_fingerprint(db, owner.id)
                 if dry_run:
                     create_private(report_path, to_json({**report, "dry_run": True}))
                     db.close()
@@ -503,7 +538,9 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                     "session_timezone": session_timezone,
                     "alembic_revision": revision, "git_sha": git_sha(),
                     "input_sha256": input_sha, "started_at": started_at.isoformat(),
-                    "row_counts": counts, "finished_at": None, "signed_off_at": None,
+                    "row_counts": counts, "fingerprint": fingerprint["sha256"],
+                    "fingerprint_tables": fingerprint["tables"],
+                    "finished_at": None, "signed_off_at": None,
                 }
                 create_private(run_record_path, to_json(record))
                 create_private(report_path, to_json({**report, "dry_run": False}))
@@ -513,7 +550,9 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                 if trans.is_active:
                     trans.rollback()
                 raise
-            finished_at = finished_clock(conn, record["owner_id"])
+            # The database clock alone: the fingerprint, not this cutoff, is what
+            # reset compares, so an application clock ahead of it hides nothing.
+            finished_at = conn.execute(text("SELECT clock_timestamp()")).scalar()
             conn.rollback()
         replace_private(run_record_path, to_json(
             {**record, "status": "complete", "finished_at": finished_at.isoformat()}))

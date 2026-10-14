@@ -131,9 +131,10 @@ python backend/scripts/cutover_load.py \
 The run record is written as `prepared` before the commit and marked
 `complete` with the database's `finished_at` after it. It holds the owner id
 and email, the database name and server address, the session time zone, the
-alembic revision, the
-git sha, the input's sha256, the start and finish times, and the owner's row
-counts. It is a report, not a rollback source. Keep it until the window
+alembic revision, the git sha, the input's sha256, the start and finish times
+(both read from the database clock), the owner's row counts, and a SHA-256
+fingerprint of the owner's loaded state taken inside the load transaction.
+It is a report, not a rollback source. Keep it until the window
 closes; the reset and the sign-off both read it.
 
 ## 5. Cutover check and sign-off
@@ -172,9 +173,13 @@ Household tag, in one transaction. It refuses unless:
   record's owner id;
 - the database and server address equal the record's;
 - the owner has not logged in since the load started;
-- no owner row was created or changed after the record's `finished_at`;
 - the owner's row counts per table, link tables and shares included, equal
   the record's (this catches deletions);
+- the fingerprint of the owner's rows equals the record's: every column but
+  the timestamps, the tag links and the shares. This catches any edit since
+  the load, including a tag rename or a swapped tag link, which move no
+  timestamp and no count. Rows with a timestamp after `finished_at` but
+  unchanged content (a no-op save, or clock skew) are listed, not refused;
 - no other user's transaction, recurring entry or allocation references an
   owner account, category or entry.
 

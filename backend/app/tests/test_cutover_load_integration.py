@@ -820,7 +820,8 @@ def _break(case, db, who, record, other):
         db.execute(text("UPDATE users SET last_login = clock_timestamp() WHERE id = :u"),
                    {"u": who["id"]})
     elif case == "updated_after":
-        db.execute(text("UPDATE transactions SET updated_at = clock_timestamp() WHERE id = "
+        db.execute(text("UPDATE transactions SET description = 'Edited later', "
+                        "updated_at = clock_timestamp() WHERE id = "
                         "(SELECT min(id) FROM transactions WHERE user_id = :u)"), {"u": who["id"]})
     elif case == "created_after":
         db.add(Category(user_id=who["id"], name="Added later"))
@@ -837,7 +838,7 @@ def _break(case, db, who, record, other):
 RESET_REFUSALS = {"confirm": "confirm", "database": "target", "server_addr": "target",
                   "owner_id": "owner", "foreign_row": "foreign_references",
                   "last_login": "last_login", "updated_after": "changed_after_load",
-                  "created_after": "changed_after_load", "link_deleted": "row_counts",
+                  "created_after": "row_counts", "link_deleted": "row_counts",
                   "signed_off": "signed_off"}
 
 
@@ -851,6 +852,107 @@ def test_reset_refuses(case, tmp_path, owner, sw_people, sw_db):
         reset(record, confirm)
     assert getattr(exc.value, "check", None) == RESET_REFUSALS[case], exc.value
     assert counts(sw_db, owner["id"]) == before
+
+
+def test_the_run_record_carries_the_loaded_state_fingerprint(tmp_path, owner, sw_db,
+                                                             monkeypatch):
+    from app.cutover_load import loader
+
+    prepared = []
+    real = loader.create_private
+
+    def spy(path, payload):
+        real(path, payload)
+        if path.endswith("record.json"):
+            prepared.append(json.loads(payload))
+
+    monkeypatch.setattr(loader, "create_private", spy)
+    _, record = load(tmp_path, fixture(), owner)
+    rec = json.loads(record.read_text())
+    assert len(rec["fingerprint"]) == 64 and rec["fingerprint"] == prepared[0]["fingerprint"]
+    sw_db.rollback()
+    assert loader.owner_fingerprint(sw_db, owner["id"])["sha256"] == rec["fingerprint"]
+
+
+def test_reset_refuses_after_a_custom_tag_rename(tmp_path, owner, sw_db, sw_client):
+    """A rename leaves the counts and the tag's created_at as they were."""
+    from app.models.tag import Tag
+
+    _, record = load(tmp_path, fixture(), owner)
+    sw_db.rollback()
+    tag = sw_db.query(Tag).filter(Tag.user_id == owner["id"], Tag.name == "Utilities").one()
+    r = sw_client.put(f"{API}/tags/{tag.id}", json={"name": "Bills"}, headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    before = counts(sw_db, owner["id"])
+    with pytest.raises(Exception) as exc:
+        reset(record, owner["email"])
+    assert getattr(exc.value, "check", None) == "changed_after_load", exc.value
+    assert counts(sw_db, owner["id"]) == before
+
+
+def test_reset_refuses_after_a_household_link_is_swapped(tmp_path, owner, sw_db, sw_client):
+    """A tag-only update moves no updated_at and keeps every count."""
+    from app.models.tag import Tag
+
+    _, record = load(tmp_path, fixture(), owner)
+    rent = entry(sw_db, owner, "Rent")
+    utilities = sw_db.query(Tag).filter(Tag.user_id == owner["id"],
+                                        Tag.name == "Utilities").one()
+    r = sw_client.put(f"{API}/budget-entries/{rent.id}", json={"tag_ids": [utilities.id]},
+                      headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    before = counts(sw_db, owner["id"])
+    with pytest.raises(Exception) as exc:
+        reset(record, owner["email"])
+    assert getattr(exc.value, "check", None) == "changed_after_load", exc.value
+    assert counts(sw_db, owner["id"]) == before
+
+
+def test_a_no_op_touch_or_a_skewed_clock_leaves_reset_allowed(tmp_path, owner, sw_db):
+    """Content unchanged: a later updated_at alone (a no-op save, or the app's
+    clock five minutes ahead of the database's) does not block the reset."""
+    _, record = load(tmp_path, fixture(), owner)
+    sw_db.rollback()
+    sw_db.execute(text("UPDATE transactions SET updated_at = clock_timestamp() "
+                       "+ interval '5 minutes' WHERE user_id = :u"), {"u": owner["id"]})
+    sw_db.commit()
+    assert reset(record, owner["email"]) == 0
+    assert counts(sw_db, owner["id"])["transactions"] == 0
+
+
+def test_an_edit_is_caught_even_with_finished_at_five_minutes_ahead(tmp_path, owner, sw_db,
+                                                                    sw_client):
+    """A run record whose finished_at is five minutes in the future (clock skew)
+    hides nothing: the fingerprint, not the timestamps, decides."""
+    from datetime import timedelta
+
+    from app.models.tag import Tag
+
+    _, record = load(tmp_path, fixture(), owner)
+    rec = json.loads(record.read_text())
+    ahead = datetime.fromisoformat(rec["finished_at"]) + timedelta(minutes=5)
+    edit_record(record, finished_at=ahead.isoformat())
+    sw_db.rollback()
+    tag = sw_db.query(Tag).filter(Tag.user_id == owner["id"], Tag.name == "Utilities").one()
+    sw_client.put(f"{API}/tags/{tag.id}", json={"color": "#112233"}, headers=owner["headers"])
+    with pytest.raises(Exception) as exc:
+        reset(record, owner["email"])
+    assert getattr(exc.value, "check", None) == "changed_after_load", exc.value
+
+
+def test_finished_at_is_the_database_clock_after_the_commit(tmp_path, owner, sw_db,
+                                                           monkeypatch):
+    """finished_at is clock_timestamp() alone, never stretched to a row's
+    (application-clock) updated_at."""
+    from app.cutover_load import loader
+
+    assert not hasattr(loader, "finished_clock")
+    _, record = load(tmp_path, fixture(), owner)
+    rec = json.loads(record.read_text())
+    sw_db.rollback()
+    now = sw_db.execute(text("SELECT clock_timestamp()")).scalar()
+    assert datetime.fromisoformat(rec["started_at"]) < datetime.fromisoformat(
+        rec["finished_at"]) <= now
 
 
 def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):

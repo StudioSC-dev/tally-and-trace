@@ -3,10 +3,16 @@
 **Reset** deletes everything the owner owns except the user and the
 Household tag, in one transaction, and only inside the maintenance window:
 the run record is ``complete`` and not signed off, the target and owner
-match the record, the owner has not logged in since the load started, no
-owner row was created or changed after ``finished_at``, the owner's row
-counts equal the record's (deletions leave no timestamp), and no other
-user's row references an owner account, category or entry. Afterwards the
+match the record, the owner has not logged in since the load started, the
+owner's row counts equal the record's, the fingerprint of the owner's state
+(``loader.owner_fingerprint``) equals the one taken inside the load, and no
+other user's row references an owner account, category or entry.
+
+The fingerprint is the content check: it catches an edit that moves no
+timestamp and no count (a tag rename, a swapped tag link). Timestamps after
+``finished_at`` are reported but do not refuse: with the content unchanged a
+later ``updated_at`` is a no-op save or the application's clock (``utc_now``)
+running ahead of the database's, and refusing on it would block a safe reset. Afterwards the
 pre-load guard passes again and every other user's row counts are unchanged.
 
 **Sign-off** makes no database connection: it writes ``signed_off_at`` into
@@ -184,12 +190,15 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
 
     from app.cutover_load.bootstrap import check_target, observe_target
     from app.cutover_load.loader import (
-        CutoverError, check_guard, find_owner, household_tag, owner_counts, take_lock,
+        CutoverError, check_guard, find_owner, household_tag, owner_counts, owner_fingerprint,
+        take_lock,
     )
     from app.models.user import User
 
     record = _record(run_record_path)
     _window_open(record, confirm)
+    if not record.get("fingerprint"):
+        raise Refused("run_record", "the run record has no fingerprint of the loaded state")
     engine = create_engine(url, poolclass=NullPool)
     try:
         with engine.connect() as conn:
@@ -214,16 +223,23 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
                 if user.last_login is not None and user.last_login > started:
                     raise CutoverError("last_login", "owner",
                                        "the owner logged in after the load started")
-                later = _later_rows(db, owner.id, finished)
-                if later:
-                    raise CutoverError("changed_after_load", "owner",
-                                       f"rows created or changed after the load: {later}")
                 counts = owner_counts(db, owner.id)
                 if counts != record.get("row_counts"):
                     differ = sorted(t for t in set(counts) | set(record.get("row_counts", {}))
                                     if counts.get(t) != record["row_counts"].get(t))
                     raise CutoverError("row_counts", "owner",
                                        f"the owner's row counts differ in: {', '.join(differ)}")
+                fingerprint = owner_fingerprint(db, owner.id)
+                if fingerprint["sha256"] != record["fingerprint"]:
+                    stored = record.get("fingerprint_tables", {})
+                    changed = sorted(t for t, h in fingerprint["tables"].items()
+                                     if stored.get(t) != h)
+                    raise CutoverError("changed_after_load", "owner",
+                                       "the owner's rows changed after the load in: "
+                                       f"{', '.join(changed) or 'unknown tables'}")
+                later = _later_rows(db, owner.id, finished)
+                if later:  # content unchanged (the fingerprint matched): report only
+                    out(f"note: later timestamps with unchanged content: {later}")
                 foreign = _foreign_references(db, owner.id)
                 if foreign:
                     raise CutoverError("foreign_references", "owner",
