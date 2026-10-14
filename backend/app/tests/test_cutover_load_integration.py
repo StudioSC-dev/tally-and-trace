@@ -745,6 +745,28 @@ def test_the_wrapper_ignores_a_local_env_file(tmp_path, owner, sw_db):
     assert "refused: expect_server_addr" in done.stdout
 
 
+@pytest.mark.parametrize("mode", ["load", "sign-off"])
+def test_a_settings_error_prints_only_its_class(mode, tmp_path, owner):
+    """Production settings without a SECRET_KEY fail validation on import; the
+    wrapper prints the error class only: no traceback, no environment value."""
+    sentinel = "https://zq9sentinel@example.com/1"
+    env = {"ENVIRONMENT": "production", "SENTRY_DSN": sentinel}
+    if mode == "load":
+        path = write_input(tmp_path, fixture(), owner)
+        args = ["--input", path, "--report", str(tmp_path / "r.json"), "--dry-run",
+                *target_args()]
+    else:
+        (tmp_path / "record.json").write_text("{}")
+        (tmp_path / "check.json").write_text("{}")
+        args = ["--sign-off", "--run-record", str(tmp_path / "record.json"),
+                "--check-report", str(tmp_path / "check.json"), "--confirm", owner["email"]]
+    done = run_wrapper(args, cwd=tmp_path, extra_env=env)
+    assert done.returncode == 1, done.stdout + done.stderr
+    shown = done.stdout + done.stderr
+    assert "Traceback" not in shown and "zq9sentinel" not in shown
+    assert "production" not in shown
+
+
 def test_an_expect_host_mismatch_is_refused_before_connecting(tmp_path, owner):
     path = write_input(tmp_path, fixture(), owner)
     other = "localhost" if TARGET["host"] != "localhost" else "127.0.0.1"

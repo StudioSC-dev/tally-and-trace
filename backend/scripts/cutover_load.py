@@ -73,7 +73,11 @@ def main(argv=None) -> int:
     # Hermetic import: an empty working directory, so no .env can load.
     os.chdir(tempfile.mkdtemp(prefix="cutover-load-"))
     sys.path.insert(0, BACKEND)
-    from app.cutover_load import bootstrap, outputs
+    try:
+        from app.cutover_load import bootstrap, outputs
+    except Exception as exc:  # never a traceback: it could print environment values
+        print(f"error: {type(exc).__name__}")
+        return 1
 
     report_path = None
     try:
@@ -109,6 +113,8 @@ def main(argv=None) -> int:
                         run_record_path=args.run_record, dry_run=args.dry_run,
                         expect_db=args.expect_db, expect_server_addr=args.expect_server_addr)
     except Exception as exc:  # every refusal and error: check names only on the terminal
+        # Includes an import of the app that fails settings validation: only the
+        # error class is printed, never a traceback holding environment values.
         return refuse(exc, report_path)
 
 
