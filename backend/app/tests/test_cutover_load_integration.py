@@ -1305,6 +1305,23 @@ def test_an_application_clock_five_minutes_ahead(edit, tmp_path, owner, sw_db, s
         assert counts(sw_db, owner["id"])["accounts"] == 0
 
 
+def test_reset_runs_at_repeatable_read(tmp_path, owner, sw_db, monkeypatch):
+    """One snapshot: the deletes act on the state the fingerprint was taken of."""
+    from app.cutover_load import loader
+
+    _, record = load(tmp_path, fixture(), owner)
+    seen = []
+    real = loader.owner_fingerprint
+
+    def spy(db, owner_id):
+        seen.append(db.execute(text("SHOW transaction_isolation")).scalar())
+        return real(db, owner_id)
+
+    monkeypatch.setattr(loader, "owner_fingerprint", spy)
+    assert reset(record, owner["email"], dry_run=True) == 0
+    assert seen == ["repeatable read"]
+
+
 def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):
     _, record = load(tmp_path, fixture(), owner)
     before = table_counts(sw_db)

@@ -213,7 +213,9 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
     _window_open(record, confirm)
     if not record.get("fingerprint"):
         raise Refused("run_record", "the run record has no fingerprint of the loaded state")
-    engine = create_engine(url, poolclass=NullPool)
+    # REPEATABLE READ: one snapshot for the whole reset, so the deletes act on
+    # exactly the state whose counts and fingerprint were just checked.
+    engine = create_engine(url, poolclass=NullPool, isolation_level="REPEATABLE READ")
     try:
         with engine.connect() as conn:
             trans = conn.begin()
