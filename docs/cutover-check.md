@@ -44,8 +44,8 @@ python backend/scripts/cutover_check.py \
 
 ### What it refuses before checking (exit code 2)
 
-- `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGSERVICE` or `PGSERVICEFILE`
-  is set.
+- `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE` or
+  `PGTZ` is set.
 - The URL's driver is not `postgresql` or `postgresql+psycopg2`, it has no host
   or several, or its host or database differs from `--expect-host` / `--expect-db`.
 - The URL has a query key other than `sslmode`, `sslrootcert`, `connect_timeout`
@@ -76,16 +76,21 @@ their class name, never their message.
 
 - The engine sets `default_transaction_read_only=on` in the connection options
   (code-supplied, not a URL key).
-- One transaction at `REPEATABLE READ`, `READ ONLY`, holding
-  `pg_try_advisory_xact_lock_shared` on the cutover key. The ORM session joins it
+- After the target is verified, the connection takes
+  `pg_try_advisory_lock_shared` on the cutover key (session level) before the
+  snapshot transaction begins, so the snapshot never predates the lock. It
+  conflicts with the exclusive transaction lock a load or reset takes on the same
+  key, in both directions.
+- Then one transaction at `REPEATABLE READ`, `READ ONLY`. The ORM session joins it
   with `create_savepoint`, so an internal `commit()` neither ends the snapshot nor
-  writes. Everything is rolled back at the end.
+  writes. Everything is rolled back at the end, then the lock is released with
+  `pg_advisory_unlock_shared`.
 - Exchange rates come from the stored rates only (`FxRates.offline`); the rate
   provider is never called.
 - **Time zone.** The date columns are `timestamptz` in the database, so dates are
   read in the session time zone. The report records it as `session_timezone`.
-  Run the load and the check with the same server default (do not set `TZ` or
-  `PGTZ` differently between them).
+  Run the load and the check with the same server default. `PGTZ` is refused;
+  `TZ` on the client does not affect the server session.
 
 ## The frozen file (`cutover-frozen` v1)
 

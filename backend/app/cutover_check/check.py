@@ -587,29 +587,37 @@ def make_engine(url):
 def readonly_session(url, expect_db: str, expect_server_addr: str) -> Iterator[tuple]:
     """``(session, database, server address)`` inside the read-only snapshot.
 
-    The target is verified and the shared lock taken before the Session exists;
-    everything is rolled back on exit.
+    The target is verified and a session-level shared lock taken before the
+    snapshot transaction begins, so the snapshot cannot predate the lock (it
+    conflicts with a load's or reset's exclusive transaction lock on the same key).
+    Everything is rolled back on exit, then the lock is released.
     """
     engine = make_engine(url)
     try:
         with engine.connect() as conn:
             conn.execution_options(isolation_level="REPEATABLE READ")
-            trans = conn.begin()
+            database, addr = verify_target(conn, expect_db, expect_server_addr)
+            locked = conn.execute(text("SELECT pg_try_advisory_lock_shared(:key)"),
+                                  {"key": CUTOVER_LOCK_KEY}).scalar()
+            conn.commit()  # ends the probe transaction; the session-level lock stays
+            if not locked:
+                raise CheckRefused("a cutover load or reset holds the lock")
             try:
-                conn.exec_driver_sql("SET TRANSACTION READ ONLY")
-                database, addr = verify_target(conn, expect_db, expect_server_addr)
-                locked = conn.execute(text("SELECT pg_try_advisory_xact_lock_shared(:key)"),
-                                      {"key": CUTOVER_LOCK_KEY}).scalar()
-                if not locked:
-                    raise CheckRefused("a cutover load or reset holds the lock")
-                session = Session(bind=conn, join_transaction_mode="create_savepoint",
-                                  autoflush=False)
+                trans = conn.begin()
                 try:
-                    yield session, database, addr
+                    conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+                    session = Session(bind=conn, join_transaction_mode="create_savepoint",
+                                      autoflush=False)
+                    try:
+                        yield session, database, addr
+                    finally:
+                        session.close()
                 finally:
-                    session.close()
+                    trans.rollback()
             finally:
-                trans.rollback()
+                conn.execute(text("SELECT pg_advisory_unlock_shared(:key)"),
+                             {"key": CUTOVER_LOCK_KEY})
+                conn.commit()
     finally:
         engine.dispose()
 

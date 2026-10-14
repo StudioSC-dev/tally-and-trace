@@ -174,6 +174,12 @@ def test_url_validation_refuses_libpq_environment_overrides(name):
     assert name in str(caught.value)
 
 
+def test_url_validation_refuses_pgtz():
+    # PGTZ would set the server session's TimeZone, which dates are read in.
+    with pytest.raises(bootstrap.BootstrapError, match="PGTZ is set"):
+        bootstrap.validate_url(LOCAL, "127.0.0.1", "c3db", {"PGTZ": "America/New_York"})
+
+
 def test_url_validation_refuses_a_missing_url():
     with pytest.raises(bootstrap.BootstrapError, match="DATABASE_URL is not set"):
         bootstrap.validate_url("", "127.0.0.1", "c3db", {})
@@ -581,6 +587,7 @@ def test_the_session_is_read_only_repeatable_read_even_after_an_internal_commit(
     with check.readonly_session(url, database, addr) as (db, _, _):
         assert db.execute(text("SHOW transaction_isolation")).scalar() == "repeatable read"
         assert db.execute(text("SHOW transaction_read_only")).scalar() == "on"
+        assert db.execute(text("SHOW default_transaction_read_only")).scalar() == "on"
         db.commit()  # releases a savepoint only: the snapshot and its mode stay
         assert db.execute(text("SHOW transaction_read_only")).scalar() == "on"
         with pytest.raises(DBAPIError) as caught:
@@ -590,8 +597,9 @@ def test_the_session_is_read_only_repeatable_read_even_after_an_internal_commit(
         from app.models.category import Category
 
         db.add(Category(user_id=1, name="never"))
-        with pytest.raises(DBAPIError):
+        with pytest.raises(DBAPIError) as caught:
             db.commit()
+        assert "read-only transaction" in str(caught.value.orig)
 
 
 @needs_db
@@ -612,6 +620,62 @@ def test_the_shared_lock_refuses_while_a_load_holds_it(target):
     engine.dispose()
     with check.readonly_session(url, database, addr):
         pass  # free again once the load's transaction ends
+
+
+@needs_db
+def test_the_shared_lock_blocks_a_load_until_the_check_ends(target):
+    from sqlalchemy import create_engine, text
+
+    from app.cutover_check import check
+    from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY
+
+    url, database, addr = target
+    engine = create_engine(url)
+    try:
+        with check.readonly_session(url, database, addr):
+            with engine.connect() as load:
+                with load.begin():
+                    assert load.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                                        {"k": CUTOVER_LOCK_KEY}).scalar() is False
+                assert load.execute(text("SELECT pg_try_advisory_lock(:k)"),
+                                    {"k": CUTOVER_LOCK_KEY}).scalar() is False
+                load.rollback()
+        with engine.connect() as load:
+            with load.begin():
+                assert load.execute(text("SELECT pg_try_advisory_xact_lock(:k)"),
+                                    {"k": CUTOVER_LOCK_KEY}).scalar() is True
+    finally:
+        engine.dispose()
+
+
+@needs_db
+def test_the_lock_is_taken_before_the_snapshot(target, sw_people, monkeypatch):
+    """A change committed before the lock is granted is in the snapshot: the
+    snapshot cannot predate the lock."""
+    from sqlalchemy import create_engine, text
+
+    from app.cutover_check import check
+
+    url, database, addr = target
+    who = sw_people("Lars", "Lock")
+    writer = create_engine(url)
+    real = check.verify_target
+
+    def verify_then_write(conn, *args):
+        observed = real(conn, *args)
+        with writer.begin() as w:  # lands after the target check, before the lock
+            w.execute(text("UPDATE users SET first_name = 'Marker' WHERE id = :id"),
+                      {"id": who["id"]})
+        return observed
+
+    monkeypatch.setattr(check, "verify_target", verify_then_write)
+    try:
+        with check.readonly_session(url, database, addr) as (db, _, _):
+            seen = db.execute(text("SELECT first_name FROM users WHERE id = :id"),
+                              {"id": who["id"]}).scalar()
+    finally:
+        writer.dispose()
+    assert seen == "Marker"
 
 
 @needs_db

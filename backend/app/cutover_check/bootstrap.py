@@ -26,8 +26,10 @@ from sqlalchemy.engine.url import URL, make_url
 
 ALLOWED_DRIVERS = ("postgresql", "postgresql+psycopg2")
 ALLOWED_QUERY_KEYS = frozenset({"sslmode", "sslrootcert", "connect_timeout", "application_name"})
-# libpq reads these for any parameter the URL leaves out (PGHOSTADDR wins over host).
-FORBIDDEN_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE")
+# libpq reads these for any parameter the URL leaves out (PGHOSTADDR wins over host);
+# PGTZ sets the server session's TimeZone, which the timestamptz dates are read in.
+FORBIDDEN_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE",
+                 "PGTZ")
 
 # The advisory lock key shared by the cutover load (exclusive) and this check (shared).
 CUTOVER_LOCK_KEY = 2_024_020_204
