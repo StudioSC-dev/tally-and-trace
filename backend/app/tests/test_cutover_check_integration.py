@@ -160,13 +160,13 @@ def test_url_validation_accepts_a_plain_url_and_sslmode_prefer():
 
 
 @pytest.mark.parametrize("raw, fragment", [
-    (LOCAL + "?host=10.0.0.9", "query key 'host' is not allowed"),
-    (LOCAL + "?hostaddr=10.0.0.9", "query key 'hostaddr' is not allowed"),
-    (LOCAL + "?port=6543", "query key 'port' is not allowed"),
-    (LOCAL + "?dbname=other", "query key 'dbname' is not allowed"),
-    (LOCAL + "?service=prod", "query key 'service' is not allowed"),
-    (LOCAL + "?options=-csearch_path%3Dx", "query key 'options' is not allowed"),
-    (LOCAL + "?sslmode=require&sslmode=disable", "query key 'sslmode' is repeated"),
+    (LOCAL + "?host=10.0.0.9", "query key is not allowed"),
+    (LOCAL + "?hostaddr=10.0.0.9", "query key is not allowed"),
+    (LOCAL + "?port=6543", "query key is not allowed"),
+    (LOCAL + "?dbname=other", "query key is not allowed"),
+    (LOCAL + "?service=prod", "query key is not allowed"),
+    (LOCAL + "?options=-csearch_path%3Dx", "query key is not allowed"),
+    (LOCAL + "?sslmode=require&sslmode=disable", "query key is repeated"),
     ("mysql://u:secret@127.0.0.1/c3db", "driver"),
     ("postgresql+asyncpg://u:secret@127.0.0.1/c3db", "driver"),
     ("postgresql://u:secret@/c3db", "exactly one host"),
@@ -185,6 +185,21 @@ def test_url_validation_refuses_libpq_environment_overrides(name):
     with pytest.raises(bootstrap.BootstrapError) as caught:
         bootstrap.validate_url(LOCAL, "127.0.0.1", "c3db", {name: "10.0.0.9"})
     assert name in str(caught.value)
+
+
+@pytest.mark.parametrize("raw, expect_host, fragment", [
+    ("postgresql://u:pa@Zq9tail@db.example.com:5432/c3db", "db.example.com",
+     "is not --expect-host 'db.example.com'"),
+    ("postgresql://u:secret@db.example.com:5432/Zq9tail", "db.example.com",
+     "is not --expect-db 'c3db'"),
+    ("postgresql://u:secret@db.example.com:5432/c3db?Zq9tail=1", "db.example.com",
+     "query key is not allowed"),
+])
+def test_url_refusals_never_echo_parsed_url_parts(raw, expect_host, fragment):
+    with pytest.raises(bootstrap.BootstrapError) as caught:
+        bootstrap.validate_url(raw, expect_host, "c3db", {})
+    assert fragment in str(caught.value), str(caught.value)
+    assert "Zq9tail" not in str(caught.value)
 
 
 def test_url_validation_refuses_the_transaction_pooler_port():
@@ -968,9 +983,40 @@ def test_wrapper_never_prints_a_malformed_date(tmp_path):
         assert leaked not in out.stdout + out.stderr, leaked
 
 
+def test_wrapper_never_prints_a_password_tail(tmp_path):
+    out = run_wrapper(["--frozen", str(tmp_path / "f.json"), "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pa@Zq9tail@127.0.0.1:1/c3db")
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "is not --expect-host '127.0.0.1'" in out.stdout
+    assert "Zq9tail" not in out.stdout + out.stderr
+
+
+def test_wrapper_reports_an_app_import_failure_by_class_only(tmp_path):
+    import subprocess
+    import sys
+
+    frozen = write_frozen(tmp_path, frozen_base())
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("PG") and k not in ("SECRET_KEY", "SENTRY_DSN", "ENVIRONMENT")}
+    env.update({"DATABASE_URL": "postgresql://u:pw@127.0.0.1:1/c3db",
+                "ENVIRONMENT": "production",
+                "SENTRY_DSN": "https://Zq9sentinel@sentry.example.com/1"})
+    out = subprocess.run([sys.executable, WRAPPER, "--frozen", frozen,
+                          "--report", str(tmp_path / "r.json"), "--expect-host", "127.0.0.1",
+                          "--expect-db", "c3db", "--expect-server-addr", "192.0.2.1"],
+                         cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "refused: ValidationError" in out.stdout, out.stdout
+    assert "Traceback" not in out.stderr
+    assert "Zq9sentinel" not in out.stdout + out.stderr
+    assert not (tmp_path / "r.json").exists()
+
+
 @pytest.mark.parametrize("url, extra_env, fragment", [
-    ("postgresql://u:pw@127.0.0.1:1/c3db?host=10.0.0.9", {}, "query key 'host'"),
-    ("postgresql://u:pw@127.0.0.1:1/c3db?hostaddr=10.0.0.9", {}, "query key 'hostaddr'"),
+    ("postgresql://u:pw@127.0.0.1:1/c3db?host=10.0.0.9", {}, "query key is not allowed"),
+    ("postgresql://u:pw@127.0.0.1:1/c3db?hostaddr=10.0.0.9", {}, "query key is not allowed"),
     ("postgresql://u:pw@127.0.0.1:1/c3db", {"PGHOSTADDR": "10.0.0.9"}, "PGHOSTADDR is set"),
 ])
 def test_wrapper_refuses_target_overrides_before_importing_the_app(tmp_path, url, extra_env,

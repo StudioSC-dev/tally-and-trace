@@ -87,7 +87,10 @@ def hermetic() -> str:
 
 def validate_url(raw: Optional[str], expect_host: str, expect_db: str,
                  environ: Mapping[str, str]) -> URL:
-    """The parsed ``DATABASE_URL``, or a refusal naming the first rule it breaks."""
+    """The parsed ``DATABASE_URL``, or a refusal naming the first rule it breaks.
+
+    Refusals never echo a parsed part of the URL (a password containing ``@`` can
+    parse into the host): only fixed text and the operator's own ``--expect-*``."""
     for name in FORBIDDEN_ENV:
         if environ.get(name):
             raise BootstrapError(f"{name} is set; unset it so the URL is the whole target")
@@ -104,19 +107,19 @@ def validate_url(raw: Optional[str], expect_host: str, expect_db: str,
         raise BootstrapError("DATABASE_URL must name exactly one host")
     for key, value in url.query.items():
         if key not in ALLOWED_QUERY_KEYS:
-            raise BootstrapError(f"DATABASE_URL query key '{key}' is not allowed")
+            raise BootstrapError("DATABASE_URL query key is not allowed (allowed: "
+                                 + ", ".join(sorted(ALLOWED_QUERY_KEYS)) + ")")
         if isinstance(value, tuple):
-            raise BootstrapError(f"DATABASE_URL query key '{key}' is repeated")
+            raise BootstrapError("DATABASE_URL query key is repeated")
     if url.port == POOLER_PORT:
         raise BootstrapError(
             f"DATABASE_URL port {POOLER_PORT} is the transaction pooler: a session-level lock "
             "can stay on one backend while its unlock runs on another; use a direct or "
             "session-mode connection (port 5432)")
     if host != expect_host:
-        raise BootstrapError(f"DATABASE_URL host '{host}' is not --expect-host '{expect_host}'")
+        raise BootstrapError(f"DATABASE_URL host is not --expect-host '{expect_host}'")
     if (url.database or "") != expect_db:
-        raise BootstrapError(
-            f"DATABASE_URL database '{url.database or ''}' is not --expect-db '{expect_db}'")
+        raise BootstrapError(f"DATABASE_URL database is not --expect-db '{expect_db}'")
     return url
 
 
@@ -137,7 +140,7 @@ def verify_target(conn, expect_db: str, expect_server_addr: str) -> tuple:
     """Refuse unless the connected database and server address are the expected ones."""
     database, addr = observe_target(conn)
     if database != expect_db:
-        raise BootstrapError(f"connected database '{database}' is not --expect-db '{expect_db}'")
+        raise BootstrapError(f"connected database is not --expect-db '{expect_db}'")
     if addr is None:
         raise BootstrapError("the server address is null (a Unix socket); connect over TCP")
     try:

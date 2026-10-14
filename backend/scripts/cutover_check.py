@@ -50,7 +50,12 @@ def main(argv=None) -> int:
     print(bootstrap.target_line(url))
 
     # Only now: the rest of the app (settings read the environment, never a .env).
-    from app.cutover_check import check, schema
+    # Settings validation can fail with environment values in its message.
+    try:
+        from app.cutover_check import check, schema
+    except Exception as exc:
+        print(f"refused: {bootstrap.error_class(exc)}")
+        return 2
 
     try:
         frozen = schema.load_frozen(frozen_path)
