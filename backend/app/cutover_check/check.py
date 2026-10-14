@@ -23,9 +23,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY, verify_target
-from app.cutover_check.schema import Frozen, Selector
-from app.cutover_check.statements import compared_set, computed_cycles
+from app.cutover_check.schema import (
+    Frozen, Recurring, Selector, add_months, month_of, month_start,
+)
+from app.cutover_check.statements import compared_set, computed_cycles, naive
 from app.models.account import Account, AccountType
+from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType, transfer_sides
 from app.models.user import User
 from app.services.fx import FxRates
@@ -146,6 +149,7 @@ class Context:
             self._by_key.setdefault(key, []).append(a)
         self.account_ids = [a.id for a in self.accounts]
         self.posted_after = self._posted_after()
+        self._entries: Optional[tuple] = None
 
     def _posted_after(self) -> List[Transaction]:
         if not self.account_ids:
@@ -165,6 +169,15 @@ class Context:
                        selector=selector.label())
             return False
         return found[0]
+
+    def label(self, account_id: Optional[int]) -> Optional[str]:
+        """An account as the report names it (any owner's, by id)."""
+        if account_id is None:
+            return None
+        a = self.db.get(Account, account_id)
+        if a is None:
+            return f"account {account_id}"
+        return f"{a.name} ({_code(a.account_type)}, {_code(a.currency)})"
 
     def owner_accounts(self, account_type: AccountType) -> List[Account]:
         return [a for a in self.accounts if a.account_type == account_type]
@@ -257,9 +270,276 @@ def check_foreign(ctx: Context, block: Block) -> None:
                        account_currency=currency.get(row.account_id), **row_ref(row))
 
 
+def _id(account) -> Optional[int]:
+    return account.id if account else None
+
+
+def check_card_routing(ctx: Context, block: Block) -> None:
+    """Check 3: each card's payment and overflow accounts equal the frozen selectors.
+    Every owner card must be listed."""
+    listed = set()
+    for r in ctx.frozen.card_routing:
+        card = ctx.resolve(r.card, block, "card routing")
+        pay = ctx.resolve(r.payment_account, block, "card routing payment account")
+        overflow = ctx.resolve(r.overflow_account, block, "card routing overflow account")
+        if card is False or pay is False or overflow is False:
+            continue
+        if card.account_type != AccountType.CREDIT:
+            block.fail("not a credit card", card=r.card.label())
+            continue
+        listed.add(card.id)
+        block.checked += 1
+        for field, want, got in (("payment_account", _id(pay), card.payment_account_id),
+                                 ("overflow_account", _id(overflow),
+                                  card.payment_overflow_account_id)):
+            if want != got:
+                block.fail(f"card {field} differs", card=r.card.label(),
+                           expected=ctx.label(want), actual=ctx.label(got))
+    for card in ctx.owner_accounts(AccountType.CREDIT):
+        if card.id not in listed:
+            block.fail("owner card not in the frozen card_routing", card=ctx.label(card.id))
+
+
+def _cents(value) -> Optional[Decimal]:
+    return None if value is None else _money(value)
+
+
+def check_loans(ctx: Context, block: Block) -> None:
+    """Check 4: each loan's payer, then ``build_schedule``: owed, payments made and
+    left, next due date and the first 3 upcoming rows (the split when frozen).
+    Every owner loan must be listed. Refused by the posted-after guard."""
+    from app.services.loans import build_schedule
+
+    if ctx.guard_refusal(block):
+        return
+    listed = set()
+    for x in ctx.frozen.loans:
+        loan = ctx.resolve(x.loan, block, "loan")
+        payer = ctx.resolve(x.payment_account, block, "loan payment account")
+        if loan is False or payer is False:
+            continue
+        if loan.account_type != AccountType.LOAN:
+            block.fail("not a loan", loan=x.loan.label())
+            continue
+        listed.add(loan.id)
+        block.checked += 1
+        name = x.loan.label()
+        if _id(payer) != loan.payment_account_id:
+            block.fail("loan payment_account differs", loan=name,
+                       expected=ctx.label(_id(payer)), actual=ctx.label(loan.payment_account_id))
+        sched = build_schedule(ctx.db, loan)
+        for field, want, got in (
+            ("owed", x.owed, _cents(sched["owed"])),
+            ("payments_made", x.payments_made, sched["payments_made"]),
+            ("payments_left", x.payments_left, sched["payments_left"]),
+            ("next_due", x.next_due, sched["next_due_date"]),
+        ):
+            if want != got:
+                block.fail(f"loan {field} differs", loan=name, expected=want, actual=got)
+        upcoming = sched["upcoming"][:3]
+        if len(upcoming) != len(x.next_rows):
+            block.fail("loan next_rows count differs", loan=name, expected=len(x.next_rows),
+                       actual=len(upcoming))
+        for i, (want, got) in enumerate(zip(x.next_rows, upcoming), start=1):
+            pairs = [("due_date", want.due_date, got["due_date"]),
+                     ("payment", want.payment, _cents(got["payment"]))]
+            for split in ("principal", "interest"):
+                if getattr(want, split) is not None:
+                    pairs.append((split, getattr(want, split), _cents(got[split])))
+            for field, w, g in pairs:
+                if w != g:
+                    block.fail(f"loan next row {i} {field} differs", loan=name, expected=w,
+                               actual=g)
+    for loan in ctx.owner_accounts(AccountType.LOAN):
+        if loan.id not in listed:
+            block.fail("owner loan not in the frozen loans", loan=ctx.label(loan.id))
+
+
+def match_entries(ctx: Context) -> tuple:
+    """``(pairs, problems)``: each frozen entry with the one owner entry it names by
+    (name, account, destination), and every resolution problem as a failure dict.
+    Every owner entry must be named by exactly one frozen entry."""
+    if ctx._entries is not None:
+        return ctx._entries
+    scratch = Block("recurring")
+    owner_entries = ctx.db.query(BudgetEntry).filter(
+        BudgetEntry.user_id == ctx.owner.id).order_by(BudgetEntry.id).all()
+    pairs, named = [], set()
+    for f in ctx.frozen.recurring:
+        account = ctx.resolve(f.account, scratch, f"recurring {f.name} account")
+        dest = ctx.resolve(f.destination, scratch, f"recurring {f.name} destination")
+        if account is False or dest is False:
+            continue
+        found = [e for e in owner_entries if e.name == f.name and e.account_id == account.id
+                 and e.transfer_to_account_id == _id(dest)]
+        if len(found) != 1:
+            scratch.fail(f"frozen entry matches {len(found)} owner entries", entry=f.label(),
+                         entry_ids=[e.id for e in found])
+            named.update(e.id for e in found)
+            continue
+        named.add(found[0].id)
+        pairs.append((f, found[0]))
+    for e in owner_entries:
+        if e.id not in named:
+            scratch.fail("owner entry not in the frozen recurring", entry_id=e.id, name=e.name,
+                         account=ctx.label(e.account_id))
+    ctx._entries = (pairs, scratch.failures)
+    return ctx._entries
+
+
+def installment_n(db: Session, entry: BudgetEntry) -> int:
+    """n of an installment: linked transactions plus the offset, as
+    ``_attach_occurrence_counts`` counts them (``linked_transactions``)."""
+    from app.services.forecast import linked_transactions
+
+    linked = sum(1 for entry_id, _ in linked_transactions(db, [entry.id]) if entry_id == entry.id)
+    return linked + (entry.occurrences_paid_offset or 0)
+
+
+def check_recurring(ctx: Context, block: Block) -> None:
+    """Check 5: each frozen entry resolves to exactly one owner entry and every frozen
+    field matches it, overflow account and autopay included; n of m for installments."""
+    pairs, problems = match_entries(ctx)
+    block.failures.extend(problems)
+    for f, e in pairs:
+        overflow = ctx.resolve(f.overflow_account, block, f"recurring {f.name} overflow")
+        if overflow is False:
+            continue
+        block.checked += 1
+        fields = [
+            ("entry_type", f.entry_type, _code(e.entry_type)),
+            ("amount", f.amount, _money(e.amount)),
+            ("currency", f.currency, _code(e.currency)),
+            ("cadence", f.cadence, _code(e.cadence)),
+            ("next_occurrence", f.next_occurrence, naive(e.next_occurrence).date()),
+            ("end_mode", f.end_mode, e.end_mode),
+            ("end_date", f.end_date, naive(e.end_date).date() if e.end_date else None),
+            ("max_occurrences", f.max_occurrences, e.max_occurrences),
+            ("is_autopay", f.is_autopay, bool(e.is_autopay)),
+            ("is_active", f.is_active, bool(e.is_active)),
+            ("overflow_account", ctx.label(_id(overflow)), ctx.label(e.overflow_account_id)),
+        ]
+        if f.semi_monthly_days is not None:
+            fields.append(("semi_monthly_days", list(f.semi_monthly_days),
+                           [e.semi_monthly_day_1, e.semi_monthly_day_2]))
+        if f.installment is not None:
+            n = installment_n(ctx.db, e)
+            m = n + (e.max_occurrences or 0)
+            fields.append(("installment", f"{f.installment.n} of {f.installment.m}",
+                           f"{n} of {m}"))
+        for field, want, got in fields:
+            if want != got:
+                block.fail(f"recurring {field} differs", entry=f.label(), expected=want,
+                           actual=got)
+
+
+def row_matches(ctx: Context, row: Transaction, f: Recurring, entry: BudgetEntry) -> bool:
+    """An unlinked row matches an entry: same account and type (a transfer: same
+    source and destination), the same money by meaning, and the description when
+    ``description_contains`` is frozen."""
+    if entry.transfer_to_account_id is not None:
+        if (row.transaction_type != TransactionType.TRANSFER
+                or (row.transfer_from_account_id or row.account_id) != entry.account_id
+                or row.transfer_to_account_id != entry.transfer_to_account_id):
+            return False
+    else:
+        kind = (TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME
+                else TransactionType.DEBIT)
+        if row.transaction_type != kind or row.account_id != entry.account_id:
+            return False
+    account = ctx.db.get(Account, entry.account_id)
+    dest = ctx.db.get(Account, entry.transfer_to_account_id) if entry.transfer_to_account_id \
+        else None
+    amount = _money(entry.amount)
+    if dest is not None and dest.account_type == AccountType.LOAN:
+        same = _money(row.amount) + _money(row.transfer_fee) == amount
+    elif account is not None and _code(entry.currency) != _code(account.currency):
+        face = ((row.projected_amount, row.projected_currency)
+                if row.projected_amount is not None
+                and row.projected_currency is not None
+                else (row.original_amount, row.original_currency))
+        same = face[0] is not None and (_money(face[0]), _code(face[1])) == (
+            amount, _code(entry.currency))
+    else:
+        same = _money(row.amount) == amount and _code(row.currency) == _code(entry.currency)
+    if not same:
+        return False
+    if f.description_contains:
+        return f.description_contains.lower() in (row.description or "").lower()
+    return True
+
+
+def check_occurrences(ctx: Context, block: Block) -> None:
+    """Check 6: per entry and month, linked transactions + unlinked matching
+    transactions + projected occurrences = the frozen count. Projected occurrences
+    are ``collect_events``' budget-entry events from T on, so months before T count
+    transactions only. Every active entry must have ``next_occurrence`` on or after T."""
+    from app.services.forecast import collect_events, is_spending_wallet
+
+    pairs, _ = match_entries(ctx)
+    for e in ctx.db.query(BudgetEntry).filter(BudgetEntry.user_id == ctx.owner.id,
+                                              BudgetEntry.is_active.is_(True)):
+        if naive(e.next_occurrence) < ctx.T:
+            block.fail("active entry with next_occurrence before as_of", entry_id=e.id,
+                       name=e.name, next_occurrence=naive(e.next_occurrence).date())
+
+    unlinked = db_rows(ctx.db.query(Transaction).filter(
+        Transaction.user_id == ctx.owner.id, Transaction.budget_entry_id.is_(None)))
+    matched: Dict[int, List[int]] = {}
+    for row in unlinked:
+        hits = [e.id for f, e in pairs if row_matches(ctx, row, f, e)]
+        if len(hits) > 1:
+            block.fail("unlinked row matches several entries", entries=[
+                f.label() for f, e in pairs if e.id in hits], **row_ref(row))
+        matched[row.id] = hits
+
+    T_month = month_of(ctx.frozen.as_of)
+    last = max((m for f, _ in pairs if f.expected for m in f.expected), default=None)
+    projected: Dict[tuple, int] = {}
+    if last is not None and last >= T_month:
+        end = _day(month_start(add_months(last, 1)))
+        for ev in collect_events(ctx.db, ctx.T, end, user_id=ctx.owner.id, keep_origin=True,
+                                 fx=ctx.fx):
+            origin = ev.get("origin")
+            if ev["source"] != "budget_entry" or not origin or origin[0] is not BudgetEntry:
+                continue
+            key = (origin[1], month_of(naive(ev["date"]).date()))
+            projected[key] = projected.get(key, 0) + 1
+
+    for f, e in pairs:
+        account = ctx.db.get(Account, e.account_id) if e.account_id else None
+        wallet = (e.transfer_to_account_id is None and account is not None
+                  and is_spending_wallet(account))
+        if wallet:
+            if f.expected is not None:
+                block.fail("refused: a wallet-funded entry is not projected; "
+                           "freeze no expected for it", entry=f.label())
+            continue
+        if f.expected is None:
+            block.fail("frozen entry has no expected counts", entry=f.label())
+            continue
+        linked_rows = db_rows(ctx.db.query(Transaction).filter(
+            Transaction.user_id == ctx.owner.id, Transaction.budget_entry_id == e.id))
+        for month, want in sorted(f.expected.items()):
+            linked = [r.id for r in linked_rows
+                      if month_of(naive(r.transaction_date).date()) == month]
+            loose = [r.id for r in unlinked if e.id in matched.get(r.id, [])
+                     and month_of(naive(r.transaction_date).date()) == month]
+            proj = projected.get((e.id, month), 0)
+            block.checked += 1
+            if len(linked) + len(loose) + proj != want:
+                block.fail("occurrence count differs", entry=f.label(), month=month,
+                           expected=want, actual=len(linked) + len(loose) + proj,
+                           linked_ids=linked, unlinked_ids=loose, projected=proj)
+
+
 BLOCKS: List[tuple] = [
     ("checkpoints", check_checkpoints),
     ("card_statements", check_card_statements),
+    ("card_routing", check_card_routing),
+    ("loans", check_loans),
+    ("recurring", check_recurring),
+    ("occurrences", check_occurrences),
     ("foreign_invariants", check_foreign),
 ]
 

@@ -760,3 +760,221 @@ def test_wrapper_refuses_paths_inside_the_repo(tmp_path):
                        "--expect-server-addr", "192.0.2.1"],
                       cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
     assert "--frozen must live outside the repository" in out.stdout
+
+
+# --- 2. Each check fails with a precise diff (routing, loans, recurring) -----------------------
+
+def recurring(raw, name) -> dict:
+    return next(r for r in raw["recurring"] if r["name"] == name)
+
+
+@needs_db
+def test_wrong_card_routing_fails(world, target):
+    raw = owner_frozen(world)
+    raw["card_routing"][0]["overflow_account"] = None
+    [failure] = block(run_check(target, raw), "card_routing")["failures"]
+    assert failure == {"message": "card overflow_account differs",
+                       "card": "Main card (credit, PHP)", "expected": None,
+                       "actual": "Second bank (savings, PHP)"}
+
+
+@needs_db
+def test_an_unlisted_owner_card_fails_card_routing(world, target):
+    world["post"]("/accounts/", {"name": "Spare card", "account_type": "credit", "balance": 0,
+                                 "billing_cycle_start": 5})
+    assert messages(run_check(target, owner_frozen(world)), "card_routing") == [
+        "owner card not in the frozen card_routing"]
+
+
+@needs_db
+def test_a_wrong_loan_payer_fails(world, target):
+    raw = owner_frozen(world)
+    raw["loans"][0]["payment_account"] = sel("Second bank", "savings")
+    [failure] = block(run_check(target, raw), "loans")["failures"]
+    assert failure["message"] == "loan payment_account differs"
+    assert failure["actual"] == "Main bank (checking, PHP)"
+
+
+@needs_db
+def test_a_wrong_loan_next_due_or_next_row_fails(world, target):
+    raw = owner_frozen(world)
+    raw["loans"][0]["next_due"] = "2031-05-20"
+    raw["loans"][0]["next_rows"][1]["payment"] = "4999.00"
+    failures = block(run_check(target, raw), "loans")["failures"]
+    assert [(f["message"], f["expected"], f["actual"]) for f in failures] == [
+        ("loan next_due differs", "2031-05-20", "2031-04-20"),
+        ("loan next row 2 payment differs", "4999.00", "5000.00"),
+    ]
+
+
+@needs_db
+@pytest.mark.parametrize("name, field, value, message", [
+    ("Utilities", "overflow_account", None, "recurring overflow_account differs"),
+    ("Utilities", "is_autopay", False, "recurring is_autopay differs"),
+    ("Salary", "amount", "30001.00", "recurring amount differs"),
+    ("Salary", "next_occurrence", "2031-03-26", "recurring next_occurrence differs"),
+    ("Phone plan", "installment", {"n": 3, "m": 6}, "recurring installment differs"),
+])
+def test_a_wrong_recurring_definition_fails(world, target, name, field, value, message):
+    raw = owner_frozen(world)
+    recurring(raw, name)[field] = value
+    failures = block(run_check(target, raw), "recurring")["failures"]
+    assert [f["message"] for f in failures] == [message], failures
+    if field == "installment":
+        assert (failures[0]["expected"], failures[0]["actual"]) == ("3 of 6", "2 of 6")
+
+
+@needs_db
+def test_a_frozen_entry_matching_two_owner_entries_fails(world, target):
+    world["post"]("/budget-entries/", {"name": "Salary", "entry_type": "income",
+                                       "amount": 100, "account_id": world["bank"],
+                                       "next_occurrence": day("2031-03-26")})
+    failures = block(run_check(target, owner_frozen(world)), "recurring")["failures"]
+    assert [f["message"] for f in failures] == ["frozen entry matches 2 owner entries"]
+    assert len(failures[0]["entry_ids"]) == 2
+
+
+# --- 4. Occurrences -------------------------------------------------------------------------
+
+def materialize(client, who, entry_id, **body):
+    from app.tests.conftest import sw_post
+
+    return sw_post(client, who, f"/budget-entries/{entry_id}/materialize",
+                   {"advance": False, **body})
+
+
+@needs_db
+def test_a_semi_monthly_entry_expects_two_a_month(world, target):
+    world["post"]("/budget-entries/", {
+        "name": "Allowance", "entry_type": "expense", "amount": 1000, "currency": "PHP",
+        "cadence": "semi_monthly", "semi_monthly_day_1": 1, "semi_monthly_day_2": 15,
+        "account_id": world["second"], "next_occurrence": day("2031-03-15")})
+    raw = owner_frozen(world)
+    raw["recurring"].append({
+        "name": "Allowance", "account": sel("Second bank", "savings"), "destination": None,
+        "overflow_account": None, "entry_type": "expense", "amount": "1000.00",
+        "currency": "PHP", "cadence": "semi_monthly", "semi_monthly_days": [1, 15],
+        "next_occurrence": "2031-03-15", "end_mode": "indefinite", "is_autopay": False,
+        "is_active": True, "expected": {"2031-03": 1, "2031-04": 2, "2031-05": 2}})
+    report = run_check(target, raw)
+    assert block(report, "occurrences")["status"] == "pass", block(report, "occurrences")
+    assert block(report, "recurring")["status"] == "pass"
+    recurring(raw, "Allowance")["expected"]["2031-04"] = 1
+    [failure] = block(run_check(target, raw), "occurrences")["failures"]
+    assert (failure["month"], failure["expected"], failure["actual"]) == ("2031-04", 1, 2)
+
+
+@needs_db
+def test_a_domestic_materialisation_without_advance_counts_once(world, target, sw_client):
+    txn_body = materialize(sw_client, world["o"], world["entries"]["utilities"])
+    assert txn_body["budget_entry_id"] == world["entries"]["utilities"]
+    occ = block(run_check(target, owner_frozen(world)), "occurrences")
+    assert occ["status"] == "pass", occ
+
+
+@needs_db
+def test_a_loan_materialisation_without_advance_counts_once(world, target, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    body = materialize(sw_client, world["o"], world["entries"]["loan"])
+    row = sw_db.get(Transaction, body["id"])
+    assert row.amount + row.transfer_fee == 5000 and row.transfer_fee > 0  # split by the stamp
+    occ = block(run_check(target, owner_frozen(world)), "occurrences")
+    assert occ["status"] == "pass", occ
+
+
+@needs_db
+def test_a_foreign_materialisation_without_advance_counts_once(world, target, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    entry_id = world["post"]("/budget-entries/", {
+        "name": "Streaming", "entry_type": "expense", "amount": 10, "currency": "USD",
+        "account_id": world["card"], "next_occurrence": day("2031-03-25")})["id"]
+    body = materialize(sw_client, world["o"], entry_id, amount=600)
+    row = sw_db.get(Transaction, body["id"])
+    assert (row.amount, row.projected_amount, row.projected_currency.value) == (600, 10, "USD")
+    raw = owner_frozen(world)
+    raw["recurring"].append({
+        "name": "Streaming", "account": sel("Main card", "credit"), "destination": None,
+        "overflow_account": None, "entry_type": "expense", "amount": "10.00",
+        "currency": "USD", "cadence": "monthly", "next_occurrence": "2031-03-25",
+        "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+        "expected": {"2031-03": 1, "2031-04": 1}})
+    occ = block(run_check(target, raw), "occurrences")
+    assert occ["status"] == "pass", occ
+
+
+@needs_db
+def test_an_unlinked_import_and_a_projection_in_one_month_fail_as_a_duplicate(world, target):
+    row = world["debit"](world["bank"], 2000, "2031-03-03", "Utilities March")
+    [failure] = block(run_check(target, owner_frozen(world)), "occurrences")["failures"]
+    assert failure == {"message": "occurrence count differs",
+                       "entry": "Utilities on Main bank (checking, PHP)", "month": "2031-03",
+                       "expected": 1, "actual": 2, "linked_ids": [], "unlinked_ids": [row],
+                       "projected": 1}
+
+
+@needs_db
+def test_a_matching_imported_loan_payment_counts_by_principal_plus_interest(world, target):
+    raw = owner_frozen(world)
+    recurring(raw, "Car loan payment")["expected"]["2031-03"] = 0
+    [failure] = block(run_check(target, raw), "occurrences")["failures"]
+    assert failure["unlinked_ids"] == [world["rows"]["loan_payment"]]
+
+
+@needs_db
+def test_an_ambiguous_row_fails_until_description_contains_is_frozen(world, target):
+    world["post"]("/budget-entries/", {
+        "name": "Gym", "entry_type": "expense", "amount": 2000, "currency": "PHP",
+        "account_id": world["bank"], "next_occurrence": day("2031-03-28")})
+    row = world["debit"](world["bank"], 2000, "2031-02-20", "Power bill")
+    raw = owner_frozen(world)
+    recurring(raw, "Utilities")["expected"] = {"2031-02": 1, "2031-03": 1, "2031-04": 1}
+    raw["recurring"].append({
+        "name": "Gym", "account": sel("Main bank", "checking"), "destination": None,
+        "overflow_account": None, "entry_type": "expense", "amount": "2000.00",
+        "currency": "PHP", "cadence": "monthly", "next_occurrence": "2031-03-28",
+        "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+        "expected": {"2031-03": 1, "2031-04": 1}})
+    failures = block(run_check(target, raw), "occurrences")["failures"]
+    ambiguous = [f for f in failures if f["message"] == "unlinked row matches several entries"]
+    assert len(ambiguous) == 1 and ambiguous[0]["transaction_id"] == row
+    assert ambiguous[0]["entries"] == ["Utilities on Main bank (checking, PHP)",
+                                       "Gym on Main bank (checking, PHP)"]
+    recurring(raw, "Utilities")["description_contains"] = "power"
+    recurring(raw, "Gym")["description_contains"] = "gym"
+    occ = block(run_check(target, raw), "occurrences")
+    assert occ["status"] == "pass", occ
+
+
+@needs_db
+def test_a_frozen_expectation_on_a_wallet_funded_entry_is_refused(world, target):
+    raw = owner_frozen(world)
+    recurring(raw, "Snacks")["expected"] = {"2031-03": 1}
+    assert messages(run_check(target, raw), "occurrences") == [
+        "refused: a wallet-funded entry is not projected; freeze no expected for it"]
+
+
+@needs_db
+def test_an_active_entry_due_before_as_of_fails(world, target):
+    raw = owner_frozen(world)
+    raw["as_of"] = "2031-03-21"
+    raw["sheet"]["dated_items"] = []
+    assert "active entry with next_occurrence before as_of" in messages(
+        run_check(target, raw), "occurrences")
+
+
+# --- 6. Posted-after guard ------------------------------------------------------------------
+
+@needs_db
+def test_a_posted_row_after_as_of_makes_the_loan_block_refuse(world, target):
+    row = world["debit"](world["bank"], 100, "2031-03-12", "Too late")
+    report = run_check(target, owner_frozen(world))
+    loans = block(report, "loans")
+    assert loans["status"] == "refused"
+    assert [f["transaction_id"] for f in loans["failures"]] == [row]
+    assert [r["transaction_id"] for r in report["posted_after"]] == [row]
+    assert report["overall"] == "fail"
+    # The balance and statement blocks still run on their own boundaries.
+    assert block(report, "checkpoints")["status"] == "pass"
+    assert block(report, "card_statements")["status"] == "pass"
