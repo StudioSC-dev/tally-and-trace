@@ -12,7 +12,7 @@ export function FxNotice({ fx }: { fx: FxMeta | undefined }) {
         <div className="flex items-start gap-3 border border-warn p-3" role="status" data-testid="unconverted-banner">
           <span aria-hidden="true" className="text-warn">⚠</span>
           <p className="text-sm text-warn">
-            {fx.unconverted_count} item{fx.unconverted_count === 1 ? ' has' : 's have'} no exchange rate yet. {fx.unconverted_count === 1 ? 'It is' : 'They are'} listed in {fx.unconverted_count === 1 ? 'its' : 'their'} own currency and left out of every total.
+            {fx.unconverted_count === 1 ? '1 item could not be converted (no exchange rate yet); it is not in these totals.' : `${fx.unconverted_count} items could not be converted (no exchange rate yet); they are not in these totals.`}
           </p>
         </div>
       )}
