@@ -115,6 +115,15 @@ def load(tmp_path, data, who, *, dry_run=False, addr="observed", tag="run"):
     return report, record
 
 
+def reset(record, confirm, *, dry_run=False):
+    from app.cutover_load.bootstrap import validate_url
+    from app.cutover_load.reset import run_reset
+
+    url = validate_url(TARGET["url"], expect_host=TARGET["host"], expect_db=TARGET["db"])
+    return run_reset(url=url, run_record_path=str(record), confirm=confirm, dry_run=dry_run,
+                     expect_db=TARGET["db"], expect_server_addr=TARGET["addr"], out=quiet)
+
+
 def counts(db, owner_id):
     from app.cutover_load.loader import owner_counts
 
@@ -161,6 +170,13 @@ def wall(value: datetime) -> datetime:
 
 def mode_of(path) -> int:
     return stat.S_IMODE(os.stat(path).st_mode)
+
+
+def edit_record(record, **changes):
+    data = json.loads(record.read_text())
+    data.update(changes)
+    os.chmod(record, 0o600)
+    record.write_text(json.dumps(data))
 
 
 @pytest.fixture
@@ -743,6 +759,170 @@ def test_a_failure_prints_only_check_names_and_writes_details_to_the_report(tmp_
     problem = json.loads(report.read_text())["problems"][0]
     assert problem["check"] == "card_opening" and "5.00" in problem["detail"]
     assert mode_of(report) == 0o600
+
+
+# --- Test 15: reset ------------------------------------------------------------------------
+
+def _demo_snapshot(db):
+    db.rollback()
+    ids = [r[0] for r in db.execute(text(
+        "SELECT id FROM users WHERE email IN ('demo@example.com', 'demo.partner@example.com')"))]
+    tables = {}
+    for table in ("accounts", "transactions", "budget_entries", "categories", "allocations",
+                  "tags"):
+        tables[table] = db.execute(text(f"SELECT count(*) FROM {table} WHERE user_id = ANY(:u)"),
+                                   {"u": ids}).scalar()
+    spot = db.execute(text(
+        "SELECT id, amount, description, transaction_date FROM transactions "
+        "WHERE user_id = ANY(:u) ORDER BY id LIMIT 3"), {"u": ids}).all()
+    balances = db.execute(text(
+        "SELECT id, balance FROM accounts WHERE user_id = ANY(:u) ORDER BY id"), {"u": ids}).all()
+    return ids, tables, spot, balances
+
+
+def test_reset_restores_the_guard_and_leaves_other_users_alone(tmp_path, owner, sw_db,
+                                                               sw_client):
+    from app.cutover_load.loader import check_guard
+    from app.models.user import User
+
+    demo = _demo_snapshot(sw_db)
+    assert demo[0], "the demo users are seeded by the app's lifespan"
+    _, record = load(tmp_path, fixture(), owner)
+    assert reset(record, owner["email"].upper()) == 0
+    sw_db.rollback()
+    check_guard(sw_db, sw_db.get(User, owner["id"]), owner["household"])
+    assert counts(sw_db, owner["id"]) == {
+        "accounts": 0, "transactions": 0, "budget_entries": 0, "categories": 0,
+        "allocations": 0, "wishlist_items": 0, "tags": 1, "account_tags": 0,
+        "transaction_tags": 0, "budget_entry_tags": 0, "account_shares": 0, "tag_shares": 0}
+    assert _demo_snapshot(sw_db) == demo
+
+
+def _break(case, db, who, record, other):
+    from app.models.category import Category
+    from app.models.transaction import Transaction, TransactionType
+
+    db.rollback()  # a fresh transaction, so a server-side now() is after the load
+    if case == "confirm":
+        return "someone-else@example.com"
+    if case == "database":
+        edit_record(record, database="another_db")
+    elif case == "server_addr":
+        edit_record(record, server_addr="192.0.2.1")
+    elif case == "owner_id":
+        edit_record(record, owner_id=who["id"] + 100000)
+    elif case == "foreign_row":
+        bank = account(db, who, "Main Bank")
+        db.add(Transaction(user_id=other["id"], account_id=bank.id, amount=1, is_posted=False,
+                           transaction_type=TransactionType.CREDIT,
+                           transaction_date=datetime(2026, 3, 20)))
+    elif case == "last_login":
+        db.execute(text("UPDATE users SET last_login = clock_timestamp() WHERE id = :u"),
+                   {"u": who["id"]})
+    elif case == "updated_after":
+        db.execute(text("UPDATE transactions SET updated_at = clock_timestamp() WHERE id = "
+                        "(SELECT min(id) FROM transactions WHERE user_id = :u)"), {"u": who["id"]})
+    elif case == "created_after":
+        db.add(Category(user_id=who["id"], name="Added later"))
+    elif case == "link_deleted":
+        db.execute(text("DELETE FROM transaction_tags WHERE transaction_id = "
+                        "(SELECT min(transaction_id) FROM transaction_tags tt JOIN transactions t "
+                        "ON t.id = tt.transaction_id WHERE t.user_id = :u)"), {"u": who["id"]})
+    elif case == "signed_off":
+        edit_record(record, signed_off_at="2026-03-10T12:00:00+00:00")
+    db.commit()
+    return who["email"]
+
+
+RESET_REFUSALS = {"confirm": "confirm", "database": "target", "server_addr": "target",
+                  "owner_id": "owner", "foreign_row": "foreign_references",
+                  "last_login": "last_login", "updated_after": "changed_after_load",
+                  "created_after": "changed_after_load", "link_deleted": "row_counts",
+                  "signed_off": "signed_off"}
+
+
+@pytest.mark.parametrize("case", sorted(RESET_REFUSALS))
+def test_reset_refuses(case, tmp_path, owner, sw_people, sw_db):
+    other = sw_people("Rex", "Other")
+    _, record = load(tmp_path, fixture(), owner)
+    confirm = _break(case, sw_db, owner, record, other)
+    before = counts(sw_db, owner["id"])
+    with pytest.raises(Exception) as exc:
+        reset(record, confirm)
+    assert getattr(exc.value, "check", None) == RESET_REFUSALS[case], exc.value
+    assert counts(sw_db, owner["id"]) == before
+
+
+def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):
+    _, record = load(tmp_path, fixture(), owner)
+    before = table_counts(sw_db)
+    assert reset(record, owner["email"], dry_run=True) == 0
+    assert table_counts(sw_db) == before
+    assert json.loads(record.read_text())["status"] == "complete"
+
+
+# --- Test 16: sign-off ---------------------------------------------------------------------
+
+def _check_report(tmp_path, record, name, **changes):
+    """A hand-written cutover check report (STU-204's shape) for the record's owner."""
+    rec = json.loads(record.read_text())
+    body = {"report": "cutover-check", "version": 1, "overall": "pass",
+            "owner_id": rec["owner_id"], "database": rec["database"],
+            "server_addr": rec["server_addr"], "host": TARGET["host"],
+            "frozen_sha256": "0" * 64, "session_timezone": rec["session_timezone"],
+            "checked_at": "2026-03-10T12:00:00+00:00", "as_of": "2026-03-01",
+            "posted_after": [],
+            "blocks": [{"name": "balances", "status": "pass", "checked": 7, "failures": []}],
+            **changes}
+    path = tmp_path / name
+    path.write_text(json.dumps(body))
+    return path
+
+
+def test_sign_off_refuses_a_failing_or_mismatched_check_then_closes_the_window(tmp_path, owner,
+                                                                              sw_db):
+    from app.cutover_load.bootstrap import Refused
+    from app.cutover_load.reset import sign_off
+
+    _, record = load(tmp_path, fixture(), owner)
+    for name, changes in (("fail.json", {"overall": "fail"}),
+                          ("kind.json", {"report": "cutover-load-review"}),
+                          ("version.json", {"version": 2}),
+                          ("tz.json", {"session_timezone": "Asia/Manila"
+                                       if json.loads(record.read_text())["session_timezone"]
+                                       != "Asia/Manila" else "Etc/UTC"}),
+                          ("db.json", {"database": "another_db"}),
+                          ("addr.json", {"server_addr": "192.0.2.1"}),
+                          ("owner.json", {"owner_id": owner["id"] + 1})):
+        with pytest.raises(Refused) as exc:
+            sign_off(run_record_path=str(record),
+                     check_report_path=str(_check_report(tmp_path, record, name, **changes)),
+                     confirm=owner["email"], out=quiet)
+        assert exc.value.check == "check_report", name
+        assert json.loads(record.read_text())["signed_off_at"] is None
+    good = _check_report(tmp_path, record, "good.json")
+    with pytest.raises(Refused):
+        sign_off(run_record_path=str(record), check_report_path=str(good),
+                 confirm="someone-else@example.com", out=quiet)
+    assert sign_off(run_record_path=str(record), check_report_path=str(good),
+                    confirm=owner["email"], out=quiet) == 0
+    signed = json.loads(record.read_text())
+    assert signed["signed_off_at"] and signed["status"] == "complete"
+    assert mode_of(record) == 0o600
+    with pytest.raises(Refused) as exc:
+        reset(record, owner["email"])
+    assert exc.value.check == "signed_off"
+    assert counts(sw_db, owner["id"])["transactions"] == 13
+
+
+def test_sign_off_makes_no_database_connection(tmp_path, owner):
+    _, record = load(tmp_path, fixture(), owner)
+    good = _check_report(tmp_path, record, "good.json")
+    done = run_wrapper(["--sign-off", "--run-record", str(record), "--check-report", str(good),
+                        "--confirm", owner["email"]], cwd=tmp_path,
+                       url="postgresql://nobody@db.invalid:1/none")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "sign-off: pass" in done.stdout and "APP_IMPORTED=False" in done.stdout
 
 
 # --- Test 17: Household --------------------------------------------------------------------
