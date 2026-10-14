@@ -166,3 +166,597 @@ def test_private_files_are_0600_and_never_replaced(tmp_path):
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     with pytest.raises(FileExistsError):
         bootstrap.create_private(path, "{}")
+
+
+# --- Database tests: skip gate --------------------------------------------------------------
+
+def _gate() -> str:
+    """Why the database tests must skip, or "" when they may run.
+
+    The effective settings URL must be the exported one and pass the bootstrap's
+    validation with a loopback host. After connecting, the server address must be
+    loopback, or a private address: Docker port publishing (the local container
+    and the CI service) reports the container's bridge address, never 127.0.0.1.
+    """
+    import ipaddress
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine.url import make_url
+
+    url = os.getenv("DATABASE_URL", "")
+    if not url:
+        return "no DATABASE_URL"
+    from app.core.config import settings
+
+    if settings.DATABASE_URL != url:
+        return "the effective settings URL is not the exported DATABASE_URL"
+    try:
+        parsed = make_url(url)
+        bootstrap.validate_url(url, parsed.host or "", parsed.database or "", os.environ)
+    except Exception as exc:
+        return f"DATABASE_URL fails the bootstrap rules: {exc}"
+    if parsed.host not in ("localhost", "127.0.0.1", "::1"):
+        return "DATABASE_URL host is not loopback"
+    try:
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            addr = conn.execute(text("SELECT host(inet_server_addr())")).scalar()
+        engine.dispose()
+    except Exception:
+        return "database unreachable"
+    if addr is None:
+        return "connected over a Unix socket"
+    ip = ipaddress.ip_address(addr)
+    if not (ip.is_loopback or ip.is_private):
+        return f"server address {addr} is not local"
+    return ""
+
+
+GATE = _gate()
+needs_db = pytest.mark.skipif(bool(GATE), reason=GATE or "database available")
+
+
+@pytest.fixture(scope="module")
+def target():
+    """``(url, database, server address)`` of the test database, as the server reports them."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine.url import make_url
+
+    url = make_url(os.environ["DATABASE_URL"])
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        database, addr = conn.execute(
+            text("SELECT current_database(), host(inet_server_addr())")).one()
+    engine.dispose()
+    return url, database, addr
+
+
+def run_check(target, raw: dict, blocks=None) -> dict:
+    from app.cutover_check import check
+
+    url, database, addr = target
+    return check.run(url, schema.parse_frozen(raw), expect_db=database,
+                     expect_server_addr=addr, blocks=blocks)
+
+
+def block(report: dict, name: str) -> dict:
+    return next(b for b in report["blocks"] if b["name"] == name)
+
+
+def messages(report: dict, name: str) -> list:
+    return [f["message"] for f in block(report, name)["failures"]]
+
+
+# --- The base world: the frozen_base.json fixture, built through the API ----------------------
+
+def day(d: str) -> str:
+    return f"{d}T00:00:00"
+
+
+def txn(client, who, body):
+    from app.tests.conftest import sw_post
+
+    return sw_post(client, who, "/transactions/", body)["id"]
+
+
+def build_world(client, people) -> dict:
+    """Owner O with the accounts, rows and recurring entries frozen_base.json describes."""
+    from app.tests.conftest import sw_post
+
+    o = people("Owen", "Owner")
+    post = lambda path, body: sw_post(client, o, path, body)  # noqa: E731
+    bank = post("/accounts/", {"name": "Main bank", "account_type": "checking",
+                               "balance": 50000})["id"]
+    second = post("/accounts/", {"name": "Second bank", "account_type": "savings",
+                                 "balance": 20000})["id"]
+    card = post("/accounts/", {"name": "Main card", "account_type": "credit", "balance": 0,
+                               "billing_cycle_start": 15, "days_until_due_date": 20,
+                               "payment_account_id": bank,
+                               "payment_overflow_account_id": second})["id"]
+    loan = post("/accounts/", {"name": "Car loan", "account_type": "loan", "loan_kind": "auto",
+                               "balance": -100000, "loan_annual_rate": 12,
+                               "loan_term_months": 24, "loan_payment_amount": 5000,
+                               "loan_first_payment_date": "2031-01-20",
+                               "loan_payments_made_offset": 2,
+                               "payment_account_id": bank})["id"]
+    wallet = post("/accounts/", {"name": "Pocket wallet", "account_type": "cash",
+                                 "balance": 1000, "is_spending_wallet": True})["id"]
+    usd = post("/accounts/", {"name": "Dollar savings", "account_type": "savings",
+                              "currency": "USD", "balance": 1000})["id"]
+
+    def debit(account, amount, when, desc, kind="debit", posted=True):
+        return txn(client, o, {"account_id": account, "amount": amount, "currency": "PHP",
+                               "transaction_type": kind, "transaction_date": day(when),
+                               "description": desc, "is_posted": posted})
+
+    def transfer(src, dst, amount, when, desc, fee=0, posted=True, **extra):
+        return txn(client, o, {"account_id": src, "transfer_from_account_id": src,
+                               "transfer_to_account_id": dst, "amount": amount,
+                               "transfer_fee": fee, "transaction_type": "transfer",
+                               "transaction_date": day(when), "description": desc,
+                               "is_posted": posted, **extra})
+
+    rows = {
+        "groceries": debit(card, 1000, "2031-02-10", "Groceries"),
+        "fuel": debit(card, 600, "2031-02-20", "Fuel"),
+        "card_payment": transfer(bank, card, 400, "2031-02-25", "Card payment"),
+        "refund": debit(bank, 5000, "2031-03-01", "Refund", kind="credit"),
+        "loan_payment": transfer(bank, loan, 4000, "2031-03-05", "Loan payment", fee=1000),
+        "hardware": debit(bank, 1000, "2031-03-05", "Hardware store"),
+        "move": transfer(bank, second, 2000, "2031-03-08", "Move to savings"),
+    }
+
+    def entry(body):
+        return post("/budget-entries/", {"currency": "PHP", "cadence": "monthly", **body})["id"]
+
+    entries = {
+        "salary": entry({"name": "Salary", "entry_type": "income", "amount": 30000,
+                         "account_id": bank, "next_occurrence": day("2031-03-25")}),
+        "utilities": entry({"name": "Utilities", "entry_type": "expense", "amount": 2000,
+                            "account_id": bank, "overflow_account_id": second,
+                            "is_autopay": True, "next_occurrence": day("2031-03-20")}),
+        "loan": entry({"name": "Car loan payment", "entry_type": "expense", "amount": 5000,
+                       "account_id": bank, "transfer_to_account_id": loan,
+                       "next_occurrence": day("2031-04-20")}),
+        "phone": entry({"name": "Phone plan", "entry_type": "expense", "amount": 1000,
+                        "account_id": card, "end_mode": "after_occurrences",
+                        "max_occurrences": 4, "occurrences_paid_offset": 2,
+                        "next_occurrence": day("2031-03-20")}),
+        "snacks": entry({"name": "Snacks", "entry_type": "expense", "amount": 500,
+                         "account_id": wallet, "next_occurrence": day("2031-03-15")}),
+    }
+    return {"o": o, "bank": bank, "second": second, "card": card, "loan": loan,
+            "wallet": wallet, "usd": usd, "rows": rows, "entries": entries,
+            "debit": debit, "transfer": transfer, "post": post}
+
+
+def owner_frozen(world) -> dict:
+    raw = frozen_base()
+    raw["owner_email"] = world["o"]["email"]
+    return raw
+
+
+def sel(name, account_type, currency="PHP") -> dict:
+    return {"name": name, "account_type": account_type, "currency": currency}
+
+
+@pytest.fixture
+def world(sw_client, sw_people):
+    return build_world(sw_client, sw_people)
+
+
+# --- 1. Pass case ---------------------------------------------------------------------------
+
+@needs_db
+def test_pass_case(world, target):
+    report = run_check(target, owner_frozen(world))
+    failing = [b for b in report["blocks"] if b["status"] != "pass"]
+    assert failing == [], failing
+    assert report["overall"] == "pass"
+    assert report["owner_id"] == world["o"]["id"]
+    assert (report["database"], report["server_addr"]) == target[1:]
+    assert all(b["checked"] > 0 for b in report["blocks"]), report["blocks"]
+
+
+# --- 2. Each check fails with a precise diff (balances, statements) ----------------------------
+
+@needs_db
+def test_a_balance_off_by_a_centavo_fails_with_the_difference(world, target):
+    raw = owner_frozen(world)
+    raw["checkpoints"][0]["balances"][0]["amount"] = "49600.01"
+    report = run_check(target, raw)
+    assert report["overall"] == "fail"
+    [failure] = block(report, "checkpoints")["failures"]
+    assert failure == {"message": "balance differs", "account": "Main bank (checking, PHP)",
+                       "date": "2031-03-01", "point": "start_of_day", "expected": "49600.01",
+                       "actual": "49600.00", "difference": "-0.01"}
+
+
+@needs_db
+def test_a_missing_and_an_extra_statement_row_are_named(world, target):
+    raw = owner_frozen(world)
+    raw["card_statements"][1]["close"] = "2031-03-16"
+    failures = block(run_check(target, raw), "card_statements")["failures"]
+    assert [(f["message"], f["close"]) for f in failures] == [
+        ("frozen statement missing from the app", "2031-03-16"),
+        ("app statement not in the frozen file", "2031-03-15"),
+    ]
+    assert failures[1]["owed"] == "600.00"
+
+
+@needs_db
+def test_a_wrong_due_date_fails(world, target):
+    raw = owner_frozen(world)
+    raw["card_statements"][0]["due"] = "2031-03-08"
+    [failure] = block(run_check(target, raw), "card_statements")["failures"]
+    assert failure["message"] == "statement due differs"
+    assert (failure["expected"], failure["actual"]) == ("2031-03-08", "2031-03-07")
+
+
+@needs_db
+def test_an_unknown_selector_fails_instead_of_being_skipped(world, target):
+    raw = owner_frozen(world)
+    raw["checkpoints"][0]["balances"][0]["account"]["name"] = "No such bank"
+    assert messages(run_check(target, raw), "checkpoints") == [
+        "checkpoint 2031-03-01 start_of_day: selector matches 0 owner accounts"]
+
+
+@needs_db
+def test_a_posted_row_in_another_currency_fails_the_foreign_invariants(world, target, sw_db):
+    from app.models.transaction import Transaction
+
+    sw_db.query(Transaction).filter(Transaction.id == world["rows"]["hardware"]).update(
+        {"currency": "USD"})
+    sw_db.commit()
+    [failure] = block(run_check(target, owner_frozen(world)), "foreign_invariants")["failures"]
+    assert failure["message"] == "posted row not in its account's currency"
+    assert failure["transaction_id"] == world["rows"]["hardware"]
+
+
+# --- 3. Statements as of T ------------------------------------------------------------------
+
+def history_as_of(db, card_id, owner_id, T):
+    from datetime import timedelta
+
+    from app.core.access import viewable_account_ids
+    from app.models.account import Account
+    from app.services.statements import statement_history
+
+    card = db.get(Account, card_id)
+    return statement_history(db, card, T - timedelta(days=1), viewable_account_ids(db, owner_id))
+
+
+@needs_db
+def test_statements_match_statement_history_when_nothing_is_excluded(world, target, sw_db):
+    from datetime import datetime
+
+    from app.cutover_check.statements import compared_set, computed_cycles
+    from app.models.account import Account
+
+    T = datetime(2031, 3, 10)
+    card = sw_db.get(Account, world["card"])
+    ours = compared_set(computed_cycles(sw_db, card, world["o"]["id"], T))
+    theirs = history_as_of(sw_db, world["card"], world["o"]["id"], T)
+    assert [(c["close"], c["due"], c["balance"], c["owed"]) for c in ours] == [
+        (h["close"].date(), h["due"].date(), h["balance"], h["owed"]) for h in theirs]
+    assert len(ours) == 2
+
+
+@needs_db
+@pytest.mark.parametrize("kind", ["pending_charge", "planned_payment", "posted_payment_after"])
+def test_rows_outside_the_as_of_view_are_excluded(world, target, sw_db, kind):
+    from datetime import datetime
+
+    if kind == "pending_charge":
+        world["debit"](world["card"], 300, "2031-03-05", "Pending charge", posted=False)
+    elif kind == "planned_payment":
+        world["transfer"](world["bank"], world["card"], 200, "2031-03-12", "Planned",
+                          posted=False)
+    else:
+        world["transfer"](world["bank"], world["card"], 600, "2031-03-12", "Paid late")
+    raw = owner_frozen(world)
+    assert block(run_check(target, raw), "card_statements")["status"] == "pass"
+    # The unfiltered statement history does see the row: the exclusion matters.
+    theirs = history_as_of(sw_db, world["card"], world["o"]["id"], datetime(2031, 3, 10))
+    assert [(h["balance"], h["owed"]) for h in theirs][:2] != [(1000, 600), (600, 600)]
+
+
+@needs_db
+def test_paid_historical_cycles_are_left_out_of_the_compared_set(world, target, sw_db):
+    from datetime import datetime
+
+    from app.cutover_check.statements import compared_set, computed_cycles
+    from app.models.account import Account
+
+    world["debit"](world["card"], 500, "2031-01-05", "Old charge")
+    world["transfer"](world["bank"], world["card"], 500, "2031-01-20", "Old payment")
+    cycles = computed_cycles(sw_db, sw_db.get(Account, world["card"]), world["o"]["id"],
+                             datetime(2031, 3, 10))
+    assert [str(c["close"]) for c in cycles] == ["2031-01-15", "2031-02-15", "2031-03-15"]
+    assert [str(c["close"]) for c in compared_set(cycles)] == ["2031-02-15", "2031-03-15"]
+    assert block(run_check(target, owner_frozen(world)), "card_statements")["status"] == "pass"
+
+
+@needs_db
+def test_an_unused_card_yields_an_empty_set(world, target):
+    world["post"]("/accounts/", {"name": "Spare card", "account_type": "credit", "balance": 0,
+                                 "billing_cycle_start": 5, "payment_account_id": world["bank"]})
+    statements = block(run_check(target, owner_frozen(world)), "card_statements")
+    assert statements["status"] == "pass"
+
+
+@needs_db
+def test_a_payment_from_a_card_without_cycle_settings_does_not_net(world, target):
+    other = world["post"]("/accounts/", {"name": "Unbilled card", "account_type": "credit",
+                                         "balance": 0})["id"]
+    world["transfer"](other, world["card"], 300, "2031-03-02", "Balance move")
+    assert block(run_check(target, owner_frozen(world)), "card_statements")["status"] == "pass"
+
+
+# --- 7. Boundaries and currency -------------------------------------------------------------
+
+@needs_db
+@pytest.mark.parametrize("as_of", ["2031-03-03", "2031-03-10"])
+def test_a_row_at_midnight_is_excluded_at_start_and_included_at_end_of_day(world, target, as_of):
+    raw = owner_frozen(world)
+    raw["as_of"] = as_of
+    raw["sheet"]["dated_items"] = []
+    bank = sel("Main bank", "checking")
+    raw["checkpoints"] = [
+        {"date": "2031-03-05", "point": "start_of_day",
+         "balances": [{"account": bank, "amount": "54600.00"}]},
+        {"date": "2031-03-05", "point": "end_of_day",
+         "balances": [{"account": bank, "amount": "48600.00"}]},
+    ]
+    assert block(run_check(target, raw), "checkpoints")["status"] == "pass"
+
+
+@needs_db
+def test_a_cross_currency_transfer_with_a_fee_moves_each_side_by_its_own_figure(world, target):
+    world["transfer"](world["usd"], world["bank"], 100, "2031-03-06", "Convert", fee=5,
+                      received_amount=5000)
+    raw = owner_frozen(world)
+    usd, bank = sel("Dollar savings", "savings", "USD"), sel("Main bank", "checking")
+    raw["checkpoints"] = [
+        {"date": "2031-03-06", "point": "start_of_day",
+         "balances": [{"account": usd, "amount": "1000.00"},
+                      {"account": bank, "amount": "48600.00"}]},
+        {"date": "2031-03-06", "point": "end_of_day",
+         "balances": [{"account": usd, "amount": "895.00"},
+                      {"account": bank, "amount": "53600.00"}]},
+    ]
+    report = run_check(target, raw)
+    assert block(report, "checkpoints")["status"] == "pass"
+    assert block(report, "foreign_invariants")["status"] == "pass"
+
+
+# --- 8. Read-only and isolation -------------------------------------------------------------
+
+@needs_db
+def test_the_session_is_read_only_repeatable_read_even_after_an_internal_commit(target):
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from app.cutover_check import check
+
+    url, database, addr = target
+    with check.readonly_session(url, database, addr) as (db, _, _):
+        assert db.execute(text("SHOW transaction_isolation")).scalar() == "repeatable read"
+        assert db.execute(text("SHOW transaction_read_only")).scalar() == "on"
+        db.commit()  # releases a savepoint only: the snapshot and its mode stay
+        assert db.execute(text("SHOW transaction_read_only")).scalar() == "on"
+        with pytest.raises(DBAPIError) as caught:
+            db.execute(text("UPDATE users SET first_name = first_name"))
+        assert "read-only transaction" in str(caught.value.orig)
+    with check.readonly_session(url, database, addr) as (db, _, _):
+        from app.models.category import Category
+
+        db.add(Category(user_id=1, name="never"))
+        with pytest.raises(DBAPIError):
+            db.commit()
+
+
+@needs_db
+def test_the_shared_lock_refuses_while_a_load_holds_it(target):
+    from sqlalchemy import create_engine, text
+
+    from app.cutover_check import check
+    from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY
+
+    url, database, addr = target
+    engine = create_engine(url)
+    with engine.connect() as holder:
+        with holder.begin():
+            holder.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CUTOVER_LOCK_KEY})
+            with pytest.raises(check.CheckRefused, match="holds the lock"):
+                with check.readonly_session(url, database, addr):
+                    pass
+    engine.dispose()
+    with check.readonly_session(url, database, addr):
+        pass  # free again once the load's transaction ends
+
+
+@needs_db
+def test_the_fx_provider_is_never_reached(world, target, monkeypatch):
+    from app.services import fx
+
+    def boom(*_a, **_k):
+        raise AssertionError("the exchange-rate provider was reached")
+
+    monkeypatch.setattr(fx.CurrencyApiProvider, "fetch", boom)
+    monkeypatch.setattr(fx._refresher, "provider", fx.CurrencyApiProvider())
+    built = []
+    real = fx._offline_factory
+    monkeypatch.setattr(fx, "_offline_factory", lambda db: built.append(db) or real(db))
+    world["transfer"](world["usd"], world["bank"], 100, "2031-03-06", "Convert",
+                      received_amount=5000)
+    world["debit"](world["card"], 50, "2031-03-06", "Pending abroad", posted=False)
+    run_check(target, owner_frozen(world))
+    assert built, "the check builds its rates with FxRates.offline"
+
+
+def test_the_check_imports_nothing_from_the_loader():
+    import ast
+    import subprocess
+    import sys
+
+    package = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cutover_check")
+    for name in sorted(os.listdir(package)):
+        if not name.endswith(".py"):
+            continue
+        with open(os.path.join(package, name), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in ast.walk(tree):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            assert not any("cutover_load" in n for n in names), (name, names)
+    probe = ("import sys, pkgutil, importlib, app.cutover_check as p\n"
+             "for m in pkgutil.iter_modules(p.__path__):\n"
+             "    importlib.import_module('app.cutover_check.' + m.name)\n"
+             "bad = [m for m in sys.modules if m.startswith('app.cutover_load') or m == 'app.main']\n"
+             "print('BAD', bad)\n")
+    env = {**os.environ, "DATABASE_URL": "postgresql://u:p@127.0.0.1:1/none"}
+    out = subprocess.run([sys.executable, "-c", probe], cwd=os.path.dirname(os.path.dirname(package)),
+                         env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert "BAD []" in out.stdout
+
+
+# --- 9. Hermetic wrapper, target pinning and output paths -------------------------------------
+
+WRAPPER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                       "scripts", "cutover_check.py")
+
+
+def run_wrapper(args, cwd, env_url=None, extra_env=None, probe=False):
+    """The wrapper as a subprocess; ``probe`` also reports whether app settings were imported."""
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
+    env["DATABASE_URL"] = env_url or os.environ.get("DATABASE_URL", "")
+    env.update(extra_env or {})
+    if probe:
+        code = ("import runpy, sys\n"
+                f"sys.argv = {[WRAPPER, *args]!r}\n"
+                "try:\n"
+                f"    runpy.run_path({WRAPPER!r}, run_name='__main__')\n"
+                "except SystemExit as e:\n"
+                "    print('EXIT', e.code)\n"
+                "print('APP_SETTINGS_IMPORTED', 'app.core.config' in sys.modules)\n")
+        cmd = [sys.executable, "-c", code]
+    else:
+        cmd = [sys.executable, WRAPPER, *args]
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+
+def wrapper_args(target, frozen_path, report_path, **override):
+    url, database, addr = target
+    values = {"--frozen": frozen_path, "--report": report_path, "--expect-host": url.host,
+              "--expect-db": database, "--expect-server-addr": addr}
+    values.update({f"--{k.replace('_', '-')}": v for k, v in override.items()})
+    return [part for pair in values.items() for part in pair]
+
+
+def write_frozen(tmp_path, raw) -> str:
+    path = tmp_path / "frozen.json"
+    path.write_text(json.dumps(raw))
+    return str(path)
+
+
+@needs_db
+def test_wrapper_ignores_a_dotenv_and_writes_a_private_report(world, target, tmp_path):
+    (tmp_path / ".env").write_text(
+        "DATABASE_URL=postgresql://x:y@conflict.invalid:5432/elsewhere\n")
+    (tmp_path / "out").mkdir()
+    frozen = write_frozen(tmp_path, owner_frozen(world))
+    out = run_wrapper(wrapper_args(target, "frozen.json", "out/report.json"), cwd=str(tmp_path))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert f"target: host={target[0].host} db={target[1]}" in out.stdout
+    assert "conflict.invalid" not in out.stdout
+    assert target[0].password not in out.stdout + out.stderr
+    report_path = tmp_path / "out" / "report.json"  # relative to where it was run
+    assert stat.S_IMODE(os.stat(report_path).st_mode) == 0o600
+    report = json.loads(report_path.read_text())
+    assert (report["overall"], report["owner_id"]) == ("pass", world["o"]["id"])
+    assert (report["database"], report["server_addr"]) == target[1:]
+    assert report["frozen_sha256"]
+    assert out.stdout.strip().splitlines()[-1] == "overall: PASS"
+    assert os.path.exists(frozen)
+
+
+@needs_db
+def test_wrapper_exits_1_on_a_failing_check(world, target, tmp_path):
+    raw = owner_frozen(world)
+    raw["checkpoints"][0]["balances"][0]["amount"] = "1.00"
+    frozen = write_frozen(tmp_path, raw)
+    out = run_wrapper(wrapper_args(target, frozen, str(tmp_path / "r.json")), cwd=str(tmp_path))
+    assert out.returncode == 1, out.stdout + out.stderr
+    assert "checkpoints: FAIL" in out.stdout
+    assert "49600" not in out.stdout  # figures stay in the private report
+    assert json.loads((tmp_path / "r.json").read_text())["overall"] == "fail"
+
+
+@needs_db
+def test_wrapper_accepts_sslmode_prefer(world, target, tmp_path):
+    frozen = write_frozen(tmp_path, owner_frozen(world))
+    url = target[0].render_as_string(hide_password=False) + "?sslmode=prefer"
+    out = run_wrapper(wrapper_args(target, frozen, str(tmp_path / "r.json")),
+                      cwd=str(tmp_path), env_url=url)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+@needs_db
+def test_wrapper_refuses_a_server_address_mismatch_after_connecting(world, target, tmp_path):
+    frozen = write_frozen(tmp_path, owner_frozen(world))
+    out = run_wrapper(wrapper_args(target, frozen, str(tmp_path / "r.json"),
+                                   expect_server_addr="192.0.2.1"), cwd=str(tmp_path))
+    assert out.returncode == 2
+    assert "is not --expect-server-addr 192.0.2.1" in out.stdout
+    assert "target: host=" in out.stdout  # it got as far as connecting
+    assert not (tmp_path / "r.json").exists()
+
+
+def test_wrapper_refuses_an_expect_host_mismatch_before_connecting(tmp_path):
+    # Nothing listens on port 1: a connection attempt would surface as a driver error.
+    out = run_wrapper(["--frozen", str(tmp_path / "f.json"), "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "db.example.com", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
+    assert out.returncode == 2
+    assert "is not --expect-host 'db.example.com'" in out.stdout
+    assert "target:" not in out.stdout
+
+
+@pytest.mark.parametrize("url, extra_env, fragment", [
+    ("postgresql://u:pw@127.0.0.1:1/c3db?host=10.0.0.9", {}, "query key 'host'"),
+    ("postgresql://u:pw@127.0.0.1:1/c3db?hostaddr=10.0.0.9", {}, "query key 'hostaddr'"),
+    ("postgresql://u:pw@127.0.0.1:1/c3db", {"PGHOSTADDR": "10.0.0.9"}, "PGHOSTADDR is set"),
+])
+def test_wrapper_refuses_target_overrides_before_importing_the_app(tmp_path, url, extra_env,
+                                                                   fragment):
+    out = run_wrapper(["--frozen", str(tmp_path / "f.json"), "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url=url, extra_env=extra_env, probe=True)
+    assert fragment in out.stdout, out.stdout + out.stderr
+    assert "EXIT 2" in out.stdout
+    assert "APP_SETTINGS_IMPORTED False" in out.stdout
+
+
+def test_wrapper_refuses_paths_inside_the_repo(tmp_path):
+    inside = os.path.join(bootstrap.repo_root(), "backend", "report.json")
+    out = run_wrapper(["--frozen", str(tmp_path / "f.json"), "--report", inside,
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
+    assert out.returncode == 2
+    assert "--report must live outside the repository" in out.stdout
+    assert not os.path.exists(inside)
+    link = tmp_path / "repo-link"
+    link.symlink_to(bootstrap.repo_root())
+    out = run_wrapper(["--frozen", str(link / "frozen.json"), "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"],
+                      cwd=str(tmp_path), env_url="postgresql://u:pw@127.0.0.1:1/c3db")
+    assert "--frozen must live outside the repository" in out.stdout
