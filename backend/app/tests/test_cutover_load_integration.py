@@ -12,24 +12,28 @@ host of ``localhost``, ``127.0.0.1`` or ``::1``, and the server must report a
 loopback or private address (a database in a local container reports its
 container address, never a loopback one).
 """
+import copy
 import ipaddress
 import json
 import os
 import stat
 import subprocess
 import sys
+from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
-from app.tests.conftest import hh_household
+from app.tests.conftest import API, fx_rates, hh_household
 
 HERE = os.path.dirname(__file__)
 DATA = os.path.join(HERE, "data", "cutover_load")
 BACKEND = os.path.dirname(os.path.dirname(HERE))
 SCRIPT = os.path.join(BACKEND, "scripts", "cutover_load.py")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+D = Decimal
 
 
 def _gate():
@@ -76,10 +80,83 @@ def fixture(name="base") -> dict:
         return json.load(fh)
 
 
+def by_key(items, key):
+    return next(i for i in items if i["key"] == key)
+
+
+def card_at_cutover(data) -> dict:
+    """``data`` without the card's rows after the cutover, so ``statement_history``
+    (which reads every recorded row) shows the statements as they stood then."""
+    data["transactions"] = [t for t in data["transactions"]
+                            if t["account_key"] != "card" or t["date"] < data["cutover_date"]]
+    return data
+
+
 def write_input(tmp_path, data, who, name="input.json") -> str:
     path = tmp_path / name
     path.write_text(json.dumps({**data, "owner_email": who["email"]}))
     return str(path)
+
+
+def quiet(_line):
+    pass
+
+
+def load(tmp_path, data, who, *, dry_run=False, addr="observed", tag="run"):
+    from app.cutover_load.bootstrap import validate_url
+    from app.cutover_load.loader import run_load
+
+    url = validate_url(TARGET["url"], expect_host=TARGET["host"], expect_db=TARGET["db"])
+    report, record = tmp_path / f"{tag}-report.json", tmp_path / f"{tag}-record.json"
+    run_load(url=url, input_path=write_input(tmp_path, data, who, f"{tag}-input.json"),
+             report_path=str(report), run_record_path=None if dry_run else str(record),
+             dry_run=dry_run, expect_db=TARGET["db"],
+             expect_server_addr=TARGET["addr"] if addr == "observed" else addr, out=quiet)
+    return report, record
+
+
+def counts(db, owner_id):
+    from app.cutover_load.loader import owner_counts
+
+    db.rollback()
+    return owner_counts(db, owner_id)
+
+
+def table_counts(db) -> dict:
+    db.rollback()
+    tables = [r[0] for r in db.execute(text(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+        "AND tablename <> 'alembic_version'"))]
+    return {t: db.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in tables}
+
+
+def account(db, who, name):
+    from app.models.account import Account
+
+    db.rollback()
+    return db.query(Account).filter(Account.user_id == who["id"], Account.name == name).one()
+
+
+def txn(db, who, description):
+    from app.models.transaction import Transaction
+
+    db.rollback()
+    return db.query(Transaction).filter(Transaction.user_id == who["id"],
+                                        Transaction.description == description).one()
+
+
+def entry(db, who, name):
+    from app.models.budget_entry import BudgetEntry
+
+    db.rollback()
+    return db.query(BudgetEntry).filter(BudgetEntry.user_id == who["id"],
+                                        BudgetEntry.name == name).one()
+
+
+def wall(value: datetime) -> datetime:
+    """A stored date as the app and the cutover check read it: the timestamptz value
+    in the session time zone with the zone dropped (``forecast._naive``)."""
+    return value.replace(tzinfo=None) if value.tzinfo else value
 
 
 def mode_of(path) -> int:
@@ -91,6 +168,412 @@ def owner(sw_people, sw_db):
     who = sw_people("Owen", "Cutover")
     who["household"] = hh_household(sw_db, who)
     return who
+
+
+# --- Test 1: happy path --------------------------------------------------------------------
+
+FINAL = {"Main Bank": D("29800.00"), "Joint Bank": D("25000.00"), "Dollar Bank": D("850.00"),
+         "Cash Wallet": D("3000.00"), "Main Card": D("-2210.00"), "Spare Card": D("0.00"),
+         "Car Loan": D("-293000.00")}
+
+
+def test_happy_path_balances_counts_and_run_record(tmp_path, owner, sw_db):
+    from app.cutover_load.loader import ledger_balance
+
+    data = fixture()
+    report, record = load(tmp_path, data, owner)
+    boundary = datetime(2026, 3, 1)
+    for a in data["accounts"]:
+        acct = account(sw_db, owner, a["name"])
+        assert D(str(acct.balance)) == FINAL[a["name"]], a["name"]
+        assert ledger_balance(sw_db, acct, boundary) == D(a["balance_at_cutover"]), a["name"]
+    found = counts(sw_db, owner["id"])
+    assert found == {"accounts": 7, "transactions": 13, "budget_entries": 6, "categories": 4,
+                     "allocations": 0, "wishlist_items": 0, "tags": 2, "account_tags": 1,
+                     "transaction_tags": 3, "budget_entry_tags": 1, "account_shares": 0,
+                     "tag_shares": 0}
+    rec = json.loads(record.read_text())
+    assert rec["status"] == "complete" and rec["signed_off_at"] is None
+    assert rec["owner_id"] == owner["id"] and rec["owner_email"] == owner["email"]
+    assert (rec["database"], rec["server_addr"]) == (TARGET["db"], TARGET["addr"])
+    assert rec["session_timezone"] == sw_db.execute(text("SHOW TimeZone")).scalar()
+    assert rec["row_counts"] == found
+    assert len(rec["input_sha256"]) == 64 and rec["alembic_revision"]
+    started = datetime.fromisoformat(rec["started_at"])
+    finished = datetime.fromisoformat(rec["finished_at"])
+    sw_db.rollback()
+    newest = sw_db.execute(text(
+        "SELECT max(greatest(created_at, coalesce(updated_at, created_at))) FROM transactions "
+        "WHERE user_id = :o"), {"o": owner["id"]}).scalar()
+    assert started <= newest <= finished  # finished_at is read from the database clock
+    assert mode_of(record) == 0o600 and mode_of(report) == 0o600
+    assert json.loads(report.read_text())["dry_run"] is False
+
+
+def test_the_prepared_record_is_written_before_the_commit(tmp_path, owner, monkeypatch):
+    """The run record is ``prepared`` until the commit, then ``complete``."""
+    from app.cutover_load import loader
+
+    seen = []
+    real = loader.create_private
+
+    def spy(path, payload):
+        real(path, payload)
+        if path.endswith("record.json"):
+            seen.append(json.loads(payload)["status"])
+
+    monkeypatch.setattr(loader, "create_private", spy)
+    _, record = load(tmp_path, fixture(), owner)
+    assert seen == ["prepared"]
+    assert json.loads(record.read_text())["status"] == "complete"
+
+
+# --- Tests 2 and 3: the boundary and a partial payment -------------------------------------
+
+def test_a_row_at_midnight_on_the_cutover_moves_the_stored_balance(tmp_path, owner, sw_db):
+    from app.cutover_load.loader import ledger_balance
+
+    load(tmp_path, fixture(), owner)
+    rent = txn(sw_db, owner, "Rent March")
+    assert wall(rent.transaction_date) == datetime(2026, 3, 1, 0, 0)
+    bank = account(sw_db, owner, "Main Bank")
+    assert ledger_balance(sw_db, bank, datetime(2026, 3, 1)) == D("50000.00")
+    assert ledger_balance(sw_db, bank, datetime(2026, 3, 2)) == D("35000.00")
+
+
+def test_a_card_line_the_day_before_the_cutover_is_in_the_open_cycle(tmp_path, owner, sw_db):
+    from app.core.access import viewable_account_ids
+    from app.models.user import User
+    from app.services.statements import statement_history
+
+    data = card_at_cutover(fixture())
+    data["transactions"].append({"key": "c_feb28", "date": "2026-02-28", "type": "debit",
+                                 "account_key": "card", "amount": "10.00", "is_posted": True})
+    by_key(data["accounts"], "card")["balance_at_cutover"] = "-130.00"
+    by_key(data["accounts"], "card")["card"]["statements_at_cutover"][1]["owed"] = "70.00"
+    load(tmp_path, data, owner)
+    card = account(sw_db, owner, "Main Card")
+    user = sw_db.get(User, owner["id"])
+    history = statement_history(sw_db, card, datetime(2026, 2, 28),
+                                viewable_account_ids(sw_db, user))
+    assert [(h["close"].date(), h["owed"]) for h in history] == [
+        (date(2026, 2, 15), D("60.00")), (date(2026, 3, 15), D("70.00"))]
+
+
+def test_a_partial_payment_leaves_sixty_and_sixty(tmp_path, owner, sw_db):
+    from app.core.access import viewable_account_ids
+    from app.cutover_load.loader import ledger_balance
+    from app.models.user import User
+    from app.services.statements import statement_history
+
+    report, _ = load(tmp_path, card_at_cutover(fixture()), owner)
+    card = account(sw_db, owner, "Main Card")
+    user = sw_db.get(User, owner["id"])
+    history = statement_history(sw_db, card, datetime(2026, 2, 28),
+                                viewable_account_ids(sw_db, user))
+    assert [(h["close"].date(), h["balance"], h["owed"]) for h in history] == [
+        (date(2026, 2, 15), D("100.00"), D("60.00")), (date(2026, 3, 15), D("60.00"), D("60.00"))]
+    bank = by_key(json.loads(report.read_text())["accounts"], "bank")
+    assert D(bank["opening"]) == D("50040.00")  # balance_at_cutover + 40
+    assert ledger_balance(sw_db, account(sw_db, owner, "Main Bank"),
+                          datetime(2026, 3, 1)) == D("50000.00")
+
+
+def test_an_unused_card_loads_with_no_statements(tmp_path, owner, sw_db):
+    from app.core.access import viewable_account_ids
+    from app.models.user import User
+    from app.services.statements import statement_history
+
+    report, _ = load(tmp_path, fixture(), owner)
+    spare = account(sw_db, owner, "Spare Card")
+    assert statement_history(sw_db, spare, datetime(2026, 2, 28),
+                             viewable_account_ids(sw_db, sw_db.get(User, owner["id"]))) == []
+    assert by_key(json.loads(report.read_text())["cards"], "spare")["statements"] == []
+
+
+# --- Test 5: loans -------------------------------------------------------------------------
+
+def test_a_loan_with_offset_seven_and_payment_eight(tmp_path, owner, sw_db):
+    from app.services.loans import build_schedule
+
+    load(tmp_path, fixture(), owner)
+    loan = account(sw_db, owner, "Car Loan")
+    schedule = build_schedule(sw_db, loan)
+    assert schedule["payments_made"] == 8
+    assert schedule["next_due_date"] == date(2026, 4, 20)  # due date number 9
+    assert D(str(schedule["owed"])) == D("293000.00")  # opening less the principal
+    payment = txn(sw_db, owner, "Car loan payment 8")
+    assert (payment.loan_payment_kind, D(str(payment.amount)), D(str(payment.transfer_fee))) == (
+        "scheduled", D("7000.00"), D("3000.00"))
+    assert loan.payment_account_id == account(sw_db, owner, "Main Bank").id
+
+
+# --- Test 6: recurring ---------------------------------------------------------------------
+
+def test_recurring_entries_load_with_their_installment_counts(tmp_path, owner, sw_db):
+    load(tmp_path, fixture(), owner)
+    phone = entry(sw_db, owner, "Phone Installment")
+    assert (phone.is_active, phone.max_occurrences, phone.occurrences_paid_offset,
+            phone.end_mode) == (False, 0, 6, "after_occurrences")
+    laptop = entry(sw_db, owner, "Laptop Installment")
+    assert (laptop.is_active, laptop.max_occurrences, laptop.occurrences_paid_offset) == (
+        True, 8, 4)
+    salary = entry(sw_db, owner, "Salary")
+    assert (salary.semi_monthly_day_1, salary.semi_monthly_day_2) == (15, 30)
+    assert wall(salary.next_occurrence) == datetime(2026, 3, 15)
+    loan_entry = entry(sw_db, owner, "Car Loan Payment")
+    assert loan_entry.transfer_to_account_id == account(sw_db, owner, "Car Loan").id
+    assert loan_entry.is_autopay is True
+
+
+# --- Test 7: cross currency ----------------------------------------------------------------
+
+def test_cross_currency_rows_store_the_right_figures(tmp_path, owner, sw_db):
+    load(tmp_path, fixture(), owner)
+    move = txn(sw_db, owner, "Dollars home")
+    assert (D(str(move.amount)), D(str(move.received_amount)), move.currency.value) == (
+        D("100.00"), D("5800.00"), "USD")
+    assert txn(sw_db, owner, "Dollar purchase").currency.value == "USD"
+    posted = txn(sw_db, owner, "Streaming March")
+    assert (posted.currency.value, D(str(posted.amount))) == ("PHP", D("590.00"))
+    assert (D(str(posted.projected_amount)), posted.projected_currency.value) == (
+        D("10.00"), "USD")
+    assert (D(str(posted.original_amount)), posted.original_currency.value) == (D("10.00"), "USD")
+    assert D(str(posted.exchange_rate)) == D("59.000000")
+    pending = txn(sw_db, owner, "Pending foreign charge")
+    assert (D(str(pending.amount)), D(str(pending.projected_amount))) == (D("20.00"), D("20.00"))
+    assert (pending.projected_currency.value, pending.currency.value) == ("USD", "PHP")
+    assert pending.original_amount is None and pending.is_posted is False
+
+
+def test_currency_refusals_happen_before_any_write(tmp_path, owner, sw_db):
+    from app.cutover_load.validate import InputInvalid
+
+    data = fixture()
+    del by_key(data["transactions"], "usd_move")["received_amount"]
+    before = table_counts(sw_db)
+    with pytest.raises(InputInvalid):
+        load(tmp_path, data, owner)
+    assert table_counts(sw_db) == before
+
+
+# --- Test 8: dates -------------------------------------------------------------------------
+
+def test_dates_round_trip_at_midnight(tmp_path, owner, sw_db, sw_client):
+    from app.core.access import viewable_account_ids
+    from app.models.user import User
+    from app.services.forecast import cashflow_by_currency
+    from app.services.statements import statement_history
+
+    load(tmp_path, fixture("dates"), owner)
+    m_end, m_first = txn(sw_db, owner, "Last day line"), txn(sw_db, owner, "First day line")
+    assert wall(m_end.transaction_date) == datetime(2026, 3, 31, 0, 0)
+    assert wall(m_first.transaction_date) == datetime(2026, 4, 1, 0, 0)
+    fee = entry(sw_db, owner, "Monthly Fee")
+    assert wall(fee.next_occurrence) == datetime(2026, 5, 1, 0, 0)
+
+    user = sw_db.get(User, owner["id"])
+    card = account(sw_db, owner, "Month End Card")
+    history = statement_history(sw_db, card, datetime(2026, 4, 5),
+                                viewable_account_ids(sw_db, user))
+    assert [(h["close"].date(), h["balance"]) for h in history] == [
+        (date(2026, 3, 31), D("100.00")), (date(2026, 4, 30), D("200.00"))]
+
+    flow = cashflow_by_currency(sw_db, owner["id"], months=2, reference=datetime(2026, 4, 5),
+                                fx=fx_rates())
+    php = [next(r for r in p["by_currency"] if r["currency"] == "PHP") for p in flow["periods"]]
+    assert (php[0]["unposted_expenses"], php[1]["unposted_expenses"]) == (300.0, 400.0)
+    assert (php[0]["expenses"], php[1]["expenses"]) == (0.0, 50.0)
+
+    headers = owner["headers"]
+    body = sw_client.get(f"{API}/transactions/{m_end.id}", headers=headers).json()
+    assert body["transaction_date"].startswith("2026-03-31T00:00:00")
+    made = sw_client.post(f"{API}/budget-entries/{fee.id}/materialize", json={},
+                          headers=headers)
+    assert made.status_code == 201, made.text
+    assert made.json()["transaction_date"].startswith("2026-05-01T00:00:00")
+    assert wall(txn(sw_db, owner, "Monthly Fee").transaction_date) == datetime(2026, 5, 1)
+
+
+# --- Test 9: atomicity ---------------------------------------------------------------------
+
+def test_a_failure_after_some_rows_rolls_everything_back(tmp_path, owner, sw_db, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.cutover_load import loader
+    from app.cutover_load.loader import CutoverError
+
+    real, calls = loader.add_transaction, []
+
+    def failing(db, user, payload):
+        calls.append(payload)
+        if len(calls) > 5:
+            raise HTTPException(status_code=400, detail="injected failure")
+        return real(db, user, payload)
+
+    monkeypatch.setattr(loader, "add_transaction", failing)
+    before = table_counts(sw_db)
+    with pytest.raises(CutoverError) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "write" and exc.value.detail == "injected failure"
+    assert len(calls) == 6
+    assert table_counts(sw_db) == before
+    assert not (tmp_path / "run-record.json").exists()
+
+
+def test_a_dry_run_changes_nothing_and_writes_no_run_record(tmp_path, owner, sw_db):
+    before = table_counts(sw_db)
+    report, record = load(tmp_path, fixture(), owner, dry_run=True)
+    assert table_counts(sw_db) == before
+    assert not record.exists()
+    body = json.loads(report.read_text())
+    assert body["dry_run"] is True and mode_of(report) == 0o600
+    assert (body["database"], body["server_addr"]) == (TARGET["db"], TARGET["addr"])
+    assert body["session_timezone"] == sw_db.execute(text("SHOW TimeZone")).scalar()
+    assert by_key(body["accounts"], "card")["final"] == "-2210.00"
+    assert body["loans"][0]["schedule"]["payments_made"] == 8
+    assert {(i["key"], i["n"], i["m"]) for i in body["installments"]} == {
+        ("e_laptop", 4, 12), ("e_phone", 6, 6)}
+    assert body["row_counts"]["transactions"] == 13
+
+
+# --- Test 10: the guard --------------------------------------------------------------------
+
+def _seed_guard_case(case, db, who, other):
+    """One row that breaks one rule of plan section 1.3."""
+    from app.models.account import Account, AccountType
+    from app.models.account_share import AccountShare
+    from app.models.allocation import Allocation, AllocationType
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.category import Category
+    from app.models.tag import Tag, account_tags
+    from app.models.tag_share import TagShare
+    from app.models.transaction import Transaction, TransactionType
+    from app.models.wishlist_item import WishlistItem
+
+    theirs = Account(user_id=other["id"], name="Other bank", account_type=AccountType.CHECKING,
+                     balance=0)
+    db.add(theirs)
+    db.flush()
+    rows = {
+        "accounts": lambda: Account(user_id=who["id"], name="Old", balance=0,
+                                    account_type=AccountType.CHECKING),
+        "transactions": lambda: Transaction(
+            user_id=who["id"], account_id=theirs.id, amount=1, is_posted=False,
+            transaction_type=TransactionType.DEBIT, transaction_date=datetime(2026, 1, 1)),
+        "budget_entries": lambda: BudgetEntry(
+            user_id=who["id"], name="Old", entry_type=BudgetEntryType.EXPENSE, amount=1,
+            next_occurrence=datetime(2026, 1, 1)),
+        "categories": lambda: Category(user_id=who["id"], name="Old"),
+        "allocations": lambda: Allocation(user_id=who["id"], account_id=theirs.id, name="Old",
+                                          allocation_type=list(AllocationType)[0]),
+        "wishlist_items": lambda: WishlistItem(user_id=who["id"], name="Old", estimated_cost=1),
+        "tags": lambda: Tag(user_id=who["id"], name="Old"),
+        "tag_shares (Household tag)": lambda: TagShare(tag_id=who["household"],
+                                                       user_id=other["id"]),
+        "account_shares (received)": lambda: AccountShare(account_id=theirs.id,
+                                                          user_id=who["id"], role="viewer"),
+        "tag_shares (received)": lambda: TagShare(tag_id=hh_household(db, other),
+                                                  user_id=who["id"]),
+    }
+    if case == "account_tags (Household tag)":
+        db.execute(account_tags.insert().values(tag_id=who["household"], account_id=theirs.id))
+    else:
+        db.add(rows[case]())
+    db.commit()
+
+
+GUARD_CASES = ["accounts", "transactions", "budget_entries", "categories", "allocations",
+               "wishlist_items", "tags", "account_tags (Household tag)",
+               "tag_shares (Household tag)", "account_shares (received)",
+               "tag_shares (received)"]
+
+
+@pytest.mark.parametrize("case", GUARD_CASES)
+def test_the_guard_refuses_each_rule(case, tmp_path, owner, sw_people, sw_db):
+    from app.cutover_load.loader import CutoverError
+
+    other = sw_people("Gus", "Other")
+    _seed_guard_case(case, sw_db, owner, other)
+    before = table_counts(sw_db)
+    with pytest.raises(CutoverError) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "guard" and case in exc.value.detail
+    assert table_counts(sw_db) == before
+
+
+@pytest.mark.parametrize("case", ["missing", "unverified", "inactive", "demo", "case"])
+def test_the_owner_must_be_one_active_verified_non_demo_user(case, tmp_path, owner, sw_people,
+                                                             sw_db, sw_client):
+    from app.cutover_load.loader import CutoverError
+    from app.models.user import User
+
+    who = dict(owner)
+    sw_db.rollback()
+    user = sw_db.get(User, owner["id"])
+    if case == "missing":
+        who["email"] = "nobody-here@example.com"
+    elif case == "unverified":
+        user.is_verified = False
+    elif case == "inactive":
+        user.is_active = False
+    elif case == "demo":
+        who["email"] = "Demo@Example.com"
+    else:
+        twin = sw_people("Twin", "Case")
+        sw_db.get(User, twin["id"]).email = owner["email"].upper()
+    sw_db.commit()
+    before = table_counts(sw_db)
+    with pytest.raises(CutoverError) as exc:
+        load(tmp_path, fixture(), who)
+    assert exc.value.check == "owner"
+    assert table_counts(sw_db) == before
+
+
+def test_an_alembic_mismatch_is_refused(tmp_path, owner, sw_db, monkeypatch):
+    from app.cutover_load import loader
+
+    monkeypatch.setattr(loader, "code_head", lambda: "0000not0head")
+    before = table_counts(sw_db)
+    with pytest.raises(loader.CutoverError) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "alembic"
+    assert table_counts(sw_db) == before
+
+
+# --- Test 11: the Household tag ------------------------------------------------------------
+
+def test_a_missing_household_tag_is_refused_and_never_created(tmp_path, owner, sw_db):
+    from app.cutover_load.loader import CutoverError
+
+    sw_db.execute(text("DELETE FROM tags WHERE id = :t"), {"t": owner["household"]})
+    sw_db.commit()
+    before = table_counts(sw_db)
+    with pytest.raises(CutoverError) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "household_tag"
+    assert table_counts(sw_db) == before
+
+
+# --- Test 12: the lock ---------------------------------------------------------------------
+
+def test_a_second_run_is_refused_while_the_lock_is_held(tmp_path, owner, sw_db):
+    from app.cutover_load.bootstrap import CUTOVER_LOCK_KEY, Refused
+
+    engine = create_engine(TARGET["url"])
+    try:
+        with engine.connect() as holder:
+            holder.begin()
+            holder.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CUTOVER_LOCK_KEY})
+            before = table_counts(sw_db)
+            with pytest.raises(Refused) as exc:
+                load(tmp_path, fixture(), owner)
+            assert exc.value.check == "lock"
+            assert "another cutover run is active" in exc.value.message
+            assert table_counts(sw_db) == before
+            holder.rollback()
+    finally:
+        engine.dispose()
 
 
 # --- Tests 13 and 14: outputs, hermetic bootstrap, target ----------------------------------
@@ -176,6 +659,32 @@ def test_outputs_are_created_new_at_mode_0600(tmp_path):
     assert mode_of(path) == 0o600 and json.loads(open(path).read()) == {"a": 1}
 
 
+def test_relative_paths_resolve_against_the_original_directory(tmp_path, owner, sw_db):
+    write_input(tmp_path, fixture(), owner, "rel-input.json")
+    before = table_counts(sw_db)
+    done = run_wrapper(["--input", "rel-input.json", "--report", "rel-report.json",
+                        "--dry-run", *target_args()], cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (tmp_path / "rel-report.json").exists()
+    assert mode_of(tmp_path / "rel-report.json") == 0o600
+    assert table_counts(sw_db) == before
+
+
+def test_the_wrapper_ignores_a_local_env_file(tmp_path, owner, sw_db):
+    (tmp_path / ".env").write_text(
+        "DATABASE_URL=postgresql://someone@db.invalid:5432/elsewhere\n"
+        "ENVIRONMENT=production\n")
+    path = write_input(tmp_path, fixture(), owner)
+    done = run_wrapper(["--input", path, "--report", str(tmp_path / "r.json"), "--dry-run",
+                        *target_args(addr="192.0.2.1")], cwd=tmp_path)
+    assert f"target: host={TARGET['host']} db={TARGET['db']}" in done.stdout
+    assert "db.invalid" not in done.stdout + done.stderr
+    assert "someone" not in done.stdout + done.stderr
+    # Connected (the observed line) and refused before any write.
+    assert f"observed: db={TARGET['db']} server_addr={TARGET['addr']}" in done.stdout
+    assert "refused: expect_server_addr" in done.stdout
+
+
 def test_an_expect_host_mismatch_is_refused_before_connecting(tmp_path, owner):
     path = write_input(tmp_path, fixture(), owner)
     other = "localhost" if TARGET["host"] != "localhost" else "127.0.0.1"
@@ -202,3 +711,84 @@ def test_target_overrides_are_refused_before_importing_the_app(query, env, tmp_p
     assert "pw@" not in done.stdout + done.stderr  # never the password
 
 
+def test_an_allowed_query_key_passes(tmp_path, owner):
+    path = write_input(tmp_path, fixture(), owner)
+    done = run_wrapper(["--input", path, "--report", str(tmp_path / "r.json"), "--dry-run",
+                        *target_args(addr="192.0.2.1")], cwd=tmp_path,
+                       url=TARGET["url"] + "?sslmode=prefer")
+    assert f"observed: db={TARGET['db']}" in done.stdout
+    assert "refused: expect_server_addr" in done.stdout
+
+
+def test_an_expect_server_addr_mismatch_is_refused_after_connecting(tmp_path, owner, sw_db):
+    from app.cutover_load.bootstrap import Refused
+
+    before = table_counts(sw_db)
+    with pytest.raises(Refused) as exc:
+        load(tmp_path, fixture(), owner, addr="192.0.2.1")
+    assert exc.value.check == "expect_server_addr"
+    assert table_counts(sw_db) == before
+
+
+def test_a_failure_prints_only_check_names_and_writes_details_to_the_report(tmp_path, owner):
+    data = fixture()
+    by_key(data["accounts"], "card")["balance_at_cutover"] = "-115.00"
+    path = write_input(tmp_path, data, owner)
+    report = tmp_path / "fail.json"
+    done = run_wrapper(["--input", path, "--report", str(report), "--dry-run", *target_args()],
+                       cwd=tmp_path)
+    assert done.returncode == 1
+    assert "FAIL card_opening [card]" in done.stdout
+    assert "5.00" not in done.stdout and "115" not in done.stdout
+    problem = json.loads(report.read_text())["problems"][0]
+    assert problem["check"] == "card_opening" and "5.00" in problem["detail"]
+    assert mode_of(report) == 0o600
+
+
+# --- Test 17: Household --------------------------------------------------------------------
+
+def test_the_spouse_sees_exactly_the_household_set_once_shared(tmp_path, owner, sw_people,
+                                                               sw_db, sw_client):
+    from app.tests.conftest import sw_share
+    from app.models.tag_share import TagShare
+
+    load(tmp_path, fixture(), owner)
+    spouse = sw_people("Sky", "Spouse")
+    joint = account(sw_db, owner, "Joint Bank")
+    sw_share(sw_db, joint.id, spouse["id"], "editor", owner["id"])
+    sw_db.add(TagShare(tag_id=owner["household"], user_id=spouse["id"]))
+    sw_db.commit()
+
+    sw_db.rollback()
+    from app.models.budget_entry import BudgetEntry
+    from app.models.transaction import Transaction
+
+    loaded = {t.description: t.id for t in sw_db.query(Transaction).filter(
+        Transaction.user_id == owner["id"])}
+    seen = sw_client.get(f"{API}/transactions/", headers=spouse["headers"],
+                         params={"limit": 200}).json()["items"]
+    visible = {t["id"] for t in seen} & set(loaded.values())
+    expected = {loaded[d] for d in ("Spouse deposit", "Rent March", "Household groceries")}
+    assert visible == expected
+    for private in ("Dollar purchase", "Card line one", "Car loan payment 8", "Wallet top-up"):
+        r = sw_client.get(f"{API}/transactions/{loaded[private]}", headers=spouse["headers"])
+        assert r.status_code == 404, private
+    entries = sw_client.get(f"{API}/budget-entries/", headers=spouse["headers"],
+                            params={"limit": 200}).json()
+    owned_entries = {e.id for e in sw_db.query(BudgetEntry).filter(
+        BudgetEntry.user_id == owner["id"])}
+    seen_entries = [e for e in entries["items"] if e["id"] in owned_entries]
+    assert [e["id"] for e in seen_entries] == [entry(sw_db, owner, "Rent").id]
+    assert seen_entries[0]["view"] == "limited"  # the Household view of an owner entry
+    accounts = {a["name"] for a in sw_client.get(
+        f"{API}/accounts/", headers=spouse["headers"], params={"limit": 200}).json()["items"]}
+    assert "Joint Bank" in accounts and "Main Bank" not in accounts
+
+
+def test_the_input_fixture_carries_no_owner_figures():
+    """Synthetic figures only: every money value is a round invented number."""
+    data = fixture()
+    values = [a["balance_at_cutover"] for a in data["accounts"]]
+    values += [t.get("amount") or t.get("face_amount") for t in data["transactions"]]
+    assert all(D(v) % 10 == 0 for v in values if v), values
+    assert copy.deepcopy(data) == fixture()
