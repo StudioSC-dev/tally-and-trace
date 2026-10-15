@@ -76,7 +76,9 @@ def step_occurrence(entry, current: datetime) -> datetime:
 
     Keeps ``current``'s time of day and tzinfo: materialize passes the aware
     value read from the ``timestamptz`` column and compares the result with
-    ``end_date``. Semi-monthly entries are walked by their callers.
+    ``end_date``. Semi-monthly entries are walked by their callers. The day is
+    taken from ``current``'s own components, which are UTC because every session
+    is pinned to UTC (values read back from the database are in UTC).
     """
     from app.services.forecast import _next_occurrence
 

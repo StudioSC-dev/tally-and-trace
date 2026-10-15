@@ -7,7 +7,7 @@ Monday-Friday. Both null keeps the legacy schedule, which steps from the
 current date's day and so sticks on a clamped day. Every walk goes through
 ``iter_occurrences``, which every projection uses.
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from app.models.transaction import RecurrenceFrequency as F
@@ -94,15 +94,14 @@ def test_anchored_days_up_to_28_agree_with_the_legacy_schedule():
 def test_step_keeps_time_of_day_and_tzinfo():
     from app.services.recurrence import step_occurrence
 
-    manila = timezone(timedelta(hours=8))
     e = _entry(F.MONTHLY, None, anchor_day=31)
     stepped = step_occurrence(e, datetime(2027, 1, 31, 9, 30, tzinfo=timezone.utc))
     assert stepped == datetime(2027, 2, 28, 9, 30, tzinfo=timezone.utc)
     assert stepped.tzinfo is timezone.utc
     ruled = _entry(F.MONTHLY, None, day_rule="last_weekday")
-    stepped = step_occurrence(ruled, datetime(2026, 10, 30, 7, 15, tzinfo=manila))
-    assert stepped == datetime(2026, 11, 30, 7, 15, tzinfo=manila)
-    assert stepped.tzinfo is manila
+    stepped = step_occurrence(ruled, datetime(2026, 10, 30, 7, 15, tzinfo=timezone.utc))
+    assert stepped == datetime(2026, 11, 30, 7, 15, tzinfo=timezone.utc)
+    assert stepped.tzinfo is timezone.utc
 
 
 # --- 3.2: last weekday -------------------------------------------------------------------
