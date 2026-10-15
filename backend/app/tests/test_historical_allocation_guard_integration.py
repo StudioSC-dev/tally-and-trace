@@ -79,7 +79,9 @@ def now_is(monkeypatch):
 def october(client, db, now_is):
     """Two October budgets with spending: one linked explicitly, one by category auto-match.
 
-    The clock is pinned to 2026-10-07 09:00 UTC; tests that need another time call ``now_is``.
+    Both start at 0 and count one posted October debit of ``OCT_SPENT``, seeded through the
+    API, so their totals are backed by a ledger row. The clock is pinned to 2026-10-07 09:00
+    UTC; tests that need another time call ``now_is``.
     """
     from app.models.allocation import Allocation, AllocationType, BudgetPeriodFrequency
     from app.models.category import Category
@@ -100,7 +102,7 @@ def october(client, db, now_is):
             account_id=funding["id"],
             name=name,
             allocation_type=AllocationType.BUDGET,
-            current_amount=OCT_SPENT,
+            current_amount=Decimal("0"),
             target_amount=Decimal("5000.00"),
             period_frequency=BudgetPeriodFrequency.MONTHLY,
             period_start=OCT_START,
@@ -122,6 +124,7 @@ def october(client, db, now_is):
         "matched_id": matched.id,
         "txn_ids": [],
     }
+    _charge(client, ctx, datetime(2026, 10, 2, 12, 0), amount=float(OCT_SPENT))
     yield ctx
 
     for txn_id in ctx["txn_ids"]:
