@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core import locking
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.access import (
@@ -380,6 +381,11 @@ def update_budget_entry(
     current_user: User = Depends(get_current_active_user),
 ):
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    # Locked and refreshed before its checks and its tag-link writes (STU-226), so
+    # an edit and a concurrent materialize or delete of the entry take turns.
+    entry = locking.lock_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
     if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")
     owner = entry.user
@@ -477,9 +483,15 @@ def delete_budget_entry(
     never changes a transaction the caller could not change directly, whoever
     created it (a creator demoted or revoked on the account their own linked
     transaction sits on included). Deactivating the entry is the way to stop
-    it then.
+    it then. Locks follow the ledger's global order (``app.core.locking``): the
+    owner's budget lock, then the entry ``FOR UPDATE``, before its linked rows
+    are nullified and it is deleted.
     """
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    locking.lock_owner_budgets(db, entry.user_id)
+    entry = locking.lock_entry(db, entry_id, for_delete=True)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
     access = RecordAccess(db, current_user)
     if not access.permissions(entry)["can_delete"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")

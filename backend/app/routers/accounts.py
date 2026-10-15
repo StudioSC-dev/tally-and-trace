@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
+from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
@@ -545,6 +546,10 @@ def get_account(account_id: int, db: Session = Depends(get_db), current_user: Us
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing account (settings and routing: owner or admin; deactivating: owner)"""
     db_account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
+    # Locked before any validation, field write or tag-link write, whatever the edit
+    # (STU-226): a tags-only edit that deleted its link rows first and wanted the
+    # account only at commit would deadlock with a balance edit holding it.
+    db_account = locking.lock_accounts(db, [db_account.id])[db_account.id]
 
     update_data = account_update.dict(exclude_unset=True)
     # Tags: the caller's own only, on an account whose settings they may change.
@@ -771,15 +776,15 @@ def _loan_funding(db: Session, current_user: User, loan: Account,
 
 
 def _lock(db: Session, *accounts: Account) -> None:
-    """``SELECT ... FOR UPDATE`` each account, in ascending id order, refreshing it.
+    """``SELECT ... FOR NO KEY UPDATE`` each account, in ascending id order, refreshing it.
 
     Owed amounts, splits and balances are then computed from rows no concurrent
     payment can change until this one commits. A fixed lock order keeps two
-    payments over the same pair of accounts from deadlocking.
+    payments over the same pair of accounts from deadlocking. The mode and order
+    are every ledger write's (``app.core.locking.lock_accounts``), so re-locking
+    an account a transaction write already holds changes nothing.
     """
-    for account in sorted(accounts, key=lambda a: a.id):
-        (db.query(Account).filter(Account.id == account.id)
-         .with_for_update().populate_existing().one())
+    locking.lock_accounts(db, [a.id for a in accounts])
 
 
 def _when(value: Optional[datetime]) -> datetime:
