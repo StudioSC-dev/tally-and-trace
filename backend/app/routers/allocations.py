@@ -11,6 +11,7 @@ from app.models.allocation import Allocation, AllocationType
 from app.schemas.allocation import AllocationCreate, AllocationResponse, AllocationUpdate, AllocationListResponse
 from app.models.user import User
 from app.core.time import utc_now
+from app.routers.transactions import _lock_allocations, _recompute_budget_total
 
 router = APIRouter()
 
@@ -93,6 +94,10 @@ def create_allocation(
 
     db_allocation = Allocation(**allocation_data, user_id=current_user.id)
     db.add(db_allocation)
+    db.flush()
+    if db_allocation.allocation_type == AllocationType.BUDGET:
+        # A budget's total is derived from its rows (STU-222): a sent one is ignored.
+        _recompute_budget_total(db, db_allocation, [None])
     db.commit()
     db.refresh(db_allocation)
     return db_allocation
@@ -116,15 +121,21 @@ def update_allocation(
 ):
     """Update an existing allocation"""
     db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
+    (db_allocation,) = _lock_allocations(db, [db_allocation])
     update_data = allocation_update.dict(exclude_unset=True)
     if "account_id" in update_data and update_data["account_id"] is not None:
         get_account_or_404(db, current_user, update_data["account_id"], roles=OWNER_ROLES)
     if "configuration" in update_data:
         _validate_configuration(db, current_user, update_data["configuration"])
+    if update_data.get("allocation_type", db_allocation.allocation_type) == AllocationType.BUDGET:
+        # A budget's total is derived from its rows (STU-222): a sent one is ignored.
+        update_data.pop("current_amount", None)
     for field, value in update_data.items():
         setattr(db_allocation, field, value)
     
     db_allocation.updated_at = utc_now()
+    if db_allocation.allocation_type == AllocationType.BUDGET:
+        _recompute_budget_total(db, db_allocation, [None])
     db.commit()
     db.refresh(db_allocation)
     return db_allocation

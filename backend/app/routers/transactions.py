@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
 from app.core import locking
@@ -706,6 +707,18 @@ def _budget_delta_for_transaction(transaction_type: TransactionType, amount: flo
     return 0.0
 
 
+def _configured_category_ids(allocation: Allocation) -> Set[int]:
+    """The category ids a budget's configuration names, ignoring any that aren't ids."""
+    config = allocation.configuration or {}
+    ids: Set[int] = set()
+    for value in config.get("category_ids") or []:
+        try:
+            ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
 def _get_budget_allocations_for_transaction(
     db: Session,
     *,
@@ -713,6 +726,12 @@ def _get_budget_allocations_for_transaction(
     allocation_id: Optional[int],
     category_id: Optional[int],
 ) -> List[Allocation]:
+    """The owner's budgets a row with these references counts toward.
+
+    Read with ``populate_existing``, so a configuration another write changed is
+    never served from the session. That overwrites unflushed changes on any
+    allocation it loads, so every discovery runs before the first recompute.
+    """
     allocations: List[Allocation] = []
     seen: Set[int] = set()
 
@@ -724,6 +743,7 @@ def _get_budget_allocations_for_transaction(
                 Allocation.user_id == user_id,
                 Allocation.allocation_type == AllocationType.BUDGET,
             )
+            .populate_existing()
             .first()
         )
         if allocation:
@@ -737,44 +757,89 @@ def _get_budget_allocations_for_transaction(
                 Allocation.user_id == user_id,
                 Allocation.allocation_type == AllocationType.BUDGET,
             )
+            .populate_existing()
             .all()
         )
         for allocation in candidate_budgets:
             if allocation.id in seen:
                 continue
-            config = allocation.configuration or {}
-            raw_category_ids = config.get("category_ids") or []
-            normalized_ids: Set[int] = set()
-            for value in raw_category_ids:
-                try:
-                    normalized_ids.add(int(value))
-                except (TypeError, ValueError):
-                    continue
-            if category_id in normalized_ids:
+            if category_id in _configured_category_ids(allocation):
                 allocations.append(allocation)
                 seen.add(allocation.id)
 
     return allocations
 
 
-def _apply_budget_delta(
-    allocations: List[Allocation],
-    delta: float,
-    reference_date: Optional[datetime],
-) -> None:
-    if not allocations or not delta:
-        return
+def _counted_allocations(db: Session, *, user_id: int, transaction_type, amount, is_posted,
+                         allocation_id: Optional[int],
+                         category_id: Optional[int]) -> List[Allocation]:
+    """The budgets a row counts toward: none unless it is a posted debit or credit."""
+    if not is_posted or not _budget_delta_for_transaction(transaction_type, amount):
+        return []
+    return _get_budget_allocations_for_transaction(
+        db, user_id=user_id, allocation_id=allocation_id, category_id=category_id)
 
-    normalized_reference = _normalize_reference(reference_date)
-    now = utc_now()  # allocations.updated_at is timestamptz
 
-    for allocation in allocations:
-        if allocation.allocation_type != AllocationType.BUDGET:
-            continue
-        if not _ensure_budget_period(allocation, normalized_reference):
-            continue  # out-of-period row (historical or future): excluded
-        allocation.current_amount = _D(allocation.current_amount) + _D(delta)
-        allocation.updated_at = now
+def _lock_allocations(db: Session, allocations: List[Allocation]) -> List[Allocation]:
+    """Lock each allocation ``FOR NO KEY UPDATE`` in ascending id, refreshed (STU-226)."""
+    locked: List[Allocation] = []
+    for allocation_id in sorted({a.id for a in allocations}):
+        allocation = (db.query(Allocation).filter(Allocation.id == allocation_id)
+                      .with_for_update(key_share=True).populate_existing().one_or_none())
+        if allocation is not None:
+            locked.append(allocation)
+    return locked
+
+
+def _recompute_budget_total(db: Session, allocation: Allocation,
+                            references: List[Optional[datetime]]) -> None:
+    """Set a budget's total to the sum of the rows in its active period (STU-222).
+
+    The period is kept current by ``_ensure_budget_period`` for each reference
+    (a write's old and new row dates, or None for now); rolls only move forward,
+    so several references are safe. The total is then the owner's posted debits
+    less credits dated in ``[period_start, period_end)`` that name the budget or
+    one of its categories, each row once, never below 0. A period that has not
+    started (it starts beyond the horizon) totals 0. A row outside the period
+    does not stop the recompute: the period is re-summed whatever triggered it,
+    so a drifted total is corrected. Flushed before and after, so the sum sees
+    the write and nothing later can discard the total.
+    """
+    db.flush()
+    for reference in references:
+        _ensure_budget_period(allocation, reference)
+    frequency = allocation.period_frequency or BudgetPeriodFrequency.MONTHLY
+    start = _normalize_reference(allocation.period_start)
+    end = (_normalize_reference(allocation.period_end) if allocation.period_end
+           else _compute_period_end(start, frequency))
+    horizon = naive_utc_now() + _MAX_UTC_OFFSET
+    total = Decimal("0")
+    if start <= horizon:
+        signed = case(
+            (Transaction.transaction_type == TransactionType.DEBIT, Transaction.amount),
+            (Transaction.transaction_type == TransactionType.CREDIT, -Transaction.amount),
+            else_=0,
+        )
+        matches = [Transaction.allocation_id == allocation.id]
+        category_ids = _configured_category_ids(allocation)
+        if category_ids:
+            matches.append(Transaction.category_id.in_(category_ids))
+        summed = (
+            db.query(func.coalesce(func.sum(signed), 0))
+            .filter(
+                Transaction.user_id == allocation.user_id,
+                Transaction.is_posted.is_(True),
+                Transaction.transaction_type.in_([TransactionType.DEBIT, TransactionType.CREDIT]),
+                Transaction.transaction_date >= start,
+                Transaction.transaction_date < end,
+                or_(*matches),
+            )
+            .scalar()
+        )
+        total = max(Decimal("0"), _D(summed))
+    allocation.current_amount = total
+    allocation.updated_at = utc_now()  # allocations.updated_at is timestamptz
+    db.flush()
 
 @router.get("/", response_model=TransactionListResponse)
 def get_transactions(
@@ -974,18 +1039,13 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         if destination_account:
             destination_account.balance = _D(destination_account.balance) + received
 
-    if transaction.is_posted:
-        delta = _budget_delta_for_transaction(transaction.transaction_type, transaction.amount)
-        if delta:
-            budget_allocations = _get_budget_allocations_for_transaction(
-                db,
-                user_id=owner.id,
-                allocation_id=transaction.allocation_id,
-                category_id=transaction.category_id,
-            )
-            _apply_budget_delta(budget_allocations, delta, transaction.transaction_date)
-
+    budget_allocations = _lock_allocations(db, _counted_allocations(
+        db, user_id=owner.id, transaction_type=transaction.transaction_type,
+        amount=transaction.amount, is_posted=transaction.is_posted,
+        allocation_id=transaction.allocation_id, category_id=transaction.category_id))
     db.flush()
+    for allocation in budget_allocations:
+        _recompute_budget_total(db, allocation, [transaction.transaction_date])
     if tag_ids:
         replace_own_tags(db, Transaction, db_transaction.id, owner, tag_ids)
     return db_transaction
@@ -1099,6 +1159,22 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     locking.lock_accounts(db, [db_transaction.account_id,
                                db_transaction.transfer_from_account_id,
                                db_transaction.transfer_to_account_id, *landing_ids])
+    # Both budget discoveries, before any recompute (STU-222): the budgets the row
+    # counts toward now, and those it will count toward after the edit. Their union
+    # is locked; each is recomputed once the edit is flushed.
+    counted_before = _counted_allocations(
+        db, user_id=db_transaction.user_id, transaction_type=db_transaction.transaction_type,
+        amount=db_transaction.amount, is_posted=db_transaction.is_posted,
+        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id)
+    counted_after = _counted_allocations(
+        db, user_id=db_transaction.user_id, transaction_type=new_type,
+        amount=requested.get("amount", db_transaction.amount),
+        is_posted=requested.get("is_posted", db_transaction.is_posted),
+        allocation_id=requested.get("allocation_id", db_transaction.allocation_id),
+        category_id=requested.get("category_id", db_transaction.category_id))
+    before_ids = {a.id for a in counted_before}
+    after_ids = {a.id for a in counted_after}
+    budget_allocations = _lock_allocations(db, counted_before + counted_after)
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -1115,8 +1191,6 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     old_out, old_in = transfer_sides(db_transaction)
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
-    old_category_id = db_transaction.category_id
-    old_allocation_id = db_transaction.allocation_id
     old_transaction_date = db_transaction.transaction_date
     
     # Reverse previous balance effects if posted
@@ -1138,15 +1212,6 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
                 to_account = db.query(Account).filter(Account.id == old_transfer_to).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - old_in
-        old_budget_delta = _budget_delta_for_transaction(old_type, old_amount)
-        if old_budget_delta:
-            previous_budget_allocations = _get_budget_allocations_for_transaction(
-                db,
-                user_id=db_transaction.user_id,
-                allocation_id=old_allocation_id,
-                category_id=old_category_id,
-            )
-            _apply_budget_delta(previous_budget_allocations, -old_budget_delta, old_transaction_date)
     
     # Update transaction
     update_data = transaction_update.dict(exclude_unset=True)
@@ -1243,15 +1308,14 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             new_out, new_in = transfer_sides(db_transaction)
             primary_account.balance = _D(primary_account.balance) - new_out
             destination_account.balance = _D(destination_account.balance) + new_in
-        new_budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
-        if new_budget_delta:
-            new_budget_allocations = _get_budget_allocations_for_transaction(
-                db,
-                user_id=db_transaction.user_id,
-                allocation_id=db_transaction.allocation_id,
-                category_id=db_transaction.category_id,
-            )
-            _apply_budget_delta(new_budget_allocations, new_budget_delta, db_transaction.transaction_date)
+
+    # The budgets the row counted toward, at its old date, and those it counts
+    # toward now, at its new one (both, old then new, for a budget in each).
+    db.flush()
+    for allocation in budget_allocations:
+        references = ([old_transaction_date] if allocation.id in before_ids else []) + (
+            [db_transaction.transaction_date] if allocation.id in after_ids else [])
+        _recompute_budget_total(db, allocation, references)
 
     if tag_ids is not None:
         replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
@@ -1300,17 +1364,18 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - received
-        budget_delta = _budget_delta_for_transaction(db_transaction.transaction_type, db_transaction.amount)
-        if budget_delta:
-            budget_allocations = _get_budget_allocations_for_transaction(
-                db,
-                user_id=db_transaction.user_id,
-                allocation_id=db_transaction.allocation_id,
-                category_id=db_transaction.category_id,
-            )
-            _apply_budget_delta(budget_allocations, -budget_delta, db_transaction.transaction_date)
-    
+
+    # The budgets the row counted toward, found before it goes and recomputed at
+    # its date once the delete is flushed (STU-222).
+    counted = _counted_allocations(
+        db, user_id=db_transaction.user_id, transaction_type=db_transaction.transaction_type,
+        amount=db_transaction.amount, is_posted=db_transaction.is_posted,
+        allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id)
+    old_transaction_date = db_transaction.transaction_date
     db.delete(db_transaction)
+    db.flush()
+    for allocation in _lock_allocations(db, counted):
+        _recompute_budget_total(db, allocation, [old_transaction_date])
     db.commit()
     return {"message": "Transaction deleted successfully"}
 
