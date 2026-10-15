@@ -44,7 +44,7 @@ from app.core.access import touches_accounts, viewable_account_ids
 from app.core.database import UTC_SESSION_OPTIONS
 from app.core.seed import DEMO_EMAILS
 from app.cutover_load.bootstrap import (
-    CUTOVER_LOCK_KEY, Refused, check_target, error_class, observe_target,
+    CUTOVER_LOCK_KEY, SESSION_TIMEZONE, Refused, check_target, error_class, observe_target,
 )
 from app.cutover_load.outputs import (
     create_private, read_json, refuse_existing, replace_private, repo_root, to_json,
@@ -550,7 +550,11 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
                 started_at = conn.execute(text("SELECT now()")).scalar()
                 # The date columns are timestamptz: a naive date is written and read
                 # in this zone, so the cutover check must run under the same one.
+                # Every engine pins UTC (STU-315); refuse should the session say otherwise.
                 session_timezone = conn.execute(text("SHOW TimeZone")).scalar()
+                if session_timezone != SESSION_TIMEZONE:
+                    raise Refused("session_timezone",
+                                  f"the session time zone is {session_timezone}, not UTC")
                 db = Session(bind=conn, join_transaction_mode="create_savepoint",
                              autoflush=False)
                 revision = check_alembic(db)

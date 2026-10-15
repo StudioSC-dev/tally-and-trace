@@ -442,6 +442,22 @@ def test_dates_round_trip_at_midnight(tmp_path, owner, sw_db, sw_client):
 
 # --- Test 9: atomicity ---------------------------------------------------------------------
 
+def test_a_load_whose_session_is_not_on_utc_is_refused(tmp_path, owner, sw_db, monkeypatch):
+    """STU-315 (defence in depth): every engine pins UTC; should a session still
+    read another zone, the load refuses before writing anything."""
+    import app.cutover_load.loader as loader
+    from app.cutover_load.bootstrap import Refused
+
+    before = counts(sw_db, owner["id"])
+    monkeypatch.setattr(loader, "UTC_SESSION_OPTIONS", "-c timezone=Asia/Manila")
+    with pytest.raises(Refused) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "session_timezone"
+    assert counts(sw_db, owner["id"]) == before
+    assert not (tmp_path / "run-report.json").exists()
+    assert not (tmp_path / "run-record.json").exists()
+
+
 def test_a_failure_after_some_rows_rolls_everything_back(tmp_path, owner, sw_db, monkeypatch):
     from fastapi import HTTPException
 
