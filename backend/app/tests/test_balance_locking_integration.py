@@ -442,3 +442,76 @@ def test_a_tags_only_account_edit_and_a_balance_edit_serialise(sw_client, sw_peo
     assert after["name"] == "Renamed"
     assert Decimal(str(after["balance"])) == Decimal("12345.00")
     assert [t["id"] for t in after["tags"]] == [tag]
+
+
+# --- 9: entry delete and entry edit lock order ----------------------------------
+
+def _statements_during(fn):
+    from app.core.database import engine as app_engine
+
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(" ".join(statement.split()))
+
+    event.listen(app_engine, "before_cursor_execute", record)
+    try:
+        result = fn()
+    finally:
+        event.remove(app_engine, "before_cursor_execute", record)
+    return result, statements
+
+
+def _first(statements, predicate):
+    return next((i for i, s in enumerate(statements) if predicate(s)), None)
+
+
+def _entry(client, who, account_id, **extra):
+    body = {"name": "Probe utilities", "entry_type": "expense", "amount": 100,
+            "cadence": "monthly", "next_occurrence": "2026-11-01T00:00:00",
+            "account_id": account_id}
+    body.update(extra)
+    return sw_post(client, who, "/budget-entries/", body)["id"]
+
+
+def test_an_entry_delete_takes_the_owner_lock_then_the_entry_before_its_writes(sw_client,
+                                                                              sw_people):
+    """Owner lock, then FOR UPDATE on the entry, then the nullify, then the DELETE."""
+    client = sw_client
+    me = sw_people()
+    checking = _checking(client, me)
+    entry = _entry(client, me, checking)
+    r = client.post(f"{API}/budget-entries/{entry}/materialize", json={}, headers=me["headers"])
+    assert r.status_code == 201, r.text
+
+    r, statements = _statements_during(lambda: client.delete(
+        f"{API}/budget-entries/{entry}", headers=me["headers"]))
+    assert r.status_code == 204, r.text
+
+    owner_lock = _first(statements, lambda s: "pg_advisory_xact_lock" in s)
+    entry_lock = _first(statements, lambda s: s.startswith("SELECT") and "FROM budget_entries" in s
+                        and "FOR UPDATE" in s and "FOR NO KEY UPDATE" not in s)
+    nullify = _first(statements, lambda s: s.startswith("UPDATE transactions"))
+    delete = _first(statements, lambda s: s.startswith("DELETE FROM budget_entries"))
+    order = [owner_lock, entry_lock, nullify, delete]
+    assert None not in order and order == sorted(order), (order, statements)
+
+
+def test_an_entry_edit_locks_the_entry_before_its_tag_writes(sw_client, sw_people):
+    """``FOR NO KEY UPDATE`` on the entry comes before any write to its tag links."""
+    client = sw_client
+    me = sw_people()
+    checking = _checking(client, me)
+    entry = _entry(client, me, checking)
+    tag = sw_post(client, me, "/tags/", {"name": "Entry lock probe"}, expect=(201,))["id"]
+
+    r, statements = _statements_during(lambda: client.put(
+        f"{API}/budget-entries/{entry}", json={"tag_ids": [tag]}, headers=me["headers"]))
+    assert r.status_code == 200, r.text
+
+    entry_lock = _first(statements, lambda s: s.startswith("SELECT") and "FROM budget_entries" in s
+                        and "FOR NO KEY UPDATE" in s)
+    tag_write = _first(statements, lambda s: s.startswith(("DELETE FROM budget_entry_tags",
+                                                           "INSERT INTO budget_entry_tags")))
+    assert entry_lock is not None and tag_write is not None, statements
+    assert entry_lock < tag_write, statements

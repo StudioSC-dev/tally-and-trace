@@ -4,9 +4,11 @@ Every write path takes the locks it needs in this order, skipping the ones it
 does not need, so no two paths can wait on each other in a cycle:
 
 0. the owner's budget lock (``lock_owner_budgets``), always first;
-1. the transaction row being edited or deleted (``lock_transaction``);
-2. accounts, in ascending id (``lock_accounts``);
-3. budget allocations, in ascending id.
+1. the recurring entry being edited, deleted or materialised (``lock_entry``);
+2. the transaction row being edited or deleted (``lock_transaction``), or an
+   entry's linked rows, which its delete nullifies;
+3. accounts, in ascending id (``lock_accounts``);
+4. budget allocations, in ascending id.
 
 Callers reach these through the module (``locking.lock_owner_budgets(...)``),
 never by importing the names, so one patch of the module reaches every caller.
@@ -26,6 +28,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
 
 from app.models.account import Account
+from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction
 
 # Namespace of the owner budget lock's two-int advisory key. The seed's
@@ -75,6 +78,15 @@ def lock_accounts(db: Session, ids: Iterable[Optional[int]]) -> Dict[int, Accoun
             account = db.get(Account, account_id)
         locked[account_id] = account
     return locked
+
+
+def lock_entry(db: Session, entry_id: int, *, for_delete: bool = False) -> Optional[BudgetEntry]:
+    """The recurring entry, locked and refreshed, or None once it is gone.
+
+    ``FOR NO KEY UPDATE`` for an edit, ``FOR UPDATE`` for a delete.
+    """
+    return (db.query(BudgetEntry).filter(BudgetEntry.id == entry_id)
+            .with_for_update(key_share=not for_delete).populate_existing().one_or_none())
 
 
 def lock_transaction(db: Session, txn_id: int, *, for_delete: bool = False) -> Optional[Transaction]:
