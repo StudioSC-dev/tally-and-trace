@@ -582,11 +582,24 @@ def materialize_budget_entry(
     The entry's explicit tags are copied onto the new transaction in the same
     commit (never the tags it gets from its accounts); later changes to the
     entry's tags leave the transaction as it is.
+
+    One commit covers the transaction, its tags and the schedule's advance. The
+    owner's budget lock and then the entry (``FOR NO KEY UPDATE``) are taken before
+    anything is checked (``app.core.locking``), so concurrent payments of one entry
+    run one after another.
     """
     from app.routers.transactions import add_transaction, exchange_rate
     from app.schemas.transaction import TransactionCreate
 
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    # The ledger's lock order (app.core.locking): the owner's budget lock, then the
+    # entry, before anything is checked. Two payments of one entry then queue here
+    # and the second sees the first's advance; a payment queued behind a delete of
+    # the entry finds it gone.
+    locking.lock_owner_budgets(db, entry.user_id)
+    entry = locking.lock_entry(db, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
     if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")
     if not entry.account_id:
@@ -660,8 +673,6 @@ def materialize_budget_entry(
     db_txn = add_transaction(db, current_user, txn_create, owner=entry.user)
     # The entry's explicit tags, in the same commit as the transaction.
     copy_explicit_tags(db, entry.id, db_txn.id)
-    db.commit()
-    db.refresh(db_txn)
 
     if payload.advance:
         next_occ = _advance_occurrence(entry, entry.next_occurrence)
@@ -677,8 +688,10 @@ def materialize_budget_entry(
         else:
             entry.next_occurrence = next_occ
         entry.updated_at = utc_now()
-        db.commit()
-        db.refresh(db_txn)
+    # The transaction, its balance and budget effects, its tags and the schedule's
+    # advance commit together: a failure anywhere leaves none of them.
+    db.commit()
+    db.refresh(db_txn)
 
     return serialize_transaction(db, current_user, db_txn)
 

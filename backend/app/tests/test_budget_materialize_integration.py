@@ -6,10 +6,12 @@ budget entry that has an account, posts it, and asserts a linked transaction was
 created, the account balance moved by the amount, and the schedule advanced.
 """
 import os
+import threading
+import time
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 
 from app.tests.conftest import sw_post
 
@@ -214,3 +216,219 @@ def test_a_default_payment_uses_one_occurrence_and_moves_the_schedule(sw_client,
     assert state["occurrences_paid"] == 1
     assert state["is_active"] is True
     assert state["next_occurrence"].startswith("2026-12-01")
+
+
+# --- STU-215: the lock order and the single commit ------------------------------
+
+def _statements_during(fn):
+    from app.core.database import engine as app_engine
+
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(" ".join(statement.split()))
+
+    event.listen(app_engine, "before_cursor_execute", record)
+    try:
+        result = fn()
+    finally:
+        event.remove(app_engine, "before_cursor_execute", record)
+    return result, statements
+
+
+def _first(statements, predicate):
+    return next((i for i, s in enumerate(statements) if predicate(s)), None)
+
+
+def test_materialize_takes_the_owner_lock_then_the_entry_then_the_account(sw_client, sw_people):
+    """Main emits no lock statements at all."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    entry = _open_ended(client, me, checking)
+
+    r, statements = _statements_during(lambda: _materialize(client, me, entry))
+    assert r.status_code == 201, r.text
+
+    owner_lock = _first(statements, lambda s: "pg_advisory_xact_lock" in s)
+    entry_locks = [i for i, s in enumerate(statements)
+                   if s.startswith("SELECT") and "FROM budget_entries" in s
+                   and "FOR NO KEY UPDATE" in s]
+    account_lock = _first(statements, lambda s: s.startswith("SELECT") and "FROM accounts" in s
+                          and "FOR NO KEY UPDATE" in s)
+    assert owner_lock is not None and account_lock is not None, statements
+    assert len(entry_locks) == 1, statements
+    assert owner_lock < entry_locks[0] < account_lock, (owner_lock, entry_locks, account_lock)
+    plain = [s for s in statements if "FROM budget_entries" in s and "FOR UPDATE" in s
+             and "FOR NO KEY UPDATE" not in s]
+    assert plain == []
+
+
+def _lock_waiters(engine) -> int:
+    """Backends in this database waiting on a lock, polled in a fresh transaction."""
+    with engine.connect() as probe:
+        n = probe.execute(text(
+            "SELECT count(*) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND wait_event_type = 'Lock'")).scalar()
+        probe.rollback()
+    return n
+
+
+def _wait_waiters(engine, target, workers) -> bool:
+    """Whether ``target`` backends wait on a lock before the deadline (or a worker ends)."""
+    deadline = time.monotonic() + PROBE_DEADLINE
+    while True:
+        waiting = _lock_waiters(engine)
+        if waiting >= target:
+            return True
+        started = [w for w in workers if w.thread.ident is not None]
+        if any(not w.thread.is_alive() for w in started) or time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+
+
+class _Worker:
+    def __init__(self, fn):
+        self.fn = fn
+        self.result = None
+        self.error = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        try:
+            self.result = self.fn()
+        except BaseException as exc:  # recorded for the test thread
+            self.error = exc
+
+
+def test_two_concurrent_payments_of_the_last_installment_post_one(sw_client, sw_people, engine):
+    """Main: both read the entry unlocked, pass every check, and post twice."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    entry = _installment(client, me, checking, remaining=1)
+    holder = engine.connect()
+    workers = [_Worker(lambda: _materialize(client, me, entry)) for _ in range(2)]
+    try:
+        holder.execute(text("SELECT id FROM accounts WHERE id = :a FOR UPDATE"), {"a": checking})
+        for w in workers:
+            w.thread.start()
+        assert _wait_waiters(engine, 2, workers), "two requests did not queue behind the holder"
+        holder.rollback()
+    finally:
+        holder.rollback()
+        holder.close()
+        for w in workers:
+            w.thread.join(JOIN_TIMEOUT)
+    assert not any(w.thread.is_alive() for w in workers)
+    assert [w.error for w in workers] == [None, None]
+
+    assert sorted(w.result.status_code for w in workers) == [201, 409]
+    assert _linked_rows(engine, entry) == 1
+    assert _balance(client, me, checking) == Decimal("9000.00")
+    state = _entry_state(client, me, entry)
+    assert (state["max_occurrences"], state["is_active"]) == (0, False)
+
+
+def test_a_failure_while_advancing_rolls_the_whole_payment_back(sw_client, sw_people, engine,
+                                                                monkeypatch):
+    """Main commits the row and the balance before the advance runs."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    import app.routers.budget_entries as entries_router
+
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    tag = sw_post(client, me, "/tags/", {"name": "Installment tag"}, expect=(201,))["id"]
+    entry = _installment(client, me, checking, remaining=3, tag_ids=[tag])
+    before = _entry_state(client, me, entry)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("advance failed")
+
+    monkeypatch.setattr(entries_router, "_advance_occurrence", boom)
+    quiet = TestClient(app, raise_server_exceptions=False)
+    r = quiet.post(f"{API}/budget-entries/{entry}/materialize", json={}, headers=me["headers"])
+
+    assert r.status_code == 500, r.text
+    assert _linked_rows(engine, entry) == 0
+    assert _balance(client, me, checking) == Decimal("10000.00")
+    after = _entry_state(client, me, entry)
+    assert after["next_occurrence"] == before["next_occurrence"]
+    assert after["max_occurrences"] == before["max_occurrences"] == 3
+    with engine.connect() as c:
+        links = c.execute(text(
+            "SELECT count(*) FROM transaction_tags tt JOIN transactions t "
+            "ON t.id = tt.transaction_id WHERE t.user_id = :u"), {"u": me["id"]}).scalar()
+    assert links == 0
+
+
+def _three_requests(client, engine, me, entry, txn, order):
+    """Hold the owner lock, queue U / M / D in ``order`` one at a time, then release."""
+    from app.core import locking
+
+    calls = {
+        "U": lambda: client.put(f"{API}/transactions/{txn}", json={"amount": 300},
+                                headers=me["headers"]),
+        "M": lambda: _materialize(client, me, entry),
+        "D": lambda: client.delete(f"{API}/budget-entries/{entry}", headers=me["headers"]),
+    }
+    workers = {name: _Worker(calls[name]) for name in order}
+    holder = engine.connect()
+    try:
+        holder.execute(text("SELECT pg_advisory_xact_lock(:ns, :owner)"),
+                       {"ns": locking.OWNER_BUDGET_LOCK_NS, "owner": me["id"]})
+        for count, name in enumerate(order, start=1):
+            workers[name].thread.start()
+            assert _wait_waiters(engine, count, list(workers.values())), (
+                name, "did not queue", {n: (w.result, w.error) for n, w in workers.items()})
+        holder.commit()
+    finally:
+        holder.rollback()
+        holder.close()
+        for w in workers.values():
+            if w.thread.ident is not None:
+                w.thread.join(JOIN_TIMEOUT)
+    assert not any(w.thread.is_alive() for w in workers.values()), "a request is still running"
+    return workers
+
+
+@pytest.mark.parametrize("order", [["U", "M", "D"], ["D", "M", "U"]])
+def test_materialize_entry_delete_and_transaction_update_cannot_deadlock(
+        sw_client, sw_people, engine, order):
+    """Regression guard for the lock order: owner, entry, transaction, account.
+
+    It reproduces no bug on main (see the PR body): with the owner lock first on
+    every path, whichever request gets it runs to its commit while the others wait
+    holding nothing. With materialize taking the entry before the owner lock,
+    ``[D, M, U]`` is a deadlock cycle (``40P01``) and ``[U, M, D]`` the three-session
+    one: D holds the transaction and waits for the entry, M holds the entry and
+    waits for the owner lock, U holds the owner lock and waits for the transaction.
+    """
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    entry = _open_ended(client, me, checking)
+    first = _materialize(client, me, entry)
+    assert first.status_code == 201, first.text
+    txn = first.json()["id"]
+    assert _balance(client, me, checking) == Decimal("9900.00")
+
+    workers = _three_requests(client, engine, me, entry, txn, order)
+
+    assert {n: w.error for n, w in workers.items()} == {n: None for n in order}
+    codes = {n: w.result.status_code for n, w in workers.items()}
+    with engine.connect() as c:
+        rows = c.execute(text(
+            "SELECT id, amount, budget_entry_id FROM transactions WHERE user_id = :u "
+            "ORDER BY id"), {"u": me["id"]}).all()
+        entry_left = c.execute(text("SELECT count(*) FROM budget_entries WHERE id = :e"),
+                               {"e": entry}).scalar()
+    if order == ["U", "M", "D"]:
+        assert codes == {"U": 200, "M": 201, "D": 204}
+        assert entry_left == 0
+        assert [(r[0], Decimal(r[1]), r[2]) for r in rows][0] == (txn, Decimal("300"), None)
+        assert len(rows) == 2 and rows[1][2] is None
+        assert _balance(client, me, checking) == Decimal("9600.00")
+    else:
+        assert codes == {"D": 204, "M": 404, "U": 200}
+        assert entry_left == 0
+        assert [(r[0], Decimal(r[1]), r[2]) for r in rows] == [(txn, Decimal("300"), None)]
+        assert _balance(client, me, checking) == Decimal("9700.00")
