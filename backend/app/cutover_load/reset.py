@@ -224,6 +224,11 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
         with engine.connect() as conn:
             trans = conn.begin()
             try:
+                # First statement: the snapshot is fixed by the first statement, so
+                # it is taken under the lock. A lock on a wrong target is harmless (it
+                # writes nothing and ends with the transaction); the target is still
+                # checked before anything is read.
+                take_lock(conn)
                 observed = observe_target(conn)
                 out(f"observed: db={observed[0]} server_addr={observed[1]}")
                 database, address = check_target(observed, expect_db=expect_db,
@@ -231,7 +236,6 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
                 if (database, address) != (record.get("database"), record.get("server_addr")):
                     raise Refused("target", "the database or server address is not the "
                                             "run record's")
-                take_lock(conn)
                 db = Session(bind=conn, join_transaction_mode="create_savepoint",
                              autoflush=False)
                 owner = find_owner(db, confirm)

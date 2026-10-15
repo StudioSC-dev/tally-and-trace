@@ -1486,6 +1486,28 @@ def test_reset_runs_at_repeatable_read(tmp_path, owner, sw_db, monkeypatch):
     assert seen == ["repeatable read"]
 
 
+def test_reset_takes_the_lock_before_its_snapshot(tmp_path, owner):
+    """The lock is the first statement of the reset's transaction: a REPEATABLE READ
+    snapshot is fixed by the first statement, so nothing is read before the lock."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    _, record = load(tmp_path, fixture(), owner)
+    statements = []
+
+    def spy(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", spy)
+    try:
+        assert reset(record, owner["email"], dry_run=True) == 0
+    finally:
+        event.remove(Engine, "before_cursor_execute", spy)
+    lock = next(i for i, s in enumerate(statements) if "pg_try_advisory_xact_lock" in s)
+    target = next(i for i, s in enumerate(statements) if "current_database()" in s)
+    assert lock < target, statements[:max(lock, target) + 1]
+
+
 def test_a_reset_dry_run_changes_nothing(tmp_path, owner, sw_db):
     _, record = load(tmp_path, fixture(), owner)
     before = table_counts(sw_db)
