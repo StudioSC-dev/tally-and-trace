@@ -51,10 +51,30 @@ def create_private(path: str, data: bytes) -> None:
     except FileExistsError:
         raise Refused("path", f"{os.path.basename(path)} already exists; choose a new path") \
             from None
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
-        fh.flush()
-        os.fsync(fh.fileno())
+    # The file is ours from here on: a failed write, flush, fsync or close closes the
+    # descriptor and removes it, so no partial output is left. (A FileExistsError
+    # above never reaches this, so someone else's file is never removed.)
+    try:
+        fh = os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        _remove(path)
+        raise
+    try:
+        with fh:  # closed on the way out, also when a write fails
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        _remove(path)
+        raise
+
+
+def _remove(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def replace_private(path: str, data: bytes) -> None:

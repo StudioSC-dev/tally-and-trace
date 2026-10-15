@@ -1020,6 +1020,51 @@ def test_an_output_write_failure_leaves_no_stale_file(failing, tmp_path, owner, 
     assert table_counts(sw_db) == before
 
 
+def _fsync_fails_for(monkeypatch, suffix):
+    """``os.fsync`` raises for a file whose name ends with ``suffix``: a failure after
+    ``create_private`` has already created the file."""
+    real = os.fsync
+
+    def fsync(fd):
+        if os.readlink(f"/proc/self/fd/{fd}").endswith(suffix):
+            raise OSError(28, "No space left on device")
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+
+
+def test_create_private_removes_its_file_when_the_write_fails(tmp_path, monkeypatch):
+    from app.cutover_load.outputs import create_private
+
+    _fsync_fails_for(monkeypatch, "out.json")
+    with pytest.raises(OSError):
+        create_private(str(tmp_path / "out.json"), b"{}")
+    assert not os.path.lexists(tmp_path / "out.json")
+
+
+def test_create_private_never_removes_a_file_that_was_already_there(tmp_path):
+    from app.cutover_load.bootstrap import Refused
+    from app.cutover_load.outputs import create_private
+
+    theirs = tmp_path / "theirs.json"
+    theirs.write_text("kept")
+    with pytest.raises(Refused):
+        create_private(str(theirs), b"{}")
+    assert theirs.read_text() == "kept"
+
+
+@pytest.mark.parametrize("failing", ["report", "record"])
+def test_a_failed_output_fsync_leaves_no_file_and_no_rows(failing, tmp_path, owner, sw_db,
+                                                          monkeypatch):
+    _fsync_fails_for(monkeypatch, f"run-{failing}.json")
+    before = table_counts(sw_db)
+    with pytest.raises(OSError):
+        load(tmp_path, fixture(), owner)
+    assert not (tmp_path / "run-record.json").exists()
+    assert not (tmp_path / "run-report.json").exists()
+    assert table_counts(sw_db) == before
+
+
 def test_the_wrapper_exits_3_when_the_commit_outcome_is_unknown(capsys):
     import importlib.util
 
