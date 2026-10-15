@@ -10,6 +10,10 @@ freezes the clock at ``FX_REF`` (2026-11-02).
 ``TODAY`` holds each figure as ``main`` gives it (recorded on main, shape 4,
 same clock); ``V4`` holds it now. Every figure that changes is listed, and is
 pinned as that explicit diff.
+
+Shape 6 (STU-217) moves the "Gym Membership" installment's next payment to
+2 Dec 2026, so its 45.00 is a December event: in the timeline, the 30-day
+payables, the 60-day closing, and each month's expenses from December on.
 """
 import sys
 
@@ -24,7 +28,7 @@ RATE_AS_OF = "2026-11-01"
 # figure: (today on main, v4)
 DIFF = {
     "timeline opening (PHP scalar)": (21_850.0, 21_700.0),
-    "timeline closing, 60 days (PHP scalar)": (24_330.0, 24_380.58),
+    "timeline closing, 60 days (PHP scalar)": (24_330.0, 24_335.58),
     "overdue pending salary at window start": (2_950.0, 3_190.0),
     "Monthly Salary, Nov 11": (3_200.0, 3_190.0),
     "Monthly Salary, Dec 11": (3_200.0, 3_190.0),
@@ -33,7 +37,7 @@ DIFF = {
     "statement balance, closing 2025-10-01": (850.0, 869.42),
     "cash-flow income, each month (PHP)": (3_200.0, 3_190.0),
     "cash-flow net, November 2026 (PHP)": (3_540.0, 3_750.58),
-    "cash-flow net, December 2026 and January 2027 (PHP)": (-1_060.0, -1_070.0),
+    "cash-flow net, December 2026 and January 2027 (PHP)": (-1_060.0, -1_115.0),
     "Aug 2025 summary income": (3_000.0, 2_942.50),
     "Aug 2025 summary net flow": (2_074.50, 2_017.00),
     "disposable monthly_income": (3_200.0, 3_190.0),
@@ -73,10 +77,10 @@ def demo(sw_client, sw_db, monkeypatch):
     return get
 
 
-def test_the_shape_is_five():
+def test_the_shape_is_six():
     from app.core.seed import DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 5
+    assert DEMO_SHAPE_VERSION == 6
 
 
 def _estimated(item, original):
@@ -115,6 +119,7 @@ def test_timeline(demo):
         ("2026-11-20", "Electric Bill", -1_200.0),
         ("2026-11-22", "Credit Card statement", -60.0),
         ("2026-12-01", "Rent", -2_500.0),
+        ("2026-12-02", "Gym Membership", -45.0),
         ("2026-12-15", "Brokerage Auto-Deposit", -500.0),
         ("2026-12-20", "Electric Bill", -1_200.0),
         ("2026-12-22", "Credit Card statement", -60.0)]
@@ -142,7 +147,8 @@ def test_snapshot(demo):
         ("2026-11-15", "Brokerage Auto-Deposit", 500.0, "Main Checking Account", "PHP"),
         ("2026-11-20", "Electric Bill", 1_200.0, "Main Checking Account", "PHP"),
         ("2026-11-22", "Credit Card statement", 60.0, "Joint Account", "PHP"),
-        ("2026-12-01", "Rent", 2_500.0, "Joint Account", "PHP")]
+        ("2026-12-01", "Rent", 2_500.0, "Joint Account", "PHP"),
+        ("2026-12-02", "Gym Membership", 45.0, "Main Checking Account", "PHP")]
     assert _estimated(body["payables"][0], 14.99)
 
 
@@ -151,9 +157,9 @@ def test_cashflow(demo):
     assert [(p["period_label"], p["income"], p["expenses"], p["net"]) for p in periods] == [
         ("November 2026", v4("cash-flow income, each month (PHP)"), 1_700.0,
          v4("cash-flow net, November 2026 (PHP)")),
-        ("December 2026", v4("cash-flow income, each month (PHP)"), 4_200.0,
+        ("December 2026", v4("cash-flow income, each month (PHP)"), 4_245.0,
          v4("cash-flow net, December 2026 and January 2027 (PHP)")),
-        ("January 2027", v4("cash-flow income, each month (PHP)"), 4_200.0,
+        ("January 2027", v4("cash-flow income, each month (PHP)"), 4_245.0,
          v4("cash-flow net, December 2026 and January 2027 (PHP)"))]
     for p in periods:
         usd = next(r for r in p["by_currency"] if r["currency"] == "USD")

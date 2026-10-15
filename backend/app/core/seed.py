@@ -33,6 +33,11 @@ foreign figure (``amount`` = ``projected_amount``) with no rate, so the
 projection estimates them at the stored rate. The "Streaming Subscription"
 entry, which ended in March 2026, is inactive.
 
+Shape 6 (STU-217): the "Gym Membership" installment is current. Its next
+payment is 2 Dec 2026, so none of its twelve remaining payments falls before
+the demo window (an installment's unrecorded earlier payments are projected as
+overdue).
+
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
 
@@ -68,8 +73,9 @@ DEMO_EMAILS = frozenset({DEMO_EMAIL, DEMO_PARTNER_EMAIL})
 DEMO_PASSWORD = "password123"
 # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232); 4: the Household
 # tag share and the card routed to the joint account (STU-233); 5: foreign rows in the
-# form's convention, the ended streaming entry inactive (STU-236)
-DEMO_SHAPE_VERSION = 5
+# form's convention, the ended streaming entry inactive (STU-236); 6: the gym
+# installment current (STU-217)
+DEMO_SHAPE_VERSION = 6
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
