@@ -880,6 +880,11 @@ export function AccountsPage() {
                     A loan's balance is negative while money is owed (for example -90000).
                   </p>
                 )}
+                {formData.account_type === 'credit' && (
+                  <p className="mt-1 text-xs text-muted">
+                    A credit card's balance is negative while money is owed (for example -500).
+                  </p>
+                )}
               </div>
               
               <TagPicker
