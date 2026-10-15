@@ -547,12 +547,13 @@ def materialize_budget_entry(
 
     With ``advance`` False the schedule stays put, so the projection would list
     that occurrence AND the new transaction. It doesn't, for every entry type
-    (cash, card, accountless or transfer): a transaction linked to the entry
-    suppresses one occurrence dated the same calendar day (see
-    ``_linked_occurrence_days`` and its use in ``collect_events`` in
-    services/forecast.py). A custom ``transaction_date`` on another day
-    suppresses nothing, so with ``advance`` False the occurrence is still
-    projected alongside the transaction.
+    (cash, card or transfer): the transaction records the occurrence it fulfils
+    (``occurrence_date``, the ``next_occurrence`` read before any advance), and
+    the transaction suppresses that one occurrence while it is still on the
+    entry's account(s) (see ``_linked_occurrence_days`` and its use in
+    ``collect_events`` in services/forecast.py). This holds with a custom
+    ``transaction_date`` on another day too; and a late payment that advances
+    the schedule leaves the occurrence it moved to projected.
 
     A recurring transfer into a loan posts as a scheduled loan payment
     (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in
@@ -674,6 +675,10 @@ def materialize_budget_entry(
     )
     # The entry's creator owns the transaction; the caller is its actor.
     db_txn = add_transaction(db, current_user, txn_create, owner=entry.user)
+    # The occurrence this row fulfils, read before the advance below: projected
+    # occurrences are suppressed by it, not by ``transaction_date``. Set on the
+    # row, not in ``TransactionCreate``, so no client can set it.
+    db_txn.occurrence_date = entry.next_occurrence
     # The entry's explicit tags, in the same commit as the transaction.
     copy_explicit_tags(db, entry.id, db_txn.id)
 
