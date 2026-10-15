@@ -1626,3 +1626,156 @@ def test_overdue_installment_into_a_loan_covers_its_own_due_date(db, user):
     on_start = [(leg["amount"], leg["cash"]) for e in events if e["date"] == OVERDUE_REFERENCE
                 for leg in e["legs"] if leg["account_id"] == checking.id]
     assert on_start == [(Decimal("-100.00"), True)]
+
+
+# --- STU-224: suppression matches the fulfilled occurrence and account -----------
+# A materialised row stands for the occurrence it fulfils (``occurrence_date``,
+# else its ``transaction_date``), and only while it is still on the entry's
+# account. Each case runs for an entry on a card with cycle settings (billed on
+# its statement) and for one on Checking (a cash event). 1,000 a month; Checking
+# 10,000; Card C bills the 25 Jul - 24 Aug cycle on 14 Sep, paid from Checking.
+
+def _suppression_entry(db, user, kind, next_occurrence):
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    account = checking
+    if kind == "card":
+        account = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
+                           billing_cycle_start=24, days_until_due_date=21,
+                           payment_account_id=checking.id)
+    entry = _entry(db, user, "Plan", BudgetEntryType.EXPENSE, "1000.00",
+                   next_occurrence, account=account)
+    return checking, entry
+
+
+def _materialize(client, user, entry, **body):
+    r = client.post(f"/api/v1/budget-entries/{entry.id}/materialize",
+                    headers=_login(client, user), json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _entry_dates(db, user, start, end):
+    return [d for d, _ in _entry_events(db, user, start, end)]
+
+
+@pytest.mark.parametrize("kind", ["card", "cash"])
+def test_late_payment_that_advances_leaves_the_next_occurrence_projected(
+        db, user, client, kind):
+    """Due 1 Sep, paid on 1 Oct and advanced: the row fulfils 1 Sep, so the 1 Oct
+    occurrence the schedule moved to is still projected."""
+    _, entry = _suppression_entry(db, user, kind, datetime(2026, 9, 1))
+    _materialize(client, user, entry, transaction_date="2026-10-01T00:00:00", advance=True)
+
+    db.expire_all()
+    assert _entry_dates(db, user, datetime(2026, 9, 2), datetime(2026, 11, 2)) == [
+        datetime(2026, 10, 1), datetime(2026, 11, 1)]
+
+
+@pytest.mark.parametrize("kind", ["card", "cash"])
+def test_payment_on_another_day_without_advancing_stands_for_its_occurrence(
+        db, user, client, kind):
+    """Due 1 Aug, paid on 3 Aug without advancing: the row stands for 1 Aug, so the
+    1,000 leaves once (as the row), and only 1 Sep is still projected."""
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    _, entry = _suppression_entry(db, user, kind, datetime(2026, 8, 1))
+    _materialize(client, user, entry, transaction_date="2026-08-03T00:00:00", advance=False)
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    assert _entry_dates(db, user, reference, datetime(2026, 9, 2)) == [datetime(2026, 9, 1)]
+    if kind == "card":
+        r = project_running_balance(db, user.id, days=45, reference=reference)
+        assert _cash_events(r) == [("2026-09-14", "Card C statement", Decimal("-1000.00"))]
+    else:
+        (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+        assert aug["expenses"] == 0.0
+        assert aug["closing_balance"] == 9000.0
+
+
+@pytest.mark.parametrize("kind", ["card", "cash"])
+def test_row_moved_off_the_entrys_account_no_longer_stands_for_its_occurrence(
+        db, user, client, kind):
+    """Due 1 Aug, materialised without advancing, then the row is moved onto
+    Savings A: it no longer stands for 1 Aug, which is projected again (billed on
+    the 14 Sep statement for the card)."""
+    from app.models.account import AccountType
+    from app.services.forecast import project_cashflow, project_running_balance
+
+    _, entry = _suppression_entry(db, user, kind, datetime(2026, 8, 1))
+    savings = _account(db, user, "Savings A", AccountType.SAVINGS, "5000.00")
+    row = _materialize(client, user, entry, advance=False)
+    moved = client.put(f"/api/v1/transactions/{row['id']}", headers=_login(client, user),
+                       json={"account_id": savings.id})
+    assert moved.status_code == 200, moved.text
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    assert _entry_dates(db, user, reference, datetime(2026, 9, 2)) == [
+        datetime(2026, 8, 1), datetime(2026, 9, 1)]
+    if kind == "card":
+        r = project_running_balance(db, user.id, days=45, reference=reference)
+        assert _cash_events(r) == [("2026-09-14", "Card C statement", Decimal("-1000.00"))]
+    else:
+        (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+        assert aug["expenses"] == 1000.0
+
+
+def test_row_relinked_to_another_entry_stands_for_its_own_date_there(db, user, client):
+    """Rent due 1 Sep is paid on 1 Oct and advanced (the row fulfils Rent's 1 Sep),
+    then the row is relinked to Water, due monthly from 1 Oct. It fulfils nothing of
+    Water's yet, so it stands for its own date there: Water's 1 Oct is suppressed."""
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import collect_events
+
+    checking, rent = _suppression_entry(db, user, "cash", datetime(2026, 9, 1))
+    water = _entry(db, user, "Water", BudgetEntryType.EXPENSE, "1000.00",
+                   datetime(2026, 10, 1), account=checking)
+    row = _materialize(client, user, rent, transaction_date="2026-10-01T00:00:00", advance=True)
+    relinked = client.put(f"/api/v1/transactions/{row['id']}", headers=_login(client, user),
+                          json={"budget_entry_id": water.id})
+    assert relinked.status_code == 200, relinked.text
+
+    db.expire_all()
+    events = collect_events(db, datetime(2026, 9, 2), datetime(2026, 11, 2), user_id=user.id)
+    water_dates = [e["date"] for e in events
+                   if e["source"] == "budget_entry" and e["source_id"] == water.id]
+    assert water_dates == [datetime(2026, 11, 1)]
+
+
+def test_only_a_materialised_row_must_stay_on_the_entrys_account(db, user, client):
+    """Boundary of the account rule (owner decision 2026-10-15). Two monthly bills on
+    Checking from 5 Aug, no shares. Water's 5 Aug is recorded by hand on Savings A
+    (no ``occurrence_date``): it still stands for 5 Aug, on any of the creator's
+    accounts. Rent's 5 Aug is materialised without advancing, then moved onto
+    Savings A: it stands for nothing there, so Rent's 5 Aug is projected again."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import collect_events
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    savings = _account(db, user, "Savings A", AccountType.SAVINGS, "5000.00")
+    water = _entry(db, user, "Water", BudgetEntryType.EXPENSE, "1000.00",
+                   datetime(2026, 8, 5), account=checking)
+    rent = _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "1000.00",
+                  datetime(2026, 8, 5), account=checking)
+    _txn(db, user, savings, TransactionType.DEBIT, "1000.00", datetime(2026, 8, 5),
+         description="Water", budget_entry_id=water.id)
+    row = _materialize(client, user, rent, advance=False)
+    moved = client.put(f"/api/v1/transactions/{row['id']}", headers=_login(client, user),
+                       json={"account_id": savings.id})
+    assert moved.status_code == 200, moved.text
+
+    db.expire_all()
+    events = collect_events(db, datetime(2026, 8, 1), datetime(2026, 9, 6), user_id=user.id)
+
+    def dates(entry):
+        return [e["date"] for e in events
+                if e["source"] == "budget_entry" and e["source_id"] == entry.id]
+
+    assert dates(water) == [datetime(2026, 9, 5)]
+    assert dates(rent) == [datetime(2026, 8, 5), datetime(2026, 9, 5)]

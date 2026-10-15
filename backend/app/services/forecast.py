@@ -14,7 +14,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Dict, Iterator, List, Optional, Sequence
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
@@ -1139,10 +1139,16 @@ def collect_events(
     An occurrence already recorded is suppressed, for every kind of entry
     (cash account, no account, card with or without cycle settings, recurring
     transfer): a transaction of the entry's creator with this
-    ``budget_entry_id`` dated the same calendar day stands in for it (each
-    transaction suppresses at most one occurrence; see
-    ``_linked_occurrence_days``), so a ``materialize`` with ``advance=False``,
-    or a row linked to the entry by hand, does not move the money twice.
+    ``budget_entry_id`` stands in for the occurrence it fulfils
+    (``occurrence_date``, set by ``materialize``; else the one on its
+    ``transaction_date``'s calendar day). A materialised row does so only while
+    it is still on the entry's account(s) (anywhere for an entry with none); a
+    row linked by hand keeps the shared-account rule of
+    ``linked_transactions``. Each transaction suppresses
+    at most one occurrence (see ``_linked_occurrence_days``), so a
+    ``materialize`` with ``advance=False``, or a row linked to the entry by
+    hand, does not move the money twice, and a late payment that advances the
+    schedule does not hide the next occurrence.
 
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
@@ -1312,7 +1318,7 @@ def collect_events(
     transfer_billed_ids = billed_ids | outside_billed
 
     # Transactions already recorded for an entry's occurrences, by day: each stands
-    # in for one occurrence on its calendar day (as in _card_entry_charges), since
+    # in for the one occurrence it fulfils (as in _card_entry_charges), since
     # the transaction itself is the movement (posted: already in the balance;
     # unposted: listed below). Fetched once for every entry walked here; entries on
     # billed cards are suppressed in _billed_card_occurrences instead.
@@ -1825,9 +1831,12 @@ def _keep_tagged(db: Session, events: List[dict], tag_id: int) -> List[dict]:
     return [e for e in events if e["origin"][1] in tagged[e["origin"][0]]]
 
 
-def linked_transactions(db: Session, entry_ids) -> List[tuple]:
-    """``[(entry id, transaction date)]``: the transactions that stand for an
-    entry's occurrences (materialised from it, or linked to it by hand).
+def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = False) -> List[tuple]:
+    """``[(entry id, day)]``: the transactions that stand for an entry's
+    occurrences (materialised from it, or linked to it by hand). The day is the
+    occurrence a materialised row fulfils (``occurrence_date``, the entry's
+    ``next_occurrence`` when it was materialised), else its ``transaction_date``
+    (a row linked by hand, or one recorded before ``occurrence_date`` existed).
 
     Only the entry creator's transactions count: another user's row naming the
     entry is a stale reference (left by the entity era; the same-owner rule
@@ -1845,44 +1854,61 @@ def linked_transactions(db: Session, entry_ids) -> List[tuple]:
     entry, and a row touching any other account (the creator's private one, or
     another user's they hold a role on), which a viewer may not be able to read,
     must change nothing they are shown.
+
+    With ``occurrence_match`` (suppressing projected occurrences,
+    ``_linked_occurrence_days``) a materialised row (``occurrence_date`` set)
+    counts only while it passes that account check, shared or not: moved off the
+    entry's account(s) it stands for nothing. An entry with no account has none
+    to check, so its creator's materialised rows count anywhere. A row linked by
+    hand (``occurrence_date`` null, which includes one relinked to another
+    entry) keeps the rule above. Without ``occurrence_match`` (counting paid
+    occurrences) the rule above holds for every row.
     """
     entry_ids = list(entry_ids)
     if not entry_ids:
         return []
     rows = (
-        db.query(Transaction.budget_entry_id, Transaction.transaction_date,
+        db.query(Transaction.budget_entry_id,
+                 func.coalesce(Transaction.occurrence_date, Transaction.transaction_date),
                  Transaction.transaction_type, Transaction.account_id,
                  Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
                  BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
-                 BudgetEntry.overflow_account_id)
+                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None))
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
                 Transaction.user_id == BudgetEntry.user_id)
         .all()
     )
-    touched = {acc for row in rows for acc in row[6:] if acc is not None}
+    touched = {acc for row in rows for acc in row[6:9] if acc is not None}
     shared = {acc for (acc,) in db.query(Account.id).filter(
         Account.id.in_(touched),
         or_(Account.id.in_(select(AccountShare.account_id)),
             Account.id.in_(tag_shared_account_ids())))} if touched else set()
 
     def on_entry_accounts(row) -> bool:
-        _, _, kind, account, src, dst, entry_account, entry_dst, _ = row
+        _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row
         if entry_dst is not None:
             return (kind == TransactionType.TRANSFER and (src or account) == entry_account
                     and dst == entry_dst)
         return kind != TransactionType.TRANSFER and account == entry_account
 
-    return [(row[0], row[1]) for row in rows
-            if not shared.intersection(row[6:]) or on_entry_accounts(row)]
+    def counts(row) -> bool:
+        if occurrence_match and row[9]:  # materialised: only on the entry's account(s)
+            return row[6] is None or on_entry_accounts(row)
+        return not shared.intersection(row[6:9]) or on_entry_accounts(row)
+
+    return [(row[0], row[1]) for row in rows if counts(row)]
 
 
 def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
     """``{(entry id, day): count}`` of the transactions standing for each entry's
-    occurrences (``linked_transactions``). Each stands in for one occurrence on
-    its calendar day."""
+    occurrences (``linked_transactions`` with ``occurrence_match``): each stands
+    in for one occurrence, the one it fulfils (else the one on its own calendar
+    day). A materialised row counts only while it is still on the entry's
+    account(s); a row linked by hand keeps the shared-account rule."""
     return Counter((entry_id, _naive(when).date())
-                   for entry_id, when in linked_transactions(db, entry_ids))
+                   for entry_id, when in linked_transactions(db, entry_ids,
+                                                             occurrence_match=True))
 
 
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,
@@ -1904,12 +1930,15 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     stale one would invent overdue statements nobody recorded.
 
     An occurrence whose linked transaction already exists is suppressed: a
-    transaction of the entry's creator with this ``budget_entry_id`` dated the same
-    calendar day stands in for it (each transaction suppresses at most one
-    occurrence), since that transaction is itself a line item on the card. This is what keeps a
-    ``materialize`` with ``advance=False`` from billing twice. Matching is by day
-    only: materialising with a custom ``transaction_date`` on another day and
-    ``advance=False`` suppresses nothing, so that occurrence is still billed too.
+    transaction of the entry's creator with this ``budget_entry_id`` stands in for
+    the occurrence it fulfils (``occurrence_date``, set by ``materialize``; else
+    the one on its ``transaction_date``'s calendar day), and each transaction
+    suppresses at most one occurrence, since that transaction is itself a line
+    item on the card. This is what keeps a ``materialize`` with ``advance=False``
+    from billing twice, even with a custom ``transaction_date`` on another day. A
+    materialised row moved off the card stands for nothing, so its occurrence is
+    billed again; a row linked by hand keeps the shared-account rule of
+    ``linked_transactions``.
 
     In-window occurrences are appended to ``events`` as non-cash listings, like
     unposted card charges; with ``events`` None (a discovered card's internal

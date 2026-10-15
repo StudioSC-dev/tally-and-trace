@@ -1226,6 +1226,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
             budget_entry = db.query(BudgetEntry).filter(
                 BudgetEntry.id == new_budget_entry_id
             ).first()
+        if new_budget_entry_id != db_transaction.budget_entry_id:
+            # The occurrence it fulfilled was the old entry's: relinked, the row
+            # stands for its own date (services/forecast.py linked_transactions).
+            db_transaction.occurrence_date = None
         setattr(db_transaction, "budget_entry_id", new_budget_entry_id)
         db_transaction.is_recurring = bool(budget_entry)
         db_transaction.recurrence_frequency = budget_entry.cadence if budget_entry else None
