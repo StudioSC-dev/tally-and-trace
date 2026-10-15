@@ -112,6 +112,9 @@ class Transaction(Base):
     # Transaction dates
     transaction_date = Column(DateTime, nullable=False)
     posting_date = Column(DateTime, nullable=True)  # For credit card transactions
+    # The budget-entry occurrence a materialised row fulfils (its next_occurrence
+    # when materialised); null falls back to transaction_date (STU-224).
+    occurrence_date = Column(DateTime, nullable=True)
     
     # File attachments
     receipt_url = Column(String(500), nullable=True)

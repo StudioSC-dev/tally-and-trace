@@ -674,6 +674,10 @@ def materialize_budget_entry(
     )
     # The entry's creator owns the transaction; the caller is its actor.
     db_txn = add_transaction(db, current_user, txn_create, owner=entry.user)
+    # The occurrence this row fulfils, read before the advance below: projected
+    # occurrences are suppressed by it, not by ``transaction_date``. Set on the
+    # row, not in ``TransactionCreate``, so no client can set it.
+    db_txn.occurrence_date = entry.next_occurrence
     # The entry's explicit tags, in the same commit as the transaction.
     copy_explicit_tags(db, entry.id, db_txn.id)
 
