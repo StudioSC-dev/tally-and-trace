@@ -755,7 +755,7 @@ def test_a_settings_error_prints_only_its_class(tmp_path, owner):
             *target_args()]
     done = run_wrapper(args, cwd=tmp_path, extra_env=env)
     assert done.returncode == 1, done.stdout + done.stderr
-    assert "error: " in done.stdout
+    assert "error: ValidationError" in done.stdout
     shown = done.stdout + done.stderr
     assert "Traceback" not in shown and "zq9sentinel" not in shown
     assert "production" not in shown
