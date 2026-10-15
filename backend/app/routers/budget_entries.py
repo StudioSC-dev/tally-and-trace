@@ -540,8 +540,9 @@ def materialize_budget_entry(
     deltas stay consistent), then moves ``next_occurrence`` to the following one —
     deactivating the entry when it passes its end date or exhausts its occurrences.
 
-    An installment (``end_mode`` "after_occurrences") always advances: a finished
-    one is refused with a 409 and ``advance`` False with a 400, because a payment
+    A capped installment (``end_mode`` "after_occurrences" with ``max_occurrences``
+    set) always advances: a finished or inactive one is refused with a 409 and
+    ``advance`` False with a 400, because a payment
     that doesn't use up an occurrence would pass the installment's total.
 
     With ``advance`` False the schedule stays put, so the projection would list
@@ -604,11 +605,13 @@ def materialize_budget_entry(
         raise HTTPException(status_code=404, detail="Budget entry not found")
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
-    if entry.end_mode == "after_occurrences":
+    if entry.end_mode == "after_occurrences" and entry.max_occurrences is not None:
         # An installment's payments are counted down by the advance, so a payment
-        # that doesn't advance, or one past the last, would pass its total.
-        if not entry.is_active or (entry.max_occurrences or 0) <= 0:
-            raise HTTPException(status_code=409, detail="This installment is finished")
+        # that doesn't advance, or one past the last, would pass its total. Without
+        # a cap (``max_occurrences`` None) the entry is open-ended, as elsewhere.
+        if not entry.is_active or entry.max_occurrences <= 0:
+            raise HTTPException(status_code=409,
+                                detail="This installment is finished or inactive")
         if not payload.advance:
             raise HTTPException(
                 status_code=400,

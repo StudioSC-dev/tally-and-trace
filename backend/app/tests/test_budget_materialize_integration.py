@@ -164,6 +164,7 @@ def test_a_finished_installment_refuses_another_payment(sw_client, sw_people, en
     r = _materialize(client, me, entry)
 
     assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "This installment is finished or inactive"
     assert _linked_rows(engine, entry) == 0
     assert _balance(client, me, checking) == Decimal("10000.00")
     assert _entry_state(client, me, entry)["occurrences_paid"] == 0
@@ -200,6 +201,24 @@ def test_the_last_payment_finishes_the_installment_and_a_second_is_refused(
     assert second.status_code == 409, second.text
     assert _linked_rows(engine, entry) == 1
     assert _balance(client, me, checking) == Decimal("9000.00")
+
+
+@pytest.mark.parametrize("advance", [True, False])
+def test_an_uncapped_after_occurrences_entry_is_paid_like_an_open_ended_one(
+        sw_client, sw_people, engine, advance):
+    """No cap means open-ended everywhere else (projection, advance, the web app)."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    entry = _installment(client, me, checking, remaining=None)
+    assert _entry_state(client, me, entry)["max_occurrences"] is None
+
+    r = _materialize(client, me, entry, advance=advance)
+
+    assert r.status_code == 201, r.text
+    assert _linked_rows(engine, entry) == 1
+    assert _balance(client, me, checking) == Decimal("9000.00")
+    state = _entry_state(client, me, entry)
+    assert state["max_occurrences"] is None and state["is_active"] is True
 
 
 def test_a_default_payment_uses_one_occurrence_and_moves_the_schedule(sw_client, sw_people):
