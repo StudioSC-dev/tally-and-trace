@@ -8,6 +8,7 @@
     ... --complete-record --run-record RECORD.json        (after exit code 3)
     python backend/scripts/cutover_load.py --sign-off --run-record RECORD.json \\
         --check-report CHECK.json --confirm OWNER_EMAIL
+    ... --sign-off ... --waive-block sheet --waiver-reason TEXT   (a waived refusal)
 
 Thin wrapper over ``app.cutover_load`` (see ``docs/cutover-load.md``). Before
 anything from the app is imported it resolves every path argument against
@@ -42,6 +43,10 @@ def parse_args(argv):
     p.add_argument("--run-record", help="the run record (written by a load; read otherwise)")
     p.add_argument("--check-report", help="the cutover check's report (sign-off)")
     p.add_argument("--confirm", help="the owner's email (reset, sign-off)")
+    p.add_argument("--waive-block", action="append", default=[], metavar="NAME",
+                   help="sign off with this refused block waived (repeatable; sign-off)")
+    p.add_argument("--waiver-reason", metavar="TEXT",
+                   help="why the waived blocks are accepted (required with --waive-block)")
     p.add_argument("--expect-host", help="the host DATABASE_URL must name")
     p.add_argument("--expect-db", help="the database DATABASE_URL must name")
     p.add_argument("--expect-server-addr", help="the server address the database must report")
@@ -56,6 +61,8 @@ def required(p, args, *names):
 
 def main(argv=None) -> int:
     p, args = parse_args(sys.argv[1:] if argv is None else argv)
+    if (args.waive_block or args.waiver_reason is not None) and not args.sign_off:
+        p.error("--waive-block and --waiver-reason go with --sign-off")
     if args.sign_off:
         required(p, args, "--run-record", "--check-report", "--confirm")
     elif args.complete_record:
@@ -94,7 +101,8 @@ def main(argv=None) -> int:
             from app.cutover_load.reset import sign_off
 
             return sign_off(run_record_path=args.run_record, check_report_path=args.check_report,
-                            confirm=args.confirm)
+                            confirm=args.confirm, waive_blocks=args.waive_block,
+                            waiver_reason=args.waiver_reason)
         raw = bootstrap.read_url()
         bootstrap.check_pg_environment()
         url = bootstrap.validate_url(raw, expect_host=args.expect_host, expect_db=args.expect_db)

@@ -49,6 +49,11 @@ POOLER_PORTS = frozenset({6543})
 # the two packages stay independent).
 CUTOVER_LOCK_KEY = 2_024_020_204
 
+# The zone every cutover session runs in (STU-315: ``loader.make_engine`` pins it).
+# A load whose session reports another is refused, and so is a sign-off on a
+# check report read in another.
+SESSION_TIMEZONE = "UTC"
+
 
 class Refused(Exception):
     """A refusal with a short check name and a message that holds no secret."""

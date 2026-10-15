@@ -2,10 +2,12 @@
 
 ``validate_input`` runs every rule that needs no database (rules 1 to 9) and
 returns a ``LoadPlan``: the computed account openings, the transactions in
-load order and each recurring entry's stored fields. Every failure is a
-``Problem`` naming its check and the input key; ``InputInvalid`` carries them
-all. Rule 10 (the owner's Household tag exists) needs the database and is
-checked by the loader.
+load order and each recurring entry's stored fields. A recurring entry's
+``anchor_day`` and ``day_rule`` are checked by the API's own rule
+(``services.recurrence.resolve_day_fields``), so the load cannot be refused
+for them halfway through. Every failure is a ``Problem`` naming its check and
+the input key; ``InputInvalid`` carries them all. Rule 10 (the owner's
+Household tag exists) needs the database and is checked by the loader.
 
 ``card_cycles`` is the card-statement computation of the cutover check
 (section 2.5, check 2): the card's posted rows dated before a boundary, split
@@ -24,6 +26,7 @@ from app.models.account import AccountType
 from app.models.budget_entry import BudgetEntryType
 from app.models.tag import HOUSEHOLD_TAG_NAME
 from app.models.transaction import TransactionType
+from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 from app.services.statements import (
     _split_card_rows, allocate_payments, iter_cycles_from, statement_balance,
 )
@@ -422,9 +425,20 @@ class _Checker:
                 self.fail("reference", e.key,
                           f"last_imported_line_key '{e.last_imported_line_key}' "
                           "is not an input transaction")
+            self._check_day_fields(e)
             plans.append(self._installment(e))
         self._check_matches(plans)
         return plans
+
+    def _check_day_fields(self, e: BudgetEntryIn) -> None:
+        """``anchor_day`` and ``day_rule`` as the API's create checks them (STU-315):
+        month-family only, not both, and ``next_occurrence`` on the rule or anchor."""
+        sent = {name: getattr(e, name) for name in DAY_FIELDS if getattr(e, name) is not None}
+        try:
+            resolve_day_fields(cadence=e.cadence, next_occurrence=day_start(e.next_occurrence),
+                               sent=sent)
+        except DayRuleError as exc:
+            self.fail("day_rule", e.key, str(exc))
 
     def _installment(self, e: BudgetEntryIn) -> EntryPlan:
         if e.installment is None:

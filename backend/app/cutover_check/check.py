@@ -18,6 +18,7 @@ import json
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from itertools import islice
 from typing import Dict, Iterator, List, Optional
 
 from sqlalchemy import and_, create_engine, func, or_, text
@@ -402,9 +403,19 @@ def installment_n(db: Session, entry: BudgetEntry) -> int:
     return linked + (entry.occurrences_paid_offset or 0)
 
 
+def next_dates(entry: BudgetEntry, count: int) -> List[str]:
+    """The entry's first ``count`` occurrence dates from ``next_occurrence`` on, walked
+    by ``iter_occurrences`` (so a cap and ``end_date`` apply as in the projection)."""
+    from app.services.forecast import iter_occurrences
+
+    walk = iter_occurrences(entry, naive(entry.next_occurrence), datetime.max)
+    return [d.date().isoformat() for d in islice(walk, count)]
+
+
 def check_recurring(ctx: Context, block: Block) -> None:
     """Check 5: each frozen entry resolves to exactly one owner entry and every frozen
-    field matches it, overflow account and autopay included; n of m for installments."""
+    field matches it, overflow account and autopay included; n of m for installments.
+    ``day_rule`` is always compared; ``anchor_day`` and ``next_dates`` when frozen."""
     pairs, problems = match_entries(ctx)
     block.failures.extend(problems)
     for f, e in pairs:
@@ -427,6 +438,12 @@ def check_recurring(ctx: Context, block: Block) -> None:
         if f.semi_monthly_days is not None:
             fields.append(("semi_monthly_days", list(f.semi_monthly_days),
                            [e.semi_monthly_day_1, e.semi_monthly_day_2]))
+        fields.append(("day_rule", f.day_rule, e.day_rule))
+        if f.anchor_day is not None:
+            fields.append(("anchor_day", f.anchor_day, e.anchor_day))
+        if f.next_dates is not None:
+            fields.append(("next_dates", [d.isoformat() for d in f.next_dates],
+                           next_dates(e, len(f.next_dates))))
         if f.installment is not None:
             n = installment_n(ctx.db, e)
             m = n + (e.max_occurrences or 0)

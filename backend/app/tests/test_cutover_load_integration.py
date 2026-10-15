@@ -352,6 +352,25 @@ def test_recurring_entries_load_with_their_installment_counts(tmp_path, owner, s
     assert loan_entry.is_autopay is True
 
 
+def test_day_fields_load_as_given_and_a_day_31_entry_gets_anchor_31(tmp_path, owner, sw_db):
+    """STU-315: a rule is stored with the rule (never an anchor), an anchor as
+    given, and an entry with neither on the 31st is anchored on 31."""
+    data = fixture()
+    by_key(data["budget_entries"], "e_rent").update(next_occurrence="2026-04-30",
+                                                    day_rule="last_weekday")
+    by_key(data["budget_entries"], "e_loan")["anchor_day"] = 20
+    by_key(data["budget_entries"], "e_stream")["next_occurrence"] = "2026-05-31"
+    load(tmp_path, data, owner)
+    rent = entry(sw_db, owner, "Rent")
+    assert (rent.day_rule, rent.anchor_day) == ("last_weekday", None)
+    assert wall(rent.next_occurrence) == datetime(2026, 4, 30)
+    loan_entry = entry(sw_db, owner, "Car Loan Payment")
+    assert (loan_entry.day_rule, loan_entry.anchor_day) == (None, 20)
+    stream = entry(sw_db, owner, "Streaming")
+    assert (stream.day_rule, stream.anchor_day) == (None, 31)
+    assert entry(sw_db, owner, "Salary").anchor_day is None  # semi-monthly
+
+
 # --- Test 7: cross currency ----------------------------------------------------------------
 
 def test_cross_currency_rows_store_the_right_figures(tmp_path, owner, sw_db):
@@ -422,6 +441,22 @@ def test_dates_round_trip_at_midnight(tmp_path, owner, sw_db, sw_client):
 
 
 # --- Test 9: atomicity ---------------------------------------------------------------------
+
+def test_a_load_whose_session_is_not_on_utc_is_refused(tmp_path, owner, sw_db, monkeypatch):
+    """STU-315 (defence in depth): every engine pins UTC; should a session still
+    read another zone, the load refuses before writing anything."""
+    import app.cutover_load.loader as loader
+    from app.cutover_load.bootstrap import Refused
+
+    before = counts(sw_db, owner["id"])
+    monkeypatch.setattr(loader, "UTC_SESSION_OPTIONS", "-c timezone=Asia/Manila")
+    with pytest.raises(Refused) as exc:
+        load(tmp_path, fixture(), owner)
+    assert exc.value.check == "session_timezone"
+    assert counts(sw_db, owner["id"]) == before
+    assert not (tmp_path / "run-report.json").exists()
+    assert not (tmp_path / "run-record.json").exists()
+
 
 def test_a_failure_after_some_rows_rolls_everything_back(tmp_path, owner, sw_db, monkeypatch):
     from fastapi import HTTPException
@@ -1574,6 +1609,23 @@ def test_sign_off_refuses_a_failing_or_mismatched_check_then_closes_the_window(t
     assert counts(sw_db, owner["id"])["transactions"] == 13
 
 
+def test_sign_off_refuses_a_check_report_not_read_on_utc(tmp_path, owner):
+    """STU-315: even when the record and the report agree, a zone other than UTC
+    (a load or check from before the pin) is refused."""
+    from app.cutover_load.bootstrap import Refused
+    from app.cutover_load.reset import sign_off
+
+    _, record = load(tmp_path, fixture(), owner)
+    assert json.loads(record.read_text())["session_timezone"] == "UTC"
+    edit_record(record, session_timezone="Asia/Manila")
+    report = _check_report(tmp_path, record, "manila.json")
+    with pytest.raises(Refused) as exc:
+        sign_off(run_record_path=str(record), check_report_path=str(report),
+                 confirm=owner["email"], out=quiet)
+    assert exc.value.check == "check_report" and "UTC" in exc.value.message
+    assert json.loads(record.read_text())["signed_off_at"] is None
+
+
 def test_sign_off_makes_no_database_connection(tmp_path, owner):
     _, record = load(tmp_path, fixture(), owner)
     good = _check_report(tmp_path, record, "good.json")
@@ -1582,6 +1634,177 @@ def test_sign_off_makes_no_database_connection(tmp_path, owner):
                        url="postgresql://nobody@db.invalid:1/none")
     assert done.returncode == 0, done.stdout + done.stderr
     assert "sign-off: pass" in done.stdout and "APP_IMPORTED=False" in done.stdout
+
+
+# --- STU-315: the sign-off waiver ----------------------------------------------------------
+
+MID_MONTH = "first_month starts after as_of"
+
+
+def _mid_month_check(tmp_path, owner):
+    """The load, then the real cutover check with the Sheet starting the month after
+    ``as_of`` (a mid-month load): every block passes but the sheet, which refuses."""
+    from app.cutover_check.check import dump, run
+    from app.cutover_check.schema import parse_frozen
+
+    _, record = load(tmp_path, fixture(), owner)
+    frozen = {**fixture("frozen"), "owner_email": owner["email"]}
+    frozen["sheet"].update(first_month="2026-04", months=["2026-04"],
+                           month_end={"2026-04": "0.00"}, dated_items=[])
+    report = run(make_url(TARGET["url"]), parse_frozen(frozen), expect_db=TARGET["db"],
+                 expect_server_addr=TARGET["addr"])
+    path = tmp_path / "check-mid-month.json"
+    path.write_text(dump(report))
+    return record, path, report
+
+
+def _waive(record, report_path, owner, blocks=("sheet",), reason="loaded mid-month",
+           out=quiet):
+    from app.cutover_load.reset import sign_off
+
+    return sign_off(run_record_path=str(record), check_report_path=str(report_path),
+                    confirm=owner["email"], waive_blocks=list(blocks), waiver_reason=reason,
+                    out=out)
+
+
+def test_the_check_report_blocks_are_the_sign_off_set():
+    from app.cutover_check.check import BLOCKS
+    from app.cutover_load.reset import CHECK_BLOCKS
+
+    assert tuple(name for name, _ in BLOCKS) == CHECK_BLOCKS
+
+
+def test_a_waived_mid_month_sheet_refusal_signs_off_and_is_recorded(tmp_path, owner):
+    from app.cutover_load.bootstrap import Refused
+    from app.cutover_load.reset import sign_off
+
+    record, path, report = _mid_month_check(tmp_path, owner)
+    statuses = {b["name"]: b["status"] for b in report["blocks"]}
+    assert report["overall"] == "fail" and report["posted_after"] == []
+    assert statuses.pop("sheet") == "refused" and set(statuses.values()) == {"pass"}, report
+    assert next(b for b in report["blocks"] if b["name"] == "sheet")["refused"] == MID_MONTH
+    with pytest.raises(Refused):  # without the flags the rule is unchanged: overall pass
+        sign_off(run_record_path=str(record), check_report_path=str(path),
+                 confirm=owner["email"], out=quiet)
+    lines = []
+    assert _waive(record, path, owner, reason="  loaded mid-month  ", out=lines.append) == 0
+    signed = json.loads(record.read_text())
+    assert signed["signed_off_at"] and signed["status"] == "complete"
+    assert signed["waiver"] == {"reason": "loaded mid-month", "blocks": [
+        {"name": "sheet", "status": "refused", "refused": MID_MONTH}]}
+    assert mode_of(record) == 0o600
+    assert any("sheet" in line and MID_MONTH in line for line in lines), lines
+    assert any("loaded mid-month" in line for line in lines), lines
+    with pytest.raises(Refused) as exc:
+        reset(record, owner["email"])
+    assert exc.value.check == "signed_off"
+
+
+def test_a_sign_off_without_flags_records_no_waiver(tmp_path, owner):
+    from app.cutover_load.reset import sign_off
+
+    _, record = load(tmp_path, fixture(), owner)
+    before = json.loads(record.read_text())
+    assert sign_off(run_record_path=str(record),
+                    check_report_path=str(_check_report(tmp_path, record, "good.json")),
+                    confirm=owner["email"], out=quiet) == 0
+    after = json.loads(record.read_text())
+    assert set(after) == set(before) and after["signed_off_at"]
+    assert {k: v for k, v in after.items() if k != "signed_off_at"} == {
+        k: v for k, v in before.items() if k != "signed_off_at"}
+
+
+def _blocks_with(report, name, **changes):
+    return [{**b, **changes} if b["name"] == name else b for b in report["blocks"]]
+
+
+def test_the_waiver_refuses_anything_but_named_allowlisted_refusals(tmp_path, owner):
+    from app.cutover_load.bootstrap import Refused
+
+    record, path, report = _mid_month_check(tmp_path, owner)
+    row = {"transaction_id": 1, "date": "2026-03-12", "type": "debit", "amount": "1.00",
+           "account_id": 1, "posted": True, "description": "late"}
+    blocks = report["blocks"]
+    cases = {
+        "sheet_posted_after": (_blocks_with(report, "sheet",
+                                            refused="posted rows dated on or after as_of"),
+                               {}, "refusal is not waivable"),
+        "sheet_not_cash": (_blocks_with(report, "sheet",
+                                        refused="the sheet account is not projection cash"),
+                           {}, "refusal is not waivable"),
+        "loans_guard": (_blocks_with(report, "loans", status="refused",
+                                     refused="posted rows dated on or after as_of"),
+                        {"waive": ("sheet", "loans")}, "loans block's refusal is not waivable"),
+        "failed_named": (_blocks_with(report, "sheet", status="fail"), {}, "did not refuse"),
+        "unnamed_non_pass": (_blocks_with(report, "recurring", status="fail"), {},
+                             "recurring block did not pass"),
+        "missing_block": ([b for b in blocks if b["name"] != "occurrences"], {},
+                          "complete version 1 set"),
+        "duplicate_block": (blocks + [blocks[0]], {}, "complete version 1 set"),
+        "unknown_block": (blocks + [{"name": "extra", "status": "pass", "checked": 1,
+                                     "failures": []}], {}, "complete version 1 set"),
+        "unknown_status": (_blocks_with(report, "recurring", status="skipped"), {},
+                           "unknown status"),
+        "unknown_waived_name": (blocks, {"waive": ("sheet", "balances")},
+                                "balances is not a check block"),
+        "posted_after": (blocks, {"report": {"posted_after": [row]}}, "posted rows"),
+        "overall_pass": (blocks, {"report": {"overall": "pass"}}, "without a waiver"),
+        "no_blocks": (None, {}, "lists no blocks"),
+        "list_name": (blocks + [{"name": ["sheet"], "status": "pass"}], {},
+                      "complete version 1 set"),
+        "list_status": (_blocks_with(report, "recurring", status=["pass"]), {},
+                        "unknown status"),
+    }
+    for name, (case_blocks, opts, fragment) in cases.items():
+        copy = tmp_path / f"check-{name}.json"
+        copy.write_text(json.dumps({**report, "blocks": case_blocks, **opts.get("report", {})}))
+        with pytest.raises(Refused) as exc:
+            _waive(record, copy, owner, blocks=opts.get("waive", ("sheet",)))
+        assert fragment in exc.value.message, (name, exc.value.message)
+        assert json.loads(record.read_text())["signed_off_at"] is None, name
+    for blocks_flag, reason in ((["sheet", "sheet"], "loaded mid-month"),
+                                (["sheet"], None), (["sheet"], ""), (["sheet"], " \t\n "),
+                                ([], "loaded mid-month")):
+        with pytest.raises(Refused) as exc:
+            _waive(record, path, owner, blocks=blocks_flag, reason=reason)
+        assert exc.value.check == "waiver", (blocks_flag, reason)
+    assert json.loads(record.read_text())["signed_off_at"] is None
+    # Every existing sign-off check still applies on the waiver path.
+    finished = datetime.fromisoformat(json.loads(record.read_text())["finished_at"])
+    for name, changes in (("early", {"checked_at": (finished - timedelta(seconds=1))
+                                     .isoformat()}),
+                          ("owner", {"owner_id": owner["id"] + 1}),
+                          ("db", {"database": "another_db"}),
+                          ("tz", {"session_timezone": "Asia/Manila"})):
+        copy = tmp_path / f"check-target-{name}.json"
+        copy.write_text(json.dumps({**report, **changes}))
+        with pytest.raises(Refused) as exc:
+            _waive(record, copy, owner)
+        assert exc.value.check == "check_report", name
+    with pytest.raises(Refused) as exc:
+        from app.cutover_load.reset import sign_off
+
+        sign_off(run_record_path=str(record), check_report_path=str(path),
+                 confirm="someone-else@example.com", waive_blocks=["sheet"],
+                 waiver_reason="loaded mid-month", out=quiet)
+    assert exc.value.check == "confirm"
+    assert json.loads(record.read_text())["signed_off_at"] is None
+
+
+def test_the_wrapper_signs_off_with_a_waiver_and_refuses_a_bare_reason(tmp_path, owner):
+    record, path, _ = _mid_month_check(tmp_path, owner)
+    bare = run_wrapper([*sign_off_args(record, path, owner["email"]),
+                        "--waiver-reason", "loaded mid-month"], cwd=tmp_path)
+    assert bare.returncode == 1 and "refused: waiver" in bare.stdout, bare.stdout + bare.stderr
+    stray = run_wrapper(["--waive-block", "sheet", "--waiver-reason", "x", "--input", "in.json",
+                         "--report", "r.json", *target_args()], cwd=tmp_path)
+    assert stray.returncode == 2, stray.stdout + stray.stderr
+    done = run_wrapper([*sign_off_args(record, path, owner["email"]), "--waive-block", "sheet",
+                        "--waiver-reason", "loaded mid-month"], cwd=tmp_path,
+                       url="postgresql://nobody@db.invalid:1/none")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "APP_IMPORTED=False" in done.stdout and "waived: sheet" in done.stdout
+    assert json.loads(record.read_text())["waiver"]["blocks"][0]["name"] == "sheet"
 
 
 # --- Test 17: Household --------------------------------------------------------------------

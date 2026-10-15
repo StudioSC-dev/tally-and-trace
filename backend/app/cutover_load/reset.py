@@ -18,23 +18,39 @@ pre-load guard passes again and every other user's row counts are unchanged.
 **Sign-off** makes no database connection: it writes ``signed_off_at`` into
 a ``complete`` run record once the cutover check's report (``report``
 "cutover-check", ``version`` 1) records an overall pass for the same owner
-id, database, server address and session time zone, with ``checked_at`` at or
-after the record's ``finished_at``. Reset then refuses.
+id, database, server address and session time zone, that zone UTC, with
+``checked_at`` at or after the record's ``finished_at``. Reset then refuses.
+
+A **waiver** (STU-315, ``--waive-block NAME`` with ``--waiver-reason``) signs off
+a report whose only non-pass blocks are the named ones, each refused with a
+refusal on the ``WAIVABLE`` allowlist (the sheet block's mid-month refusal), with
+every version 1 block listed once and no posted row on or after ``as_of``. The
+run record keeps each waived block's name, status and refusal and the reason.
+Without the flags nothing changes: the report must record an overall pass.
 
 The database imports are made inside ``run_reset``, so a sign-off imports no
 database code.
 """
 
 from datetime import datetime, timezone
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
-from app.cutover_load.bootstrap import Refused
+from app.cutover_load.bootstrap import SESSION_TIMEZONE, Refused
 from app.cutover_load.outputs import read_json, refuse_existing, replace_private, to_json
 
 # The cutover check's report (STU-204) as sign-off reads it.
 CHECK_KIND, CHECK_VERSION = "cutover-check", 1
 CHECK_OVERALL, CHECK_PASS = "overall", "pass"
 CHECK_TARGET_KEYS = ("owner_id", "database", "server_addr", "session_timezone")
+# The blocks a version 1 report lists, in order (``cutover_check.check.BLOCKS``; not
+# imported, so a sign-off imports no database code), and their statuses.
+CHECK_BLOCKS = ("checkpoints", "card_statements", "card_routing", "loans", "recurring",
+                "occurrences", "foreign_invariants", "sheet")
+CHECK_STATUSES = frozenset({"pass", "fail", "refused"})
+# The (block, refusal) pairs a waiver may name (STU-315): only the sheet block's
+# refusal for a Sheet that starts after as_of, the mid-month load. Its other
+# refusals and the posted-after guard's are never waivable.
+WAIVABLE = frozenset({("sheet", "first_month starts after as_of")})
 
 
 def _record(path: str) -> dict:
@@ -55,18 +71,79 @@ def _window_open(record: dict, confirm: str) -> None:
 
 # --- Sign-off ------------------------------------------------------------------------------
 
+def _waiver_flags(waive_blocks: Sequence[str], reason: Optional[str]) -> None:
+    """The waiver flags on their own: a block needs a reason and a reason a block,
+    and no block is named twice."""
+    if reason is not None and not waive_blocks:
+        raise Refused("waiver", "--waiver-reason needs --waive-block")
+    if waive_blocks and (reason is None or not reason.strip()):
+        raise Refused("waiver", "--waive-block needs a non-blank --waiver-reason")
+    if len(set(waive_blocks)) != len(waive_blocks):
+        raise Refused("waiver", "a block is named twice in --waive-block")
+
+
+def _waived(report: dict, waive_blocks: Sequence[str]) -> List[dict]:
+    """The waived blocks as the run record stores them, or ``Refused``.
+
+    The report must fail, list exactly the version 1 blocks once each with a known
+    status and no posted row on or after ``as_of``; every named block must refuse
+    with an allowlisted refusal (``WAIVABLE``), and every other block must pass.
+    """
+    if report.get(CHECK_OVERALL) == CHECK_PASS:
+        raise Refused("waiver", "the cutover check passed; sign off without a waiver")
+    if report.get(CHECK_OVERALL) != "fail":
+        raise Refused("check_report", "the check report's overall is neither pass nor fail")
+    blocks = report.get("blocks")
+    if not isinstance(blocks, list) or not all(isinstance(b, dict) for b in blocks):
+        raise Refused("check_report", "the check report lists no blocks")
+    names = [b.get("name") for b in blocks]
+    if not all(isinstance(n, str) for n in names) or len(names) != len(set(names)) \
+            or set(names) != set(CHECK_BLOCKS):
+        raise Refused("check_report", "the check report's blocks are not the complete "
+                                      "version 1 set, each once")
+    if any(not isinstance(b.get("status"), str) or b["status"] not in CHECK_STATUSES
+           for b in blocks):
+        raise Refused("check_report", "a block in the check report has an unknown status")
+    by_name = {b["name"]: b for b in blocks}
+    for name in waive_blocks:
+        if name not in by_name:
+            raise Refused("waiver", f"--waive-block {name} is not a check block")
+        block = by_name[name]
+        if block["status"] != "refused":
+            raise Refused("waiver", f"the {name} block did not refuse "
+                                    f"(its status is {block['status']}); only a refusal "
+                                    "can be waived")
+        if (name, block.get("refused")) not in WAIVABLE:
+            raise Refused("waiver", f"the {name} block's refusal is not waivable")
+    for name, block in by_name.items():
+        if name not in waive_blocks and block["status"] != CHECK_PASS:
+            raise Refused("check_report", f"the {name} block did not pass and is not waived")
+    if report.get("posted_after") != []:
+        raise Refused("check_report", "the check report lists posted rows on or after as_of")
+    return [{"name": name, "status": by_name[name]["status"],
+             "refused": by_name[name]["refused"]} for name in waive_blocks]
+
+
 def sign_off(*, run_record_path: str, check_report_path: str, confirm: str,
+             waive_blocks: Sequence[str] = (), waiver_reason: Optional[str] = None,
              out: Callable[[str], None] = print) -> int:
+    """Close the window on a passing check report or, with ``waive_blocks`` and a
+    ``waiver_reason`` (STU-315), on one whose only non-pass blocks are those named,
+    each refused with an allowlisted refusal; the waiver goes into the run record."""
+    _waiver_flags(waive_blocks, waiver_reason)
     record = _record(run_record_path)
     _window_open(record, confirm)
     report = read_json(check_report_path, "check report")
     if report.get("report") != CHECK_KIND or report.get("version") != CHECK_VERSION:
         raise Refused("check_report", "this file is not a version 1 cutover check report")
-    if report.get(CHECK_OVERALL) != CHECK_PASS:
+    waived = _waived(report, waive_blocks) if waive_blocks else None
+    if waived is None and report.get(CHECK_OVERALL) != CHECK_PASS:
         raise Refused("check_report", "the cutover check did not record an overall pass")
     for key in CHECK_TARGET_KEYS:
         if record.get(key) is None or report.get(key) != record.get(key):
             raise Refused("check_report", f"the check report's {key} is not the run record's")
+    if report.get("session_timezone") != SESSION_TIMEZONE:  # STU-315: every session is on UTC
+        raise Refused("check_report", "the check report's session_timezone is not UTC")
     try:  # the check must have read the loaded state, not an earlier one
         checked = datetime.fromisoformat(report["checked_at"])
         finished = datetime.fromisoformat(record["finished_at"])
@@ -77,8 +154,16 @@ def sign_off(*, run_record_path: str, check_report_path: str, confirm: str,
     if early:
         raise Refused("check_report", "the check ran before the load finished")
     signed = {**record, "signed_off_at": datetime.now(timezone.utc).isoformat()}
+    if waived is not None:
+        signed["waiver"] = {"reason": waiver_reason.strip(), "blocks": waived}
     replace_private(run_record_path, to_json(signed))
-    out("sign-off: pass; the maintenance window is closed and reset now refuses")
+    if waived is None:
+        out("sign-off: pass; the maintenance window is closed and reset now refuses")
+        return 0
+    out("sign-off: pass with a waiver; the maintenance window is closed and reset now refuses")
+    for block in waived:
+        out(f"  waived: {block['name']} ({block['status']}: {block['refused']})")
+    out(f"  reason: {waiver_reason.strip()}")
     return 0
 
 

@@ -157,6 +157,10 @@ class BudgetEntryIn(_Model):
     last_imported_line_key: Optional[Key] = None
     description_contains: Optional[str] = Field(None, min_length=1)
     installment: Optional[Installment] = None
+    # STU-315: the month-family day. Neither: the API anchors the entry on its
+    # next_occurrence's day. Validation checks them as the API does.
+    anchor_day: Optional[int] = Field(None, ge=1, le=31)
+    day_rule: Optional[Literal["last_weekday"]] = None
 
 
 class CutoverInput(_Model):

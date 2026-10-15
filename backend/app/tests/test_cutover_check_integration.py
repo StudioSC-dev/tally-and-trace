@@ -150,6 +150,52 @@ def test_schema_refuses_a_zero_dated_item():
 
 # --- Bootstrap: URL validation (no connection) -------------------------------------------------
 
+def test_schema_accepts_day_fields_and_next_dates():
+    raw = frozen_base()
+    raw["recurring"][0].update(anchor_day=25, next_dates=["2031-03-25", "2031-04-25"])
+    raw["recurring"][1]["day_rule"] = "last_weekday"
+    frozen = schema.parse_frozen(raw)
+    assert frozen.recurring[0].anchor_day == 25
+    assert [d.isoformat() for d in frozen.recurring[0].next_dates] == ["2031-03-25",
+                                                                      "2031-04-25"]
+    assert frozen.recurring[1].day_rule == "last_weekday"
+    old = schema.parse_frozen(frozen_base()).recurring[0]  # files without them still parse
+    assert (old.day_rule, old.anchor_day, old.next_dates) == (None, None, None)
+
+
+def test_schema_month_family_is_the_recurrence_rules():
+    from app.services.recurrence import MONTH_FAMILY
+
+    assert schema._MONTH_FAMILY == {c.value for c in MONTH_FAMILY}
+
+
+def test_schema_refuses_more_than_twelve_next_dates():
+    raw = frozen_base()
+    raw["recurring"][0]["next_dates"] = [f"2031-{m:02d}-25" for m in range(1, 13)] + [
+        "2032-01-25"]
+    refused(raw, "next_dates holds 12 dates at most")
+
+
+@pytest.mark.parametrize("cadence, fields", [
+    ("monthly", {"anchor_day": 25, "day_rule": "last_weekday"}),
+    ("weekly", {"anchor_day": 25}),
+    ("weekly", {"day_rule": "last_weekday"}),
+])
+def test_schema_refuses_day_fields_together_or_outside_the_month_family(cadence, fields):
+    raw = frozen_base()
+    raw["recurring"][0].update(cadence=cadence, **fields)
+    refused(raw, "anchor_day and day_rule")
+
+
+@pytest.mark.parametrize("field, value", [("anchor_day", 0), ("anchor_day", 32),
+                                          ("day_rule", "first_weekday")])
+def test_schema_refuses_day_fields_out_of_range(field, value):
+    raw = frozen_base()
+    raw["recurring"][0][field] = value
+    with pytest.raises(schema.FrozenError):
+        schema.parse_frozen(raw)
+
+
 LOCAL = "postgresql://u:secret@127.0.0.1:5432/c3db"
 
 
@@ -1201,6 +1247,70 @@ def test_a_wrong_recurring_definition_fails(world, target, name, field, value, m
     assert [f["message"] for f in failures] == [message], failures
     if field == "installment":
         assert (failures[0]["expected"], failures[0]["actual"]) == ("3 of 6", "2 of 6")
+
+
+def recurring_only():
+    from app.cutover_check.check import check_recurring
+
+    return [("recurring", check_recurring)]
+
+
+def add_payday(world) -> dict:
+    """A last-weekday entry (STU-315) and its frozen counterpart."""
+    world["post"]("/budget-entries/", {
+        "name": "Payday", "entry_type": "income", "amount": 1000, "currency": "PHP",
+        "cadence": "monthly", "day_rule": "last_weekday", "account_id": world["bank"],
+        "next_occurrence": day("2031-03-31")})
+    return {"name": "Payday", "account": sel("Main bank", "checking"), "destination": None,
+            "overflow_account": None, "entry_type": "income", "amount": "1000.00",
+            "currency": "PHP", "cadence": "monthly", "next_occurrence": "2031-03-31",
+            "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+            "day_rule": "last_weekday",
+            "next_dates": ["2031-03-31", "2031-04-30", "2031-05-30"]}
+
+
+@needs_db
+def test_a_matching_day_rule_and_next_dates_pass(world, target):
+    raw = owner_frozen(world)
+    raw["recurring"].append(add_payday(world))
+    recurring(raw, "Salary").update(anchor_day=25,
+                                    next_dates=["2031-03-25", "2031-04-25", "2031-05-25"])
+    recurring(raw, "Phone plan")["next_dates"] = [  # the cap of 4 applies
+        "2031-03-20", "2031-04-20", "2031-05-20", "2031-06-20"]
+    report = run_check(target, raw, blocks=recurring_only())
+    assert block(report, "recurring")["status"] == "pass", block(report, "recurring")
+
+
+@needs_db
+def test_a_day_rule_mismatch_fails_either_way(world, target):
+    raw = owner_frozen(world)
+    payday = add_payday(world)
+    del payday["day_rule"], payday["next_dates"]  # frozen as a plain day: unexpected rule
+    raw["recurring"].append(payday)
+    recurring(raw, "Salary")["day_rule"] = "last_weekday"  # frozen rule, none stored
+    failures = block(run_check(target, raw, blocks=recurring_only()), "recurring")["failures"]
+    assert sorted((f["entry"].split(" on ")[0], f["message"], f["expected"], f["actual"])
+                  for f in failures) == [
+        ("Payday", "recurring day_rule differs", None, "last_weekday"),
+        ("Salary", "recurring day_rule differs", "last_weekday", None)]
+
+
+@needs_db
+def test_a_wrong_anchor_or_next_dates_fail(world, target):
+    raw = owner_frozen(world)
+    recurring(raw, "Salary")["anchor_day"] = 24
+    recurring(raw, "Utilities")["next_dates"] = ["2031-03-20", "2031-04-21"]
+    recurring(raw, "Phone plan")["next_dates"] = [  # one past the cap of 4
+        "2031-03-20", "2031-04-20", "2031-05-20", "2031-06-20", "2031-07-20"]
+    failures = block(run_check(target, raw, blocks=recurring_only()), "recurring")["failures"]
+    assert [(f["message"], f["expected"], f["actual"]) for f in failures] == [
+        ("recurring anchor_day differs", 24, 25),
+        ("recurring next_dates differs", ["2031-03-20", "2031-04-21"],
+         ["2031-03-20", "2031-04-20"]),
+        ("recurring next_dates differs",
+         ["2031-03-20", "2031-04-20", "2031-05-20", "2031-06-20", "2031-07-20"],
+         ["2031-03-20", "2031-04-20", "2031-05-20", "2031-06-20"]),
+    ]
 
 
 @needs_db
