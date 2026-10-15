@@ -49,8 +49,8 @@ python backend/scripts/cutover_check.py \
 
 ### What it refuses before checking (exit code 2)
 
-- `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE` or
-  `PGTZ` is set.
+- `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE`,
+  `PGTZ` or `PGOPTIONS` is set.
 - The URL's driver is not `postgresql` or `postgresql+psycopg2`, it has no host
   or several, or its host or database differs from `--expect-host` / `--expect-db`.
 - The URL has a query key other than `sslmode`, `sslrootcert`, `connect_timeout`
@@ -99,7 +99,7 @@ their class name, never their message.
   provider is never called.
 - **Time zone.** The date columns are `timestamptz` in the database, so dates are
   read in the session time zone. The report records it as `session_timezone`.
-  Run the load and the check with the same server default. `PGTZ` is refused;
+  Run the load and the check with the same server default. `PGTZ` and `PGOPTIONS` are refused;
   `TZ` on the client does not affect the server session.
 
 ## The frozen file (`cutover-frozen` v1)
