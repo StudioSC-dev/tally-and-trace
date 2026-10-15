@@ -241,6 +241,14 @@ def test_rule_row_must_stay_on_the_rule(sw_client, sw_db, world):
     assert _stored(sw_db, entry) == (None, "last_weekday", datetime(2026, 11, 30))
 
 
+def test_a_null_anchor_alone_leaves_a_stored_rule(sw_client, sw_db, world):
+    """Only a non-null anchor clears the stored rule (the request decides by value)."""
+    who, bank = world
+    entry = _create(sw_client, who, bank, "2026-10-30T00:00:00", day_rule="last_weekday")["id"]
+    _update(sw_client, who, entry, anchor_day=None)
+    assert _stored(sw_db, entry)[:2] == (None, "last_weekday")
+
+
 def test_clearing_the_rule_derives_from_the_date(sw_client, sw_db, world):
     who, bank = world
     entry = _create(sw_client, who, bank, "2026-10-30T00:00:00", day_rule="last_weekday")["id"]
