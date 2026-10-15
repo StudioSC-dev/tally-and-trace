@@ -1701,3 +1701,31 @@ def test_the_check_is_refused_while_a_load_holds_the_lock(tmp_path, owner):
     assert done.returncode == 2, done.stdout + done.stderr
     assert "refused: a cutover load or reset holds the lock" in done.stdout
     assert not (tmp_path / "check-report.json").exists()
+
+
+def test_one_changed_input_row_fails_the_check_and_names_it(tmp_path, owner):
+    """Plan v3: changing one input row makes the check fail and name that row. The
+    spouse deposit on the joint account is loaded at 5100 instead of 5000; the check
+    against the unchanged frozen figures fails on that account's balance only."""
+    data = fixture()
+    by_key(data["transactions"], "spouse_dep")["amount"] = "5100.00"
+    path = write_input(tmp_path, data, owner)
+    done = run_wrapper(["--input", path, "--report", str(tmp_path / "load-report.json"),
+                        "--run-record", str(tmp_path / "record.json"),
+                        *target_args(addr=TARGET["addr"])], cwd=tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(json.dumps({**fixture("frozen"), "owner_email": owner["email"]}))
+    check_report = tmp_path / "check-report.json"
+    done = run_check(tmp_path, frozen, check_report)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "checkpoints: FAIL" in done.stdout and "overall: FAIL" in done.stdout
+    checked = json.loads(check_report.read_text())
+    assert checked["overall"] == "fail"
+    failing = {b["name"]: b["failures"] for b in checked["blocks"] if b["status"] != "pass"}
+    assert list(failing) == ["checkpoints"], failing
+    assert failing["checkpoints"] == [{
+        "message": "balance differs", "account": "Joint Bank (savings, PHP)",
+        "date": "2026-03-09", "point": "end_of_day", "expected": "25000.00",
+        "actual": "25100.00", "difference": "100.00"}]
