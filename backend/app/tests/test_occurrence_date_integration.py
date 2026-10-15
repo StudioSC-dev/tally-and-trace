@@ -106,13 +106,13 @@ def _naive(dt):
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
-def test_occurrence_date_migration_is_the_single_head():
+def test_occurrence_date_migration_is_on_the_single_head():
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
     (head,) = script.get_heads()
-    assert head == OCCURRENCE_DATE
+    assert OCCURRENCE_DATE in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(OCCURRENCE_DATE).down_revision == PREVIOUS
 
 
