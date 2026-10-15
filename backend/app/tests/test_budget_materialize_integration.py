@@ -417,10 +417,12 @@ def test_materialize_entry_delete_and_transaction_update_cannot_deadlock(
 
     It reproduces no bug on main (see the PR body): with the owner lock first on
     every path, whichever request gets it runs to its commit while the others wait
-    holding nothing. With materialize taking the entry before the owner lock,
-    ``[D, M, U]`` is a deadlock cycle (``40P01``) and ``[U, M, D]`` the three-session
-    one: D holds the transaction and waits for the entry, M holds the entry and
-    waits for the owner lock, U holds the owner lock and waits for the transaction.
+    holding nothing. ``delete_budget_entry`` takes the owner lock and then the entry
+    before it nullifies the linked rows, so D never holds the transaction while it
+    waits for the entry. The cycle this pins is ``[D, M, U]`` with materialize's two
+    lock lines swapped: M holds the entry and waits for the owner lock, D holds the
+    owner lock and waits for the entry (``40P01``). ``[U, M, D]`` is an ordering
+    guard kept from the earlier design, where D nullified before locking the entry.
     """
     client, me = sw_client, sw_people()
     checking = _checking(client, me)
