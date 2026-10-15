@@ -1859,7 +1859,9 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
     ``_linked_occurrence_days``) a materialised row (``occurrence_date`` set)
     counts only while it passes that account check, shared or not: moved off the
     entry's account(s) it stands for nothing. An entry with no account has none
-    to check, so its creator's materialised rows count anywhere. A row linked by
+    to check, so its creator's materialised rows count anywhere. The check reads
+    the entry's current account(s), so a later change to the entry's account
+    counts as a move, and the occurrence is projected again. A row linked by
     hand (``occurrence_date`` null, which includes one relinked to another
     entry) keeps the rule above. Without ``occurrence_match`` (counting paid
     occurrences) the rule above holds for every row.
