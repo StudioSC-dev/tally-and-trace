@@ -943,8 +943,19 @@ def test_card_installment_statement_is_routed_to_the_payment_account(db, user):
     ]
 
 
+def _card_entry(db, user, card, **kw):
+    """An open-ended 2,000 a month on the card from 1 Aug."""
+    from app.models.budget_entry import BudgetEntryType
+
+    return _entry(db, user, "Card entry", BudgetEntryType.EXPENSE, "2000.00",
+                  datetime(2026, 8, 1), account=card, **kw)
+
+
 def test_card_installment_occurrence_with_a_linked_transaction_is_suppressed(db, user, client):
-    """Materialised without advancing: the transaction stands in for that occurrence."""
+    """Materialised without advancing: the transaction stands in for that occurrence.
+
+    An installment can't be paid without advancing (``materialize`` refuses it), so
+    this uses an open-ended entry."""
     from app.models.account import AccountType
     from app.services.forecast import collect_events, project_running_balance
 
@@ -952,7 +963,7 @@ def test_card_installment_occurrence_with_a_linked_transaction_is_suppressed(db,
     card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
-    entry = _card_installment(db, user, card)
+    entry = _card_entry(db, user, card)
 
     login = client.post("/api/v1/auth/login",
                         json={"email": user.email, "password": "password123"})
