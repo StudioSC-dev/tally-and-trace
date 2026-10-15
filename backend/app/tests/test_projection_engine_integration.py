@@ -1779,3 +1779,43 @@ def test_only_a_materialised_row_must_stay_on_the_entrys_account(db, user, clien
 
     assert dates(water) == [datetime(2026, 9, 5)]
     assert dates(rent) == [datetime(2026, 8, 5), datetime(2026, 9, 5)]
+
+
+# --- STU-225: payables and per-account closings (guard) --------------------------
+# Fixed by 0849d03; this pins the two views its test did not assert.
+
+@pytest.mark.parametrize("posted", [True, False])
+def test_cash_entry_recorded_without_advancing_is_paid_once_in_payables_and_closings(
+        db, user, client, posted):
+    """The scenario of ``test_cash_entry_occurrence_recorded_without_advancing_is_
+    projected_once``: rent 2,000 a month on Checking (10,000) from 5 Aug, the 5 Aug
+    occurrence recorded without advancing (materialised, or an unposted row linked
+    by hand). Over 1 Aug - 10 Sep the payables list 5 Sep once (and the unposted
+    row on 5 Aug), and Checking closes August at 8,000 and the window at 6,000."""
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.models.transaction import TransactionType
+    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+
+    checking = _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+    entry = _entry(db, user, "Rent", BudgetEntryType.EXPENSE, "2000.00",
+                   datetime(2026, 8, 5), account=checking)
+    if posted:
+        _materialize(client, user, entry, advance=False)
+    else:
+        _txn(db, user, checking, TransactionType.DEBIT, "2000.00", datetime(2026, 8, 5),
+             description="Rent", budget_entry_id=entry.id)
+
+    db.expire_all()
+    reference = datetime(2026, 8, 1)
+    payables = [(p["due_date"], p["name"], p["amount"], p["source"], p["account_name"])
+                for p in get_payables(db, user.id, days=40, reference=reference)]
+    expected = [] if posted else [("2026-08-05", "Rent", 2000.0, "transaction", "Checking B")]
+    assert payables == expected + [("2026-09-05", "Rent", 2000.0, "budget_entry", "Checking B")]
+
+    (aug,) = project_cashflow(db, user.id, months=1, reference=reference)
+    assert [(a["account_name"], a["closing_balance"]) for a in aug["by_account"]] == [
+        ("Checking B", 8000.0)]
+    r = project_running_balance(db, user.id, days=40, reference=reference)
+    assert [(a["account_name"], a["closing_balance"]) for a in r["by_account"]] == [
+        ("Checking B", Decimal("6000.00"))]
