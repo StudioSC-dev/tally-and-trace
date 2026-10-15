@@ -24,6 +24,7 @@ from sqlalchemy import and_, create_engine, func, or_, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
+from app.core.database import UTC_SESSION_OPTIONS
 from app.cutover_check.bootstrap import CUTOVER_LOCK_KEY, verify_target
 from app.cutover_check.schema import (
     Frozen, Recurring, Selector, add_months, month_of, month_start,
@@ -36,7 +37,9 @@ from app.models.transaction import Transaction, TransactionType, transfer_sides
 from app.models.user import User
 from app.services.fx import FxRates
 
-READ_ONLY_OPTIONS = "-c default_transaction_read_only=on"
+# Read-only by default, and on UTC like every engine (STU-315): the dates are
+# timestamptz, read back in the session's zone.
+READ_ONLY_OPTIONS = f"-c default_transaction_read_only=on {UTC_SESSION_OPTIONS}"
 
 
 class CheckRefused(Exception):
@@ -580,7 +583,8 @@ def check_session(db: Session, frozen: Frozen,
 
 
 def make_engine(url):
-    """An engine whose sessions default to read-only (code-supplied, not a URL key)."""
+    """An engine whose sessions default to read-only and run on UTC (code-supplied,
+    not a URL key)."""
     return create_engine(url, poolclass=NullPool,
                          connect_args={"options": READ_ONLY_OPTIONS})
 

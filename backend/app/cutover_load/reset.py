@@ -194,6 +194,14 @@ def delete_owner_rows(db, owner_id: int, household_id: int) -> None:
         db.execute(text(statement), p)
 
 
+def reset_engine(url):
+    """The reset's engine: on UTC like the load's (``loader.make_engine``), and
+    REPEATABLE READ, one snapshot for the whole reset."""
+    from app.cutover_load.loader import make_engine
+
+    return make_engine(url, isolation_level="REPEATABLE READ")
+
+
 def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_db: str,
               expect_server_addr: Optional[str], report_path: Optional[str] = None,
               out: Callable[[str], None] = print) -> int:
@@ -201,9 +209,7 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
     ``CutoverError`` on any refusal, with nothing changed. ``report_path``, when
     given, is where the wrapper writes a refusal's details (tables and counts,
     never figures); it must not exist yet."""
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
-    from sqlalchemy.pool import NullPool
 
     from app.cutover_load.bootstrap import check_target, observe_target
     from app.cutover_load.loader import (
@@ -219,7 +225,7 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
         raise Refused("run_record", "the run record has no fingerprint of the loaded state")
     # REPEATABLE READ: one snapshot for the whole reset, so the deletes act on
     # exactly the state whose counts and fingerprint were just checked.
-    engine = create_engine(url, poolclass=NullPool, isolation_level="REPEATABLE READ")
+    engine = reset_engine(url)
     try:
         with engine.connect() as conn:
             trans = conn.begin()

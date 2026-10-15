@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from app.core.access import touches_accounts, viewable_account_ids
+from app.core.database import UTC_SESSION_OPTIONS
 from app.core.seed import DEMO_EMAILS
 from app.cutover_load.bootstrap import (
     CUTOVER_LOCK_KEY, Refused, check_target, error_class, observe_target,
@@ -517,6 +518,14 @@ def git_sha() -> str:
 
 # --- The run -------------------------------------------------------------------------------
 
+def make_engine(url, **kwargs):
+    """An engine for one cutover run, its sessions on UTC (STU-315): the dates are
+    timestamptz, so a naive date is stored as its UTC components whatever the
+    server's default zone. Every load, completion and reset engine comes from here."""
+    return create_engine(url, poolclass=NullPool,
+                         connect_args={"options": UTC_SESSION_OPTIONS}, **kwargs)
+
+
 def run_load(*, url, input_path: str, report_path: str, run_record_path: Optional[str],
              dry_run: bool, expect_db: str, expect_server_addr: Optional[str],
              out: Callable[[str], None] = print) -> int:
@@ -526,7 +535,7 @@ def run_load(*, url, input_path: str, report_path: str, run_record_path: Optiona
     with open(input_path, "rb") as fh:
         raw = fh.read()
     input_sha = hashlib.sha256(raw).hexdigest()
-    engine = create_engine(url, poolclass=NullPool)
+    engine = make_engine(url)
     try:
         with engine.connect() as conn:
             trans = conn.begin()
@@ -630,7 +639,7 @@ def complete_record(*, url, run_record_path: str, expect_db: str,
         raise Refused("run_record", "only a prepared cutover run record can be completed")
     if not record.get("fingerprint"):
         raise Refused("run_record", "the run record has no fingerprint of the loaded state")
-    engine = create_engine(url, poolclass=NullPool)
+    engine = make_engine(url)
     try:
         with engine.connect() as conn:
             trans = conn.begin()

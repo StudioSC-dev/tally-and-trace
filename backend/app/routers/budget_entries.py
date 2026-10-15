@@ -44,6 +44,7 @@ from app.schemas.budget_entry import (
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 from app.core.time import utc_now
 
 router = APIRouter()
@@ -272,6 +273,21 @@ def _validate_transfer_destination(
             )
 
 
+def _day_fields(cadence, next_occurrence, sent: dict, stored=None) -> dict:
+    """The ``anchor_day`` and ``day_rule`` a write persists (services/recurrence.py
+    ``resolve_day_fields``, plan STU-315 section 2.4); 422 when it refuses them.
+
+    ``cadence`` and ``next_occurrence`` are the row as it will be; ``sent`` holds
+    the day fields the request named (null included); ``stored`` is the row
+    before an update, None on create.
+    """
+    try:
+        return resolve_day_fields(cadence=cadence, next_occurrence=next_occurrence,
+                                  sent=sent, stored=stored)
+    except DayRuleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
 @router.get("/", response_model=BudgetEntryListResponse)
 def list_budget_entries(
     db: Session = Depends(get_db),
@@ -358,10 +374,15 @@ def create_budget_entry(
         entry_in.entry_type, entry_in.currency,
     )
 
+    day_fields = _day_fields(
+        entry_in.cadence, entry_in.next_occurrence,
+        {f: getattr(entry_in, f) for f in DAY_FIELDS if f in entry_in.model_fields_set})
+
     entry_data = entry_in.dict()
     entry_data.pop("tag_ids", None)
     entry_data["user_id"] = current_user.id
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
+    entry_data.update(day_fields)
     entry = BudgetEntry(**entry_data)
 
     db.add(entry)
@@ -457,6 +478,13 @@ def update_budget_entry(
     ):
         raise HTTPException(status_code=422, detail=ZERO_REMAINING_MESSAGE)
 
+    # The day fields as the row will be: the request merged over the stored row.
+    prospective_data.update(_day_fields(
+        prospective_data.get("cadence") or entry.cadence,
+        prospective_data.get("next_occurrence") or entry.next_occurrence,
+        {f: prospective_data[f] for f in DAY_FIELDS if f in prospective_data},
+        stored=entry))
+
     for field, value in prospective_data.items():
         setattr(entry, field, value)
 
@@ -506,8 +534,15 @@ def delete_budget_entry(
 
 
 def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
-    """Return the occurrence following ``current`` for this entry's cadence."""
+    """Return the occurrence following ``current`` for this entry's cadence.
+
+    Fixed-step cadences go through ``step_occurrence`` (services/recurrence.py),
+    which follows the entry's ``anchor_day`` or ``day_rule`` and keeps the aware
+    value's tzinfo, so materialize's ``end_date`` comparison never mixes naive and
+    aware values.
+    """
     from app.services.forecast import _next_occurrence
+    from app.services.recurrence import step_occurrence
 
     if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
         d1 = entry.semi_monthly_day_1 or 1
@@ -523,7 +558,7 @@ def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
         future = sorted(c for c in candidates if c > current)
         return future[0] if future else _next_occurrence(current, RecurrenceFrequency.MONTHLY)
 
-    return _next_occurrence(current, entry.cadence)
+    return step_occurrence(entry, current)
 
 
 @router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)

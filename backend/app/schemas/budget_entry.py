@@ -11,6 +11,9 @@ from app.schemas.tag import (
 )
 
 
+DayRule = Literal["last_weekday"]
+
+
 class BudgetEntryBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     entry_type: BudgetEntryType
@@ -22,6 +25,11 @@ class BudgetEntryBase(BaseModel):
     # Only meaningful when cadence == SEMI_MONTHLY. Days clamp to month length at projection time.
     semi_monthly_day_1: int = Field(1, ge=1, le=31)
     semi_monthly_day_2: int = Field(15, ge=1, le=31)
+    # Month-family cadences only (services/recurrence.py): the intended day of the
+    # month, or the rule "last_weekday", never both. Omitted on create, the anchor
+    # is next_occurrence's day; next_occurrence must be on the day either names.
+    anchor_day: Optional[int] = Field(None, ge=1, le=31)
+    day_rule: Optional[DayRule] = None
     end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
     account_id: Optional[int] = Field(None, gt=0)
     overflow_account_id: Optional[int] = Field(None, gt=0)
@@ -70,6 +78,9 @@ class BudgetEntryUpdate(BaseModel):
     lead_time_days: Optional[int] = Field(None, ge=0, le=365)
     semi_monthly_day_1: Optional[int] = Field(None, ge=1, le=31)
     semi_monthly_day_2: Optional[int] = Field(None, ge=1, le=31)
+    # Null clears (see services/recurrence.py ``resolve_day_fields``).
+    anchor_day: Optional[int] = Field(None, ge=1, le=31)
+    day_rule: Optional[DayRule] = None
     account_id: Optional[int] = Field(None, gt=0)
     overflow_account_id: Optional[int] = Field(None, gt=0)
     transfer_to_account_id: Optional[int] = Field(None, gt=0)
@@ -138,6 +149,8 @@ class SharedFullRecurringEntry(BaseModel):
     lead_time_days: int = 0
     semi_monthly_day_1: int = 1
     semi_monthly_day_2: int = 15
+    anchor_day: Optional[int] = None
+    day_rule: Optional[DayRule] = None
     end_mode: Literal["indefinite", "on_date", "after_occurrences"] = "indefinite"
     account_id: Optional[int] = None
     overflow_account_id: Optional[int] = None
