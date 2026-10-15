@@ -734,19 +734,22 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
 def iter_window_occurrences(entry, start: datetime, end: datetime) -> Iterator[tuple]:
     """Yield ``(date, original)`` for a budget entry's occurrences owed in ``[start, end)``.
 
-    An installment (``end_mode == "after_occurrences"``) whose ``next_occurrence``
-    is before ``start`` is walked from ``next_occurrence``: each occurrence before
-    ``start`` is still owed, since nothing advances the schedule except recording
-    it, so it is yielded as ``(start, occurrence)``, overdue on the window start
+    An installment (``end_mode == "after_occurrences"`` with a ``max_occurrences``
+    cap) whose ``next_occurrence`` is before ``start`` is walked from
+    ``next_occurrence``: each occurrence before ``start`` is still owed, since
+    nothing advances the schedule except recording it, so it is yielded as ``(start, occurrence)``, overdue on the window start
     like an overdue unposted transaction, and it uses up its place in the cap.
     Every other occurrence is ``(occurrence, None)``. Any other entry is walked from
     ``start`` (``iter_occurrences``): an open-ended schedule's missed occurrences
-    are dropped, so a stale schedule cannot flood the projection. Callers
+    are dropped, so a stale schedule cannot flood the projection. An
+    ``after_occurrences`` entry with no cap is walked that way too. Callers
     suppress a recorded occurrence on ``original`` (when set), its own day.
     """
     start, end = _naive(start), _naive(end)
     anchor = _naive(entry.next_occurrence)
-    if getattr(entry, "end_mode", None) == "after_occurrences" and anchor < start < end:
+    capped = (getattr(entry, "end_mode", None) == "after_occurrences"
+              and getattr(entry, "max_occurrences", None) is not None)
+    if capped and anchor < start < end:
         for occ in iter_occurrences(entry, anchor, end):
             yield (start, occ) if occ < start else (occ, None)
         return
@@ -1144,7 +1147,7 @@ def collect_events(
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
-    So is an installment's (``after_occurrences``) occurrence before ``start``
+    So is a capped installment's (``after_occurrences``) occurrence before ``start``
     that nothing recorded: it is still owed, and it keeps its place in the cap,
     while an open-ended entry's occurrences before ``start`` are dropped (see
     ``iter_window_occurrences``). Such an occurrence is suppressed on its

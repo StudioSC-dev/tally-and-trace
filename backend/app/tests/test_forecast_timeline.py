@@ -196,6 +196,20 @@ def test_window_occurrences_bring_overdue_installments_to_the_window_start():
         (datetime(2026, 9, 1), None)]
 
 
+def test_window_occurrences_walk_an_uncapped_installment_like_an_open_ended_entry():
+    # An "after_occurrences" entry with no cap has no bound on what it owes, so
+    # its missed occurrences are dropped, not brought to the window start.
+    from app.services.forecast import iter_window_occurrences
+
+    start, end = datetime(2026, 8, 10), datetime(2026, 10, 10)
+    uncapped = _entry(RecurrenceFrequency.MONTHLY, datetime(2024, 1, 1),
+                      end_mode="after_occurrences", max_occurrences=None)
+    assert list(iter_window_occurrences(uncapped, start, end)) == [
+        (datetime(2026, 9, 1), None),
+        (datetime(2026, 10, 1), None),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # _monthly_equivalent — normalization for the new cadences
 # ---------------------------------------------------------------------------
