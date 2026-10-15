@@ -1609,6 +1609,23 @@ def test_sign_off_refuses_a_failing_or_mismatched_check_then_closes_the_window(t
     assert counts(sw_db, owner["id"])["transactions"] == 13
 
 
+def test_sign_off_refuses_a_check_report_not_read_on_utc(tmp_path, owner):
+    """STU-315: even when the record and the report agree, a zone other than UTC
+    (a load or check from before the pin) is refused."""
+    from app.cutover_load.bootstrap import Refused
+    from app.cutover_load.reset import sign_off
+
+    _, record = load(tmp_path, fixture(), owner)
+    assert json.loads(record.read_text())["session_timezone"] == "UTC"
+    edit_record(record, session_timezone="Asia/Manila")
+    report = _check_report(tmp_path, record, "manila.json")
+    with pytest.raises(Refused) as exc:
+        sign_off(run_record_path=str(record), check_report_path=str(report),
+                 confirm=owner["email"], out=quiet)
+    assert exc.value.check == "check_report" and "UTC" in exc.value.message
+    assert json.loads(record.read_text())["signed_off_at"] is None
+
+
 def test_sign_off_makes_no_database_connection(tmp_path, owner):
     _, record = load(tmp_path, fixture(), owner)
     good = _check_report(tmp_path, record, "good.json")
