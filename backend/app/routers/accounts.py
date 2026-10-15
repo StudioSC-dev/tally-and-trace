@@ -355,9 +355,11 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       payment or prepayment), or an active recurring entry paying into it that
       still has an occurrence from today on that no linked transaction stands
       for (``has_unsuppressed_occurrence``, the loan-cover walk in
-      ``collect_events``, which starts at today: an entry whose schedule has
-      ended, or whose last occurrence was recorded without advancing it,
-      projects nothing); both are projected against its due dates
+      ``collect_events``, which starts at today: an installment's unrecorded
+      overdue occurrence counts as due today, while an open-ended entry's
+      missed occurrences, a schedule that has ended, or a last occurrence
+      recorded without advancing it, project nothing); both are projected
+      against its due dates
       (services/loans.py).
     """
     from app.models.budget_entry import BudgetEntry

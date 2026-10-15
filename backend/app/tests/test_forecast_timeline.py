@@ -170,6 +170,32 @@ def test_occurrences_respect_window_start():
     assert got == [datetime(2026, 8, 1).date(), datetime(2026, 9, 1).date()]
 
 
+def test_window_occurrences_bring_overdue_installments_to_the_window_start():
+    # STU-217: an installment's occurrences before the window are owed at its
+    # start, as (start, original); the cap is not used up by skipping them.
+    from app.services.forecast import iter_window_occurrences
+
+    start, end = datetime(2026, 8, 10), datetime(2026, 10, 10)
+    capped = _entry(RecurrenceFrequency.MONTHLY, datetime(2026, 7, 1),
+                    end_mode="after_occurrences", max_occurrences=3)
+    assert list(iter_window_occurrences(capped, start, end)) == [
+        (start, datetime(2026, 7, 1)),
+        (start, datetime(2026, 8, 1)),
+        (datetime(2026, 9, 1), None),
+    ]
+    # An open-ended schedule still drops what fell before the window.
+    open_ended = _entry(RecurrenceFrequency.MONTHLY, datetime(2026, 7, 1))
+    assert list(iter_window_occurrences(open_ended, start, end)) == [
+        (datetime(2026, 9, 1), None),
+        (datetime(2026, 10, 1), None),
+    ]
+    # An installment not yet due walks from the window start as before.
+    upcoming = _entry(RecurrenceFrequency.MONTHLY, datetime(2026, 9, 1),
+                      end_mode="after_occurrences", max_occurrences=1)
+    assert list(iter_window_occurrences(upcoming, start, end)) == [
+        (datetime(2026, 9, 1), None)]
+
+
 # ---------------------------------------------------------------------------
 # _monthly_equivalent — normalization for the new cadences
 # ---------------------------------------------------------------------------

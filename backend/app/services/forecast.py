@@ -731,6 +731,29 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
             return  # past the last date datetime can hold
 
 
+def iter_window_occurrences(entry, start: datetime, end: datetime) -> Iterator[tuple]:
+    """Yield ``(date, original)`` for a budget entry's occurrences owed in ``[start, end)``.
+
+    An installment (``end_mode == "after_occurrences"``) whose ``next_occurrence``
+    is before ``start`` is walked from ``next_occurrence``: each occurrence before
+    ``start`` is still owed, since nothing advances the schedule except recording
+    it, so it is yielded as ``(start, occurrence)``, overdue on the window start
+    like an overdue unposted transaction, and it uses up its place in the cap.
+    Every other occurrence is ``(occurrence, None)``. Any other entry is walked from
+    ``start`` (``iter_occurrences``): an open-ended schedule's missed occurrences
+    are dropped, so a stale schedule cannot flood the projection. Callers
+    suppress a recorded occurrence on ``original`` (when set), its own day.
+    """
+    start, end = _naive(start), _naive(end)
+    anchor = _naive(entry.next_occurrence)
+    if getattr(entry, "end_mode", None) == "after_occurrences" and anchor < start < end:
+        for occ in iter_occurrences(entry, anchor, end):
+            yield (start, occ) if occ < start else (occ, None)
+        return
+    for occ in iter_occurrences(entry, start, end):
+        yield occ, None
+
+
 def build_timeline(opening, events: List[dict]) -> dict:
     """Pure core: walk signed-amount events in date order over an opening balance.
 
@@ -1121,6 +1144,12 @@ def collect_events(
     Balances change only when a transaction is posted, so an unposted transaction
     dated before ``start`` is a pending movement not yet in the opening balance: it
     is emitted dated at ``start`` with ``overdue`` True and its ``original_date``.
+    So is an installment's (``after_occurrences``) occurrence before ``start``
+    that nothing recorded: it is still owed, and it keeps its place in the cap,
+    while an open-ended entry's occurrences before ``start`` are dropped (see
+    ``iter_window_occurrences``). Such an occurrence is suppressed on its
+    original day, and a recurring transfer into a loan covers that day's due
+    date with it.
     Overdue charges on a credit card are skipped (they reach cash through their
     statements); a non-transfer row's card involvement comes from ``account_id``
     alone, never from leftover ``transfer_*`` fields. Overdue card transfers are
@@ -1296,11 +1325,13 @@ def collect_events(
         overflow_id = entry.overflow_account_id if entry.overflow_account_id in scoped_ids else None
         if entry.transfer_to_account_id is not None:
             # Only the scoped legs are kept (see _transfer_event).
-            for occ in iter_occurrences(entry, start, end):
-                key = (entry.id, occ.date())
+            for occ, original in iter_window_occurrences(entry, start, end):
+                key = (entry.id, (original or occ).date())
                 if linked[key]:
                     linked[key] -= 1
                     continue  # already materialised (e.g. advance=False)
+                overdue = ({"overdue": True, "original_date": original}
+                           if original is not None else {})
                 events.append(_transfer_event(
                     SimpleNamespace(
                         id=entry.id,
@@ -1318,7 +1349,7 @@ def collect_events(
                     hidden_loan_ids=hidden_loan_ids, unbilled_ids=outside_unbilled,
                     source="budget_entry",
                     overflow_account_id=overflow_id, origin=(BudgetEntry, entry.id),
-                    money=money, face_currency=entry.currency,
+                    money=money, face_currency=entry.currency, **overdue,
                 ))
             continue
         if entry.account_id in wallet_ids:
@@ -1342,11 +1373,13 @@ def collect_events(
                     leg_currency]
         else:
             rows = [_row(entry.currency, _money(entry.amount))]
-        for occ in iter_occurrences(entry, start, end):
-            key = (entry.id, occ.date())
+        for occ, original in iter_window_occurrences(entry, start, end):
+            key = (entry.id, (original or occ).date())
             if linked[key]:
                 linked[key] -= 1
                 continue  # already recorded (e.g. advance=False)
+            overdue = ({"overdue": True, "original_date": original}
+                       if original is not None else {})
             events.append(_meta(_event(
                 date=occ,
                 name=entry.name,
@@ -1356,6 +1389,7 @@ def collect_events(
                 face_amount=entry.amount,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
+                **overdue,
             ), leg_currencies, rows, entry.currency))
 
     for txn in txns:
@@ -1535,13 +1569,14 @@ def collect_events(
     linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
     for entry in loan_entries:
-        for occ in iter_occurrences(entry, start, end + COVER_HORIZON):
-            key = (entry.id, occ.date())
+        for occ, original in iter_window_occurrences(entry, start, end + COVER_HORIZON):
+            day = (original or occ).date()  # an overdue cover is dated its own day
+            key = (entry.id, day)
             if linked_covers[key]:
                 linked_covers[key] -= 1
                 continue
             projected_covers.setdefault(entry.transfer_to_account_id, []).append(
-                (occ.date(), _money(entry.amount), entry))
+                (day, _money(entry.amount), entry))
     loans_by_id = {a.id: a for a in payable_loans}
     # A legacy cover from another currency is normalised into the loan's first;
     # one with no stored rate is not netted (plan B6, services/loans.py).
@@ -1935,13 +1970,15 @@ def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: dat
 def has_unsuppressed_occurrence(db: Session, entries: list, start: datetime) -> bool:
     """Whether any of ``entries`` still occurs on or after ``start``, at any
     horizon, once each occurrence a linked transaction stands for is suppressed
-    (``_linked_occurrence_days``, as the loan-cover and card-charge walks do)."""
+    (``_linked_occurrence_days``, as the loan-cover and card-charge walks do).
+    An installment's unrecorded occurrence before ``start`` still counts, as owed
+    on ``start``, and is suppressed on its own day (``iter_window_occurrences``)."""
     if not entries:
         return False
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     for entry in entries:
-        for occ in iter_occurrences(entry, start, datetime.max):
-            key = (entry.id, occ.date())
+        for occ, original in iter_window_occurrences(entry, start, datetime.max):
+            key = (entry.id, (original or occ).date())
             if linked[key]:
                 linked[key] -= 1
                 continue
