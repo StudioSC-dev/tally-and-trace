@@ -6,7 +6,13 @@ value is stored as those UTC components and read back unchanged, whatever the
 server's default zone, so the day rules and the cutover tools agree on dates.
 Each engine factory is checked against a scratch database whose default zone
 is Asia/Manila (UTC+8), where an unpinned session would shift a midnight to the
-previous day. Skips without a database.
+previous day.
+
+The application's engine pins each transaction (``SET LOCAL``), not the
+connection: production connects through the Supabase pooler, which drops or
+refuses a ``timezone`` startup parameter and hands a pooled connection to
+another client between transactions. The cutover engines refuse the pooler and
+keep the startup option. Skips without a database.
 """
 import os
 import re
@@ -114,11 +120,59 @@ def test_the_check_engine_stays_read_only(manila_url):
         engine.dispose()
 
 
+def _zone(c):
+    """``(TimeZone now, the value the session resets to, the backend)``."""
+    return tuple(c.execute(text(
+        "SELECT current_setting('TimeZone'), reset_val, pg_backend_pid() "
+        "FROM pg_settings WHERE name = 'TimeZone'")).one())
+
+
+def test_the_application_engine_pins_each_transaction_without_a_startup_option(manila_url):
+    """No startup option (the session resets to the database's Manila, as through
+    the pooler), yet every transaction is on UTC: ORM sessions across two
+    transactions on one pooled connection, ``engine.begin()`` and ``connect()``."""
+    from sqlalchemy.orm import sessionmaker
+
+    engine = _core(manila_url)
+    try:
+        session = sessionmaker(bind=engine)()
+        try:
+            zone, reset, first = _zone(session)
+            assert (zone, reset) == ("UTC", "Asia/Manila")
+            stored = session.execute(text("SELECT CAST(:d AS timestamptz)"),
+                                     {"d": DAY_START}).scalar()
+            assert _canon(stored) == DAY_START
+            assert stored.replace(tzinfo=None) == DAY_START
+            session.commit()
+            zone, reset, second = _zone(session)
+            assert (zone, reset, second) == ("UTC", "Asia/Manila", first)
+            session.rollback()
+        finally:
+            session.close()
+        with engine.begin() as c:
+            assert _zone(c)[:2] == ("UTC", "Asia/Manila")
+        with engine.connect() as c:
+            assert _zone(c)[:2] == ("UTC", "Asia/Manila")
+            c.commit()
+            assert _zone(c)[:2] == ("UTC", "Asia/Manila")
+    finally:
+        engine.dispose()
+
+
 def test_the_application_engine_is_on_utc():
     from app.core.database import engine
 
     with engine.connect() as c:
         assert c.execute(text("SHOW TimeZone")).scalar() == "UTC"
+
+
+def test_the_application_engine_pins_utc_by_its_begin_listener():
+    from sqlalchemy import event
+
+    from app.core import database
+
+    assert event.contains(database.engine, "begin", database.pin_utc)
+    assert "connect_args" not in (APP_DIR / "core/database.py").read_text()
 
 
 @pytest.mark.parametrize("module, expected", [
