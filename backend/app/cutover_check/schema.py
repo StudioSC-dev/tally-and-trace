@@ -16,7 +16,9 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator,
+)
 from pydantic.functional_validators import BeforeValidator
 from pydantic_core import PydanticCustomError
 
@@ -33,6 +35,8 @@ _MESSAGES = {
     "cutover_card_routing_duplicate": "card_routing lists an account twice",
     "cutover_checkpoint_duplicate": "a checkpoint lists an account twice",
     "cutover_date": "dates are YYYY-MM-DD strings",
+    "cutover_day_fields": "anchor_day and day_rule are exclusive and go with a monthly, "
+                          "quarterly, semi_annual or annual cadence",
     "cutover_dated_late": "sheet.dated_items must be dated before as_of",
     "cutover_dated_zero": "dated item amount cannot be zero",
     "cutover_description_empty": "description_contains is empty",
@@ -44,6 +48,7 @@ _MESSAGES = {
     "cutover_loans_duplicate": "loans lists an account twice",
     "cutover_money": "money must be a decimal string with at most 2 places",
     "cutover_month": "months are YYYY-MM strings",
+    "cutover_next_dates": "next_dates holds 12 dates at most",
     "cutover_next_rows": "next_rows holds the first 3 upcoming rows at most",
     "cutover_recurring_duplicate": "recurring entries must be unique by (name, account, destination)",
     "cutover_semi_monthly": "semi_monthly_days goes with a semi_monthly cadence",
@@ -212,6 +217,10 @@ class Loan(_Strict):
         return rows
 
 
+_MONTH_FAMILY = frozenset({"monthly", "quarterly", "semi_annual", "annual"})
+MAX_NEXT_DATES = 12
+
+
 class Installment(_Strict):
     n: int
     m: int
@@ -239,6 +248,12 @@ class Recurring(_Strict):
     # Occurrence multiplicity per month; absent only on a wallet-funded
     # non-transfer entry, which the projection never lists (checked by definition).
     expected: Optional[Dict[Month, int]] = None
+    # STU-315. day_rule is always compared (absent means none, so an unexpected
+    # rule fails); anchor_day and next_dates only when frozen. next_dates are the
+    # entry's first occurrences from next_occurrence on, caps and end_date applied.
+    day_rule: Optional[Literal["last_weekday"]] = None
+    anchor_day: Optional[Annotated[int, Field(ge=1, le=31)]] = None
+    next_dates: Optional[List[Day]] = None
 
     def key(self) -> tuple:
         return (self.name, self.account.key(),
@@ -256,6 +271,12 @@ class Recurring(_Strict):
             raise _fail("cutover_installment")
         if self.description_contains is not None and not self.description_contains.strip():
             raise _fail("cutover_description_empty")
+        if (self.anchor_day is not None or self.day_rule is not None) and (
+                (self.anchor_day is not None and self.day_rule is not None)
+                or self.cadence not in _MONTH_FAMILY):
+            raise _fail("cutover_day_fields")
+        if self.next_dates is not None and len(self.next_dates) > MAX_NEXT_DATES:
+            raise _fail("cutover_next_dates")
         if self.expected is not None:
             months = sorted(self.expected)
             if not months:
