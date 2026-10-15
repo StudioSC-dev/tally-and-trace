@@ -224,6 +224,27 @@ def test_url_validation_refuses_pgtz():
         bootstrap.validate_url(LOCAL, "127.0.0.1", "c3db", {"PGTZ": "America/New_York"})
 
 
+def test_url_validation_refuses_pgoptions_without_echoing_it():
+    # PGOPTIONS can set any server session GUC (search_path, TimeZone) on connect.
+    with pytest.raises(bootstrap.BootstrapError, match="PGOPTIONS is set") as caught:
+        bootstrap.validate_url(LOCAL, "127.0.0.1", "c3db",
+                               {"PGOPTIONS": "-c search_path=zq9sentinel"})
+    assert "zq9sentinel" not in str(caught.value)
+
+
+def test_wrapper_refuses_pgoptions_with_exit_2_and_never_echoes_it(tmp_path):
+    frozen = write_frozen(tmp_path, frozen_base())
+    out = run_wrapper(["--frozen", frozen, "--report", str(tmp_path / "r.json"),
+                       "--expect-host", "127.0.0.1", "--expect-db", "c3db",
+                       "--expect-server-addr", "192.0.2.1"], cwd=str(tmp_path),
+                      env_url="postgresql://u:pw@127.0.0.1:1/c3db",
+                      extra_env={"PGOPTIONS": "-c search_path=zq9sentinel"})
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "PGOPTIONS is set" in out.stdout
+    assert "zq9sentinel" not in out.stdout + out.stderr
+    assert not (tmp_path / "r.json").exists()
+
+
 def test_url_validation_refuses_a_missing_url():
     with pytest.raises(bootstrap.BootstrapError, match="DATABASE_URL is not set"):
         bootstrap.validate_url("", "127.0.0.1", "c3db", {})

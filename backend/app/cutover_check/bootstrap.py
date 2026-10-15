@@ -27,13 +27,14 @@ from sqlalchemy.engine.url import URL, make_url
 ALLOWED_DRIVERS = ("postgresql", "postgresql+psycopg2")
 ALLOWED_QUERY_KEYS = frozenset({"sslmode", "sslrootcert", "connect_timeout", "application_name"})
 # libpq reads these for any parameter the URL leaves out (PGHOSTADDR wins over host);
-# PGTZ sets the server session's TimeZone, which the timestamptz dates are read in.
+# PGTZ sets the server session's TimeZone, which the timestamptz dates are read in;
+# PGOPTIONS can set any session setting (search_path, TimeZone) at connect.
 # Supabase's transaction pooler hands each transaction any backend: the check's
 # session-level lock and its unlock could land on different ones.
 POOLER_PORT = 6543
 
 FORBIDDEN_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE",
-                 "PGTZ")
+                 "PGTZ", "PGOPTIONS")
 
 # The advisory lock key shared by the cutover load (exclusive) and this check (shared).
 CUTOVER_LOCK_KEY = 2_024_020_204
