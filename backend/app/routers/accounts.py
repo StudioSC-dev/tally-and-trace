@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
+from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
@@ -771,15 +772,15 @@ def _loan_funding(db: Session, current_user: User, loan: Account,
 
 
 def _lock(db: Session, *accounts: Account) -> None:
-    """``SELECT ... FOR UPDATE`` each account, in ascending id order, refreshing it.
+    """``SELECT ... FOR NO KEY UPDATE`` each account, in ascending id order, refreshing it.
 
     Owed amounts, splits and balances are then computed from rows no concurrent
     payment can change until this one commits. A fixed lock order keeps two
-    payments over the same pair of accounts from deadlocking.
+    payments over the same pair of accounts from deadlocking. The mode and order
+    are every ledger write's (``app.core.locking.lock_accounts``), so re-locking
+    an account a transaction write already holds changes nothing.
     """
-    for account in sorted(accounts, key=lambda a: a.id):
-        (db.query(Account).filter(Account.id == account.id)
-         .with_for_update().populate_existing().one())
+    locking.lock_accounts(db, [a.id for a in accounts])
 
 
 def _when(value: Optional[datetime]) -> datetime:

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Set
+from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
@@ -920,6 +921,10 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         ).first()
         if not _usable(current_user, owner, destination_account):
             raise HTTPException(status_code=404, detail="Destination account not found")
+        # Locked once access passes, before anything reads a balance (STU-226).
+        locked = locking.lock_accounts(db, [primary_account.id, destination_account.id])
+        primary_account = locked[primary_account.id]
+        destination_account = locked[destination_account.id]
         if destination_account.account_type == AccountType.LOAN:
             _stamp_loan_payment(db, current_user, transaction, transaction_data,
                                 primary_account, destination_account)
@@ -944,6 +949,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         ).first()
         if not _usable(current_user, owner, primary_account):
             raise HTTPException(status_code=404, detail="Account not found")
+        # Locked once access passes, before anything reads a balance (STU-226).
+        primary_account = locking.lock_accounts(db, [primary_account.id])[primary_account.id]
         if transaction.is_posted:
             _foreign_post_on_create(transaction, transaction_data, primary_account)
         if transaction_data.get("currency") is None:
@@ -1020,6 +1027,11 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     """
     db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
                                        "Transaction not found")
+    # Locked and refreshed before anything reads it: every check below reads the
+    # row as it is now, after any concurrent edit or delete commits (STU-226).
+    db_transaction = locking.lock_transaction(db, transaction_id)
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
     owner = db_transaction.user
 
     # Validate before any balance reversal or write.
@@ -1075,6 +1087,18 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
         if field in requested and requested[field] != getattr(db_transaction, field):
             require_owned_ref(db, model, requested[field], detail, current_user,
                               db_transaction.user)
+    # Every account the edit reverses or lands on, locked before any balance or
+    # loan figure is read (STU-226). The reads below then see the locked rows.
+    if new_type == TransactionType.TRANSFER:
+        landing_ids = [
+            requested.get("transfer_from_account_id", db_transaction.transfer_from_account_id),
+            requested.get("transfer_to_account_id", db_transaction.transfer_to_account_id),
+        ]
+    else:
+        landing_ids = [requested.get("account_id", db_transaction.account_id)]
+    locking.lock_accounts(db, [db_transaction.account_id,
+                               db_transaction.transfer_from_account_id,
+                               db_transaction.transfer_to_account_id, *landing_ids])
     if db_transaction.loan_payment_kind:
         _validate_loan_payment_edit(db, current_user, db_transaction, requested)
     loan_stamp = _stamp_retargeted_loan_payment(db, current_user, db_transaction, requested)
@@ -1245,8 +1269,16 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
     """
     db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
                                        "Transaction not found")
+    # Locked (FOR UPDATE, as the DELETE needs) and refreshed before anything reads
+    # it, then its accounts before their balances are read (STU-226).
+    db_transaction = locking.lock_transaction(db, transaction_id, for_delete=True)
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
     if not RecordAccess(db, current_user).permissions(db_transaction)["can_delete"]:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    locking.lock_accounts(db, [db_transaction.account_id,
+                               db_transaction.transfer_from_account_id,
+                               db_transaction.transfer_to_account_id])
     
     # Update account balances if posted
     if db_transaction.is_posted:
