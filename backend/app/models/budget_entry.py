@@ -59,9 +59,10 @@ class BudgetEntry(Base):
     semi_monthly_day_1 = Column(Integer, nullable=False, default=1)
     semi_monthly_day_2 = Column(Integer, nullable=False, default=15)
     # Month-family cadences only (monthly, quarterly, semi-annual, annual).
-    # ``day_rule`` "last_weekday" is the last Mon-Fri of the month; otherwise ``anchor_day`` (1-31) is the intended day, clamped to each
-    # month's length so it never drifts. Both null: the legacy schedule, stepping
-    # from the current date's day.
+    # ``day_rule`` "last_weekday" is the last Mon-Fri of the month; otherwise
+    # ``anchor_day`` (1-31) is the intended day, clamped to each month's length
+    # so it never drifts. Both null: the legacy schedule, stepping from the
+    # current date's day.
     anchor_day = Column(SmallInteger, nullable=True)
     day_rule = Column(String(20), nullable=True)
     end_mode = Column(String(20), nullable=False, default="indefinite")
