@@ -81,7 +81,7 @@ TRANSACTION_FIELDS = (
 BUDGET_ENTRY_FIELDS = (
     "id", "entry_type", "name", "description", "amount", "currency", "cadence",
     "next_occurrence", "lead_time_days", "semi_monthly_day_1", "semi_monthly_day_2",
-    "end_mode", "end_date", "max_occurrences", "occurrences_paid_offset", "account_id",
+    "anchor_day", "day_rule", "end_mode", "end_date", "max_occurrences", "occurrences_paid_offset", "account_id",
     "overflow_account_id", "transfer_to_account_id", "category_id", "allocation_id",
     "is_autopay", "is_active", "created_at", "updated_at",
 )
