@@ -61,14 +61,16 @@ Exit codes:
 
 ## Time zone
 
-The date columns are `timestamptz`. The load writes each date as midnight of
-that day **in the session time zone**, and the cutover check reads dates back
-in its own session time zone. Run the load and the check against the same
-server, both in the server's default time zone (the one the deployed app
-uses). `PGTZ` and `PGOPTIONS` are refused by both scripts, and the URL may
-not carry an `options` key, so neither run can change its session time zone. The run record, the dry-run report and the
-check report each record `session_timezone`, and sign-off refuses unless the
-check's equals the load's.
+The date columns are `timestamptz`. Every cutover session (the load, the
+reset, `--complete-record` and the cutover check) is pinned to **UTC** by the
+code, whatever the server's default zone: the load writes each date as
+midnight UTC of that day, and the check reads dates back in UTC. `PGTZ` and
+`PGOPTIONS` are refused by both scripts, and the URL may not carry an
+`options` key, so neither run can change its session time zone. The run
+record, the dry-run report and the check report each record
+`session_timezone`. The load refuses (`refused: session_timezone`) if its
+session reports anything but `UTC`, and sign-off refuses unless the check's
+zone equals the load's and is `UTC`.
 
 ## Connection mode
 
@@ -100,6 +102,14 @@ load already exists, reset it or sign it off before migrating.
    (every due date before it is either fully paid or not paid at all) and
    set `"no_partial_due_at_cutover": true` in that loan's terms. The load
    refuses a loan without it, or with it false.
+   A monthly, quarterly, semi-annual or annual recurring entry may carry
+   **one** of two day fields: `"day_rule": "last_weekday"` (the last Monday to
+   Friday of each month) or `"anchor_day": N` (day N, 1 to 31, on the month's
+   last day when the month is shorter). Its `next_occurrence` must already be
+   on that day, or the load refuses it (`FAIL day_rule [entry key]`, the
+   expected date in the report). Leave both out and the entry is anchored on
+   its `next_occurrence`'s day (a 31st gives `anchor_day` 31). Weekly,
+   biweekly and semi-monthly entries take neither.
 3. Announce the maintenance window: Hermes and any other automation are off,
    the spouse does not use the app, and the owner does not use the UI until
    the cutover check is signed off.
@@ -209,8 +219,38 @@ Sign-off makes no database connection. It refuses unless the run record is
 and the check report is a version 1 `cutover-check` report recording
 `overall: pass` for the record's owner id, database, server address and
 session time zone, with its `checked_at` at or after the record's
-`finished_at` (so the check read the loaded state). It then writes `signed_off_at` into the run
-record (an atomic replace, mode 0600). After sign-off the reset refuses.
+`finished_at` (so the check read the loaded state), and that session time
+zone is `UTC`. It then writes `signed_off_at` into the run record (an atomic
+replace, mode 0600). After sign-off the reset refuses.
+
+**Mid-month load: the waiver.** After a mid-month load the Sheet starts on the
+1st of the next month, so the check's sheet block refuses ("first_month starts
+after as_of") and the report's overall is `fail`. If every other block passes,
+sign off with that refusal waived, giving the reason in writing:
+
+```sh
+python backend/scripts/cutover_load.py --sign-off \
+    --run-record ~/cutover/run-record.json \
+    --check-report ~/cutover/check-report.json --confirm OWNER_EMAIL \
+    --waive-block sheet --waiver-reason "loaded mid-month; the Sheet starts next month"
+```
+
+`--waive-block NAME` may be repeated; `--waiver-reason` is required with it and
+must not be blank. On top of every check above, the waiver requires:
+
+- the report lists exactly the eight version 1 blocks (`checkpoints`,
+  `card_statements`, `card_routing`, `loans`, `recurring`, `occurrences`,
+  `foreign_invariants`, `sheet`), each once, each `pass`, `fail` or `refused`;
+- each named block is `refused` with a refusal on the allowlist, which today
+  holds only the sheet block's "first_month starts after as_of" (its other
+  refusals, posted rows on or after `as_of` and a sheet account that is not
+  projection cash, and the loans block's refusal are never waivable);
+- every block not named passes, and `posted_after` is empty.
+
+It refuses a reason without a block, a block named twice, and waiver flags on a
+report that already passed. The run record keeps a `waiver` object, the reason
+and each waived block's name, status and refusal, and the terminal prints them.
+Without the flags nothing changes: the report must record an overall pass.
 
 ## 6. On failure, before sign-off: reset
 

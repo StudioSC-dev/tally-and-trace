@@ -98,9 +98,10 @@ their class name, never their message.
 - Exchange rates come from the stored rates only (`FxRates.offline`); the rate
   provider is never called.
 - **Time zone.** The date columns are `timestamptz` in the database, so dates are
-  read in the session time zone. The report records it as `session_timezone`.
-  Run the load and the check with the same server default. `PGTZ` and `PGOPTIONS` are refused;
-  `TZ` on the client does not affect the server session.
+  read in the session time zone, which the check pins to UTC (as the load does).
+  The report records it as `session_timezone`; sign-off refuses one that is not
+  `UTC`. `PGTZ` and `PGOPTIONS` are refused; `TZ` on the client does not affect
+  the server session.
 
 ## The frozen file (`cutover-frozen` v1)
 
@@ -117,7 +118,7 @@ accounts. The file never refers to the cutover input.
 | `card_statements[]` | `card`, `close`, `due`, `balance`, `owed`: the compared set below. |
 | `card_routing[]` | `card`, `payment_account`, `overflow_account` (selector or null). Every owner card is listed. |
 | `loans[]` | `loan`, `payment_account`, `owed`, `payments_made`, `payments_left`, `next_due`, `next_rows[]` (up to 3: `due_date`, `payment`, optional `principal`, `interest`). Every owner loan is listed. |
-| `recurring[]` | `name`, `account`, `destination`, `overflow_account`, `entry_type`, `amount`, `currency`, `cadence`, `semi_monthly_days` (semi-monthly only), `next_occurrence`, `end_mode`, `end_date`, `max_occurrences`, `is_autopay`, `is_active`, optional `description_contains`, `installment` `{n, m}` (after-occurrences only), `expected` `{"YYYY-MM": count}` over contiguous months. Unique by (name, account, destination); every owner entry is listed. |
+| `recurring[]` | `name`, `account`, `destination`, `overflow_account`, `entry_type`, `amount`, `currency`, `cadence`, `semi_monthly_days` (semi-monthly only), `next_occurrence`, `end_mode`, `end_date`, `max_occurrences`, `is_autopay`, `is_active`, optional `description_contains`, `installment` `{n, m}` (after-occurrences only), `expected` `{"YYYY-MM": count}` over contiguous months, optional `day_rule` (`"last_weekday"`) or `anchor_day` (1 to 31; monthly, quarterly, semi-annual and annual only, never both), optional `next_dates[]` (up to 12). Unique by (name, account, destination); every owner entry is listed. |
 | `sheet` | `account`, `currency` (the account's), `first_month`, `months[]` (contiguous, from `first_month`), `sheet_opening`, `month_end{}` (exactly `months`), `opening_offset`, `overflow_policy` (`excluded` or `included`), `approved_differences[]` (`month`, `amount`, `reason`), `dated_items[]` (`date` before `as_of`, a non-zero `amount`, `description_contains`). |
 
 `sheet.first_month` must start on or after `cutover_date`: with a cutover on the 1st
@@ -126,9 +127,12 @@ Its 1st must also be on or before `as_of`, because the opening is read from the
 ledger; a later `first_month` makes the sheet block refuse ("first_month starts
 after as_of").
 
-**Mid-month cutover.** The Sheet then starts on the 1st of the next month, so the
-load date and `as_of` must be on or after that 1st. Loading earlier means the
-sheet block always refuses and sign-off can never pass: wait for the 1st.
+**Mid-month cutover.** The Sheet then starts on the 1st of the next month. With
+the load date and `as_of` before that 1st, the sheet block refuses ("first_month
+starts after as_of") and the overall is `fail`. Either wait for the 1st, or sign
+off with that refusal waived and a written reason (`--waive-block sheet
+--waiver-reason ...`, `docs/cutover-load.md` section 5), which requires every
+other block to pass and no posted row on or after `as_of`.
 
 A wallet-funded recurring entry that is not a transfer is never projected, so it
 carries no `expected`; giving it one fails the occurrences block. Every other
@@ -156,6 +160,10 @@ subtracts; a transfer takes `amount + fee` from its source and adds
 5. **recurring**: each frozen entry names exactly one owner entry; every field
    matches, including the overflow account and autopay; installments read n of m
    (linked transactions plus the offset, and n plus `max_occurrences`).
+   `day_rule` is always compared (left out, it means none, so an entry stored
+   with a rule fails); `anchor_day` only when frozen. `next_dates`, when frozen,
+   are the entry's first occurrences from `next_occurrence` on, walked as the
+   projection walks them (a cap and `end_date` apply), compared in order.
 6. **occurrences**: per entry and month, linked transactions + unlinked matching
    transactions + projected occurrences equals `expected`. An unlinked row
    matches by account and type (a transfer by source and destination), by money
@@ -204,6 +212,8 @@ block names, counts, pass or fail, and timestamps.
 
 - **Pass:** run `cutover_load.py --sign-off --run-record PATH --check-report PATH
   --confirm <owner email>`. After sign-off the reset refuses.
+- **Only the mid-month sheet refusal:** the same with `--waive-block sheet
+  --waiver-reason TEXT` (see `docs/cutover-load.md` section 5).
 - **Fail:** read the report, then reset (`cutover_load.py --reset ...`), fix the
   input or the frozen figures, reload and check again. See `docs/cutover-load.md`.
 
