@@ -174,9 +174,13 @@ python backend/scripts/cutover_load.py --complete-record \
 It reads only. It refuses unless the target equals the record's and the
 owner's state still has the fingerprint taken inside the load; it then marks
 the record `complete` with the database clock's `finished_at`. If it refuses
-with `changed_after_load` after `commit outcome UNKNOWN`, the commit did not
-happen: confirm the owner is still empty (the pre-load guard of a dry run),
-keep the old record for reference, and load again with new output paths.
+with `changed_after_load` after `commit outcome UNKNOWN`, the outcome is still
+unresolved: the commit may not have happened, or it did and the owner's rows
+were edited afterwards. Do not reload on that refusal alone. Confirm
+independently that the owner is empty (a dry run of the same input, whose
+pre-load guard refuses an owner who owns anything); only then keep the old
+record for reference and load again with new output paths. If the owner is not
+empty, the load committed: stop and investigate before any reset.
 
 ## 5. Cutover check and sign-off
 

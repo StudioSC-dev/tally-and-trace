@@ -41,8 +41,10 @@ PG_TARGET_ENV = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "P
 # one stable session; the cutover needs a direct or session-mode connection.
 POOLER_PORTS = frozenset({6543})
 
-# One cutover run at a time: the load and the reset take
-# pg_try_advisory_xact_lock on this key; the cutover check takes the shared form.
+# One cutover run at a time: the load and the reset take the exclusive
+# transaction-level lock (pg_try_advisory_xact_lock) on this key; the cutover
+# check takes the session-level shared lock (pg_try_advisory_lock_shared), so it
+# is refused while a load or reset runs, and they are refused while it runs.
 # It must equal CUTOVER_LOCK_KEY in app/cutover_check/bootstrap.py (not imported:
 # the two packages stay independent).
 CUTOVER_LOCK_KEY = 2_024_020_204
