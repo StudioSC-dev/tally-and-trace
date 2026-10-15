@@ -34,6 +34,7 @@ from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType, pending_face
 from app.models.transaction import RecurrenceFrequency
 from app.services.fx import FxMeta, FxRates, convert
+from app.services.recurrence import step_occurrence
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +671,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
     """Yield naive occurrence datetimes for a budget entry in ``[start, end)``.
 
     - Fixed-step cadences (weekly/biweekly/monthly/quarterly/semi-annual/annual)
-      walk forward from ``next_occurrence``.
+      walk forward from ``next_occurrence`` (``step_occurrence``: a month-family
+      entry's ``anchor_day`` or ``day_rule`` decides the day in each month).
     - ``SEMI_MONTHLY`` fires on two configurable days each month (default 1 & 15),
       clamped to the month length.
     - Respects ``end_date`` (``end_mode == "on_date"``) and caps future occurrences
@@ -726,7 +728,7 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
         if occ >= start:
             yield occ
         try:
-            occ = _next_occurrence(occ, entry.cadence)
+            occ = step_occurrence(entry, occ)
         except (OverflowError, ValueError):
             return  # past the last date datetime can hold
 

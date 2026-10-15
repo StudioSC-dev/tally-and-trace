@@ -506,8 +506,15 @@ def delete_budget_entry(
 
 
 def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
-    """Return the occurrence following ``current`` for this entry's cadence."""
+    """Return the occurrence following ``current`` for this entry's cadence.
+
+    Fixed-step cadences go through ``step_occurrence`` (services/recurrence.py),
+    which follows the entry's ``anchor_day`` or ``day_rule`` and keeps the aware
+    value's tzinfo, so materialize's ``end_date`` comparison never mixes naive and
+    aware values.
+    """
     from app.services.forecast import _next_occurrence
+    from app.services.recurrence import step_occurrence
 
     if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
         d1 = entry.semi_monthly_day_1 or 1
@@ -523,7 +530,7 @@ def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
         future = sorted(c for c in candidates if c > current)
         return future[0] if future else _next_occurrence(current, RecurrenceFrequency.MONTHLY)
 
-    return _next_occurrence(current, entry.cadence)
+    return step_occurrence(entry, current)
 
 
 @router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)
