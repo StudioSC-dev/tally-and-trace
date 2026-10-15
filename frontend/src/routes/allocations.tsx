@@ -21,7 +21,15 @@ import type {
   Category,
   WishlistItem,
 } from '../store/api'
-import { isLimited, isOwnerFull, isSharedFull } from '@tally-trace/shared'
+import {
+  entryCalendarDate,
+  formatEntryDate,
+  fromWireWallTime,
+  isLimited,
+  isOwnerFull,
+  isSharedFull,
+  toWireWallTime,
+} from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -41,24 +49,12 @@ const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth
 const differenceInDays = (future: Date, from: Date) =>
   Math.round((startOfDay(future).getTime() - startOfDay(from).getTime()) / DAY_IN_MS)
 
-const getOrdinal = (day: number) => {
-  if (day % 100 >= 11 && day % 100 <= 13) {
-    return `${day}th`
-  }
-  const lastDigit = day % 10
-  if (lastDigit === 1) return `${day}st`
-  if (lastDigit === 2) return `${day}nd`
-  if (lastDigit === 3) return `${day}rd`
-  return `${day}th`
-}
-
-const formatFullDate = (isoString: string) => {
-  const date = new Date(isoString)
-  return `${date.toLocaleString('default', { month: 'short' })} ${getOrdinal(date.getDate())}, ${date.getFullYear()}`
-}
+// A budget entry's dates are wall time stored as UTC components, so they are read
+// from those components, not converted to the browser's zone.
+const formatFullDate = (isoString: string) => formatEntryDate(isoString)
 
 const formatRelativeDate = (isoString: string) => {
-  const target = new Date(isoString)
+  const target = entryCalendarDate(isoString)
   const today = new Date()
   const days = differenceInDays(target, today)
   if (days === 0) return 'Today'
@@ -668,12 +664,12 @@ export function AllocationsPage() {
           category_id: isOwnerFull(entry) ? entry.category_id ?? undefined : undefined,
           allocation_id: isOwnerFull(entry) ? entry.allocation_id ?? undefined : undefined,
           cadence: entry.cadence,
-          next_occurrence: toLocalDateTimeInput(entry.next_occurrence),
+          next_occurrence: fromWireWallTime(entry.next_occurrence),
           lead_time_days: entry.lead_time_days ?? 0,
           is_autopay: entry.is_autopay,
           is_active: entry.is_active,
           end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
-          end_date: entry.end_date ? toLocalDateTimeInput(entry.end_date) : undefined,
+          end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
           max_occurrences: entry.max_occurrences ?? undefined,
           tag_ids: tagIdsOf(entry.tags),
         })
@@ -818,6 +814,15 @@ export function AllocationsPage() {
           return
         }
 
+        // The dates go out as the typed wall time in UTC components.
+        let nextOccurrenceWire: string
+        try {
+          nextOccurrenceWire = toWireWallTime(subscriptionForm.next_occurrence)
+        } catch {
+          alert('Please choose a valid next occurrence date and time.')
+          return
+        }
+
         let endDateIso: string | undefined
         let maxOccurrences: number | undefined
         if (subscriptionForm.end_mode === 'on_date') {
@@ -825,7 +830,12 @@ export function AllocationsPage() {
             alert('Please select the end date.')
             return
           }
-          endDateIso = new Date(subscriptionForm.end_date).toISOString()
+          try {
+            endDateIso = toWireWallTime(subscriptionForm.end_date)
+          } catch {
+            alert('Please choose a valid end date.')
+            return
+          }
         } else if (subscriptionForm.end_mode === 'after_occurrences') {
           if (!subscriptionForm.max_occurrences || subscriptionForm.max_occurrences <= 0) {
             alert('Please specify how many occurrences before the entry stops.')
@@ -850,7 +860,7 @@ export function AllocationsPage() {
           category_id: subscriptionForm.category_id || undefined,
           allocation_id: subscriptionForm.allocation_id ?? undefined,
           cadence: subscriptionForm.cadence,
-          next_occurrence: new Date(subscriptionForm.next_occurrence).toISOString(),
+          next_occurrence: nextOccurrenceWire,
           lead_time_days: subscriptionForm.lead_time_days,
           is_autopay: subscriptionForm.is_autopay,
           is_active: subscriptionForm.is_active,
