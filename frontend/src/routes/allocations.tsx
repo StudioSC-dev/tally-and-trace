@@ -22,14 +22,22 @@ import type {
   WishlistItem,
 } from '../store/api'
 import {
+  buildEntryDayFields,
+  dateForDaySetting,
+  daySettingOf,
   entryCalendarDate,
   formatEntryDate,
   fromWireWallTime,
+  generateOccurrences,
   isLimited,
+  isMonthFamily,
   isOwnerFull,
   isSharedFull,
+  parseEntryDate,
+  resolveEntryDayFields,
   toWireWallTime,
 } from '@tally-trace/shared'
+import type { DaySetting, DayRule } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -87,6 +95,20 @@ const formatCadenceLabel = (value: string) => {
       return value
   }
 }
+
+/** "Monthly · last weekday" / "Monthly · day 31"; a legacy entry is just its cadence. */
+const formatScheduleLabel = (
+  cadence: string,
+  fields: { anchor_day?: number | null; day_rule?: DayRule | null }
+) => {
+  const cadenceLabel = formatCadenceLabel(cadence)
+  if (fields.day_rule === 'last_weekday') return `${cadenceLabel} · last weekday`
+  if (fields.anchor_day) return `${cadenceLabel} · day ${fields.anchor_day}`
+  return cadenceLabel
+}
+
+/** Far enough ahead that the schedule preview is bounded by its count alone. */
+const PREVIEW_RANGE_END = new Date(Date.UTC(9999, 11, 31))
 
 const formatAmount = (amount: number, currency: CurrencyCode) => formatCurrency(amount, currency)
 
@@ -254,6 +276,8 @@ type SubscriptionFormState = {
   end_mode: 'indefinite' | 'on_date' | 'after_occurrences'
   end_date?: string
   max_occurrences?: number
+  /** Month-family cadences: the Day control (an edit sends it only when it changed). */
+  day: DaySetting
   // The tags picked in the form; an edit sends them only when they changed.
   tag_ids: number[]
 }
@@ -340,6 +364,7 @@ export function AllocationsPage() {
       end_mode: 'indefinite',
       end_date: undefined,
       max_occurrences: undefined,
+      day: { kind: 'same_as_date' },
       tag_ids: [],
     }),
     [defaultCurrencyCode]
@@ -351,6 +376,72 @@ export function AllocationsPage() {
   const [subscriptionForm, setSubscriptionForm] = useState<SubscriptionFormState>(() =>
     createSubscriptionDefaults()
   )
+
+  // The schedule a save would store: the day fields the API resolves the write to
+  // (or the detail it would refuse it with), and the next three dates.
+  const schedulePreview = useMemo(() => {
+    if (!isMonthFamily(subscriptionForm.cadence)) return null
+    let nextOccurrence: string
+    try {
+      nextOccurrence = toWireWallTime(subscriptionForm.next_occurrence)
+    } catch {
+      return null
+    }
+    const resolved = resolveEntryDayFields({
+      cadence: subscriptionForm.cadence,
+      nextOccurrence,
+      sent: buildEntryDayFields({
+        cadence: subscriptionForm.cadence,
+        day: subscriptionForm.day,
+        nextOccurrence,
+        stored: editingBudgetEntry,
+      }),
+      stored: editingBudgetEntry,
+    })
+    if (!resolved.ok) return { error: resolved.error }
+    let endDate: string | null = null
+    if (subscriptionForm.end_mode === 'on_date' && subscriptionForm.end_date) {
+      try {
+        endDate = toWireWallTime(subscriptionForm.end_date)
+      } catch {
+        endDate = null
+      }
+    }
+    const dates = generateOccurrences(
+      {
+        cadence: subscriptionForm.cadence,
+        next_occurrence: nextOccurrence,
+        anchor_day: resolved.anchor_day,
+        day_rule: resolved.day_rule,
+        end_mode: subscriptionForm.end_mode,
+        end_date: endDate,
+        max_occurrences: subscriptionForm.end_mode === 'after_occurrences' ? subscriptionForm.max_occurrences ?? null : null,
+      },
+      parseEntryDate(nextOccurrence),
+      PREVIEW_RANGE_END,
+      3
+    )
+    return {
+      label: formatScheduleLabel(subscriptionForm.cadence, resolved),
+      dates: dates.map((date) => formatEntryDate(date)),
+    }
+  }, [
+    editingBudgetEntry,
+    subscriptionForm.cadence,
+    subscriptionForm.day,
+    subscriptionForm.next_occurrence,
+    subscriptionForm.end_mode,
+    subscriptionForm.end_date,
+    subscriptionForm.max_occurrences,
+  ])
+  // "Same as date" is offered on create and on a row with no stored day (a legacy row).
+  const offersSameAsDate = !editingBudgetEntry || daySettingOf(editingBudgetEntry).kind === 'same_as_date'
+  const chooseDay = (day: DaySetting) =>
+    setSubscriptionForm((prev) => ({
+      ...prev,
+      day,
+      next_occurrence: dateForDaySetting(prev.next_occurrence, day),
+    }))
   const [selectedBudgetCategoryIds, setSelectedBudgetCategoryIds] = useState<number[]>([])
   const [selectedSavingsAccountIds, setSelectedSavingsAccountIds] = useState<number[]>([])
 
@@ -671,6 +762,7 @@ export function AllocationsPage() {
           end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
           end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
           max_occurrences: entry.max_occurrences ?? undefined,
+          day: daySettingOf(entry),
           tag_ids: tagIdsOf(entry.tags),
         })
       } else {
@@ -844,6 +936,23 @@ export function AllocationsPage() {
           maxOccurrences = Math.floor(subscriptionForm.max_occurrences)
         }
 
+        const dayFields = buildEntryDayFields({
+          cadence: subscriptionForm.cadence,
+          day: subscriptionForm.day,
+          nextOccurrence: nextOccurrenceWire,
+          stored: editingBudgetEntry,
+        })
+        const resolvedDay = resolveEntryDayFields({
+          cadence: subscriptionForm.cadence,
+          nextOccurrence: nextOccurrenceWire,
+          sent: dayFields,
+          stored: editingBudgetEntry,
+        })
+        if (!resolvedDay.ok) {
+          alert(resolvedDay.error)
+          return
+        }
+
         const subscriptionPayload = {
           name: subscriptionForm.name.trim(),
           description: subscriptionForm.description?.trim() || undefined,
@@ -861,6 +970,7 @@ export function AllocationsPage() {
           allocation_id: subscriptionForm.allocation_id ?? undefined,
           cadence: subscriptionForm.cadence,
           next_occurrence: nextOccurrenceWire,
+          ...dayFields,
           lead_time_days: subscriptionForm.lead_time_days,
           is_autopay: subscriptionForm.is_autopay,
           is_active: subscriptionForm.is_active,
@@ -1407,7 +1517,7 @@ export function AllocationsPage() {
       ? categoriesById.get(entry.category_id)?.name
       : undefined
     const allocation = isOwnerFull(entry) && entry.allocation_id ? allocationsById.get(entry.allocation_id) : undefined
-    const cadenceLabel = formatCadenceLabel(entry.cadence)
+    const cadenceLabel = formatScheduleLabel(entry.cadence, entry)
     const amountLabel = formatAmount(entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
     // Installment "n of m". The backend decrements max_occurrences on each payment
@@ -2141,6 +2251,61 @@ export function AllocationsPage() {
                       />
             </div>
                   </div>
+
+                  {isMonthFamily(subscriptionForm.cadence) && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-body">Day</label>
+                          <select
+                            value={subscriptionForm.day.kind}
+                            onChange={(e) => {
+                              const kind = e.target.value as DaySetting['kind']
+                              if (kind === 'day') {
+                                // Start from the date's own day, so the date stays put.
+                                const day = parseEntryDate(subscriptionForm.next_occurrence).getUTCDate()
+                                chooseDay({ kind: 'day', day: Number.isNaN(day) ? 1 : day })
+                              } else {
+                                chooseDay({ kind })
+                              }
+                            }}
+                            className="mt-1 block w-full border border-line px-3 py-2"
+                          >
+                            {offersSameAsDate && <option value="same_as_date">Same as date</option>}
+                            <option value="day">Day of month (1–31)</option>
+                            <option value="last_weekday">Last weekday of month</option>
+                          </select>
+                        </div>
+                        {subscriptionForm.day.kind === 'day' && (
+                          <div>
+                            <label className="block text-sm font-medium text-body">Day of month</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={31}
+                              value={subscriptionForm.day.day}
+                              onChange={(e) => {
+                                const day = parseInt(e.target.value, 10)
+                                if (Number.isNaN(day)) return
+                                chooseDay({ kind: 'day', day: Math.min(31, Math.max(1, day)) })
+                              }}
+                              className="mt-1 block w-full border border-line px-3 py-2"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {schedulePreview && 'error' in schedulePreview ? (
+                        <p className="text-xs text-danger" data-testid="schedule-error">
+                          {schedulePreview.error}
+                        </p>
+                      ) : schedulePreview ? (
+                        <div className="text-xs text-muted" data-testid="schedule-preview">
+                          <p className="font-medium text-body">{schedulePreview.label}</p>
+                          {schedulePreview.dates.length > 0 && <p>Next: {schedulePreview.dates.join(', ')}</p>}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
