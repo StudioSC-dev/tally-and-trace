@@ -414,7 +414,7 @@ class Writer:
             tag_ids=self.tag_ids(e.tags))
         if e.end_date is not None:
             payload["end_date"] = day_start(e.end_date)
-        for name in ("semi_monthly_day_1", "semi_monthly_day_2"):
+        for name in ("semi_monthly_day_1", "semi_monthly_day_2", "anchor_day", "day_rule"):
             if getattr(e, name) is not None:
                 payload[name] = getattr(e, name)
         created = self.call(e.key, lambda: create_budget_entry(

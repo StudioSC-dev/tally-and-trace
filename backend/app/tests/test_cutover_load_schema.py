@@ -366,6 +366,53 @@ def test_a_fully_paid_installment_loads_inactive():
     assert phone.is_active is False and phone.entry.is_active is True
 
 
+# --- STU-315: a recurring entry's day fields --------------------------------------------
+
+def test_a_last_weekday_entry_on_its_last_weekday_is_accepted():
+    data = base()
+    entry(data, "e_rent").update(next_occurrence="2026-10-30", day_rule="last_weekday")
+    rent = next(p for p in plan_of(data).entries if p.entry.key == "e_rent")
+    assert (rent.entry.day_rule, rent.entry.anchor_day) == ("last_weekday", None)
+
+
+def test_a_last_weekday_entry_off_its_last_weekday_is_refused():
+    data = base()
+    entry(data, "e_rent").update(next_occurrence="2026-10-31", day_rule="last_weekday")
+    problem = next(p for p in problems_of(data) if p.key == "e_rent")
+    assert problem.check == "day_rule" and "2026-10-30" in problem.detail
+
+
+def test_a_day_field_on_a_semi_monthly_entry_is_refused():
+    for field, value in (("day_rule", "last_weekday"), ("anchor_day", 15)):
+        data = base()
+        entry(data, "e_salary")[field] = value
+        assert ("day_rule", "e_salary") in checks(problems_of(data)), field
+
+
+def test_an_anchor_must_be_the_next_occurrence_day_clamped():
+    data = base()
+    entry(data, "e_rent").update(next_occurrence="2026-04-30", anchor_day=31)
+    assert plan_of(data).entries[0].entry.anchor_day == 31
+    entry(data, "e_rent")["next_occurrence"] = "2026-05-10"
+    assert ("day_rule", "e_rent") in checks(problems_of(data))
+
+
+def test_an_anchor_and_a_rule_together_are_refused():
+    data = base()
+    entry(data, "e_rent").update(next_occurrence="2026-04-30", anchor_day=30,
+                                 day_rule="last_weekday")
+    assert ("day_rule", "e_rent") in checks(problems_of(data))
+
+
+@pytest.mark.parametrize("field,value", [("anchor_day", 0), ("anchor_day", 32),
+                                         ("day_rule", "first_weekday")])
+def test_day_fields_out_of_range_are_refused_by_the_schema(field, value):
+    data = base()
+    entry(data, "e_rent")[field] = value
+    with pytest.raises(ValidationError):
+        plan_of(data)
+
+
 # --- Test 7: currency rules ---------------------------------------------------------------
 
 def test_a_posted_cross_currency_transfer_needs_received_amount():

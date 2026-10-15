@@ -352,6 +352,25 @@ def test_recurring_entries_load_with_their_installment_counts(tmp_path, owner, s
     assert loan_entry.is_autopay is True
 
 
+def test_day_fields_load_as_given_and_a_day_31_entry_gets_anchor_31(tmp_path, owner, sw_db):
+    """STU-315: a rule is stored with the rule (never an anchor), an anchor as
+    given, and an entry with neither on the 31st is anchored on 31."""
+    data = fixture()
+    by_key(data["budget_entries"], "e_rent").update(next_occurrence="2026-04-30",
+                                                    day_rule="last_weekday")
+    by_key(data["budget_entries"], "e_loan")["anchor_day"] = 20
+    by_key(data["budget_entries"], "e_stream")["next_occurrence"] = "2026-05-31"
+    load(tmp_path, data, owner)
+    rent = entry(sw_db, owner, "Rent")
+    assert (rent.day_rule, rent.anchor_day) == ("last_weekday", None)
+    assert wall(rent.next_occurrence) == datetime(2026, 4, 30)
+    loan_entry = entry(sw_db, owner, "Car Loan Payment")
+    assert (loan_entry.day_rule, loan_entry.anchor_day) == (None, 20)
+    stream = entry(sw_db, owner, "Streaming")
+    assert (stream.day_rule, stream.anchor_day) == (None, 31)
+    assert entry(sw_db, owner, "Salary").anchor_day is None  # semi-monthly
+
+
 # --- Test 7: cross currency ----------------------------------------------------------------
 
 def test_cross_currency_rows_store_the_right_figures(tmp_path, owner, sw_db):
