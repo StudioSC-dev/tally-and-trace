@@ -80,6 +80,16 @@ address the tool pins and the session time zone it records would describe
 whichever backend answered, not one stable session. The tool refuses port
 6543.
 
+## Migrations
+
+Apply every pending migration (`alembic upgrade head`) to the target database
+**before the first load**. Never run a migration between a load and its reset
+or sign-off: the owner fingerprint hashes `SELECT * FROM transactions` (and
+the other owned tables) with the column names included, so a new column
+changes the fingerprint even while every value in it is NULL, and the reset
+then refuses. The current example is `transactions.occurrence_date`. If a
+load already exists, reset it or sign it off before migrating.
+
 ## Before the window
 
 1. The owner and the spouse register and verify in the production UI. If the
