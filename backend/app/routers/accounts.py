@@ -546,6 +546,10 @@ def get_account(account_id: int, db: Session = Depends(get_db), current_user: Us
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing account (settings and routing: owner or admin; deactivating: owner)"""
     db_account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
+    # Locked before any validation, field write or tag-link write, whatever the edit
+    # (STU-226): a tags-only edit that deleted its link rows first and wanted the
+    # account only at commit would deadlock with a balance edit holding it.
+    db_account = locking.lock_accounts(db, [db_account.id])[db_account.id]
 
     update_data = account_update.dict(exclude_unset=True)
     # Tags: the caller's own only, on an account whose settings they may change.

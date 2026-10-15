@@ -399,3 +399,46 @@ def test_a_locked_account_still_takes_new_references(sw_client, sw_people, holde
     finally:
         other.rollback()
         other.close()
+
+
+# --- 10: account edits, tags-only against balance -------------------------------
+
+def test_a_tags_only_account_edit_and_a_balance_edit_serialise(sw_client, sw_people,
+                                                              engine, holder):
+    """Both edits lock the account before touching its tag links, so neither deadlocks.
+
+    The holder runs ``update_account`` with ``{"name", "tag_ids": []}`` and stops
+    before its commit: its link DELETE has run, its account UPDATE is still pending.
+    Locking the account only for balance edits would deadlock here: the holder wants
+    the account at commit while the worker holds it and waits for the link row.
+    Main takes no account lock at all, so this passes there (a guard).
+    """
+    from app.models.user import User
+    from app.routers.accounts import update_account
+    from app.schemas.account import AccountUpdate
+
+    client = sw_client
+    me = sw_people()
+    account = _checking(client, me)
+    tag = sw_post(client, me, "/tags/", {"name": "Locking probe tag"}, expect=(201,))["id"]
+    r = client.put(f"{API}/accounts/{account}", json={"tag_ids": [tag]}, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    holder.commit = lambda: None  # stop before the commit (restored below)
+    holder.refresh = lambda *args, **kwargs: None
+    try:
+        update_account(account, AccountUpdate(name="Renamed", tag_ids=[]), db=holder,
+                       current_user=holder.get(User, me["id"]))
+    finally:
+        del holder.commit
+        del holder.refresh
+
+    r = _race(engine, holder, lambda: client.put(
+        f"{API}/accounts/{account}", json={"balance": 12_345, "tag_ids": [tag]},
+        headers=me["headers"]))
+
+    assert r.status_code == 200, r.text
+    after = client.get(f"{API}/accounts/{account}", headers=me["headers"]).json()
+    assert after["name"] == "Renamed"
+    assert Decimal(str(after["balance"])) == Decimal("12345.00")
+    assert [t["id"] for t in after["tags"]] == [tag]
