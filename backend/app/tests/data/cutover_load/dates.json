@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "owner_email": "owner@example.com",
+  "cutover_date": "2026-03-01",
+  "load_date": "2026-04-05",
+  "timezone": "Asia/Manila",
+  "accounts": [
+    {"key": "bank", "name": "Date Bank", "account_type": "checking", "currency": "PHP",
+     "balance_at_cutover": "10000.00"},
+    {"key": "card", "name": "Month End Card", "account_type": "credit", "currency": "PHP",
+     "balance_at_cutover": "0.00",
+     "card": {"billing_cycle_start": 31, "days_until_due_date": 20, "payment_account_key": "bank"}}
+  ],
+  "transactions": [
+    {"key": "m_end", "date": "2026-03-31", "type": "debit", "account_key": "card",
+     "amount": "100.00", "is_posted": true, "description": "Last day line"},
+    {"key": "m_first", "date": "2026-04-01", "type": "debit", "account_key": "card",
+     "amount": "200.00", "is_posted": true, "description": "First day line"},
+    {"key": "u_end", "date": "2026-04-30", "type": "debit", "account_key": "bank",
+     "amount": "300.00", "is_posted": false, "description": "Planned last day"},
+    {"key": "u_first", "date": "2026-05-01", "type": "debit", "account_key": "bank",
+     "amount": "400.00", "is_posted": false, "description": "Planned first day"}
+  ],
+  "budget_entries": [
+    {"key": "e_first", "name": "Monthly Fee", "entry_type": "expense", "amount": "50.00",
+     "currency": "PHP", "cadence": "monthly", "next_occurrence": "2026-05-01",
+     "account_key": "bank"}
+  ]
+}
