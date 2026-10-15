@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
@@ -86,6 +87,8 @@ def create_allocation(
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new allocation"""
+    # Allocations are never shared: the caller is the owner (STU-222).
+    locking.lock_owner_budgets(db, current_user.id)
     # An allocation is the owner's: its account must be the caller's own.
     get_account_or_404(db, current_user, allocation.account_id, roles=OWNER_ROLES)
     _validate_configuration(db, current_user, allocation.configuration)
@@ -121,24 +124,39 @@ def update_allocation(
 ):
     """Update an existing allocation"""
     db_allocation = get_owned_or_404(db, Allocation, allocation_id, current_user, "Allocation not found")
-    (db_allocation,) = _lock_allocations(db, [db_allocation])
-    update_data = allocation_update.dict(exclude_unset=True)
-    if "account_id" in update_data and update_data["account_id"] is not None:
-        get_account_or_404(db, current_user, update_data["account_id"], roles=OWNER_ROLES)
-    if "configuration" in update_data:
-        _validate_configuration(db, current_user, update_data["configuration"])
-    if update_data.get("allocation_type", db_allocation.allocation_type) == AllocationType.BUDGET:
-        # A budget's total is derived from its rows (STU-222): a sent one is ignored.
-        update_data.pop("current_amount", None)
-    for field, value in update_data.items():
-        setattr(db_allocation, field, value)
-    
-    db_allocation.updated_at = utc_now()
-    if db_allocation.allocation_type == AllocationType.BUDGET:
-        _recompute_budget_total(db, db_allocation, [None])
+    db_allocation = apply_allocation_update(
+        db, current_user, db_allocation, allocation_update.dict(exclude_unset=True))
     db.commit()
     db.refresh(db_allocation)
     return db_allocation
+
+def apply_allocation_update(db: Session, user: User, allocation: Allocation,
+                            update_data: dict) -> Allocation:
+    """Apply an allocation edit, uncommitted, and return the allocation.
+
+    The owner's budget lock is taken first (allocations are never shared, so the
+    caller is the owner), then the allocation row, refreshed, so a membership
+    change never races a transaction write discovering that owner's budgets
+    (STU-222). A budget's total is derived from its rows: a sent one is ignored
+    and the total is recomputed.
+    """
+    locking.lock_owner_budgets(db, user.id)
+    (allocation,) = _lock_allocations(db, [allocation])
+    update_data = dict(update_data)
+    if "account_id" in update_data and update_data["account_id"] is not None:
+        get_account_or_404(db, user, update_data["account_id"], roles=OWNER_ROLES)
+    if "configuration" in update_data:
+        _validate_configuration(db, user, update_data["configuration"])
+    if update_data.get("allocation_type", allocation.allocation_type) == AllocationType.BUDGET:
+        update_data.pop("current_amount", None)
+    for field, value in update_data.items():
+        setattr(allocation, field, value)
+
+    allocation.updated_at = utc_now()
+    db.flush()
+    if allocation.allocation_type == AllocationType.BUDGET:
+        _recompute_budget_total(db, allocation, [None])
+    return allocation
 
 @router.delete("/{allocation_id}")
 def delete_allocation(

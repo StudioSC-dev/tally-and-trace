@@ -562,3 +562,152 @@ def test_moving_a_row_between_categories_keeps_both_budgets_right(client, db, oc
     late_reads = [s for s in statements[first_write:]
                   if s.startswith("SELECT") and "FROM allocations" in s]
     assert late_reads == [], late_reads
+
+
+# --- STU-222: budget membership changes are serialised per owner ----------------------------
+#
+# A configuration change and a transaction write for the same owner take the owner's
+# advisory lock first, so neither can discover budgets from a state the other is about
+# to change. The negative control patches the lock out (every caller reaches it through
+# ``app.core.locking``) and shows the race then loses the row.
+
+RACE_PROBE_DEADLINE = 10
+RACE_JOIN_TIMEOUT = 20
+
+
+def _race_worker(fn):
+    import threading
+
+    outcome = {}
+
+    def run():
+        try:
+            outcome["result"] = fn()
+        except BaseException as exc:  # recorded, re-raised in the test thread
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    return thread, outcome
+
+
+def _blocked_on(holder_pid, thread) -> bool:
+    """Whether a backend waits on ``holder_pid`` before the deadline (one transaction per poll)."""
+    import time
+
+    engine = create_engine(os.environ["DATABASE_URL"])
+    deadline = time.monotonic() + RACE_PROBE_DEADLINE
+    try:
+        with engine.connect() as probe:
+            while True:
+                waiting = probe.execute(text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE pg_blocking_pids(pid) @> ARRAY[CAST(:holder AS integer)]"),
+                    {"holder": holder_pid}).scalar()
+                probe.rollback()
+                if waiting or not thread.is_alive() or time.monotonic() > deadline:
+                    return bool(waiting)
+                time.sleep(0.05)
+    finally:
+        engine.dispose()
+
+
+def _race_against(session, serialised, fn):
+    """Run ``fn`` in a worker while ``session`` holds its uncommitted write, then commit it.
+
+    Serialised, the worker must wait on the session before it commits. Without the
+    owner lock nothing makes it wait, so it must finish on its own while the session
+    is still open (no probe: it could only run into its deadline).
+    """
+    thread, outcome = _race_worker(fn)
+    holder_pid = session.execute(text("SELECT pg_backend_pid()")).scalar()
+    try:
+        thread.start()
+        if serialised:
+            assert _blocked_on(holder_pid, thread), ("the worker did not wait on the holder", outcome)
+        else:
+            thread.join(RACE_PROBE_DEADLINE)
+            assert not thread.is_alive(), "the worker waited although nothing serialises it"
+            assert "error" not in outcome, outcome
+        session.commit()
+    finally:
+        session.rollback()  # a no-op once committed
+        thread.join(RACE_JOIN_TIMEOUT)
+    assert not thread.is_alive(), "the worker did not finish"
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
+
+
+@pytest.fixture
+def unserialised(monkeypatch):
+    """Patch the owner lock out for every caller (they reach it through the module)."""
+    from app.core import locking
+
+    def patch(serialised):
+        if not serialised:
+            monkeypatch.setattr(locking, "lock_owner_budgets", lambda db, owner_id: None)
+
+    return patch
+
+
+@pytest.mark.parametrize("serialised", [True, False])
+def test_a_charge_racing_a_budget_config_change_is_counted(client, db, october, unserialised,
+                                                          serialised):
+    """Config first. Without the lock the charge discovers the old config and is lost (500)."""
+    from app.core.database import SessionLocal
+    from app.models.allocation import Allocation
+    from app.models.user import User
+    from app.routers.allocations import apply_allocation_update
+
+    unserialised(serialised)
+    dining = _category(db, october, "Race dining")
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.email == "demo@example.com").one()
+        apply_allocation_update(
+            session, user, session.get(Allocation, october["matched_id"]),
+            {"configuration": {"category_ids": [october["category_id"], dining]}})
+        assert Decimal(session.get(Allocation, october["matched_id"]).current_amount) == OCT_SPENT
+
+        _race_against(session, serialised,
+                      lambda: _post(client, october, OCT_DAY, 200.0, category_id=dining))
+    finally:
+        session.rollback()
+        session.close()
+
+    expected = OCT_SPENT + Decimal("200.00") if serialised else OCT_SPENT
+    assert _total(db, october["matched_id"]) == expected
+
+
+@pytest.mark.parametrize("serialised", [True, False])
+def test_a_budget_config_change_racing_a_charge_counts_it(client, db, october, unserialised,
+                                                         serialised):
+    """Transaction first. Without the lock the recompute skips the uncommitted row (500)."""
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    from app.routers.transactions import add_transaction
+    from app.schemas.transaction import TransactionCreate
+
+    unserialised(serialised)
+    dining = _category(db, october, "Race dining")
+    session = SessionLocal()
+    try:
+        user = session.query(User).filter(User.email == "demo@example.com").one()
+        txn = add_transaction(session, user, TransactionCreate(
+            account_id=october["account_id"], category_id=dining, amount=200.0,
+            transaction_type="debit", description="race charge", transaction_date=OCT_DAY))
+        session.flush()
+        txn_id = txn.id
+
+        r = _race_against(session, serialised, lambda: client.put(
+            f"{API}/allocations/{october['matched_id']}",
+            json={"configuration": {"category_ids": [october["category_id"], dining]}},
+            headers=october["headers"]))
+        october["txn_ids"].append(txn_id)
+    finally:
+        session.rollback()
+        session.close()
+
+    assert r.status_code == 200, r.text
+    expected = OCT_SPENT + Decimal("200.00") if serialised else OCT_SPENT
+    assert _total(db, october["matched_id"]) == expected

@@ -943,6 +943,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     (category, allocation, recurring entry) must be the owner's.
     """
     owner = owner or current_user
+    # The owner's budget lock comes before every other lock (STU-222, STU-226).
+    locking.lock_owner_budgets(db, owner.id)
     transaction_data = transaction.dict()
     # The owner's own tags only (404 otherwise); linked once the row exists.
     tag_ids = own_tag_ids(db, owner, transaction_data.pop("tag_ids", None) or [])
@@ -1087,8 +1089,10 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     """
     db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
                                        "Transaction not found")
-    # Locked and refreshed before anything reads it: every check below reads the
-    # row as it is now, after any concurrent edit or delete commits (STU-226).
+    # The owner's budget lock first (its owner never changes, so the unlocked read
+    # is safe), then the row, locked and refreshed before anything reads it: every
+    # check below reads it as it is now, after any concurrent edit or delete commits.
+    locking.lock_owner_budgets(db, db_transaction.user_id)
     db_transaction = locking.lock_transaction(db, transaction_id)
     if db_transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -1333,8 +1337,9 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
     """
     db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
                                        "Transaction not found")
-    # Locked (FOR UPDATE, as the DELETE needs) and refreshed before anything reads
-    # it, then its accounts before their balances are read (STU-226).
+    # The owner's budget lock first, then the row (FOR UPDATE, as the DELETE needs),
+    # refreshed before anything reads it, then its accounts before their balances.
+    locking.lock_owner_budgets(db, db_transaction.user_id)
     db_transaction = locking.lock_transaction(db, transaction_id, for_delete=True)
     if db_transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
