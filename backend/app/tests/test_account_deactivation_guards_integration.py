@@ -399,6 +399,37 @@ def test_a_loan_whose_final_payment_was_recorded_without_advancing_deactivates(
     assert _is_active(sw_client, a, loan) is False
 
 
+def test_a_loan_with_an_overdue_unrecorded_installment_is_refused_until_it_is_recorded(
+        sw, sw_client):
+    # STU-217: the installment's one payment left fell due 30 days before the
+    # guard's today (``TODAY``, pinned by ``_frozen_today``) and was never
+    # recorded. It is still owed (due today), so it does not use up the cap and
+    # leave the loan free to deactivate; a posted payment linked on its original
+    # day stands for it.
+    a = sw["a"]
+    due = _days_from_today(-30)
+    loan = sw_post(sw_client, a, "/accounts/", {
+        "name": "Small loan", "account_type": "loan", "loan_kind": "auto",
+        "balance": -1_000, "loan_annual_rate": 0, "loan_term_months": 10,
+        "loan_payment_amount": 100, "loan_first_payment_date": due[:10],
+        "payment_account_id": sw["a_private"]})["id"]
+    entry = _entry(sw_client, a, sw["a_private"], name="Loan installment", amount=100,
+                   transfer_to_account_id=loan, next_occurrence=due,
+                   end_mode="after_occurrences", max_occurrences=1)
+
+    _refused(_deactivate(sw_client, a, loan, "put"), LOAN_PENDING_PAYMENT_DETAIL)
+    assert _is_active(sw_client, a, loan) is True
+
+    sw_post(sw_client, a, "/transactions/", {
+        "account_id": sw["a_private"], "transfer_from_account_id": sw["a_private"],
+        "transfer_to_account_id": loan, "amount": 100, "transaction_type": "transfer",
+        "description": "Loan installment", "transaction_date": due,
+        "is_posted": True, "budget_entry_id": entry})
+    r = _deactivate(sw_client, a, loan, "put")
+    assert r.status_code == 200, r.text
+    assert _is_active(sw_client, a, loan) is False
+
+
 # --- No obligations ---------------------------------------------------------------------
 
 @pytest.mark.parametrize("how", DEACTIVATIONS)

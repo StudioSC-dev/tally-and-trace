@@ -178,7 +178,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     """
     from app.core.redaction import LIMITED, Redactor
     from app.services.forecast import (
-        Money, _billed_card_occurrences, _linked_occurrence_days, iter_occurrences,
+        Money, _billed_card_occurrences, _linked_occurrence_days, iter_window_occurrences,
     )
 
     start, end = _naive(start), _naive(end)
@@ -297,12 +297,16 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
                     card_lines.setdefault(entry.account_id, []).append(
                         (occ, ("e", entry.id, when)))
             continue
-        for when in iter_occurrences(entry, start, end):
-            key = (entry.id, when.date())
+        for when, original in iter_window_occurrences(entry, start, end):
+            key = (entry.id, (original or when).date())
             if linked[key]:
                 linked[key] -= 1
                 continue
-            occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount))
+            # An installment's overdue occurrence is listed on ``start``, as an
+            # overdue unposted transaction is above.
+            extra = ({"overdue": True, "original_date": original}
+                     if original is not None else {})
+            occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount), extra)
             out.append(occ)
             if entry.account_id not in billed and entry.transfer_to_account_id is None:
                 account_fx(occ, entry.amount, entry.currency)
@@ -370,7 +374,7 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     rates (``forecast.Money``).
     """
     from app.services.forecast import (
-        Money, _card_entry_charges, _linked_occurrence_days, iter_occurrences,
+        Money, _card_entry_charges, _linked_occurrence_days, iter_window_occurrences,
     )
     from app.services.statements import _card_rows, _split_card_rows, normalise_lines
 
@@ -410,8 +414,10 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
             BudgetEntry.is_active.is_(True)).all()
         linked = _linked_occurrence_days(db, [e.id for e in transfers])
         for entry in transfers:
-            for when in iter_occurrences(entry, start, end):
-                key = (entry.id, when.date())
+            # An installment's overdue occurrence pays on ``start``, as the
+            # projection dates it; it is suppressed on its own day.
+            for when, original in iter_window_occurrences(entry, start, end):
+                key = (entry.id, (original or when).date())
                 if linked[key]:
                     linked[key] -= 1
                     continue

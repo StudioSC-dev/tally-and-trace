@@ -1482,3 +1482,136 @@ def test_planned_payment_pays_the_oldest_unpaid_statement_and_each_peso_leaves_o
     assert [(p["due_date"], p["amount"]) for p in get_payables(
         db, user.id, days=60, reference=reference)] == [
         ("2026-08-14", 2500.0), ("2026-09-10", 500.0), ("2026-09-14", 500.0)]
+
+
+# --- STU-217: overdue installments ------------------------------------------------
+# An ``after_occurrences`` entry whose ``next_occurrence`` is before the window
+# start: each unrecorded occurrence before it is emitted on the window start as
+# overdue (with its ``original_date``), as an overdue unposted row is, instead of
+# silently using up the cap. Checking 10,000; 1,000 a month from 1 Aug; the
+# projection starts on 10 Aug and runs 60 days (to 9 Oct).
+
+OVERDUE_REFERENCE = datetime(2026, 8, 10)
+OVERDUE_DAYS = 60
+
+
+def _overdue_checking(db, user):
+    from app.models.account import AccountType
+
+    return _account(db, user, "Checking B", AccountType.CHECKING, "10000.00")
+
+
+def _overdue_installment(db, user, checking, **kw):
+    """1,000 a month on Checking from 1 Aug, nine days before the window start."""
+    from app.models.budget_entry import BudgetEntryType
+
+    return _entry(db, user, "Installment", BudgetEntryType.EXPENSE, "1000.00",
+                  datetime(2026, 8, 1), account=checking, **kw)
+
+
+def _overdue_entry_events(db, user):
+    """``(date, overdue, original_date)`` of every budget-entry event in the window."""
+    from datetime import timedelta
+
+    from app.services.forecast import collect_events
+
+    end = OVERDUE_REFERENCE + timedelta(days=OVERDUE_DAYS)
+    return [(e["date"], e.get("overdue", False), e.get("original_date"))
+            for e in collect_events(db, OVERDUE_REFERENCE, end, user_id=user.id)
+            if e["source"] == "budget_entry"]
+
+
+def _overdue_closing(db, user):
+    from app.services.forecast import project_running_balance
+
+    return project_running_balance(db, user.id, days=OVERDUE_DAYS,
+                                   reference=OVERDUE_REFERENCE)["closing_balance"]
+
+
+def test_overdue_final_installment_is_projected_on_the_window_start(db, user):
+    """One payment left, due 1 Aug: it is owed on 10 Aug, not dropped."""
+    checking = _overdue_checking(db, user)
+    _overdue_installment(db, user, checking, end_mode="after_occurrences", max_occurrences=1)
+
+    assert _overdue_entry_events(db, user) == [
+        (OVERDUE_REFERENCE, True, datetime(2026, 8, 1))]
+    assert _overdue_closing(db, user) == Decimal("9000.00")
+
+
+def test_overdue_installment_keeps_its_remaining_occurrences(db, user):
+    """Three payments left from 1 Aug: 1 Aug overdue on 10 Aug, then 1 Sep and 1 Oct."""
+    checking = _overdue_checking(db, user)
+    _overdue_installment(db, user, checking, end_mode="after_occurrences", max_occurrences=3)
+
+    assert _overdue_entry_events(db, user) == [
+        (OVERDUE_REFERENCE, True, datetime(2026, 8, 1)),
+        (datetime(2026, 9, 1), False, None),
+        (datetime(2026, 10, 1), False, None),
+    ]
+    assert _overdue_closing(db, user) == Decimal("7000.00")
+
+
+def test_overdue_installment_linked_on_its_original_day_is_suppressed(db, user):
+    """A posted row hand-linked on 1 Aug stands for the overdue occurrence."""
+    from app.models.transaction import TransactionType
+
+    checking = _overdue_checking(db, user)
+    entry = _overdue_installment(db, user, checking, end_mode="after_occurrences",
+                                 max_occurrences=3)
+    _txn(db, user, checking, TransactionType.DEBIT, "1000.00", datetime(2026, 8, 1),
+         is_posted=True, description="Installment", budget_entry_id=entry.id)
+
+    assert _overdue_entry_events(db, user) == [
+        (datetime(2026, 9, 1), False, None),
+        (datetime(2026, 10, 1), False, None),
+    ]
+    assert _overdue_closing(db, user) == Decimal("8000.00")
+
+
+def test_open_ended_entry_still_drops_occurrences_before_the_window(db, user):
+    """Guard: an open-ended schedule from 1 Aug projects 1 Sep and 1 Oct only."""
+    checking = _overdue_checking(db, user)
+    _overdue_installment(db, user, checking)
+
+    assert _overdue_entry_events(db, user) == [
+        (datetime(2026, 9, 1), False, None),
+        (datetime(2026, 10, 1), False, None),
+    ]
+    assert _overdue_closing(db, user) == Decimal("8000.00")
+
+
+def test_overdue_installment_into_a_loan_covers_its_own_due_date(db, user):
+    """A loan owing 1,000 at 100 a month, first due 5 Aug, paid from Checking. Its
+    one recurring payment left is dated 5 Aug, the due day: it is overdue on 10 Aug,
+    and as a cover dated 5 Aug it pays the 5 Aug due date, so that due date owes
+    nothing and the 100 leaves Checking once, on 10 Aug."""
+    from datetime import date, timedelta
+
+    from app.models.account import AccountType
+    from app.models.budget_entry import BudgetEntryType
+    from app.services.forecast import collect_events
+
+    checking = _overdue_checking(db, user)
+    loan = _account(db, user, "Loan L", AccountType.LOAN, "-1000.00",
+                    loan_kind="auto", loan_amortization="fixed",
+                    loan_annual_rate=Decimal("0"), loan_term_months=10,
+                    loan_payment_amount=Decimal("100.00"),
+                    loan_first_payment_date=date(2026, 8, 5), loan_payments_made_offset=0,
+                    payment_account_id=checking.id)
+    _entry(db, user, "Loan installment", BudgetEntryType.EXPENSE, "100.00",
+           datetime(2026, 8, 5), account=checking, transfer_to_account_id=loan.id,
+           end_mode="after_occurrences", max_occurrences=1)
+
+    end = OVERDUE_REFERENCE + timedelta(days=OVERDUE_DAYS)
+    events = collect_events(db, OVERDUE_REFERENCE, end, user_id=user.id)
+
+    transfers = [e for e in events if e["source"] == "budget_entry"]
+    assert [(e["date"], e.get("overdue"), e.get("original_date")) for e in transfers] == [
+        (OVERDUE_REFERENCE, True, datetime(2026, 8, 5))]
+    loans = [e for e in events if e["source"] == "loan"]
+    assert [e["loan_due_date"] for e in loans] == [date(2026, 9, 5), date(2026, 10, 5)]
+    assert [e["amount"] for e in loans] == [Decimal("-100.00"), Decimal("-100.00")]
+    assert date(2026, 8, 5) not in [e["loan_due_date"] for e in loans]
+    on_start = [(leg["amount"], leg["cash"]) for e in events if e["date"] == OVERDUE_REFERENCE
+                for leg in e["legs"] if leg["account_id"] == checking.id]
+    assert on_start == [(Decimal("-100.00"), True)]

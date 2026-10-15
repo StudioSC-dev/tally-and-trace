@@ -277,7 +277,7 @@
       "amount": 45.00,
       "currency": "PHP",
       "cadence": "MONTHLY",
-      "next_occurrence": "2025-09-02T07:00:00",
+      "next_occurrence": "2026-12-02T07:00:00",
       "lead_time_days": 1,
       "account_id": 1,
       "category_id": 3,
