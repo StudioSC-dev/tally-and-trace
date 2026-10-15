@@ -358,6 +358,8 @@ export type RecurrenceFrequency =
   | 'semi_annual'
   | 'annual'
 export type EndMode = 'indefinite' | 'on_date' | 'after_occurrences'
+/** A month-family entry's day rule: the last Monday-Friday of each month. */
+export type DayRule = 'last_weekday'
 
 /** The fields a recurring entry has in every shape except Limited. */
 interface RecurringEntryDetail {
@@ -373,6 +375,15 @@ interface RecurringEntryDetail {
   /** Only meaningful when cadence === 'semi_monthly' (defaults 1 & 15). */
   semi_monthly_day_1?: number
   semi_monthly_day_2?: number
+  /**
+   * Month-family entries (monthly, quarterly, semi-annual, annual): the intended
+   * day of the month, 1-31, clamped to short months but never drifting. Used
+   * when `day_rule` is null. Both null is the legacy schedule, which steps from
+   * the current day.
+   */
+  anchor_day?: number | null
+  /** Month-family entries: a day rule instead of `anchor_day` (never both). */
+  day_rule?: DayRule | null
   end_mode: EndMode
   end_date?: string
   /** Installments: the "m" in "n of m". */

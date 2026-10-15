@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "TZ=Asia/Manila vitest run"
   },
   "devDependencies": {
     "typescript": "^5.2.2",

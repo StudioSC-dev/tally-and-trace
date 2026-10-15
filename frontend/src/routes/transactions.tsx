@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
+import { formatEntryDate, isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
@@ -2035,7 +2035,7 @@ export function TransactionsPage() {
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt>Next Occurrence</dt>
-                        <dd>{formatDateWithOrdinal(new Date(actionSchedule.next_occurrence))}</dd>
+                        <dd>{formatEntryDate(actionSchedule.next_occurrence)}</dd>
                       </div>
                       {actionSchedule.lead_time_days ? (
                         <div className="flex justify-between gap-3 text-xs text-muted">
@@ -2699,7 +2699,7 @@ export function TransactionsPage() {
                     <div className="bg-sunken p-3 text-xs text-body space-y-1">
                       <p className="font-semibold text-ink">{selectedBudgetEntry.name}</p>
                       <p>Cadence: {RECURRENCE_LABELS[selectedBudgetEntry.cadence]}</p>
-                      <p>Next due: {formatDateWithOrdinal(new Date(selectedBudgetEntry.next_occurrence))}</p>
+                      <p>Next due: {formatEntryDate(selectedBudgetEntry.next_occurrence)}</p>
                       <p>Amount: {formatCurrency(selectedBudgetEntry.amount, selectedBudgetEntry.currency)}</p>
                       {selectedBudgetEntry.is_autopay && <p>Autopay enabled</p>}
                     </div>
