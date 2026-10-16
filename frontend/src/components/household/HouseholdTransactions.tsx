@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { localToday, transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
+import { transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
 import { useGetHouseholdDashboardQuery, useGetHouseholdTransactionsQuery } from '../../store/api'
 import type { Transaction } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
+import { useToday } from '../../hooks/useToday'
 import { TagChips } from '../TagChips'
 import { formatDay, money } from './format'
 
@@ -22,9 +23,9 @@ const isReadOnly = (transaction: Transaction): boolean => !Object.values(transac
  * offers no controls on them, so a row has nothing to edit, delete, post or revert whatever
  * its flags say.
  */
-function Row({ transaction, accountNames }: { transaction: Transaction; accountNames: Map<number, string> }) {
+function Row({ transaction, accountNames, today }: { transaction: Transaction; accountNames: Map<number, string>; today: string }) {
   const limited = transaction.view === 'limited'
-  const status = transactionStatus(transaction, localToday())
+  const status = transactionStatus(transaction, today)
   const accountName = limited
     ? transaction.account?.name
     : accountNames.get(transaction.account_id) ?? null
@@ -68,6 +69,7 @@ function Row({ transaction, accountNames }: { transaction: Transaction; accountN
 
 /** The Household's transactions, newest first, a page at a time. */
 export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
+  const today = useToday()
   const [page, setPage] = useState(0)
   useEffect(() => setPage(0), [sharerId])
   const { data, isLoading, isFetching, error } = useGetHouseholdTransactionsQuery({
@@ -98,7 +100,7 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
       ) : (
         <ul className="divide-y divide-line border border-line">
           {data.items.map((transaction) => (
-            <Row key={transaction.id} transaction={transaction} accountNames={accountNames} />
+            <Row key={transaction.id} transaction={transaction} accountNames={accountNames} today={today} />
           ))}
         </ul>
       )}
