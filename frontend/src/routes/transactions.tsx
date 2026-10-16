@@ -519,10 +519,12 @@ export function TransactionsPage() {
   const [upcomingTotal, setUpcomingTotal] = useState(0)
   const [isUpcomingOpen, setIsUpcomingOpen] = useState(true)
   // The full-page spinner is for the first load only; later loads keep the rows on screen.
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+  // It ends once both lists have settled, so the empty state never shows before Upcoming is known.
+  const [mainSettled, setMainSettled] = useState(false)
+  const [upcomingSettled, setUpcomingSettled] = useState(false)
   const [isMainLoading, setIsMainLoading] = useState(false)
   const [isUpcomingLoading, setIsUpcomingLoading] = useState(false)
-  const isInitialLoading = !hasLoadedOnce
+  const isInitialLoading = !(mainSettled && upcomingSettled)
   const isRefreshing = isMainLoading || isUpcomingLoading
 
   const [pageSize, setPageSizeState] = useState<PageSize>(readStoredPageSize)
@@ -618,7 +620,7 @@ export function TransactionsPage() {
       } finally {
         if (isCurrent() && !refetching) {
           setIsMainLoading(false)
-          setHasLoadedOnce(true)
+          setMainSettled(true)
         }
       }
     },
@@ -660,6 +662,7 @@ export function TransactionsPage() {
       } finally {
         if (isCurrent()) {
           setIsUpcomingLoading(false)
+          setUpcomingSettled(true)
         }
       }
     },
@@ -1966,16 +1969,17 @@ export function TransactionsPage() {
         )}
       </div>
 
+      {isRefreshing && (
+        <p className="flex items-center gap-2 text-xs text-muted" role="status">
+          <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
+          Updating...
+        </p>
+      )}
       {transactions.length === 0 && upcomingTransactions.length === 0 ? (
-        emptyState
+        // Not while a list is still loading: it may be about to fill.
+        isRefreshing ? null : emptyState
       ) : (
         <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
-          {isRefreshing && (
-            <p className="flex items-center gap-2 text-xs text-muted" role="status">
-              <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
-              Updating...
-            </p>
-          )}
           {upcomingTransactions.length > 0 && (
             <section className="space-y-3" data-testid="upcoming-transactions">
               <button
