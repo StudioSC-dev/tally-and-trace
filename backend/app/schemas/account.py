@@ -119,11 +119,14 @@ class DirectAccountResponse(AccountFields):
     """An account as a caller with a direct role sees it.
 
     ``description``, ``credit_limit``, the routing ids and the loan terms are
-    null unless ``my_role`` is "owner" or "admin".
+    null unless ``my_role`` is "owner" or "admin". ``is_shared`` is set only for
+    the owner (true when the account has an account share or carries the owner's
+    Household tag); null for every other role.
     """
     my_role: Literal["owner", "admin", "editor", "viewer"]
     permissions: AccountPermissions
     owner_name: Optional[str] = None
+    is_shared: Optional[bool] = None
 
 
 class TagViewerAccountResponse(BaseModel):
