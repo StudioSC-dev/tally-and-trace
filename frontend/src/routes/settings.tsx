@@ -177,7 +177,7 @@ function SettingsPage() {
             >
               <option value="">None (all cash accounts)</option>
               {mainAccountId !== null && !pinnable.some((a) => a.id === mainAccountId) && (
-                <option value={String(mainAccountId)} disabled>Unavailable account</option>
+                <option value={String(mainAccountId)} disabled>{accountsPage === undefined ? 'Loading…' : 'Unavailable account'}</option>
               )}
               {pinnable.map((a) => (
                 <option key={a.id} value={String(a.id)}>{a.name} ({a.currency})</option>

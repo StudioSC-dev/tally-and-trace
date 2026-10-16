@@ -12,7 +12,7 @@ import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
 
-import { timelineEventAccountLabel, timelineEventAmount, timelineEventName } from '@tally-trace/shared'
+import { overflowPullsFrom, timelineEventAccountLabel, timelineEventAmount, timelineEventName } from '@tally-trace/shared'
 import type { CashflowTimelineEvent, LimitedTimelineEvent } from '@tally-trace/shared'
 export const Route = createFileRoute('/forecast')({
   component: ForecastPage,
@@ -78,11 +78,14 @@ function ForecastPage() {
   const row = data?.by_currency.find((r) => r.currency === currency)
   // Funding shortfalls in every currency, whichever one is selected.
   const fundingShortfalls = data?.by_currency.flatMap((r) => r.account_shortfalls.map((sf) => ({ ...sf, currency: r.currency }))) ?? []
-  // Pinned: a row an overflow move touches says where the money would come from or go.
+  // Pinned: a row an overflow move covers says where the money would come from. A pull
+  // out of the account has no row of its own here, so those are listed above the table.
   const overflowNotes = new Map<string, string>()
+  const overflowPulls = data?.account && row ? overflowPullsFrom(row.overflow_moves, data.account.account_id) : []
   if (data?.account && row) {
     for (const m of row.overflow_moves) {
-      const note = m.to_account_id === data.account.account_id ? `covered by ${m.from_account_name ?? 'overflow'}` : `pulled to ${m.to_account_name ?? 'another account'}`
+      if (m.to_account_id !== data.account.account_id) continue
+      const note = `covered by ${m.from_account_name ?? 'overflow'}`
       const key = `${m.date}|${m.name}`
       overflowNotes.set(key, overflowNotes.has(key) ? `${overflowNotes.get(key)}; ${note}` : note)
     }
@@ -215,6 +218,21 @@ function ForecastPage() {
               <h2 className="text-lg font-semibold text-ink">Scheduled items</h2>
               <span className="badge badge-info">{row.events.length}</span>
             </div>
+            {overflowPulls.length > 0 && (
+              <section className="p-4 sm:p-6 border-b border-line" aria-labelledby="overflow-pulls-heading" data-testid="timeline-overflow-pulls">
+                <h3 id="overflow-pulls-heading" className="text-sm font-semibold text-ink">Overflow pulls from this account</h3>
+                <p className="text-xs text-muted mt-1">Not in the running balance below, which would be lower by each amount from its date on.</p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {overflowPulls.map((m, i) => (
+                    <li key={`${m.date}-${m.to_account_id}-${i}`} className="flex flex-wrap gap-x-2">
+                      <span className="text-muted">{longDate(m.date)}</span>
+                      <span className="font-medium text-danger">−{format(m.amount)}</span>
+                      <span className="text-body">to {m.to_account_name ?? 'another account'} ({m.name})</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {row.events.length === 0 ? (
               <p className="p-4 sm:p-6 text-sm text-muted">No income or payables scheduled in this window.</p>
             ) : (
