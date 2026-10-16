@@ -85,6 +85,16 @@ describe('buildSpendingBreakdown', () => {
     expect(slices[0]?.offset).toBe(0)
     expect((other?.offset ?? 0) + (other?.share ?? 0)).toBeCloseTo(1, 10)
   })
+
+  it('keeps slice keys unique when a real category is named other', () => {
+    const data = { other: line(50), B: line(40), C: line(30), D: line(20), E: line(10) }
+    const { slices, rows } = buildSpendingBreakdown(data, [], 3)
+    expect(slices.some((s) => s.isOther)).toBe(true)
+    expect(slices.some((s) => s.name === 'other')).toBe(true)
+    const keys = slices.map((s) => s.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length)
+  })
 })
 
 describe('summaryRange', () => {

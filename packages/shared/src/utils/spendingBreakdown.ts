@@ -84,7 +84,7 @@ export function buildSpendingBreakdown(
   const rows: SpendingRow[] = entries.map((entry) => {
     const color = categories.find((c) => c.name === entry.name)?.color?.trim()
     const row: SpendingRow = {
-      key: entry.name,
+      key: `category:${entry.name}`,
       name: entry.name,
       amount: entry.amount,
       share: total > 0 ? entry.amount / total : 0,
@@ -100,7 +100,7 @@ export function buildSpendingBreakdown(
   if (rest.length > 0) {
     const amount = rest.reduce((sum, row) => sum + row.amount, 0)
     parts.push({
-      key: 'other',
+      key: 'aggregate:other',
       name: 'Other',
       amount,
       share: total > 0 ? amount / total : 0,
