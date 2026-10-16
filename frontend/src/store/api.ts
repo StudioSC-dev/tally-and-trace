@@ -278,6 +278,8 @@ export const accountingApi = createApi({
     getTransactions: builder.query<PaginatedResponse<Transaction>, {
       account_ids?: number[]
       category_ids?: number[]
+      category_names?: string[]
+      entered_by?: 'me'
       allocation_id?: number
       transaction_types?: string[]
       start_date?: string
@@ -292,6 +294,8 @@ export const accountingApi = createApi({
         const searchParams = new URLSearchParams()
         params?.account_ids?.forEach((id) => searchParams.append('account_ids', String(id)))
         params?.category_ids?.forEach((id) => searchParams.append('category_ids', String(id)))
+        params?.category_names?.forEach((name) => searchParams.append('category_names', name))
+        if (params?.entered_by) searchParams.set('entered_by', params.entered_by)
         params?.transaction_types?.forEach((v) => searchParams.append('transaction_types', v))
         if (typeof params?.allocation_id === 'number') searchParams.set('allocation_id', String(params.allocation_id))
         if (params?.start_date) searchParams.set('start_date', params.start_date)
@@ -340,8 +344,16 @@ export const accountingApi = createApi({
       }),
       transformResponse: (blob: Blob) => ({ url: URL.createObjectURL(blob), type: blob.type }),
     }),
-    getTransactionSummary: builder.query<TransactionSummary, { start_date: string; end_date: string; account_id?: number; tag?: number }>({
-      query: (params) => ({ url: 'transactions/summary/period', params }),
+    getTransactionSummary: builder.query<TransactionSummary, { start_date?: string; end_date?: string; account_id?: number; tag?: number }>({
+      query: (params) => {
+        // An omitted bound is open on that side, so each is sent only when set.
+        const searchParams = new URLSearchParams()
+        if (params.start_date) searchParams.set('start_date', params.start_date)
+        if (params.end_date) searchParams.set('end_date', params.end_date)
+        if (typeof params.account_id === 'number') searchParams.set('account_id', String(params.account_id))
+        if (typeof params.tag === 'number') searchParams.set('tag', String(params.tag))
+        return { url: 'transactions/summary/period', params: searchParams }
+      },
       providesTags: ['Transaction', 'Account', 'Category'],
     }),
 

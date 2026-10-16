@@ -44,6 +44,9 @@ const TYPE_TO_KIND: Record<Transaction['transaction_type'], CategoryKind> = {
 const categoryKind = (category: { kind?: CategoryKind; is_expense?: boolean }): CategoryKind =>
   category.kind ?? (category.is_expense === false ? 'income' : 'expense')
 
+// The API takes at most this many category names per request.
+const MAX_CATEGORY_NAMES = 50
+
 const RECURRENCE_LABELS: Record<string, string> = {
   daily: 'Daily',
   weekly: 'Weekly',
@@ -130,7 +133,8 @@ const readStoredPageSize = (): PageSize => {
 
 type TransactionQuery = {
   account_ids?: number[]
-  category_ids?: number[]
+  category_names?: string[]
+  entered_by?: 'me'
   transaction_types?: string[]
   start_date?: string
   end_date?: string
@@ -337,7 +341,8 @@ export function TransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([])
+  const [selectedCategoryNames, setSelectedCategoryNames] = useState<string[]>([])
+  const [enteredBy, setEnteredBy] = useState<'everyone' | 'me'>('everyone')
   const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   const resetPostingFormState = useCallback(() => {
@@ -366,7 +371,8 @@ export function TransactionsPage() {
     defaultMonthEndRef.current = freshEnd
     setSearchTerm('')
     setSelectedAccountIds((prev) => (prev.length ? [] : prev))
-    setSelectedCategoryIds((prev) => (prev.length ? [] : prev))
+    setSelectedCategoryNames((prev) => (prev.length ? [] : prev))
+    setEnteredBy('everyone')
     setSelectedTypes((prev) => (prev.length ? [] : prev))
     setSelectedTag(undefined)
     setCurrentMonth(freshStart)
@@ -383,7 +389,8 @@ export function TransactionsPage() {
       Boolean(
         searchTerm.trim() ||
           selectedAccountIds.length ||
-          selectedCategoryIds.length ||
+          selectedCategoryNames.length ||
+          enteredBy !== 'everyone' ||
           selectedTypes.length ||
           selectedTag !== undefined ||
           isCustomRange ||
@@ -393,7 +400,8 @@ export function TransactionsPage() {
     [
       searchTerm,
       selectedAccountIds,
-      selectedCategoryIds,
+      selectedCategoryNames,
+      enteredBy,
       selectedTypes,
       selectedTag,
       isCustomRange,
@@ -441,10 +449,11 @@ export function TransactionsPage() {
     )
   }, [])
 
-  const toggleCategoryFilter = useCallback((id: number) => {
-    setSelectedCategoryIds((prev) =>
-      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
-    )
+  const toggleCategoryFilter = useCallback((name: string) => {
+    setSelectedCategoryNames((prev) => {
+      if (prev.includes(name)) return prev.filter((value) => value !== name)
+      return prev.length >= MAX_CATEGORY_NAMES ? prev : [...prev, name]
+    })
   }, [])
 
   const toggleTypeFilter = useCallback((value: Transaction['transaction_type']) => {
@@ -509,6 +518,11 @@ export function TransactionsPage() {
   const [resolvedDestinations, setResolvedDestinations] = useState<Record<number, Account | null>>({})
   const destinationLookups = useRef(new Set<number>())
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
+  // One chip per name: the filter matches by name, so same-name categories are one choice.
+  const categoryFilterNames = useMemo(
+    () => Array.from(new Set(categories.map((category) => category.name))),
+    [categories]
+  )
   // Only the caller's own entries can be linked to a transaction: a shared or limited
   // entry belongs to someone else, whose category and allocation the caller can't use.
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
@@ -546,8 +560,8 @@ export function TransactionsPage() {
   // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
   const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch
   const filterKey = useMemo(
-    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
-    [startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
@@ -577,8 +591,11 @@ export function TransactionsPage() {
     if (selectedTypes.length > 0) {
       params.transaction_types = selectedTypes
     }
-    if (selectedCategoryIds.length > 0) {
-      params.category_ids = selectedCategoryIds
+    if (selectedCategoryNames.length > 0) {
+      params.category_names = selectedCategoryNames
+    }
+    if (enteredBy === 'me') {
+      params.entered_by = 'me'
     }
     if (selectedTag !== undefined) {
       params.tag = selectedTag
@@ -587,7 +604,7 @@ export function TransactionsPage() {
       params.search = effectiveSearch.trim()
     }
     return params
-  }, [selectedAccountIds, selectedTypes, selectedCategoryIds, selectedTag, effectiveSearch])
+  }, [selectedAccountIds, selectedTypes, selectedCategoryNames, enteredBy, selectedTag, effectiveSearch])
 
   const loadTransactions = useCallback(
     async () => {
@@ -1854,6 +1871,33 @@ export function TransactionsPage() {
             </button>
           )}
         </div>
+        {(selectedCategoryNames.length > 0 || enteredBy === 'me') && (
+          <div className="flex flex-wrap gap-2" aria-label="Active filters">
+            {selectedCategoryNames.map((name) => (
+              <button
+                type="button"
+                key={`category:${name}`}
+                onClick={() => toggleCategoryFilter(name)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label={`Remove category filter ${name}`}
+              >
+                Category: {name}
+                <span aria-hidden="true">×</span>
+              </button>
+            ))}
+            {enteredBy === 'me' && (
+              <button
+                type="button"
+                onClick={() => setEnteredBy('everyone')}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label="Remove the Only mine filter"
+              >
+                Only mine
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
+          </div>
+        )}
         {showFilters && (
           <div className="space-y-6">
             <div>
@@ -1913,27 +1957,51 @@ export function TransactionsPage() {
               <div className="mt-2 flex flex-wrap gap-2">
             <button
                   type="button"
-                  onClick={() => setSelectedCategoryIds([])}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedCategoryIds.length === 0 ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  disabled={selectedCategoryIds.length === 0}
+                  onClick={() => setSelectedCategoryNames([])}
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedCategoryNames.length === 0 ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                  disabled={selectedCategoryNames.length === 0}
                 >
                   All categories
             </button>
-                {categories.map((category) => {
-                  const isSelected = selectedCategoryIds.includes(category.id)
+                {categoryFilterNames.map((name) => {
+                  const isSelected = selectedCategoryNames.includes(name)
                   return (
                     <button
                       type="button"
-                      key={category.id}
-                      onClick={() => toggleCategoryFilter(category.id)}
+                      key={name}
+                      onClick={() => toggleCategoryFilter(name)}
                       className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                     >
-                      {category.name}
+                      {name}
                     </button>
                   )
                 })}
           </div>
+              {selectedCategoryNames.length >= MAX_CATEGORY_NAMES && (
+                <p className="mt-2 text-xs text-muted">
+                  You can filter by up to {MAX_CATEGORY_NAMES} categories at once.
+                </p>
+              )}
       </div>
+            <div>
+              <h3 className="text-sm font-semibold text-body">Entered by</h3>
+              <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label="Entered by">
+                {([['everyone', 'Everyone'], ['me', 'Only mine']] as const).map(([value, label]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    onClick={() => setEnteredBy(value)}
+                    aria-pressed={enteredBy === value}
+                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ enteredBy === value ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                Only mine keeps the rows you own, including ones someone else recorded for you from your recurring entries.
+              </p>
+            </div>
             <div>
               <h3 className="text-sm font-semibold text-body">Tag</h3>
               <div className="mt-2">
