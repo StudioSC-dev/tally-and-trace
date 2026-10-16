@@ -17,6 +17,7 @@ import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
+import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
@@ -340,6 +341,7 @@ export function TransactionsPage() {
   const [postingFormState, setPostingFormState] = useState<PostingFormState>(emptyPostingForm(fallbackCurrency))
   const [searchTerm, setSearchTerm] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
   const [selectedCategoryNames, setSelectedCategoryNames] = useState<string[]>([])
   const [enteredBy, setEnteredBy] = useState<'everyone' | 'me'>('everyone')
@@ -418,6 +420,13 @@ export function TransactionsPage() {
     }
     const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Beginning'
     const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Present'
+    return `${startLabel} → ${endLabel}`
+  }, [startDate, endDate])
+
+  // The dialog reads the same dates; an open side is "Any date".
+  const breakdownRangeLabel = useMemo(() => {
+    const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Any date'
+    const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Any date'
     return `${startLabel} → ${endLabel}`
   }, [startDate, endDate])
 
@@ -1844,6 +1853,18 @@ export function TransactionsPage() {
             </div>
             <button
               type="button"
+              onClick={() => setIsBreakdownOpen(true)}
+              data-onboarding="spending-breakdown"
+              className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+              </svg>
+              Spending breakdown
+            </button>
+            <button
+              type="button"
               onClick={() => setShowFilters((prev) => !prev)}
               className="inline-flex items-center justify-center gap-2 border border-line bg-surface px-3 py-2 text-sm font-semibold text-body transition hover:bg-sunken focus:outline-none"
             >
@@ -2137,6 +2158,24 @@ export function TransactionsPage() {
             </nav>
           )}
         </div>
+      )}
+
+      {isBreakdownOpen && (
+        <SpendingBreakdownDialog
+          startDate={startDate}
+          endDate={endDate}
+          tag={selectedTag}
+          rangeLabel={breakdownRangeLabel}
+          defaultCurrency={fallbackCurrency}
+          onSelectCategory={(name) => {
+            // Replaces any category selection. Page 1 is set explicitly so picking again
+            // from page 2 still resets, when the key would not change.
+            setSelectedCategoryNames([name])
+            goToPage(1)
+            setIsBreakdownOpen(false)
+          }}
+          onClose={() => setIsBreakdownOpen(false)}
+        />
       )}
 
       {isActionModalOpen && actionTransaction && (

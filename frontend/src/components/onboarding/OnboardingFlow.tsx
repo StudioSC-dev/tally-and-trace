@@ -221,10 +221,10 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     },
     {
       id: 8,
-      title: 'Top Expenditure Categories',
-      description: 'Understand where your money goes with a visual breakdown of your spending by category.',
-      targetSelector: '[data-onboarding="top-categories"]',
-      navigateTo: '/',
+      title: 'Spending breakdown',
+      description: 'Open a breakdown of your posted spending by category for the dates shown, then pick a category to filter the list.',
+      targetSelector: '[data-onboarding="spending-breakdown"]',
+      navigateTo: '/transactions',
     },
   ], [])
 
