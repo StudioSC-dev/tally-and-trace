@@ -13,6 +13,8 @@ from app.services.forecast import (
     _leg,
     _route_legs,
     _transfer_event,
+    account_events,
+    account_closings,
     build_timeline,
     is_projection_cash,
     route_accounts,
@@ -248,3 +250,61 @@ def test_build_timeline_carries_accounts_through():
     ev["accounts"] = _event_accounts(ev["legs"], NAMES)
     (out,) = build_timeline(Decimal("1000"), [ev])["events"]
     assert out["accounts"] == ev["accounts"]
+
+
+# ---------------------------------------------------------------------------
+# One pinned account's walk (STU-326)
+# ---------------------------------------------------------------------------
+
+def _inflow(day, amount, account_id, name="Pay"):
+    return _event(
+        date=datetime(2026, 8, day), name=name, type="income", source="budget_entry",
+        source_id=8, face_amount=amount, legs=[_leg(account_id, Decimal(str(amount)))],
+    )
+
+
+def _mixed():
+    """A transfer, a payable with overflow, an accountless bill and an inflow."""
+    bill = _event(
+        date=datetime(2026, 8, 12), name="Tuition", type="expense", source="budget_entry",
+        source_id=9, face_amount=7000,
+        legs=[_leg(CHECKING_B, Decimal("-7000"), overflow_account_id=SAVINGS_A)])
+    loose = _event(
+        date=datetime(2026, 8, 13), name="Loose", type="expense", source="budget_entry",
+        source_id=10, face_amount=40, legs=[_leg(None, Decimal("-40"))])
+    return [
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS),
+        bill, loose, _inflow(20, 3000, CHECKING_B),
+    ]
+
+
+def test_account_events_reamount_a_transfer_per_side():
+    move = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS)
+    (out,) = account_events([move], SAVINGS_A)
+    (into,) = account_events([move], CHECKING_B)
+    assert out["amount"] == Decimal("-5015.00")
+    assert into["amount"] == Decimal("5000.00")
+    assert move["amount"] == Decimal("-15.00")  # the pooled event is untouched
+
+
+def test_account_events_drop_events_without_a_leg_on_the_account():
+    events = _mixed()
+    assert [e["name"] for e in account_events(events, SAVINGS_A)] == ["Move to B"]
+    assert [e["name"] for e in account_events(events, CHECKING_B)] == [
+        "Move to B", "Tuition", "Pay"]
+    assert account_events(events, OUTSIDE) == []
+
+
+def test_each_accounts_walk_closes_on_its_scheduled_book():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("500")}
+    events = _mixed()
+    routing = _route_legs(opening, events, NAMES)
+    assert routing["overflow_moves"], "the tuition bill pulls from savings"
+    for account_id in opening:
+        walk = build_timeline(opening[account_id], account_events(events, account_id))
+        assert walk["closing_balance"] == routing["final"]["by_account"][account_id]
+        (closing,) = account_closings(routing["final"], {account_id: opening[account_id]}, NAMES)
+        assert closing["closing_balance"] == walk["closing_balance"]
+    # Checking B dips below zero on its own book even though overflow covers it.
+    walk = build_timeline(opening[CHECKING_B], account_events(events, CHECKING_B))
+    assert walk["lowest_balance"] == Decimal("-1500.00")

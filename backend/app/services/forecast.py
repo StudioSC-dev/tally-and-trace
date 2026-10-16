@@ -2289,21 +2289,58 @@ def _timeline_window(days: int, reference: Optional[datetime]) -> tuple:
     return start, start + timedelta(days=days)
 
 
+def account_events(events: List[dict], account_id: int) -> List[dict]:
+    """The events with a cash leg on ``account_id``, each re-amounted to the sum
+    of its cash legs there (STU-326): a transfer out is ``-(amount + fee)``, a
+    transfer in what was received, in the account's own currency. Events with
+    no cash leg on it (an accountless entry included) are dropped.
+    """
+    out = []
+    for e in events:
+        if not e.get("counts_as_cash", True):
+            continue
+        legs = [leg for leg in _legs_of(e)
+                if leg.get("cash", True) and leg.get("account_id") == account_id]
+        if legs:
+            out.append({**e, "amount": sum((_money(leg["amount"]) for leg in legs),
+                                           Decimal("0"))})
+    return out
+
+
 def _timeline(p: "Projection", currency: str, start: datetime, end: datetime, *,
-              rows: bool) -> dict:
-    """One currency's running-balance timeline (``project_running_balance``)."""
+              rows: bool, account_id: Optional[int] = None) -> dict:
+    """One currency's running-balance timeline (``project_running_balance``).
+
+    With ``account_id`` (a main account in ``currency``, STU-326) the walk is
+    that account alone: its own opening and its own cash legs. Routing still
+    runs over the whole currency, so its shortfalls and overflow moves are the
+    pooled view's, kept where they touch the account. The walk is the
+    scheduled book (no virtual overflow pulls), so its closing is the
+    account's ``by_account`` closing.
+    """
     # Available cash is projection-cash accounts only (see is_projection_cash).
     opening_by_account, cash_events = p.run(currency, rows=rows)
-    opening = sum(opening_by_account.values(), Decimal("0"))
-
-    result = build_timeline(opening, cash_events)
     routing = _route_legs(opening_by_account, cash_events, p.names, currency_of=p.currencies)
-    result["account_shortfalls"] = routing["shortfalls"]
-    # Per-account closings at window end exclude virtual overflow pulls; those
-    # are reported separately so the closings stay a plain sum of scheduled legs.
-    result["by_account"] = account_closings(routing["final"], opening_by_account, p.names)
-    result["unassigned_closing"] = routing["final"]["unassigned"]
-    result["overflow_moves"] = routing["overflow_moves"]
+
+    if account_id is None:
+        opening = sum(opening_by_account.values(), Decimal("0"))
+        result = build_timeline(opening, cash_events)
+        result["account_shortfalls"] = routing["shortfalls"]
+        # Per-account closings at window end exclude virtual overflow pulls; those
+        # are reported separately so the closings stay a plain sum of scheduled legs.
+        result["by_account"] = account_closings(routing["final"], opening_by_account, p.names)
+        result["unassigned_closing"] = routing["final"]["unassigned"]
+        result["overflow_moves"] = routing["overflow_moves"]
+    else:
+        opening = {account_id: opening_by_account[account_id]}
+        result = build_timeline(opening[account_id], account_events(cash_events, account_id))
+        result["account_shortfalls"] = [s for s in routing["shortfalls"]
+                                        if s["account_id"] == account_id]
+        result["by_account"] = account_closings(routing["final"], opening, p.names)
+        result["unassigned_closing"] = Decimal("0")
+        result["overflow_moves"] = [
+            m for m in routing["overflow_moves"]
+            if account_id in (m["from_account_id"], m["to_account_id"])]
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
@@ -2498,20 +2535,37 @@ def response_currencies(p_currencies: set, collector: FxCollector, default: str)
 
 def timeline_by_currency(db: Session, user_id: int, days: int = 60,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
-                         fx: Optional[FxRates] = None) -> dict:
+                         fx: Optional[FxRates] = None,
+                         account_id: Optional[int] = None) -> dict:
     """``/forecast/timeline``: the default currency's timeline as the scalars,
-    plus ``by_currency`` (one row per currency), ``currencies`` and ``fx``."""
+    plus ``by_currency`` (one row per currency), ``currencies`` and ``fx``.
+
+    With ``account_id`` (checked by the caller with ``require_main_account``)
+    it is that one account's timeline (STU-326): ``by_currency`` is the
+    account's currency only, the scalars are that row (not necessarily the
+    default currency) and ``currencies`` is ``[its currency]``. ``account``
+    echoes the scope (null when pooled). The projection is built as usual,
+    so scope, routing and overflow are unchanged; ``fx.unconverted_count``
+    stays projection-wide, since an unconverted leg has no account to filter on.
+    """
     start, end = _timeline_window(days, reference)
     p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
     collector = FxCollector()
     rows = []
+    account = None
+    currencies = p.run_currencies()
+    if account_id is not None:
+        currency = p.money.currency_of(account_id)
+        account = {"account_id": account_id, "account_name": p.names.get(account_id),
+                   "currency": currency}
+        currencies = [currency]
     # Limited public ids are opaque and per response: numbered once across
     # every row, so distinct rows never share one. The default row comes
     # first, so a single-currency response keeps ``e1``, ``e2``, ... and the
     # scalars (the default row) reuse its ids.
     numbered = 0
-    for currency in p.run_currencies():
-        result = _timeline(p, currency, start, end, rows=True)
+    for currency in currencies:
+        result = _timeline(p, currency, start, end, rows=True, account_id=account_id)
         row = serialize_currency_timeline(result, currency, collector, first_id=numbered + 1)
         numbered += len(result["events"])
         rows.append(row)
@@ -2522,8 +2576,10 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
         "window_end": end.date().isoformat(),
         **default,
         "by_currency": rows,
-        "currencies": response_currencies(p.account_currencies(), collector, p.default),
+        "currencies": (list(currencies) if account is not None else
+                       response_currencies(p.account_currencies(), collector, p.default)),
         "fx": collector.as_dict(),
+        "account": account,
     }
 
 
