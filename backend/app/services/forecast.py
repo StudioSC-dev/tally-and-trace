@@ -844,9 +844,10 @@ def build_timeline(opening, events: List[dict]) -> dict:
             out_events[-1].update({k: e.get(k) for k in (
                 "view", "face_amount", "currency", "account", "kind", "overdue",
                 "original_date")})
-        for key in ("row", "cash_currency"):
+        for key in ("row", "cash_currency", "accounts"):
             if key in e:
-                # A per-currency run's listing row and currency, for serialisers.
+                # A per-currency run's listing row and currency, and the
+                # accounts the event moves cash on, for serialisers.
                 out_events[-1][key] = e[key]
         if running < lowest:
             lowest = running
@@ -2090,6 +2091,34 @@ def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -
     return next(billed, None) is not None
 
 
+def _event_accounts(legs: List[dict], names: dict,
+                    leg_currencies: Optional[List[Optional[str]]] = None) -> List[dict]:
+    """The accounts an event moves projection cash on, for the timeline's
+    Account column (STU-326): ``[{account_id, account_name, amount, currency}]``,
+    one per cash leg, in leg order.
+
+    Built from every cash leg, before a per-currency run drops the legs in
+    other currencies, so a cross-currency transfer still names both sides
+    (each with its own currency). Names come from ``names`` only (the scope's
+    accounts); a leg with no account, or one ``names`` lacks, is
+    ``{None, None, amount}``: a name is never looked up elsewhere.
+    """
+    currencies = leg_currencies if leg_currencies is not None else [None] * len(legs)
+    out = []
+    for leg, currency in zip(legs, currencies):
+        if not leg.get("cash", True):
+            continue
+        account_id = leg.get("account_id")
+        name = names.get(account_id) if account_id is not None else None
+        out.append({
+            "account_id": account_id if name is not None else None,
+            "account_name": name,
+            "amount": _money(leg["amount"]),
+            "currency": currency,
+        })
+    return out
+
+
 def _route_legs(
     opening_by_account: dict,
     events: List[dict],
@@ -2338,7 +2367,8 @@ class Projection:
 
         Each event keeps only its legs in ``currency``, its ``amount`` is that
         currency's cash, and ``moved`` its money moved; with ``rows`` it also
-        carries its listing ``row`` in that currency.
+        carries its listing ``row`` in that currency. ``accounts`` names every
+        cash leg, in any currency (``_event_accounts``).
         """
         opening = {a: v for a, v in self.opening_by_account.items()
                    if self.money.currency_of(a) == currency}
@@ -2350,6 +2380,7 @@ class Projection:
                   "legs": [leg for leg, c in zip(e["legs"], e["leg_currencies"])
                            if c == currency],
                   "cash_currency": currency,
+                  "accounts": _event_accounts(e["legs"], self.names, e["leg_currencies"]),
                   "amount": e["cash_by_currency"][currency],
                   "moved": e["moved_by_currency"].get(currency, Decimal("0"))}
             if rows:
@@ -2801,6 +2832,7 @@ def _timeline_event(e: dict, index: int) -> dict:
         return float(x) if isinstance(x, Decimal) else x
 
     if e.get("view") == LIMITED:
+        # Unchanged: a limited event names its account in ``account`` only.
         return {**limited_event(e, f"e{index}"), "running_balance": f(e["running_balance"])}
     return {
         "date": e["date"].isoformat() if e["date"] is not None else None,
@@ -2810,4 +2842,5 @@ def _timeline_event(e: dict, index: int) -> dict:
         "source": e["source"],
         "source_id": e["source_id"],
         "running_balance": f(e["running_balance"]),
+        "accounts": [{**a, "amount": f(a["amount"])} for a in e.get("accounts") or ()],
     }

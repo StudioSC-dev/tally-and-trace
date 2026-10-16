@@ -9,6 +9,7 @@ from app.models.account import AccountType
 from app.models.transaction import TransactionType
 from app.services.forecast import (
     _event,
+    _event_accounts,
     _leg,
     _route_legs,
     _transfer_event,
@@ -207,3 +208,43 @@ def test_checkpoint_closings_and_pooled_invariant():
     assert final["unassigned"] == Decimal("700.00")
     pooled = build_timeline(sum(opening.values()), events)["closing_balance"]
     assert sum(final["by_account"].values()) + final["unassigned"] == pooled
+
+
+# ---------------------------------------------------------------------------
+# The timeline's Account column (STU-326)
+# ---------------------------------------------------------------------------
+
+def test_event_accounts_names_cash_legs_only():
+    legs = [_leg(SAVINGS_A, Decimal("-5015")), _leg(CARD_C, Decimal("5000"), cash=False)]
+    assert _event_accounts(legs, NAMES, ["PHP", "PHP"]) == [
+        {"account_id": SAVINGS_A, "account_name": "Savings A",
+         "amount": Decimal("-5015.00"), "currency": "PHP"},
+    ]
+
+
+def test_event_accounts_maps_no_account_and_unknown_names_to_null():
+    legs = [_leg(None, Decimal("-200")), _leg(OUTSIDE, Decimal("-50"))]
+    assert _event_accounts(legs, NAMES, ["PHP", "USD"]) == [
+        {"account_id": None, "account_name": None, "amount": Decimal("-200.00"),
+         "currency": "PHP"},
+        {"account_id": None, "account_name": None, "amount": Decimal("-50.00"),
+         "currency": "USD"},
+    ]
+
+
+def test_event_accounts_keeps_both_sides_of_a_transfer_with_their_currencies():
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS)
+    out = _event_accounts(ev["legs"], NAMES, ["PHP", "USD"])
+    assert [(a["account_name"], a["amount"], a["currency"]) for a in out] == [
+        ("Savings A", Decimal("-5015.00"), "PHP"),
+        ("Checking B", Decimal("5000.00"), "USD"),
+    ]
+    # Without currencies each leg's currency is None.
+    assert {a["currency"] for a in _event_accounts(ev["legs"], NAMES)} == {None}
+
+
+def test_build_timeline_carries_accounts_through():
+    ev = _payable(10, 400, CHECKING_B)
+    ev["accounts"] = _event_accounts(ev["legs"], NAMES)
+    (out,) = build_timeline(Decimal("1000"), [ev])["events"]
+    assert out["accounts"] == ev["accounts"]
