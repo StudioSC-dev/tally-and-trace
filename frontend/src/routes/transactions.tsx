@@ -529,6 +529,11 @@ export function TransactionsPage() {
   // The search term enters the filter key 300ms after the last keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
   useEffect(() => {
+    // A cleared search (a filter reset) applies at once, so a reset sends one fetch.
+    if (searchTerm.trim() === '') {
+      setDebouncedSearch(searchTerm)
+      return
+    }
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [searchTerm])
@@ -542,6 +547,12 @@ export function TransactionsPage() {
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
+  // Re-key the stored page when the filters change, so a round trip (page 2, another
+  // filter, back) lands on page 1. `page` is already 1 for a mismatched key, so this
+  // changes nothing the fetches depend on.
+  useEffect(() => {
+    setPageState((prev) => (prev.key === filterKey ? prev : { key: filterKey, page: 1 }))
+  }, [filterKey])
   const goToPage = useCallback((next: number) => setPageState({ key: filterKey, page: next }), [filterKey])
   const setPageSize = useCallback((next: PageSize) => {
     try {
