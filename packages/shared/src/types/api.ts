@@ -107,6 +107,12 @@ export interface Account {
   updated_at?: string
   /** The caller's role on the account. */
   my_role: AccountRole
+  /**
+   * Owner only: `true` when the account has an account share or carries the owner's
+   * own Household tag (whether or not anyone holds that tag yet), otherwise `false`.
+   * `null` for admin, editor and viewer; absent for `tag_viewer`.
+   */
+  is_shared?: boolean | null
   /** Who owns the account ("First L."). */
   owner_name: string | null
   permissions: AccountPermissions
@@ -114,7 +120,7 @@ export interface Account {
 
 /** POST /accounts/ and PUT /accounts/{id}. */
 export type AccountInput = Partial<
-  Omit<Account, 'id' | 'tags' | 'my_role' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
 > &
   TagIdsInput
 

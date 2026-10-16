@@ -5,6 +5,7 @@ export * from './types/auth'
 export * from './types/household'
 
 // Utilities
+export * from './utils/accountGroups'
 export * from './utils/currency'
 export * from './utils/date'
 export * from './utils/editAmount'
