@@ -1,6 +1,6 @@
 import type {
-  Account, BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, TimelineEventAccount, Transaction,
-  UpcomingItemOrEvent,
+  Account, BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, OverflowMove, TimelineEventAccount,
+  Transaction, UpcomingItemOrEvent,
 } from '../types/api'
 
 /**
@@ -96,4 +96,14 @@ export function isPinnableAccount(account: Pick<Account, 'account_type' | 'is_ac
     && account.account_type !== 'credit'
     && account.account_type !== 'loan'
     && !account.is_spending_wallet
+}
+
+/**
+ * The overflow moves that pull money out of `accountId`, in date order. A pinned
+ * timeline walks the scheduled book only, so these drains show nowhere in its rows.
+ */
+export function overflowPullsFrom(moves: OverflowMove[], accountId: number): OverflowMove[] {
+  return moves
+    .filter((m) => m.from_account_id === accountId)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }

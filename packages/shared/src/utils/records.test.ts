@@ -3,9 +3,9 @@ import type {
   BudgetEntry, FullTransaction, LimitedEvent, LimitedTransaction, RecordPermissions, SharedFullTransaction,
 } from '../index'
 import { isDetailed, isLimited, isLimitedEvent, isOwnerFull, isSharedFull } from '../index'
-import type { Account, CashflowTimelineEvent, LimitedTimelineEvent, TimelineEventAccount } from '../index'
+import type { Account, CashflowTimelineEvent, LimitedTimelineEvent, OverflowMove, TimelineEventAccount } from '../index'
 import {
-  entryName, isPinnableAccount, timelineEventAccountLabel, timelineEventAmount, timelineEventName, transactionDate,
+  entryName, isPinnableAccount, overflowPullsFrom, timelineEventAccountLabel, timelineEventAmount, timelineEventName, transactionDate,
   transactionDescription, upcomingItemAmount,
 } from './records'
 
@@ -221,5 +221,27 @@ describe('isPinnableAccount', () => {
     expect(isPinnableAccount({ ...base, account_type: 'credit' })).toBe(false)
     expect(isPinnableAccount({ ...base, account_type: 'loan' })).toBe(false)
     expect(isPinnableAccount({ ...base, is_spending_wallet: true })).toBe(false)
+  })
+})
+
+describe('overflowPullsFrom', () => {
+  const move = (date: string, from: number, to: number, amount: number): OverflowMove => ({
+    date, name: `Bill ${date}`, from_account_id: from, from_account_name: `Acct ${from}`,
+    to_account_id: to, to_account_name: `Acct ${to}`, amount,
+  })
+
+  it('keeps only the moves out of the account, in date order', () => {
+    const moves = [move('2026-11-20', 7, 3, 500), move('2026-11-05', 3, 7, 200), move('2026-11-02', 7, 4, 100)]
+    expect(overflowPullsFrom(moves, 7).map((m) => [m.date, m.to_account_id, m.amount])).toEqual([
+      ['2026-11-02', 4, 100],
+      ['2026-11-20', 3, 500],
+    ])
+  })
+
+  it('is empty when the account covers nothing, and leaves the input alone', () => {
+    const moves = [move('2026-11-05', 3, 7, 200)]
+    expect(overflowPullsFrom(moves, 7)).toEqual([])
+    expect(overflowPullsFrom([], 7)).toEqual([])
+    expect(moves).toHaveLength(1)
   })
 })
