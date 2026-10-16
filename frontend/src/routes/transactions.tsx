@@ -2163,7 +2163,7 @@ export function TransactionsPage() {
                   {actionSchedule && (
                     <>
                       <div className="flex justify-between gap-3">
-                        <dt>Schedule</dt>
+                        <dt>Recurring entry</dt>
                         <dd className="text-right text-ink font-medium">{actionSchedule.name}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
@@ -2810,9 +2810,10 @@ export function TransactionsPage() {
 
               {formData.transaction_type !== 'transfer' && !(editingTransaction && isSharedFull(editingTransaction)) && (
                 <div className="space-y-3">
-                  <label className="label">Budget Schedule</label>
+                  <label className="label">Recurring entry (optional)</label>
+                  <p className="text-xs text-muted">Link this to one of your recurring income or expenses.</p>
                   {matchingBudgetEntries.length === 0 ? (
-                    <p className="text-sm text-muted">No active schedules available for this transaction type.</p>
+                    <p className="text-sm text-muted">No recurring entries of this type yet.</p>
                   ) : (
                     <select
                       className="input-field focus-ring"
@@ -2828,7 +2829,7 @@ export function TransactionsPage() {
                         handleBudgetEntrySelect(entry ?? undefined)
                       }}
                     >
-                      <option value="">No schedule</option>
+                      <option value="">None</option>
                       {matchingBudgetEntries.map((entry) => (
                         <option key={entry.id} value={entry.id}>
                           {entry.name} • {RECURRENCE_LABELS[entry.cadence]} • {formatCurrency(entry.amount, entry.currency)}
