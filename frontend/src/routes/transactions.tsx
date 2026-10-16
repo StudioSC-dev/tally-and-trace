@@ -9,8 +9,8 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
-import type { TransactionStatus } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, pageWindow, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
+import type { ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useToday } from '../hooks/useToday'
@@ -111,6 +111,55 @@ const STATUS_BADGE_CLASSES: Record<TransactionStatus, string> = {
   planned: 'bg-sunken text-body',
 }
 const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
+
+const PAGE_SIZES = [25, 50, 100] as const
+type PageSize = (typeof PAGE_SIZES)[number]
+const PAGE_SIZE_STORAGE_KEY = 'transactions.pageSize'
+const SEARCH_DEBOUNCE_MS = 300
+// One request's worth of Upcoming rows; the API allows up to 1000 per request.
+const UPCOMING_LIMIT = 100
+
+const readStoredPageSize = (): PageSize => {
+  try {
+    const stored = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY))
+    return PAGE_SIZES.find((size) => size === stored) ?? PAGE_SIZES[0]
+  } catch {
+    return PAGE_SIZES[0]
+  }
+}
+
+type TransactionQuery = {
+  account_ids?: number[]
+  category_ids?: number[]
+  transaction_types?: string[]
+  start_date?: string
+  end_date?: string
+  search?: string
+  tag?: number
+  limit?: number
+  offset?: number
+}
+
+/** A list range as the API's date filters; an open end sends nothing. */
+const rangeParams = (range: ListRange): TransactionQuery => ({
+  ...(range.start !== undefined ? { start_date: range.start } : {}),
+  ...(range.end !== undefined ? { end_date: range.end } : {}),
+})
+
+/** Page numbers to show, with 0 standing for a gap: 1 … 4 5 6 … 12. */
+const pageItems = (pages: number, page: number): number[] => {
+  const wanted = new Set([1, pages, page - 1, page, page + 1])
+  const shown = [...wanted].filter((value) => value >= 1 && value <= pages).sort((a, b) => a - b)
+  const items: number[] = []
+  shown.forEach((value, index) => {
+    const previous = shown[index - 1]
+    if (previous !== undefined && value - previous > 1) {
+      items.push(0)
+    }
+    items.push(value)
+  })
+  return items
+}
 
 const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
 
@@ -427,20 +476,9 @@ export function TransactionsPage() {
     setEndDate((prev) => (prev === nextEnd ? prev : nextEnd))
   }, [currentMonth, isCustomRange])
 
-  const toISODateTime = useCallback((dateValue: string, endOfDay = false) => {
-    if (!dateValue) {
-      return undefined
-    }
-    const [year, month, day] = dateValue.split('-').map(Number)
-    if (!year || !month || !day) {
-      return undefined
-    }
-    const date = new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
-    return date.toISOString()
-  }, [])
- 
   const [triggerTransactions] = useLazyGetTransactionsQuery()
   const beginTransactionsRequest = useRequestGeneration()
+  const beginUpcomingRequest = useRequestGeneration()
   const { data: accountsData, isLoading: isAccountsLoading } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
@@ -474,155 +512,175 @@ export function TransactionsPage() {
   // Only the caller's own entries can be linked to a transaction: a shared or limited
   // entry belongs to someone else, whose category and allocation the caller can't use.
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
-  const limit = 10
   const today = useToday()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
-  const [hasMoreTransactions, setHasMoreTransactions] = useState(true)
-  const offsetRef = useRef(0)
-  const loadMoreObserver = useRef<IntersectionObserver | null>(null)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [isFetchingMore, setIsFetchingMore] = useState(false)
+  const [upcomingTransactions, setUpcomingTransactions] = useState<Transaction[]>([])
+  const [upcomingTotal, setUpcomingTotal] = useState(0)
+  const [isUpcomingOpen, setIsUpcomingOpen] = useState(true)
+  // The full-page spinner is for the first load only; later loads keep the rows on screen.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+  const [isMainLoading, setIsMainLoading] = useState(false)
+  const [isUpcomingLoading, setIsUpcomingLoading] = useState(false)
+  const isInitialLoading = !hasLoadedOnce
+  const isRefreshing = isMainLoading || isUpcomingLoading
+
+  const [pageSize, setPageSizeState] = useState<PageSize>(readStoredPageSize)
+  // The search term enters the filter key 300ms after the last keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Everything that changes which rows are listed. The page is stored with the key it
+  // was chosen under, so any change of filter, page size or day falls back to page 1
+  // in the same render, with no second fetch.
+  const filterKey = useMemo(
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, debouncedSearch.trim(), selectedTag ?? null, pageSize, today]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, debouncedSearch, selectedTag, pageSize, today]
+  )
+  const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
+  const page = pageState.key === filterKey ? pageState.page : 1
+  const goToPage = useCallback((next: number) => setPageState({ key: filterKey, page: next }), [filterKey])
+  const setPageSize = useCallback((next: PageSize) => {
+    try {
+      localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(next))
+    } catch {
+      // Storage can be blocked; the choice then lasts for this visit only.
+    }
+    setPageSizeState(next)
+  }, [])
+
+  // The filter's two requests: the main list (on or before today) and Upcoming (after).
+  const bounds = useMemo(() => listBounds(startDate, endDate, today), [startDate, endDate, today])
+  const filterParams = useMemo(() => {
+    const params: TransactionQuery = {}
+    if (selectedAccountIds.length > 0) {
+      params.account_ids = selectedAccountIds
+    }
+    if (selectedTypes.length > 0) {
+      params.transaction_types = selectedTypes
+    }
+    if (selectedCategoryIds.length > 0) {
+      params.category_ids = selectedCategoryIds
+    }
+    if (selectedTag !== undefined) {
+      params.tag = selectedTag
+    }
+    if (debouncedSearch.trim()) {
+      params.search = debouncedSearch.trim()
+    }
+    return params
+  }, [selectedAccountIds, selectedTypes, selectedCategoryIds, selectedTag, debouncedSearch])
 
   const loadTransactions = useCallback(
-    async (reset = false) => {
+    async () => {
       if (!isAuthenticated) {
         return
       }
-
-      const nextOffset = reset ? 0 : offsetRef.current
-      const params: {
-        account_ids?: number[]
-        category_ids?: number[]
-        allocation_id?: number
-        transaction_types?: string[]
-        start_date?: string
-        end_date?: string
-        search?: string
-        tag?: number
-        limit: number
-        offset: number
-      } = {
-        limit,
-        offset: nextOffset,
-      }
-      if (selectedAccountIds.length > 0) {
-        params.account_ids = selectedAccountIds
-      }
-      if (selectedTypes.length > 0) {
-        params.transaction_types = selectedTypes
-      }
-      if (selectedCategoryIds.length > 0) {
-        params.category_ids = selectedCategoryIds
-      }
-      if (selectedTag !== undefined) {
-        params.tag = selectedTag
-      }
-      if (searchTerm.trim()) {
-        params.search = searchTerm.trim()
-      }
-      if (startDate) {
-        const isoStart = toISODateTime(startDate)
-        if (isoStart) {
-          params.start_date = isoStart
-        }
-      }
-      if (endDate) {
-        const isoEnd = toISODateTime(endDate, true)
-        if (isoEnd) {
-          params.end_date = isoEnd
-        }
-      }
-
-      const isCurrent = beginTransactionsRequest(reset)
+      const isCurrent = beginTransactionsRequest(true)
+      let refetching = false
       try {
-        if (reset) {
-          offsetRef.current = 0
-          setIsInitialLoading(true)
-          setIsFetchingMore(false)
+        setIsMainLoading(true)
+        if (bounds.main === null) {
           setTransactions([])
-        } else {
-          setIsFetchingMore(true)
+          setTotalTransactions(0)
+          return
         }
-
-        const result = await triggerTransactions(params).unwrap()
+        const offset = (page - 1) * pageSize
+        const result = await triggerTransactions({ ...filterParams, ...rangeParams(bounds.main), limit: pageSize, offset }).unwrap()
         if (!isCurrent()) return
-        offsetRef.current = nextOffset + result.items.length
-        setTransactions((prev) => (reset ? result.items : [...prev, ...result.items]))
+        // The page ran past the end (rows were deleted or moved): go straight to the last one.
+        if (result.total > 0 && offset >= result.total) {
+          refetching = true
+          goToPage(pageWindow(result.total, page, pageSize).pages)
+          return
+        }
+        setTransactions(result.items)
         setTotalTransactions(result.total)
-        setHasMoreTransactions(result.has_more)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading transactions:', error)
-        if (reset) {
-          setTransactions([])
-          setTotalTransactions(0)
-          setHasMoreTransactions(false)
-        }
+        setTransactions([])
+        setTotalTransactions(0)
       } finally {
-        if (isCurrent()) {
-          if (reset) {
-            setIsInitialLoading(false)
-          } else {
-            setIsFetchingMore(false)
-          }
+        if (isCurrent() && !refetching) {
+          setIsMainLoading(false)
+          setHasLoadedOnce(true)
         }
       }
     },
-    [
-      beginTransactionsRequest,
-      selectedAccountIds,
-      selectedTypes,
-      selectedCategoryIds,
-      selectedTag,
-      searchTerm,
-      startDate,
-      endDate,
-      toISODateTime,
-      triggerTransactions,
-      isAuthenticated,
-    ]
+    [beginTransactionsRequest, bounds.main, filterParams, goToPage, isAuthenticated, page, pageSize, triggerTransactions]
   )
-  const loadTransactionsRef = useLatestRef(loadTransactions)
+
+  // Upcoming shows the nearest rows after today, soonest first. The server lists newest
+  // first, so the nearest ones are the last of the range: fetch the head to learn the
+  // total, and the tail too only when there are more than one request holds.
+  const loadUpcoming = useCallback(
+    async () => {
+      if (!isAuthenticated) {
+        return
+      }
+      const isCurrent = beginUpcomingRequest(true)
+      try {
+        setIsUpcomingLoading(true)
+        if (bounds.upcoming === null) {
+          setUpcomingTransactions([])
+          setUpcomingTotal(0)
+          return
+        }
+        const query = { ...filterParams, ...rangeParams(bounds.upcoming), limit: UPCOMING_LIMIT }
+        const head = await triggerTransactions({ ...query, offset: 0 }).unwrap()
+        if (!isCurrent()) return
+        let items = head.items
+        if (head.total > UPCOMING_LIMIT) {
+          const tail = await triggerTransactions({ ...query, offset: head.total - UPCOMING_LIMIT }).unwrap()
+          if (!isCurrent()) return
+          items = tail.items
+        }
+        setUpcomingTransactions(head.total === 0 ? [] : [...items].reverse())
+        setUpcomingTotal(head.total)
+      } catch (error) {
+        if (!isCurrent()) return
+        console.error('Error loading upcoming transactions:', error)
+        setUpcomingTransactions([])
+        setUpcomingTotal(0)
+      } finally {
+        if (isCurrent()) {
+          setIsUpcomingLoading(false)
+        }
+      }
+    },
+    [beginUpcomingRequest, bounds.upcoming, filterParams, isAuthenticated, triggerTransactions]
+  )
+
+  // After any create, edit, delete, post or un-post a row can move between the lists,
+  // so both are fetched again under the filters and page now on screen.
+  const refreshLists = useCallback(async () => {
+    await Promise.all([loadTransactions(), loadUpcoming()])
+  }, [loadTransactions, loadUpcoming])
+  const refreshListsRef = useLatestRef(refreshLists)
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
       return
     }
-    loadTransactions(true)
+    void loadTransactions()
   }, [authLoading, isAuthenticated, loadTransactions])
+
+  useEffect(() => {
+    if (authLoading || !isAuthenticated) {
+      return
+    }
+    void loadUpcoming()
+  }, [authLoading, isAuthenticated, loadUpcoming])
 
   useEffect(() => {
     if (!isActionModalOpen) {
       resetPostingFormState()
     }
   }, [isActionModalOpen, resetPostingFormState])
-
-  useEffect(() => {
-    return () => {
-      loadMoreObserver.current?.disconnect()
-    }
-  }, [])
-
-  const sentinelRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (loadMoreObserver.current) {
-        loadMoreObserver.current.disconnect()
-      }
-      if (!node) {
-        return
-      }
-
-      loadMoreObserver.current = new IntersectionObserver((entries) => {
-        if (entries[0]?.isIntersecting && hasMoreTransactions && !isFetchingMore && !isInitialLoading) {
-          loadTransactions(false)
-        }
-      })
-
-      loadMoreObserver.current.observe(node)
-    },
-    [hasMoreTransactions, isFetchingMore, isInitialLoading, loadTransactions]
-  )
 
   const transferDestinationOptions = useMemo(
     () =>
@@ -794,12 +852,6 @@ export function TransactionsPage() {
   }, [formData.transaction_type, selectedFormAccount, destinationFormAccount])
 
   const isLoading = isInitialLoading || isAccountsLoading || isCategoriesLoading || budgetEntriesLoading
-
-  const orderedTransactions = useMemo(() => {
-    const posted = transactions.filter((transaction) => transaction.is_posted)
-    const pending = transactions.filter((transaction) => !transaction.is_posted)
-    return [...posted, ...pending]
-  }, [transactions])
 
   // A transfer between currencies sends one figure and receives another.
   const crossCurrencyTransfer =
@@ -1078,7 +1130,7 @@ export function TransactionsPage() {
       }
       resetForm()
       setIsCreateModalOpen(false)
-      await loadTransactionsRef.current(true)
+      await refreshListsRef.current()
     } catch (error) {
       console.error('Error saving transaction:', error)
       // Show the API's reason (e.g. a loan payment rule) instead of failing silently.
@@ -1142,7 +1194,7 @@ export function TransactionsPage() {
         if (actionTransaction?.id === transactionId) {
           closeActionModal()
         }
-        await loadTransactionsRef.current(true)
+        await refreshListsRef.current()
       } catch (error) {
         console.error('Error deleting transaction:', error)
         alert(apiErrorMessage(error) || 'Could not delete the transaction. Please try again.')
@@ -1178,8 +1230,8 @@ export function TransactionsPage() {
     // The response carries the row's fresh permissions (posting changes what may be reverted).
     const updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     setActionTransaction(updatedTransaction)
-    setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
     resetPostingFormState()
+    void refreshListsRef.current()
   }
 
   // Posting or reverting a record the caller may not edit (the account owner resolving
@@ -1198,8 +1250,8 @@ export function TransactionsPage() {
       return apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.'
     }
     setActionTransaction(updatedTransaction)
-    setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
     resetPostingFormState()
+    void refreshListsRef.current()
     return null
   }
 
@@ -1235,8 +1287,8 @@ export function TransactionsPage() {
       return
     }
     setActionTransaction(updatedTransaction)
-    setTransactions((prev) => prev.map((item) => (item.id === transaction.id ? updatedTransaction : item)))
     resetPostingFormState()
+    void refreshListsRef.current()
   }
 
   const handleInitPostingForm = (transaction: Transaction) => {
@@ -1540,6 +1592,135 @@ export function TransactionsPage() {
     )
   }
 
+  const renderTransactionRow = (transaction: Transaction) => {
+    const {
+      accountLabel,
+      sourceLabel,
+      destinationLabel,
+      categoryName,
+      amountLabel,
+      projectedLabel,
+      transferFeeLabel,
+      typeBadgeStyles,
+      amountClass,
+      scheduleLabel,
+    } = getTransactionMeta(transaction)
+    const rowDate = transactionDate(transaction)
+    const relativeDate = relativeEntryDay(rowDate, today)
+    const exactDate = formatEntryDate(rowDate)
+    const status = transactionStatus(transaction, today)
+    const postedDate =
+      !isLimited(transaction) && transaction.posting_date
+        ? formatDateWithOrdinal(new Date(transaction.posting_date))
+        : null
+    const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
+    const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
+    const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
+
+    return (
+      <article
+        key={transaction.id}
+        className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${cardStateClasses}`}
+        onClick={() => openActionModal(transaction)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            openActionModal(transaction)
+          }
+        }}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                <span>{relativeDate}</span>
+                <span className="hidden md:inline text-muted">•</span>
+                <span className="text-muted">{exactDate}</span>
+              </div>
+              <p className="text-base font-semibold text-ink">{description}</p>
+              <div className="flex flex-wrap gap-2 text-xs text-body">
+                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                  {transaction.transaction_type === 'transfer'
+                    ? `${sourceLabel} → ${destinationLabel}`
+                    : accountLabel}
+              </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  {transaction.transaction_type === 'transfer'
+                    ? categoryName || 'Transfer'
+                    : categoryName || 'Uncategorized'}
+              </span>
+                {transaction.created_by && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
+                    by {transaction.created_by}
+                  </span>
+                )}
+                <TagChips tags={transaction.tags} />
+                {scheduleLabel && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    {scheduleLabel}
+                  </span>
+                )}
+                {transferFeeLabel && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-warn">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                    </svg>
+                    Fee {transferFeeLabel}
+                  </span>
+                )}
+                {projectedLabel && !transaction.is_posted && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
+                    </svg>
+                    Projected {projectedLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2 text-right">
+              <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
+              {!isLimited(transaction) && transaction.original_amount != null && transaction.original_currency && (
+                <p className="text-xs text-muted">
+                  Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
+                </p>
+              )}
+              {postedDate && <p className="text-xs text-muted">Posted {postedDate}</p>}
+              <div className="flex flex-wrap justify-end gap-2">
+                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
+                  {typeLabel}
+                </span>
+                <span
+                  className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${STATUS_BADGE_CLASSES[status]}`}
+                >
+                  {STATUS_LABELS[status]}
+                </span>
+                {!isLimited(transaction) && transaction.is_reconciled && (
+                  <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
+                    Reconciled
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  const pageView = pageWindow(totalTransactions, page, pageSize)
+
   // Nothing to add a transaction to when every account is read-only for the caller.
   const canAddTransactions = writableAccounts.length > 0
 
@@ -1774,153 +1955,103 @@ export function TransactionsPage() {
         )}
       </div>
 
-      {transactions.length === 0 ? (
+      {transactions.length === 0 && upcomingTransactions.length === 0 ? (
         emptyState
       ) : (
-        <>
-          <div className="grid grid-cols-1 gap-3">
-          {orderedTransactions.map((transaction) => {
-            const {
-              accountLabel,
-              sourceLabel,
-              destinationLabel,
-              categoryName,
-              amountLabel,
-              projectedLabel,
-              transferFeeLabel,
-              typeBadgeStyles,
-              amountClass,
-              scheduleLabel,
-            } = getTransactionMeta(transaction)
-            const rowDate = transactionDate(transaction)
-            const relativeDate = relativeEntryDay(rowDate, today)
-            const exactDate = formatEntryDate(rowDate)
-            const status = transactionStatus(transaction, today)
-            const postedDate =
-              !isLimited(transaction) && transaction.posting_date
-                ? formatDateWithOrdinal(new Date(transaction.posting_date))
-                : null
-            const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
-            const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
-            const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
-                
-                return (
-              <article
-                key={transaction.id}
-                className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${cardStateClasses}`}
-                onClick={() => openActionModal(transaction)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    openActionModal(transaction)
-                  }
-                }}
+        <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
+          {isRefreshing && (
+            <p className="flex items-center gap-2 text-xs text-muted" role="status">
+              <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
+              Updating...
+            </p>
+          )}
+          {upcomingTransactions.length > 0 && (
+            <section className="space-y-3" data-testid="upcoming-transactions">
+              <button
+                type="button"
+                onClick={() => setIsUpcomingOpen((open) => !open)}
+                aria-expanded={isUpcomingOpen}
+                className="flex w-full items-center justify-between gap-3 text-left focus-ring"
               >
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                        <span>{relativeDate}</span>
-                        <span className="hidden md:inline text-muted">•</span>
-                        <span className="text-muted">{exactDate}</span>
-                      </div>
-                      <p className="text-base font-semibold text-ink">{description}</p>
-                      <div className="flex flex-wrap gap-2 text-xs text-body">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                          </svg>
-                          {transaction.transaction_type === 'transfer'
-                            ? `${sourceLabel} → ${destinationLabel}`
-                            : accountLabel}
-                      </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-                          </svg>
-                          {transaction.transaction_type === 'transfer'
-                            ? categoryName || 'Transfer'
-                            : categoryName || 'Uncategorized'}
-                      </span>
-                        {transaction.created_by && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="created-by">
-                            by {transaction.created_by}
-                          </span>
-                        )}
-                        <TagChips tags={transaction.tags} />
-                        {scheduleLabel && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            {scheduleLabel}
-                          </span>
-                        )}
-                        {transferFeeLabel && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 text-warn">
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                            </svg>
-                            Fee {transferFeeLabel}
-                          </span>
-                        )}
-                        {projectedLabel && !transaction.is_posted && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
-                            </svg>
-                            Projected {projectedLabel}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-right">
-                      <p className={`text-lg font-bold ${amountClass}`}>{amountLabel}</p>
-                      {!isLimited(transaction) && transaction.original_amount != null && transaction.original_currency && (
-                        <p className="text-xs text-muted">
-                          Original {formatCurrency(transaction.original_amount, transaction.original_currency as CurrencyCode)}
-                        </p>
-                      )}
-                      {postedDate && <p className="text-xs text-muted">Posted {postedDate}</p>}
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
-                          {typeLabel}
-                        </span>
-                        <span
-                          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${STATUS_BADGE_CLASSES[status]}`}
-                        >
-                          {STATUS_LABELS[status]}
-                        </span>
-                        {!isLimited(transaction) && transaction.is_reconciled && (
-                          <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
-                            Reconciled
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                <span className="text-sm font-semibold text-body">
+                  Upcoming ({upcomingTotal})
+                  {upcomingTotal > upcomingTransactions.length && (
+                    <span className="ml-2 text-xs font-normal text-muted">
+                      showing the next {upcomingTransactions.length} of {upcomingTotal}, narrow the dates for more
+                    </span>
+                  )}
+                </span>
+                <svg className={`h-4 w-4 text-muted transition-transform ${isUpcomingOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {isUpcomingOpen && (
+                <div className="grid grid-cols-1 gap-3">
+                  {upcomingTransactions.map(renderTransactionRow)}
                 </div>
-              </article>
-            )
-          })}
-          <div ref={sentinelRef} className="h-3" />
-          {!isInitialLoading && (isFetchingMore || hasMoreTransactions) && (
-            <p className="text-center text-xs text-muted pb-2">
-              {isFetchingMore ? 'Loading more transactions...' : 'Scroll for more transactions'}
-            </p>
+              )}
+            </section>
           )}
-          {!isInitialLoading && !hasMoreTransactions && orderedTransactions.length === totalTransactions && totalTransactions > 0 && (
-            <p className="text-center text-xs text-muted pb-2">End of list</p>
+          {transactions.length === 0 ? (
+            <p className="text-sm text-muted">Nothing on or before today in this range.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {transactions.map(renderTransactionRow)}
+            </div>
           )}
-          </div>
-          <div className="flex justify-end px-1">
-            <p className="text-xs text-muted">
-              Showing {transactions.length} of {totalTransactions} transactions
-            </p>
-          </div>
-        </>
+          {totalTransactions > 0 && (
+            <nav className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between" aria-label="Transactions pages" data-testid="transactions-pager">
+              <p className="text-xs text-muted">
+                {pageView.from}–{pageView.to} of {totalTransactions}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => goToPage(pageView.page - 1)}
+                  disabled={pageView.page <= 1}
+                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                {pageItems(pageView.pages, pageView.page).map((item, index) =>
+                  item === 0 ? (
+                    <span key={`gap-${index}`} className="px-1 text-muted" aria-hidden="true">…</span>
+                  ) : (
+                    <button
+                      type="button"
+                      key={item}
+                      onClick={() => goToPage(item)}
+                      aria-current={item === pageView.page ? 'page' : undefined}
+                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ item === pageView.page ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                    >
+                      {item}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  onClick={() => goToPage(pageView.page + 1)}
+                  disabled={pageView.page >= pageView.pages}
+                  className="btn-secondary focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <label className="flex items-center gap-2 text-xs text-muted">
+                  Per page
+                  <select
+                    value={pageSize}
+                    onChange={(event) => setPageSize(Number(event.target.value) as PageSize)}
+                    className="input-field focus-ring !w-auto !py-1"
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>{size}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </nav>
+          )}
+        </div>
       )}
 
       {isActionModalOpen && actionTransaction && (
