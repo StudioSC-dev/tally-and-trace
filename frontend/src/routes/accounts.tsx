@@ -12,6 +12,7 @@ import { TagPicker } from '../components/TagPicker'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
 import { ShareDialog } from '../components/ShareDialog'
 import { SharedWithMe } from '../components/SharedWithMe'
+import { HouseholdLinks } from '../components/household/HouseholdLinks'
 import { StatementsPanel } from '../components/StatementsPanel'
 import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
@@ -463,6 +464,8 @@ export function AccountsPage() {
           Add Account
         </button>
       </div>
+
+      <HouseholdLinks />
 
       <TagFilter value={selectedTag} onChange={setSelectedTag} />
 

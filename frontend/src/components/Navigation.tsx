@@ -3,7 +3,6 @@ import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../hooks/useTheme'
 import { useState } from 'react'
 import { getCurrencyLogoSymbol } from '../utils/currency'
-import { useGetHouseholdViewsQuery } from '../store/api'
 
 export function Navigation() {
   const { user, logout } = useAuth()
@@ -11,9 +10,6 @@ export function Navigation() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const symbol = getCurrencyLogoSymbol(user?.default_currency)
-  // The Household view is offered whenever there is a Household to open (your own is always one).
-  const { data: householdViews } = useGetHouseholdViewsQuery()
-  const hasHousehold = (householdViews?.length ?? 0) > 0
 
   // Active tab is an ink underline rather than a tinted pill — a saturated fill
   // in the chrome competes with the figures, which are what should carry colour
@@ -76,14 +72,6 @@ export function Navigation() {
                 </svg>
                 Allocations
               </Link>
-              {hasHousehold && (
-                <Link to="/household" data-testid="nav-household" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" />
-                  </svg>
-                  Household
-                </Link>
-              )}
             </div>
           </div>
 
@@ -209,14 +197,6 @@ export function Navigation() {
             </svg>
             Allocations
           </Link>
-          {hasHousehold && (
-            <Link to="/household" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" />
-              </svg>
-              Household
-            </Link>
-          )}
           <div className="border-t border-line pt-2">
             <div className="px-3 py-2 text-sm text-muted">
               <div className="font-medium text-ink">{user?.first_name} {user?.last_name}</div>

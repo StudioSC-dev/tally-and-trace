@@ -1,5 +1,4 @@
 import { Link } from '@tanstack/react-router'
-import { useGetHouseholdViewsQuery } from '../store/api'
 
 // ── Icon helpers ───────────────────────────────────────────────────────────────
 
@@ -36,14 +35,6 @@ function AllocationsIcon({ active }: { active?: boolean }) {
   )
 }
 
-function HouseholdIcon({ active }: { active?: boolean }) {
-  return (
-    <svg className={`w-6 h-6 ${active ? 'text-ink' : 'text-muted'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 2.5 : 2} d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" />
-    </svg>
-  )
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface TabItem {
@@ -61,22 +52,15 @@ const TABS: TabItem[] = [
   { to: '/allocations', label: 'Goals',        onboarding: 'nav-allocations',  Icon: AllocationsIcon },
 ]
 
-const HOUSEHOLD_TAB: TabItem = {
-  to: '/household', label: 'Household', onboarding: 'nav-household', Icon: HouseholdIcon,
-}
-
 const tabBase =
   'relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 active:bg-sunken'
 
 export function BottomNav() {
-  // Offered whenever there is a Household to open (your own is always one).
-  const { data: householdViews } = useGetHouseholdViewsQuery()
-  const tabs = (householdViews?.length ?? 0) > 0 ? [...TABS, HOUSEHOLD_TAB] : TABS
   return (
     // Only visible on mobile – hides at sm (640 px) and above
     <nav className="safe-area-bottom fixed bottom-0 left-0 right-0 z-50 border-t border-line bg-surface sm:hidden">
       <div className="flex h-16 items-stretch">
-        {tabs.map(({ to, label, onboarding, Icon }) => (
+        {TABS.map(({ to, label, onboarding, Icon }) => (
           <Link
             key={to}
             to={to}

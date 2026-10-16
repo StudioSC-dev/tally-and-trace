@@ -94,7 +94,7 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
             </div>
             <div className="flex items-center gap-2">
               <Link
-                to="/household"
+                to="/accounts/household"
                 search={{ sharer: share.sharer_id }}
                 className="btn-secondary focus-ring text-sm"
                 data-testid="shared-with-me-household-open"
