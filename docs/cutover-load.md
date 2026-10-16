@@ -49,6 +49,18 @@ Hosts, addresses and paths below are placeholders:
 - **Pre-load guard.** The owner must be one active, verified, non-demo user
   who owns nothing yet except the Household tag, and has received no shares.
   The Household tag must exist; the tool never creates it.
+  An account registered after STU-317 starts with the default categories, so a
+  fresh owner is refused until they are removed. The app's delete only
+  deactivates a category (`is_active = false`) and the guard counts inactive
+  rows too, so the UI cannot clear them. Before a load, the operator removes
+  them with a hard `DELETE FROM categories WHERE user_id = <owner id>`. That
+  is safe once the account is untouched apart from the default categories and
+  the Household tag. Check that every count from this query is 0 first:
+  `SELECT (SELECT count(*) FROM accounts WHERE user_id = <owner id>) AS accounts,
+  (SELECT count(*) FROM transactions WHERE user_id = <owner id>) AS transactions,
+  (SELECT count(*) FROM budget_entries WHERE user_id = <owner id>) AS budget_entries,
+  (SELECT count(*) FROM allocations WHERE user_id = <owner id>) AS allocations,
+  (SELECT count(*) FROM wishlist_items WHERE user_id = <owner id>) AS wishlist_items`.
 
 Exit codes:
 
@@ -96,7 +108,9 @@ load already exists, reset it or sign it off before migrating.
 
 1. The owner and the spouse register and verify in the production UI. If the
    owner's user already holds test rows, register a fresh user for the owner
-   or clear those rows in the UI first; the guard refuses otherwise.
+   or clear those rows in the UI first; the guard refuses otherwise. A fresh
+   user also starts with the default categories: remove them as described
+   under the pre-load guard, because the UI cannot.
 2. Prepare the cutover input (`cutover-input` v1 JSON) in `~/cutover/`.
    For each loan, confirm that **no due date is partly paid at the cutover**
    (every due date before it is either fully paid or not paid at all) and

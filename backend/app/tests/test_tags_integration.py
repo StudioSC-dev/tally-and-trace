@@ -240,11 +240,13 @@ def test_another_users_tag_is_404_like_an_unknown_id(client, people):
 
 
 def test_deleting_a_user_deletes_their_tags(db, people):
+    from app.models.category import Category
     from app.models.tag import Tag
     from app.models.user import User
 
     owner = people()
     assert db.query(Tag).filter(Tag.user_id == owner["id"]).count() == 1
+    db.query(Category).filter(Category.user_id == owner["id"]).delete(synchronize_session=False)
     db.query(User).filter(User.id == owner["id"]).delete(synchronize_session=False)
     db.commit()
     assert db.query(Tag).filter(Tag.user_id == owner["id"]).count() == 0
