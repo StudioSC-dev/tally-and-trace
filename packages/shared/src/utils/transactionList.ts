@@ -129,3 +129,18 @@ export function pageWindow(total: number, page: number, size: number): PageWindo
   if (total <= 0) return { from: 0, to: 0, pages: 0, page: clamped }
   return { from: (clamped - 1) * perPage + 1, to: Math.min(total, clamped * perPage), pages, page: clamped }
 }
+
+/** Page numbers to show, with 0 standing for a gap: 1 … 4 5 6 … 12. */
+export function pageItems(pages: number, page: number): number[] {
+  const wanted = new Set([1, pages, page - 1, page, page + 1])
+  const shown = [...wanted].filter((value) => value >= 1 && value <= pages).sort((a, b) => a - b)
+  const items: number[] = []
+  shown.forEach((value, index) => {
+    const previous = shown[index - 1]
+    if (previous !== undefined && value - previous > 1) {
+      items.push(0)
+    }
+    items.push(value)
+  })
+  return items
+}

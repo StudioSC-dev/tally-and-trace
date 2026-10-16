@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect } from 'vitest'
 import type { LimitedTransaction, Transaction } from '../types/api'
 import {
-  addDays, dayEndWire, dayStartWire, listBounds, localToday, pageWindow, relativeEntryDay,
+  addDays, dayEndWire, dayStartWire, listBounds, localToday, pageItems, pageWindow, relativeEntryDay,
   statusFromDate, transactionStatus, wallDay,
 } from './transactionList'
 
@@ -234,5 +234,25 @@ describe('zone independence', () => {
     expect(relativeEntryDay('2026-10-30T00:00:00Z', '2026-10-16')).toBe('Oct 30th, 2026')
     // 2026-10-17T05:00Z is still the 16th in Los Angeles.
     expect(localToday(new Date('2026-10-17T05:00:00Z'))).toBe('2026-10-16')
+  })
+})
+
+describe('pageItems', () => {
+  it('shows a single page', () => {
+    expect(pageItems(1, 1)).toEqual([1])
+  })
+
+  it('shows every page when there are few', () => {
+    expect(pageItems(5, 3)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('marks gaps with 0', () => {
+    expect(pageItems(12, 6)).toEqual([1, 0, 5, 6, 7, 0, 12])
+    expect(pageItems(12, 1)).toEqual([1, 2, 0, 12])
+    expect(pageItems(12, 12)).toEqual([1, 0, 11, 12])
+  })
+
+  it('shows nothing without pages', () => {
+    expect(pageItems(0, 1)).toEqual([])
   })
 })
