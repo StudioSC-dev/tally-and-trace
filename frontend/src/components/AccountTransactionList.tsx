@@ -47,8 +47,10 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
   const category = transactionCategoryName(row, categoryNames)
   const postingDate = row.view !== 'limited' ? row.posting_date : undefined
 
+  // Unknown effect: a transfer in shows what was sent; anything else shows its face as "≈".
+  const isTransferIn = isTransfer && leg.direction === 'in'
   const amountText = !leg.effectKnown
-    ? `Sent ${formatCurrency(Math.abs(leg.signed), leg.currency)}`
+    ? `${isTransferIn ? 'Sent' : '≈'} ${formatCurrency(Math.abs(leg.signed), leg.currency)}`
     : `${leg.signed > 0 ? '+' : leg.signed < 0 ? '−' : ''}${formatCurrency(Math.abs(leg.signed), leg.currency)}`
   const amountClass =
     !leg.effectKnown || leg.direction === null ? 'text-ink' : leg.direction === 'in' ? 'text-ok' : 'text-danger'
@@ -89,7 +91,13 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
           <p
             className={`text-lg font-bold ${amountClass}`}
             data-testid="account-transaction-amount"
-            title={!leg.effectKnown ? `Amount sent in ${leg.currency}; the amount received isn't shown.` : undefined}
+            title={
+              leg.effectKnown
+                ? undefined
+                : isTransferIn
+                  ? `Amount sent in ${leg.currency}; the amount received isn't shown.`
+                  : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
+            }
           >
             {amountText}
           </p>
