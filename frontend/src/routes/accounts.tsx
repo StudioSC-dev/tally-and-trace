@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useGetHouseholdViewsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
@@ -37,71 +37,84 @@ function NotCountedTag() {
 /** One account row. A click (or Enter/Space) hands the account to `onOpen`. */
 function AccountCard({ account, onOpen }: { account: Account; onOpen: (account: Account) => void }) {
   return (
-    <article
-      className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${isAccountActive(account) ? '' : 'opacity-60'}`}
-      onClick={() => onOpen(account)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onOpen(account)
-        }
-      }}
-    >
-      <div className="flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] md:items-center md:gap-4">
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-3 md:block">
-            <div>
-              <p className="text-base font-semibold text-ink">{account.name}</p>
-              <p className="text-sm text-muted capitalize">{account.account_type.replace('_', ' ')}</p>
-              {account.description && (
-                <p className="text-sm text-body mt-1">{account.description}</p>
+    <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
+      <div
+        className="cursor-pointer hover:bg-sunken focus-ring"
+        onClick={() => onOpen(account)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onOpen(account)
+          }
+        }}
+      >
+        <div className="flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] md:items-center md:gap-4">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3 md:block">
+              <div>
+                <p className="text-base font-semibold text-ink">{account.name}</p>
+                <p className="text-sm text-muted capitalize">{account.account_type.replace('_', ' ')}</p>
+                {account.description && (
+                  <p className="text-sm text-body mt-1">{account.description}</p>
+                )}
+              </div>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
+              >
+                {isAccountActive(account) ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+
+            {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
+
+            <div className="flex flex-wrap gap-2 text-xs text-body">
+              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+                Currency: {account.currency}
+              </span>
+              {account.is_spending_wallet && <NotCountedTag />}
+              <AccountRoleBadge account={account} />
+              <TagChips tags={account.tags} />
+              {account.account_type === 'credit' && account.credit_limit != null && (
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
+                  Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
+                </span>
+              )}
+              {account.account_type === 'credit' && account.days_until_due_date && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                  +{account.days_until_due_date} days to due
+                </span>
               )}
             </div>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
-            >
+          </div>
+
+          <div className="text-right space-y-2">
+            <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
+              {formatCurrency(account.balance, account.currency as CurrencyCode)}
+            </p>
+            {account.account_type === 'credit' && account.due_date && (
+              <p className="text-xs text-muted">Statement due every {account.due_date}th</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body'}`}>
               {isAccountActive(account) ? 'Active' : 'Inactive'}
             </span>
           </div>
-
-          {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
-
-          <div className="flex flex-wrap gap-2 text-xs text-body">
-            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-              Currency: {account.currency}
-            </span>
-            {account.is_spending_wallet && <NotCountedTag />}
-            <AccountRoleBadge account={account} />
-            <TagChips tags={account.tags} />
-            {account.account_type === 'credit' && account.credit_limit != null && (
-              <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
-                Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
-              </span>
-            )}
-            {account.account_type === 'credit' && account.days_until_due_date && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                +{account.days_until_due_date} days to due
-              </span>
-            )}
-          </div>
         </div>
-
-        <div className="text-right space-y-2">
-          <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
-            {formatCurrency(account.balance, account.currency as CurrencyCode)}
-          </p>
-          {account.account_type === 'credit' && account.due_date && (
-            <p className="text-xs text-muted">Statement due every {account.due_date}th</p>
-          )}
-        </div>
-
-        <div className="flex flex-wrap justify-end gap-2">
-          <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body'}`}>
-            {isAccountActive(account) ? 'Active' : 'Inactive'}
-          </span>
-        </div>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Link
+          to="/accounts/$accountId"
+          params={{ accountId: String(account.id) }}
+          aria-label={`View transactions for ${account.name}`}
+          className="text-sm font-medium text-ink hover:underline focus-ring"
+          data-testid={`account-detail-link-${account.id}`}
+        >
+          Transactions <span aria-hidden="true">&rarr;</span>
+        </Link>
       </div>
     </article>
   )
@@ -671,6 +684,14 @@ export function AccountsPage() {
             )}
 
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Link
+                to="/accounts/$accountId"
+                params={{ accountId: String(actionAccount.id) }}
+                className="flex items-center justify-center gap-2 border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-sunken focus-ring sm:col-span-2"
+                data-testid="view-account-transactions"
+              >
+                View transactions
+              </Link>
               {actionAccount.permissions.can_delete && (
               <button
                 onClick={() => handleToggleActive(actionAccount)}
