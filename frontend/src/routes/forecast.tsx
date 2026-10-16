@@ -12,7 +12,7 @@ import { useGetForecastTimelineQuery } from '../store/api'
 import { RunningBalanceChart } from '../components/RunningBalanceChart'
 import { TagFilter } from '../components/TagFilter'
 
-import { timelineEventAmount, timelineEventName } from '@tally-trace/shared'
+import { timelineEventAccountLabel, timelineEventAmount, timelineEventName } from '@tally-trace/shared'
 import type { CashflowTimelineEvent, LimitedTimelineEvent } from '@tally-trace/shared'
 export const Route = createFileRoute('/forecast')({
   component: ForecastPage,
@@ -159,6 +159,7 @@ function ForecastPage() {
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
                       <th className="py-3 px-4 sm:px-6">Date</th>
                       <th className="py-3 px-4">Item</th>
+                      <th className="py-3 px-4">Account</th>
                       <th className="py-3 px-4 text-right">Amount</th>
                       <th className="py-3 px-4 sm:px-6 text-right">Running balance</th>
                     </tr>
@@ -168,6 +169,7 @@ function ForecastPage() {
                       <tr key={e.view === 'limited' ? e.public_id : `${e.source}-${e.source_id}-${i}`} className="hover:bg-sunken/50 transition-colors duration-150">
                         <td className="py-3 px-4 sm:px-6 whitespace-nowrap text-muted">{longDate(e.date)}</td>
                         <td className="py-3 px-4 text-ink">{timelineEventName(e)}</td>
+                        <td className="py-3 px-4 text-muted" data-testid="timeline-account">{timelineEventAccountLabel(e)}</td>
                         <td className={`py-3 px-4 text-right font-medium ${timelineEventAmount(e) >= 0 ? 'text-ok' : 'text-danger'}`}>
                           <span title={e.view === 'limited' ? undefined : estimateTitle(e)} data-testid="timeline-amount">{signedEvent(e)}</span>
                         </td>
