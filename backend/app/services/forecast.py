@@ -14,12 +14,13 @@ from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from typing import Dict, Iterator, List, Optional, Sequence
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, tag_shared_account_ids,
-    touches_accounts, viewable_account_ids, viewable_accounts,
+    DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion,
+    tag_shared_account_ids, touches_accounts, viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
@@ -135,6 +136,53 @@ def _loan_ids_of(db: Session, account_ids) -> frozenset:
         a.id for a in db.query(Account.id).filter(
             Account.id.in_(ids), Account.account_type == AccountType.LOAN)
     )
+
+
+MAIN_ACCOUNT_NOT_FOUND = "Account not found"
+MAIN_ACCOUNT_NOT_CASH = "Only a cash account can be the main account"
+
+
+def _main_account(db: Session, user, account_id: int) -> tuple:
+    """``(account, problem)`` for a main-account candidate (STU-326).
+
+    The account must be active and the user must hold a direct role on it
+    (owner, admin, editor or viewer; a Household ``tag_viewer`` sees only the
+    sharer's Household rows, so its balance would not match its ledger):
+    otherwise ``(None, 404)``. It must also be projection cash: a card, loan
+    or spending wallet has no cash running balance, so it is ``(account, 400)``.
+    The caller can already see that account, so the 400 leaks nothing.
+    """
+    account = viewable_accounts(db, user, active_only=True, roles=DIRECT_ROLES).filter(
+        Account.id == account_id).first()
+    if account is None:
+        return None, status.HTTP_404_NOT_FOUND
+    if not is_projection_cash(account):
+        return account, status.HTTP_400_BAD_REQUEST
+    return account, None
+
+
+def require_main_account(db: Session, user, account_id: int) -> Account:
+    """The account ``user`` may pin (or project the timeline for), else 404 / 400."""
+    account, problem = _main_account(db, user, account_id)
+    if problem == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(status_code=problem, detail=MAIN_ACCOUNT_NOT_FOUND)
+    if problem == status.HTTP_400_BAD_REQUEST:
+        raise HTTPException(status_code=problem, detail=MAIN_ACCOUNT_NOT_CASH)
+    return account
+
+
+def main_account_or_none(db: Session, user) -> Optional[int]:
+    """The user's stored main account when it still passes the pin rule, else None.
+
+    Read-only: a revoked share, a deactivated or ineligible account reads as
+    unpinned but the stored id is kept (a re-granted share or a reactivated
+    account brings the pin back). A hard delete clears it in the database.
+    """
+    account_id = getattr(user, "main_account_id", None)
+    if account_id is None:
+        return None
+    _, problem = _main_account(db, user, account_id)
+    return None if problem else account_id
 
 
 def get_account_balances(db: Session, user_id: int):

@@ -37,6 +37,7 @@ from app.schemas.user import (
     UserResponse,
     UserUpdate,
 )
+from app.services.forecast import main_account_or_none, require_main_account
 from app.services.email import (
     build_password_reset_email,
     build_verification_email,
@@ -206,10 +207,20 @@ def refresh(
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
 
+def _user_out(db: Session, user: User) -> UserResponse:
+    """The user as returned, with ``main_account_id`` only while it still
+    passes the pin rule. The stored row is never changed here."""
+    return UserResponse.model_validate(user).model_copy(
+        update={"main_account_id": main_account_or_none(db, user)})
+
+
 @router.get("/me", response_model=UserResponse)
-def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
     """Get current user information."""
-    return current_user
+    return _user_out(db, current_user)
 
 @router.put("/me", response_model=UserResponse)
 def update_current_user(
@@ -219,6 +230,8 @@ def update_current_user(
 ):
     """Update current user information."""
     update_data = user_update.dict(exclude_unset=True)
+    if update_data.get("main_account_id") is not None:
+        require_main_account(db, current_user, update_data["main_account_id"])
     for field, value in update_data.items():
         setattr(current_user, field, value)
     
@@ -226,7 +239,7 @@ def update_current_user(
     db.commit()
     db.refresh(current_user)
     
-    return current_user
+    return _user_out(db, current_user)
 
 @router.delete("/me")
 def deactivate_current_user(
@@ -279,7 +292,7 @@ def complete_onboarding(current_user: User = Depends(get_current_active_user), d
     current_user.updated_at = utc_now()
     db.commit()
     db.refresh(current_user)
-    return current_user
+    return _user_out(db, current_user)
 
 
 @router.post("/verify-email")
