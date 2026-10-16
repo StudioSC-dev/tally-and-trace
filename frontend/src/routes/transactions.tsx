@@ -9,9 +9,11 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, toTotal, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
+import type { TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -100,6 +102,15 @@ const formatRelativeDate = (dateString: string) => {
 
   return formatDateWithOrdinal(date)
 }
+
+// An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
+const STATUS_LABELS: Record<TransactionStatus, string> = { posted: 'Posted', pending: 'Pending', planned: 'Planned' }
+const STATUS_BADGE_CLASSES: Record<TransactionStatus, string> = {
+  posted: 'text-ink',
+  pending: 'bg-sunken text-warn',
+  planned: 'bg-sunken text-body',
+}
+const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-ok', pending: 'text-warn', planned: 'text-muted' }
 
 const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
 
@@ -464,6 +475,7 @@ export function TransactionsPage() {
   // entry belongs to someone else, whose category and allocation the caller can't use.
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
   const limit = 10
+  const today = useToday()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
   const [hasMoreTransactions, setHasMoreTransactions] = useState(true)
@@ -1219,7 +1231,7 @@ export function TransactionsPage() {
       updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     } catch (error) {
       console.error('Error reverting transaction:', error)
-      alert(apiErrorMessage(error) || 'Could not mark the transaction as planned. Please try again.')
+      alert(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
       return
     }
     setActionTransaction(updatedTransaction)
@@ -1441,17 +1453,17 @@ export function TransactionsPage() {
     // A Limited row has no posting date; its status alone says whether it is posted.
     const postingDate = isLimited(actionTransaction) ? undefined : actionTransaction.posting_date
     return {
-      transactionDate: formatDateWithOrdinal(new Date(date)),
-      transactionRelative: formatRelativeDate(date),
+      transactionDate: formatEntryDate(date),
+      transactionRelative: relativeEntryDay(date, today),
       postingDate: postingDate
         ? formatDateWithOrdinal(new Date(postingDate))
         : isLimited(actionTransaction) && actionTransaction.is_posted
         ? 'Posted'
-        : 'Pending',
+        : 'Not posted',
       postingRelative: postingDate ? formatRelativeDate(postingDate) : null,
       typeLabel: TRANSACTION_TYPE_LABELS[actionTransaction.transaction_type],
     }
-  }, [actionTransaction])
+  }, [actionTransaction, today])
 
   const actionMeta = useMemo(() => (actionTransaction ? getTransactionMeta(actionTransaction) : null), [actionTransaction, getTransactionMeta])
 
@@ -1781,8 +1793,9 @@ export function TransactionsPage() {
               scheduleLabel,
             } = getTransactionMeta(transaction)
             const rowDate = transactionDate(transaction)
-            const relativeDate = formatRelativeDate(rowDate)
-            const exactDate = formatDateWithOrdinal(new Date(rowDate))
+            const relativeDate = relativeEntryDay(rowDate, today)
+            const exactDate = formatEntryDate(rowDate)
+            const status = transactionStatus(transaction, today)
             const postedDate =
               !isLimited(transaction) && transaction.posting_date
                 ? formatDateWithOrdinal(new Date(transaction.posting_date))
@@ -1876,9 +1889,9 @@ export function TransactionsPage() {
                           {typeLabel}
                         </span>
                         <span
-                          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${ transaction.is_posted ? 'text-ink' : 'bg-sunken text-body' }`}
+                          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${STATUS_BADGE_CLASSES[status]}`}
                         >
-                          {transaction.is_posted ? 'Posted' : 'Planned'}
+                          {STATUS_LABELS[status]}
                         </span>
                         {!isLimited(transaction) && transaction.is_reconciled && (
                           <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ok">
@@ -1984,8 +1997,8 @@ export function TransactionsPage() {
                   </div>
                   <div className="flex justify-between">
                     <dt>Status</dt>
-                    <dd className={actionTransaction.is_posted ? 'text-ok' : 'text-warn'}>
-                      {actionTransaction.is_posted ? 'Posted' : 'Planned'}
+                    <dd className={STATUS_TEXT_CLASSES[transactionStatus(actionTransaction, today)]}>
+                      {STATUS_LABELS[transactionStatus(actionTransaction, today)]}
                     </dd>
                   </div>
                   {actionTransaction.created_by && (
@@ -2101,7 +2114,7 @@ export function TransactionsPage() {
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    Mark as Planned
+                    Mark as not posted
                   </button>
                   )
                 ) : (

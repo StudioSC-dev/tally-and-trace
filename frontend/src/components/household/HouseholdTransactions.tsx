@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { transactionDate, transactionDescription } from '@tally-trace/shared'
+import { localToday, transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
 import { useGetHouseholdDashboardQuery, useGetHouseholdTransactionsQuery } from '../../store/api'
 import type { Transaction } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
@@ -24,6 +24,7 @@ const isReadOnly = (transaction: Transaction): boolean => !Object.values(transac
  */
 function Row({ transaction, accountNames }: { transaction: Transaction; accountNames: Map<number, string> }) {
   const limited = transaction.view === 'limited'
+  const status = transactionStatus(transaction, localToday())
   const accountName = limited
     ? transaction.account?.name
     : accountNames.get(transaction.account_id) ?? null
@@ -43,7 +44,7 @@ function Row({ transaction, accountNames }: { transaction: Transaction; accountN
           {formatDay(transactionDate(transaction))} · {TYPE_LABELS[transaction.transaction_type]}
           {accountName ? ` · ${accountName}` : ''}
           {counterpart ? ` → ${counterpart}` : ''}
-          {!transaction.is_posted ? ' · Planned' : ''}
+          {status !== 'posted' ? ` · ${status === 'pending' ? 'Pending' : 'Planned'}` : ''}
         </p>
         <div className="flex flex-wrap items-center gap-2 text-xs text-body">
           {transaction.created_by && (

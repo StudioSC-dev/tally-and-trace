@@ -256,7 +256,7 @@ export function LoanActions({
               checked={form.is_posted}
               onChange={(e) => setForm({ ...form, is_posted: e.target.checked })}
             />
-            <span>Posted (moves the balances now; otherwise it is planned)</span>
+            <span>Posted (moves the balances now; otherwise it is not posted yet)</span>
           </label>
           {error && <p className="text-sm text-danger" role="alert">{error}</p>}
           <div className="flex gap-3">
