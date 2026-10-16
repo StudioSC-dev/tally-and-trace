@@ -66,7 +66,7 @@ const HOUSEHOLD_TAB: TabItem = {
 }
 
 const tabBase =
-  'relative flex flex-1 flex-col items-center justify-center gap-1 text-muted transition-colors duration-150 active:bg-sunken'
+  'relative flex flex-1 flex-col items-center justify-center gap-1 transition-colors duration-150 active:bg-sunken'
 
 export function BottomNav() {
   // Offered whenever there is a Household to open (your own is always one).
@@ -82,7 +82,9 @@ export function BottomNav() {
             to={to}
             data-onboarding={onboarding}
             className={tabBase}
-            activeProps={{ className: `${tabBase} text-ink` }}
+            activeOptions={{ exact: to === '/' }}
+            activeProps={{ className: 'text-ink' }}
+            inactiveProps={{ className: 'text-muted' }}
           >
             {({ isActive }) => (
               <>
