@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { formatEntryDate, isLimited, isOwnerFull, isSharedFull, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, toTotal, transactionDate, transactionDescription, transferAccountFields } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
@@ -111,9 +111,6 @@ const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() &&
 // the form and the posting flow work with the whole payment, in whole cents.
 const toPrincipal = (total: number, interest?: number | null) =>
   Math.round((total - (interest ?? 0)) * 100) / 100
-
-const toTotal = (principal: number, interest?: number | null) =>
-  Math.round((principal + (interest ?? 0)) * 100) / 100
 
 // A transaction the caller sees in full or shared-full (never Limited): the only
 // shapes that carry the fields an edit form, a posting or a loan check reads.
@@ -1097,7 +1094,7 @@ export function TransactionsPage() {
         budget_entry_id: isOwnerFull(transaction) ? transaction.budget_entry_id ?? undefined : undefined,
       amount: total,
         currency: (transaction.currency as CurrencyCode) || fallbackCurrency,
-        projected_amount: transaction.projected_amount ?? (intoLoan ? total : undefined),
+        projected_amount: editFormProjectedAmount(transaction, intoLoan),
         projected_currency:
           (transaction.projected_currency as CurrencyCode) ||
           (transaction.currency as CurrencyCode) ||

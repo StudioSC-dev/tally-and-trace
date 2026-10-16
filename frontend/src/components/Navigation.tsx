@@ -18,10 +18,16 @@ export function Navigation() {
   // Active tab is an ink underline rather than a tinted pill — a saturated fill
   // in the chrome competes with the figures, which are what should carry colour
   // on a ledger screen.
-  const navLinkBase = "inline-flex items-center border-b-2 border-transparent px-3 py-2 text-sm text-muted transition-colors duration-200 hover:text-ink"
-  const navLinkActive = "inline-flex items-center border-b-2 border-ink px-3 py-2 text-sm text-ink"
-  const mobileNavLinkBase = "flex w-full items-center border-l-2 border-transparent px-3 py-3 text-base text-muted transition-colors duration-200 hover:text-ink"
-  const mobileNavLinkActive = "flex w-full items-center border-l-2 border-ink px-3 py-3 text-base text-ink"
+  //
+  // The router joins className, activeProps.className and inactiveProps.className,
+  // so the base holds only layout; the state classes live in the active/inactive
+  // props so an active link never carries the inactive colours as well.
+  const navLinkBase = "inline-flex items-center border-b-2 px-3 py-2 text-sm transition-colors duration-200"
+  const navLinkInactive = "border-transparent text-muted hover:text-ink"
+  const navLinkActive = "border-ink text-ink"
+  const mobileNavLinkBase = "flex w-full items-center border-l-2 px-3 py-3 text-base transition-colors duration-200"
+  const mobileNavLinkInactive = "border-transparent text-muted hover:text-ink"
+  const mobileNavLinkActive = "border-ink text-ink"
 
   return (
     <nav className="fixed left-0 right-0 top-0 z-50 border-b border-line bg-paper/85 backdrop-blur-sm">
@@ -38,40 +44,40 @@ export function Navigation() {
               </Link>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-0.5 min-w-0 overflow-x-auto">
-              <Link to="/" data-onboarding="nav-home" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+              <Link to="/" data-onboarding="nav-home" activeOptions={{ exact: true }} className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
                 </svg>
                 Dashboard
               </Link>
-              <Link to="/forecast" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+              <Link to="/forecast" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 14l4-4 3 3 5-6" />
                 </svg>
                 Forecast
               </Link>
-              <Link to="/accounts" data-onboarding="nav-accounts" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+              <Link to="/accounts" data-onboarding="nav-accounts" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
                 Accounts
               </Link>
-              <Link to="/transactions" data-onboarding="nav-transactions" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+              <Link to="/transactions" data-onboarding="nav-transactions" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
                 Transactions
               </Link>
-              <Link to="/allocations" data-onboarding="nav-allocations" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+              <Link to="/allocations" data-onboarding="nav-allocations" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
                 Allocations
               </Link>
               {hasHousehold && (
-                <Link to="/household" data-testid="nav-household" className={navLinkBase} activeProps={{ className: navLinkActive }}>
+                <Link to="/household" data-testid="nav-household" className={navLinkBase} activeProps={{ className: navLinkActive }} inactiveProps={{ className: navLinkInactive }}>
                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" />
                   </svg>
@@ -178,33 +184,33 @@ export function Navigation() {
       {/* Mobile menu dropdown */}
       {showMobileMenu && (
         <div className="space-y-1 border-t border-line bg-surface px-4 pb-4 pt-2 sm:hidden">
-          <Link to="/" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
+          <Link to="/" activeOptions={{ exact: true }} className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5a2 2 0 012-2h4a2 2 0 012 2v2H8V5z" />
             </svg>
             Dashboard
           </Link>
-          <Link to="/accounts" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
+          <Link to="/accounts" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
             </svg>
             Accounts
           </Link>
-          <Link to="/transactions" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
+          <Link to="/transactions" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
             </svg>
             Transactions
           </Link>
-          <Link to="/allocations" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
+          <Link to="/allocations" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
             Allocations
           </Link>
           {hasHousehold && (
-            <Link to="/household" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} onClick={() => setShowMobileMenu(false)}>
+            <Link to="/household" className={mobileNavLinkBase} activeProps={{ className: mobileNavLinkActive }} inactiveProps={{ className: mobileNavLinkInactive }} onClick={() => setShowMobileMenu(false)}>
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l9-9 9 9M5 10v10a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V10" />
               </svg>
