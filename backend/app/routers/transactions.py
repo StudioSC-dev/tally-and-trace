@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
-from typing import List, Optional, Set
+from typing import Annotated, List, Literal, Optional, Set
+from pydantic import Field
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -847,6 +848,11 @@ def get_transactions(
     current_user: User = Depends(get_current_active_user),
     account_ids: Optional[List[int]] = Query(None, alias="account_ids", description="Filter by account IDs"),
     category_ids: Optional[List[int]] = Query(None, alias="category_ids", description="Filter by category IDs"),
+    category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
+        None, max_length=50,
+        description="Filter by category name, matching any creator's category of that name"),
+    entered_by: Optional[Literal["me"]] = Query(
+        None, description="'me' keeps only rows the caller owns (entered by, or materialised for, them)"),
     allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),
     transaction_types: Optional[List[str]] = Query(None, alias="transaction_types", description="Filter by transaction types"),
     start_date: Optional[datetime] = Query(None, description="Start date for filtering"),
@@ -877,6 +883,31 @@ def get_transactions(
     if category_ids:
         query = query.filter(Transaction.category_id.in_(category_ids),
                              Transaction.user_id == current_user.id)
+    if category_names:
+        # By name, as summarize_period counts them: a row's category counts only
+        # when its creator owns it, so the same name matches each household
+        # member's own row. Scope and visibility mirror the other reads:
+        #  - touches_accounts(seen) is the summary's scope (seen includes
+        #    tag_viewer accounts);
+        #  - displayed_description_criterion is the SQL form of
+        #    Redactor.shows_text. Redactor.transaction() shows category_name only
+        #    for a FULL / SHARED_FULL view (both require every touched account
+        #    viewable, and SHARED_FULL also needs ids) or, in the limited view,
+        #    when shows_text holds: every touched account viewable (rule i) or
+        #    Household rule (c) (rule ii). The criterion is exactly "every
+        #    touched account in seen, or an explicit Household grant", so a row
+        #    whose category_name is hidden never matches its hidden category.
+        # Reserved names ("Transfer fees", "Uncategorized") are not special here:
+        # they match real creator-owned categories of that name only.
+        query = (
+            query.join(Category, Category.id == Transaction.category_id)
+            .filter(Category.name.in_(category_names),
+                    Category.user_id == Transaction.user_id,
+                    touches_accounts(Transaction, seen),
+                    displayed_description_criterion(seen, grants))
+        )
+    if entered_by == "me":
+        query = query.filter(Transaction.user_id == current_user.id)
     if allocation_id:
         query = query.filter(Transaction.allocation_id == allocation_id,
                              Transaction.user_id == current_user.id)
@@ -1652,16 +1683,17 @@ def summarize_period(
 def get_transaction_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    start_date: datetime = Query(..., description="Start date for summary"),
-    end_date: datetime = Query(..., description="End date for summary"),
+    start_date: Optional[datetime] = Query(None, description="Start date for summary; omit for no lower bound"),
+    end_date: Optional[datetime] = Query(None, description="End date for summary; omit for no upper bound"),
     account_id: Optional[int] = Query(None, description="Filter by account ID"),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
 ):
     """Get transaction summary for a specific period"""
-    query = db.query(Transaction).filter(
-        Transaction.transaction_date >= start_date,
-        Transaction.transaction_date <= end_date,
-    )
+    query = db.query(Transaction)
+    if start_date is not None:
+        query = query.filter(Transaction.transaction_date >= start_date)
+    if end_date is not None:
+        query = query.filter(Transaction.transaction_date <= end_date)
     # The accounts the caller sees (inactive ones included: this is history).
     # Rows touching them that the caller may read: with a direct role that is
     # whoever entered them; through a tag share, only the sharer's own (the
