@@ -7,8 +7,6 @@ whose category the caller is not shown (``category_name`` null), and it never
 widens what the caller may read. ``entered_by=me`` is a separate, deliberate
 filter: rows the caller owns.
 """
-from datetime import datetime
-
 import pytest
 
 from app.tests.conftest import API, sw_db_reachable, sw_post
