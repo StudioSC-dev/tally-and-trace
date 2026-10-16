@@ -14,6 +14,7 @@ import {
 import type { Category, Tag } from '../store/api'
 import { downloadAuthed } from '../utils/download'
 import { HouseholdShares } from '../components/HouseholdShares'
+import { localToday } from '@tally-trace/shared'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -121,7 +122,7 @@ function SettingsPage() {
     setDownloading(kind)
     setDownloadError(null)
     try {
-      const date = new Date().toISOString().slice(0, 10)
+      const date = localToday()
       if (kind === 'json') await downloadAuthed('data/export.json', `tally_trace_export_${date}.json`)
       else await downloadAuthed('data/export.csv', `tally_trace_export_${date}.zip`)
     } catch (err) {

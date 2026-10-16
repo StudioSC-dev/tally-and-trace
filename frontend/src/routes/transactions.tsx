@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, pageWindow, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
 import type { ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -304,7 +304,7 @@ export function TransactionsPage() {
     transfer_fee: undefined,
     description: '',
     transaction_type: 'debit',
-    transaction_date: new Date().toISOString().split('T')[0],
+    transaction_date: localToday(),
     posting_date: undefined,
     is_posted: true,
     transfer_from_account_id: undefined,
@@ -2805,7 +2805,7 @@ export function TransactionsPage() {
                     checked={formData.is_posted}
                     onChange={(e) => {
                       const checked = e.target.checked
-                      const today = new Date().toISOString().split('T')[0]
+                      const today = localToday()
                       setFormData((prev) => ({
                         ...prev,
                         is_posted: checked,
