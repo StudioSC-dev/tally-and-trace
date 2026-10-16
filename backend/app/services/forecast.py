@@ -2555,6 +2555,10 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
     account = None
     currencies = p.run_currencies()
     if account_id is not None:
+        # Deactivated or unshared since require_main_account: the same 404, not a KeyError.
+        if account_id not in p.opening_by_account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=MAIN_ACCOUNT_NOT_FOUND)
         currency = p.money.currency_of(account_id)
         account = {"account_id": account_id, "account_name": p.names.get(account_id),
                    "currency": currency}

@@ -181,6 +181,25 @@ def test_pinned_errors(sw_client, sw_db, sw_people, frozen, mx):  # noqa: F811
     _timeline(sw_client, mx["a"], expect=422, account_id=0)
 
 
+def test_account_lost_after_the_pin_check_is_a_404(sw_db, frozen, mx):  # noqa: F811
+    """Deactivated between ``require_main_account`` and the projection: a 404, not a 500."""
+    from fastapi import HTTPException
+
+    from app.models.account import Account
+    from app.models.user import User
+    from app.services import forecast as forecast_svc
+    from app.tests.conftest import fx_rates
+
+    uid = mx["a"]["id"]
+    forecast_svc.require_main_account(sw_db, sw_db.get(User, uid), mx["php_sav"])
+    sw_db.get(Account, mx["php_sav"]).is_active = False
+    sw_db.flush()
+    with pytest.raises(HTTPException) as caught:
+        forecast_svc.timeline_by_currency(sw_db, uid, days=DAYS, fx=fx_rates(),
+                                          account_id=mx["php_sav"])
+    assert (caught.value.status_code, caught.value.detail) == (404, "Account not found")
+
+
 def test_tag_and_account_together(sw_client, frozen, mx):  # noqa: F811
     a = mx["a"]
     trip = sw_post(sw_client, a, "/tags/", {"name": "Trip"})["id"]
