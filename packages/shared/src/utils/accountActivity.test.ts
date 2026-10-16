@@ -67,7 +67,50 @@ describe('accountLeg: debit and credit', () => {
   })
 })
 
+describe('accountLeg: currencies of debits and credits', () => {
+  it('shows a posted debit with a foreign stored currency in the account currency (Full)', () => {
+    const row: FullTransaction = { ...full, amount: 4700, currency: 'USD' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'out', signed: -4700, currency: 'PHP', effectKnown: true })
+  })
+
+  it('shows a posted debit with a foreign stored currency in the account currency (Shared-full and Limited)', () => {
+    expect(accountLeg({ ...sharedFull, amount: 4700, currency: 'USD' }, 10, 'PHP')).toMatchObject({ signed: -4700, currency: 'PHP', effectKnown: true })
+    expect(accountLeg({ ...limited, amount: 4700, currency: 'USD' }, 10, 'PHP')).toMatchObject({ signed: -4700, currency: 'PHP', effectKnown: true })
+  })
+
+  it('shows a posted credit with a foreign stored currency in the account currency', () => {
+    const row: FullTransaction = { ...full, transaction_type: 'credit', amount: 4700, currency: 'USD' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'in', signed: 4700, currency: 'PHP', effectKnown: true })
+  })
+
+  it('keeps an unposted foreign debit at its face, with an unknown effect', () => {
+    const row: FullTransaction = { ...full, is_posted: false, amount: 80, currency: 'USD' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'out', signed: -80, currency: 'USD', effectKnown: false })
+    expect(accountLeg({ ...limited, is_posted: false, amount: 80, currency: 'USD' }, 10, 'PHP'))
+      .toMatchObject({ signed: -80, currency: 'USD', effectKnown: false })
+  })
+
+  it('reads an unposted face from the projected figure and currency', () => {
+    const row: FullTransaction = { ...full, is_posted: false, amount: 4700, currency: 'PHP', projected_amount: 80, projected_currency: 'USD' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed: -80, currency: 'USD', effectKnown: false })
+  })
+
+  it('knows an unposted debit in the account currency', () => {
+    expect(accountLeg({ ...full, is_posted: false }, 10, 'PHP')).toMatchObject({ signed: -100, currency: 'PHP', effectKnown: true })
+  })
+})
+
 describe('accountLeg: transfers out', () => {
+  it('shows a posted out transfer in the source account currency whatever the row currency', () => {
+    const row = transfer({ amount: 100, transfer_fee: 5, currency: 'USD' })
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'out', signed: -105, currency: 'PHP', effectKnown: true, fee: 5 })
+  })
+
+  it('keeps an unposted out transfer in the row currency, unknown when it is not the account currency', () => {
+    const row = transfer({ amount: 100, currency: 'USD', is_posted: false })
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed: -100, currency: 'USD', effectKnown: false })
+  })
+
   it('takes the fee on top of the amount', () => {
     expect(accountLeg(transfer({ transfer_fee: 5 }), 10, 'PHP')).toEqual({
       direction: 'out', signed: -105, currency: 'PHP', effectKnown: true, fee: 5, counterpartId: 20, counterpartName: null,
@@ -121,8 +164,13 @@ describe('accountLeg: transfers in', () => {
     expect(accountLeg(transfer({ received_amount: null }), 20, 'PHP')).toMatchObject({ signed: 100, currency: 'PHP', effectKnown: true })
   })
 
-  it('does not know the effect of a Full cross-currency transfer with no received amount', () => {
+  it('adds the stored amount in the account currency for a posted Full transfer with no received amount', () => {
     const row = transfer({ amount: 100, currency: 'USD', received_amount: null })
+    expect(accountLeg(row, 20, 'PHP')).toMatchObject({ direction: 'in', signed: 100, currency: 'PHP', effectKnown: true })
+  })
+
+  it('does not know the effect of an unposted Full cross-currency transfer with no received amount', () => {
+    const row = transfer({ amount: 100, currency: 'USD', received_amount: null, is_posted: false })
     expect(accountLeg(row, 20, 'PHP')).toMatchObject({ direction: 'in', signed: 100, currency: 'USD', effectKnown: false })
   })
 

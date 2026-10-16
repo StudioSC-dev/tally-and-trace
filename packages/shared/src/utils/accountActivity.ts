@@ -3,9 +3,26 @@ import type { CurrencyCode } from './currency'
 
 /**
  * What one transaction does to one account, read from the row alone. It mirrors the
- * backend's per-leg arithmetic (services/forecast.py `transfer`) over the shapes
- * redaction.py `limited_transaction` produces, so it works on Full, Shared-full and
- * Limited rows alike.
+ * backend's per-leg arithmetic over the shapes redaction.py `limited_transaction`
+ * produces, so it works on Full, Shared-full and Limited rows alike.
+ *
+ * Currencies, by the backend's rule:
+ * - A POSTED row moves the balance by its stored figures, whatever `currency` says:
+ *   a debit or credit's `amount` is in the account's currency even when `currency`
+ *   keeps a foreign code (test_foreign_posting_integration.py:283-310; routers/
+ *   transactions.py `_foreign_post_on_update` and :626-629, which store the actual
+ *   figure in `amount` and move the foreign face to `projected_*`). A transfer's
+ *   source moves by `amount + transfer_fee`, its destination by `received_amount`, else
+ *   `amount` (models/transaction.py `transfer_sides`, which never reads currencies).
+ *   So a posted row's effect is shown in `accountCurrency`. The one exception is a
+ *   Limited cross-currency transfer in: it has no `received_amount`, so what the
+ *   destination got is unknown.
+ * - An UNPOSTED row has no balance effect yet. A debit or credit carries a face in
+ *   `projected_currency`, else `currency` (models/transaction.py `pending_face`; Limited
+ *   has only `currency`); a transfer's `amount` is in its source's currency
+ *   (routers/transactions.py:1002, services/forecast.py `transfer`). That face is
+ *   shown in its own currency, and `effectKnown` is false when it isn't
+ *   `accountCurrency` because the forecast would only estimate it.
  */
 
 export type LegDirection = 'in' | 'out'
@@ -18,9 +35,9 @@ export interface AccountLeg {
   /** The currency of `signed`. */
   currency: CurrencyCode
   /**
-   * False when the row can't say what an incoming transfer added to the account: the row
-   * is in another currency and carries no received amount. `signed` is then the amount
-   * sent, in the row's currency.
+   * False when the row can't say what it does to the account in the account's currency:
+   * an unposted row whose face is in another currency, or a Limited transfer in from
+   * another currency (no received amount). `signed` is then the face amount, in `currency`.
    */
   effectKnown: boolean
   /** The fee (or loan interest) this leg pays; only on an out transfer leg, null when hidden or none. */
@@ -35,11 +52,17 @@ const NO_LEG = { signed: 0, effectKnown: true, fee: null, counterpartId: null, c
 
 /** The effect of `row` on the account `accountId` (whose currency is `accountCurrency`). */
 export function accountLeg(row: Transaction, accountId: number, accountCurrency: CurrencyCode): AccountLeg {
-  if (row.transaction_type === 'debit') {
-    return { ...NO_LEG, direction: 'out', signed: -row.amount, currency: row.currency }
-  }
-  if (row.transaction_type === 'credit') {
-    return { ...NO_LEG, direction: 'in', signed: row.amount, currency: row.currency }
+  if (row.transaction_type === 'debit' || row.transaction_type === 'credit') {
+    const direction = row.transaction_type === 'debit' ? 'out' : 'in'
+    const sign = direction === 'out' ? -1 : 1
+    if (row.is_posted) {
+      return { ...NO_LEG, direction, signed: sign * row.amount, currency: accountCurrency }
+    }
+    // Unposted: the face, in its own currency.
+    const projected = row.view !== 'limited' ? row.projected_amount : undefined
+    const amount = projected ?? row.amount
+    const currency = (row.view !== 'limited' && row.projected_currency) || row.currency
+    return { ...NO_LEG, direction, signed: sign * amount, currency, effectKnown: currency === accountCurrency }
   }
 
   const limited = row.view === 'limited'
@@ -52,8 +75,9 @@ export function accountLeg(row: Transaction, accountId: number, accountCurrency:
     return {
       direction: 'out',
       signed: -(row.amount + (fee ?? 0)),
-      currency: row.currency,
-      effectKnown: true,
+      // Posted: always the source's own currency. Unposted: the row's, estimated by the forecast.
+      currency: row.is_posted ? accountCurrency : row.currency,
+      effectKnown: row.is_posted || row.currency === accountCurrency,
       fee: fee != null && fee > 0 ? fee : null,
       counterpartId: dest,
       counterpartName: limited ? row.counterpart?.name ?? null : null,
@@ -67,6 +91,10 @@ export function accountLeg(row: Transaction, accountId: number, accountCurrency:
     }
     if (!limited && row.received_amount != null) {
       return { direction: 'in', signed: row.received_amount, currency: accountCurrency, effectKnown: true, fee: null, ...counterpart }
+    }
+    if (!limited && row.is_posted) {
+      // No received amount: the backend adds `amount` (`transfer_sides`).
+      return { direction: 'in', signed: row.amount, currency: accountCurrency, effectKnown: true, fee: null, ...counterpart }
     }
     return {
       direction: 'in',
