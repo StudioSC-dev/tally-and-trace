@@ -10,11 +10,12 @@ import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
+import { useToday } from '../hooks/useToday'
 import { FxNotice } from '../components/FxNotice'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { apiErrorMessage } from '../utils/apiError'
-import { isDetailed, isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
+import { isDetailed, isLimitedEvent, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
 
 const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
@@ -96,10 +97,10 @@ type PayableRow = {
   overdue: boolean
   budgetEntryId: number | null
   /** What kind of payable this is; only scheduled entries have a known autopay state. */
-  kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned'
+  kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
 }
 
-const payableRow = (fallback: CurrencyCode) => (payable: Payable | LimitedEvent, index: number): PayableRow => {
+const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable | LimitedEvent, index: number): PayableRow => {
   if (isLimitedEvent(payable)) {
     // Face amount, never `cash_delta` (0 for a charge billed on a later statement).
     return {
@@ -117,7 +118,9 @@ const payableRow = (fallback: CurrencyCode) => (payable: Payable | LimitedEvent,
   }
   const pays = payable.account_name ? ` · from ${payable.account_name}` : ''
   const overflow = payable.overflow_account_name ? ` (overflow: ${payable.overflow_account_name})` : ''
-  const label = payable.source === 'statement' ? 'Card statement' : payable.source === 'loan' ? 'Loan payment' : payable.source === 'budget_entry' ? 'Scheduled' : 'Planned'
+  // An unposted transaction is Pending once its day has come and Planned before it.
+  const transactionKind = statusFromDate(payable.due_date, false, today) === 'planned' ? 'planned' : 'pending'
+  const label = payable.source === 'statement' ? 'Card statement' : payable.source === 'loan' ? 'Loan payment' : payable.source === 'budget_entry' ? 'Scheduled' : transactionKind === 'planned' ? 'Planned' : 'Pending'
   return {
     key: `${payable.source}-${payable.source_id ?? 'x'}-${payable.due_date}-${index}`,
     name: payable.name,
@@ -128,7 +131,7 @@ const payableRow = (fallback: CurrencyCode) => (payable: Payable | LimitedEvent,
     detail: `${label}${pays}${overflow}`,
     overdue: false,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
-    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? 'planned' : 'scheduled',
+    kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
   }
 }
 
@@ -256,7 +259,9 @@ export function Dashboard() {
   const balanceRow = snapshot?.balances.by_currency.find((r) => r.currency === currency)
   const summaryRow = periodSummary?.by_currency.find((r) => r.currency === currency)
   const periodCategories = useMemo(() => summaryRow?.category_breakdown ?? {}, [summaryRow])
-  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency)), [snapshot, defaultCurrency])
+  // The day that decides Pending or Planned; it moves at midnight and on refocus.
+  const today = useToday()
+  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, today)), [snapshot, defaultCurrency, today])
   const accountCurrencies = useMemo(
     () => new Map((accountsData?.items ?? []).map((a) => [a.id, a.currency as CurrencyCode])),
     [accountsData]
@@ -321,7 +326,7 @@ export function Dashboard() {
       .filter((value): value is { allocation: Allocation; limit: number; spent: number; remaining: number; usagePercentage: number } => value !== null)
   }, [budgetAllocations])
 
-  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared' | 'planned'
+  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
   const STATUS_LABELS: Record<PayableStatus, string> = {
     danger: 'Overdue',
     autopay: 'Autopay',
@@ -330,6 +335,7 @@ export function Dashboard() {
     loan: 'Loan payment',
     shared: 'Shared item',
     planned: 'Planned',
+    pending: 'Pending',
   }
 
   const renderPlannedExpenseIcon = (status: PayableStatus) => {
