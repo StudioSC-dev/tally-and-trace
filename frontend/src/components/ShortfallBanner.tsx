@@ -15,6 +15,8 @@ interface Props {
   /** The window's length, for the sentence about the selected currency's close. */
   days?: number
   compact?: boolean
+  /** A timeline walked for one main account: the heading names it. */
+  accountName?: string | null
 }
 
 /**
@@ -22,7 +24,7 @@ interface Props {
  * selected, so a USD shortfall is not hidden behind the PHP segment. Colour is always
  * paired with an icon and text.
  */
-export function ShortfallBanner({ rows, selected, days, compact = false }: Props) {
+export function ShortfallBanner({ rows, selected, days, compact = false, accountName }: Props) {
   const short = rows.filter((row) => row.shortfall)
   const selectedRow = rows.find((row) => row.currency === selected)
   const selectedShort = selectedRow?.shortfall === true
@@ -36,7 +38,9 @@ export function ShortfallBanner({ rows, selected, days, compact = false }: Props
             <path d="M9 8h2v4H9V8zm0 5h2v2H9v-2z" fill="white" />
           </svg>
           <div className="text-sm min-w-0">
-            <p className="font-semibold text-danger">Projected shortfall{short.length > 1 ? ' in more than one currency' : ''}</p>
+            <p className="font-semibold text-danger">
+              {accountName ? `Shortfall on ${accountName} before overflow` : `Projected shortfall${short.length > 1 ? ' in more than one currency' : ''}`}
+            </p>
             <ul className="text-danger space-y-0.5">
               {short.map((row) => {
                 const when = longDate(row.trough_date)
