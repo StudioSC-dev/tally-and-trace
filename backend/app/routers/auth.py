@@ -19,6 +19,7 @@ from app.core.auth import (
     revoke_all_refresh_tokens,
 )
 from app.core.seed import DEMO_EMAILS
+from app.core.categories import ensure_default_categories
 from app.core.tags import ensure_household_tag
 from app.core.config import settings
 from app.core.time import utc_now
@@ -104,6 +105,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.flush()
     # Every user has their Household system tag from the start (same transaction).
     ensure_household_tag(db, db_user)
+    ensure_default_categories(db, db_user)
     db.commit()
     db.refresh(db_user)
     

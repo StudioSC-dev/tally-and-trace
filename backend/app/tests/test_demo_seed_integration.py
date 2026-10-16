@@ -512,7 +512,7 @@ def test_a_current_startup_restores_a_missing_demo_share_without_reseeding(db, s
 @pytest.mark.parametrize("email", ["demo@example.com", "DEMO@example.com",
                                    "demo.partner@example.com", "Demo.Partner@Example.com"])
 def test_registration_refuses_the_demo_emails_as_taken(client, db, email):
-    from app.models import User
+    from app.models import Category, User
 
     taken = client.post(f"{API}/auth/register", json={
         "email": f"share-{secrets.token_hex(6)}@example.com", "password": "Password123!",
@@ -527,6 +527,7 @@ def test_registration_refuses_the_demo_emails_as_taken(client, db, email):
         400, {"detail": "Email already registered"})
     db.expire_all()
     assert db.query(User).filter(User.email == email, User.first_name == "Not").count() == 0
+    db.query(Category).filter(Category.user_id == taken.json()["id"]).delete()
     db.query(User).filter(User.id == taken.json()["id"]).delete()
     db.commit()
 
