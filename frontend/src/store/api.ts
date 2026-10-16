@@ -257,6 +257,10 @@ export const accountingApi = createApi({
       query: (params) => ({ url: 'budget-entries/', params }),
       providesTags: ['BudgetEntry'],
     }),
+    getBudgetEntry: builder.query<BudgetEntry, number>({
+      query: (id) => `budget-entries/${id}`,
+      providesTags: ['BudgetEntry'],
+    }),
     createBudgetEntry: builder.mutation<BudgetEntry, BudgetEntryInput>({
       query: (entry) => ({ url: 'budget-entries/', method: 'POST', body: entry }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
@@ -554,6 +558,7 @@ export const {
 
   // Budget entry hooks
   useGetBudgetEntriesQuery,
+  useGetBudgetEntryQuery,
   useLazyGetBudgetEntriesQuery,
   useCreateBudgetEntryMutation,
   useUpdateBudgetEntryMutation,
