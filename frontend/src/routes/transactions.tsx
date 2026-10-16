@@ -531,6 +531,11 @@ export function TransactionsPage() {
   // The search term enters the filter key 300ms after the last keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
   useEffect(() => {
+    // `effectiveSearch` makes a reset a single fetch; clearing here at once stops a stale term coming back.
+    if (searchTerm.trim() === '') {
+      setDebouncedSearch('')
+      return
+    }
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [searchTerm])
