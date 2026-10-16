@@ -365,9 +365,9 @@ export function TransactionsPage() {
     defaultMonthStartRef.current = freshStart
     defaultMonthEndRef.current = freshEnd
     setSearchTerm('')
-    setSelectedAccountIds([])
-    setSelectedCategoryIds([])
-    setSelectedTypes([])
+    setSelectedAccountIds((prev) => (prev.length ? [] : prev))
+    setSelectedCategoryIds((prev) => (prev.length ? [] : prev))
+    setSelectedTypes((prev) => (prev.length ? [] : prev))
     setSelectedTag(undefined)
     setCurrentMonth(freshStart)
     setStartDate(formatDateInput(freshStart))
@@ -531,11 +531,6 @@ export function TransactionsPage() {
   // The search term enters the filter key 300ms after the last keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
   useEffect(() => {
-    // A cleared search (a filter reset) applies at once, so a reset sends one fetch.
-    if (searchTerm.trim() === '') {
-      setDebouncedSearch(searchTerm)
-      return
-    }
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [searchTerm])
@@ -543,9 +538,11 @@ export function TransactionsPage() {
   // Everything that changes which rows are listed. The page is stored with the key it
   // was chosen under, so any change of filter, page size or day falls back to page 1
   // in the same render, with no second fetch.
+  // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
+  const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch
   const filterKey = useMemo(
-    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, debouncedSearch.trim(), selectedTag ?? null, pageSize, today]),
-    [startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, debouncedSearch, selectedTag, pageSize, today]
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryIds, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
@@ -581,11 +578,11 @@ export function TransactionsPage() {
     if (selectedTag !== undefined) {
       params.tag = selectedTag
     }
-    if (debouncedSearch.trim()) {
-      params.search = debouncedSearch.trim()
+    if (effectiveSearch.trim()) {
+      params.search = effectiveSearch.trim()
     }
     return params
-  }, [selectedAccountIds, selectedTypes, selectedCategoryIds, selectedTag, debouncedSearch])
+  }, [selectedAccountIds, selectedTypes, selectedCategoryIds, selectedTag, effectiveSearch])
 
   const loadTransactions = useCallback(
     async () => {
