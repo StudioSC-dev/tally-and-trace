@@ -119,7 +119,7 @@ const STATUS_TEXT_CLASSES: Record<TransactionStatus, string> = { posted: 'text-o
 const PAGE_SIZES = [25, 50, 100] as const
 type PageSize = (typeof PAGE_SIZES)[number]
 const PAGE_SIZE_STORAGE_KEY = 'transactions.pageSize'
-const SEARCH_DEBOUNCE_MS = 300
+const SEARCH_DEBOUNCE_MS = 450
 // One request's worth of Upcoming rows; the API allows up to 1000 per request.
 const UPCOMING_LIMIT = 100
 
@@ -551,7 +551,7 @@ export function TransactionsPage() {
   const isRefreshing = isMainLoading || isUpcomingLoading
 
   const [pageSize, setPageSizeState] = useState<PageSize>(readStoredPageSize)
-  // The search term enters the filter key 300ms after the last keystroke.
+  // The search term enters the filter key 450ms after the last keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm)
   useEffect(() => {
     // `effectiveSearch` makes a reset a single fetch; clearing here at once stops a stale term coming back.
@@ -567,9 +567,9 @@ export function TransactionsPage() {
   // was chosen under, so any change of filter, page size or day falls back to page 1
   // in the same render, with no second fetch.
   // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
-  const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch
+  const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch.trim()
   const filterKey = useMemo(
-    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch, selectedTag ?? null, pageSize, today]),
     [startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
@@ -609,8 +609,8 @@ export function TransactionsPage() {
     if (selectedTag !== undefined) {
       params.tag = selectedTag
     }
-    if (effectiveSearch.trim()) {
-      params.search = effectiveSearch.trim()
+    if (effectiveSearch) {
+      params.search = effectiveSearch
     }
     return params
   }, [selectedAccountIds, selectedTypes, selectedCategoryNames, enteredBy, selectedTag, effectiveSearch])
@@ -2060,15 +2060,18 @@ export function TransactionsPage() {
         )}
       </div>
 
-      {isRefreshing && (
-        <p className="flex items-center gap-2 text-xs text-muted" role="status">
-          <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
-          Updating...
-        </p>
-      )}
+      {/* Always mounted at a fixed height so showing it never moves the list. */}
+      <p className="flex h-4 items-center gap-2 text-xs text-muted" role="status">
+        {isRefreshing && (
+          <>
+            <span className="loading-spinner !h-3 !w-3" aria-hidden="true"></span>
+            Updating...
+          </>
+        )}
+      </p>
       {transactions.length === 0 && upcomingTransactions.length === 0 ? (
-        // Not while a list is still loading: it may be about to fill.
-        isRefreshing ? null : emptyState
+        // Not before the first load settles; after that the previous state stays up while refreshing.
+        isInitialLoading ? null : emptyState
       ) : (
         <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
           {upcomingTransactions.length > 0 && (
