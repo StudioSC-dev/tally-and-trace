@@ -51,7 +51,7 @@ interface Props {
 /**
  * An upcoming payable, opened from its row: what it is, and the actions the caller's
  * permission flags allow. A recurring entry is edited here, in its own form; a
- * transaction is edited on the Transactions page, which comes back here afterwards.
+ * transaction is edited on the Transactions page, which returns to the dashboard afterwards.
  *
  * Rendered through a portal; while it is open the app root is `inert`, so focus and
  * assistive technology stay inside. Inert is cleared before focus returns to the row
@@ -369,8 +369,9 @@ export function PayableDetailDialog({
 }
 
 /**
- * The recurring entry form with the reference data it needs, fetched with the same
- * arguments as the Allocations page so the pickers match (and hit the same cache).
+ * The recurring entry form with the reference data it needs, fetched with the
+ * same arguments as the Allocations page for accounts and categories, and as the
+ * dashboard for allocations, so each hits the cache that page already filled.
  */
 function PayableEntryForm({
   entry, onClose, onSaved, onDeleted,
