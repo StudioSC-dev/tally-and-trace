@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
 import type { Allocation } from '../store/api'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency, getCurrencySymbol } from '../utils/currency'
@@ -15,6 +15,10 @@ import { FxNotice } from '../components/FxNotice'
 import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
+import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
+import { useLatestRef } from '../hooks/useRequestGeneration'
+import { payableActions, payableTarget } from '@tally-trace/shared'
+import type { FullBudgetEntry, SharedFullBudgetEntry } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { isDetailed, isLimitedEvent, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
@@ -90,6 +94,8 @@ type PayableRow = {
   budgetEntryId: number | null
   /** What kind of payable this is; only scheduled entries have a known autopay state. */
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
+  /** The payable itself, for the detail dialog; null for a Limited row, which never opens. */
+  payable: Payable | null
 }
 
 const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable | LimitedEvent, index: number): PayableRow => {
@@ -106,6 +112,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
       overdue: payable.overdue,
       budgetEntryId: null,
       kind: 'shared',
+      payable: null,
     }
   }
   const pays = payable.account_name ? ` · from ${payable.account_name}` : ''
@@ -124,6 +131,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     overdue: false,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
+    payable,
   }
 }
 
@@ -156,6 +164,11 @@ export function Dashboard() {
   const [materializeEntry] = useMaterializeBudgetEntryMutation()
   // The "Mark paid" dialog: open for a payable that needs the figure actually charged.
   const [payDialog, setPayDialog] = useState<PayDialogState | null>(null)
+  // The payable open in the detail dialog, and a Mark paid it handed back as it closed.
+  const [detailRow, setDetailRow] = useState<PayableRow | null>(null)
+  const [pendingMarkPaid, setPendingMarkPaid] = useState<{ row: PayableRow; entry: FullBudgetEntry | SharedFullBudgetEntry } | null>(null)
+  // Takes focus after a delete from the dialog, when the row that opened it is gone.
+  const payablesHeadingRef = useRef<HTMLHeadingElement>(null)
 
   const handleMarkPaid = async (entryId: number) => {
     setPostingId(entryId)
@@ -262,9 +275,10 @@ export function Dashboard() {
 
   // "Mark paid" posts at once, unless the entry is in another currency than the account it pays
   // from (or moves money into another currency): then the figure actually charged is needed.
-  const startMarkPaid = (row: PayableRow) => {
+  // `fetched` is the entry the detail dialog looked up, when the dashboard's list doesn't hold it.
+  const startMarkPaid = (row: PayableRow, fetched?: FullBudgetEntry | SharedFullBudgetEntry) => {
     if (row.budgetEntryId === null) return
-    const entry = entriesById.get(row.budgetEntryId)
+    const entry = fetched ?? entriesById.get(row.budgetEntryId)
     const sourceCurrency = entry?.account_id !== undefined ? accountCurrencies.get(entry.account_id) : undefined
     const destinationCurrency = entry?.transfer_to_account_id != null ? accountCurrencies.get(entry.transfer_to_account_id) : undefined
     const chargedCurrency = sourceCurrency ?? row.currency
@@ -288,6 +302,14 @@ export function Dashboard() {
       submitting: false,
     })
   }
+  // Mark paid from the detail dialog runs once the dialog has closed and handed focus back
+  // to its row, so a pay dialog that needs a figure can take focus from there.
+  const startMarkPaidRef = useLatestRef(startMarkPaid)
+  useEffect(() => {
+    if (!pendingMarkPaid) return
+    setPendingMarkPaid(null)
+    startMarkPaidRef.current(pendingMarkPaid.row, pendingMarkPaid.entry)
+  }, [pendingMarkPaid, startMarkPaidRef])
   const otherUpcoming = useMemo(() => (snapshot?.upcoming_this_month ?? []).filter(isOtherUpcoming), [snapshot])
 
   const periodIncome = summaryRow?.total_income ?? 0
@@ -325,6 +347,13 @@ export function Dashboard() {
     shared: 'Shared item',
     planned: 'Planned',
     pending: 'Pending',
+  }
+
+  const payableStatusOf = (row: PayableRow): PayableStatus =>
+    row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
+  const dueLabelOf = (row: PayableRow) => {
+    const remaining = daysUntil(row.day)
+    return row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`
   }
 
   const renderPlannedExpenseIcon = (status: PayableStatus) => {
@@ -610,7 +639,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
+                <h2 ref={payablesHeadingRef} tabIndex={-1} className="text-lg font-semibold text-ink">Upcoming Payables</h2>
                 <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
               <span className="badge badge-info" data-testid="payables-count">{payableRows.length}</span>
@@ -621,23 +650,41 @@ export function Dashboard() {
           ) : (
             <div className="divide-y divide-line" data-testid="payables">
               {payableRows.slice(0, MAX_PAYABLES_SHOWN).map((row) => {
-                const status: PayableStatus = row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
-                const remaining = daysUntil(row.day)
+                const status = payableStatusOf(row)
+                const opens = row.payable !== null && payableActions(payableTarget(row.payable), null).open
                 return (
                   <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
-                    <div className="flex items-start gap-3">
-                      {renderPlannedExpenseIcon(status)}
-                      <div>
-                        <p className="font-medium text-ink">{row.name}</p>
-                        <p className="text-sm text-muted">
-                          {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
-                        </p>
-                        <p className="text-xs text-muted">{row.detail}</p>
+                    {opens ? (
+                      <button
+                        type="button"
+                        onClick={() => setDetailRow(row)}
+                        className="group flex items-start gap-3 text-left focus-ring"
+                        data-testid="payable-open"
+                      >
+                        {renderPlannedExpenseIcon(status)}
+                        <span className="block">
+                          <span className="block font-medium text-ink group-hover:underline">{row.name}</span>
+                          <span className="block text-sm text-muted">
+                            {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
+                          </span>
+                          <span className="block text-xs text-muted">{row.detail}</span>
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="flex items-start gap-3">
+                        {renderPlannedExpenseIcon(status)}
+                        <div>
+                          <p className="font-medium text-ink">{row.name}</p>
+                          <p className="text-sm text-muted">
+                            {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
+                          </p>
+                          <p className="text-xs text-muted">{row.detail}</p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <div className="text-right space-y-1 flex-shrink-0">
                       <p className="text-xs text-muted">
-                        {row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`}
+                        {dueLabelOf(row)}
                       </p>
                       {row.budgetEntryId !== null && postableEntryIds.has(row.budgetEntryId) && (
                         <button
@@ -690,6 +737,31 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {detailRow?.payable && (
+        <PayableDetailDialog
+          payable={detailRow.payable}
+          display={{
+            name: detailRow.name,
+            dateLabel: formatDateWithOrdinal(detailRow.day),
+            amountText: estimateText(detailRow.amount, detailRow.currency, detailRow.labels),
+            amountTitle: estimateTitle(detailRow.labels),
+            detail: detailRow.detail,
+            statusLabel: STATUS_LABELS[payableStatusOf(detailRow)],
+            dueLabel: dueLabelOf(detailRow),
+          }}
+          entry={detailRow.budgetEntryId !== null ? entriesById.get(detailRow.budgetEntryId) : undefined}
+          // The list says the caller may post it, or doesn't hold it (the dialog looks it up).
+          canMarkPaid={detailRow.budgetEntryId !== null && (postableEntryIds.has(detailRow.budgetEntryId) || !entriesById.has(detailRow.budgetEntryId))}
+          posting={postingId !== null && postingId === detailRow.budgetEntryId}
+          onMarkPaid={(entry) => {
+            setPendingMarkPaid({ row: detailRow, entry })
+            setDetailRow(null)
+          }}
+          onClose={() => setDetailRow(null)}
+          deletedFocusRef={payablesHeadingRef}
+        />
+      )}
 
       {payDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="pay-dialog-overlay">
