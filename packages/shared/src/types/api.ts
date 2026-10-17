@@ -708,9 +708,10 @@ export interface GoalsSummary {
 }
 
 export interface TransactionSummary {
+  /** The bounds that were sent; null on a side the request left open. */
   period: {
-    start_date: string
-    end_date: string
+    start_date: string | null
+    end_date: string | null
   }
   summary: {
     total_income: number

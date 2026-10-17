@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
+import { useGetAccountsQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
 import type { Allocation } from '../store/api'
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -18,17 +18,8 @@ import { apiErrorMessage } from '../utils/apiError'
 import { isDetailed, isLimitedEvent, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
 
-const FALLBACK_CATEGORY_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777']
 const MAX_PAYABLES_SHOWN = 6
 const MAX_OTHER_UPCOMING_SHOWN = 4
-
-type ExpenditureInsight = {
-  id: string
-  name: string
-  amount: number
-  displayColor: string
-  percentage: number
-}
 
 export const Route = createFileRoute('/')({
   component: Dashboard,
@@ -221,8 +212,6 @@ export function Dashboard() {
     useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
   const { data: periodSummary, isLoading: summaryLoading, error: summaryError } =
     useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
-  const { data: categoriesData, isLoading: categoriesLoading, error: categoriesError } =
-    useGetCategoriesQuery({ is_active: true }, { skip: !isAuthenticated })
   // Only for "Mark paid": the payables carry no permissions, so the entries the caller may post are looked up here.
   const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
     useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
@@ -258,7 +247,6 @@ export function Dashboard() {
   const closings = snapshot?.account_closings[0]?.by_currency.find((r) => r.currency === currency)
   const balanceRow = snapshot?.balances.by_currency.find((r) => r.currency === currency)
   const summaryRow = periodSummary?.by_currency.find((r) => r.currency === currency)
-  const periodCategories = useMemo(() => summaryRow?.category_breakdown ?? {}, [summaryRow])
   // The day that decides Pending or Planned; it moves at midnight and on refocus.
   const today = useToday()
   const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, today)), [snapshot, defaultCurrency, today])
@@ -380,47 +368,7 @@ export function Dashboard() {
     )
   }
 
-  // Shares are of the rows listed: the ring and table list spending-wallet debits that the period expenses figure nets out.
-  const listedTotal = useMemo(
-    () => Object.values(periodCategories).reduce((sum, row) => sum + Math.max(row.expenses, 0), 0),
-    [periodCategories],
-  )
-
-  // The wallet-aware backend summary names categories; the chart colours them from the caller's own.
-  const expenditureInsights = useMemo<ExpenditureInsight[]>(() => {
-    if (!periodSummary) return []
-    const categories = categoriesData ?? []
-    const positive = Object.entries(periodCategories).filter(([, row]) => row.expenses > 0)
-    if (listedTotal <= 0) return []
-    return positive
-      .sort(([, a], [, b]) => b.expenses - a.expenses)
-      .slice(0, 5)
-      .map(([name, row], index) => {
-        const color = categories.find((cat) => cat.name === name)?.color?.trim()
-        return {
-          id: name,
-          name,
-          amount: row.expenses,
-          displayColor: color || FALLBACK_CATEGORY_COLORS[index % FALLBACK_CATEGORY_COLORS.length] || '#6B7280',
-          percentage: (row.expenses / listedTotal) * 100,
-        }
-      })
-  }, [periodSummary, periodCategories, categoriesData, listedTotal])
-
-  const expenditureChartStyle = useMemo(() => {
-    if (expenditureInsights.length === 0) return { backgroundImage: 'conic-gradient(#334155 0% 100%)' }
-    let cumulative = 0
-    const segments = expenditureInsights.map((item) => {
-      const start = cumulative
-      cumulative += item.percentage
-      return `${item.displayColor} ${start}% ${Math.min(cumulative, 100)}%`
-    })
-    // Whatever the top five leave out is drawn neutral so the ring still adds up to the listed spend.
-    if (cumulative < 100) segments.push(`#334155 ${cumulative}% 100%`)
-    return { backgroundImage: `conic-gradient(${segments.join(', ')})` }
-  }, [expenditureInsights])
-
-  const allLoading = snapshotLoading && summaryLoading && categoriesLoading && budgetEntriesLoading && allocationsLoading
+  const allLoading = snapshotLoading && summaryLoading && budgetEntriesLoading && allocationsLoading
 
   if (authLoading) {
     return (
@@ -434,7 +382,6 @@ export function Dashboard() {
 
   if (snapshotError) console.error('Snapshot error:', snapshotError)
   if (summaryError) console.error('Summary error:', summaryError)
-  if (categoriesError) console.error('Categories error:', categoriesError)
   if (allocationsError) console.error('Allocations error:', allocationsError)
 
   const getErrorDetail = (error: unknown): string | undefined => {
@@ -461,7 +408,7 @@ export function Dashboard() {
     )
   }
 
-  if (snapshotError || summaryError || categoriesError || budgetEntriesError || allocationsError) {
+  if (snapshotError || summaryError || budgetEntriesError || allocationsError) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -475,7 +422,6 @@ export function Dashboard() {
           <div className="text-sm text-muted space-y-1">
             {snapshotError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
             {summaryError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
-            {categoriesError && <p>• Categories: {getErrorDetail(categoriesError) ?? 'Failed to load'}</p>}
             {budgetEntriesError && <p>• Schedules: {getErrorDetail(budgetEntriesError) ?? 'Failed to load'}</p>}
             {allocationsError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
           </div>
@@ -513,7 +459,7 @@ export function Dashboard() {
               </button>
             ))}
           </div>
-          <p className="text-xs text-muted" data-testid="period-note">Period applies to actuals (totals and categories), not the projection.</p>
+          <p className="text-xs text-muted" data-testid="period-note">Period applies to actual totals, not the projection.</p>
         </div>
       </div>
 
@@ -799,69 +745,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Top Expenditure Categories */}
-      <div className="bg-surface border border-line" data-onboarding="top-categories">
-        <div className="p-4 sm:p-6 border-b border-line">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-ink">
-              Top Expenditure Categories ({periodTag})
-            </h2>
-            <span className="badge badge-info">{expenditureInsights.length} categories</span>
-          </div>
-        </div>
-        <div className="p-4 sm:p-6">
-          {expenditureInsights.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 bg-sunken rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <p className="text-muted font-medium">No spending recorded yet.</p>
-              <p className="text-sm text-muted mt-1">Record expenses to see category insights.</p>
-            </div>
-          ) : (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)] lg:items-center">
-              <div className="flex justify-center">
-                <div className="relative h-44 w-44 sm:h-52 sm:w-52 rounded-full border border-line shadow-inner" style={expenditureChartStyle}>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm">
-                    <span className="text-xs uppercase tracking-wide text-muted">Spend by category</span>
-                    <span className="text-base font-semibold text-ink">{format(listedTotal)}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <p className="mb-2 text-xs text-muted" data-testid="category-note">Includes spending from wallets; may differ from period expenses, which net wallet top-ups and returns.</p>
-                <table className="min-w-full divide-y divide-line text-sm">
-                  <thead>
-                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-muted">
-                      <th className="py-2">Category</th>
-                      <th className="py-2 text-right">Amount</th>
-                      <th className="py-2 text-right">Share</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line/50">
-                    {expenditureInsights.map((category, index) => (
-                      <tr key={category.id} className="hover:bg-sunken/50 transition-colors duration-150">
-                        <td className="py-2 pr-4">
-                          <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: category.displayColor }}></span>
-                            <span className="font-medium text-ink truncate">
-                              #{index + 1}&nbsp;{category.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-2 text-right font-medium text-ink">{format(category.amount)}</td>
-                        <td className="py-2 text-right text-muted">{category.percentage.toFixed(1)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
