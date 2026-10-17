@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Literal, Optional, Set
 from pydantic import Field
@@ -851,6 +851,9 @@ def get_transactions(
     category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
         None, max_length=50,
         description="Filter by category name, matching any creator's category of that name"),
+    uncategorized: bool = Query(
+        False, description="Also match income and expense rows shown with no category; "
+                           "ORed with category_names"),
     entered_by: Optional[Literal["me"]] = Query(
         None, description="'me' keeps only rows the caller owns (entered by, or materialised for, them)"),
     allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),
@@ -883,10 +886,16 @@ def get_transactions(
     if category_ids:
         query = query.filter(Transaction.category_id.in_(category_ids),
                              Transaction.user_id == current_user.id)
-    if category_names:
+    if category_names or uncategorized:
         # By name, as summarize_period counts them: a row's category counts only
-        # when its creator owns it, so the same name matches each household
-        # member's own row. Scope and visibility mirror the other reads:
+        # when its creator owns it and it is active, so the same name matches each
+        # household member's own row. The owner and active checks sit in the ON
+        # clause, so a row with no category, a stale link to another user's
+        # category, or a deleted (inactive) category all join to no category:
+        # exactly what Redactor.category_name and summarize_period read as none.
+        # Category ids are unique, so the outer join never duplicates a row.
+        #
+        # Scope and visibility mirror the other reads:
         #  - touches_accounts(seen) is the summary's scope (seen includes
         #    tag_viewer accounts);
         #  - displayed_description_criterion is the SQL form of
@@ -897,18 +906,27 @@ def get_transactions(
         #    Household rule (c) (rule ii). The criterion is exactly "every
         #    touched account in seen, or an explicit Household grant", so a row
         #    whose category_name is hidden never matches its hidden category.
-        # A deleted (inactive) category matches nothing: the row reads as
-        # uncategorized, as Redactor.category_name and the summary show it.
-        # Reserved names ("Transfer fees", "Uncategorized") are not special here:
-        # they match real creator-owned categories of that name only.
-        query = (
-            query.join(Category, Category.id == Transaction.category_id)
-            .filter(Category.name.in_(category_names),
-                    Category.user_id == Transaction.user_id,
-                    Category.is_active.is_(True),
-                    touches_accounts(Transaction, seen),
-                    displayed_description_criterion(seen, grants))
-        )
+        #
+        # ``uncategorized`` (STU-338) matches debits and credits only: a transfer
+        # without a category shows as "Transfer" and summarize_period never puts
+        # a transfer in a category row, so this is the summary's "Uncategorized"
+        # row. A debit or credit touches only account_id, so inside the scope
+        # every touched account is in seen and shows_text holds: its category is
+        # always shown, and a hidden category can never match as "none".
+        # Reserved names ("Transfer fees", "Uncategorized") are not special in
+        # category_names: they match real creator-owned categories of that name
+        # only. Rows with no category are asked for with ``uncategorized``.
+        query = query.outerjoin(Category, and_(Category.id == Transaction.category_id,
+                                               Category.user_id == Transaction.user_id,
+                                               Category.is_active.is_(True)))
+        matches = []
+        if category_names:
+            matches.append(Category.name.in_(category_names))
+        if uncategorized:
+            matches.append(and_(Category.id.is_(None), Transaction.transaction_type.in_(
+                [TransactionType.DEBIT, TransactionType.CREDIT])))
+        query = query.filter(or_(*matches), touches_accounts(Transaction, seen),
+                             displayed_description_criterion(seen, grants))
     if entered_by == "me":
         query = query.filter(Transaction.user_id == current_user.id)
     if allocation_id:

@@ -9,6 +9,11 @@ filter: rows the caller owns.
 
 A deleted (inactive) category counts as no category (STU-338): it is not shown,
 not matched by name, and its rows fall into the summary's "Uncategorized" row.
+
+``uncategorized=true`` (STU-338) matches debits and credits shown with no
+category, ORed with ``category_names`` and in the same scope: the summary's
+"Uncategorized" row. Transfers never match it, and "Uncategorized" stays an
+ordinary name in ``category_names``.
 """
 import pytest
 
@@ -316,3 +321,222 @@ def test_a_members_deleted_category_no_longer_matches_its_name(hh, groceries, sw
     assert body["total"] == 2
     # B's own rows on the deleted category no longer match for B either.
     assert _ids(_list(sw_client, b, category_names="Groceries")) == [groceries["a_joint"]]
+
+
+# --- uncategorized (STU-338) -------------------------------------------------------------
+# ``uncategorized=true`` matches debits and credits shown with no category: none set, a
+# stale link to another user's category, or a deleted one. It ORs with category_names
+# and keeps their scope, so a hidden category never reads as "none".
+
+
+def _credit(client, who, account, amount, category=None, when=DAY, posted=True, **extra):
+    body = {"account_id": account, "amount": amount, "transaction_type": "credit",
+            "description": "Refund", "transaction_date": when, "is_posted": posted, **extra}
+    if category is not None:
+        body["category_id"] = category
+    return sw_post(client, who, "/transactions/", body)["id"]
+
+
+def test_uncategorized_matches_the_owners_rows_with_no_category(hh, groceries, sw_client):
+    a = hh["a"]
+    debit = _debit(sw_client, a, hh["a_private"], 11)
+    credit = _credit(sw_client, a, hh["a_private"], 4)
+    body = _list(sw_client, a, uncategorized=True)
+    assert _ids(body) == sorted([debit, credit])
+    assert body["total"] == 2
+    assert groceries["a_private"] not in _ids(body)
+
+
+def test_uncategorized_matches_a_members_row_on_a_shared_account(hh, sw_client):
+    a, b = hh["a"], hh["b"]
+    joint = _debit(sw_client, b, hh["joint"], 15)
+    private = _debit(sw_client, b, hh["b_private"], 6)
+    named = _debit(sw_client, b, hh["joint"], 3, _category(sw_client, b, "Dining"))
+    body = _list(sw_client, a, uncategorized=True)
+    assert _ids(body) == [joint]
+    assert private not in _ids(body) and named not in _ids(body)
+    item = body["items"][0]
+    assert item["view"] == "shared_full" and item["category_name"] is None
+
+
+def test_a_stale_reference_reads_and_matches_as_uncategorized(hh, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    a, b = hh["a"], hh["b"]
+    dining = _category(sw_client, a, "Dining")
+    stale = _debit(sw_client, b, hh["joint"], 20)
+    _debit(sw_client, b, hh["joint"], 5, _category(sw_client, b, "Fuel"))  # categorized
+    # The API refuses another owner's category, so the stale reference is written directly.
+    sw_db.query(Transaction).filter(Transaction.id == stale).update({"category_id": dining})
+    sw_db.commit()
+    shown = next(i for i in _list(sw_client, a)["items"] if i["id"] == stale)
+    assert shown["category_name"] is None
+    assert _ids(_list(sw_client, a, uncategorized=True)) == [stale]
+    assert _ids(_list(sw_client, b, uncategorized=True)) == [stale]
+
+
+def test_a_deleted_category_matches_uncategorized(hh, sw_client):
+    a = hh["a"]
+    dining = _category(sw_client, a, "Dining")
+    row = _debit(sw_client, a, hh["a_private"], 13, dining)
+    assert _list(sw_client, a, uncategorized=True)["total"] == 0
+    _delete_category(sw_client, a, dining)
+    assert _ids(_list(sw_client, a, uncategorized=True)) == [row]
+    breakdown = _summary(sw_client, a, **RANGE)["category_breakdown"]
+    assert float(breakdown["Uncategorized"]["expenses"]) == 13.0
+
+
+def test_a_tag_viewer_matches_uncategorized_rows_in_view(hh, sw_client):
+    a, b, c = hh["a"], hh["b"], hh["c"]
+    a_joint = _debit(sw_client, a, hh["joint"], 30)
+    b_joint = _debit(sw_client, b, hh["joint"], 8)
+    named = _debit(sw_client, a, hh["joint"], 4, _category(sw_client, a, "Dining"))
+    assert named in _ids(_list(sw_client, c))
+    shown = next(i for i in _list(sw_client, c)["items"] if i["id"] == a_joint)
+    assert shown["view"] == "limited" and shown["display_description"] == "Spend"
+    assert shown["category_name"] is None
+    body = _list(sw_client, c, uncategorized=True)
+    assert _ids(body) == [a_joint]
+    assert b_joint not in _ids(body)
+
+
+def test_a_hidden_category_never_matches_uncategorized(hh, sw, sw_client, sw_db):
+    from app.models.account_share import AccountShare
+
+    # (i) B loses the joint account: B still reads both of B's rows there (rule (a),
+    # limited, no category shown either way), but neither matches.
+    b = hh["b"]
+    dining = _category(sw_client, b, "Dining")
+    categorized = _debit(sw_client, b, hh["joint"], 20, dining)
+    bare = _debit(sw_client, b, hh["joint"], 9)
+    sw_db.delete(sw_db.get(AccountShare, hh["b_share"]))
+    sw_db.commit()
+    items = {i["id"]: i for i in _list(sw_client, b)["items"]}
+    for row in (categorized, bare):
+        assert items[row]["view"] == "limited" and items[row]["category_name"] is None
+    body = _list(sw_client, b, uncategorized=True)
+    assert body["items"] == [] and body["total"] == 0
+    # (ii) Limited transfers A sees in the sw world, one with B's "Savings", one without.
+    sa, sb = sw["a"], sw["b"]
+    savings = _category(sw_client, sb, "Savings")
+    with_cat = _transfer(sw_client, sb, sw["joint"], sw["b_private"], 50, savings)
+    without = _transfer(sw_client, sb, sw["joint"], sw["b_private"], 5)
+    items = {i["id"]: i for i in _list(sw_client, sa)["items"]}
+    for row in (with_cat, without):
+        assert items[row]["view"] == "limited" and items[row]["category_name"] is None
+    body = _list(sw_client, sa, uncategorized=True)
+    assert body["items"] == [] and body["total"] == 0
+
+
+def test_uncategorized_ors_with_names_and_ands_with_other_filters(hh, groceries, sw_client):
+    a = hh["a"]
+    debit = _debit(sw_client, a, hh["a_private"], 11)
+    credit = _credit(sw_client, a, hh["a_private"], 4)
+    late = _debit(sw_client, a, hh["a_private"], 3, when="2026-11-20T00:00:00")
+    wallet = _debit(sw_client, a, hh["a_wallet"], 2)
+    b_bare = _debit(sw_client, hh["b"], hh["joint"], 6)
+    union = _list(sw_client, a, category_names="Groceries", uncategorized=True)
+    assert _ids(union) == sorted([groceries["a_joint"], groceries["b_joint"],
+                                  groceries["a_private"], debit, credit, late, wallet, b_bare])
+    assert union["total"] == 8
+    credits = _list(sw_client, a, uncategorized=True, transaction_types="credit")
+    assert _ids(credits) == [credit]
+    ranged = _list(sw_client, a, uncategorized=True, **RANGE)
+    assert late not in _ids(ranged) and debit in _ids(ranged)
+    tag = sw_post(sw_client, a, "/tags/", {"name": "Trip"}, expect=(201,))["id"]
+    tagged = _debit(sw_client, a, hh["a_private"], 2, tag_ids=[tag])
+    assert _ids(_list(sw_client, a, uncategorized=True, tag=tag)) == [tagged]
+    mine = _list(sw_client, a, uncategorized=True, entered_by="me")
+    assert b_bare not in _ids(mine) and debit in _ids(mine)
+    on_wallet = _list(sw_client, a, uncategorized=True, account_ids=[hh["a_wallet"]])
+    assert _ids(on_wallet) == [wallet]
+    joint = _list(sw_client, a, uncategorized=True, category_names="Groceries",
+                  account_ids=[hh["joint"]])
+    assert _ids(joint) == sorted([groceries["a_joint"], groceries["b_joint"], b_bare])
+
+
+def test_transfers_are_never_uncategorized(hh, sw_client):
+    a = hh["a"]
+    savings = _category(sw_client, a, "Savings")
+    bare = _transfer(sw_client, a, hh["a_private"], hh["a_wallet"], 50)
+    named = _transfer(sw_client, a, hh["a_private"], hh["a_wallet"], 20, savings)
+    assert bare not in _ids(_list(sw_client, a, uncategorized=True))
+    assert named not in _ids(_list(sw_client, a, uncategorized=True))
+    assert _ids(_list(sw_client, a, category_names="Savings")) == [named]
+    assert _ids(_list(sw_client, a, category_names="Savings", uncategorized=True)) == [named]
+
+
+def test_a_real_uncategorized_category_is_not_uncategorized(hh, sw_client):
+    a = hh["a"]
+    real_cat = _category(sw_client, a, "Uncategorized")
+    real = _debit(sw_client, a, hh["a_private"], 12, real_cat)
+    bare = _debit(sw_client, a, hh["a_private"], 9)
+    assert _ids(_list(sw_client, a, uncategorized=True)) == [bare]
+    assert _ids(_list(sw_client, a, category_names="Uncategorized")) == [real]
+    both = _list(sw_client, a, category_names="Uncategorized", uncategorized=True,
+                 transaction_types="debit", **RANGE)
+    assert _ids(both) == sorted([real, bare])
+    summary = _summary(sw_client, a, **RANGE)
+    assert sum(i["amount"] for i in both["items"]) == pytest.approx(
+        float(summary["category_breakdown"]["Uncategorized"]["expenses"]))
+
+
+def test_the_summarys_uncategorized_row_matches_with_a_partners_real_category(hh, sw_client):
+    # The summary merges B's real "Uncategorized" category into the synthetic row,
+    # so the drill-down sends the name and the flag together.
+    a, b = hh["a"], hh["b"]
+    b_real = _category(sw_client, b, "Uncategorized")
+    partner = _debit(sw_client, b, hh["joint"], 17.25, b_real)
+    bare = _debit(sw_client, a, hh["joint"], 4.5)
+    rows = _list(sw_client, a, category_names="Uncategorized", uncategorized=True,
+                 transaction_types="debit", **RANGE)
+    assert _ids(rows) == sorted([partner, bare])
+    listed = sum(i["amount"] for i in rows["items"] if i["is_posted"])
+    summary = _summary(sw_client, a, **RANGE)
+    assert round(listed, 2) == pytest.approx(
+        float(summary["category_breakdown"]["Uncategorized"]["expenses"]))
+    # The flag alone leaves B's real category out.
+    assert _ids(_list(sw_client, a, uncategorized=True)) == [bare]
+
+
+def test_uncategorized_matches_the_summary_row(hh, sw_client):
+    a = hh["a"]
+    groceries = _category(sw_client, a, "Groceries")
+    _debit(sw_client, a, hh["a_private"], 100.50)
+    _debit(sw_client, a, hh["a_wallet"], 12.25)
+    _debit(sw_client, a, hh["a_private"], 40, groceries)
+    _debit(sw_client, a, hh["a_private"], 60, posted=False)
+    _debit(sw_client, a, hh["a_private"], 15, when="2026-12-05T00:00:00")
+    _credit(sw_client, a, hh["a_private"], 5)
+    _transfer(sw_client, a, hh["a_private"], hh["a_wallet"], 50, transfer_fee=2)
+    rows = _list(sw_client, a, uncategorized=True, transaction_types="debit", **RANGE)
+    listed = sum(i["amount"] for i in rows["items"] if i["is_posted"])
+    summary = _summary(sw_client, a, **RANGE)
+    assert round(listed, 2) == pytest.approx(
+        float(summary["category_breakdown"]["Uncategorized"]["expenses"]))
+    assert round(listed, 2) == pytest.approx(112.75)
+
+
+def test_rule_c_rows_match_as_category_names_does(hh, sw_client):
+    # Gap 6(a), kept on purpose: C reads these rows through A's explicit Household
+    # tag (rule (c)) on A's private account, outside C's account scope. Neither
+    # filter counts them, as the summary doesn't.
+    a, c = hh["a"], hh["c"]
+    groceries = _category(sw_client, a, "Groceries")
+    bare = _debit(sw_client, a, hh["a_private"], 7, tag_ids=[hh["hh_a"]])
+    named = _debit(sw_client, a, hh["a_private"], 8, groceries, tag_ids=[hh["hh_a"]])
+    readable = _ids(_list(sw_client, c))
+    assert bare in readable and named in readable
+    assert named not in _ids(_list(sw_client, c, category_names="Groceries"))
+    assert bare not in _ids(_list(sw_client, c, uncategorized=True))
+
+
+def test_uncategorized_false_is_no_filter(hh, groceries, sw_client):
+    a = hh["a"]
+    _debit(sw_client, a, hh["a_private"], 11)
+    _transfer(sw_client, a, hh["a_private"], hh["a_wallet"], 5)
+    everything = _list(sw_client, a)
+    assert _ids(_list(sw_client, a, uncategorized=False)) == _ids(everything)
+    assert _list(sw_client, a, uncategorized=False)["total"] == everything["total"]
+    named = _list(sw_client, a, category_names="Groceries", uncategorized=False)
+    assert _ids(named) == _ids(_list(sw_client, a, category_names="Groceries"))
