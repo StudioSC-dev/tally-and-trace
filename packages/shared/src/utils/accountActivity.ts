@@ -17,11 +17,20 @@ import type { CurrencyCode } from './currency'
  *   So a posted row's effect is shown in `accountCurrency`. The one exception is a
  *   Limited cross-currency transfer in: it has no `received_amount`, so what the
  *   destination got is unknown.
- * - An UNPOSTED row has no balance effect yet. A debit or credit carries a face in
- *   `projected_currency`, else `currency` (models/transaction.py `pending_face`; Limited
- *   has only `currency`); a transfer's `amount` is in its source's currency
- *   (routers/transactions.py:1002, services/forecast.py `transfer`). That face is
- *   shown in its own currency, and `effectKnown` is false when it isn't
+ * - An UNPOSTED row has no balance effect yet. A debit or credit's face currency is
+ *   `projected_currency`, else `currency` (models/transaction.py `pending_face`). The
+ *   forecast (services/forecast.py, the unposted debit/credit loop) and posting
+ *   (routers/transactions.py `update_transaction`, which applies `amount`) agree:
+ *   - face currency is the account's: the effect is exactly `amount`, whatever
+ *     `projected_amount` says;
+ *   - otherwise: the forecast estimates from the face figure, `projected_amount`, else
+ *     `amount`, and posting needs the actual figure, so the effect is unknown and the
+ *     face is shown in its own currency.
+ *   A Limited row has no `projected_*` (redaction.py `limited_transaction`), and its
+ *   `amount` may be an actual figure retained after a revert while the face is foreign,
+ *   so its effect is never known: `amount` in `currency` is shown as an estimate.
+ *   A transfer's `amount` is in its source's currency (routers/transactions.py:1002,
+ *   services/forecast.py `transfer`); `effectKnown` is false when that isn't
  *   `accountCurrency` because the forecast would only estimate it.
  */
 
@@ -36,8 +45,9 @@ export interface AccountLeg {
   currency: CurrencyCode
   /**
    * False when the row can't say what it does to the account in the account's currency:
-   * an unposted row whose face is in another currency, or a Limited transfer in from
-   * another currency (no received amount). `signed` is then the face amount, in `currency`.
+   * an unposted row whose face is in another currency, any unposted Limited debit or
+   * credit (its stored figure is an estimate), or a Limited transfer in from another
+   * currency (no received amount). `signed` is then the face or stored amount, in `currency`.
    */
   effectKnown: boolean
   /** The fee (or loan interest) this leg pays; only on an out transfer leg, null when hidden or none. */
@@ -58,11 +68,18 @@ export function accountLeg(row: Transaction, accountId: number, accountCurrency:
     if (row.is_posted) {
       return { ...NO_LEG, direction, signed: sign * row.amount, currency: accountCurrency }
     }
-    // Unposted: the face, in its own currency.
-    const projected = row.view !== 'limited' ? row.projected_amount : undefined
-    const amount = projected ?? row.amount
-    const currency = (row.view !== 'limited' && row.projected_currency) || row.currency
-    return { ...NO_LEG, direction, signed: sign * amount, currency, effectKnown: currency === accountCurrency }
+    if (row.view === 'limited') {
+      // No face fields: the stored figure is only an estimate of the effect.
+      return { ...NO_LEG, direction, signed: sign * row.amount, currency: row.currency, effectKnown: false }
+    }
+    const faceCurrency = row.projected_currency || row.currency
+    if (faceCurrency === accountCurrency) {
+      // The forecast and posting both use `amount` here, never `projected_amount`.
+      return { ...NO_LEG, direction, signed: sign * row.amount, currency: accountCurrency }
+    }
+    // A foreign face: shown in its own currency, the effect unknown until posted.
+    const face = row.projected_amount ?? row.amount
+    return { ...NO_LEG, direction, signed: sign * face, currency: faceCurrency, effectKnown: false }
   }
 
   const limited = row.view === 'limited'

@@ -100,6 +100,57 @@ describe('accountLeg: currencies of debits and credits', () => {
   })
 })
 
+describe('accountLeg: unposted debits and credits follow the forecast and posting', () => {
+  // services/forecast.py: a face in the account currency moves it by `amount`; posting applies `amount`.
+  it.each([
+    ['debit', 'Full', full, -100],
+    ['credit', 'Full', { ...full, transaction_type: 'credit' } as FullTransaction, 100],
+    ['debit', 'Shared-full', sharedFull, -100],
+    ['credit', 'Shared-full', { ...sharedFull, transaction_type: 'credit' } as SharedFullTransaction, 100],
+  ] as const)('uses amount, not projected_amount, for a same-currency %s (%s)', (_type, _view, base, signed) => {
+    const row = { ...base, is_posted: false, amount: 100, currency: 'PHP', projected_amount: 80, projected_currency: 'PHP' } as const
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed, currency: 'PHP', effectKnown: true })
+  })
+
+  it('uses amount when projected_amount is set but projected_currency is not', () => {
+    const row: FullTransaction = { ...full, is_posted: false, amount: 100, currency: 'PHP', projected_amount: 80 }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed: -100, currency: 'PHP', effectKnown: true })
+  })
+
+  it.each([
+    ['debit', 'Full', full, -80],
+    ['credit', 'Full', { ...full, transaction_type: 'credit' } as FullTransaction, 80],
+    ['debit', 'Shared-full', sharedFull, -80],
+    ['credit', 'Shared-full', { ...sharedFull, transaction_type: 'credit' } as SharedFullTransaction, 80],
+  ] as const)('shows a foreign projected face for a %s (%s), effect unknown', (_type, _view, base, signed) => {
+    const row = { ...base, is_posted: false, amount: 4700, currency: 'PHP', projected_amount: 80, projected_currency: 'USD' } as const
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed, currency: 'USD', effectKnown: false })
+  })
+
+  it('falls back to amount as the face when a foreign face has no projected figure', () => {
+    const row: FullTransaction = { ...full, is_posted: false, amount: 80, currency: 'PHP', projected_currency: 'USD' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ signed: -80, currency: 'USD', effectKnown: false })
+  })
+})
+
+describe('accountLeg: unposted Limited debits and credits are estimates', () => {
+  // A foreign purchase posted then reverted keeps its actual PHP amount; redaction hides the USD face.
+  it('does not know the effect of a same-currency unposted Limited debit', () => {
+    const row: LimitedTransaction = { ...limited, is_posted: false, amount: 4700, currency: 'PHP' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'out', signed: -4700, currency: 'PHP', effectKnown: false })
+  })
+
+  it('does not know the effect of a same-currency unposted Limited credit', () => {
+    const row: LimitedTransaction = { ...limited, transaction_type: 'credit', is_posted: false, amount: 4700, currency: 'PHP' }
+    expect(accountLeg(row, 10, 'PHP')).toMatchObject({ direction: 'in', signed: 4700, currency: 'PHP', effectKnown: false })
+  })
+
+  it('still knows a posted Limited debit and credit', () => {
+    expect(accountLeg(limited, 10, 'PHP')).toMatchObject({ signed: -100, currency: 'PHP', effectKnown: true })
+    expect(accountLeg({ ...limited, transaction_type: 'credit' }, 10, 'PHP')).toMatchObject({ signed: 100, effectKnown: true })
+  })
+})
+
 describe('accountLeg: transfers out', () => {
   it('shows a posted out transfer in the source account currency whatever the row currency', () => {
     const row = transfer({ amount: 100, transfer_fee: 5, currency: 'USD' })
