@@ -152,6 +152,17 @@ def _holds_household_share(uid, account) -> bool:
     return False
 
 
+def _owner_shares_out(account) -> bool:
+    """Whether the owner shares the account out: it has an account share, or it carries
+    the owner's own Household system tag (whether or not anyone holds that tag yet).
+
+    Reads ``shares`` and ``tag_links``, both loaded with the account. A Household tag
+    another user put on the account does not count.
+    """
+    return bool(account.shares) or any(
+        tag.is_system and tag.user_id == account.user_id for tag in account.tag_links)
+
+
 def _shared_role(uid, account) -> str:
     """The role ``uid`` holds on ``account`` through a share, or ``none``.
 

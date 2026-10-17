@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useGetAccountsQuery, useGetHouseholdViewsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
+import { groupAccounts } from '@tally-trace/shared'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -12,6 +13,7 @@ import { TagPicker } from '../components/TagPicker'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
 import { ShareDialog } from '../components/ShareDialog'
 import { SharedWithMe } from '../components/SharedWithMe'
+import { HouseholdLinks } from '../components/household/HouseholdLinks'
 import { StatementsPanel } from '../components/StatementsPanel'
 import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
@@ -29,6 +31,79 @@ function NotCountedTag() {
     >
       Not counted
     </span>
+  )
+}
+
+/** One account row. A click (or Enter/Space) hands the account to `onOpen`. */
+function AccountCard({ account, onOpen }: { account: Account; onOpen: (account: Account) => void }) {
+  return (
+    <article
+      className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${isAccountActive(account) ? '' : 'opacity-60'}`}
+      onClick={() => onOpen(account)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen(account)
+        }
+      }}
+    >
+      <div className="flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] md:items-center md:gap-4">
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3 md:block">
+            <div>
+              <p className="text-base font-semibold text-ink">{account.name}</p>
+              <p className="text-sm text-muted capitalize">{account.account_type.replace('_', ' ')}</p>
+              {account.description && (
+                <p className="text-sm text-body mt-1">{account.description}</p>
+              )}
+            </div>
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
+            >
+              {isAccountActive(account) ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+
+          {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
+
+          <div className="flex flex-wrap gap-2 text-xs text-body">
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
+              Currency: {account.currency}
+            </span>
+            {account.is_spending_wallet && <NotCountedTag />}
+            <AccountRoleBadge account={account} />
+            <TagChips tags={account.tags} />
+            {account.account_type === 'credit' && account.credit_limit != null && (
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
+                Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
+              </span>
+            )}
+            {account.account_type === 'credit' && account.days_until_due_date && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
+                +{account.days_until_due_date} days to due
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="text-right space-y-2">
+          <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
+            {formatCurrency(account.balance, account.currency as CurrencyCode)}
+          </p>
+          {account.account_type === 'credit' && account.due_date && (
+            <p className="text-xs text-muted">Statement due every {account.due_date}th</p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body'}`}>
+            {isAccountActive(account) ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+      </div>
+    </article>
   )
 }
 
@@ -111,16 +186,16 @@ export function AccountsPage() {
   const [updateAccount] = useUpdateAccountMutation()
   const [deleteAccount] = useDeleteAccountMutation()
   const formCurrencySymbol = getCurrencySymbol(formData.currency as CurrencyCode)
-  const limit = 10
+  // All accounts in one request (the API maximum): sections and groups are built from the
+  // whole list, so pages arriving later would reshuffle them.
+  const limit = 1000
   const [accounts, setAccounts] = useState<Account[]>([])
   const [totalAccounts, setTotalAccounts] = useState(0)
-  const [hasMoreAccounts, setHasMoreAccounts] = useState(true)
-  const offsetRef = useRef(0)
-  const loadMoreObserver = useRef<IntersectionObserver | null>(null)
   const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [isFetchingMore, setIsFetchingMore] = useState(false)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   // The list above is narrowed by the tag filter, but payment routing can pick any account.
+  const { data: householdViews } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
+  const hasHouseholdViews = (householdViews?.length ?? 0) > 0
   const { data: allAccountsData } = useGetAccountsQuery(
     { limit: 100 },
     { skip: !isAuthenticated || selectedTag === undefined },
@@ -175,50 +250,33 @@ export function AccountsPage() {
   })()
 
   const loadAccounts = useCallback(
-    async (reset = false) => {
+    async () => {
       if (!isAuthenticated) {
         return
       }
 
-      const nextOffset = reset ? 0 : offsetRef.current
       const params = {
         limit,
-        offset: nextOffset,
         ...(selectedTag !== undefined ? { tag: selectedTag } : {}),
       }
 
-      const isCurrent = beginAccountsRequest(reset)
+      const isCurrent = beginAccountsRequest(true)
       try {
-        if (reset) {
-          offsetRef.current = 0
-          setIsInitialLoading(true)
-          setIsFetchingMore(false)
-          setAccounts([])
-        } else {
-          setIsFetchingMore(true)
-        }
+        setIsInitialLoading(true)
+        setAccounts([])
 
         const result = await triggerAccounts(params).unwrap()
         if (!isCurrent()) return
-        offsetRef.current = nextOffset + result.items.length
-        setAccounts((prev) => (reset ? result.items : [...prev, ...result.items]))
+        setAccounts(result.items)
         setTotalAccounts(result.total)
-        setHasMoreAccounts(result.has_more)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading accounts:', error)
-        if (reset) {
-          setAccounts([])
-          setTotalAccounts(0)
-          setHasMoreAccounts(false)
-        }
+        setAccounts([])
+        setTotalAccounts(0)
       } finally {
         if (isCurrent()) {
-          if (reset) {
-            setIsInitialLoading(false)
-          } else {
-            setIsFetchingMore(false)
-          }
+          setIsInitialLoading(false)
         }
       }
     },
@@ -230,7 +288,7 @@ export function AccountsPage() {
     if (authLoading || !isAuthenticated) {
       return
     }
-    loadAccounts(true)
+    loadAccounts()
   }, [authLoading, isAuthenticated, loadAccounts])
 
   useEffect(() => {
@@ -238,41 +296,6 @@ export function AccountsPage() {
       navigate({ to: '/login', search: { message: undefined } })
     }
   }, [authLoading, isAuthenticated, navigate])
-
-  useEffect(() => {
-    return () => {
-      loadMoreObserver.current?.disconnect()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!editingAccount) {
-      setFormData((prev) => ({
-        ...prev,
-        currency: defaultCurrency,
-      }))
-    }
-  }, [defaultCurrency, editingAccount])
-
-  const sentinelRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (loadMoreObserver.current) {
-        loadMoreObserver.current.disconnect()
-      }
-      if (!node) {
-        return
-      }
-
-      loadMoreObserver.current = new IntersectionObserver((entries) => {
-        if (entries[0]?.isIntersecting && hasMoreAccounts && !isFetchingMore && !isInitialLoading) {
-          loadAccounts(false)
-        }
-      })
-
-      loadMoreObserver.current.observe(node)
-    },
-    [hasMoreAccounts, isFetchingMore, isInitialLoading, loadAccounts]
-  )
 
   useEffect(() => {
     if (!editingAccount) {
@@ -291,6 +314,11 @@ export function AccountsPage() {
       return Number(isAccountActive(b)) - Number(isAccountActive(a))
     })
   }, [accounts])
+
+  // Sections and type groups in fixed order; the sort above holds inside each group.
+  const sections = useMemo(() => groupAccounts(orderedAccounts), [orderedAccounts])
+  const individualSection = sections.find((section) => section.section === 'individual')
+  const sharedSection = sections.find((section) => section.section === 'shared')
 
   if (isInitialLoading) {
     return (
@@ -358,7 +386,7 @@ export function AccountsPage() {
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
       setIsCreateModalOpen(false)
-      await loadAccountsRef.current(true)
+      await loadAccountsRef.current()
     } catch (error) {
       setSaveError(apiErrorMessage(error) || 'Could not save the account. Please try again.')
     }
@@ -402,7 +430,7 @@ export function AccountsPage() {
         if (actionAccount?.id === accountId) {
           closeActionModal()
         }
-        await loadAccountsRef.current(true)
+        await loadAccountsRef.current()
       } catch (error) {
         console.error('Error deleting account:', error)
         alert(apiErrorMessage(error) || 'Could not delete the account. Please try again.')
@@ -452,6 +480,29 @@ export function AccountsPage() {
     return null // Will redirect
   }
 
+  const renderGroups = (section: NonNullable<typeof individualSection>) =>
+    section.groups.map(({ group, label, accounts: inGroup }) => (
+      <div key={group} className="space-y-3" data-testid={`accounts-group-${section.section}-${group}`}>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          {label} ({inGroup.length})
+        </h3>
+        <div className="grid grid-cols-1 gap-3">
+          {inGroup.map((account) => (
+            <AccountCard key={account.id} account={account} onOpen={openActionModal} />
+          ))}
+        </div>
+      </div>
+    ))
+
+  const renderSection = (section: NonNullable<typeof individualSection>) => (
+    <section className="space-y-4" data-testid={`accounts-section-${section.section}`}>
+      <h2 className="text-lg font-semibold text-ink">
+        {section.label} ({section.count})
+      </h2>
+      {renderGroups(section)}
+    </section>
+  )
+
   return (
     <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
@@ -474,104 +525,40 @@ export function AccountsPage() {
             : 'No accounts have this tag.'}
         </div>
       ) : (
-        <>
-          <div className="overflow-x-auto">
-          <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-muted mb-2">
-            <span>Account</span>
-            <span className="text-right">Balance</span>
-            <span className="text-right">Status</span>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            {orderedAccounts.map((account) => (
-              <article
-                key={account.id}
-                className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${isAccountActive(account) ? '' : 'opacity-60'}`}
-                onClick={() => openActionModal(account)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    openActionModal(account)
-                  }
-                }}
-              >
-                <div className="flex flex-col gap-4 md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] md:items-center md:gap-4">
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3 md:block">
-                      <div>
-                        <p className="text-base font-semibold text-ink">{account.name}</p>
-                        <p className="text-sm text-muted capitalize">{account.account_type.replace('_', ' ')}</p>
-                        {account.description && (
-                          <p className="text-sm text-body mt-1">{account.description}</p>
-                        )}
-                      </div>
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${ isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body' } md:hidden`}
-                      >
-                        {isAccountActive(account) ? 'Active' : 'Inactive'}
-                      </span>
-                    </div>
-
-                    {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
-
-                    <div className="flex flex-wrap gap-2 text-xs text-body">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
-                        Currency: {account.currency}
-                      </span>
-                      {account.is_spending_wallet && <NotCountedTag />}
-                      <AccountRoleBadge account={account} />
-                      <TagChips tags={account.tags} />
-                      {account.account_type === 'credit' && account.credit_limit != null && (
-                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
-                          Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
-                        </span>
-                      )}
-                      {account.account_type === 'credit' && account.days_until_due_date && (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
-                          +{account.days_until_due_date} days to due
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="text-right space-y-2">
-                    <p className={`text-lg font-bold ${account.balance >= 0 ? 'text-ok' : 'text-danger'}`}>
-                      {formatCurrency(account.balance, account.currency as CurrencyCode)}
-                    </p>
-                    {account.account_type === 'credit' && account.due_date && (
-                      <p className="text-xs text-muted">Statement due every {account.due_date}th</p>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <span className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${isAccountActive(account) ? 'text-ink' : 'bg-sunken text-body'}`}>
-                      {isAccountActive(account) ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                </div>
-              </article>
-            ))}
-            <div ref={sentinelRef} className="h-3" />
-            {!isInitialLoading && (isFetchingMore || hasMoreAccounts) && (
-              <p className="text-center text-xs text-muted pb-2">
-                {isFetchingMore ? 'Loading more accounts...' : 'Scroll for more accounts'}
-              </p>
-            )}
-            {!isInitialLoading && !hasMoreAccounts && orderedAccounts.length === totalAccounts && totalAccounts > 0 && (
-              <p className="text-center text-xs text-muted pb-2">End of list</p>
-            )}
-          </div>
-          </div>{/* end overflow-x-auto */}
-          <div className="flex justify-end px-4">
-            <p className="text-xs text-muted">
-              Showing {orderedAccounts.length} of {totalAccounts} accounts
-            </p>
-          </div>
-        </>
+        <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-muted -mb-4">
+          <span>Account</span>
+          <span className="text-right">Balance</span>
+          <span className="text-right">Status</span>
+        </div>
       )}
 
-      <SharedWithMe onLeft={() => void loadAccountsRef.current(true)} />
+      {individualSection && renderSection(individualSection)}
+
+      {/* Kept outside the empty state so the Household links stay reachable with no accounts. */}
+      {(sharedSection || hasHouseholdViews) && (
+        <section className="space-y-4" data-testid="accounts-section-shared">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-lg font-semibold text-ink">
+              Shared{sharedSection ? ` (${sharedSection.count})` : ''}
+            </h2>
+            <HouseholdLinks />
+          </div>
+          {sharedSection && renderGroups(sharedSection)}
+          {!sharedSection && orderedAccounts.length > 0 && (
+            <p className="text-sm text-muted">No shared accounts.</p>
+          )}
+        </section>
+      )}
+
+      {orderedAccounts.length > 0 && (
+        <div className="flex justify-end px-4">
+          <p className="text-xs text-muted">
+            Showing {orderedAccounts.length} of {totalAccounts} accounts
+          </p>
+        </div>
+      )}
+
+      <SharedWithMe onLeft={() => void loadAccountsRef.current()} />
 
       {shareAccount && (
         <ShareDialog
@@ -580,7 +567,7 @@ export function AccountsPage() {
             setShareAccount(null)
             // The list is a copy of a lazy query: reload it, since a share change can
             // change what the accounts show.
-            void loadAccountsRef.current(true)
+            void loadAccountsRef.current()
           }}
         />
       )}
@@ -670,7 +657,7 @@ export function AccountsPage() {
                   )}
                   onRecorded={() => {
                     closeActionModal()
-                    void loadAccountsRef.current(true)
+                    void loadAccountsRef.current()
                   }}
                 />
                 )}

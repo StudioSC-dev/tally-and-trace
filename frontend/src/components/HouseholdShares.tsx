@@ -87,7 +87,7 @@ export function HouseholdShares() {
   }
 
   return (
-    <section className="bg-surface border border-line" data-testid="household-shares">
+    <section id="household-sharing" className="bg-surface border border-line" data-testid="household-shares">
       <div className="p-4 sm:p-6 border-b border-line">
         <h2 className="text-lg font-semibold text-ink">Household sharing</h2>
         <p className="text-sm text-muted">

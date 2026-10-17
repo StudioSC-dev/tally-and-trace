@@ -445,8 +445,10 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
     (deleting or deactivating the account) is the owner's alone. An account
     the caller reaches only through a Household tag share (``tag_viewer``)
     shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
-    (every permission false) and ``tags``."""
-    from app.core.access import MANAGE_ROLES, OWNER_ROLES, TAG_VIEWER, account_role
+    (every permission false) and ``tags``. ``is_shared`` is the owner's alone
+    (null for other direct roles, absent for ``tag_viewer``)."""
+    from app.core.access import (MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER, _owner_shares_out,
+                                 account_role)
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
@@ -472,6 +474,8 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
             },
             "owner_name": display_name(owners.get(account.user_id)),
         })
+        if role != TAG_VIEWER:
+            data["is_shared"] = _owner_shares_out(account) if role == OWNER else None
         out.append(data)
     return out
 
