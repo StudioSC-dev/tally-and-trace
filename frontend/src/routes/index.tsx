@@ -12,6 +12,7 @@ import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { useToday } from '../hooks/useToday'
 import { FxNotice } from '../components/FxNotice'
+import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { apiErrorMessage } from '../utils/apiError'
@@ -540,7 +541,16 @@ export function Dashboard() {
                 <dl className="space-y-2">
                   {closings.by_account.map((closing) => (
                     <div key={closing.account_id} className="flex items-center justify-between">
-                      <dt className="text-sm text-muted">{closing.account_name ?? `Account ${closing.account_id}`}</dt>
+                      <dt className="text-sm text-muted">
+                        <Link
+                          to="/accounts/$accountId"
+                          params={{ accountId: String(closing.account_id) }}
+                          className="hover:text-ink underline-offset-2 hover:underline focus-ring"
+                          data-testid={`closing-link-${closing.account_id}`}
+                        >
+                          {closing.account_name ?? `Account ${closing.account_id}`}
+                        </Link>
+                      </dt>
                       <dd className="text-sm font-medium text-ink" data-testid={`closing-${closing.account_id}`}>{format(closing.closing_balance)}</dd>
                     </div>
                   ))}

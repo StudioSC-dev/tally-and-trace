@@ -21,6 +21,7 @@ import { Route as AllocationsRouteImport } from './routes/allocations'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsHouseholdRouteImport } from './routes/accounts_.household'
+import { Route as AccountsAccountIdRouteImport } from './routes/accounts_.$accountId'
 
 const WishlistRoute = WishlistRouteImport.update({
   id: '/wishlist',
@@ -82,6 +83,11 @@ const AccountsHouseholdRoute = AccountsHouseholdRouteImport.update({
   path: '/accounts/household',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountsAccountIdRoute = AccountsAccountIdRouteImport.update({
+  id: '/accounts_/$accountId',
+  path: '/accounts/$accountId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/transactions': typeof TransactionsRoute
   '/verify-email': typeof VerifyEmailRoute
   '/wishlist': typeof WishlistRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
   '/accounts/household': typeof AccountsHouseholdRoute
 }
 export interface FileRoutesByTo {
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/transactions': typeof TransactionsRoute
   '/verify-email': typeof VerifyEmailRoute
   '/wishlist': typeof WishlistRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
   '/accounts/household': typeof AccountsHouseholdRoute
 }
 export interface FileRoutesById {
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/transactions': typeof TransactionsRoute
   '/verify-email': typeof VerifyEmailRoute
   '/wishlist': typeof WishlistRoute
+  '/accounts_/$accountId': typeof AccountsAccountIdRoute
   '/accounts_/household': typeof AccountsHouseholdRoute
 }
 export interface FileRouteTypes {
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/verify-email'
     | '/wishlist'
+    | '/accounts/$accountId'
     | '/accounts/household'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/verify-email'
     | '/wishlist'
+    | '/accounts/$accountId'
     | '/accounts/household'
   id:
     | '__root__'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/transactions'
     | '/verify-email'
     | '/wishlist'
+    | '/accounts_/$accountId'
     | '/accounts_/household'
   fileRoutesById: FileRoutesById
 }
@@ -183,6 +195,7 @@ export interface RootRouteChildren {
   TransactionsRoute: typeof TransactionsRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
   WishlistRoute: typeof WishlistRoute
+  AccountsAccountIdRoute: typeof AccountsAccountIdRoute
   AccountsHouseholdRoute: typeof AccountsHouseholdRoute
 }
 
@@ -272,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountsHouseholdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounts_/$accountId': {
+      id: '/accounts_/$accountId'
+      path: '/accounts/$accountId'
+      fullPath: '/accounts/$accountId'
+      preLoaderRoute: typeof AccountsAccountIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -287,6 +307,7 @@ const rootRouteChildren: RootRouteChildren = {
   TransactionsRoute: TransactionsRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   WishlistRoute: WishlistRoute,
+  AccountsAccountIdRoute: AccountsAccountIdRoute,
   AccountsHouseholdRoute: AccountsHouseholdRoute,
 }
 export const routeTree = rootRouteImport

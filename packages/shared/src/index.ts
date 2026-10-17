@@ -6,6 +6,7 @@ export * from './types/household'
 
 // Utilities
 export * from './utils/accountGroups'
+export * from './utils/accountActivity'
 export * from './utils/currency'
 export * from './utils/date'
 export * from './utils/editAmount'
