@@ -8,6 +8,7 @@ import {
   transactionStatus,
 } from '@tally-trace/shared'
 import type { TransactionStatus } from '@tally-trace/shared'
+import { useId } from 'react'
 import type { CurrencyCode, Transaction } from '../store/api'
 import { formatCurrency } from '../utils/currency'
 import { TagChips } from './TagChips'
@@ -53,6 +54,15 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
   const amountText = !leg.effectKnown
     ? `${isTransferIn ? 'Sent' : '≈'} ${formatCurrency(Math.abs(leg.signed), leg.currency)}`
     : `${leg.signed > 0 ? '+' : leg.signed < 0 ? '−' : ''}${formatCurrency(Math.abs(leg.signed), leg.currency)}`
+  // Shown, not hovered, so keyboard, touch and screen-reader users all get it.
+  const effectNoteId = useId()
+  const effectNote = leg.effectKnown
+    ? null
+    : isTransferIn
+      ? `Amount sent in ${leg.currency}; the amount received isn't shown.`
+      : row.view === 'limited'
+        ? `Estimated from the amount recorded in ${leg.currency}; the effect on this account isn't known until it is posted.`
+        : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
   const amountClass =
     !leg.effectKnown || leg.direction === null ? 'text-ink' : leg.direction === 'in' ? 'text-ok' : 'text-danger'
 
@@ -92,18 +102,15 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
           <p
             className={`text-lg font-bold ${amountClass}`}
             data-testid="account-transaction-amount"
-            title={
-              leg.effectKnown
-                ? undefined
-                : isTransferIn
-                  ? `Amount sent in ${leg.currency}; the amount received isn't shown.`
-                  : row.view === 'limited'
-                    ? `Estimated from the amount recorded in ${leg.currency}; the effect on this account isn't known until it is posted.`
-                    : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
-            }
+            aria-describedby={effectNote ? effectNoteId : undefined}
           >
             {amountText}
           </p>
+          {effectNote && (
+            <p id={effectNoteId} className="text-xs text-muted" data-testid="account-transaction-effect-note">
+              {effectNote}
+            </p>
+          )}
           {leg.direction === 'out' && leg.fee !== null && (
             <p className="text-xs text-muted">incl. fee {formatCurrency(leg.fee, leg.currency)}</p>
           )}
