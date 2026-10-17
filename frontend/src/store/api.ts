@@ -279,6 +279,7 @@ export const accountingApi = createApi({
       account_ids?: number[]
       category_ids?: number[]
       category_names?: string[]
+      uncategorized?: boolean
       entered_by?: 'me'
       allocation_id?: number
       transaction_types?: string[]
@@ -295,6 +296,7 @@ export const accountingApi = createApi({
         params?.account_ids?.forEach((id) => searchParams.append('account_ids', String(id)))
         params?.category_ids?.forEach((id) => searchParams.append('category_ids', String(id)))
         params?.category_names?.forEach((name) => searchParams.append('category_names', name))
+        if (params?.uncategorized) searchParams.set('uncategorized', 'true')
         if (params?.entered_by) searchParams.set('entered_by', params.entered_by)
         params?.transaction_types?.forEach((v) => searchParams.append('transaction_types', v))
         if (typeof params?.allocation_id === 'number') searchParams.set('allocation_id', String(params.allocation_id))

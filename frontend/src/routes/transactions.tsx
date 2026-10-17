@@ -135,6 +135,7 @@ const readStoredPageSize = (): PageSize => {
 type TransactionQuery = {
   account_ids?: number[]
   category_names?: string[]
+  uncategorized?: boolean
   entered_by?: 'me'
   transaction_types?: string[]
   start_date?: string
@@ -344,6 +345,7 @@ export function TransactionsPage() {
   const [isBreakdownOpen, setIsBreakdownOpen] = useState(false)
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([])
   const [selectedCategoryNames, setSelectedCategoryNames] = useState<string[]>([])
+  const [filterUncategorized, setFilterUncategorized] = useState(false)
   const [enteredBy, setEnteredBy] = useState<'everyone' | 'me'>('everyone')
   const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
@@ -374,6 +376,7 @@ export function TransactionsPage() {
     setSearchTerm('')
     setSelectedAccountIds((prev) => (prev.length ? [] : prev))
     setSelectedCategoryNames((prev) => (prev.length ? [] : prev))
+    setFilterUncategorized(false)
     setEnteredBy('everyone')
     setSelectedTypes((prev) => (prev.length ? [] : prev))
     setSelectedTag(undefined)
@@ -386,12 +389,17 @@ export function TransactionsPage() {
   const defaultMonthStartString = formatDateInput(defaultMonthStartRef.current)
   const defaultMonthEndString = formatDateInput(defaultMonthEndRef.current)
 
+  // The spending breakdown's Uncategorized row sets both, which read as one "No category" chip.
+  const isDrilledUncategorized =
+    filterUncategorized && selectedCategoryNames.length === 1 && selectedCategoryNames[0] === 'Uncategorized'
+
   const hasActiveFilters = useMemo(
     () =>
       Boolean(
         searchTerm.trim() ||
           selectedAccountIds.length ||
           selectedCategoryNames.length ||
+          filterUncategorized ||
           enteredBy !== 'everyone' ||
           selectedTypes.length ||
           selectedTag !== undefined ||
@@ -403,6 +411,7 @@ export function TransactionsPage() {
       searchTerm,
       selectedAccountIds,
       selectedCategoryNames,
+      filterUncategorized,
       enteredBy,
       selectedTypes,
       selectedTag,
@@ -569,8 +578,8 @@ export function TransactionsPage() {
   // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
   const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch
   const filterKey = useMemo(
-    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
-    [startDate, endDate, selectedAccountIds, selectedCategoryNames, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch.trim(), selectedTag ?? null, pageSize, today]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
@@ -603,6 +612,9 @@ export function TransactionsPage() {
     if (selectedCategoryNames.length > 0) {
       params.category_names = selectedCategoryNames
     }
+    if (filterUncategorized) {
+      params.uncategorized = true
+    }
     if (enteredBy === 'me') {
       params.entered_by = 'me'
     }
@@ -613,7 +625,7 @@ export function TransactionsPage() {
       params.search = effectiveSearch.trim()
     }
     return params
-  }, [selectedAccountIds, selectedTypes, selectedCategoryNames, enteredBy, selectedTag, effectiveSearch])
+  }, [selectedAccountIds, selectedTypes, selectedCategoryNames, filterUncategorized, enteredBy, selectedTag, effectiveSearch])
 
   const loadTransactions = useCallback(
     async () => {
@@ -1892,9 +1904,9 @@ export function TransactionsPage() {
             </button>
           )}
         </div>
-        {(selectedCategoryNames.length > 0 || enteredBy === 'me') && (
+        {(selectedCategoryNames.length > 0 || filterUncategorized || enteredBy === 'me') && (
           <div className="flex flex-wrap gap-2" aria-label="Active filters">
-            {selectedCategoryNames.map((name) => (
+            {!isDrilledUncategorized && selectedCategoryNames.map((name) => (
               <button
                 type="button"
                 key={`category:${name}`}
@@ -1906,6 +1918,20 @@ export function TransactionsPage() {
                 <span aria-hidden="true">×</span>
               </button>
             ))}
+            {filterUncategorized && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterUncategorized(false)
+                  if (isDrilledUncategorized) setSelectedCategoryNames([])
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1 text-sm font-medium text-paper focus-ring"
+                aria-label="Remove the No category filter"
+              >
+                No category
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
             {enteredBy === 'me' && (
               <button
                 type="button"
@@ -1978,12 +2004,24 @@ export function TransactionsPage() {
               <div className="mt-2 flex flex-wrap gap-2">
             <button
                   type="button"
-                  onClick={() => setSelectedCategoryNames([])}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedCategoryNames.length === 0 ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  disabled={selectedCategoryNames.length === 0}
+                  onClick={() => {
+                    setSelectedCategoryNames([])
+                    setFilterUncategorized(false)
+                  }}
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedCategoryNames.length === 0 && !filterUncategorized ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                  disabled={selectedCategoryNames.length === 0 && !filterUncategorized}
                 >
                   All categories
             </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterUncategorized((prev) => !prev)}
+                  title="Income and expenses with no category"
+                  aria-pressed={filterUncategorized}
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium italic transition ${ filterUncategorized ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                >
+                  No category
+                </button>
                 {categoryFilterNames.map((name) => {
                   const isSelected = selectedCategoryNames.includes(name)
                   return (
@@ -2167,10 +2205,11 @@ export function TransactionsPage() {
           tag={selectedTag}
           rangeLabel={breakdownRangeLabel}
           defaultCurrency={fallbackCurrency}
-          onSelectCategory={(name) => {
-            // Replaces any category selection. Page 1 is set explicitly so picking again
-            // from page 2 still resets, when the key would not change.
-            setSelectedCategoryNames([name])
+          onSelectCategory={(target) => {
+            // Replaces any category selection and the uncategorized flag. Page 1 is set
+            // explicitly so picking again from page 2 still resets, when the key would not change.
+            setSelectedCategoryNames(target.names)
+            setFilterUncategorized(target.uncategorized)
             goToPage(1)
             setIsBreakdownOpen(false)
           }}
