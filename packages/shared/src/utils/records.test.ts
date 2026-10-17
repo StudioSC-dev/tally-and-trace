@@ -105,7 +105,7 @@ describe('isLimitedEvent', () => {
 describe('timeline event readers', () => {
   const fullEvent = {
     date: '2026-10-05', name: 'Rent', amount: -500, type: 'expense', source: 'budget_entry' as const,
-    source_id: 7, running_balance: 100,
+    source_id: 7, event_id: 'e1', running_balance: 100,
   }
   const limitedEvent = {
     view: 'limited' as const, public_id: 'e1', date: '2026-10-06', original_date: null, overdue: false,
@@ -154,7 +154,7 @@ describe('upcoming item amounts', () => {
 describe('timelineEventAccountLabel', () => {
   const event: CashflowTimelineEvent = {
     date: '2026-11-05', name: 'Rent', amount: -500, type: 'expense', source: 'budget_entry',
-    source_id: 7, running_balance: 100, currency: 'PHP',
+    source_id: 7, event_id: 'e1', running_balance: 100, currency: 'PHP',
   }
   const leg = (account_name: string | null, amount: number, currency: 'PHP' | 'USD' = 'PHP'): TimelineEventAccount => ({
     account_id: account_name === null ? null : 1, account_name, amount, currency,

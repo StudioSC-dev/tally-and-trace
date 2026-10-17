@@ -965,6 +965,8 @@ export interface CashflowTimelineEvent extends Partial<Estimate> {
    */
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
+  /** Names this event within the response; an `OverflowMove.event_id` points at it. */
+  event_id: string
   running_balance: number
   /**
    * The accounts the event moves cash on, one per cash leg, in any currency (a
@@ -1075,6 +1077,11 @@ export interface DashboardAccountBalance {
 export interface OverflowMove {
   date: string
   name: string
+  /**
+   * The id of the timeline event this move covers: that event's `event_id`, or its
+   * `public_id` when limited. Only on moves served with a timeline.
+   */
+  event_id?: string
   from_account_id: number
   from_account_name: string | null
   to_account_id: number
