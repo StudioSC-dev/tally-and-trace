@@ -651,8 +651,7 @@ export function Dashboard() {
             <div className="divide-y divide-line" data-testid="payables">
               {payableRows.slice(0, MAX_PAYABLES_SHOWN).map((row) => {
                 const status = payableStatusOf(row)
-                // Statement and loan rows open once they can link to the account (STU-319).
-                const opens = row.payable !== null && payableTarget(row.payable).kind !== 'account' && payableActions(payableTarget(row.payable), null).open
+                const opens = row.payable !== null && payableActions(payableTarget(row.payable), null).open
                 return (
                   <div key={row.key} className="p-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between" data-testid="payable-row">
                     {opens ? (

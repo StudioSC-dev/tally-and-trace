@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { isDetailed, payableActions, payableTarget } from '@tally-trace/shared'
 import type { FullBudgetEntry, Payable, SharedFullBudgetEntry } from '@tally-trace/shared'
 import {
@@ -289,6 +289,19 @@ export function PayableDetailDialog({
             <p className="text-sm text-muted" data-testid="payable-read-only">
               You can view this item but not change it here.
             </p>
+          )}
+
+          {target.kind === 'account' && actions.accountId !== null && (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/accounts/$accountId"
+                params={{ accountId: String(actions.accountId) }}
+                className="btn-primary focus-ring"
+                data-testid="payable-account-link"
+              >
+                {target.source === 'loan' ? 'View loan account' : 'View card account'}
+              </Link>
+            </div>
           )}
 
           {hasActions && (
