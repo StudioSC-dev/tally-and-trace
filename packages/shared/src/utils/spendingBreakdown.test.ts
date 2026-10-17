@@ -28,25 +28,34 @@ describe('buildSpendingBreakdown', () => {
 
   it('makes a normal name drillable', () => {
     const { rows } = buildSpendingBreakdown({ Groceries: line(5) }, [cat('Groceries')])
-    expect(rows[0]?.drillName).toBe('Groceries')
+    expect(rows[0]?.drill).toEqual({ names: ['Groceries'], uncategorized: false })
   })
 
   it('keeps a partner-only name drillable', () => {
     const { rows } = buildSpendingBreakdown({ 'Partner Fuel': line(5) }, [cat('Groceries')])
-    expect(rows[0]?.drillName).toBe('Partner Fuel')
+    expect(rows[0]?.drill).toEqual({ names: ['Partner Fuel'], uncategorized: false })
   })
 
-  it('blocks the summary rows', () => {
+  it('blocks the computed rows other than Uncategorized', () => {
     const { rows } = buildSpendingBreakdown({
-      Uncategorized: line(4), 'Transfer fees': line(3), 'Interest: Car loan': line(2),
-      'Unallocated wallet spend': line(1),
+      'Transfer fees': line(3), 'Interest: Car loan': line(2), 'Unallocated wallet spend': line(1),
     }, [])
-    expect(rows.map((r) => r.drillName)).toEqual([null, null, null, null])
+    expect(rows.map((r) => r.drill)).toEqual([null, null, null])
+  })
+
+  it('drills the Uncategorized row into its name plus the uncategorized flag', () => {
+    const { rows } = buildSpendingBreakdown({ Uncategorized: line(4) }, [])
+    expect(rows[0]?.drill).toEqual({ names: ['Uncategorized'], uncategorized: true })
+  })
+
+  it('drills the same way when the caller owns a real Uncategorized category', () => {
+    const { rows } = buildSpendingBreakdown({ Uncategorized: line(4) }, [cat('Uncategorized')])
+    expect(rows[0]?.drill).toEqual({ names: ['Uncategorized'], uncategorized: true })
   })
 
   it('blocks a synthetic name even when the caller owns a category of that name', () => {
     const { rows } = buildSpendingBreakdown({ 'Transfer fees': line(3) }, [cat('Transfer fees')])
-    expect(rows[0]?.drillName).toBeNull()
+    expect(rows[0]?.drill).toBeNull()
   })
 
   it('recognises synthetic names', () => {
@@ -80,7 +89,7 @@ describe('buildSpendingBreakdown', () => {
     expect(slices.map((s) => s.name)).toEqual(['A', 'B', 'Other'])
     const other = slices[2]
     expect(other?.amount).toBe(30 + 20 + 10)
-    expect(other?.drillName).toBeNull()
+    expect(other?.drill).toBeNull()
     expect(other?.isOther).toBe(true)
     expect(slices[0]?.offset).toBe(0)
     expect((other?.offset ?? 0) + (other?.share ?? 0)).toBeCloseTo(1, 10)

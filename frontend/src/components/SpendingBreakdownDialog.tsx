@@ -134,7 +134,7 @@ export function SpendingBreakdownDialog({
           <div className="relative h-44 w-44">
             <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90" role="img" aria-label="Spending by category">
               {breakdown.slices.map((slice, index) => {
-                const drillable = slice.drillName !== null
+                const drillable = slice.drill !== null && !slice.drill.uncategorized
                 const length = slice.share * DONUT_CIRCUMFERENCE
                 return (
                   <circle
@@ -148,7 +148,7 @@ export function SpendingBreakdownDialog({
                     strokeDasharray={`${length} ${DONUT_CIRCUMFERENCE - length}`}
                     strokeDashoffset={-slice.offset * DONUT_CIRCUMFERENCE}
                     className={drillable ? 'cursor-pointer hover:opacity-80' : undefined}
-                    onClick={drillable ? () => onSelectCategory(slice.drillName ?? '') : undefined}
+                    onClick={drillable ? () => onSelectCategory(slice.drill?.names[0] ?? '') : undefined}
                   >
                     <title>{`${slice.name}: ${format(slice.amount)}${drillable ? ' (click to filter the list)' : ''}`}</title>
                   </circle>
@@ -163,7 +163,7 @@ export function SpendingBreakdownDialog({
         </div>
         <ul className="divide-y divide-line/50 text-sm">
           {breakdown.rows.map((row, index) => {
-            const color = colorFor(index, row.color, row.drillName !== null)
+            const color = colorFor(index, row.color, row.drill !== null && !row.drill.uncategorized)
             const cells = (
               <>
                 <span className="flex min-w-0 items-center gap-2">
@@ -176,10 +176,10 @@ export function SpendingBreakdownDialog({
             )
             return (
               <li key={row.key}>
-                {row.drillName !== null ? (
+                {row.drill !== null && !row.drill.uncategorized ? (
                   <button
                     type="button"
-                    onClick={() => onSelectCategory(row.drillName ?? '')}
+                    onClick={() => onSelectCategory(row.drill?.names[0] ?? '')}
                     className="focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 py-2 text-left transition-colors hover:bg-sunken/50"
                   >
                     {cells}
