@@ -93,9 +93,13 @@ export function PayableDetailDialog({
       : target.kind === 'transaction'
         ? transactionLookup
         : null
-  const entryRecord = target.kind === 'budget_entry' ? entry ?? entryLookup.currentData : undefined
-  const record = target.kind === 'transaction' ? transactionLookup.currentData : entryRecord
   const lookupError = lookup?.error
+  // RTK Query keeps the last good data after a failed refetch, so a lookup that has
+  // errored is treated as no record at all: no actions, nothing editable.
+  const entryRecord =
+    target.kind === 'budget_entry' && lookupError === undefined ? entry ?? entryLookup.currentData : undefined
+  const record =
+    lookupError !== undefined ? undefined : target.kind === 'transaction' ? transactionLookup.currentData : entryRecord
   const gone = lookupError !== undefined && 'status' in lookupError && lookupError.status === 404
   const checking = lookup !== null && record === undefined && lookupError === undefined
   const actions = payableActions(target, record)
@@ -132,6 +136,15 @@ export function PayableDetailDialog({
       }
     }
   }, [deletedFocusRef])
+
+  // The record went away under an open form: back to the detail view, which says so.
+  const formLost = mode === 'edit' && editableEntry === null
+  useEffect(() => {
+    if (formLost) {
+      pendingFocus.current = 'edit'
+      setMode('detail')
+    }
+  }, [formLost])
 
   // Hand focus over when the form replaces the details, and back when it goes.
   useEffect(() => {
