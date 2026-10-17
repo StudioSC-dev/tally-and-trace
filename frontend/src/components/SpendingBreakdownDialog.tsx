@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { buildSpendingBreakdown, summaryRange } from '@tally-trace/shared'
+import type { SpendingDrill } from '@tally-trace/shared'
 import { useGetCategoriesQuery, useGetTransactionSummaryQuery } from '../store/api'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { apiErrorMessage } from '../utils/apiError'
@@ -27,8 +28,8 @@ interface Props {
   /** Shown under the title, e.g. "October 1st → October 31st"; an open side reads "Any date". */
   rangeLabel: string
   defaultCurrency: CurrencyCode
-  /** Called with the category name to filter the list by. */
-  onSelectCategory: (name: string) => void
+  /** Called with the list filters the picked row sets: category names and the uncategorized flag. */
+  onSelectCategory: (target: SpendingDrill) => void
   onClose: () => void
 }
 
@@ -134,7 +135,8 @@ export function SpendingBreakdownDialog({
           <div className="relative h-44 w-44">
             <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90" role="img" aria-label="Spending by category">
               {breakdown.slices.map((slice, index) => {
-                const drillable = slice.drill !== null && !slice.drill.uncategorized
+                const sliceDrill = slice.drill
+                const drillable = sliceDrill !== null
                 const length = slice.share * DONUT_CIRCUMFERENCE
                 return (
                   <circle
@@ -148,7 +150,7 @@ export function SpendingBreakdownDialog({
                     strokeDasharray={`${length} ${DONUT_CIRCUMFERENCE - length}`}
                     strokeDashoffset={-slice.offset * DONUT_CIRCUMFERENCE}
                     className={drillable ? 'cursor-pointer hover:opacity-80' : undefined}
-                    onClick={drillable ? () => onSelectCategory(slice.drill?.names[0] ?? '') : undefined}
+                    onClick={sliceDrill ? () => onSelectCategory(sliceDrill) : undefined}
                   >
                     <title>{`${slice.name}: ${format(slice.amount)}${drillable ? ' (click to filter the list)' : ''}`}</title>
                   </circle>
@@ -163,7 +165,8 @@ export function SpendingBreakdownDialog({
         </div>
         <ul className="divide-y divide-line/50 text-sm">
           {breakdown.rows.map((row, index) => {
-            const color = colorFor(index, row.color, row.drill !== null && !row.drill.uncategorized)
+            const rowDrill = row.drill
+            const color = colorFor(index, row.color, rowDrill !== null)
             const cells = (
               <>
                 <span className="flex min-w-0 items-center gap-2">
@@ -176,10 +179,10 @@ export function SpendingBreakdownDialog({
             )
             return (
               <li key={row.key}>
-                {row.drill !== null && !row.drill.uncategorized ? (
+                {rowDrill !== null ? (
                   <button
                     type="button"
-                    onClick={() => onSelectCategory(row.drill?.names[0] ?? '')}
+                    onClick={() => onSelectCategory(rowDrill)}
                     className="focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 py-2 text-left transition-colors hover:bg-sunken/50"
                   >
                     {cells}

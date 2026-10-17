@@ -2205,10 +2205,11 @@ export function TransactionsPage() {
           tag={selectedTag}
           rangeLabel={breakdownRangeLabel}
           defaultCurrency={fallbackCurrency}
-          onSelectCategory={(name) => {
-            // Replaces any category selection. Page 1 is set explicitly so picking again
-            // from page 2 still resets, when the key would not change.
-            setSelectedCategoryNames([name])
+          onSelectCategory={(target) => {
+            // Replaces any category selection and the uncategorized flag. Page 1 is set
+            // explicitly so picking again from page 2 still resets, when the key would not change.
+            setSelectedCategoryNames(target.names)
+            setFilterUncategorized(target.uncategorized)
             goToPage(1)
             setIsBreakdownOpen(false)
           }}
