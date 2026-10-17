@@ -225,7 +225,14 @@ export function PayableDetailDialog({
 
   if (mode === 'edit' && editableEntry) {
     return createPortal(
-      <div ref={formRef} onKeyDown={trapTab} data-testid="payable-entry-form">
+      <div
+        ref={formRef}
+        onKeyDown={trapTab}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit recurring entry"
+        data-testid="payable-entry-form"
+      >
         <PayableEntryForm
           entry={editableEntry}
           onClose={backToDetail}
