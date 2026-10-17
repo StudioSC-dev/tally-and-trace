@@ -395,8 +395,9 @@ def test_timeline_reports_overflow_use_without_moving_closings(db, user, client)
     )
 
     assert body["account_shortfalls"] == []
+    (bill,) = body["events"]
     assert body["overflow_moves"] == [{
-        "date": "2026-08-10", "name": "Bill from B",
+        "date": "2026-08-10", "name": "Bill from B", "event_id": bill["event_id"],
         "from_account_id": savings_a.id, "from_account_name": "Savings A",
         "to_account_id": checking_b.id, "to_account_name": "Checking B",
         "amount": 200.0,

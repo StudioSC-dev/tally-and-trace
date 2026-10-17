@@ -23,7 +23,7 @@ from app.tests.test_currency_projection_integration import (  # noqa: F401  (fix
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
 
 DAYS = 30
-FULL_KEYS = {"date", "name", "amount", "type", "source", "source_id", "running_balance",
+FULL_KEYS = {"date", "name", "amount", "type", "source", "source_id", "event_id", "running_balance",
              "currency", "accounts"}
 LABELS = {"estimated", "original_amount", "original_currency", "rate", "rate_as_of",
           "rate_stale", "unconverted"}
@@ -231,6 +231,10 @@ def test_pinned_overflow_follows_the_scheduled_book(sw_client, sw_db, frozen, mx
     assert body["closing_balance"] == _closing_of(pooled, mx["php"])
     assert body["account_shortfalls"] == [s for s in pooled["account_shortfalls"]
                                           if s["account_id"] == mx["php"]]
+
+    # Each move names the event it covers by id, never by name.
+    tuition_id = _event(_row(body, "PHP"), "Tuition")["event_id"]
+    assert {m["event_id"] for m in body["overflow_moves"]} == {tuition_id}
 
     # Pinned to the overflow account: the move shows where money was pulled from.
     sav = _timeline(sw_client, mx["a"], account_id=mx["php_sav"])

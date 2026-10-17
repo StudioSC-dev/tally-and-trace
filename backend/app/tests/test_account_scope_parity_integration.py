@@ -212,9 +212,13 @@ def _canonical(value, names):
 
 def _without_accounts(timeline):
     """The timeline as captured: each event's ``accounts`` (STU-326, added after
-    the snapshot) is checked to be a list and left out of the comparison."""
+    the snapshot) is checked to be a list and left out of the comparison, as are
+    the event ids events carry and overflow moves name them by (STU-326)."""
     for e in timeline["events"]:
         assert isinstance(e.pop("accounts"), list), e
+        assert isinstance(e.pop("event_id"), str), e
+    for m in timeline["overflow_moves"]:
+        assert isinstance(m.pop("event_id"), str), m
     return timeline
 
 

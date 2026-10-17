@@ -11,6 +11,7 @@ from calendar import monthrange
 from collections import Counter
 from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from itertools import count
 from types import SimpleNamespace
 from typing import Dict, Iterator, List, Optional, Sequence
 
@@ -838,6 +839,7 @@ def build_timeline(opening, events: List[dict]) -> dict:
             "type": e.get("type"),
             "source": e.get("source"),
             "source_id": e.get("source_id"),
+            "event_uid": e.get("event_uid"),
             "running_balance": running,
         })
         if e.get("view") == LIMITED:
@@ -894,6 +896,10 @@ def _leg(account_id, amount, overflow_account_id=None, cash: bool = True) -> dic
     }
 
 
+# Internal identity of one event, so an overflow move can name the event it covers.
+_event_uids = count(1)
+
+
 def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict],
            counts_as_cash: Optional[bool] = None, **extra) -> dict:
     cash_legs = [leg for leg in legs if leg["cash"]]
@@ -907,6 +913,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
         "type": type,
         "source": source,
         "source_id": source_id,
+        "event_uid": next(_event_uids),
         "face_amount": _money(face_amount),
         "legs": legs,
         "counts_as_cash": counts_as_cash,
@@ -920,7 +927,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
 # Internal per-currency keys every event carries inside this module; collect_events
 # drops them unless asked (``detail``), so a default caller's events are unchanged.
 DETAIL_KEYS = ("leg_currencies", "rows", "cash_by_currency", "moved_by_currency",
-               "estimate", "face_currency", "unconverted", "household_bucket")
+               "estimate", "face_currency", "unconverted", "household_bucket", "event_uid")
 
 
 def _row(currency, amount, estimate=None) -> dict:
@@ -2199,6 +2206,7 @@ def _route_legs(
                     overflow_moves.append({
                         "date": d,
                         "name": e.get("name"),
+                        "event_uid": e.get("event_uid"),
                         "from_account_id": ov,
                         "from_account_name": account_names.get(ov),
                         "to_account_id": acc,
@@ -2820,11 +2828,16 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     return payables
 
 
-def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
+def serialize_overflow_moves(moves: List[dict],
+                             event_ids: Optional[Dict[int, str]] = None) -> List[dict]:
+    """``event_ids`` maps an event's internal uid to its id in the same response;
+    a move whose event is listed there carries it as ``event_id``."""
     return [
         {
             "date": m["date"].isoformat(),
             "name": m["name"],
+            **({"event_id": event_ids[m["event_uid"]]}
+               if event_ids and m.get("event_uid") in event_ids else {}),
             "from_account_id": m["from_account_id"],
             "from_account_name": m["from_account_name"],
             "to_account_id": m["to_account_id"],
@@ -2880,7 +2893,10 @@ def serialize_timeline(result: dict, first_id: int = 1) -> dict:
             for a in result.get("by_account", [])
         ],
         "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
-        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
+        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", []), {
+            e["event_uid"]: f"e{i}"
+            for i, e in enumerate(result["events"], start=first_id)
+            if e.get("event_uid") is not None}),
         "events": [_timeline_event(e, i)
                    for i, e in enumerate(result["events"], start=first_id)],
     }
@@ -2901,6 +2917,7 @@ def _timeline_event(e: dict, index: int) -> dict:
         "type": e["type"],
         "source": e["source"],
         "source_id": e["source_id"],
+        "event_id": f"e{index}",
         "running_balance": f(e["running_balance"]),
         "accounts": [{**a, "amount": f(a["amount"])} for a in e.get("accounts") or ()],
     }

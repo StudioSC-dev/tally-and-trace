@@ -183,6 +183,7 @@ def test_closings_exclude_virtual_overflow_moves_which_are_reported_separately()
     assert r["shortfalls"] == []  # overflow covered it
     assert r["overflow_moves"] == [{
         "date": datetime(2026, 8, 10).date(), "name": "Bill from B",
+        "event_uid": payable["event_uid"],
         "from_account_id": SAVINGS_A, "from_account_name": "Savings A",
         "to_account_id": CHECKING_B, "to_account_name": "Checking B",
         "amount": Decimal("200.00"),
@@ -308,3 +309,23 @@ def test_each_accounts_walk_closes_on_its_scheduled_book():
     # Checking B dips below zero on its own book even though overflow covers it.
     walk = build_timeline(opening[CHECKING_B], account_events(events, CHECKING_B))
     assert walk["lowest_balance"] == Decimal("-1500.00")
+
+
+def test_overflow_move_names_its_event_by_id_when_names_collide():
+    from app.services.forecast import build_timeline, serialize_timeline
+
+    opening = {SAVINGS_A: Decimal("1000"), CHECKING_B: Decimal("100")}
+    day = datetime(2026, 8, 10)
+    # Two same-named bills on one day: only the second overruns B and pulls from A.
+    first, second = (
+        _event(date=day, name="Rent", type="expense", source="budget_entry",
+               source_id=sid, face_amount=amount,
+               legs=[_leg(CHECKING_B, Decimal(-amount), SAVINGS_A)])
+        for sid, amount in ((1, 100), (2, 300)))
+    routing = _route_legs(opening, [first, second], NAMES)
+    body = serialize_timeline({**build_timeline(Decimal("100"), [first, second]),
+                               "overflow_moves": routing["overflow_moves"]})
+
+    ids = {e["source_id"]: e["event_id"] for e in body["events"]}
+    assert ids[1] != ids[2]
+    assert [m["event_id"] for m in body["overflow_moves"]] == [ids[2]]
