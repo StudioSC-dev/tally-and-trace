@@ -98,7 +98,7 @@ class Account(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    user = relationship("User", back_populates="accounts")
+    user = relationship("User", back_populates="accounts", foreign_keys=[user_id])
     transactions = relationship(
         "Transaction",
         back_populates="account",

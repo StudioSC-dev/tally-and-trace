@@ -19,6 +19,8 @@ interface AuthContextType {
   }) => Promise<void>
   logout: () => void
   updateUser: (userData: Partial<User>) => Promise<void>
+  /** Re-read the current user from the API (e.g. after a main account stops being usable). */
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -124,6 +126,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }
 
+  const refreshUser = async () => {
+    const generation = currentSessionGeneration()
+    try {
+      const result = await dispatch(authApi.endpoints.getCurrentUser.initiate(undefined, { forceRefetch: true })).unwrap()
+      if (generation !== currentSessionGeneration()) return
+      setUser(result)
+      localStorage.setItem('user', JSON.stringify(result))
+    } catch (error) {
+      console.error('Refresh user failed:', error)
+    }
+  }
+
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
@@ -132,6 +146,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     register,
     logout,
     updateUser,
+    refreshUser,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

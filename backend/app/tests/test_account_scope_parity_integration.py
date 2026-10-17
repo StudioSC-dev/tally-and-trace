@@ -210,6 +210,18 @@ def _canonical(value, names):
     return json.loads(json.dumps(walk(value), default=str))
 
 
+def _without_accounts(timeline):
+    """The timeline as captured: each event's ``accounts`` (STU-326, added after
+    the snapshot) is checked to be a list and left out of the comparison, as are
+    the event ids events carry and overflow moves name them by (STU-326)."""
+    for e in timeline["events"]:
+        assert isinstance(e.pop("accounts"), list), e
+        assert isinstance(e.pop("event_id"), str), e
+    for m in timeline["overflow_moves"]:
+        assert isinstance(m.pop("event_id"), str), m
+    return timeline
+
+
 def views(db, built):
     """Every projection view, for both users, unscoped (the single-owner case)."""
     from app.services.forecast import (
@@ -224,8 +236,8 @@ def views(db, built):
             # collect_events is unordered (the queries have no ORDER BY).
             "events": sorted(collect_events(db, REF, REF + timedelta(days=60), user_id=uid),
                              key=lambda e: (e["date"], e["name"], e["source"])),
-            "timeline": serialize_timeline(project_running_balance(
-                db, uid, days=60, reference=REF)),
+            "timeline": _without_accounts(serialize_timeline(project_running_balance(
+                db, uid, days=60, reference=REF))),
             "cashflow": project_cashflow(db, uid, months=2, reference=REF),
             "upcoming": get_upcoming_items(db, uid, days=60, reference=REF),
             "payables": get_payables(db, uid, days=60, reference=REF),

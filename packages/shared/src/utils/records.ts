@@ -1,5 +1,6 @@
 import type {
-  BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, Transaction, UpcomingItemOrEvent,
+  Account, BudgetEntry, CashflowTimelineEvent, LimitedTimelineEvent, OverflowMove, TimelineEventAccount,
+  Transaction, UpcomingItemOrEvent,
 } from '../types/api'
 
 /**
@@ -54,4 +55,55 @@ export function upcomingItemAmount(item: UpcomingItemOrEvent): { amount: number;
   // An unconverted item (no stored rate) has a null amount; it reads 0 here, so a caller
   // that lists it checks `item.unconverted` first.
   return { amount: item.amount ?? 0, direction }
+}
+
+/** A timeline leg's account name, or "Unassigned" for a leg with no (visible) account. */
+function legName(leg: TimelineEventAccount, withCurrency: boolean): string {
+  const name = leg.account_name ?? 'Unassigned'
+  return withCurrency && leg.currency ? `${name} (${leg.currency})` : name
+}
+
+/**
+ * The timeline's Account column. A limited event names its one account; a full
+ * event names its cash legs. A transfer (two legs of opposite sign) reads
+ * "From → To", with each side's currency when they differ, so a cross-currency
+ * transfer never reads like spending in one row.
+ */
+export function timelineEventAccountLabel(event: CashflowTimelineEvent | LimitedTimelineEvent): string {
+  if (event.view === 'limited') return event.account?.name ?? '—'
+  const legs = event.accounts ?? []
+  if (legs.length === 0) return '—'
+  if (legs.length === 1) return legName(legs[0], false)
+  if (legs.length === 2) {
+    const [a, b] = legs
+    if (Math.sign(a.amount) * Math.sign(b.amount) < 0) {
+      const [out, into] = a.amount < 0 ? [a, b] : [b, a]
+      const mixed = out.currency !== into.currency
+      return `${legName(out, mixed)} → ${legName(into, mixed)}`
+    }
+  }
+  return legs.map((leg) => legName(leg, false)).join(', ')
+}
+
+/**
+ * Whether an account can be the cash-flow timeline's main account: a projection-cash
+ * account (not a card, loan or spending wallet) that is active and held with a direct
+ * role. The API is the gate (400/404); this only filters the Settings list.
+ */
+export function isPinnableAccount(account: Pick<Account, 'account_type' | 'is_active' | 'is_spending_wallet' | 'my_role'>): boolean {
+  return account.my_role !== 'tag_viewer'
+    && account.is_active !== false
+    && account.account_type !== 'credit'
+    && account.account_type !== 'loan'
+    && !account.is_spending_wallet
+}
+
+/**
+ * The overflow moves that pull money out of `accountId`, in date order. A pinned
+ * timeline walks the scheduled book only, so these drains show nowhere in its rows.
+ */
+export function overflowPullsFrom(moves: OverflowMove[], accountId: number): OverflowMove[] {
+  return moves
+    .filter((m) => m.from_account_id === accountId)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 }

@@ -176,6 +176,7 @@ def _reset_demo_user(user: User, last_name: str, *, onboarded: bool) -> None:
     # The demo owner starts pre-onboarding; the partner goes straight in.
     user.onboarding_completed = onboarded
     user.default_currency = CurrencyType.PHP
+    user.main_account_id = None
 
 
 def _delete_demo_data(db: Session, users) -> None:

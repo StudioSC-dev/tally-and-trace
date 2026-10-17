@@ -82,6 +82,10 @@ def get_timeline(
     current_user: User = Depends(get_current_active_user),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     fx: FxRates = Depends(get_fx),
+    account_id: Optional[int] = Query(
+        None, ge=1,
+        description="Project one cash account alone (a main account): an active "
+                    "projection-cash account you hold a direct role on, else 404 / 400."),
 ):
     """
     Dated running-balance timeline (pre-due-date solvency).
@@ -90,13 +94,20 @@ def get_timeline(
     date order and reports the running balance after each, the trough (lowest point
     + date), and any shortfall — i.e. whether bills due before payday can be covered
     with funds on hand. Available cash excludes credit-card balances.
+
+    With ``account_id`` the walk is that account's own balance and cash legs, in
+    its currency; ``account`` echoes the scope (null when pooled). The server
+    never applies the user's main account on its own: the client sends it.
     """
+    if account_id is not None:
+        forecast_svc.require_main_account(db, current_user, account_id)
     return forecast_svc.timeline_by_currency(
         db=db,
         user_id=current_user.id,
         days=days,
         tag_id=filter_tag_id(db, current_user, tag),
         fx=fx,
+        account_id=account_id,
     )
 
 

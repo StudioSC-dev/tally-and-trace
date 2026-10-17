@@ -3,8 +3,10 @@ import type {
   BudgetEntry, FullTransaction, LimitedEvent, LimitedTransaction, RecordPermissions, SharedFullTransaction,
 } from '../index'
 import { isDetailed, isLimited, isLimitedEvent, isOwnerFull, isSharedFull } from '../index'
+import type { Account, CashflowTimelineEvent, LimitedTimelineEvent, OverflowMove, TimelineEventAccount } from '../index'
 import {
-  entryName, timelineEventAmount, timelineEventName, transactionDate, transactionDescription, upcomingItemAmount,
+  entryName, isPinnableAccount, overflowPullsFrom, timelineEventAccountLabel, timelineEventAmount, timelineEventName, transactionDate,
+  transactionDescription, upcomingItemAmount,
 } from './records'
 
 const none: RecordPermissions = { can_edit: false, can_delete: false, can_post: false, can_revert: false, can_tag: false }
@@ -103,7 +105,7 @@ describe('isLimitedEvent', () => {
 describe('timeline event readers', () => {
   const fullEvent = {
     date: '2026-10-05', name: 'Rent', amount: -500, type: 'expense', source: 'budget_entry' as const,
-    source_id: 7, running_balance: 100,
+    source_id: 7, event_id: 'e1', running_balance: 100,
   }
   const limitedEvent = {
     view: 'limited' as const, public_id: 'e1', date: '2026-10-06', original_date: null, overdue: false,
@@ -146,5 +148,100 @@ describe('upcoming item amounts', () => {
     const full = { name: 'Rent', amount: 500, due_date: '2026-11-01', entry_type: 'expense', source: 'budget_entry' as const, source_id: 7 }
     expect(upcomingItemAmount(full)).toEqual({ amount: 500, direction: 'out' })
     expect(upcomingItemAmount({ ...full, entry_type: 'income' })).toEqual({ amount: 500, direction: 'in' })
+  })
+})
+
+describe('timelineEventAccountLabel', () => {
+  const event: CashflowTimelineEvent = {
+    date: '2026-11-05', name: 'Rent', amount: -500, type: 'expense', source: 'budget_entry',
+    source_id: 7, event_id: 'e1', running_balance: 100, currency: 'PHP',
+  }
+  const leg = (account_name: string | null, amount: number, currency: 'PHP' | 'USD' = 'PHP'): TimelineEventAccount => ({
+    account_id: account_name === null ? null : 1, account_name, amount, currency,
+  })
+  const limited: LimitedTimelineEvent = {
+    view: 'limited', public_id: 'e1', date: '2026-11-06', original_date: null, overdue: false,
+    display_name: 'Loan payment', face_amount: 300, cash_delta: -300, currency: 'PHP',
+    account: { id: 4, name: 'Joint account' }, kind: 'loan_payment', running_balance: 50,
+  }
+
+  it('names a limited event by its account, or a dash without one', () => {
+    expect(timelineEventAccountLabel(limited)).toBe('Joint account')
+    expect(timelineEventAccountLabel({ ...limited, account: null })).toBe('—')
+  })
+
+  it('shows a dash for a full event with no legs', () => {
+    expect(timelineEventAccountLabel(event)).toBe('—')
+    expect(timelineEventAccountLabel({ ...event, accounts: [] })).toBe('—')
+  })
+
+  it('names one leg, or Unassigned for an accountless one', () => {
+    expect(timelineEventAccountLabel({ ...event, accounts: [leg('Checking', -500)] })).toBe('Checking')
+    expect(timelineEventAccountLabel({ ...event, accounts: [leg(null, -500)] })).toBe('Unassigned')
+  })
+
+  it('reads a same-currency transfer as from → to, whatever the leg order', () => {
+    const accounts = [leg('Savings', -2025), leg('Checking', 2000)]
+    expect(timelineEventAccountLabel({ ...event, accounts })).toBe('Savings → Checking')
+    expect(timelineEventAccountLabel({ ...event, accounts: [...accounts].reverse() })).toBe('Savings → Checking')
+  })
+
+  it('adds currency codes to a cross-currency transfer', () => {
+    const accounts = [leg('PHP Checking', -5800, 'PHP'), leg('USD Savings', 100, 'USD')]
+    expect(timelineEventAccountLabel({ ...event, accounts })).toBe('PHP Checking (PHP) → USD Savings (USD)')
+  })
+
+  it('joins legs of the same sign, or more than two, with commas', () => {
+    expect(timelineEventAccountLabel({ ...event, accounts: [leg('A', -1), leg('B', -2)] })).toBe('A, B')
+    expect(timelineEventAccountLabel({ ...event, accounts: [leg('A', -1), leg('B', 2), leg(null, 3)] }))
+      .toBe('A, B, Unassigned')
+    expect(timelineEventAccountLabel({ ...event, accounts: [leg('A', 0), leg('B', 2)] })).toBe('A, B')
+  })
+})
+
+describe('isPinnableAccount', () => {
+  const base: Pick<Account, 'account_type' | 'is_active' | 'is_spending_wallet' | 'my_role'> = {
+    account_type: 'checking', is_active: true, is_spending_wallet: false, my_role: 'owner',
+  }
+
+  it('accepts an active cash account held directly', () => {
+    expect(isPinnableAccount(base)).toBe(true)
+    for (const my_role of ['admin', 'editor', 'viewer'] as const) {
+      expect(isPinnableAccount({ ...base, my_role })).toBe(true)
+    }
+    for (const account_type of ['cash', 'e_wallet', 'savings'] as const) {
+      expect(isPinnableAccount({ ...base, account_type })).toBe(true)
+    }
+    expect(isPinnableAccount({ account_type: 'savings', my_role: 'owner' })).toBe(true)
+  })
+
+  it('rejects a Household tag viewer, an inactive account, a card, a loan and a wallet', () => {
+    expect(isPinnableAccount({ ...base, my_role: 'tag_viewer' })).toBe(false)
+    expect(isPinnableAccount({ ...base, is_active: false })).toBe(false)
+    expect(isPinnableAccount({ ...base, account_type: 'credit' })).toBe(false)
+    expect(isPinnableAccount({ ...base, account_type: 'loan' })).toBe(false)
+    expect(isPinnableAccount({ ...base, is_spending_wallet: true })).toBe(false)
+  })
+})
+
+describe('overflowPullsFrom', () => {
+  const move = (date: string, from: number, to: number, amount: number): OverflowMove => ({
+    date, name: `Bill ${date}`, from_account_id: from, from_account_name: `Acct ${from}`,
+    to_account_id: to, to_account_name: `Acct ${to}`, amount,
+  })
+
+  it('keeps only the moves out of the account, in date order', () => {
+    const moves = [move('2026-11-20', 7, 3, 500), move('2026-11-05', 3, 7, 200), move('2026-11-02', 7, 4, 100)]
+    expect(overflowPullsFrom(moves, 7).map((m) => [m.date, m.to_account_id, m.amount])).toEqual([
+      ['2026-11-02', 4, 100],
+      ['2026-11-20', 3, 500],
+    ])
+  })
+
+  it('is empty when the account covers nothing, and leaves the input alone', () => {
+    const moves = [move('2026-11-05', 3, 7, 200)]
+    expect(overflowPullsFrom(moves, 7)).toEqual([])
+    expect(overflowPullsFrom([], 7)).toEqual([])
+    expect(moves).toHaveLength(1)
   })
 })

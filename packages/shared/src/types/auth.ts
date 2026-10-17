@@ -10,6 +10,8 @@ export interface User {
   created_at: string
   updated_at?: string
   last_login?: string
+  /** The cash-flow timeline's main account; null unless it is still pinnable. */
+  main_account_id?: number | null
 }
 
 export interface LoginRequest {
@@ -41,4 +43,6 @@ export interface UpdateUserRequest {
   last_name?: string
   default_currency?: string
   is_active?: boolean
+  /** null clears the main account. */
+  main_account_id?: number | null
 }

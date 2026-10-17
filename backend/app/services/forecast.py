@@ -11,15 +11,17 @@ from calendar import monthrange
 from collections import Counter
 from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from itertools import count
 from types import SimpleNamespace
 from typing import Dict, Iterator, List, Optional, Sequence
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion, tag_shared_account_ids,
-    touches_accounts, viewable_account_ids, viewable_accounts,
+    DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion,
+    tag_shared_account_ids, touches_accounts, viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
@@ -135,6 +137,53 @@ def _loan_ids_of(db: Session, account_ids) -> frozenset:
         a.id for a in db.query(Account.id).filter(
             Account.id.in_(ids), Account.account_type == AccountType.LOAN)
     )
+
+
+MAIN_ACCOUNT_NOT_FOUND = "Account not found"
+MAIN_ACCOUNT_NOT_CASH = "Only a cash account can be the main account"
+
+
+def _main_account(db: Session, user, account_id: int) -> tuple:
+    """``(account, problem)`` for a main-account candidate (STU-326).
+
+    The account must be active and the user must hold a direct role on it
+    (owner, admin, editor or viewer; a Household ``tag_viewer`` sees only the
+    sharer's Household rows, so its balance would not match its ledger):
+    otherwise ``(None, 404)``. It must also be projection cash: a card, loan
+    or spending wallet has no cash running balance, so it is ``(account, 400)``.
+    The caller can already see that account, so the 400 leaks nothing.
+    """
+    account = viewable_accounts(db, user, active_only=True, roles=DIRECT_ROLES).filter(
+        Account.id == account_id).first()
+    if account is None:
+        return None, status.HTTP_404_NOT_FOUND
+    if not is_projection_cash(account):
+        return account, status.HTTP_400_BAD_REQUEST
+    return account, None
+
+
+def require_main_account(db: Session, user, account_id: int) -> Account:
+    """The account ``user`` may pin (or project the timeline for), else 404 / 400."""
+    account, problem = _main_account(db, user, account_id)
+    if problem == status.HTTP_404_NOT_FOUND:
+        raise HTTPException(status_code=problem, detail=MAIN_ACCOUNT_NOT_FOUND)
+    if problem == status.HTTP_400_BAD_REQUEST:
+        raise HTTPException(status_code=problem, detail=MAIN_ACCOUNT_NOT_CASH)
+    return account
+
+
+def main_account_or_none(db: Session, user) -> Optional[int]:
+    """The user's stored main account when it still passes the pin rule, else None.
+
+    Read-only: a revoked share, a deactivated or ineligible account reads as
+    unpinned but the stored id is kept (a re-granted share or a reactivated
+    account brings the pin back). A hard delete clears it in the database.
+    """
+    account_id = getattr(user, "main_account_id", None)
+    if account_id is None:
+        return None
+    _, problem = _main_account(db, user, account_id)
+    return None if problem else account_id
 
 
 def get_account_balances(db: Session, user_id: int):
@@ -790,15 +839,17 @@ def build_timeline(opening, events: List[dict]) -> dict:
             "type": e.get("type"),
             "source": e.get("source"),
             "source_id": e.get("source_id"),
+            "event_uid": e.get("event_uid"),
             "running_balance": running,
         })
         if e.get("view") == LIMITED:
             out_events[-1].update({k: e.get(k) for k in (
                 "view", "face_amount", "currency", "account", "kind", "overdue",
                 "original_date")})
-        for key in ("row", "cash_currency"):
+        for key in ("row", "cash_currency", "accounts"):
             if key in e:
-                # A per-currency run's listing row and currency, for serialisers.
+                # A per-currency run's listing row and currency, and the
+                # accounts the event moves cash on, for serialisers.
                 out_events[-1][key] = e[key]
         if running < lowest:
             lowest = running
@@ -845,6 +896,10 @@ def _leg(account_id, amount, overflow_account_id=None, cash: bool = True) -> dic
     }
 
 
+# Internal identity of one event, so an overflow move can name the event it covers.
+_event_uids = count(1)
+
+
 def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict],
            counts_as_cash: Optional[bool] = None, **extra) -> dict:
     cash_legs = [leg for leg in legs if leg["cash"]]
@@ -858,6 +913,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
         "type": type,
         "source": source,
         "source_id": source_id,
+        "event_uid": next(_event_uids),
         "face_amount": _money(face_amount),
         "legs": legs,
         "counts_as_cash": counts_as_cash,
@@ -871,7 +927,7 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
 # Internal per-currency keys every event carries inside this module; collect_events
 # drops them unless asked (``detail``), so a default caller's events are unchanged.
 DETAIL_KEYS = ("leg_currencies", "rows", "cash_by_currency", "moved_by_currency",
-               "estimate", "face_currency", "unconverted", "household_bucket")
+               "estimate", "face_currency", "unconverted", "household_bucket", "event_uid")
 
 
 def _row(currency, amount, estimate=None) -> dict:
@@ -2042,6 +2098,34 @@ def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -
     return next(billed, None) is not None
 
 
+def _event_accounts(legs: List[dict], names: dict,
+                    leg_currencies: Optional[List[Optional[str]]] = None) -> List[dict]:
+    """The accounts an event moves projection cash on, for the timeline's
+    Account column (STU-326): ``[{account_id, account_name, amount, currency}]``,
+    one per cash leg, in leg order.
+
+    Built from every cash leg, before a per-currency run drops the legs in
+    other currencies, so a cross-currency transfer still names both sides
+    (each with its own currency). Names come from ``names`` only (the scope's
+    accounts); a leg with no account, or one ``names`` lacks, is
+    ``{None, None, amount}``: a name is never looked up elsewhere.
+    """
+    currencies = leg_currencies if leg_currencies is not None else [None] * len(legs)
+    out = []
+    for leg, currency in zip(legs, currencies):
+        if not leg.get("cash", True):
+            continue
+        account_id = leg.get("account_id")
+        name = names.get(account_id) if account_id is not None else None
+        out.append({
+            "account_id": account_id if name is not None else None,
+            "account_name": name,
+            "amount": _money(leg["amount"]),
+            "currency": currency,
+        })
+    return out
+
+
 def _route_legs(
     opening_by_account: dict,
     events: List[dict],
@@ -2122,6 +2206,7 @@ def _route_legs(
                     overflow_moves.append({
                         "date": d,
                         "name": e.get("name"),
+                        "event_uid": e.get("event_uid"),
                         "from_account_id": ov,
                         "from_account_name": account_names.get(ov),
                         "to_account_id": acc,
@@ -2212,21 +2297,58 @@ def _timeline_window(days: int, reference: Optional[datetime]) -> tuple:
     return start, start + timedelta(days=days)
 
 
+def account_events(events: List[dict], account_id: int) -> List[dict]:
+    """The events with a cash leg on ``account_id``, each re-amounted to the sum
+    of its cash legs there (STU-326): a transfer out is ``-(amount + fee)``, a
+    transfer in what was received, in the account's own currency. Events with
+    no cash leg on it (an accountless entry included) are dropped.
+    """
+    out = []
+    for e in events:
+        if not e.get("counts_as_cash", True):
+            continue
+        legs = [leg for leg in _legs_of(e)
+                if leg.get("cash", True) and leg.get("account_id") == account_id]
+        if legs:
+            out.append({**e, "amount": sum((_money(leg["amount"]) for leg in legs),
+                                           Decimal("0"))})
+    return out
+
+
 def _timeline(p: "Projection", currency: str, start: datetime, end: datetime, *,
-              rows: bool) -> dict:
-    """One currency's running-balance timeline (``project_running_balance``)."""
+              rows: bool, account_id: Optional[int] = None) -> dict:
+    """One currency's running-balance timeline (``project_running_balance``).
+
+    With ``account_id`` (a main account in ``currency``, STU-326) the walk is
+    that account alone: its own opening and its own cash legs. Routing still
+    runs over the whole currency, so its shortfalls and overflow moves are the
+    pooled view's, kept where they touch the account. The walk is the
+    scheduled book (no virtual overflow pulls), so its closing is the
+    account's ``by_account`` closing.
+    """
     # Available cash is projection-cash accounts only (see is_projection_cash).
     opening_by_account, cash_events = p.run(currency, rows=rows)
-    opening = sum(opening_by_account.values(), Decimal("0"))
-
-    result = build_timeline(opening, cash_events)
     routing = _route_legs(opening_by_account, cash_events, p.names, currency_of=p.currencies)
-    result["account_shortfalls"] = routing["shortfalls"]
-    # Per-account closings at window end exclude virtual overflow pulls; those
-    # are reported separately so the closings stay a plain sum of scheduled legs.
-    result["by_account"] = account_closings(routing["final"], opening_by_account, p.names)
-    result["unassigned_closing"] = routing["final"]["unassigned"]
-    result["overflow_moves"] = routing["overflow_moves"]
+
+    if account_id is None:
+        opening = sum(opening_by_account.values(), Decimal("0"))
+        result = build_timeline(opening, cash_events)
+        result["account_shortfalls"] = routing["shortfalls"]
+        # Per-account closings at window end exclude virtual overflow pulls; those
+        # are reported separately so the closings stay a plain sum of scheduled legs.
+        result["by_account"] = account_closings(routing["final"], opening_by_account, p.names)
+        result["unassigned_closing"] = routing["final"]["unassigned"]
+        result["overflow_moves"] = routing["overflow_moves"]
+    else:
+        opening = {account_id: opening_by_account[account_id]}
+        result = build_timeline(opening[account_id], account_events(cash_events, account_id))
+        result["account_shortfalls"] = [s for s in routing["shortfalls"]
+                                        if s["account_id"] == account_id]
+        result["by_account"] = account_closings(routing["final"], opening, p.names)
+        result["unassigned_closing"] = Decimal("0")
+        result["overflow_moves"] = [
+            m for m in routing["overflow_moves"]
+            if account_id in (m["from_account_id"], m["to_account_id"])]
     result["window_start"] = start.date()
     result["window_end"] = end.date()
     return result
@@ -2290,7 +2412,8 @@ class Projection:
 
         Each event keeps only its legs in ``currency``, its ``amount`` is that
         currency's cash, and ``moved`` its money moved; with ``rows`` it also
-        carries its listing ``row`` in that currency.
+        carries its listing ``row`` in that currency. ``accounts`` names every
+        cash leg, in any currency (``_event_accounts``).
         """
         opening = {a: v for a, v in self.opening_by_account.items()
                    if self.money.currency_of(a) == currency}
@@ -2302,6 +2425,7 @@ class Projection:
                   "legs": [leg for leg, c in zip(e["legs"], e["leg_currencies"])
                            if c == currency],
                   "cash_currency": currency,
+                  "accounts": _event_accounts(e["legs"], self.names, e["leg_currencies"]),
                   "amount": e["cash_by_currency"][currency],
                   "moved": e["moved_by_currency"].get(currency, Decimal("0"))}
             if rows:
@@ -2419,20 +2543,41 @@ def response_currencies(p_currencies: set, collector: FxCollector, default: str)
 
 def timeline_by_currency(db: Session, user_id: int, days: int = 60,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
-                         fx: Optional[FxRates] = None) -> dict:
+                         fx: Optional[FxRates] = None,
+                         account_id: Optional[int] = None) -> dict:
     """``/forecast/timeline``: the default currency's timeline as the scalars,
-    plus ``by_currency`` (one row per currency), ``currencies`` and ``fx``."""
+    plus ``by_currency`` (one row per currency), ``currencies`` and ``fx``.
+
+    With ``account_id`` (checked by the caller with ``require_main_account``)
+    it is that one account's timeline (STU-326): ``by_currency`` is the
+    account's currency only, the scalars are that row (not necessarily the
+    default currency) and ``currencies`` is ``[its currency]``. ``account``
+    echoes the scope (null when pooled). The projection is built as usual,
+    so scope, routing and overflow are unchanged; ``fx.unconverted_count``
+    stays projection-wide, since an unconverted leg has no account to filter on.
+    """
     start, end = _timeline_window(days, reference)
     p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
     collector = FxCollector()
     rows = []
+    account = None
+    currencies = p.run_currencies()
+    if account_id is not None:
+        # Deactivated or unshared since require_main_account: the same 404, not a KeyError.
+        if account_id not in p.opening_by_account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail=MAIN_ACCOUNT_NOT_FOUND)
+        currency = p.money.currency_of(account_id)
+        account = {"account_id": account_id, "account_name": p.names.get(account_id),
+                   "currency": currency}
+        currencies = [currency]
     # Limited public ids are opaque and per response: numbered once across
     # every row, so distinct rows never share one. The default row comes
     # first, so a single-currency response keeps ``e1``, ``e2``, ... and the
     # scalars (the default row) reuse its ids.
     numbered = 0
-    for currency in p.run_currencies():
-        result = _timeline(p, currency, start, end, rows=True)
+    for currency in currencies:
+        result = _timeline(p, currency, start, end, rows=True, account_id=account_id)
         row = serialize_currency_timeline(result, currency, collector, first_id=numbered + 1)
         numbered += len(result["events"])
         rows.append(row)
@@ -2443,8 +2588,10 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
         "window_end": end.date().isoformat(),
         **default,
         "by_currency": rows,
-        "currencies": response_currencies(p.account_currencies(), collector, p.default),
+        "currencies": (list(currencies) if account is not None else
+                       response_currencies(p.account_currencies(), collector, p.default)),
         "fx": collector.as_dict(),
+        "account": account,
     }
 
 
@@ -2681,11 +2828,16 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     return payables
 
 
-def serialize_overflow_moves(moves: List[dict]) -> List[dict]:
+def serialize_overflow_moves(moves: List[dict],
+                             event_ids: Optional[Dict[int, str]] = None) -> List[dict]:
+    """``event_ids`` maps an event's internal uid to its id in the same response;
+    a move whose event is listed there carries it as ``event_id``."""
     return [
         {
             "date": m["date"].isoformat(),
             "name": m["name"],
+            **({"event_id": event_ids[m["event_uid"]]}
+               if event_ids and m.get("event_uid") in event_ids else {}),
             "from_account_id": m["from_account_id"],
             "from_account_name": m["from_account_name"],
             "to_account_id": m["to_account_id"],
@@ -2741,7 +2893,10 @@ def serialize_timeline(result: dict, first_id: int = 1) -> dict:
             for a in result.get("by_account", [])
         ],
         "unassigned_closing": f(result.get("unassigned_closing", Decimal("0"))),
-        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", [])),
+        "overflow_moves": serialize_overflow_moves(result.get("overflow_moves", []), {
+            e["event_uid"]: f"e{i}"
+            for i, e in enumerate(result["events"], start=first_id)
+            if e.get("event_uid") is not None}),
         "events": [_timeline_event(e, i)
                    for i, e in enumerate(result["events"], start=first_id)],
     }
@@ -2753,6 +2908,7 @@ def _timeline_event(e: dict, index: int) -> dict:
         return float(x) if isinstance(x, Decimal) else x
 
     if e.get("view") == LIMITED:
+        # Unchanged: a limited event names its account in ``account`` only.
         return {**limited_event(e, f"e{index}"), "running_balance": f(e["running_balance"])}
     return {
         "date": e["date"].isoformat() if e["date"] is not None else None,
@@ -2761,5 +2917,7 @@ def _timeline_event(e: dict, index: int) -> dict:
         "type": e["type"],
         "source": e["source"],
         "source_id": e["source_id"],
+        "event_id": f"e{index}",
         "running_balance": f(e["running_balance"]),
+        "accounts": [{**a, "amount": f(a["amount"])} for a in e.get("accounts") or ()],
     }

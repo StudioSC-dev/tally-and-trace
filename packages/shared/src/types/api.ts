@@ -972,7 +972,33 @@ export interface CashflowTimelineEvent extends Partial<Estimate> {
    */
   source: 'budget_entry' | 'transaction' | 'statement' | 'loan'
   source_id: number | null
+  /** Names this event within the response; an `OverflowMove.event_id` points at it. */
+  event_id: string
   running_balance: number
+  /**
+   * The accounts the event moves cash on, one per cash leg, in any currency (a
+   * cross-currency transfer names both sides in both rows). Read it with
+   * `timelineEventAccountLabel`.
+   */
+  accounts?: TimelineEventAccount[]
+}
+
+/**
+ * One cash leg of a full timeline event. `amount` is signed and in `currency`.
+ * A leg with no account (an accountless entry) has null `account_id` and `account_name`.
+ */
+export interface TimelineEventAccount {
+  account_id: number | null
+  account_name: string | null
+  amount: number
+  currency: CurrencyCode | null
+}
+
+/** The scope of a timeline projected for one account (`?account_id=`). */
+export interface TimelineAccountScope {
+  account_id: number
+  account_name: string | null
+  currency: CurrencyCode
 }
 
 export interface CashflowShortfall {
@@ -1028,11 +1054,15 @@ export interface CashflowTimelineCurrencyRow extends CashflowTimelineBody {
 /**
  * GET /forecast/timeline. The scalars (balances, shortfalls, events) are the default
  * currency's timeline only; `by_currency` has one row per currency, default first.
+ * With `?account_id=` it is that one account's timeline: `by_currency`, `currencies`
+ * and the scalars are the account's currency only, and `account` echoes the scope
+ * (null when pooled).
  */
 export interface CashflowTimeline extends CashflowTimelineBody, ProjectionMeta {
   window_start: string
   window_end: string
   by_currency: CashflowTimelineCurrencyRow[]
+  account?: TimelineAccountScope | null
 }
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
@@ -1054,6 +1084,11 @@ export interface DashboardAccountBalance {
 export interface OverflowMove {
   date: string
   name: string
+  /**
+   * The id of the timeline event this move covers: that event's `event_id`, or its
+   * `public_id` when limited. Only on moves served with a timeline.
+   */
+  event_id?: string
   from_account_id: number
   from_account_name: string | null
   to_account_id: number

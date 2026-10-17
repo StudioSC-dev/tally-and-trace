@@ -9,9 +9,12 @@ from app.models.account import AccountType
 from app.models.transaction import TransactionType
 from app.services.forecast import (
     _event,
+    _event_accounts,
     _leg,
     _route_legs,
     _transfer_event,
+    account_events,
+    account_closings,
     build_timeline,
     is_projection_cash,
     route_accounts,
@@ -180,6 +183,7 @@ def test_closings_exclude_virtual_overflow_moves_which_are_reported_separately()
     assert r["shortfalls"] == []  # overflow covered it
     assert r["overflow_moves"] == [{
         "date": datetime(2026, 8, 10).date(), "name": "Bill from B",
+        "event_uid": payable["event_uid"],
         "from_account_id": SAVINGS_A, "from_account_name": "Savings A",
         "to_account_id": CHECKING_B, "to_account_name": "Checking B",
         "amount": Decimal("200.00"),
@@ -207,3 +211,121 @@ def test_checkpoint_closings_and_pooled_invariant():
     assert final["unassigned"] == Decimal("700.00")
     pooled = build_timeline(sum(opening.values()), events)["closing_balance"]
     assert sum(final["by_account"].values()) + final["unassigned"] == pooled
+
+
+# ---------------------------------------------------------------------------
+# The timeline's Account column (STU-326)
+# ---------------------------------------------------------------------------
+
+def test_event_accounts_names_cash_legs_only():
+    legs = [_leg(SAVINGS_A, Decimal("-5015")), _leg(CARD_C, Decimal("5000"), cash=False)]
+    assert _event_accounts(legs, NAMES, ["PHP", "PHP"]) == [
+        {"account_id": SAVINGS_A, "account_name": "Savings A",
+         "amount": Decimal("-5015.00"), "currency": "PHP"},
+    ]
+
+
+def test_event_accounts_maps_no_account_and_unknown_names_to_null():
+    legs = [_leg(None, Decimal("-200")), _leg(OUTSIDE, Decimal("-50"))]
+    assert _event_accounts(legs, NAMES, ["PHP", "USD"]) == [
+        {"account_id": None, "account_name": None, "amount": Decimal("-200.00"),
+         "currency": "PHP"},
+        {"account_id": None, "account_name": None, "amount": Decimal("-50.00"),
+         "currency": "USD"},
+    ]
+
+
+def test_event_accounts_keeps_both_sides_of_a_transfer_with_their_currencies():
+    ev = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS)
+    out = _event_accounts(ev["legs"], NAMES, ["PHP", "USD"])
+    assert [(a["account_name"], a["amount"], a["currency"]) for a in out] == [
+        ("Savings A", Decimal("-5015.00"), "PHP"),
+        ("Checking B", Decimal("5000.00"), "USD"),
+    ]
+    # Without currencies each leg's currency is None.
+    assert {a["currency"] for a in _event_accounts(ev["legs"], NAMES)} == {None}
+
+
+def test_build_timeline_carries_accounts_through():
+    ev = _payable(10, 400, CHECKING_B)
+    ev["accounts"] = _event_accounts(ev["legs"], NAMES)
+    (out,) = build_timeline(Decimal("1000"), [ev])["events"]
+    assert out["accounts"] == ev["accounts"]
+
+
+# ---------------------------------------------------------------------------
+# One pinned account's walk (STU-326)
+# ---------------------------------------------------------------------------
+
+def _inflow(day, amount, account_id, name="Pay"):
+    return _event(
+        date=datetime(2026, 8, day), name=name, type="income", source="budget_entry",
+        source_id=8, face_amount=amount, legs=[_leg(account_id, Decimal(str(amount)))],
+    )
+
+
+def _mixed():
+    """A transfer, a payable with overflow, an accountless bill and an inflow."""
+    bill = _event(
+        date=datetime(2026, 8, 12), name="Tuition", type="expense", source="budget_entry",
+        source_id=9, face_amount=7000,
+        legs=[_leg(CHECKING_B, Decimal("-7000"), overflow_account_id=SAVINGS_A)])
+    loose = _event(
+        date=datetime(2026, 8, 13), name="Loose", type="expense", source="budget_entry",
+        source_id=10, face_amount=40, legs=[_leg(None, Decimal("-40"))])
+    return [
+        _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS),
+        bill, loose, _inflow(20, 3000, CHECKING_B),
+    ]
+
+
+def test_account_events_reamount_a_transfer_per_side():
+    move = _transfer_event(_txn_transfer(5, 5000, 15, SAVINGS_A, CHECKING_B), CASH, CARDS)
+    (out,) = account_events([move], SAVINGS_A)
+    (into,) = account_events([move], CHECKING_B)
+    assert out["amount"] == Decimal("-5015.00")
+    assert into["amount"] == Decimal("5000.00")
+    assert move["amount"] == Decimal("-15.00")  # the pooled event is untouched
+
+
+def test_account_events_drop_events_without_a_leg_on_the_account():
+    events = _mixed()
+    assert [e["name"] for e in account_events(events, SAVINGS_A)] == ["Move to B"]
+    assert [e["name"] for e in account_events(events, CHECKING_B)] == [
+        "Move to B", "Tuition", "Pay"]
+    assert account_events(events, OUTSIDE) == []
+
+
+def test_each_accounts_walk_closes_on_its_scheduled_book():
+    opening = {SAVINGS_A: Decimal("10000"), CHECKING_B: Decimal("500")}
+    events = _mixed()
+    routing = _route_legs(opening, events, NAMES)
+    assert routing["overflow_moves"], "the tuition bill pulls from savings"
+    for account_id in opening:
+        walk = build_timeline(opening[account_id], account_events(events, account_id))
+        assert walk["closing_balance"] == routing["final"]["by_account"][account_id]
+        (closing,) = account_closings(routing["final"], {account_id: opening[account_id]}, NAMES)
+        assert closing["closing_balance"] == walk["closing_balance"]
+    # Checking B dips below zero on its own book even though overflow covers it.
+    walk = build_timeline(opening[CHECKING_B], account_events(events, CHECKING_B))
+    assert walk["lowest_balance"] == Decimal("-1500.00")
+
+
+def test_overflow_move_names_its_event_by_id_when_names_collide():
+    from app.services.forecast import build_timeline, serialize_timeline
+
+    opening = {SAVINGS_A: Decimal("1000"), CHECKING_B: Decimal("100")}
+    day = datetime(2026, 8, 10)
+    # Two same-named bills on one day: only the second overruns B and pulls from A.
+    first, second = (
+        _event(date=day, name="Rent", type="expense", source="budget_entry",
+               source_id=sid, face_amount=amount,
+               legs=[_leg(CHECKING_B, Decimal(-amount), SAVINGS_A)])
+        for sid, amount in ((1, 100), (2, 300)))
+    routing = _route_legs(opening, [first, second], NAMES)
+    body = serialize_timeline({**build_timeline(Decimal("100"), [first, second]),
+                               "overflow_moves": routing["overflow_moves"]})
+
+    ids = {e["source_id"]: e["event_id"] for e in body["events"]}
+    assert ids[1] != ids[2]
+    assert [m["event_id"] for m in body["overflow_moves"]] == [ids[2]]

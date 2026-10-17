@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -31,9 +31,18 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
+    # The cash-flow timeline's optional main account (STU-326). A preference,
+    # never trusted on read: app/services/forecast.py main_account_or_none
+    # re-checks it. use_alter breaks the users <-> accounts table cycle.
+    main_account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="SET NULL", name="fk_users_main_account_id",
+                   use_alter=True),
+        nullable=True,
+    )
 
     # Relationships
-    accounts = relationship("Account", back_populates="user")
+    accounts = relationship("Account", back_populates="user", foreign_keys="Account.user_id")
     transactions = relationship(
         "Transaction", back_populates="user", foreign_keys="Transaction.user_id")
     allocations = relationship("Allocation", back_populates="user")

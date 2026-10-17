@@ -365,7 +365,7 @@ export const accountingApi = createApi({
     }),
 
     // ── Forecast ──────────────────────────────────────────────────────────────
-    getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number } | void>({
+    getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number; account_id?: number } | void>({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
       providesTags: ['Account', 'BudgetEntry', 'Transaction'],
     }),

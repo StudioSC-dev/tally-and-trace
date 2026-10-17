@@ -26,6 +26,8 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
     default_currency: Optional[CurrencyType] = None
     is_active: Optional[bool] = None
+    # The cash-flow timeline's main account (STU-326); an explicit null clears it.
+    main_account_id: Optional[int] = None
 
 class UserResponse(UserBase):
     id: int
@@ -35,7 +37,9 @@ class UserResponse(UserBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
-    
+    # Null unless the stored pin still passes the rule (see main_account_or_none).
+    main_account_id: Optional[int] = None
+
     class Config:
         from_attributes = True
 

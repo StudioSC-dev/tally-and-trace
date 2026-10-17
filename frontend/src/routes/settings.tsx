@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { isPinnableAccount } from '@tally-trace/shared'
 import {
+  useGetAccountsQuery,
   useGetCategoriesQuery,
   useCreateCategoryMutation,
   useUpdateCategoryMutation,
@@ -34,12 +36,19 @@ const apiErrorMessage = (error: unknown, fallback: string) => {
 }
 
 function SettingsPage() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth()
+  const { isAuthenticated, isLoading: authLoading, user, updateUser } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) navigate({ to: '/login', search: { message: undefined } })
   }, [authLoading, isAuthenticated, navigate])
+
+  // The cash-flow timeline's main account: active cash accounts held directly (the API checks too).
+  const { data: accountsPage } = useGetAccountsQuery({ is_active: true, limit: 1000 }, { skip: !isAuthenticated })
+  const pinnable = (accountsPage?.items ?? []).filter(isPinnableAccount)
+  const mainAccountId = user?.main_account_id ?? null
+  const [savingMain, setSavingMain] = useState(false)
+  const [mainError, setMainError] = useState<string | null>(null)
 
   const { data: categories = [] } = useGetCategoriesQuery({}, { skip: !isAuthenticated })
   const [createCategory] = useCreateCategoryMutation()
@@ -69,6 +78,18 @@ function SettingsPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
   if (!isAuthenticated) return null
+
+  const saveMainAccount = async (value: string) => {
+    setMainError(null)
+    setSavingMain(true)
+    try {
+      await updateUser({ main_account_id: value === '' ? null : Number(value) })
+    } catch (err) {
+      setMainError(apiErrorMessage(err, 'Could not save the main account.'))
+    } finally {
+      setSavingMain(false)
+    }
+  }
 
   const openCreateCategory = () => { setEditingCategory(null); setCategoryForm(emptyCategory); setCategoryModal(true) }
   const openEditCategory = (c: Category) => {
@@ -136,8 +157,37 @@ function SettingsPage() {
     <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6 lg:px-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-ink">Settings</h1>
-        <p className="text-sm text-muted mt-1">Manage categories and tags, and export your data.</p>
+        <p className="text-sm text-muted mt-1">Choose your cash-flow timeline's main account, manage categories and tags, and export your data.</p>
       </div>
+
+      {/* Cash-flow timeline */}
+      <section className="bg-surface border border-line" data-testid="timeline-settings">
+        <div className="p-4 sm:p-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Cash-flow timeline</h2>
+            <p className="text-sm text-muted">The timeline opens on your main account's own running balance. You can still switch to all cash accounts there.</p>
+          </div>
+          <div className="md:w-72">
+            <label className="label" htmlFor="main-account">Main account</label>
+            <select
+              id="main-account"
+              value={mainAccountId === null ? '' : String(mainAccountId)}
+              disabled={savingMain}
+              onChange={(e) => saveMainAccount(e.target.value)}
+              className="select-field focus-ring disabled:opacity-60"
+            >
+              <option value="">None (all cash accounts)</option>
+              {mainAccountId !== null && !pinnable.some((a) => a.id === mainAccountId) && (
+                <option value={String(mainAccountId)} disabled>{accountsPage === undefined ? 'Loading…' : 'Unavailable account'}</option>
+              )}
+              {pinnable.map((a) => (
+                <option key={a.id} value={String(a.id)}>{a.name} ({a.currency})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {mainError && <p role="alert" className="px-4 sm:px-6 pb-3 text-sm text-danger">{mainError}</p>}
+      </section>
 
       {/* Export */}
       <section className="bg-surface border border-line">

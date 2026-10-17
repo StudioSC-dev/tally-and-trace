@@ -198,7 +198,7 @@ describe('per-currency projection responses', () => {
     const row = {
       opening_balance: 10.0, lowest_balance: 10.0, trough_date: null, closing_balance: 10.0, shortfall: false,
       shortfalls: [], account_shortfalls: [], by_account: [], unassigned_closing: 0.0, overflow_moves: [],
-      events: [{ date: '2026-11-09', name: 'Rent', amount: -5.0, type: 'expense', source: 'budget_entry' as const, source_id: 1, running_balance: 5.0, currency: 'PHP' as const }],
+      events: [{ date: '2026-11-09', name: 'Rent', amount: -5.0, type: 'expense', source: 'budget_entry' as const, source_id: 1, event_id: 'e1', running_balance: 5.0, currency: 'PHP' as const }],
     }
     const timeline = {
       window_start: '2026-10-13', window_end: '2026-12-12', ...row,
