@@ -897,12 +897,15 @@ def get_transactions(
         #    Household rule (c) (rule ii). The criterion is exactly "every
         #    touched account in seen, or an explicit Household grant", so a row
         #    whose category_name is hidden never matches its hidden category.
+        # A deleted (inactive) category matches nothing: the row reads as
+        # uncategorized, as Redactor.category_name and the summary show it.
         # Reserved names ("Transfer fees", "Uncategorized") are not special here:
         # they match real creator-owned categories of that name only.
         query = (
             query.join(Category, Category.id == Transaction.category_id)
             .filter(Category.name.in_(category_names),
                     Category.user_id == Transaction.user_id,
+                    Category.is_active.is_(True),
                     touches_accounts(Transaction, seen),
                     displayed_description_criterion(seen, grants))
         )
@@ -1736,8 +1739,10 @@ def get_transaction_summary(
         and not can_view_account(current_user, a)
     }
     category_ids = {t.category_id for t in transactions if t.category_id}
+    # Active categories only: a row on a deleted category falls through to
+    # "Uncategorized", as it reads everywhere else (STU-338).
     categories = db.query(Category).filter(
-        Category.id.in_(category_ids)).all() if category_ids else []
+        Category.id.in_(category_ids), Category.is_active.is_(True)).all() if category_ids else []
     # A row shows its category's name only when the row's creator owns it.
     category_names = {c.id: c.name for c in categories}
     category_owners = {c.id: c.user_id for c in categories}

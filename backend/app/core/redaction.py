@@ -140,12 +140,16 @@ class Redactor:
         return display_name(self._users.get(record.user_id))
 
     def category_name(self, record) -> Optional[str]:
-        """The record's category name, when its creator owns the category."""
+        """The record's category name, when its creator owns the category.
+
+        A deleted (inactive) category reads as none, as it does in the creator's
+        own view, the summary and the ``category_names`` filter (STU-338).
+        """
         if not record.category_id:
             return None
         self._load_categories([record.category_id])
         category = self._categories.get(record.category_id)
-        if category is None or category.user_id != record.user_id:
+        if category is None or category.user_id != record.user_id or not category.is_active:
             return None
         return category.name
 

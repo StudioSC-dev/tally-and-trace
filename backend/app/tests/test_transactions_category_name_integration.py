@@ -6,6 +6,9 @@ account sees every member's "Groceries" under one filter. It never matches a row
 whose category the caller is not shown (``category_name`` null), and it never
 widens what the caller may read. ``entered_by=me`` is a separate, deliberate
 filter: rows the caller owns.
+
+A deleted (inactive) category counts as no category (STU-338): it is not shown,
+not matched by name, and its rows fall into the summary's "Uncategorized" row.
 """
 import pytest
 
@@ -244,3 +247,72 @@ def test_summary_bounds_are_optional(hh, sw_client):
     total, period = spent(end_date="2026-10-31T00:00:00")
     assert total == 11.0
     assert period["start_date"] is None and period["end_date"] is not None
+
+
+# --- deleted categories (STU-338) --------------------------------------------------------
+# A deleted category is only marked inactive, so rows keep its id. It reads as no
+# category everywhere: in a member's view, in the summary and in category_names.
+
+
+def _delete_category(client, who, category):
+    r = client.delete(f"{API}/categories/{category}", headers=who["headers"])
+    assert r.status_code == 200, r.text
+
+
+def _get(client, who, path):
+    r = client.get(f"{API}{path}", headers=who["headers"])
+    assert r.status_code == 200, (path, r.status_code, r.text)
+    return r.json()
+
+
+def test_a_deleted_category_reads_as_none_to_a_shared_full_viewer(hh, sw_client):
+    a, b = hh["a"], hh["b"]
+    dining = _category(sw_client, b, "Dining")
+    row = _debit(sw_client, b, hh["joint"], 20, dining)
+    shown = _get(sw_client, a, f"/transactions/{row}")
+    assert shown["view"] == "shared_full" and shown["category_name"] == "Dining"
+    _delete_category(sw_client, b, dining)
+    shown = _get(sw_client, a, f"/transactions/{row}")
+    assert shown["view"] == "shared_full" and shown["category_name"] is None
+    listed = next(i for i in _list(sw_client, a)["items"] if i["id"] == row)
+    assert listed["category_name"] is None
+
+
+def test_a_deleted_category_reads_as_none_on_a_shared_full_recurring_entry(hh, sw_client):
+    a, b = hh["a"], hh["b"]
+    bills = _category(sw_client, b, "Bills")
+    entry = sw_post(sw_client, b, "/budget-entries/", {
+        "name": "Bea bill", "entry_type": "expense", "amount": 10,
+        "next_occurrence": "2026-10-05T00:00:00", "account_id": hh["joint"],
+        "category_id": bills})["id"]
+    shown = _get(sw_client, a, f"/budget-entries/{entry}")
+    assert shown["view"] == "shared_full" and shown["category_name"] == "Bills"
+    _delete_category(sw_client, b, bills)
+    shown = _get(sw_client, a, f"/budget-entries/{entry}")
+    assert shown["view"] == "shared_full" and shown["category_name"] is None
+
+
+def test_a_deleted_category_falls_into_the_summarys_uncategorized_row(hh, sw_client):
+    a = hh["a"]
+    dining = _category(sw_client, a, "Dining")
+    _debit(sw_client, a, hh["a_private"], 33, dining)
+    _debit(sw_client, a, hh["a_private"], 7)  # uncategorised from the start
+    before = _summary(sw_client, a, **RANGE)["category_breakdown"]
+    assert float(before["Dining"]["expenses"]) == 33.0
+    assert float(before["Uncategorized"]["expenses"]) == 7.0
+    _delete_category(sw_client, a, dining)
+    after = _summary(sw_client, a, **RANGE)["category_breakdown"]
+    assert "Dining" not in after
+    assert float(after["Uncategorized"]["expenses"]) == 40.0
+
+
+def test_a_members_deleted_category_no_longer_matches_its_name(hh, groceries, sw_client):
+    a, b = hh["a"], hh["b"]
+    # B deletes B's "Groceries"; A's stays live. Names are unique per owner, so B
+    # can't recreate it while the old one exists (categories.py create_category).
+    _delete_category(sw_client, b, groceries["b_cat"])
+    body = _list(sw_client, a, category_names="Groceries")
+    assert _ids(body) == sorted([groceries["a_joint"], groceries["a_private"]])
+    assert body["total"] == 2
+    # B's own rows on the deleted category no longer match for B either.
+    assert _ids(_list(sw_client, b, category_names="Groceries")) == [groceries["a_joint"]]
