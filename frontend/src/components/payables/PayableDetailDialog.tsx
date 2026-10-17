@@ -137,8 +137,9 @@ export function PayableDetailDialog({
     }
   }, [deletedFocusRef])
 
-  // The record went away under an open form: back to the detail view, which says so.
-  const formLost = mode === 'edit' && editableEntry === null
+  // The record went away, or edit permission was lost, under an open form: back to the detail view, which says so.
+  const formEntry = actions.edit ? editableEntry : null
+  const formLost = mode === 'edit' && formEntry === null
   useEffect(() => {
     if (formLost) {
       pendingFocus.current = 'edit'
@@ -223,7 +224,7 @@ export function PayableDetailDialog({
     }
   }
 
-  if (mode === 'edit' && editableEntry) {
+  if (mode === 'edit' && formEntry) {
     return createPortal(
       <div
         ref={formRef}
@@ -234,7 +235,7 @@ export function PayableDetailDialog({
         data-testid="payable-entry-form"
       >
         <PayableEntryForm
-          entry={editableEntry}
+          entry={formEntry}
           onClose={backToDetail}
           onSaved={onClose}
           onDeleted={closeAfterDelete}
