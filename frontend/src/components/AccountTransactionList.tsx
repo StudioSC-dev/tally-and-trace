@@ -47,7 +47,8 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
   const category = transactionCategoryName(row, categoryNames)
   const postingDate = row.view !== 'limited' ? row.posting_date : undefined
 
-  // Unknown effect: a transfer in shows what was sent; anything else shows its face as "≈".
+  // Unknown effect: a transfer in shows what was sent; anything else shows its face (or a
+  // Limited row's recorded amount) as "≈", an estimate.
   const isTransferIn = isTransfer && leg.direction === 'in'
   const amountText = !leg.effectKnown
     ? `${isTransferIn ? 'Sent' : '≈'} ${formatCurrency(Math.abs(leg.signed), leg.currency)}`
@@ -96,7 +97,9 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
                 ? undefined
                 : isTransferIn
                   ? `Amount sent in ${leg.currency}; the amount received isn't shown.`
-                  : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
+                  : row.view === 'limited'
+                    ? `Estimated from the amount recorded in ${leg.currency}; the effect on this account isn't known until it is posted.`
+                    : `Face amount in ${leg.currency}; the effect on this account isn't known until it is posted.`
             }
           >
             {amountText}
