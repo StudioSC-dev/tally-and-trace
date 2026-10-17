@@ -25,6 +25,9 @@ const longDate = (iso: string | null) => {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(d)
 }
 
+// The id an overflow move names: a limited event's public id, else its event id.
+const timelineEventId = (e: CashflowTimelineEvent | LimitedTimelineEvent) => (e.view === 'limited' ? e.public_id : e.event_id)
+
 const DAY_OPTIONS = [30, 60, 90] as const
 
 // A pinned request the API refuses (the account is no longer usable) falls back to pooled.
@@ -86,7 +89,8 @@ function ForecastPage() {
     for (const m of row.overflow_moves) {
       if (m.to_account_id !== data.account.account_id) continue
       const note = `covered by ${m.from_account_name ?? 'overflow'}`
-      const key = `${m.date}|${m.name}`
+      if (m.event_id === undefined) continue
+      const key = m.event_id
       overflowNotes.set(key, overflowNotes.has(key) ? `${overflowNotes.get(key)}; ${note}` : note)
     }
   }
@@ -253,8 +257,8 @@ function ForecastPage() {
                         <td className="py-3 px-4 sm:px-6 whitespace-nowrap text-muted">{longDate(e.date)}</td>
                         <td className="py-3 px-4 text-ink">
                           {timelineEventName(e)}
-                          {overflowNotes.has(`${e.date}|${timelineEventName(e)}`) && (
-                            <span className="block text-xs text-muted" data-testid="timeline-overflow-note">{overflowNotes.get(`${e.date}|${timelineEventName(e)}`)}</span>
+                          {overflowNotes.has(timelineEventId(e)) && (
+                            <span className="block text-xs text-muted" data-testid="timeline-overflow-note">{overflowNotes.get(timelineEventId(e))}</span>
                           )}
                         </td>
                         <td className="py-3 px-4 text-muted" data-testid="timeline-account">{timelineEventAccountLabel(e)}</td>
