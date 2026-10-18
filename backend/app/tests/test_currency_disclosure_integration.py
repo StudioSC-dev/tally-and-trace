@@ -6,6 +6,11 @@ no Limited object carries an estimate field (G2), Limited values are today's
 ``by_currency`` come only from viewable accounts and full rows. Each world is
 walked over every G4 endpoint the caller can reach, clock frozen at
 ``FX_REF`` (2026-11-02), rate 58.00 PHP per USD.
+
+``summary/period``'s ``household_private`` (STU-336) lists Household rule-(c)
+debits in their record currency, as their Limited rows show it; it is not a
+``by_currency``. No world here puts a row on it: the tag-share rows are pending
+(one is on ``a_private``, out of scope, but pending).
 """
 from datetime import datetime
 

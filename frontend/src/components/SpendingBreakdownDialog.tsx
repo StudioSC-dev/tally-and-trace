@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { buildSpendingBreakdown, summaryRange } from '@tally-trace/shared'
+import {
+  buildHouseholdPrivateBreakdown, buildSpendingBreakdown, summaryCurrencies, summaryRange,
+} from '@tally-trace/shared'
 import type { SpendingDrill } from '@tally-trace/shared'
 import { useGetCategoriesQuery, useGetTransactionSummaryQuery } from '../store/api'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
@@ -56,13 +58,17 @@ export function SpendingBreakdownDialog({
   } = useGetTransactionSummaryQuery({ ...range, ...(tag !== undefined ? { tag } : {}) })
   // Colours only: a failure here leaves the breakdown readable with palette colours.
   const { data: categoriesData } = useGetCategoriesQuery({})
-  const [currency, setCurrency] = useSelectedCurrency(
-    summary?.by_currency.map((row) => row.currency), defaultCurrency)
+  const currencies = useMemo(() => summaryCurrencies(summary), [summary])
+  const [currency, setCurrency] = useSelectedCurrency(currencies, defaultCurrency)
 
   const breakdown = useMemo(() => {
     const row = summary?.by_currency.find((r) => r.currency === currency)
     return buildSpendingBreakdown(row?.category_breakdown ?? {}, categoriesData ?? [])
   }, [summary, currency, categoriesData])
+  const household = useMemo(
+    () => buildHouseholdPrivateBreakdown(summary?.household_private ?? [], currency, categoriesData ?? []),
+    [summary, currency, categoriesData],
+  )
 
   // Focus into the dialog, make the page behind inert, and undo both on close.
   useEffect(() => {
@@ -126,10 +132,14 @@ export function SpendingBreakdownDialog({
         </button>
       </div>
     )
-  } else if (breakdown.rows.length === 0) {
+  } else if (breakdown.rows.length === 0 && household.rows.length === 0) {
     body = <p className="py-8 text-center text-sm text-muted">No posted spending in this range.</p>
   } else {
-    body = (
+    const main = breakdown.rows.length === 0 ? (
+      <p className="py-8 text-center text-sm text-muted">
+        No posted spending from your accounts in this range.
+      </p>
+    ) : (
       <div className={`grid gap-6 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)] lg:items-center ${isFetching ? 'opacity-60' : ''}`}>
         <div className="flex justify-center">
           <div className="relative h-44 w-44">
@@ -199,6 +209,56 @@ export function SpendingBreakdownDialog({
         </ul>
       </div>
     )
+    body = (
+      <>
+        {main}
+        {household.rows.length > 0 && (
+          <section className={`mt-6 border-t border-line/50 pt-4 ${isFetching ? 'opacity-60' : ''}`}>
+            <h3 className="text-sm font-semibold text-ink">Household: paid from other accounts</h3>
+            <p className="mt-1 text-xs text-muted">
+              Household-tagged spending a household member paid from their own accounts. Not included in
+              the total or chart above; some of it may have been paid with money moved from accounts you see.
+            </p>
+            <ul className="mt-2 divide-y divide-line/50 text-sm">
+              {household.rows.map((row, index) => {
+                const rowDrill = row.drill
+                const cells = (
+                  <>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                        style={{ backgroundColor: colorFor(index, row.color, rowDrill !== null) }}
+                      />
+                      <span className="truncate font-medium text-ink">{row.name}</span>
+                    </span>
+                    <span className="text-right font-medium text-ink">{format(row.amount)}</span>
+                  </>
+                )
+                return (
+                  <li key={row.key}>
+                    {rowDrill !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => onSelectCategory(rowDrill)}
+                        className="focus-ring grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-2 text-left transition-colors hover:bg-sunken/50"
+                      >
+                        {cells}
+                      </button>
+                    ) : (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 py-2">{cells}</div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-t border-line/50 py-2 text-sm font-semibold text-ink">
+              <span>Total paid from other accounts</span>
+              <span className="text-right">{format(household.total)}</span>
+            </div>
+          </section>
+        )}
+      </>
+    )
   }
 
   return createPortal(
@@ -233,7 +293,7 @@ export function SpendingBreakdownDialog({
           </div>
           <div className="mt-4">
             <CurrencyControl
-              currencies={summary?.by_currency.map((row) => row.currency)}
+              currencies={currencies}
               value={currency}
               onChange={setCurrency}
             />
@@ -246,6 +306,7 @@ export function SpendingBreakdownDialog({
               transfers and other currencies for that category; set Type to Expense to narrow it.
             </p>
             <p>Includes spending from wallets.</p>
+            <p>The filtered list also includes Household rows paid from other accounts.</p>
           </div>
         </div>
       </div>

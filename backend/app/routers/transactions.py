@@ -14,11 +14,13 @@ from app.core.access import (
     can_view_account,
     editable_account_ids,
     get_record_or_404,
+    household_explicit_criterion,
     household_grants,
     readable_criterion,
     require_account,
     require_owned_ref,
     touches_accounts,
+    touches_none,
     viewable_account_ids,
 )
 from app.core.tags import (
@@ -895,24 +897,23 @@ def get_transactions(
         # exactly what Redactor.category_name and summarize_period read as none.
         # Category ids are unique, so the outer join never duplicates a row.
         #
-        # Scope and visibility mirror the other reads:
-        #  - touches_accounts(seen) is the summary's scope (seen includes
-        #    tag_viewer accounts);
-        #  - displayed_description_criterion is the SQL form of
-        #    Redactor.shows_text. Redactor.transaction() shows category_name only
-        #    for a FULL / SHARED_FULL view (both require every touched account
-        #    viewable, and SHARED_FULL also needs ids) or, in the limited view,
-        #    when shows_text holds: every touched account viewable (rule i) or
-        #    Household rule (c) (rule ii). The criterion is exactly "every
-        #    touched account in seen, or an explicit Household grant", so a row
-        #    whose category_name is hidden never matches its hidden category.
+        # Scope and visibility are one criterion, displayed_description_criterion,
+        # the SQL form of Redactor.shows_text: every touched account in seen
+        # (seen includes tag_viewer accounts), or Household rule (c) for any
+        # grant. That is what the period summary counts: its totals (every
+        # touched account in seen) plus its ``household_private`` line (rule-(c)
+        # rows outside the scope, STU-336). Redactor.transaction() shows
+        # category_name only for a FULL / SHARED_FULL view (both require every
+        # touched account viewable, and SHARED_FULL also needs ids) or, in the
+        # limited view, when shows_text holds (rule i or rule ii), so a row whose
+        # category_name is hidden never matches its hidden category.
         #
         # ``uncategorized`` (STU-338) matches debits and credits only: a transfer
         # without a category shows as "Transfer" and summarize_period never puts
         # a transfer in a category row, so this is the summary's "Uncategorized"
-        # row. A debit or credit touches only account_id, so inside the scope
-        # every touched account is in seen and shows_text holds: its category is
-        # always shown, and a hidden category can never match as "none".
+        # row (and the Household line's). shows_text holds for every row in the
+        # scope, so its category is always shown, and a hidden category can never
+        # match as "none".
         # Reserved names ("Transfer fees", "Uncategorized") are not special in
         # category_names: they match real creator-owned categories of that name
         # only. Rows with no category are asked for with ``uncategorized``.
@@ -925,8 +926,7 @@ def get_transactions(
         if uncategorized:
             matches.append(and_(Category.id.is_(None), Transaction.transaction_type.in_(
                 [TransactionType.DEBIT, TransactionType.CREDIT])))
-        query = query.filter(or_(*matches), touches_accounts(Transaction, seen),
-                             displayed_description_criterion(seen, grants))
+        query = query.filter(or_(*matches), displayed_description_criterion(seen, grants))
     if entered_by == "me":
         query = query.filter(Transaction.user_id == current_user.id)
     if allocation_id:
@@ -1517,6 +1517,18 @@ RETURNED_FROM_WALLETS = "Returned from wallets"
 LOAN_INTEREST_PREFIX = "Interest: "
 
 
+def category_label(t, category_names: dict, category_owners: Optional[dict] = None) -> str:
+    """The summary's category name for ``t``: its category's name, or
+    "Uncategorized" when it has none, the category isn't in ``category_names``
+    (e.g. a deleted one), or, with ``category_owners``, the row's creator
+    doesn't own it."""
+    if not t.category_id:
+        return UNCATEGORIZED
+    if category_owners is not None and category_owners.get(t.category_id) != t.user_id:
+        return UNCATEGORIZED
+    return category_names.get(t.category_id, UNCATEGORIZED)
+
+
 def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
@@ -1615,11 +1627,7 @@ def summarize_period(
         return b["breakdown"].setdefault(name, {"income": zero, "expenses": zero})
 
     def category(t) -> str:
-        if not t.category_id:
-            return UNCATEGORIZED
-        if category_owners is not None and category_owners.get(t.category_id) != t.user_id:
-            return UNCATEGORIZED
-        return category_names.get(t.category_id, UNCATEGORIZED)
+        return category_label(t, category_names, category_owners)
 
     for t in transactions:
         amount = _D(t.amount)
@@ -1700,6 +1708,35 @@ def summarize_period(
     }}
 
 
+def summarize_household_private(transactions, category_names: dict, category_owners: dict,
+                                default: str) -> list:
+    """The "paid from other accounts" line: posted Household debits that rule (c)
+    reads on the sharers' accounts outside the caller's scope. Mirrors
+    household_monthly's ``paid_from_other_accounts``: debits only, each in its
+    record's currency as its Limited row shows it (a row with no currency is not
+    counted), by category name under the creator-owns rule. Never added into the
+    caller's totals."""
+    from app.services.forecast import ordered_currencies
+
+    zero = Decimal("0")
+    parts: dict = {}
+    for t in transactions:
+        if t.transaction_type != TransactionType.DEBIT:
+            continue  # the query asks for debits only; defence for direct callers
+        currency = getattr(t.currency, "value", t.currency)
+        if currency is None:
+            continue
+        part = parts.setdefault(currency, {"total_expenses": zero, "transaction_count": 0,
+                                           "category_breakdown": {}})
+        amount = _D(t.amount)
+        part["total_expenses"] += amount
+        part["transaction_count"] += 1
+        name = category_label(t, category_names, category_owners)
+        part["category_breakdown"][name] = part["category_breakdown"].get(name, zero) + amount
+    return [{"currency": currency, **parts[currency]}
+            for currency in ordered_currencies(parts, default, keep_default=False)]
+
+
 @router.get("/summary/period")
 def get_transaction_summary(
     db: Session = Depends(get_db),
@@ -1710,31 +1747,51 @@ def get_transaction_summary(
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
 ):
     """Get transaction summary for a specific period"""
-    query = db.query(Transaction)
+    # The date and tag filters, applied to the main query and the Household line alike.
+    common = []
     if start_date is not None:
-        query = query.filter(Transaction.transaction_date >= start_date)
+        common.append(Transaction.transaction_date >= start_date)
     if end_date is not None:
-        query = query.filter(Transaction.transaction_date <= end_date)
+        common.append(Transaction.transaction_date <= end_date)
+    # Only rows carrying the tag effectively; each row counts once.
+    tag_id = filter_tag_id(db, current_user, tag)
+    if tag_id is not None:
+        common.append(effective_tag_criterion(Transaction, tag_id))
+    query = db.query(Transaction).filter(*common)
     # The accounts the caller sees (inactive ones included: this is history).
     # Rows touching them that the caller may read: with a direct role that is
     # whoever entered them; through a tag share, only the sharer's own (the
     # tag-share invariant). summarize_period's source-scope guard decides
     # what a transfer from outside counts for.
     scope_ids = viewable_account_ids(db, current_user, roles=VIEW_ROLES)
+    viewable = viewable_account_ids(db, current_user)
+    grants = household_grants(db, current_user)
     query = query.filter(touches_accounts(Transaction, scope_ids), readable_criterion(
-        Transaction, current_user, viewable_account_ids(db, current_user),
-        household_grants(db, current_user)))
+        Transaction, current_user, viewable, grants))
     
     if account_id:
         # An account the caller can't view matches nothing, as a nonexistent one.
         query = query.filter(Transaction.account_id == account_id,
                              Transaction.account_id.in_(scope_ids))
-    # Only rows carrying the tag effectively; each row counts once.
-    tag_id = filter_tag_id(db, current_user, tag)
-    if tag_id is not None:
-        query = query.filter(effective_tag_criterion(Transaction, tag_id))
 
     transactions = [t for t in query.all() if t.is_posted]
+
+    # Rule (c) rows outside the scope are their own line, as household_monthly's
+    # paid_from_other_accounts; never in the totals above (owner decision
+    # 2026-10-17, STU-336). touches_none is the main query's complement, so no row
+    # is in both. A set account_id is restricted to the scope, so it can never
+    # match one of these rows: skipping the query keeps a hidden id identical to
+    # a nonexistent one. No Account row is loaded for them.
+    private_rows = []
+    if grants and not account_id:
+        private_rows = db.query(Transaction).filter(
+            *common,
+            or_(*(household_explicit_criterion(Transaction, g) for g in grants)),
+            touches_none(Transaction, scope_ids),
+            Transaction.transaction_type == TransactionType.DEBIT,
+            Transaction.is_posted.is_(True),
+            readable_criterion(Transaction, current_user, viewable, grants),
+        ).all()
 
     account_ids = {
         acc_id
@@ -1756,7 +1813,7 @@ def get_transaction_summary(
         if a.account_type in (AccountType.LOAN, AccountType.CREDIT)
         and not can_view_account(current_user, a)
     }
-    category_ids = {t.category_id for t in transactions if t.category_id}
+    category_ids = {t.category_id for t in (*transactions, *private_rows) if t.category_id}
     # Active categories only: a row on a deleted category falls through to
     # "Uncategorized", as it reads everywhere else (STU-338).
     categories = db.query(Category).filter(
@@ -1811,4 +1868,6 @@ def get_transaction_summary(
         },
         "category_breakdown": category_summary,
         "by_currency": by_currency,
+        "household_private": summarize_household_private(
+            private_rows, category_names, category_owners, default),
     }

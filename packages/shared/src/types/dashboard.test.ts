@@ -219,6 +219,9 @@ describe('per-currency projection responses', () => {
         currency: 'PHP', total_income: 10.0, total_expenses: 4.0, moved_in: 0.0, moved_out: 0.0, net_flow: 6.0,
         transaction_count: 3, category_breakdown: { Food: { income: 0.0, expenses: 4.0 } },
       }],
+      household_private: [{
+        currency: 'PHP', total_expenses: 55.55, transaction_count: 1, category_breakdown: { Utilities: 55.55 },
+      }],
     } satisfies TransactionSummary
     const full = {
       view: 'full', account_id: 1, name: 'Card', currency: 'PHP',
@@ -236,6 +239,7 @@ describe('per-currency projection responses', () => {
       statements: [{ close_date: '2026-10-15', due_date: '2026-11-05', amount_due: 100.0, currency: 'PHP', status: 'open', lines: [], incomplete: true }],
     } satisfies LimitedCardStatements
     expect(summary.by_currency).toHaveLength(1)
+    expect(summary.household_private[0]?.category_breakdown.Utilities).toBe(55.55)
     expect(full.statements[0]?.incomplete).toBe(true)
     expect(Object.keys(limited.statements[0] ?? {})).toContain('incomplete')
   })
