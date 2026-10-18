@@ -18,14 +18,18 @@ export function summaryRange(filterStart: string, filterEnd: string): SummaryRan
   return range
 }
 
+const UNCATEGORIZED_ROW_NAME = 'Uncategorized'
+
 /**
  * The summary's computed rows. They merge several sources (fees, wallet spend,
- * interest) and are not categories, so no list filter can reproduce them. These mirror
+ * interest) and are not categories, so no category-name filter can reproduce them.
+ * "Uncategorized" is the one exception: the list's `uncategorized` filter reproduces it
+ * (see `buildSpendingBreakdown`). These mirror
  * `UNCATEGORIZED`, `TRANSFER_FEES`, `UNALLOCATED_WALLET_SPEND`, `RETURNED_FROM_WALLETS`
  * and `LOAN_INTEREST_PREFIX` in `backend/app/routers/transactions.py`.
  */
 export const SYNTHETIC_ROW_NAMES: readonly string[] = [
-  'Uncategorized',
+  UNCATEGORIZED_ROW_NAME,
   'Transfer fees',
   'Unallocated wallet spend',
   'Returned from wallets',
@@ -36,14 +40,27 @@ export function isSyntheticRowName(name: string): boolean {
   return SYNTHETIC_ROW_NAMES.includes(name) || name.startsWith(LOAN_INTEREST_PREFIX)
 }
 
+/** What a row sets on the list's filters when it is clicked. */
+export interface SpendingDrill {
+  /** The category names to filter the list by. */
+  names: string[]
+  /** Also match income and expenses with no category (the list's `uncategorized` filter). */
+  uncategorized: boolean
+}
+
+function drillFor(name: string): SpendingDrill | null {
+  if (name === UNCATEGORIZED_ROW_NAME) return { names: [name], uncategorized: true }
+  return isSyntheticRowName(name) ? null : { names: [name], uncategorized: false }
+}
+
 export interface SpendingRow {
   key: string
   name: string
   amount: number
   /** Fraction of `total`, 0 to 1. */
   share: number
-  /** The category name to filter the list by, or null when the row can't be drilled into. */
-  drillName: string | null
+  /** The list filters this row sets when clicked, or null when it can't be drilled into. */
+  drill: SpendingDrill | null
   color?: string
 }
 
@@ -69,6 +86,11 @@ export interface SpendingBreakdown {
  * caller owns a category of that name, because that row merges the computed amount.
  * A name the caller has no category for (a partner's) is still drillable: the list
  * filters by name.
+ *
+ * The "Uncategorized" row is the exception among the computed rows. It drills into the
+ * name "Uncategorized" together with the `uncategorized` flag, whoever owns a real
+ * category of that name, because the summary merges the computed row with that
+ * category. The other computed rows and "Other" have no drill.
  */
 export function buildSpendingBreakdown(
   breakdown: Record<string, { income: number; expenses: number }>,
@@ -88,7 +110,7 @@ export function buildSpendingBreakdown(
       name: entry.name,
       amount: entry.amount,
       share: total > 0 ? entry.amount / total : 0,
-      drillName: isSyntheticRowName(entry.name) ? null : entry.name,
+      drill: drillFor(entry.name),
     }
     if (color) row.color = color
     return row
@@ -104,7 +126,7 @@ export function buildSpendingBreakdown(
       name: 'Other',
       amount,
       share: total > 0 ? amount / total : 0,
-      drillName: null,
+      drill: null,
       isOther: true,
     })
   }
