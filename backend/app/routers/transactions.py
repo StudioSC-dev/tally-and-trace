@@ -1517,6 +1517,18 @@ RETURNED_FROM_WALLETS = "Returned from wallets"
 LOAN_INTEREST_PREFIX = "Interest: "
 
 
+def category_label(t, category_names: dict, category_owners: Optional[dict] = None) -> str:
+    """The summary's category name for ``t``: its category's name, or
+    "Uncategorized" when it has none, the category isn't in ``category_names``
+    (e.g. a deleted one), or, with ``category_owners``, the row's creator
+    doesn't own it."""
+    if not t.category_id:
+        return UNCATEGORIZED
+    if category_owners is not None and category_owners.get(t.category_id) != t.user_id:
+        return UNCATEGORIZED
+    return category_names.get(t.category_id, UNCATEGORIZED)
+
+
 def summarize_period(
     transactions, wallet_ids: Set[int], category_names: dict, scope_ids: Set[int],
     loan_names: Optional[dict] = None, category_owners: Optional[dict] = None,
@@ -1615,11 +1627,7 @@ def summarize_period(
         return b["breakdown"].setdefault(name, {"income": zero, "expenses": zero})
 
     def category(t) -> str:
-        if not t.category_id:
-            return UNCATEGORIZED
-        if category_owners is not None and category_owners.get(t.category_id) != t.user_id:
-            return UNCATEGORIZED
-        return category_names.get(t.category_id, UNCATEGORIZED)
+        return category_label(t, category_names, category_owners)
 
     for t in transactions:
         amount = _D(t.amount)
