@@ -897,24 +897,23 @@ def get_transactions(
         # exactly what Redactor.category_name and summarize_period read as none.
         # Category ids are unique, so the outer join never duplicates a row.
         #
-        # Scope and visibility mirror the other reads:
-        #  - touches_accounts(seen) is the summary's scope (seen includes
-        #    tag_viewer accounts);
-        #  - displayed_description_criterion is the SQL form of
-        #    Redactor.shows_text. Redactor.transaction() shows category_name only
-        #    for a FULL / SHARED_FULL view (both require every touched account
-        #    viewable, and SHARED_FULL also needs ids) or, in the limited view,
-        #    when shows_text holds: every touched account viewable (rule i) or
-        #    Household rule (c) (rule ii). The criterion is exactly "every
-        #    touched account in seen, or an explicit Household grant", so a row
-        #    whose category_name is hidden never matches its hidden category.
+        # Scope and visibility are one criterion, displayed_description_criterion,
+        # the SQL form of Redactor.shows_text: every touched account in seen
+        # (seen includes tag_viewer accounts), or Household rule (c) for any
+        # grant. That is what the period summary counts: its totals (every
+        # touched account in seen) plus its ``household_private`` line (rule-(c)
+        # rows outside the scope, STU-336). Redactor.transaction() shows
+        # category_name only for a FULL / SHARED_FULL view (both require every
+        # touched account viewable, and SHARED_FULL also needs ids) or, in the
+        # limited view, when shows_text holds (rule i or rule ii), so a row whose
+        # category_name is hidden never matches its hidden category.
         #
         # ``uncategorized`` (STU-338) matches debits and credits only: a transfer
         # without a category shows as "Transfer" and summarize_period never puts
         # a transfer in a category row, so this is the summary's "Uncategorized"
-        # row. A debit or credit touches only account_id, so inside the scope
-        # every touched account is in seen and shows_text holds: its category is
-        # always shown, and a hidden category can never match as "none".
+        # row (and the Household line's). shows_text holds for every row in the
+        # scope, so its category is always shown, and a hidden category can never
+        # match as "none".
         # Reserved names ("Transfer fees", "Uncategorized") are not special in
         # category_names: they match real creator-owned categories of that name
         # only. Rows with no category are asked for with ``uncategorized``.
@@ -927,8 +926,7 @@ def get_transactions(
         if uncategorized:
             matches.append(and_(Category.id.is_(None), Transaction.transaction_type.in_(
                 [TransactionType.DEBIT, TransactionType.CREDIT])))
-        query = query.filter(or_(*matches), touches_accounts(Transaction, seen),
-                             displayed_description_criterion(seen, grants))
+        query = query.filter(or_(*matches), displayed_description_criterion(seen, grants))
     if entered_by == "me":
         query = query.filter(Transaction.user_id == current_user.id)
     if allocation_id:

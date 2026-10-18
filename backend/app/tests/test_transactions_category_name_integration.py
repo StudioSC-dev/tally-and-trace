@@ -518,17 +518,17 @@ def test_uncategorized_matches_the_summary_row(hh, sw_client):
 
 
 def test_rule_c_rows_match_as_category_names_does(hh, sw_client):
-    # Gap 6(a), kept on purpose: C reads these rows through A's explicit Household
-    # tag (rule (c)) on A's private account, outside C's account scope. Neither
-    # filter counts them, as the summary doesn't.
+    # C reads these rows through A's explicit Household tag (rule (c)) on A's
+    # private account, outside C's account scope. The summary lists them on its
+    # ``household_private`` line (STU-336), so both filters match them.
     a, c = hh["a"], hh["c"]
     groceries = _category(sw_client, a, "Groceries")
     bare = _debit(sw_client, a, hh["a_private"], 7, tag_ids=[hh["hh_a"]])
     named = _debit(sw_client, a, hh["a_private"], 8, groceries, tag_ids=[hh["hh_a"]])
     readable = _ids(_list(sw_client, c))
     assert bare in readable and named in readable
-    assert named not in _ids(_list(sw_client, c, category_names="Groceries"))
-    assert bare not in _ids(_list(sw_client, c, uncategorized=True))
+    assert named in _ids(_list(sw_client, c, category_names="Groceries"))
+    assert bare in _ids(_list(sw_client, c, uncategorized=True))
 
 
 def test_uncategorized_false_is_no_filter(hh, groceries, sw_client):

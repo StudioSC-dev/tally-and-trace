@@ -294,3 +294,74 @@ def test_i12_wallet_logic_is_untouched_and_the_line_is_not_additive(hh, sw_clien
     assert _line(after) == {"currency": "PHP", "total_expenses": 1_000.0,
                             "transaction_count": 1,
                             "category_breakdown": {"Uncategorized": 1_000.0}}
+
+
+# --- Commit 2: the category filter ---------------------------------------------------------
+
+def _neutral(t):
+    return t["view"] == "limited" and t["account"]["id"] is None
+
+
+def test_i13_category_names_matches_the_household_row(hh, sw_client, private_world):
+    found = _list(sw_client, hh["c"], category_names="Utilities")
+    # The Household debit, and the Household credit (listed, never on the line).
+    assert {t["id"] for t in found} == {private_world["hh"], private_world["hh_credit"]}
+    row = next(t for t in found if t["id"] == private_world["hh"])
+    assert row["account"]["id"] is None
+    assert row["category_name"] == "Utilities"
+    assert sw_leaks(found, private_ids=[hh["a_private"], private_world["usd"]]) == []
+
+
+def test_i14_the_untagged_private_row_never_matches(hh, sw_client, private_world):
+    untagged = private_world["untagged"]
+    assert untagged not in {t["id"] for t in _list(sw_client, hh["c"], category_names="Utilities")}
+    assert _list(sw_client, hh["b"], category_names="Utilities") == []
+    mine = {t["id"] for t in _list(sw_client, hh["a"], category_names="Utilities")}
+    assert mine == {private_world["hh"], private_world["hh_credit"], untagged}
+
+
+def test_i15_the_filter_drills_into_both_figures(hh, sw_client, utilities):
+    client, a, c = sw_client, hh["a"], hh["c"]
+    _txn(client, a, hh["joint"], 120, category=utilities)
+    _txn(client, a, hh["a_private"], 55.55, tags=[hh["hh_a"]], category=utilities)
+    _txn(client, a, hh["a_private"], UNTAGGED_DEBIT, category=utilities)
+    found = _list(client, c, category_names="Utilities")
+    posted_debits = [t for t in found if t["transaction_type"] == "debit" and t["is_posted"]
+                     and t["currency"] == "PHP"]
+    body = _summary(client, c)
+    on_line = sum(t["amount"] for t in posted_debits if _neutral(t))
+    in_scope = sum(t["amount"] for t in posted_debits if not _neutral(t))
+    assert on_line == pytest.approx(_line(body)["category_breakdown"]["Utilities"])
+    assert in_scope == pytest.approx(_php(body)["category_breakdown"]["Utilities"]["expenses"])
+    assert (on_line, in_scope) == (pytest.approx(55.55), pytest.approx(120))
+
+
+def test_i16_revoking_the_share_drops_the_row_from_the_filter(hh, sw_client, sw_db,
+                                                              private_world):
+    from app.models.tag_share import TagShare
+
+    c = hh["c"]
+    assert private_world["hh"] in {t["id"] for t in _list(sw_client, c,
+                                                          category_names="Utilities")}
+    sw_db.query(TagShare).filter(TagShare.id == hh["a_to_c"]).delete()
+    sw_db.commit()
+    assert _list(sw_client, c, category_names="Utilities") == []
+
+
+def test_i17_uncategorized_matches_an_uncategorized_household_row(hh, sw_client):
+    client, a, c = sw_client, hh["a"], hh["c"]
+    bare = _txn(client, a, hh["a_private"], 4.75, tags=[hh["hh_a"]])
+    hidden = _txn(client, a, hh["a_private"], UNTAGGED_DEBIT)
+    found = {t["id"]: t for t in _list(client, c, uncategorized=True)}
+    assert bare in found and hidden not in found
+    assert found[bare]["category_name"] is None and found[bare]["account"]["id"] is None
+    assert _line(_summary(client, c))["category_breakdown"] == {"Uncategorized": 4.75}
+
+
+def test_a_reserved_name_on_the_line_is_a_real_category(hh, sw_client):
+    """A Household debit under a real "Transfer fees" category is drillable by name."""
+    client, a, c = sw_client, hh["a"], hh["c"]
+    fees = _category(client, a, "Transfer fees")
+    row = _txn(client, a, hh["a_private"], 2.5, tags=[hh["hh_a"]], category=fees)
+    assert _line(_summary(client, c))["category_breakdown"] == {"Transfer fees": 2.5}
+    assert [t["id"] for t in _list(client, c, category_names="Transfer fees")] == [row]
