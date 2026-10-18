@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildSpendingBreakdown, isSyntheticRowName, summaryRange,
+  buildHouseholdPrivateBreakdown, buildSpendingBreakdown, isSyntheticRowName, summaryCurrencies,
+  summaryRange,
 } from './spendingBreakdown'
+import type { TransactionSummaryHouseholdRow } from '../types/api'
 
 const line = (expenses: number) => ({ income: 0, expenses })
 const cat = (name: string, color?: string) => ({ name, color })
@@ -117,5 +119,62 @@ describe('summaryRange', () => {
     expect(summaryRange('2026-10-01', '')).toEqual({ start_date: '2026-10-01T00:00:00Z' })
     expect(summaryRange('', '2026-10-31')).toEqual({ end_date: '2026-10-31T23:59:59.999999Z' })
     expect(summaryRange('', '')).toEqual({})
+  })
+})
+
+const hh = (currency: 'PHP' | 'USD', category_breakdown: Record<string, number>, count = 1): TransactionSummaryHouseholdRow => ({
+  currency,
+  total_expenses: Object.values(category_breakdown).reduce((a, b) => a + b, 0),
+  transaction_count: count,
+  category_breakdown,
+})
+
+describe('buildHouseholdPrivateBreakdown', () => {
+  it('gives zeros for an empty, missing or unmatched currency', () => {
+    const zero = { total: 0, count: 0, rows: [] }
+    expect(buildHouseholdPrivateBreakdown([], 'PHP', [])).toEqual(zero)
+    expect(buildHouseholdPrivateBreakdown(undefined, 'PHP', [])).toEqual(zero)
+    expect(buildHouseholdPrivateBreakdown([hh('USD', { Food: 5 })], 'PHP', [])).toEqual(zero)
+  })
+
+  it('sorts, prefixes keys, drills, and applies category colours', () => {
+    const { rows, total, count } = buildHouseholdPrivateBreakdown(
+      [hh('PHP', { Utilities: 20, Food: 30, Uncategorized: 10 }, 3)], 'PHP', [cat('Food', '#ff0000')])
+    expect(rows.map((r) => r.name)).toEqual(['Food', 'Utilities', 'Uncategorized'])
+    expect(rows.map((r) => r.key)).toEqual(['household:Food', 'household:Utilities', 'household:Uncategorized'])
+    expect(total).toBe(60)
+    expect(count).toBe(3)
+    expect(rows[0]?.color).toBe('#ff0000')
+    expect(rows[1]?.drill).toEqual({ names: ['Utilities'], uncategorized: false })
+    expect(rows[2]?.drill).toEqual({ names: ['Uncategorized'], uncategorized: true })
+  })
+
+  it('makes names the main breakdown reserves drillable', () => {
+    const { rows } = buildHouseholdPrivateBreakdown(
+      [hh('PHP', { 'Transfer fees': 4, 'Unallocated wallet spend': 3, 'Returned from wallets': 2, 'Interest: Car': 1 })],
+      'PHP', [])
+    expect(rows).toHaveLength(4)
+    for (const r of rows) expect(r.drill).toEqual({ names: [r.name], uncategorized: false })
+  })
+
+  it('does not drop a long line into an Other slice', () => {
+    const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`C${i}`, i + 1]))
+    expect(buildHouseholdPrivateBreakdown([hh('PHP', many)], 'PHP', []).rows).toHaveLength(9)
+  })
+})
+
+describe('summaryCurrencies', () => {
+  const byCurrency = (c: 'PHP' | 'USD' | 'JPY') =>
+    ({ currency: c, total_income: 0, total_expenses: 0, moved_in: 0, moved_out: 0, net_flow: 0, transaction_count: 0, category_breakdown: {} })
+
+  it('lists by_currency first, then extra household currencies without duplicates', () => {
+    expect(summaryCurrencies({
+      by_currency: [byCurrency('PHP'), byCurrency('JPY')],
+      household_private: [hh('USD', { A: 1 }), hh('PHP', { A: 1 })],
+    })).toEqual(['PHP', 'JPY', 'USD'])
+  })
+
+  it('is undefined without a summary', () => {
+    expect(summaryCurrencies(undefined)).toBeUndefined()
   })
 })

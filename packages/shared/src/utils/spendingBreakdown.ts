@@ -1,4 +1,5 @@
-import type { Category } from '../types/api'
+import type { Category, TransactionSummary } from '../types/api'
+import type { CurrencyCode } from './currency'
 import { dayEndWire, dayStartWire } from './transactionList'
 
 /** The summary query's date bounds: each side is sent only when it is set. */
@@ -138,4 +139,57 @@ export function buildSpendingBreakdown(
   })
 
   return { total, rows, slices }
+}
+
+/**
+ * The currencies a summary can be read in: `by_currency` in its order, then any
+ * `household_private` currency not already listed, so a partner-only line is reachable.
+ */
+export function summaryCurrencies(
+  summary: Pick<TransactionSummary, 'by_currency' | 'household_private'> | undefined,
+): CurrencyCode[] | undefined {
+  if (!summary) return undefined
+  const currencies = summary.by_currency.map((row) => row.currency)
+  for (const row of summary.household_private ?? []) {
+    if (!currencies.includes(row.currency)) currencies.push(row.currency)
+  }
+  return currencies
+}
+
+export interface HouseholdPrivateBreakdown {
+  /** The sum of the rows listed. */
+  total: number
+  /** The currency row's `transaction_count`. */
+  count: number
+  rows: SpendingRow[]
+}
+
+/**
+ * The "paid from other accounts" rows for one currency. Sorting and colours come from
+ * `buildSpendingBreakdown`; the drill targets are set here instead. Every row on this
+ * line is an ordinary debit category, so every name is drillable, including names the
+ * main breakdown reserves ("Transfer fees", "Interest: ..."). "Uncategorized" carries
+ * the `uncategorized` flag. Keys are prefixed `household:` so they never collide with
+ * the main rows. No match gives zeros and no rows.
+ */
+export function buildHouseholdPrivateBreakdown(
+  householdRows: TransactionSummary['household_private'] | undefined,
+  currency: CurrencyCode,
+  categories: readonly Pick<Category, 'name' | 'color'>[],
+): HouseholdPrivateBreakdown {
+  const row = (householdRows ?? []).find((r) => r.currency === currency)
+  if (!row) return { total: 0, count: 0, rows: [] }
+  const lines = Object.fromEntries(
+    Object.entries(row.category_breakdown).map(([name, expenses]) => [name, { income: 0, expenses }]),
+  )
+  const built = buildSpendingBreakdown(lines, categories, Infinity)
+  return {
+    total: built.total,
+    count: row.transaction_count,
+    rows: built.rows.map((r) => ({
+      ...r,
+      key: `household:${r.name}`,
+      drill: { names: [r.name], uncategorized: r.name === UNCATEGORIZED_ROW_NAME },
+    })),
+  }
 }

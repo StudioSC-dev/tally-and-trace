@@ -725,6 +725,23 @@ export interface TransactionSummary {
    * (`summary.transaction_count` stays the total). One row per currency, default first.
    */
   by_currency: TransactionSummaryCurrencyRow[]
+  /**
+   * The "paid from other accounts" line, one row per currency (empty when there is none).
+   * Never part of `summary`, `category_breakdown` or `by_currency`.
+   */
+  household_private: TransactionSummaryHouseholdRow[]
+}
+
+/**
+ * One currency's "paid from other accounts" line of GET /transactions/summary/period:
+ * posted Household debits a member made on their own accounts the caller can't view,
+ * in each record's currency. Not in `summary`, `category_breakdown` or `by_currency`.
+ */
+export interface TransactionSummaryHouseholdRow {
+  currency: CurrencyCode
+  total_expenses: number
+  transaction_count: number
+  category_breakdown: Record<string, number>
 }
 
 /** One currency's row of GET /transactions/summary/period; a row counts in its account's currency. */
