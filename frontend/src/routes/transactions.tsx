@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -221,6 +221,14 @@ const parseDateInput = (value: string) => {
 
 export const Route = createFileRoute('/transactions')({
   component: TransactionsPage,
+  // `?edit=<id>` opens that transaction; `from=dashboard` goes back there when it closes.
+  validateSearch: (search: Record<string, unknown>): { edit?: number; from?: 'dashboard' } => {
+    const edit = Number(search.edit)
+    return {
+      edit: Number.isInteger(edit) && edit > 0 ? edit : undefined,
+      from: search.from === 'dashboard' ? 'dashboard' : undefined,
+    }
+  },
 })
 
 type TransactionFormState = {
@@ -1459,6 +1467,104 @@ export function TransactionsPage() {
     closeActionModal()
     handleEdit(transaction)
   }
+
+  // A link from the dashboard (`?edit=<id>&from=dashboard`) opens that transaction: its
+  // form when the caller may edit it and it is classified, else its action modal, which
+  // locks a pending or unavailable loan destination and shows only the permitted
+  // actions. The search is then cleared, so a reload doesn't reopen it, and once the
+  // modal it opened closes, the page goes back to the dashboard.
+  const { edit: linkedId, from: linkedFrom } = Route.useSearch()
+  const router = useRouter()
+  const canGoBack = useCanGoBack()
+  const { currentData: linkedTransaction, error: linkedError } = useGetTransactionQuery(linkedId ?? 0, {
+    skip: linkedId === undefined || !isAuthenticated,
+  })
+  const handleEditRef = useLatestRef(handleEdit)
+  const openActionModalRef = useLatestRef(openActionModal)
+  // The id already opened, so a re-run (StrictMode, a new `loanPaymentStatus`) doesn't reopen it.
+  const handledEditId = useRef<number | null>(null)
+  const returnToDashboard = useRef(false)
+  // The linked modal has been seen open, so its closing is what sends the page back.
+  const linkedSeenOpen = useRef(false)
+  const goBackToDashboard = useCallback(() => {
+    if (canGoBack) {
+      router.history.back()
+    } else {
+      navigate({ to: '/' })
+    }
+  }, [canGoBack, navigate, router])
+
+  useEffect(() => {
+    if (linkedId === undefined) {
+      handledEditId.current = null
+      return
+    }
+    if (handledEditId.current === linkedId) {
+      return
+    }
+    if (linkedError) {
+      handledEditId.current = linkedId
+      alert(
+        'status' in linkedError && linkedError.status === 404
+          ? 'This transaction is no longer available.'
+          : apiErrorMessage(linkedError) || 'This transaction is no longer available.'
+      )
+      if (linkedFrom === 'dashboard') {
+        goBackToDashboard()
+      } else {
+        navigate({ to: '/transactions', search: {}, replace: true })
+      }
+      return
+    }
+    if (!accountsData || !linkedTransaction || linkedTransaction.id !== linkedId) {
+      return
+    }
+    handledEditId.current = linkedId
+    returnToDashboard.current = linkedFrom === 'dashboard'
+    linkedSeenOpen.current = false
+    const status = loanPaymentStatus(linkedTransaction)
+    // `handleEdit` itself refuses only a Limited row, so the edit right is checked here.
+    if (
+      !isLimited(linkedTransaction) &&
+      linkedTransaction.permissions.can_edit &&
+      (status === 'loan' || status === 'not_loan')
+    ) {
+      handleEditRef.current(linkedTransaction)
+    } else {
+      openActionModalRef.current(linkedTransaction)
+    }
+    navigate({ to: '/transactions', search: {}, replace: true })
+  }, [
+    accountsData,
+    goBackToDashboard,
+    handleEditRef,
+    linkedError,
+    linkedFrom,
+    linkedId,
+    linkedTransaction,
+    loanPaymentStatus,
+    navigate,
+    openActionModalRef,
+  ])
+
+  useEffect(() => {
+    if (!returnToDashboard.current) {
+      return
+    }
+    // `openEditFromModal` swaps the action modal for the form in one batch, so this
+    // never reads false in between.
+    if (isCreateModalOpen || isActionModalOpen) {
+      linkedSeenOpen.current = true
+      return
+    }
+    if (!linkedSeenOpen.current) {
+      return
+    }
+    returnToDashboard.current = false
+    linkedSeenOpen.current = false
+    handledEditId.current = null
+    goBackToDashboard()
+  }, [goBackToDashboard, isActionModalOpen, isCreateModalOpen])
 
   const getTransactionMeta = useCallback(
     (transaction: Transaction) => {
