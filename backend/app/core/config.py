@@ -1,3 +1,5 @@
+import os
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
@@ -8,8 +10,13 @@ _PLACEHOLDER_DATABASE_URL = "postgresql://user:password@localhost:5432/tally_tra
 _PLACEHOLDER_SECRET_KEY = "your-secret-key-here-change-in-production"
 
 
+# The test guard sets TT_DISABLE_DOTENV=1 so a developer's local .env (which may
+# point at a real database) can never supply settings to a test run.
+_ENV_FILE: Optional[str] = None if os.environ.get("TT_DISABLE_DOTENV") == "1" else ".env"
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, case_sensitive=True)
 
     PROJECT_NAME: str = "Tally & Trace API"
     VERSION: str = "2.0.0"
