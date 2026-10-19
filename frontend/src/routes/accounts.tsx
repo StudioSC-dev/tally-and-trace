@@ -1,8 +1,9 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetHouseholdViewsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
+import { useGetAccountsQuery, useGetCardCreditsQuery, useGetHouseholdViewsQuery, useGetMinimumDuePresetsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
 import { groupAccounts } from '@tally-trace/shared'
+import type { CardCredit, MinimumDuePreset, MinimumDueRule } from '@tally-trace/shared'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -15,6 +16,7 @@ import { ShareDialog } from '../components/ShareDialog'
 import { SharedWithMe } from '../components/SharedWithMe'
 import { HouseholdLinks } from '../components/household/HouseholdLinks'
 import { StatementsPanel } from '../components/StatementsPanel'
+import { CreditSummary } from '../components/CreditSummary'
 import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
@@ -35,7 +37,7 @@ function NotCountedTag() {
 }
 
 /** One account row. A click (or Enter/Space) hands the account to `onOpen`. */
-function AccountCard({ account, onOpen }: { account: Account; onOpen: (account: Account) => void }) {
+function AccountCard({ account, credit, onOpen }: { account: Account; credit?: CardCredit; onOpen: (account: Account) => void }) {
   return (
     <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
@@ -68,6 +70,12 @@ function AccountCard({ account, onOpen }: { account: Account; onOpen: (account: 
             </div>
 
             {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
+
+            {credit && (
+              <div data-testid={`account-credit-${account.id}`}>
+                <CreditSummary credit={credit} compact />
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2 text-xs text-body">
               <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
@@ -117,6 +125,142 @@ function AccountCard({ account, onOpen }: { account: Account; onOpen: (account: 
         </Link>
       </div>
     </article>
+  )
+}
+
+/** A copy of a preset's rule, so editing the form never touches the cached preset. */
+const copyRule = (rule: MinimumDueRule): MinimumDueRule => ({
+  ...rule,
+  base_excludes: [...rule.base_excludes],
+  floored_terms: [...rule.floored_terms],
+  added_terms: [...rule.added_terms],
+  floor: { ...rule.floor },
+})
+
+/** Two rules are the same when they serialise the same; the key order never changes. */
+const sameRule = (a: MinimumDueRule | null, b: MinimumDueRule | null): boolean =>
+  JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * The "Minimum due rule" part of the card form: None or a bank preset, with the floor in
+ * the card's currency, the annual fee where the rule reads one, and, on BDO, the switch
+ * for the footnote that leaves new purchases out of the base.
+ */
+function MinimumDueRuleFields({
+  rule,
+  presets,
+  currency,
+  onChange,
+}: {
+  rule: MinimumDueRule | null
+  presets: readonly MinimumDuePreset[]
+  currency: CurrencyCode
+  onChange: (rule: MinimumDueRule | null) => void
+}) {
+  const preset = presets.find((p) => p.key === rule?.preset)
+  const usesAnnualFee = rule !== null && [...rule.floored_terms, ...rule.added_terms].includes('annual_fee_twelfth')
+  const isBdo = rule?.preset === 'bdo' || rule?.preset === 'bdo_installment'
+  const newPurchasesExcluded = rule?.base_excludes.includes('new_transactions') ?? false
+
+  const pick = (key: string) => {
+    const chosen = presets.find((p) => p.key === key)
+    onChange(chosen ? copyRule(chosen.rule) : null)
+  }
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-line" data-testid="minimum-due-rule">
+      <div>
+        <label className="label" htmlFor="minimum-due-preset">Minimum due rule</label>
+        <select
+          id="minimum-due-preset"
+          value={rule?.preset ?? ''}
+          onChange={(e) => pick(e.target.value)}
+          className="select-field focus-ring"
+          data-testid="minimum-due-preset"
+        >
+          <option value="">None</option>
+          {rule?.preset === 'custom' && <option value="custom">Custom (kept as it is)</option>}
+          {presets.map((p) => (
+            <option key={p.key} value={p.key}>{p.label}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted">
+          How this card's minimum amount due is estimated at each statement.
+          {preset && (preset.effective_from
+            ? ` Follows the bank's rule from ${preset.effective_from}.`
+            : " Follows the bank's statement wording, which gives no effective date.")}
+        </p>
+      </div>
+
+      {rule && (
+        <div>
+          <label className="label" htmlFor="minimum-due-floor">Minimum floor ({currency})</label>
+          <input
+            id="minimum-due-floor"
+            type="number"
+            step="0.01"
+            min={0}
+            value={rule.floor[currency] ?? ''}
+            onChange={(e) => {
+              const rest = Object.fromEntries(Object.entries(rule.floor).filter(([code]) => code !== currency))
+              onChange({ ...rule, floor: e.target.value === '' ? rest : { ...rest, [currency]: e.target.value } })
+            }}
+            className="input-field focus-ring"
+            placeholder="0.00"
+            data-testid="minimum-due-floor"
+          />
+          <p className="mt-1 text-xs text-muted">
+            The lowest minimum the bank asks for. Left empty, the floor counts as 0.
+          </p>
+        </div>
+      )}
+
+      {rule && usesAnnualFee && (
+        <div>
+          <label className="label" htmlFor="minimum-due-annual-fee">Annual fee ({currency})</label>
+          <input
+            id="minimum-due-annual-fee"
+            type="number"
+            step="0.01"
+            min={0}
+            value={rule.annual_fee ?? ''}
+            onChange={(e) => onChange({ ...rule, annual_fee: e.target.value === '' ? null : e.target.value })}
+            className="input-field focus-ring"
+            placeholder="0.00"
+            data-testid="minimum-due-annual-fee"
+          />
+          <p className="mt-1 text-xs text-muted">
+            One twelfth is added to each minimum. This estimate leaves out finance, late and overlimit fees, so it
+            may be below your statement's minimum; adjust the floor or enter the statement's figure.
+          </p>
+        </div>
+      )}
+
+      {rule && isBdo && (
+        <label className="flex items-start gap-2 text-sm text-body">
+          <input
+            type="checkbox"
+            checked={newPurchasesExcluded}
+            onChange={(e) =>
+              onChange({
+                ...rule,
+                base_excludes: e.target.checked
+                  ? [...rule.base_excludes, 'new_transactions']
+                  : rule.base_excludes.filter((x) => x !== 'new_transactions'),
+              })
+            }
+            className="mt-1 h-4 w-4"
+            data-testid="minimum-due-new-purchases"
+          />
+          <span>
+            Leave this cycle's new purchases out of the base
+            <span className="block text-xs text-muted">
+              One reading of a BDO footnote. Off gives the higher, safer minimum.
+            </span>
+          </span>
+        </label>
+      )}
+    </div>
   )
 }
 
@@ -190,8 +334,17 @@ export function AccountsPage() {
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
   const [amortizationTouched, setAmortizationTouched] = useState(false)
   const [showCreditSettings, setShowCreditSettings] = useState(false)
+  // The minimum due rule is held beside the form data: it is a nested object, sent only
+  // when the card is new or the rule changed (None sends null, which clears it).
+  const [ruleDraft, setRuleDraft] = useState<MinimumDueRule | null>(null)
   // Why the last save failed, shown in the form until the next attempt or close.
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  const { data: cardCredits } = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
+  const creditById = useMemo(() => new Map((cardCredits?.items ?? []).map((c) => [c.account_id, c])), [cardCredits])
+  const { data: presets } = useGetMinimumDuePresetsQuery(undefined, {
+    skip: !isAuthenticated || !isCreateModalOpen || formData.account_type !== 'credit',
+  })
 
   const [triggerAccounts] = useLazyGetAccountsQuery()
   const beginAccountsRequest = useRequestGeneration()
@@ -348,6 +501,15 @@ export function AccountsPage() {
     return null // Will redirect
   }
 
+  // The rule is sent on an edit only when it changed. Only a card holds one, so changing
+  // the type away from credit clears a stored rule in the same save.
+  const changedRule = (account: Account): { minimum_due_rule?: MinimumDueRule | null } => {
+    if (!account.permissions.can_edit_settings) return {}
+    const stored = account.minimum_due_rule ?? null
+    if (formData.account_type !== 'credit') return stored ? { minimum_due_rule: null } : {}
+    return sameRule(ruleDraft, stored) ? {} : { minimum_due_rule: ruleDraft }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaveError(null)
@@ -381,6 +543,7 @@ export function AccountsPage() {
             ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
             ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
             ...changedRouting,
+            ...changedRule(editingAccount),
             ...(isLoan
               ? {
                   loan_annual_rate: formData.loan_annual_rate ?? null,
@@ -394,10 +557,16 @@ export function AccountsPage() {
         }).unwrap()
         setEditingAccount(null)
       } else {
-        await createAccount({ ...payload, is_active: isActive, tag_ids: selectedTagIds }).unwrap()
+        await createAccount({
+          ...payload,
+          is_active: isActive,
+          tag_ids: selectedTagIds,
+          ...(formData.account_type === 'credit' && ruleDraft ? { minimum_due_rule: ruleDraft } : {}),
+        }).unwrap()
       }
       setFormData(blankForm(defaultCurrency))
       setAmortizationTouched(false)
+      setRuleDraft(null)
       setIsCreateModalOpen(false)
       await loadAccountsRef.current()
     } catch (error) {
@@ -433,6 +602,7 @@ export function AccountsPage() {
     })
     setAmortizationTouched(true)
     setShowCreditSettings(false)
+    setRuleDraft(account.minimum_due_rule ?? null)
     setIsCreateModalOpen(true)
   }
 
@@ -501,7 +671,7 @@ export function AccountsPage() {
         </h3>
         <div className="grid grid-cols-1 gap-3">
           {inGroup.map((account) => (
-            <AccountCard key={account.id} account={account} onOpen={openActionModal} />
+            <AccountCard key={account.id} account={account} credit={creditById.get(account.id)} onOpen={openActionModal} />
           ))}
         </div>
       </div>
@@ -759,6 +929,7 @@ export function AccountsPage() {
                   setEditingAccount(null)
                   setFormData(blankForm(defaultCurrency))
                   setAmortizationTouched(false)
+                  setRuleDraft(null)
                   setShowCreditSettings(false)
                   setSaveError(null)
                 }}
@@ -1047,6 +1218,15 @@ export function AccountsPage() {
                           Used when "Paid From" can't cover the statement on its own.
                         </p>
                       </div>
+
+                      {(!editingAccount || editingAccount.permissions.can_edit_settings) && (
+                        <MinimumDueRuleFields
+                          rule={ruleDraft}
+                          presets={presets ?? []}
+                          currency={formData.currency as CurrencyCode}
+                          onChange={setRuleDraft}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -1241,6 +1421,7 @@ export function AccountsPage() {
                     setEditingAccount(null)
                     setFormData(blankForm(defaultCurrency))
                     setAmortizationTouched(false)
+                    setRuleDraft(null)
                     setSaveError(null)
                   }}
                   className="flex-1 btn-secondary focus-ring w-full sm:w-auto py-3 px-4 text-base"

@@ -82,6 +82,15 @@ export type {
   LimitedLoanSchedule,
   LoanScheduleResponse,
   CardStatementsResponse,
+  CardCredit,
+  CardCreditDetail,
+  CardPaymentInput,
+  CreditCheck,
+  CreditStatus,
+  MinimumDueRule,
+  MinimumDuePreset,
+  StatementDue,
+  StatementMinimumInput,
   BalanceHistoryEntry,
   LimitedEvent,
   LimitedTimelineEvent,
@@ -118,6 +127,11 @@ import type {
   LoanPrepaymentRequest,
   LoanScheduleResponse,
   CardStatementsResponse,
+  CardCredit,
+  CardCreditDetail,
+  CardPaymentInput,
+  MinimumDuePreset,
+  StatementMinimumInput,
   AccountShares,
   AccountShare,
   ReceivedShare,
@@ -212,6 +226,45 @@ export const accountingApi = createApi({
     getAccountBalance: builder.query<AccountBalance, number>({
       query: (id) => `accounts/${id}/balance`,
       providesTags: ['Account'],
+    }),
+    // The bank presets for a card's minimum due rule. Static, so it carries no tag.
+    getMinimumDuePresets: builder.query<MinimumDuePreset[], void>({
+      query: () => 'accounts/minimum-due-presets',
+    }),
+
+    // ── Card credit, minimum due and payments (owner and admin only) ──────────
+    // Available credit reads posted and pending transactions, recurring entries and
+    // the card itself, so both credit queries provide all three tags: any transaction,
+    // Mark paid or entry edit refreshes the figure.
+    getCardCredits: builder.query<{ items: CardCredit[] }, void>({
+      query: () => 'cards/credit',
+      providesTags: ['Account', 'Transaction', 'BudgetEntry'],
+    }),
+    // 404 for anyone who does not own or administer the card.
+    getCardCredit: builder.query<CardCreditDetail, number>({
+      query: (accountId) => `cards/${accountId}/credit`,
+      providesTags: ['Account', 'Transaction', 'BudgetEntry'],
+    }),
+    // One transfer into the card. A day after today is a planned payment.
+    payCard: builder.mutation<Transaction, { accountId: number; data: CardPaymentInput }>({
+      query: ({ accountId, data }) => ({ url: `cards/${accountId}/payments`, method: 'POST', body: data }),
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+    }),
+    // Enter the minimum a closed statement actually shows, replacing the estimate.
+    setStatementMinimum: builder.mutation<{ close_date: string; amount: number }, { accountId: number; closeDate: string; data: StatementMinimumInput }>({
+      query: ({ accountId, closeDate, data }) => ({
+        url: `cards/${accountId}/statements/${closeDate}/minimum-due`,
+        method: 'PUT',
+        body: data,
+      }),
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry'],
+    }),
+    clearStatementMinimum: builder.mutation<void, { accountId: number; closeDate: string }>({
+      query: ({ accountId, closeDate }) => ({
+        url: `cards/${accountId}/statements/${closeDate}/minimum-due`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry'],
     }),
 
     // ── Categories ────────────────────────────────────────────────────────────
@@ -578,6 +631,12 @@ export const {
   useGetAccountBalanceQuery,
   useGetLoanScheduleQuery,
   useGetAccountStatementsQuery,
+  useGetMinimumDuePresetsQuery,
+  useGetCardCreditsQuery,
+  useGetCardCreditQuery,
+  usePayCardMutation,
+  useSetStatementMinimumMutation,
+  useClearStatementMinimumMutation,
   useRecordLoanPaymentMutation,
   useRecordLoanPrepaymentMutation,
 
