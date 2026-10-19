@@ -594,7 +594,7 @@ export type TransactionInput = Partial<
 
 /** POST /budget-entries/{id}/materialize. */
 export interface BudgetEntryMaterializeInput {
-  /** The occurrence being recorded (any wire time on its day). Defaults to `next_occurrence`. */
+  /** The occurrence being recorded. The server reads its day in UTC, so send `YYYY-MM-DDT00:00:00Z`. Defaults to `next_occurrence`. */
   occurrence_date?: string
   /** The day it was paid. Defaults to the occurrence. */
   transaction_date?: string
