@@ -48,6 +48,7 @@ from app.core.attachments import public_receipt_url
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.category import Category
+from app.services.recurring_kinds import entry_kind
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 
@@ -306,6 +307,7 @@ class Redactor:
         if view in (FULL, SHARED_FULL):
             data = BudgetEntryFields.model_validate(entry).model_dump()
             data.update(self._common(entry, view))
+            data["kind"] = entry_kind(entry, self.access.account(entry.account_id))
             if view == SHARED_FULL:
                 for field in OWNER_PRIVATE_FIELDS:
                     data.pop(field, None)

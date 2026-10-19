@@ -44,6 +44,7 @@ from app.schemas.budget_entry import (
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services.recurring_kinds import default_billing_kind
 from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 from app.core.time import utc_now
 
@@ -384,6 +385,9 @@ def create_budget_entry(
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
     entry_data.update(day_fields)
     entry = BudgetEntry(**entry_data)
+    if "billing_kind" not in entry_in.model_fields_set:
+        entry.billing_kind = default_billing_kind(
+            db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
 
     db.add(entry)
     db.flush()
@@ -487,6 +491,9 @@ def update_budget_entry(
 
     for field, value in prospective_data.items():
         setattr(entry, field, value)
+    if entry.billing_kind is None and "billing_kind" not in prospective_data:
+        entry.billing_kind = default_billing_kind(
+            db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
 
     db.add(entry)
     if tag_ids is not None:

@@ -12,6 +12,8 @@ from app.schemas.tag import (
 
 
 DayRule = Literal["last_weekday"]
+BillingKind = Literal["subscription", "bill"]
+EntryKind = Literal["subscription", "installment", "bill", "cash"]
 
 
 class BudgetEntryBase(BaseModel):
@@ -44,6 +46,9 @@ class BudgetEntryBase(BaseModel):
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     # Installments paid before import with no linked transaction; counts toward "n of m".
     occurrences_paid_offset: int = Field(0, ge=0, le=360)
+    # Card expenses: how an open-ended entry is billed. Unset on create, an open-ended
+    # card expense gets a server default; an explicit null is stored as sent.
+    billing_kind: Optional[BillingKind] = None
 
 
 ZERO_REMAINING_MESSAGE = (
@@ -93,6 +98,7 @@ class BudgetEntryUpdate(BaseModel):
     end_date: Optional[datetime] = None
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
+    billing_kind: Optional[BillingKind] = None
     tag_ids: Optional[TagIds] = tag_ids_update_field()
 
     @field_validator("tag_ids")
@@ -117,6 +123,8 @@ class BudgetEntryFields(BudgetEntryBase):
     # Installments only ("n of m"): occurrences materialised so far, counted from the
     # linked transactions. None for open-ended entries, where the notion doesn't apply.
     occurrences_paid: Optional[int] = None
+    # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
+    kind: Optional[EntryKind] = None
     tags: TagSummaries = tags_response_field()
 
     class Config:
@@ -162,6 +170,8 @@ class SharedFullRecurringEntry(BaseModel):
     max_occurrences: Optional[int] = None
     occurrences_paid_offset: int = 0
     occurrences_paid: Optional[int] = None
+    billing_kind: Optional[BillingKind] = None
+    kind: Optional[EntryKind] = None
     category_name: Optional[str] = None
     tags: TagSummaries = tags_response_field()
     created_at: datetime
