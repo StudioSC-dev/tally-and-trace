@@ -170,3 +170,30 @@ def test_occurrences_report_no_due_range_when_nothing_is_due(sw_client, sw_peopl
     body = _occurrences(client, me, rent)
 
     assert (body["due_unposted"], body["oldest_due"], body["latest_due"]) == (0, None, None)
+
+
+def test_occurrences_walk_a_decades_stale_schedule_completely(sw_client, sw_people, monkeypatch):
+    """Past the projection's guard (2000 weekly steps, 600 semi-monthly months)."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    weekly = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "1985-01-06T00:00:00", "account_id": checking})["id"]
+    semi = sw_post(client, me, "/budget-entries/", {
+        "name": "Allowance", "entry_type": "expense", "amount": 100,
+        "cadence": "semi_monthly", "semi_monthly_day_1": 1, "semi_monthly_day_2": 15,
+        "next_occurrence": "1970-01-01T00:00:00", "account_id": checking})["id"]
+    pin_clock(monkeypatch, REF)
+
+    body = _occurrences(client, me, weekly, include="2026-10-18")
+    assert (body["due_unposted"], body["oldest_due"], body["latest_due"]) == (
+        2181, "1985-01-06", "2026-10-18")
+    assert len(body["occurrences"]) + body["omitted"] == 2185  # through 2026-11-15
+    oct18 = next(o for o in body["occurrences"] if o["occurrence_date"] == "2026-10-18")
+    assert oct18["skipped_before"] == 2180
+
+    body = _occurrences(client, me, semi, include="2026-11-15")
+    assert (body["due_unposted"], body["oldest_due"], body["latest_due"]) == (
+        1364, "1970-01-01", "2026-10-15")
+    assert body["occurrences"][-1]["occurrence_date"] == "2026-11-15"
+    assert body["occurrences"][-1]["skipped_before"] == 1365

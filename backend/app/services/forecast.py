@@ -716,7 +716,8 @@ def _clamp_day(year: int, month: int, day: int) -> int:
     return min(day, monthrange(year, month)[1])
 
 
-def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime]:
+def iter_occurrences(entry, start: datetime, end: datetime,
+                     max_steps: Optional[int] = None) -> Iterator[datetime]:
     """Yield naive occurrence datetimes for a budget entry in ``[start, end)``.
 
     - Fixed-step cadences (weekly/biweekly/monthly/quarterly/semi-annual/annual)
@@ -729,6 +730,9 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
       ``next_occurrence`` forward — best-effort, since elapsed count isn't stored).
     - Stops at the last date ``datetime`` can hold rather than raising, so an
       unbounded walk (``end`` of ``datetime.max``) ends there.
+    - Walks at most ``max_steps`` steps (months, for ``SEMI_MONTHLY``); by
+      default 2000 (600 months), the projection's guard, which a long-stale
+      schedule outruns. Posting passes a bound derived from ``end`` instead.
     """
     start = _naive(start)
     end = _naive(end)
@@ -743,7 +747,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
         days = sorted({d1, d2})
         y, m = anchor.year, anchor.month
         guard = 0
-        while guard < 600:
+        limit = 600 if max_steps is None else max_steps
+        while guard < limit:
             guard += 1
             if y > MAXYEAR or datetime(y, m, 1) > end:
                 break
@@ -767,7 +772,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
     # Fixed-step cadences
     occ = anchor
     guard = 0
-    while occ < end and guard < 2000:
+    limit = 2000 if max_steps is None else max_steps
+    while occ < end and guard < limit:
         guard += 1
         if end_date is not None and occ > end_date:
             break

@@ -33,7 +33,6 @@ from app.schemas.transaction import TransactionUpdate
 from app.services import loans as loan_svc
 from app.services.forecast import (
     _linked_rows, _naive, _next_occurrence, iter_occurrences, occurrence_links,
-    unrecorded_occurrences,
 )
 from app.services.recurring_kinds import entry_kind, is_capped
 
@@ -58,8 +57,14 @@ def _day_after(day: date) -> datetime:
 
 def schedule_walk(entry, through: date) -> List[datetime]:
     """The entry's occurrences from ``next_occurrence`` through the day ``through``
-    (inclusive), as the projection walks them (cap and end date respected)."""
-    return list(iter_occurrences(entry, _naive(entry.next_occurrence), _day_after(through)))
+    (inclusive), as the projection walks them (cap and end date respected), all
+    of them: not the projection's step guard but one step per day from
+    ``next_occurrence`` to ``through`` (every cadence moves at least a day a
+    step, and a semi-monthly step is a month), which a complete walk never
+    reaches."""
+    start, end = _naive(entry.next_occurrence), _day_after(through)
+    bound = max((end - start).days, 0) + 2
+    return list(iter_occurrences(entry, start, end, max_steps=bound))
 
 
 def _utc_naive(value: datetime) -> datetime:
@@ -84,12 +89,24 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     if requested is None:
         return _naive(entry.next_occurrence), []
     day = _utc_naive(requested).date()
-    match = next((occ for occ in schedule_walk(entry, day) if occ.date() == day), None)
+    walk = schedule_walk(entry, day)
+    match = next((occ for occ in walk if occ.date() == day), None)
     if match is None:
         raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
     if is_capped(entry) and match != _naive(entry.next_occurrence):
         raise HTTPException(status_code=409, detail="Record the oldest unrecorded month first")
-    skipped = [occ for occ in unrecorded_occurrences(db, [entry], day)[entry.id] if occ < match]
+    # ``unrecorded_occurrences``' rule over the complete walk: each posted
+    # linked row stands for one occurrence on its day.
+    posted = Counter(_naive(when).date() for _, when, _, is_posted in _linked_rows(
+        db, [entry.id], occurrence_match=True) if is_posted)
+    skipped = []
+    for occ in walk:
+        if occ >= match:
+            break
+        if posted[occ.date()]:
+            posted[occ.date()] -= 1
+            continue
+        skipped.append(occ)
     return match, skipped
 
 

@@ -128,6 +128,33 @@ def test_skipped_header_count_is_complete_for_a_long_stale_schedule(sw_client, s
     assert _balance(client, me, checking) == Decimal("49900.00")
 
 
+def test_mark_paid_resolves_a_recent_occurrence_of_a_decades_stale_schedule(sw_client,
+                                                                           sw_people):
+    """Past the projection's guard (2000 weekly steps, 600 semi-monthly months)."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    weekly = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "1985-01-06T00:00:00", "account_id": checking})["id"]
+    semi = sw_post(client, me, "/budget-entries/", {
+        "name": "Allowance", "entry_type": "expense", "amount": 100,
+        "cadence": "semi_monthly", "semi_monthly_day_1": 1, "semi_monthly_day_2": 15,
+        "next_occurrence": "1970-01-01T00:00:00", "account_id": checking})["id"]
+
+    r = _materialize(client, me, weekly, occurrence_date=_day("2026-10-18"))
+    assert r.status_code == 201, r.text
+    assert r.headers["X-Occurrence-Recorded"] == "2026-10-18"
+    assert r.headers["X-Occurrences-Skipped-Count"] == "2180"
+    assert r.headers["X-Occurrences-Skipped"].split(",")[0] == "1985-01-06"
+    assert _entry(client, me, weekly)["next_occurrence"].startswith("2026-10-25")
+
+    r = _materialize(client, me, semi, occurrence_date=_day("2026-10-15"))
+    assert r.status_code == 201, r.text
+    assert r.headers["X-Occurrence-Recorded"] == "2026-10-15"
+    assert r.headers["X-Occurrences-Skipped-Count"] == "1363"
+    assert _entry(client, me, semi)["next_occurrence"].startswith("2026-11-01")
+
+
 def test_cors_exposes_the_occurrence_headers(sw_client, sw_people):
     from app.core.config import settings
 
