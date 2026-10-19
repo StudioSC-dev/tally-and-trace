@@ -8,6 +8,8 @@ on Playwright. Run them by hand when you change the auth or session code.
 |---|---|
 | `refresh-session-switch.cjs` | STU-239: a token refresh stays bound to the session that started it |
 | `mark-paid-payables.cjs` | STU-343: expandable payables; Mark paid on a chosen occurrence and date; Post all due |
+| `card-charges.cjs` | STU-343: upcoming charges by card on the dashboard; Mark paid and Post all due from a card |
+| `allocations-kinds.cjs` | STU-343: Allocations groups recurring entries by kind; Mark paid on a card; the form picks a card expense's kind |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
