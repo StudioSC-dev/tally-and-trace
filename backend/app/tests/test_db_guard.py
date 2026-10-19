@@ -129,6 +129,9 @@ def test_check_environment_ignores_empty_values():
     "mysql://u:p@127.0.0.1:3306/tt_test_x",
     "postgresql+asyncpg://u:p@127.0.0.1:5432/tt_test_x",
     "postgresql:///tt_test_x",
+    "postgresql://u:p@db.example.com,x@localhost/tt_test_x",
+    "postgresql://u:p@x@localhost/tt_test_x",
+    "postgresql://u:p,x@localhost/tt_test_x",
 ])
 def test_guard_refuses_remote_and_overridden_targets(url):
     assert _db_guard.check_test_database_url(url) is not None
@@ -149,6 +152,7 @@ def test_guard_refuses_a_local_dev_database_name():
     "postgresql://u:p@localhost:5432/tally_trace_test",
     "postgresql://u:p@[::1]:5432/tt_test_x",
     "postgresql+psycopg2://u:p@127.0.0.1:5432/tt_test_x",
+    "postgresql://u:p%40ss@127.0.0.1:5432/tt_test_x",  # an escaped @ in the password
 ])
 def test_guard_accepts_throwaway_names(url):
     assert _db_guard.check_test_database_url(url) is None

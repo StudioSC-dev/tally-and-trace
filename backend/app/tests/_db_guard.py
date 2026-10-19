@@ -55,8 +55,13 @@ def check_test_database_url(url: str) -> Optional[str]:
         return "the URL has a query string, which can override the host or database"
     if parts.fragment:
         return "the URL has a fragment"
-    hostinfo = parts.netloc.rpartition("@")[2]
-    if "," in hostinfo:
+    # Judge the whole netloc, as frontend/e2e/_local_stack.cjs does: SQLAlchemy
+    # splits it at the first "@" and libpq reads a "," as a host list, so a second
+    # unescaped "@" or a "," anywhere (the password included) can name another
+    # host than the one urlsplit reports. An escaped "%40" is fine.
+    if parts.netloc.count("@") > 1:
+        return "the URL has more than one unescaped @"
+    if "," in parts.netloc:
         return "the URL names more than one host"
     if parts.hostname not in ALLOWED_HOSTS:
         return f"host {parts.hostname!r} is not local ({', '.join(ALLOWED_HOSTS)})"
