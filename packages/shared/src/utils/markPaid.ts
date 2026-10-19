@@ -190,6 +190,32 @@ export function markPaidSendsAmount(args: {
   return args.linked === 'pending' ? args.edited : true
 }
 
+/** Hint shown on a pending-linked bill's blank amount field. */
+export const PENDING_AMOUNT_HINT = "Leave blank to keep the pending transaction's amount"
+
+/**
+ * What the Mark paid amount field shows. A bill's usual amount is prefilled, except when its
+ * occurrence is linked to a pending row: that row's own amount is posted unless the user types
+ * one, so the field starts empty rather than showing a figure that is not what gets posted.
+ * `input` is what the user typed (null until they touch the field).
+ */
+export function markPaidAmountShown(args: {
+  editableBill: boolean
+  linked: EntryOccurrence['linked'] | undefined
+  input: string | null
+  usual: number | undefined
+}): string {
+  if (args.input !== null) return args.input
+  if (!args.editableBill || args.usual === undefined || args.linked === 'pending') return ''
+  return String(args.usual)
+}
+
+/** Whether the field counts as edited: for a pending bill, an edited-then-cleared field is not. */
+export function markPaidAmountEdited(args: { linked: EntryOccurrence['linked'] | undefined; input: string | null }): boolean {
+  if (args.input === null) return false
+  return args.linked === 'pending' ? args.input.trim() !== '' : true
+}
+
 /** A run of walked occurrences the listing left out, shown before the listed occurrence on `before`. */
 export interface OmittedRun {
   before: string

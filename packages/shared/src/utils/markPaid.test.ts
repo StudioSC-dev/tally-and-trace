@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   canPostAllDue,
   defaultMarkPaidDay,
+  markPaidAmountEdited,
+  markPaidAmountShown,
   markPaidSendsAmount,
   omittedRuns,
   markPaidWireDate,
@@ -226,6 +228,46 @@ describe('markPaidSendsAmount', () => {
 
   it('sends nothing for a non-bill', () => {
     expect(markPaidSendsAmount({ needsCharged: false, editableBill: false, linked: null, edited: true })).toBe(false)
+  })
+})
+
+describe('markPaidAmountShown', () => {
+  const bill = { editableBill: true, usual: 250 }
+
+  it('starts a pending-linked bill blank', () => {
+    expect(markPaidAmountShown({ ...bill, linked: 'pending', input: null })).toBe('')
+  })
+
+  it('prefills an unlinked or posted bill with its usual amount', () => {
+    expect(markPaidAmountShown({ ...bill, linked: null, input: null })).toBe('250')
+    expect(markPaidAmountShown({ ...bill, linked: 'posted', input: null })).toBe('250')
+    expect(markPaidAmountShown({ ...bill, linked: undefined, input: null })).toBe('250')
+  })
+
+  it('shows what was typed, including a cleared field', () => {
+    expect(markPaidAmountShown({ ...bill, linked: 'pending', input: '300' })).toBe('300')
+    expect(markPaidAmountShown({ ...bill, linked: null, input: '' })).toBe('')
+  })
+
+  it('is blank for a non-bill or before the entry loads', () => {
+    expect(markPaidAmountShown({ editableBill: false, usual: 250, linked: null, input: null })).toBe('')
+    expect(markPaidAmountShown({ editableBill: true, usual: undefined, linked: null, input: null })).toBe('')
+  })
+})
+
+describe('markPaidAmountEdited', () => {
+  it('is false until typed', () => {
+    expect(markPaidAmountEdited({ linked: 'pending', input: null })).toBe(false)
+  })
+
+  it('treats a cleared pending field as unedited, so nothing is sent', () => {
+    expect(markPaidAmountEdited({ linked: 'pending', input: '' })).toBe(false)
+    expect(markPaidAmountEdited({ linked: 'pending', input: '  ' })).toBe(false)
+    expect(markPaidAmountEdited({ linked: 'pending', input: '300' })).toBe(true)
+  })
+
+  it('keeps an unlinked bill edited once touched', () => {
+    expect(markPaidAmountEdited({ linked: null, input: '' })).toBe(true)
   })
 })
 

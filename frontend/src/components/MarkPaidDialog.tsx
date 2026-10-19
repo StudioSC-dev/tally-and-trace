@@ -7,7 +7,10 @@ import {
   defaultMarkPaidDay,
   formatEntryDate,
   isDetailed,
+  markPaidAmountEdited,
+  markPaidAmountShown,
   markPaidSendsAmount,
+  PENDING_AMOUNT_HINT,
   markPaidWireDate,
   omittedRuns,
   postAllDueRange,
@@ -192,9 +195,9 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
   const receivedCurrency: CurrencyCode = destination?.currency ?? chargedCurrency
   // A bill varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
   const editableBill = kind === 'bill' && !needsCharged
-  const amountShown = amountInput ?? (editableBill && detailed ? String(detailed.amount) : '')
-  // A pending bill keeps its recorded amount unless the field was edited.
-  const sendsAmount = markPaidSendsAmount({ needsCharged, editableBill, linked: selected?.linked, edited: amountInput !== null })
+  const amountShown = markPaidAmountShown({ editableBill, linked: selected?.linked, input: amountInput, usual: detailed?.amount })
+  // A pending bill starts blank and keeps its recorded amount unless a figure is typed.
+  const sendsAmount = markPaidSendsAmount({ needsCharged, editableBill, linked: selected?.linked, edited: markPaidAmountEdited({ linked: selected?.linked, input: amountInput }) })
   const showsAmount = needsCharged || editableBill
 
   const defaultDay = selected && today ? defaultMarkPaidDay({ kind, occurrenceDate: selected.occurrence_date, today }) : ''
@@ -414,11 +417,15 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
                         setError(null)
                       }}
                       className="input-field pl-7 focus-ring"
-                      placeholder="0.00"
+                      placeholder={editableBill && selected.linked === 'pending' ? PENDING_AMOUNT_HINT : '0.00'}
                       data-testid="mark-paid-amount"
                     />
                   </div>
-                  {editableBill && <p className="mt-1 text-xs text-muted">Bills vary: enter this month's amount.</p>}
+                  {editableBill && (
+                    <p className="mt-1 text-xs text-muted">
+                      {selected.linked === 'pending' ? PENDING_AMOUNT_HINT : "Bills vary: enter this month's amount."}
+                    </p>
+                  )}
                 </div>
               )}
 
