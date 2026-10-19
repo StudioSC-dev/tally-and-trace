@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery, useMaterializeBudgetEntryMutation } from '../store/api'
+import { useGetAccountsQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery } from '../store/api'
 import type { Allocation } from '../store/api'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
-import { formatCurrency, getCurrencySymbol } from '../utils/currency'
+import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
@@ -16,10 +16,10 @@ import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
+import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { useLatestRef } from '../hooks/useRequestGeneration'
 import { payableActions, payableTarget } from '@tally-trace/shared'
 import type { FullBudgetEntry, SharedFullBudgetEntry } from '@tally-trace/shared'
-import { apiErrorMessage } from '../utils/apiError'
 import { isDetailed, isLimitedEvent, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
 
@@ -64,22 +64,6 @@ const daysUntil = (day: Date): number => {
   return Math.max(0, Math.round((day.getTime() - today.getTime()) / MS_PER_DAY))
 }
 
-/** The "Mark paid" dialog: which figures the API needs for this entry. */
-type PayDialogState = {
-  entryId: number
-  name: string
-  /** The row as listed, e.g. "≈ PHP 4,640.00 (USD 80.00)": a hint, never a default value. */
-  estimate: string
-  needsCharged: boolean
-  needsReceived: boolean
-  chargedCurrency: CurrencyCode
-  receivedCurrency: CurrencyCode
-  charged: string
-  received: string
-  error: string | null
-  submitting: boolean
-}
-
 type PayableRow = {
   key: string
   name: string
@@ -92,6 +76,8 @@ type PayableRow = {
   detail: string
   overdue: boolean
   budgetEntryId: number | null
+  /** Budget-entry rows: the occurrence this row stands for (`YYYY-MM-DD`), which Mark paid opens on. */
+  occurrenceDate: string | null
   /** What kind of payable this is; only scheduled entries have a known autopay state. */
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
   /** The payable itself, for the detail dialog; null for a Limited row, which never opens. */
@@ -111,6 +97,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
       overdue: payable.overdue,
       budgetEntryId: null,
+      occurrenceDate: null,
       kind: 'shared',
       payable: null,
     }
@@ -128,8 +115,10 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     currency: payable.currency ?? fallback,
     labels: payable,
     detail: `${label}${pays}${overflow}`,
-    overdue: false,
+    // Budget-entry rows say whether their occurrence is before today on the Manila calendar.
+    overdue: payable.overdue === true,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
+    occurrenceDate: payable.source === 'budget_entry' ? payable.occurrence_date ?? payable.due_date.slice(0, 10) : null,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
     payable,
   }
@@ -160,55 +149,15 @@ export function Dashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month')
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   const tagParam = useMemo(() => (selectedTag !== undefined ? { tag: selectedTag } : {}), [selectedTag])
-  const [postingId, setPostingId] = useState<number | null>(null)
-  const [materializeEntry] = useMaterializeBudgetEntryMutation()
-  // The "Mark paid" dialog: open for a payable that needs the figure actually charged.
-  const [payDialog, setPayDialog] = useState<PayDialogState | null>(null)
+  // The Mark paid dialog, open for one payable row; it is the only way an occurrence is marked paid.
+  const [markPaid, setMarkPaid] = useState<{ row: PayableRow; entry: FullBudgetEntry | SharedFullBudgetEntry | undefined } | null>(null)
   // The payable open in the detail dialog, and a Mark paid it handed back as it closed.
   const [detailRow, setDetailRow] = useState<PayableRow | null>(null)
   const [pendingMarkPaid, setPendingMarkPaid] = useState<{ row: PayableRow; entry: FullBudgetEntry | SharedFullBudgetEntry } | null>(null)
+  // Every payable, not just the first MAX_PAYABLES_SHOWN.
+  const [showAllPayables, setShowAllPayables] = useState(false)
   // Takes focus after a delete from the dialog, when the row that opened it is gone.
   const payablesHeadingRef = useRef<HTMLHeadingElement>(null)
-
-  const handleMarkPaid = async (entryId: number) => {
-    setPostingId(entryId)
-    try {
-      await materializeEntry({ id: entryId }).unwrap()
-    } catch (error) {
-      console.error('Error posting budget entry:', error)
-      alert(apiErrorMessage(error) || 'Could not mark the entry as paid. Please try again.')
-    } finally {
-      setPostingId(null)
-    }
-  }
-
-  const handleSubmitPayDialog = async () => {
-    if (!payDialog) return
-    const charged = payDialog.needsCharged ? parseFloat(payDialog.charged) : undefined
-    const received = payDialog.needsReceived ? parseFloat(payDialog.received) : undefined
-    if (charged !== undefined && !(charged > 0)) {
-      setPayDialog({ ...payDialog, error: `Enter the amount charged in ${payDialog.chargedCurrency}` })
-      return
-    }
-    if (received !== undefined && !(received > 0)) {
-      setPayDialog({ ...payDialog, error: `Enter the amount received in ${payDialog.receivedCurrency}` })
-      return
-    }
-    setPayDialog({ ...payDialog, error: null, submitting: true })
-    try {
-      await materializeEntry({
-        id: payDialog.entryId,
-        data: {
-          ...(charged !== undefined ? { amount: charged } : {}),
-          ...(received !== undefined ? { received_amount: received } : {}),
-        },
-      }).unwrap()
-      setPayDialog(null)
-    } catch (error) {
-      // The API's reason ("Enter the amount charged in PHP", ...) stays in the dialog.
-      setPayDialog({ ...payDialog, submitting: false, error: apiErrorMessage(error) || 'Could not mark the entry as paid. Please try again.' })
-    }
-  }
 
   const dateRange = useMemo(() => {
     const now = new Date()
@@ -231,8 +180,8 @@ export function Dashboard() {
     useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
   const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
     useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
-  // Only for "Mark paid": the currency of the account an entry pays from and into.
-  const { data: accountsData } = useGetAccountsQuery({ limit: 200 }, { skip: !isAuthenticated })
+  // Fills the accounts cache the Mark paid dialog reads (the currency an entry pays from and into).
+  useGetAccountsQuery({ limit: 200 }, { skip: !isAuthenticated })
 
   // The currency every total below is read in: the default one, or the first the user holds.
   const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
@@ -264,43 +213,16 @@ export function Dashboard() {
   // The day that decides Pending or Planned; it moves at midnight and on refocus.
   const today = useToday()
   const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, today)), [snapshot, defaultCurrency, today])
-  const accountCurrencies = useMemo(
-    () => new Map((accountsData?.items ?? []).map((a) => [a.id, a.currency as CurrencyCode])),
-    [accountsData]
-  )
   const entriesById = useMemo(
     () => new Map((budgetEntriesData?.items ?? []).filter(isDetailed).map((e) => [e.id, e])),
     [budgetEntriesData]
   )
 
-  // "Mark paid" posts at once, unless the entry is in another currency than the account it pays
-  // from (or moves money into another currency): then the figure actually charged is needed.
+  // Mark paid always opens the dialog: it names the occurrence and the day paid.
   // `fetched` is the entry the detail dialog looked up, when the dashboard's list doesn't hold it.
   const startMarkPaid = (row: PayableRow, fetched?: FullBudgetEntry | SharedFullBudgetEntry) => {
     if (row.budgetEntryId === null) return
-    const entry = fetched ?? entriesById.get(row.budgetEntryId)
-    const sourceCurrency = entry?.account_id !== undefined ? accountCurrencies.get(entry.account_id) : undefined
-    const destinationCurrency = entry?.transfer_to_account_id != null ? accountCurrencies.get(entry.transfer_to_account_id) : undefined
-    const chargedCurrency = sourceCurrency ?? row.currency
-    const needsCharged = entry !== undefined && sourceCurrency !== undefined ? entry.currency !== sourceCurrency : row.labels.estimated === true
-    const needsReceived = destinationCurrency !== undefined && destinationCurrency !== chargedCurrency
-    if (!needsCharged && !needsReceived) {
-      void handleMarkPaid(row.budgetEntryId)
-      return
-    }
-    setPayDialog({
-      entryId: row.budgetEntryId,
-      name: row.name,
-      estimate: estimateText(row.amount, row.currency, row.labels),
-      needsCharged,
-      needsReceived,
-      chargedCurrency,
-      receivedCurrency: destinationCurrency ?? chargedCurrency,
-      charged: '',
-      received: '',
-      error: null,
-      submitting: false,
-    })
+    setMarkPaid({ row, entry: fetched ?? entriesById.get(row.budgetEntryId) })
   }
   // Mark paid from the detail dialog runs once the dialog has closed and handed focus back
   // to its row, so a pay dialog that needs a figure can take focus from there.
@@ -649,7 +571,7 @@ export function Dashboard() {
             <div className="p-4 sm:p-6 text-sm text-muted">No upcoming payables in the next 30 days.</div>
           ) : (
             <div className="divide-y divide-line" data-testid="payables">
-              {payableRows.slice(0, MAX_PAYABLES_SHOWN).map((row) => {
+              {(showAllPayables ? payableRows : payableRows.slice(0, MAX_PAYABLES_SHOWN)).map((row) => {
                 const status = payableStatusOf(row)
                 const opens = row.payable !== null && payableActions(payableTarget(row.payable), null).open
                 return (
@@ -689,10 +611,11 @@ export function Dashboard() {
                       {row.budgetEntryId !== null && postableEntryIds.has(row.budgetEntryId) && (
                         <button
                           onClick={() => startMarkPaid(row)}
-                          disabled={postingId === row.budgetEntryId}
+                          disabled={markPaid !== null && markPaid.row.key === row.key}
                           className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
+                          data-testid="payable-mark-paid-button"
                         >
-                          {postingId === row.budgetEntryId ? 'Posting…' : 'Mark paid'}
+                          Mark paid
                         </button>
                       )}
                     </div>
@@ -700,7 +623,17 @@ export function Dashboard() {
                 )
               })}
               {payableRows.length > MAX_PAYABLES_SHOWN && (
-                <p className="p-4 text-xs text-muted">+{payableRows.length - MAX_PAYABLES_SHOWN} more in the next 30 days</p>
+                <div className="p-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPayables((shown) => !shown)}
+                    aria-expanded={showAllPayables}
+                    className="text-xs text-muted hover:text-ink underline-offset-2 hover:underline focus-ring"
+                    data-testid="payables-more"
+                  >
+                    {showAllPayables ? 'Show fewer' : `+${payableRows.length - MAX_PAYABLES_SHOWN} more in the next 30 days`}
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -753,7 +686,7 @@ export function Dashboard() {
           entry={detailRow.budgetEntryId !== null ? entriesById.get(detailRow.budgetEntryId) : undefined}
           // The list says the caller may post it, or doesn't hold it (the dialog looks it up).
           canMarkPaid={detailRow.budgetEntryId !== null && (postableEntryIds.has(detailRow.budgetEntryId) || !entriesById.has(detailRow.budgetEntryId))}
-          posting={postingId !== null && postingId === detailRow.budgetEntryId}
+          posting={false}
           onMarkPaid={(entry) => {
             setPendingMarkPaid({ row: detailRow, entry })
             setDetailRow(null)
@@ -763,68 +696,16 @@ export function Dashboard() {
         />
       )}
 
-      {payDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-testid="pay-dialog-overlay">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pay-dialog-title"
-            className="w-full max-w-md bg-surface border border-line p-5 sm:p-6 space-y-4"
-            onKeyDown={(e) => { if (e.key === 'Escape') setPayDialog(null) }}
-          >
-            <div>
-              <h2 id="pay-dialog-title" className="text-lg font-semibold text-ink">Mark {payDialog.name} as paid</h2>
-              <p className="mt-1 text-sm text-muted" data-testid="pay-dialog-estimate">
-                Listed as {payDialog.estimate}. Enter what was actually {payDialog.needsCharged ? 'charged' : 'moved'}; the estimate is only a guide.
-              </p>
-            </div>
-            {payDialog.needsCharged && (
-              <div>
-                <label className="label" htmlFor="pay-charged">Amount charged ({payDialog.chargedCurrency})</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(payDialog.chargedCurrency)}</span>
-                  <input
-                    id="pay-charged"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    autoFocus
-                    value={payDialog.charged}
-                    onChange={(e) => setPayDialog({ ...payDialog, charged: e.target.value, error: null })}
-                    className="input-field pl-7 focus-ring"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-            )}
-            {payDialog.needsReceived && (
-              <div>
-                <label className="label" htmlFor="pay-received">Amount received ({payDialog.receivedCurrency})</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(payDialog.receivedCurrency)}</span>
-                  <input
-                    id="pay-received"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    autoFocus={!payDialog.needsCharged}
-                    value={payDialog.received}
-                    onChange={(e) => setPayDialog({ ...payDialog, received: e.target.value, error: null })}
-                    className="input-field pl-7 focus-ring"
-                    placeholder="0.00"
-                  />
-                </div>
-              </div>
-            )}
-            {payDialog.error && <p className="text-sm text-danger" role="alert" data-testid="pay-dialog-error">{payDialog.error}</p>}
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={handleSubmitPayDialog} disabled={payDialog.submitting} className="btn-primary focus-ring disabled:opacity-50">
-                {payDialog.submitting ? 'Posting…' : 'Mark paid'}
-              </button>
-              <button type="button" onClick={() => setPayDialog(null)} className="btn-secondary focus-ring">Cancel</button>
-            </div>
-          </div>
-        </div>
+      {markPaid && markPaid.row.budgetEntryId !== null && (
+        <MarkPaidDialog
+          entryId={markPaid.row.budgetEntryId}
+          name={markPaid.row.name}
+          occurrenceDate={markPaid.row.occurrenceDate}
+          entry={markPaid.entry}
+          estimate={estimateText(markPaid.row.amount, markPaid.row.currency, markPaid.row.labels)}
+          estimated={markPaid.row.labels.estimated === true}
+          onClose={() => setMarkPaid(null)}
+        />
       )}
 
     </div>
