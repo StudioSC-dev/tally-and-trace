@@ -1924,6 +1924,13 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
     entry) keeps the rule above. Without ``occurrence_match`` (counting paid
     occurrences) the rule above holds for every row.
     """
+    return [(entry_id, when) for entry_id, when, _, _ in
+            _linked_rows(db, entry_ids, occurrence_match=occurrence_match)]
+
+
+def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List[tuple]:
+    """``[(entry id, day, transaction id, is_posted)]``: ``linked_transactions``
+    with each row's id and whether it is posted, under the same rule."""
     entry_ids = list(entry_ids)
     if not entry_ids:
         return []
@@ -1933,10 +1940,12 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
                  Transaction.transaction_type, Transaction.account_id,
                  Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
                  BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
-                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None))
+                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
+                 Transaction.id, Transaction.is_posted)
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
                 Transaction.user_id == BudgetEntry.user_id)
+        .order_by(Transaction.id)
         .all()
     )
     touched = {acc for row in rows for acc in row[6:9] if acc is not None}
@@ -1946,7 +1955,7 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
             Account.id.in_(tag_shared_account_ids())))} if touched else set()
 
     def on_entry_accounts(row) -> bool:
-        _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row
+        _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row[:10]
         if entry_dst is not None:
             return (kind == TransactionType.TRANSFER and (src or account) == entry_account
                     and dst == entry_dst)
@@ -1957,7 +1966,39 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
             return row[6] is None or on_entry_accounts(row)
         return not shared.intersection(row[6:9]) or on_entry_accounts(row)
 
-    return [(row[0], row[1]) for row in rows if counts(row)]
+    return [(row[0], row[1], row[10], bool(row[11])) for row in rows if counts(row)]
+
+
+def occurrence_links(db: Session, entry, day: date) -> List[tuple]:
+    """``[(transaction id, is_posted)]`` of the rows standing for ``entry``'s
+    occurrence on ``day``, by the projection's rule (``linked_transactions``
+    with ``occurrence_match``), in id order."""
+    return [(txn_id, is_posted)
+            for _, when, txn_id, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)
+            if _naive(when).date() == day]
+
+
+def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, List[datetime]]:
+    """``{entry id: [occurrence]}``: each entry's occurrences from its
+    ``next_occurrence`` through the day ``through`` (inclusive) that no posted
+    linked row stands for. Each posted row stands for one occurrence on its day
+    (``occurrence_links``); a pending one records nothing yet."""
+    entries = list(entries)
+    posted = Counter((entry_id, _naive(when).date())
+                     for entry_id, when, _, is_posted in _linked_rows(
+                         db, [e.id for e in entries], occurrence_match=True)
+                     if is_posted)
+    end = datetime.combine(through + timedelta(days=1), datetime.min.time())
+    out: Dict[int, List[datetime]] = {}
+    for entry in entries:
+        out[entry.id] = []
+        for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
+            key = (entry.id, occ.date())
+            if posted[key]:
+                posted[key] -= 1
+                continue
+            out[entry.id].append(occ)
+    return out
 
 
 def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:

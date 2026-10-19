@@ -352,7 +352,7 @@ def test_a_failure_while_advancing_rolls_the_whole_payment_back(sw_client, sw_pe
     """Main commits the row and the balance before the advance runs."""
     from fastapi.testclient import TestClient
     from app.main import app
-    import app.routers.budget_entries as entries_router
+    import app.services.posting as posting
 
     client, me = sw_client, sw_people()
     checking = _checking(client, me)
@@ -363,7 +363,7 @@ def test_a_failure_while_advancing_rolls_the_whole_payment_back(sw_client, sw_pe
     def boom(*args, **kwargs):
         raise RuntimeError("advance failed")
 
-    monkeypatch.setattr(entries_router, "_advance_occurrence", boom)
+    monkeypatch.setattr(posting, "advance_occurrence", boom)
     quiet = TestClient(app, raise_server_exceptions=False)
     r = quiet.post(f"{API}/budget-entries/{entry}/materialize", json={}, headers=me["headers"])
 

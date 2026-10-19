@@ -211,7 +211,10 @@ class BudgetEntryListResponse(BaseModel):
 
 class BudgetEntryMaterialize(BaseModel):
     """Post a due recurring entry as an actual transaction."""
-    transaction_date: Optional[datetime] = None  # defaults to the entry's next_occurrence
+    # The occurrence being recorded, matched by calendar day against the schedule
+    # (services/posting.py ``resolve_occurrence``); defaults to next_occurrence.
+    occurrence_date: Optional[datetime] = None
+    transaction_date: Optional[datetime] = None  # defaults to the occurrence
     amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
     advance: bool = True                          # advance next_occurrence to the following one
     transfer_fee: float = Field(0, ge=0)          # transfer entries only: fee charged on the source
