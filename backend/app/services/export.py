@@ -22,6 +22,9 @@ Version 2 (STU-232, shared accounts):
   accounts (STU-233). Accounts are references; a hidden one is neutral, and a
   payment into a hidden loan or card shows no interest.
 
+``card_statement_minimums`` (STU-343 Plan C): the minimum amounts due
+entered from the statements of the cards the caller owns.
+
 Tags (STU-231): the caller's own tags, and the links from those tags to the
 caller's own accounts and the records in ``transactions`` and
 ``budget_entries``. Another user's tags, and links to records not in the
@@ -51,6 +54,7 @@ from app.core.time import utc_now
 from app.models.account import Account
 from app.models.allocation import Allocation
 from app.models.budget_entry import BudgetEntry
+from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.category import Category
 from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tags
 from app.models.transaction import Transaction
@@ -103,6 +107,10 @@ WISHLIST_FIELDS = (
     "target_date", "is_purchased", "purchased_at", "created_at", "updated_at",
 )
 
+CARD_STATEMENT_MINIMUM_FIELDS = (
+    "id", "account_id", "statement_close", "amount", "created_at", "updated_at",
+)
+
 TAG_FIELDS = ("id", "name", "color", "is_system", "created_at")
 
 ACCOUNT_TAG_FIELDS = ("tag_id", "account_id")
@@ -127,7 +135,7 @@ LIMITED_BUDGET_ENTRY_FIELDS = (
 TABLES = (
     "accounts", "shared_accounts", "transactions", "budget_entries", "categories", "allocations",
     "wishlist_items", "others_transactions", "others_budget_entries", "tags",
-    "account_tags", "transaction_tags", "budget_entry_tags",
+    "account_tags", "transaction_tags", "budget_entry_tags", "card_statement_minimums",
 )
 
 
@@ -188,6 +196,11 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
     transactions, others_transactions = split(Transaction)
     entries, others_entries = split(BudgetEntry)
     tags = db.query(Tag).filter(Tag.user_id == user.id).order_by(Tag.id).all()
+    owned_ids = [a.id for a in owned]
+    minimums = (db.query(CardStatementMinimum)
+                .filter(CardStatementMinimum.account_id.in_(owned_ids))
+                .order_by(CardStatementMinimum.account_id, CardStatementMinimum.statement_close)
+                .all()) if owned_ids else []
 
     return {
         "export_version": EXPORT_VERSION,
@@ -216,6 +229,7 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
             db, user, transaction_tags, TRANSACTION_TAG_FIELDS, [t.id for t in transactions]),
         "budget_entry_tags": _own_links(
             db, user, budget_entry_tags, BUDGET_ENTRY_TAG_FIELDS, [e.id for e in entries]),
+        "card_statement_minimums": [_row(m, CARD_STATEMENT_MINIMUM_FIELDS) for m in minimums],
     }
 
 
@@ -233,4 +247,5 @@ TABLE_FIELDS: Dict[str, tuple] = {
     "account_tags": ACCOUNT_TAG_FIELDS,
     "transaction_tags": TRANSACTION_TAG_FIELDS,
     "budget_entry_tags": BUDGET_ENTRY_TAG_FIELDS,
+    "card_statement_minimums": CARD_STATEMENT_MINIMUM_FIELDS,
 }

@@ -543,6 +543,15 @@ def statement_history(db: Session, card: Account, today: datetime,
     only: nothing is projected. ``viewable_ids`` are the caller's viewable
     accounts (see ``_card_rows``).
 
+    Four more keys feed the minimum amount due (STU-343 Plan C, 2.5):
+    ``outstanding`` is every line dated on or before the close (debits less
+    credits) less every payment dated on or before it; ``paid_since_close``
+    every payment dated after the close; ``clear_through`` the sum of
+    ``owed`` over this statement and every one before it (what clears it,
+    since payments settle oldest first); and ``incomplete`` whether this or
+    an earlier statement left a line out for want of a rate. Posted and
+    planned rows count alike, as for every other figure here.
+
     Lines are in the card's currency (``normalise_lines``, at the stored rates
     of ``fx``, offline when None): a line estimated from a foreign face carries
     ``estimate``, and one with no stored rate is left out of ``balance`` and
@@ -564,10 +573,27 @@ def statement_history(db: Session, card: Account, today: datetime,
                 for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     history = []
+    clear_through = Decimal("0")
+    incomplete = False
     for cycle, balance, left in zip(cycles, balances, owed):
         first_excluded, last_included = cycle["window_start"].date(), cycle["close"].date()
         window = [row for row in lines
                   if first_excluded < row.transaction_date.date() <= last_included]
+        charged = sum(((-amount_of(row) if row.transaction_type == TransactionType.CREDIT
+                        else amount_of(row))
+                       for row in lines
+                       if row.transaction_date.date() <= last_included
+                       and row.transaction_type in (TransactionType.DEBIT,
+                                                    TransactionType.CREDIT)),
+                      Decimal("0"))
+        paid_by_close = sum((amount for when, amount in payments
+                             if when.date() <= last_included), Decimal("0"))
+        paid_since_close = sum((amount for when, amount in payments
+                                if when.date() > last_included), Decimal("0"))
+        clear_through += left
+        incomplete = incomplete or any(
+            first_excluded < line.transaction_date.date() <= last_included
+            for line, _, _ in unconverted)
         if left <= 0:
             status = "paid"
         elif cycle["due"].date() < today.date():
@@ -580,6 +606,10 @@ def statement_history(db: Session, card: Account, today: datetime,
             "balance": balance,
             "owed": left,
             "status": status,
+            "outstanding": charged - paid_by_close,
+            "paid_since_close": paid_since_close,
+            "clear_through": clear_through,
+            "incomplete": incomplete,
             "lines": [{
                 "date": row.transaction_date,
                 "amount": (-amount_of(row)
@@ -598,6 +628,15 @@ def statement_history(db: Session, card: Account, today: datetime,
                 if first_excluded < line.transaction_date.date() <= last_included],
         })
     return history
+
+
+def card_payments(db: Session, card: Account, viewable_ids: Iterable[int]
+                  ) -> List[Tuple[datetime, Decimal]]:
+    """Every payment into the card, posted or planned, as ``(date, received amount)``
+    in date order: the payments ``statement_history`` nets (one from a card
+    without cycle settings is not a payment, see ``_split_card_rows``)."""
+    by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
+    return _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources)[1]
 
 
 def get_statement_payables(

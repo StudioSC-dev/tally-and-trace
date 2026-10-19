@@ -14,10 +14,15 @@ and the assumptions the estimate rests on (see ``ASSUMPTIONS``).
 
 ``PRESETS`` holds the five bank rules, served by
 ``GET /accounts/minimum-due-presets``.
+
+``statement_minimums`` walks a card's statements oldest first and gives each
+its minimum: the override entered from the bank's statement when there is one,
+else the estimate from the card's rule, with the overdue carry (section 2.5).
 """
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from app.models.user import CurrencyType
 from app.schemas.minimum_due import MinimumDueRule
@@ -227,3 +232,113 @@ HSBC = Preset(
 PRESETS: Dict[str, Preset] = {
     p.key: p for p in (BDO, BDO_INSTALLMENT, METROBANK, SECURITY_BANK, HSBC)
 }
+
+
+# --- a card's statements (section 2.5) -------------------------------------------------------
+
+def _visible_installment_rows(db, card, redactor) -> set:
+    """Ids of the rows linked to a card-installment entry on ``card`` (active or
+    not) that the caller sees Full. A link to an entry the caller does not see
+    Full is the creator's private reference, so such a row stays a purchase."""
+    from app.core.redaction import FULL
+    from app.models.budget_entry import BudgetEntry
+    from app.services import forecast as fc
+    from app.services.recurring_kinds import is_card_installment
+
+    entries = [e for e in db.query(BudgetEntry).filter(BudgetEntry.account_id == card.id).all()
+               if is_card_installment(e, card)]
+    if not entries:
+        return set()
+    redactor.prepare(entries)
+    visible = [e.id for e in entries
+               if redactor.access.readable(e) and redactor.view(e) == FULL]
+    return {txn_id for _, _, txn_id, _ in fc._linked_rows(db, visible)}
+
+
+def statement_minimums(db, card, history: List[dict], rule: Optional[MinimumDueRule],
+                       overrides: Dict[date, Decimal], limit: Optional[Decimal],
+                       redactor) -> List[dict]:
+    """Each statement's minimum amount due, parallel to ``history``
+    (``statements.statement_history``), walked oldest first.
+
+    Inputs at a statement's close: T is its ``outstanding``; I its lines linked
+    to a card installment the caller sees Full (``_visible_installment_rows``);
+    N its other debit lines; L = max(0, T - limit), 0 with no limit; and O the
+    overdue carry. Each statement q has its own obligation
+    ``own_q = max(0, M_q - O_q)``, M_q being its override when set, else its
+    estimate (0 when neither exists). Payments into the card are applied once,
+    in date order: each is spread oldest first over the unpaid obligations of
+    the statements that closed before it was paid, so one payment can settle
+    several, and only what is left once all of them are met is ignored here
+    (one payment and the same sum split on one day count alike). O at a
+    close c is the unpaid obligations of every statement due before c, from
+    the payments dated on or before c. A payment on the due day is on time.
+
+    Each result is ``{amount, remaining, source, reason, complete,
+    assumptions, inputs}`` in Decimals: ``source`` "statement" (an override),
+    "estimate" or "unavailable" (no rule and no override, ``reason``
+    "no_rule"). ``remaining = min(clear_through, max(0, amount -
+    paid_since_close))``. An estimate is incomplete, with
+    ``unconverted_lines_left_out``, when a line on or before its close was
+    left out for want of a rate; an override is complete.
+    """
+    from app.core.access import viewable_account_ids
+    from app.services.statements import card_payments
+
+    payments = card_payments(db, card, viewable_account_ids(db, redactor.user))
+    installment_rows = _visible_installment_rows(db, card, redactor) if rule is not None else set()
+    obligations: List[dict] = []  # {close, due, unpaid}, oldest first
+    paid_up_to = 0
+    results = []
+    for statement in history:
+        close, due = statement["close"].date(), statement["due"].date()
+        while paid_up_to < len(payments) and payments[paid_up_to][0].date() <= close:
+            when, amount = payments[paid_up_to]
+            paid_up_to += 1
+            left = amount
+            for o in obligations:
+                if left <= 0:
+                    break
+                if o["close"] < when.date() and o["unpaid"] > 0:
+                    applied = min(left, o["unpaid"])
+                    o["unpaid"] -= applied
+                    left -= applied
+        overdue = sum((o["unpaid"] for o in obligations if o["due"] < close), ZERO)
+
+        total = statement["outstanding"]
+        installments = new = ZERO
+        for line in statement["lines"]:
+            if line["amount"] <= 0:
+                continue  # a refund is not a new charge
+            if getattr(line["transaction"], "id", None) in installment_rows:
+                installments += line["amount"]
+            else:
+                new += line["amount"]
+        overlimit = max(ZERO, total - limit) if limit is not None else ZERO
+        inputs = MinimumDueInputs(outstanding=total, installments=installments,
+                                  new_transactions=new, overdue=overdue, overlimit=overlimit)
+
+        override = overrides.get(close)
+        if override is not None:
+            amount = Decimal(override).quantize(CENT, rounding=ROUND_HALF_UP)
+            result = {"amount": amount, "source": "statement", "reason": None,
+                      "complete": True, "assumptions": [], "inputs": None}
+        elif rule is not None:
+            amount, assumptions = minimum_due(rule, inputs, card.currency)
+            if statement["incomplete"]:
+                assumptions = [a for a in ASSUMPTIONS
+                               if a in set(assumptions) | {"unconverted_lines_left_out"}]
+            result = {"amount": amount, "source": "estimate", "reason": None,
+                      "complete": not statement["incomplete"], "assumptions": assumptions,
+                      "inputs": inputs}
+        else:
+            amount = None
+            result = {"amount": None, "source": "unavailable", "reason": "no_rule",
+                      "complete": False, "assumptions": [], "inputs": None}
+        result["remaining"] = None if amount is None else min(
+            statement["clear_through"],
+            max(ZERO, amount - statement["paid_since_close"]))
+        results.append(result)
+        obligations.append({"close": close, "due": due,
+                            "unpaid": max(ZERO, (amount or ZERO) - overdue)})
+    return results
