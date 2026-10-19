@@ -8,6 +8,7 @@ import {
   formatEntryDate,
   isDetailed,
   markPaidWireDate,
+  postAllDueRange,
   sameStatementCycle,
   skippedNotice,
   statementCycleClose,
@@ -223,9 +224,8 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
     : []
   const skipped = selected ? skippedNotice(selected.skipped_before, skippedDates) : null
 
-  const dueUnrecorded = occurrences.filter((o) => o.due && unrecorded(o))
-  const oldestDue = dueUnrecorded[0]?.occurrence_date
-  const latestDue = dueUnrecorded[dueUnrecorded.length - 1]?.occurrence_date
+  // The range the server reports over the whole walk, not just the listed (truncated) part.
+  const dueRange = listing ? postAllDueRange(listing, occurrences) : null
   const showPostAll =
     listing !== undefined &&
     detailed !== undefined &&
@@ -474,7 +474,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
             >
               {submitting ? 'Posting…' : 'Mark paid'}
             </button>
-            {showPostAll && oldestDue && latestDue && (
+            {showPostAll && dueRange && (
               <button
                 type="button"
                 onClick={() => void handlePostAll()}
@@ -484,7 +484,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
               >
                 {postingAll
                   ? 'Posting…'
-                  : `Post all ${listing.due_unposted} due (${formatEntryDate(oldestDue)} – ${formatEntryDate(latestDue)})`}
+                  : `Post all ${listing.due_unposted} due (${formatEntryDate(dueRange.oldest)} – ${formatEntryDate(dueRange.latest)})`}
               </button>
             )}
             <button type="button" onClick={onClose} className="btn-secondary focus-ring">Cancel</button>

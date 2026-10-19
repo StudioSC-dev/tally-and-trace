@@ -647,6 +647,12 @@ export interface EntryOccurrences {
   capped: boolean
   kind: RecurringKind | null
   due_unposted: number
+  /**
+   * The oldest and latest due unposted occurrence over the whole walk (YYYY-MM-DD), not just
+   * the listed part; null when `due_unposted` is 0. Absent from an older API.
+   */
+  oldest_due?: string | null
+  latest_due?: string | null
   /** Walked occurrences left out of the list. */
   omitted: number
   occurrences: EntryOccurrence[]

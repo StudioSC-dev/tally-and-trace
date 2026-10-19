@@ -3,6 +3,7 @@ import {
   canPostAllDue,
   defaultMarkPaidDay,
   markPaidWireDate,
+  postAllDueRange,
   readMaterializeHeaders,
   sameStatementCycle,
   skippedNotice,
@@ -173,5 +174,28 @@ describe('canPostAllDue', () => {
 
   it('is false for a foreign-currency entry', () => {
     expect(canPostAllDue({ kind: 'subscription', capped: false, sameCurrency: false, due_unposted: 3 })).toBe(false)
+  })
+})
+
+describe('postAllDueRange', () => {
+  const occ = (date: string, due: boolean, linked: 'pending' | 'posted' | 'ambiguous' | null = null) => ({
+    occurrence_date: date, due, linked, skipped_before: 0,
+  })
+
+  it('uses the server range even when no listed occurrence is due', () => {
+    const listed = [occ('2026-10-20', false)]
+    expect(postAllDueRange({ oldest_due: '2025-01-05', latest_due: '2026-09-05' }, listed)).toEqual({
+      oldest: '2025-01-05', latest: '2026-09-05',
+    })
+  })
+
+  it('is null when the server reports none, whatever is listed', () => {
+    expect(postAllDueRange({ oldest_due: null, latest_due: null }, [occ('2026-09-05', true)])).toBeNull()
+  })
+
+  it('falls back to the listed unposted due occurrences when the fields are absent', () => {
+    const listed = [occ('2026-07-05', true, 'posted'), occ('2026-08-05', true), occ('2026-09-05', true, 'pending'), occ('2026-10-20', false)]
+    expect(postAllDueRange({}, listed)).toEqual({ oldest: '2026-08-05', latest: '2026-09-05' })
+    expect(postAllDueRange({}, [occ('2026-10-20', false)])).toBeNull()
   })
 })

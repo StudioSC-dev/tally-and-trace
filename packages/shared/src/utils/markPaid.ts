@@ -1,4 +1,4 @@
-import type { Account, MaterializeOutcome, OccurrenceOutcome, RecurringKind } from '../types/api'
+import type { Account, EntryOccurrence, EntryOccurrences, MaterializeOutcome, OccurrenceOutcome, RecurringKind } from '../types/api'
 import { formatEntryDate } from './entryDate'
 import { daysInMonth } from './recurrence'
 import { wallDay } from './transactionList'
@@ -152,4 +152,23 @@ export function canPostAllDue(args: {
     args.sameCurrency &&
     args.due_unposted > 1
   )
+}
+
+/**
+ * The oldest and latest due unposted day "Post all due" covers. The server reports them
+ * over the whole walk, which the listed occurrences may not reach (the list is truncated);
+ * an API that does not send them (undefined) falls back to the listed occurrences.
+ * Null when there is none.
+ */
+export function postAllDueRange(
+  listing: Pick<EntryOccurrences, 'oldest_due' | 'latest_due'>,
+  listed: readonly EntryOccurrence[],
+): { oldest: string; latest: string } | null {
+  if (listing.oldest_due !== undefined || listing.latest_due !== undefined) {
+    return listing.oldest_due && listing.latest_due ? { oldest: listing.oldest_due, latest: listing.latest_due } : null
+  }
+  const due = listed.filter((o) => o.due && o.linked !== 'posted')
+  const first = due[0]
+  const last = due[due.length - 1]
+  return first && last ? { oldest: first.occurrence_date, latest: last.occurrence_date } : null
 }
