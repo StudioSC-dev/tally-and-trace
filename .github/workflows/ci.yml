@@ -36,6 +36,7 @@ jobs:
       DATABASE_URL: postgresql://test_user:test_password@localhost:5432/tally_trace_test
       SECRET_KEY: ci-test-secret-key
       ENVIRONMENT: test
+      REQUIRE_DB: "1"
 
     steps:
       - uses: actions/checkout@v4
