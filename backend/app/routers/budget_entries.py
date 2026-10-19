@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -39,6 +39,7 @@ from app.schemas.budget_entry import (
     BudgetEntryOut,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    EntryOccurrences,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
@@ -561,6 +562,23 @@ def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> Budge
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
     return entry
+
+
+@router.get("/{entry_id}/occurrences", response_model=EntryOccurrences)
+def list_entry_occurrences(
+    entry_id: int,
+    include: Optional[date] = Query(
+        None, description="An occurrence (YYYY-MM-DD) to list whatever its distance from today"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """The occurrences a Mark paid can record, with what each is already linked
+    to (services/posting.py ``entry_occurrences``). Needs ``can_post`` on the
+    entry (404 otherwise); an ``include`` off the schedule is a 422."""
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_post"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    return posting.entry_occurrences(db, entry, include)
 
 
 def _occurrence_headers(outcome, occurrence: datetime, skipped: list) -> dict:

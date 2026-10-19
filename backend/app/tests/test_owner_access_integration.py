@@ -189,6 +189,7 @@ def _id_routes(w):
         ("put", f"/budget-entries/{w['entry']}", {"json": {"amount": 1}}),
         ("delete", f"/budget-entries/{w['entry']}", {}),
         ("post", f"/budget-entries/{w['entry']}/materialize", {}),
+        ("get", f"/budget-entries/{w['entry']}/occurrences", {}),
         ("get", f"/budget-entries/{w['accountless']}", {}),
         ("put", f"/budget-entries/{w['accountless']}", {"json": {"amount": 1}}),
         ("delete", f"/budget-entries/{w['accountless']}", {}),

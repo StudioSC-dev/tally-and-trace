@@ -11,6 +11,7 @@ path as ``PUT /transactions/{id}`` (``apply_transaction_update``). Only an
 occurrence with no linked row gets a new transaction.
 """
 from calendar import monthrange
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.core import locking
 from app.core.access import RecordAccess
 from app.core.tags import copy_explicit_tags
-from app.core.time import utc_now
+from app.core.time import manila_today, utc_now
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
@@ -31,9 +32,10 @@ from app.schemas.budget_entry import BudgetEntryMaterialize
 from app.schemas.transaction import TransactionUpdate
 from app.services import loans as loan_svc
 from app.services.forecast import (
-    _naive, _next_occurrence, iter_occurrences, occurrence_links, unrecorded_occurrences,
+    _linked_rows, _naive, _next_occurrence, iter_occurrences, occurrence_links,
+    unrecorded_occurrences,
 )
-from app.services.recurring_kinds import is_capped
+from app.services.recurring_kinds import entry_kind, is_capped
 
 
 class Outcome(str, Enum):
@@ -300,3 +302,67 @@ def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMater
         _advance(entry, occurrence)
     db.flush()
     return Recorded(transaction=txn, outcome=outcome, occurrence=occurrence)
+
+
+OCCURRENCES_FIRST = 30   # the first occurrences from next_occurrence always listed
+OCCURRENCES_AROUND = 31  # and every one within this many days of today
+
+
+def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
+    """The occurrences Mark paid offers (``GET /budget-entries/{id}/occurrences``).
+
+    The schedule is walked from ``next_occurrence`` to the later of Manila's
+    today + 31 days and ``include``. Listed: the first 30 occurrences, every
+    one within 31 days of today, and ``include`` (a 422 when it is not an
+    occurrence of the schedule from ``next_occurrence``); ``omitted`` counts the
+    walked ones left out. A capped entry lists only ``next_occurrence``, its
+    oldest unrecorded month. ``due_unposted`` counts due occurrences no posted
+    row stands for; each occurrence's ``skipped_before`` counts the unrecorded
+    ones before it.
+    """
+    today = manila_today()
+    around = timedelta(days=OCCURRENCES_AROUND)
+    walk = schedule_walk(entry, max(today + around, include or today))
+    if include is not None and include not in {occ.date() for occ in walk}:
+        raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
+
+    links = defaultdict(list)
+    for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True):
+        links[_naive(when).date()].append(is_posted)
+    posted = Counter({day: sum(flags) for day, flags in links.items()})
+
+    rows = []
+    unrecorded = due_unposted = 0
+    for occ in walk:
+        day = occ.date()
+        flags = links.get(day, [])
+        linked = (None if not flags else "ambiguous" if len(flags) > 1
+                  else "posted" if flags[0] else "pending")
+        rows.append({"occurrence_date": day, "due": day <= today, "linked": linked,
+                     "skipped_before": unrecorded})
+        if posted[day]:
+            posted[day] -= 1
+            continue
+        unrecorded += 1
+        if day <= today:
+            due_unposted += 1
+
+    capped = is_capped(entry)
+    if capped:
+        first = _naive(entry.next_occurrence).date()
+        listed = [r for r in rows if r["occurrence_date"] == first][:1]
+    else:
+        listed = [r for i, r in enumerate(rows)
+                  if i < OCCURRENCES_FIRST
+                  or today - around <= r["occurrence_date"] <= today + around
+                  or r["occurrence_date"] == include]
+    account = db.get(Account, entry.account_id) if entry.account_id else None
+    return {
+        "entry_id": entry.id,
+        "today": today,
+        "capped": capped,
+        "kind": entry_kind(entry, account),
+        "due_unposted": due_unposted,
+        "omitted": len(walk) - len(listed),
+        "occurrences": listed,
+    }

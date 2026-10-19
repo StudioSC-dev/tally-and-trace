@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from app.schemas.access import AccountRef, RecordPermissions
@@ -222,3 +222,24 @@ class BudgetEntryMaterialize(BaseModel):
     # Required when the destination's currency differs from the source's.
     received_amount: Optional[float] = Field(None, ge=0)
 
+
+
+class EntryOccurrence(BaseModel):
+    """One occurrence offered by Mark paid."""
+    occurrence_date: date
+    due: bool  # on or before today on the Manila calendar
+    # The row(s) already standing for it: one pending (posted by Mark paid), one
+    # posted (Mark paid only moves the schedule on), or several (refused).
+    linked: Optional[Literal["pending", "posted", "ambiguous"]] = None
+    skipped_before: int  # unrecorded occurrences before it, from next_occurrence
+
+
+class EntryOccurrences(BaseModel):
+    """GET /budget-entries/{id}/occurrences."""
+    entry_id: int
+    today: date
+    capped: bool
+    kind: Optional[EntryKind] = None
+    due_unposted: int
+    omitted: int  # walked occurrences left out of ``occurrences``
+    occurrences: List[EntryOccurrence]
