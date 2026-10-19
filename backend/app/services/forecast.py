@@ -13,7 +13,7 @@ from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from itertools import count
 from types import SimpleNamespace
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
@@ -1984,10 +1984,24 @@ def occurrence_links(db: Session, entry, day: date) -> List[tuple]:
             if _naive(when).date() == day]
 
 
+def distinct_days(occurrences: Iterable[datetime]) -> List[datetime]:
+    """``occurrences`` with each calendar day kept once (its first): a
+    semi-monthly schedule clamps both its days onto a short month's last day
+    (days 30 and 31 both fall on Feb 28), which is one occurrence to record."""
+    seen: set = set()
+    out: List[datetime] = []
+    for occ in occurrences:
+        if occ.date() not in seen:
+            seen.add(occ.date())
+            out.append(occ)
+    return out
+
+
 def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, List[datetime]]:
     """``{entry id: [occurrence]}``: each entry's occurrences from its
     ``next_occurrence`` through the day ``through`` (inclusive) that no posted
-    linked row stands for. Each posted row stands for one occurrence on its day
+    linked row stands for, each calendar day once (``distinct_days``). Each
+    posted row stands for one occurrence on its day
     (``occurrence_links``); a pending one records nothing yet. The walk is
     complete through ``through``, not capped by the projection's step guard:
     one step per day from ``next_occurrence`` (``posting.schedule_walk``'s
@@ -2003,7 +2017,7 @@ def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, Lis
         out[entry.id] = []
         start = _naive(entry.next_occurrence)
         bound = max((end - start).days, 0) + 2
-        for occ in iter_occurrences(entry, start, end, max_steps=bound):
+        for occ in distinct_days(iter_occurrences(entry, start, end, max_steps=bound)):
             key = (entry.id, occ.date())
             if posted[key]:
                 posted[key] -= 1

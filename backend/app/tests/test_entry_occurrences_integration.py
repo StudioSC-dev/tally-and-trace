@@ -275,3 +275,19 @@ def test_mark_paid_refuses_a_day_more_than_two_years_ahead(sw_client, sw_people,
     r = mark_paid("2028-10-16")
     assert r.status_code == 201, r.text
     assert r.headers["X-Occurrence-Recorded"] == "2028-10-16"
+
+
+def test_occurrences_list_a_clamped_semi_monthly_day_once(sw_client, sw_people, monkeypatch):
+    """Days 30/31 clamp onto Feb 28 (and Apr 30): each day is listed and counted once."""
+    client, me = sw_client, sw_people()
+    rent = _entry(client, me, _checking(client, me), "2027-01-30", cadence="semi_monthly",
+                  semi_monthly_day_1=30, semi_monthly_day_2=31)
+    pin_clock(monkeypatch, datetime(2027, 3, 31, 2, 0))
+
+    body = _occurrences(client, me, rent)
+
+    assert [(o["occurrence_date"], o["skipped_before"]) for o in body["occurrences"]] == [
+        ("2027-01-30", 0), ("2027-01-31", 1), ("2027-02-28", 2), ("2027-03-30", 3),
+        ("2027-03-31", 4), ("2027-04-30", 5)]
+    assert (body["due_unposted"], body["omitted"], body["oldest_due"], body["latest_due"],
+            body["oldest_unrecorded"]) == (5, 0, "2027-01-30", "2027-03-31", "2027-01-30")

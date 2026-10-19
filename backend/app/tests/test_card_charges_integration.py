@@ -406,3 +406,20 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
     ]
     assert _card_of(body, card)["missed"] == []
     assert late not in [ch["source_id"] for ch in _card_of(body, card)["charges"]]
+
+
+def test_missed_count_counts_a_clamped_semi_monthly_day_once(sw_client, sw_people, monkeypatch):
+    """Days 30/31 clamp onto Feb 28: missed counts it once, as ``due_unposted`` does."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    card = _card(client, me, checking)
+    gym = _entry(client, me, card, "2027-01-30", 100, "Gym", cadence="semi_monthly",
+                 semi_monthly_day_1=30, semi_monthly_day_2=31)
+    pin_clock(monkeypatch, datetime(2027, 3, 31, 2, 0))
+
+    [missed] = _card_of(_snapshot(client, me), card)["missed"]
+    assert (missed["entry_id"], missed["count"], missed["due_count"], missed["oldest"]) == (
+        gym, 4, 5, "2027-01-30")
+    r = client.get(f"{API}/budget-entries/{gym}/occurrences", headers=me["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["due_unposted"] == missed["due_count"]

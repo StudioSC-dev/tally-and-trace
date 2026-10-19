@@ -64,3 +64,16 @@ def test_walk_from_a_future_next_occurrence_is_empty_before_it():
     assert schedule_walk(e, TODAY) == []
     assert [o.date() for o in schedule_walk(e, date(2027, 1, 1))] == [
         date(2026, 11, 1), date(2026, 12, 1), date(2027, 1, 1)]
+
+
+def test_walk_lists_a_clamped_semi_monthly_day_once():
+    """Days 30 and 31 both clamp onto Feb 28: one occurrence to record. The
+    projection's own walk still yields both."""
+    e = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
+               semi_monthly_day_2=31)
+
+    assert [o.date() for o in schedule_walk(e, date(2027, 3, 31))] == [
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30),
+        date(2027, 3, 31)]
+    assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2027, 3, 1))] == [
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28)]

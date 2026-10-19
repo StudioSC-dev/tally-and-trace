@@ -272,3 +272,23 @@ def test_materialize_due_with_nothing_due_is_empty(sw_client, sw_people, engine,
     assert (body["entry_id"], body["results"], body["is_active"]) == (rent, [], True)
     assert body["next_occurrence"].startswith("2026-11-01")
     assert _linked(engine, rent) == []
+
+
+def test_materialize_due_posts_a_clamped_semi_monthly_day_once(sw_client, sw_people, engine,
+                                                               monkeypatch):
+    """Days 30/31 both clamp onto Feb 28: Post N due records one row for it and
+    the schedule moves on to Apr 30, skipping nothing."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    rent = _entry(client, me, checking, "2027-01-30", 1_000, "Rent", cadence="semi_monthly",
+                  semi_monthly_day_1=30, semi_monthly_day_2=31)
+    pin_clock(monkeypatch, datetime(2027, 3, 31, 2, 0))
+
+    r = _due(client, me, rent)
+    assert r.status_code == 200, r.text
+    assert _summary(r.json()) == [
+        ("2027-01-30", "created"), ("2027-01-31", "created"), ("2027-02-28", "created"),
+        ("2027-03-30", "created"), ("2027-03-31", "created")]
+    assert len(_linked(engine, rent)) == 5
+    assert r.json()["next_occurrence"].startswith("2027-04-30")
+    assert _balance(client, me, checking) == Decimal("45000.00")
