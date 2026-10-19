@@ -305,7 +305,7 @@ describe('omittedRuns', () => {
 })
 
 describe('skippedBefore', () => {
-  const occ = (date: string, skipped_before: number, linked: 'pending' | 'posted' | null) => ({
+  const occ = (date: string, skipped_before: number, linked: 'pending' | 'posted' | 'ambiguous' | null) => ({
     occurrence_date: date, due: true, linked, skipped_before,
   })
 
@@ -326,6 +326,11 @@ describe('skippedBefore', () => {
     const listed = [occ('2026-08-05', 0, null), occ('2026-09-05', 1, null)]
     expect(skippedBefore({ oldest_unrecorded: '2026-08-05' }, listed, listed[0]!)).toEqual({ count: 0, dates: [] })
     expect(skippedBefore({ oldest_unrecorded: null }, listed, listed[0]!)).toEqual({ count: 0, dates: [] })
+  })
+
+  it('leaves an ambiguous day out of the date list, as the server counts it recorded', () => {
+    const listed = [occ('2026-07-05', 0, 'ambiguous'), occ('2026-08-05', 0, null), occ('2026-09-05', 1, null)]
+    expect(skippedBefore({}, listed, listed[2]!)).toEqual({ count: 1, dates: ['2026-08-05'] })
   })
 
   it('falls back to the listed unrecorded dates when the field is absent', () => {
