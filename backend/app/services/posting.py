@@ -67,6 +67,18 @@ def schedule_walk(entry, through: date) -> List[datetime]:
     return list(iter_occurrences(entry, start, end, max_steps=bound))
 
 
+OCCURRENCE_HORIZON = timedelta(days=730)  # the furthest occurrence a request may name
+
+
+def refuse_far_occurrence(day: date) -> None:
+    """422 for a requested occurrence more than two years (730 days) after
+    Manila's today: the walk to it is complete, one step per day, so an
+    unbounded request (9999-12-31) would walk millions of steps."""
+    if day > manila_today() + OCCURRENCE_HORIZON:
+        raise HTTPException(status_code=422,
+                            detail="Choose an occurrence no more than two years from today")
+
+
 def _utc_naive(value: datetime) -> datetime:
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -79,8 +91,10 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     earlier unrecorded one it leaves behind.
 
     No request records ``next_occurrence`` (the legacy contract), skipping
-    nothing. A request is matched by calendar day against the schedule from
-    ``next_occurrence``: no match (a day before it included) is a 422; on a
+    nothing. A request more than two years ahead is a 422
+    (``refuse_far_occurrence``). A request is matched by calendar day against
+    the schedule from ``next_occurrence``: no match (a day before it included)
+    is a 422; on a
     capped entry anything but ``next_occurrence`` is a 409, since its months
     are counted down in order. ``skipped`` is every occurrence in
     ``[next_occurrence, occurrence)`` that no posted linked row stands for,
@@ -89,6 +103,7 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     if requested is None:
         return _naive(entry.next_occurrence), []
     day = _utc_naive(requested).date()
+    refuse_far_occurrence(day)
     walk = schedule_walk(entry, day)
     match = next((occ for occ in walk if occ.date() == day), None)
     if match is None:
@@ -331,7 +346,8 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     The schedule is walked from ``next_occurrence`` to the later of Manila's
     today + 31 days and ``include``. Listed: the first 30 occurrences, every
     one within 31 days of today, and ``include`` (a 422 when it is not an
-    occurrence of the schedule from ``next_occurrence``); ``omitted`` counts the
+    occurrence of the schedule from ``next_occurrence``, or more than two years
+    ahead: ``refuse_far_occurrence``); ``omitted`` counts the
     walked ones left out. A capped entry lists only ``next_occurrence``, its
     oldest unrecorded month. ``due_unposted`` counts due occurrences no posted
     row stands for, and ``oldest_due`` / ``latest_due`` are the first and last
@@ -343,6 +359,8 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     the listing immediately before it (0 when it follows the previous listed
     one, or is the walk's first).
     """
+    if include is not None:
+        refuse_far_occurrence(include)
     today = manila_today()
     around = timedelta(days=OCCURRENCES_AROUND)
     walk = schedule_walk(entry, max(today + around, include or today))

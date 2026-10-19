@@ -575,7 +575,8 @@ def list_entry_occurrences(
 ):
     """The occurrences a Mark paid can record, with what each is already linked
     to (services/posting.py ``entry_occurrences``). Needs ``can_post`` on the
-    entry (404 otherwise); an ``include`` off the schedule is a 422."""
+    entry (404 otherwise); an ``include`` off the schedule, or more than two
+    years after Manila's today, is a 422."""
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     if not RecordAccess(db, current_user).permissions(entry)["can_post"]:
         raise HTTPException(status_code=404, detail="Budget entry not found")
@@ -611,7 +612,8 @@ def materialize_budget_entry(
 
     The occurrence is ``occurrence_date`` (matched by calendar day against the
     schedule from ``next_occurrence``; 422 when it is not one of its
-    occurrences), else ``next_occurrence``. A capped installment records its
+    occurrences or is more than two years after Manila's today), else
+    ``next_occurrence``. A capped installment records its
     oldest unrecorded month only (409 for a later one). See
     services/posting.py ``record_occurrence``: an occurrence is recorded once.
 

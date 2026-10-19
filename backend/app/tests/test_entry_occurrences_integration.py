@@ -237,3 +237,41 @@ def test_occurrences_walk_a_decades_stale_schedule_completely(sw_client, sw_peop
         1364, "1970-01-01", "2026-10-15")
     assert body["occurrences"][-1]["occurrence_date"] == "2026-11-15"
     assert body["occurrences"][-1]["skipped_before"] == 1365
+
+
+def test_occurrences_refuse_a_day_more_than_two_years_ahead(sw_client, sw_people, monkeypatch):
+    """Manila's today is 2026-10-18: 2028-10-16 (729 days on) is accepted,
+    2028-10-18 (731) and 9999-12-31 are refused before any walk."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    weekly = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "2026-10-19T00:00:00", "account_id": checking})["id"]
+    pin_clock(monkeypatch, REF)
+    two_years = "Choose an occurrence no more than two years from today"
+
+    body = _occurrences(client, me, weekly, include="2028-10-16")
+    assert body["occurrences"][-1]["occurrence_date"] == "2028-10-16"
+    for day in ("2028-10-18", "2028-10-23", "9999-12-31"):
+        assert _occurrences(client, me, weekly, expect=422, include=day)["detail"] == two_years
+
+
+def test_mark_paid_refuses_a_day_more_than_two_years_ahead(sw_client, sw_people, monkeypatch):
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    weekly = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "2026-10-19T00:00:00", "account_id": checking})["id"]
+    pin_clock(monkeypatch, REF)
+    two_years = "Choose an occurrence no more than two years from today"
+
+    def mark_paid(day):
+        return client.post(f"{API}/budget-entries/{weekly}/materialize", headers=me["headers"],
+                           json={"occurrence_date": f"{day}T00:00:00"})
+
+    for day in ("2028-10-18", "2028-10-23", "9999-12-31"):
+        r = mark_paid(day)
+        assert (r.status_code, r.json()["detail"]) == (422, two_years), r.text
+    r = mark_paid("2028-10-16")
+    assert r.status_code == 201, r.text
+    assert r.headers["X-Occurrence-Recorded"] == "2028-10-16"
