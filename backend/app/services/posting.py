@@ -337,6 +337,11 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     row stands for, and ``oldest_due`` / ``latest_due`` are the first and last
     of them (None when there are none), from the whole walk, listed or not;
     each occurrence's ``skipped_before`` counts the unrecorded ones before it.
+    ``oldest_unrecorded`` is the first occurrence of the whole walk (due or
+    not) that no posted row stands for (None when there is none), and each
+    listed occurrence's ``omitted_before`` counts the walked ones left out of
+    the listing immediately before it (0 when it follows the previous listed
+    one, or is the walk's first).
     """
     today = manila_today()
     around = timedelta(days=OCCURRENCES_AROUND)
@@ -351,7 +356,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
 
     rows = []
     unrecorded = due_unposted = 0
-    oldest_due = latest_due = None
+    oldest_due = latest_due = oldest_unrecorded = None
     for occ in walk:
         day = occ.date()
         flags = links.get(day, [])
@@ -363,6 +368,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
             posted[day] -= 1
             continue
         unrecorded += 1
+        oldest_unrecorded = oldest_unrecorded or day
         if day <= today:
             due_unposted += 1
             oldest_due = oldest_due or day
@@ -371,12 +377,16 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     capped = is_capped(entry)
     if capped:
         first = _naive(entry.next_occurrence).date()
-        listed = [r for r in rows if r["occurrence_date"] == first][:1]
+        kept = [i for i, r in enumerate(rows) if r["occurrence_date"] == first][:1]
     else:
-        listed = [r for i, r in enumerate(rows)
-                  if i < OCCURRENCES_FIRST
-                  or today - around <= r["occurrence_date"] <= today + around
-                  or r["occurrence_date"] == include]
+        kept = [i for i, r in enumerate(rows)
+                if i < OCCURRENCES_FIRST
+                or today - around <= r["occurrence_date"] <= today + around
+                or r["occurrence_date"] == include]
+    listed, previous = [], -1
+    for i in kept:
+        listed.append({**rows[i], "omitted_before": i - previous - 1})
+        previous = i
     account = db.get(Account, entry.account_id) if entry.account_id else None
     return {
         "entry_id": entry.id,
@@ -386,6 +396,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
         "due_unposted": due_unposted,
         "oldest_due": oldest_due,
         "latest_due": latest_due,
+        "oldest_unrecorded": oldest_unrecorded,
         "omitted": len(walk) - len(listed),
         "occurrences": listed,
     }

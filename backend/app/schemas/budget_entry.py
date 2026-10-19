@@ -233,6 +233,9 @@ class EntryOccurrence(BaseModel):
     # posted (Mark paid only moves the schedule on), or several (refused).
     linked: Optional[Literal["pending", "posted", "ambiguous"]] = None
     skipped_before: int  # unrecorded occurrences before it, from next_occurrence
+    # Walked occurrences left out of the listing immediately before this one
+    # (0 when it follows the previous listed one, or is the walk's first).
+    omitted_before: int
 
 
 class EntryOccurrences(BaseModel):
@@ -245,6 +248,9 @@ class EntryOccurrences(BaseModel):
     # The first and last of those, listed or not; None when due_unposted is 0.
     oldest_due: Optional[date] = None
     latest_due: Optional[date] = None
+    # The first walked occurrence, due or not, listed or not, that no posted row
+    # stands for; None when every walked occurrence is recorded.
+    oldest_unrecorded: Optional[date] = None
     omitted: int  # walked occurrences left out of ``occurrences``
     occurrences: List[EntryOccurrence]
 

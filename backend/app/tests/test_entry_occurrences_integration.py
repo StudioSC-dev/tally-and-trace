@@ -160,6 +160,46 @@ def test_occurrences_report_the_due_range_of_omitted_ones(sw_client, sw_people, 
     assert body["due_unposted"] == 36
     assert (body["oldest_due"], body["latest_due"]) == ("2026-01-04", "2026-09-06")
     assert not {body["oldest_due"], body["latest_due"]} & listed
+    # The gap: 2025-12-28..2026-09-13 (38 Sundays) sits right before 2026-09-20,
+    # and the oldest unrecorded one is inside it.
+    gaps = {o["occurrence_date"]: o["omitted_before"] for o in body["occurrences"]
+            if o["omitted_before"]}
+    assert gaps == {"2026-09-20": 38}
+    assert sum(o["omitted_before"] for o in body["occurrences"]) == body["omitted"] == 38
+    assert body["oldest_unrecorded"] == "2026-01-04"
+    assert body["oldest_unrecorded"] not in listed
+
+
+def test_occurrences_mark_a_recorded_omitted_run(sw_client, sw_people, monkeypatch):
+    """Every omitted occurrence recorded: the gap is still marked, and the oldest
+    unrecorded one is the first unrecorded of the whole walk (then none)."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    laundry = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "2025-06-01T00:00:00", "account_id": checking})["id"]
+
+    def record(days):
+        for day in days:
+            sw_post(client, me, "/transactions/", {
+                "account_id": checking, "transaction_type": "debit", "amount": 100,
+                "description": "Laundry", "transaction_date": f"{day}T00:00:00",
+                "is_posted": True, "budget_entry_id": laundry})
+
+    # Every due Sunday, 2025-06-01..2026-10-18.
+    record(date(2025, 6, 1) + timedelta(weeks=i) for i in range(73))
+    pin_clock(monkeypatch, REF)
+
+    body = _occurrences(client, me, laundry)
+    assert body["due_unposted"] == 0
+    gaps = {o["occurrence_date"]: o["omitted_before"] for o in body["occurrences"]
+            if o["omitted_before"]}
+    assert gaps == {"2026-09-20": 38} and body["omitted"] == 38
+    assert body["occurrences"][0]["omitted_before"] == 0
+    assert body["oldest_unrecorded"] == "2026-10-25"
+
+    record(date(2026, 10, 25) + timedelta(weeks=i) for i in range(4))  # ..2026-11-15
+    assert _occurrences(client, me, laundry)["oldest_unrecorded"] is None
 
 
 def test_occurrences_report_no_due_range_when_nothing_is_due(sw_client, sw_people, monkeypatch):
