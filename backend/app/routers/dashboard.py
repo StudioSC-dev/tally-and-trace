@@ -12,10 +12,12 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.access import TAG_VIEWER, account_role, owned_criterion
+from app.core.redaction import Redactor
 from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
+from app.services import card_charges as card_charges_svc
 from app.services import forecast as forecast_svc
 from app.services.fx import FxRates, get_fx
 from app.core.time import utc_now
@@ -43,10 +45,12 @@ def get_snapshot(
     - Available cash (projection-cash accounts only; card balances are owed)
     - Per-account month-end closings over the forecast window
     - Payables (cash outflows) due in the next 30 days
+    - Upcoming charges by card (``card_charges``, services/card_charges.py)
 
     With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
     payables keep only tagged records (see routers/forecast.py); balances,
-    available cash, goals and the wishlist are not tagged and stay whole.
+    available cash, goals, the wishlist and the card charges are not tagged
+    and stay whole.
 
     Split by account currency (STU-236): every scalar is the user's default
     currency, ``by_currency`` rows carry each currency's (``balances``,
@@ -191,6 +195,10 @@ def get_snapshot(
     ]
     payables = forecast_svc.payables_by_currency(db, current_user.id, days=30, tag_id=tag_id,
                                                  fx=fx, collector=collector, ids=ids)
+    # After the other lists: its rows join the same ``fx`` and public ids.
+    card_charges = card_charges_svc.card_charges_by_card(
+        db, current_user, fx=fx, collector=collector, ids=ids,
+        redactor=Redactor(db, current_user))
 
     return {
         "balances": {
@@ -206,6 +214,7 @@ def get_snapshot(
         "available_cash": round(float(available_cash), 2),
         "account_closings": account_closings,
         "payables": payables,
+        "card_charges": card_charges,
         # The monthly summary's currencies too (viewable accounts and entries'
         # buckets, no placeholder); ``fx.rates`` stays the full listed rows'.
         "currencies": forecast_svc.response_currencies(
