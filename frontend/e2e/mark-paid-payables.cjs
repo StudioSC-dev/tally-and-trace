@@ -14,8 +14,10 @@
 //   (d) a loan transfer payable posts as a scheduled loan payment split into
 //       principal and interest
 //   (e) every materialise request body carries occurrence_date
+//   (f) an amount typed for one occurrence is cleared when another is chosen:
+//       a pending-linked occurrence shows a blank field and sends no amount
 //
-// Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e]
+// Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -317,6 +319,52 @@ async function loanPayment(browser) {
   await ctx.close()
 }
 
+// (f) Switching occurrence drops the figure typed for the previous one.
+async function switchOccurrenceClearsAmount(browser) {
+  console.log('\n=== (f) an amount typed for one occurrence is not carried to a pending-linked one')
+  const u = await makeUser('f')
+  const bank = await checking(u, 200000)
+  // A variable bill is a card expense billed as a bill.
+  const visa = await post(u.token, '/accounts/', {
+    name: 'Visa F', account_type: 'credit', balance: 0, currency: 'PHP',
+    billing_cycle_start: 5, days_until_due_date: 21, payment_account_id: bank.id,
+  })
+  const { anchor, start } = staleSchedule()
+  const pendingDay = addMonths(start, 1, anchor)
+  const rent = await expense(u, { name: 'Rent', amount: 15000, next_occurrence: wire(start), anchor_day: anchor, account_id: visa.id, billing_kind: 'bill' })
+  const pending = await post(u.token, '/transactions/', {
+    account_id: visa.id, transaction_type: 'debit', amount: 4321, description: 'Rent',
+    transaction_date: wire(pendingDay), is_posted: false, budget_entry_id: rent.id,
+  })
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await settle(page)
+  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${rent.id}/occurrences`))
+  await page.locator('[data-testid="card-charges-card"]').filter({ has: page.getByText('Visa F', { exact: true }) })
+    .locator('[data-testid="card-charge-row"]').filter({ has: page.locator('[data-testid="card-charge-mark-paid"]') })
+    .first().locator('[data-testid="card-charge-mark-paid"]').click()
+  await asked
+  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
+  const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
+  await select.selectOption(start)
+  check('(f) an unlinked bill prefills its usual amount', await amount.inputValue(), '15000')
+  await amount.fill('777')
+  await select.selectOption(pendingDay)
+  check('(f) the pending-linked occurrence is selected', await select.inputValue(), pendingDay)
+  check('(f) its amount field is blank, not 777', await amount.inputValue(), '')
+  const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${rent.id}/materialize`))
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  const res = await done
+  const body = parseBody(res.request().postData() || '')
+  check('(f) the body names the pending occurrence and sends no amount', [body && 'amount' in body, body && body.occurrence_date.slice(0, 10)], [false, pendingDay])
+  check('(f) the pending row is posted', [res.status(), res.headers()['x-occurrence-outcome']], [200, 'posted_pending'])
+  await dialog(page).waitFor({ state: 'detached' })
+  check('(f) the pending row keeps its recorded amount', (await get(u.token, `/transactions/${pending.id}`)).amount, 4321)
+  await ctx.close()
+}
+
 // (e) Every materialise body named its occurrence.
 function everyBodyNamesItsOccurrence() {
   console.log('\n=== (e) every materialise request body carries occurrence_date')
@@ -337,6 +385,7 @@ function everyBodyNamesItsOccurrence() {
   if (run('c')) await staleInstallment(browser)
   if (run('d')) await loanPayment(browser)
   if (run('e')) everyBodyNamesItsOccurrence()
+  if (run('f')) await switchOccurrenceClearsAmount(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

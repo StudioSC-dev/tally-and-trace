@@ -333,6 +333,9 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
                     onChange={(e) => {
                       setSelectedInput(e.target.value)
                       setDayInput(null)
+                      // A figure typed for one occurrence is not another's: each starts from its own default.
+                      setAmountInput(null)
+                      setReceived('')
                       setError(null)
                     }}
                     disabled={listing.capped && occurrences.length === 1}
