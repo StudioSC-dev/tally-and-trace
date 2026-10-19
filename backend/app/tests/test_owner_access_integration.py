@@ -167,6 +167,7 @@ def _id_routes(w):
         ("delete", f"/accounts/{w['card']}", {}),
         ("get", f"/accounts/{w['bank']}/balance", {}),
         ("get", f"/accounts/{w['card']}/statements", {}),
+        ("get", f"/cards/{w['card']}/credit", {}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
         ("post", f"/accounts/{w['loan']}/loan-payment",
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),
