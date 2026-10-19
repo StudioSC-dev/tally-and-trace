@@ -429,7 +429,9 @@ def test_card_charges_ignore_the_tag_filter(card_c, monkeypatch):
 
 def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, monkeypatch):
     """16:30 UTC on Oct 18 is 00:30 on Oct 19 in Manila: the card window runs from
-    Oct 19 to Nov 18 inclusive, while the (UTC) upcoming window still starts Oct 18."""
+    Oct 19 to Nov 18 inclusive, and so does the upcoming window, so the Oct 18 debit
+    is before its start and skipped there as an overdue card charge (it reaches cash
+    through its statement)."""
     client, me = sw_client, sw_people()
     checking = _account(client, me)
     card = _card(client, me, checking)
@@ -455,7 +457,7 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
          "can_mark_paid": True}]
     upcoming = [u for u in body["upcoming_this_month"]
                 if u.get("source") == "transaction" and u.get("source_id") == bookstore]
-    assert [u["due_date"] for u in upcoming] == ["2026-10-18"]
+    assert upcoming == []
 
     pin_clock(monkeypatch, REF)
     body = _snapshot(client, me)

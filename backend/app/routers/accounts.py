@@ -34,7 +34,7 @@ from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
 from app.services.fx import FxRates, get_fx
 from app.services.statements import resolve_cycle_fields
-from app.core.time import naive_utc_now, utc_now
+from app.core.time import manila_midnight, naive_utc_now, utc_now
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -312,8 +312,8 @@ LOAN_PENDING_PAYMENT_DETAIL = (
 
 
 def _start_of_today() -> datetime:
-    """The projection's window start (``_upcoming_window``): today at midnight."""
-    return naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    """The projection's window start (``_upcoming_window``): Manila today at midnight."""
+    return manila_midnight()
 
 
 def _validate_deactivation(db: Session, current_user: User, data: dict,
@@ -387,7 +387,7 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
         ).all()
         if card_entries_still_bill(db, account, entries, _start_of_today()):
             raise HTTPException(status_code=400, detail=CARD_RECURRING_ENTRY_DETAIL)
-        history = statement_history(db, account, naive_utc_now(),
+        history = statement_history(db, account, manila_midnight(),
                                     viewable_account_ids(db, current_user))
         if any(statement["owed"] > 0 or statement["unconverted"] for statement in history):
             raise HTTPException(status_code=400, detail=CARD_OPEN_STATEMENT_DETAIL)
@@ -704,7 +704,7 @@ def get_card_statements(
         raise HTTPException(status_code=400, detail="Account is not a credit card")
     role = account_role(current_user, card)
     limited = role not in EDIT_ROLES
-    history = statement_history(db, card, naive_utc_now(),
+    history = statement_history(db, card, manila_midnight(),
                                 viewable_account_ids(db, current_user), fx=fx)
     redactor = Redactor(db, current_user)
     redactor.prepare([line["transaction"] for s in history

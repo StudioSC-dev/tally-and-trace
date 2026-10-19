@@ -53,8 +53,9 @@ def test_full_payables_carry_occurrence_date_and_overdue(sw_client, sw_people, m
 
 
 def test_overdue_uses_the_manila_calendar(sw_client, sw_people, monkeypatch):
-    """16:30 UTC on Oct 18 is 00:30 on Oct 19 in Manila: an Oct 18 occurrence is overdue,
-    though the (UTC) window still starts on Oct 18 and lists it on its own day."""
+    """16:30 UTC on Oct 18 is 00:30 on Oct 19 in Manila: the window starts on Oct 19, so
+    the open-ended rent's Oct 18 occurrence is before it and dropped, as every open-ended
+    missed occurrence is, and the first payable is November's."""
     client, me = sw_client, sw_people()
     checking = _checking(client, me)
     entry = sw_post(client, me, "/budget-entries/", {
@@ -63,7 +64,7 @@ def test_overdue_uses_the_manila_calendar(sw_client, sw_people, monkeypatch):
         "account_id": checking})["id"]
 
     pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 30))
-    assert _entry_payables(client, me, entry)[0] == ("2026-10-18", "2026-10-18", True)
+    assert _entry_payables(client, me, entry)[0] == ("2026-11-18", "2026-11-18", False)
 
     pin_clock(monkeypatch, REF)
     assert _entry_payables(client, me, entry)[0] == ("2026-10-18", "2026-10-18", False)

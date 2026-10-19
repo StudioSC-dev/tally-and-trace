@@ -49,12 +49,21 @@ def naive_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def manila_wall_now() -> datetime:
+    """The Manila wall clock now, as a naive datetime.
+
+    The projection window and every due or missed decision start from its
+    calendar day, so the household's day turns at Manila midnight, not UTC's.
+    """
+    return naive_utc_now() + MANILA_OFFSET
+
+
 def manila_today() -> date:
     """Today on the Manila calendar: what every due or missed decision reads.
 
     Due is ``occurrence.date() <= manila_today()``, missed is ``<``.
     """
-    return (naive_utc_now() + MANILA_OFFSET).date()
+    return manila_wall_now().date()
 
 
 def manila_midnight() -> datetime:

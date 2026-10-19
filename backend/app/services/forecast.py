@@ -25,7 +25,10 @@ from app.core.access import (
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import manila_today, naive_utc_now
+from app.core.time import manila_today, manila_wall_now
+# Unused here since the window moved to Manila, but tests pin the clock by
+# patching this module's ``naive_utc_now``.
+from app.core.time import naive_utc_now  # noqa: F401
 from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
@@ -248,8 +251,9 @@ LEGACY_PERIOD_KEYS = (
 
 
 def _month_boundaries(months: int, reference: Optional[datetime]) -> list:
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = start.replace(day=1)
     return [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
@@ -341,8 +345,9 @@ def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
 
 def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=days + 1)
 
@@ -2377,8 +2382,9 @@ def project_running_balance(
 
 
 def _timeline_window(days: int, reference: Optional[datetime]) -> tuple:
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=days)
 
