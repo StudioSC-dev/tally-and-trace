@@ -84,6 +84,7 @@ def first_occurrence(entry) -> datetime:
 
 
 OCCURRENCE_HORIZON = timedelta(days=730)  # the furthest occurrence a request may name
+FAR_OCCURRENCE = "Choose an occurrence no more than two years from today"
 
 
 def refuse_far_occurrence(day: date) -> None:
@@ -91,8 +92,7 @@ def refuse_far_occurrence(day: date) -> None:
     Manila's today: the walk to it is complete, one step per day, so an
     unbounded request (9999-12-31) would walk millions of steps."""
     if day > manila_today() + OCCURRENCE_HORIZON:
-        raise HTTPException(status_code=422,
-                            detail="Choose an occurrence no more than two years from today")
+        raise HTTPException(status_code=422, detail=FAR_OCCURRENCE)
 
 
 def _utc_naive(value: datetime) -> datetime:
@@ -109,7 +109,9 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     No request records the schedule's first occurrence (``first_occurrence``:
     ``next_occurrence``, the legacy contract, unless a semi-monthly one is
     stored off its days), skipping nothing. A request more than two years
-    ahead is a 422 (``refuse_far_occurrence``). A request is matched by
+    ahead is a 422 (``refuse_far_occurrence``), as is one too far ahead to
+    convert to UTC; one too far back to convert is off the schedule, a 422
+    too. A request is matched by
     calendar day against the schedule from ``next_occurrence``: no match (a
     day before it, or an off-day ``next_occurrence``, included) is a 422; on a
     capped entry anything but the schedule's first occurrence is a 409, since
@@ -119,7 +121,14 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     """
     if requested is None:
         return first_occurrence(entry), []
-    day = _utc_naive(requested).date()
+    try:
+        day = _utc_naive(requested).date()
+    except OverflowError:
+        # Past the last (or before the first) instant ``datetime`` holds in UTC.
+        if requested.year >= 9999:
+            raise HTTPException(status_code=422, detail=FAR_OCCURRENCE) from None
+        raise HTTPException(status_code=422,
+                            detail="Not an occurrence of this schedule") from None
     refuse_far_occurrence(day)
     walk = schedule_walk(entry, day)
     match = next((occ for occ in walk if occ.date() == day), None)

@@ -351,3 +351,27 @@ def test_capped_entry_stored_off_its_days_records_its_first_walked_one_by_defaul
     state = _entry_state(client, me, phone)
     assert state["next_occurrence"].startswith("2026-11-15")
     assert (state["max_occurrences"], state["is_active"]) == (2, True)
+
+
+def test_mark_paid_refuses_a_day_too_far_to_convert_to_utc(sw_client, sw_people, monkeypatch):
+    """An aware date whose UTC instant is past (or before) what ``datetime``
+    holds is a 422, never a 500. ``include`` is a plain date: no conversion."""
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    weekly = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "2026-10-19T00:00:00", "account_id": checking})["id"]
+    pin_clock(monkeypatch, REF)
+    two_years = "Choose an occurrence no more than two years from today"
+
+    def mark_paid(when):
+        return client.post(f"{API}/budget-entries/{weekly}/materialize", headers=me["headers"],
+                           json={"occurrence_date": when})
+
+    r = mark_paid("9999-12-31T23:00:00-05:00")
+    assert (r.status_code, r.json()["detail"]) == (422, two_years), r.text
+    r = mark_paid("0001-01-01T00:00:00+05:00")
+    assert (r.status_code, r.json()["detail"]) == (
+        422, "Not an occurrence of this schedule"), r.text
+    assert _occurrences(client, me, weekly, expect=422, include="9999-12-31")["detail"] == two_years
+    assert _entry_state(client, me, weekly)["next_occurrence"].startswith("2026-10-19")
