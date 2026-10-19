@@ -242,6 +242,9 @@ class EntryOccurrences(BaseModel):
     capped: bool
     kind: Optional[EntryKind] = None
     due_unposted: int
+    # The first and last of those, listed or not; None when due_unposted is 0.
+    oldest_due: Optional[date] = None
+    latest_due: Optional[date] = None
     omitted: int  # walked occurrences left out of ``occurrences``
     occurrences: List[EntryOccurrence]
 

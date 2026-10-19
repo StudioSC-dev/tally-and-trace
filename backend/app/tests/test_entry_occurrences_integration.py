@@ -3,7 +3,7 @@
 Skips without a database.
 """
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -58,6 +58,7 @@ def test_occurrences_for_a_stale_rent(sw_client, sw_people, monkeypatch):
                                  "omitted")} == {
         "entry_id": rent, "today": "2026-10-18", "capped": False, "kind": "cash",
         "due_unposted": 3, "omitted": 0}
+    assert (body["oldest_due"], body["latest_due"]) == ("2026-08-01", "2026-10-01")
     assert [(o["occurrence_date"], o["due"], o["linked"], o["skipped_before"])
             for o in body["occurrences"]] == [
         ("2026-08-01", True, None, 0),
@@ -131,3 +132,41 @@ def test_occurrences_for_capped_and_forbidden(sw_client, sw, monkeypatch):
     _occurrences(client, sw["v"], joint_rent, expect=404)
     _occurrences(client, sw["s"], joint_rent, expect=404)
     _occurrences(client, sw["s"], phone, expect=404)
+
+
+def test_occurrences_report_the_due_range_of_omitted_ones(sw_client, sw_people, monkeypatch):
+    client, me = sw_client, sw_people()
+    checking = _checking(client, me)
+    laundry = sw_post(client, me, "/budget-entries/", {
+        "name": "Laundry", "entry_type": "expense", "amount": 100, "cadence": "weekly",
+        "next_occurrence": "2025-06-01T00:00:00", "account_id": checking})["id"]
+    # Record the first 31 Sundays (2025-06-01..2025-12-28), 2026-09-13 and every
+    # listed due one (2026-09-20..2026-10-18): only 2026-01-04..2026-09-06, all
+    # in the omitted middle, stay unrecorded.
+    recorded = [date(2025, 6, 1) + timedelta(weeks=i) for i in range(31)]
+    recorded += [date(2026, 9, 13) + timedelta(weeks=i) for i in range(6)]
+    for day in recorded:
+        sw_post(client, me, "/transactions/", {
+            "account_id": checking, "transaction_type": "debit", "amount": 100,
+            "description": "Laundry", "transaction_date": f"{day}T00:00:00",
+            "is_posted": True, "budget_entry_id": laundry})
+    pin_clock(monkeypatch, REF)
+
+    body = _occurrences(client, me, laundry)
+
+    listed = {o["occurrence_date"] for o in body["occurrences"]}
+    assert body["omitted"] > 0
+    assert not any(o["due"] and o["linked"] is None for o in body["occurrences"])
+    assert body["due_unposted"] == 36
+    assert (body["oldest_due"], body["latest_due"]) == ("2026-01-04", "2026-09-06")
+    assert not {body["oldest_due"], body["latest_due"]} & listed
+
+
+def test_occurrences_report_no_due_range_when_nothing_is_due(sw_client, sw_people, monkeypatch):
+    client, me = sw_client, sw_people()
+    rent = _entry(client, me, _checking(client, me), "2026-11-01")
+    pin_clock(monkeypatch, REF)
+
+    body = _occurrences(client, me, rent)
+
+    assert (body["due_unposted"], body["oldest_due"], body["latest_due"]) == (0, None, None)

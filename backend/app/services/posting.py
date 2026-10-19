@@ -317,8 +317,9 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     occurrence of the schedule from ``next_occurrence``); ``omitted`` counts the
     walked ones left out. A capped entry lists only ``next_occurrence``, its
     oldest unrecorded month. ``due_unposted`` counts due occurrences no posted
-    row stands for; each occurrence's ``skipped_before`` counts the unrecorded
-    ones before it.
+    row stands for, and ``oldest_due`` / ``latest_due`` are the first and last
+    of them (None when there are none), from the whole walk, listed or not;
+    each occurrence's ``skipped_before`` counts the unrecorded ones before it.
     """
     today = manila_today()
     around = timedelta(days=OCCURRENCES_AROUND)
@@ -333,6 +334,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
 
     rows = []
     unrecorded = due_unposted = 0
+    oldest_due = latest_due = None
     for occ in walk:
         day = occ.date()
         flags = links.get(day, [])
@@ -346,6 +348,8 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
         unrecorded += 1
         if day <= today:
             due_unposted += 1
+            oldest_due = oldest_due or day
+            latest_due = day
 
     capped = is_capped(entry)
     if capped:
@@ -363,6 +367,8 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
         "capped": capped,
         "kind": entry_kind(entry, account),
         "due_unposted": due_unposted,
+        "oldest_due": oldest_due,
+        "latest_due": latest_due,
         "omitted": len(walk) - len(listed),
         "occurrences": listed,
     }
