@@ -21,8 +21,8 @@ import { CardChargesPanel } from '../components/payables/CardChargesPanel'
 import { useLatestRef } from '../hooks/useRequestGeneration'
 import { payableActions, payableTarget } from '@tally-trace/shared'
 import type { FullBudgetEntry, SharedFullBudgetEntry } from '@tally-trace/shared'
-import { isDetailed, isLimitedEvent, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
-import type { CardCharges, LimitedEvent, Payable, UpcomingItemOrEvent } from '@tally-trace/shared'
+import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
+import type { LimitedEvent, Payable } from '@tally-trace/shared'
 
 const MAX_PAYABLES_SHOWN = 6
 const MAX_OTHER_UPCOMING_SHOWN = 4
@@ -123,23 +123,6 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
     payable,
   }
-}
-
-/** `source:source_id` of every full card charge, so "Also coming up" doesn't list it twice. */
-const fullCardChargeKeys = (cards: readonly CardCharges[]): Set<string> =>
-  new Set(cards.flatMap((card) => card.charges.flatMap((charge) => (isLimitedEvent(charge) ? [] : [`${charge.source}:${charge.source_id}`]))))
-
-/**
- * An upcoming item that is not a cash outflow listed in the payables: a Household bill, money
- * coming in, or a full row with no stored rate (it moves no cash and is counted nowhere, so
- * it is listed here in its own currency whichever way it goes). A full row listed among the
- * card charges is shown there instead.
- */
-const isOtherUpcoming = (cardChargeKeys: ReadonlySet<string>) => (item: UpcomingItemOrEvent): boolean => {
-  if (!isLimitedEvent(item) && cardChargeKeys.has(`${item.source}:${item.source_id}`)) return false
-  if (!isLimitedEvent(item) && item.unconverted === true) return true
-  const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
-  return household || upcomingItemAmount(item).direction === 'in'
 }
 
 export function Dashboard() {
