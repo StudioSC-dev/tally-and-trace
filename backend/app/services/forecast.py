@@ -2873,6 +2873,13 @@ def _occurrence_fields(e: dict, today: date) -> dict:
     return {"occurrence_date": occurrence.isoformat(), "overdue": occurrence < today}
 
 
+def _statement_fields(e: dict) -> dict:
+    """A card statement payable's close day (``statement_close``, ``YYYY-MM-DD``),
+    so the row can name its statement; nothing for any other payable."""
+    close = e.get("statement_close") if e["source"] == "statement" else None
+    return {"statement_close": _naive(close).date().isoformat()} if close is not None else {}
+
+
 def payables_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
@@ -2887,7 +2894,8 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     A full budget-entry payable also carries the occurrence it stands for
     (``occurrence_date``: its ``original_date`` when listed overdue on the
     window start, else its own day) and ``overdue``, that occurrence being
-    before today on the Manila calendar (``manila_today``)."""
+    before today on the Manila calendar (``manila_today``). A full card
+    statement payable carries its ``statement_close`` (``_statement_fields``)."""
     start, end = _upcoming_window(days, reference)
     today = manila_today()
     accounts = get_account_balances(db, user_id)
@@ -2933,6 +2941,7 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
             **(_occurrence_fields(e, today) if e["source"] == "budget_entry" else {}),
+            **_statement_fields(e),
         })
     public_ids = (ids or PublicIds()).assign([e for _, e in limited])
     for (position, e), public_id in zip(limited, public_ids):

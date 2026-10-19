@@ -173,6 +173,8 @@ def _id_routes(w):
         ("put", f"/cards/{w['card']}/statements/{{close_date}}/minimum-due",
          {"json": {"amount": 100}}),
         ("delete", f"/cards/{w['card']}/statements/{{close_date}}/minimum-due", {}),
+        ("post", f"/cards/{w['card']}/payments",
+         {"json": {"amount": 100, "from_account_id": sb, "payment_date": "2026-10-05"}}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
         ("post", f"/accounts/{w['loan']}/loan-payment",
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),

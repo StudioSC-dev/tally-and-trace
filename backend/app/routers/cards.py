@@ -1,27 +1,33 @@
-"""Credit-card endpoints (STU-343 Plan C): available credit, statement minimums.
+"""Credit-card endpoints (STU-343 Plan C): available credit, statement minimums, Pay.
 
 Owner and admin only (``card_credit.can_see_credit``); anyone else gets a 404,
 so no credit-derived figure reaches an editor, viewer or tag viewer.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
-from app.core.access import MANAGE_ROLES, get_account_or_404, viewable_account_ids
+from app.core import locking
+from app.core.access import (
+    EDIT_ROLES, MANAGE_ROLES, NONE, account_role, get_account_or_404, role_map,
+    viewable_account_ids,
+)
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.redaction import Redactor
+from app.core.redaction import Redactor, serialize_transaction
 from app.core.time import manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.card_statement_minimum import CardStatementMinimum
+from app.models.transaction import TransactionType
 from app.models.user import User
-from app.schemas.card import StatementMinimumSet
+from app.schemas.card import CardPaymentCreate, StatementMinimumSet
 from app.schemas.minimum_due import MinimumDueRule
+from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
@@ -219,3 +225,90 @@ def clear_statement_minimum(
     ).delete(synchronize_session=False)
     db.commit()
     return Response(status_code=204)
+
+
+def _check_payment(user: User, card: Optional[Account], payer: Optional[Account],
+                   roles: Optional[Dict[int, str]] = None) -> None:
+    """Pay's rules, in order (section 2.6). Run before the locks and again on
+    the locked, refreshed rows, so a concurrent change cannot slip through.
+    ``roles`` (``role_map``, read after the locks) replaces ``account_role``,
+    whose loaded share grants could predate a revocation.
+
+    The card: an owner or admin (404), a credit card (400), active (400). The
+    paying account: an edit role (404), not the card, active, not a credit or
+    loan account (spending wallets may pay), in the card's currency (400).
+    """
+    def role(account: Account) -> str:
+        return roles.get(account.id, NONE) if roles is not None else account_role(user, account)
+
+    if card is None or role(card) not in MANAGE_ROLES:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if card.account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="Only a credit card takes a card payment")
+    if not card.is_active:
+        raise HTTPException(status_code=400, detail="This card is inactive")
+    if payer is None or role(payer) not in EDIT_ROLES:
+        raise HTTPException(status_code=404, detail="from_account_id account not found")
+    if payer.id == card.id:
+        raise HTTPException(status_code=400, detail="A card cannot pay itself")
+    if not payer.is_active:
+        raise HTTPException(status_code=400, detail="This account is inactive")
+    if payer.account_type in (AccountType.CREDIT, AccountType.LOAN):
+        raise HTTPException(status_code=400,
+                            detail="Pay a card from a bank, cash or e-wallet account")
+    currency = fc._code(card.currency)
+    if fc._code(payer.currency) != currency:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pay this card from a {currency} account. Card payments are in the "
+                   f"card's currency; move the money into a {currency} account first.")
+
+
+@router.post("/{account_id}/payments", response_model=TransactionOut, status_code=201)
+def record_card_payment(
+    account_id: int,
+    payment: CardPaymentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Pay a card: one transfer from a same-currency account into the card (201).
+
+    Any amount; the server targets no statement, since payments settle the
+    oldest statement first. Owner or admin of the card only (404 otherwise);
+    the rules are ``_check_payment``'s. ``payment_date`` is the transaction's
+    day (midnight); a day after Manila's today is a planned payment, recorded
+    pending. The global lock order is taken here (the owner's budget lock,
+    then both accounts in ascending id) and the rules re-run on the refreshed
+    rows, with the caller's roles re-read, before ``add_transaction`` records
+    the transfer.
+    """
+    from app.routers.transactions import add_transaction
+
+    card = db.query(Account).filter(Account.id == account_id).first()
+    payer = db.query(Account).filter(Account.id == payment.from_account_id).first()
+    _check_payment(current_user, card, payer)
+
+    locking.lock_owner_budgets(db, current_user.id)
+    locked = locking.lock_accounts(db, [card.id, payer.id])
+    try:
+        # The caller's grants read afresh: the loaded ones may predate a
+        # revocation or downgrade made while Pay waited on its locks.
+        _check_payment(current_user, locked.get(card.id), locked.get(payer.id),
+                       role_map(db, current_user))
+    except HTTPException:
+        db.rollback()
+        raise
+
+    txn = add_transaction(db, current_user, TransactionCreate(
+        account_id=payer.id,
+        transaction_type=TransactionType.TRANSFER,
+        transfer_from_account_id=payer.id,
+        transfer_to_account_id=card.id,
+        amount=float(payment.amount),
+        description=payment.description or "Card payment",
+        transaction_date=datetime.combine(payment.payment_date, time()),
+        is_posted=payment.payment_date <= manila_today(),
+    ))
+    db.commit()
+    db.refresh(txn)
+    return serialize_transaction(db, current_user, txn)

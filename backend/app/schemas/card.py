@@ -1,6 +1,7 @@
 """Credit-card request bodies (STU-343 Plan C, sections 2.5 and 2.6)."""
+from datetime import date
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,3 +14,17 @@ class StatementMinimumSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     amount: Money
+
+
+class CardPaymentCreate(BaseModel):
+    """``POST /cards/{account_id}/payments``: one transfer into the card.
+
+    ``payment_date`` after Manila's today records a planned (pending) payment.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    amount: Annotated[Decimal, Field(gt=0, max_digits=15, decimal_places=2,
+                                     allow_inf_nan=False)]
+    from_account_id: int = Field(..., gt=0)
+    payment_date: date
+    description: Optional[str] = Field(None, max_length=255)
