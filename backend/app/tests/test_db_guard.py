@@ -15,17 +15,35 @@ def _load_config_fresh():
     return module
 
 
-def test_dotenv_is_skipped_when_tt_disable_dotenv_is_set(monkeypatch):
+PROBE_NAME = "Probe from a temporary .env"
+
+
+def _probe_dotenv(monkeypatch, tmp_path):
+    """Run from ``tmp_path`` holding a synthetic ``.env``, so reloading config
+    (``settings = Settings()``) never parses a real one from the cwd."""
+    (tmp_path / ".env").write_text(f"PROJECT_NAME={PROBE_NAME}\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PROJECT_NAME", raising=False)
+
+
+def test_dotenv_is_skipped_when_tt_disable_dotenv_is_set(monkeypatch, tmp_path):
+    _probe_dotenv(monkeypatch, tmp_path)
     monkeypatch.setenv("TT_DISABLE_DOTENV", "1")
     module = _load_config_fresh()
     assert module.Settings.model_config["env_file"] is None
+    assert module.settings.PROJECT_NAME != PROBE_NAME
 
 
-def test_dotenv_is_read_when_tt_disable_dotenv_is_unset_or_not_one(monkeypatch):
+def test_dotenv_is_read_when_tt_disable_dotenv_is_unset_or_not_one(monkeypatch, tmp_path):
+    _probe_dotenv(monkeypatch, tmp_path)
     monkeypatch.delenv("TT_DISABLE_DOTENV", raising=False)
-    assert _load_config_fresh().Settings.model_config["env_file"] == ".env"
+    module = _load_config_fresh()
+    assert module.Settings.model_config["env_file"] == ".env"
+    assert module.settings.PROJECT_NAME == PROBE_NAME
     monkeypatch.setenv("TT_DISABLE_DOTENV", "0")
-    assert _load_config_fresh().Settings.model_config["env_file"] == ".env"
+    module = _load_config_fresh()
+    assert module.Settings.model_config["env_file"] == ".env"
+    assert module.settings.PROJECT_NAME == PROBE_NAME
 
 
 # --- the guard itself ---------------------------------------------------------------------
