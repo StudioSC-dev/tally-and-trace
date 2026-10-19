@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  billingKindChoices,
   buildEntryDayFields,
   dateForDaySetting,
   daySettingOf,
@@ -13,7 +14,7 @@ import {
   resolveEntryDayFields,
   toWireWallTime,
 } from '@tally-trace/shared'
-import type { DaySetting } from '@tally-trace/shared'
+import type { BillingKind, BillingKindChoice, DaySetting } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -51,10 +52,29 @@ type SubscriptionFormState = {
   end_mode: 'indefinite' | 'on_date' | 'after_occurrences'
   end_date?: string
   max_occurrences?: number
+  /** Card expenses: the pick in the kind select (what `billingKindChoices` offers). */
+  kind_choice: BillingKindChoice['id']
   /** Month-family cadences: the Day control (an edit sends it only when it changed). */
   day: DaySetting
   // The tags picked in the form; an edit sends them only when they changed.
   tag_ids: number[]
+}
+
+/**
+ * The kind select shows for an expense paid from a credit card that is not a transfer.
+ * A capped one is an installment unless it is a bill; a stored 'subscription' on it
+ * shows as Installment, because the server derives it so.
+ */
+const kindChoiceFor = (capped: boolean, billingKind: BillingKind | null | undefined): BillingKindChoice['id'] => {
+  if (billingKind === 'bill') return 'bill'
+  if (capped) return 'installment'
+  return billingKind === 'subscription' ? 'subscription' : 'automatic'
+}
+
+/** The pick that carries over when the Ends choice moves an entry between capped and open-ended. */
+const kindChoiceAfterEnds = (capped: boolean, choice: BillingKindChoice['id']): BillingKindChoice['id'] => {
+  if (choice === 'bill') return 'bill'
+  return capped ? 'installment' : 'automatic'
 }
 
 const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormState => ({
@@ -75,6 +95,7 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   end_mode: 'indefinite',
   end_date: undefined,
   max_occurrences: undefined,
+  kind_choice: 'automatic',
   day: { kind: 'same_as_date' },
   tag_ids: [],
 })
@@ -143,10 +164,25 @@ export function RecurringEntryFormModal({
       end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
       end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
       max_occurrences: entry.max_occurrences ?? undefined,
+      kind_choice: kindChoiceFor(entry.end_mode === 'after_occurrences', entry.billing_kind),
       day: daySettingOf(entry),
       tag_ids: tagIdsOf(entry.tags),
     }
   })
+
+  const showKindSelect =
+    subscriptionForm.entry_type === 'expense' &&
+    !subscriptionForm.transfer_to_account_id &&
+    accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'
+  const kindCapped = subscriptionForm.end_mode === 'after_occurrences'
+  // The pick the form opened on: an edit sends the field only when the pick moved off it.
+  const openingKindChoice = editingBudgetEntry
+    ? kindChoiceFor(editingBudgetEntry.end_mode === 'after_occurrences', editingBudgetEntry.billing_kind)
+    : null
+  // "Automatic" cannot undo a stored kind, so an edit offers it only when it opened on it.
+  const kindChoices = billingKindChoices(kindCapped).filter(
+    (choice) => choice.id !== 'automatic' || openingKindChoice === null || openingKindChoice === 'automatic',
+  )
 
   // The schedule a save would store: the day fields the API resolves the write to
   // (or the detail it would refuse it with), and the next three dates.
@@ -317,6 +353,11 @@ export function RecurringEntryFormModal({
         return
       }
 
+      const pickedBillingKind =
+        showKindSelect && subscriptionForm.kind_choice !== openingKindChoice
+          ? kindChoices.find((choice) => choice.id === subscriptionForm.kind_choice)?.billingKind
+          : undefined
+
       const subscriptionPayload = {
         name: subscriptionForm.name.trim(),
         description: subscriptionForm.description?.trim() || undefined,
@@ -341,6 +382,9 @@ export function RecurringEntryFormModal({
         end_mode: subscriptionForm.end_mode,
         end_date: endDateIso,
         max_occurrences: maxOccurrences,
+        // Card expenses only. "Automatic" sends nothing; Installment sends null, which clears an override.
+        // An edit sends the kind only when the pick moved.
+        ...(pickedBillingKind === undefined ? {} : { billing_kind: pickedBillingKind }),
         // An edit sends the tags only when they changed; omitting them keeps them.
         ...(editingBudgetEntry
           ? tagIdsIfChanged(subscriptionForm.tag_ids, tagIdsOf(editingBudgetEntry.tags))
@@ -724,6 +768,7 @@ export function RecurringEntryFormModal({
                             setSubscriptionForm((prev) => ({
                               ...prev,
                               end_mode: value as SubscriptionFormState['end_mode'],
+                              kind_choice: kindChoiceAfterEnds(value === 'after_occurrences', prev.kind_choice),
                               end_date: value === 'on_date' ? prev.end_date : undefined,
                               max_occurrences:
                                 value === 'after_occurrences'
@@ -783,6 +828,33 @@ export function RecurringEntryFormModal({
                   </div>
                 )}
               </div>
+
+              {showKindSelect && (
+                <div>
+                  <label className="block text-sm font-medium text-body" htmlFor="recurring-kind">Kind</label>
+                  <select
+                    id="recurring-kind"
+                    value={subscriptionForm.kind_choice}
+                    onChange={(e) =>
+                      setSubscriptionForm((prev) => ({
+                        ...prev,
+                        kind_choice: e.target.value as BillingKindChoice['id'],
+                      }))
+                    }
+                    className="mt-1 block w-full border border-line px-3 py-2"
+                    data-testid="recurring-kind"
+                  >
+                    {kindChoices.map((choice) => (
+                      <option key={choice.id} value={choice.id}>{choice.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    {kindCapped
+                      ? 'An installment has a fixed amount; a bill varies, and you enter the amount charged each time.'
+                      : 'A subscription posts a fixed amount; a bill varies, and you enter the amount charged each time.'}
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex items-center justify-between border border-line px-4 py-3">

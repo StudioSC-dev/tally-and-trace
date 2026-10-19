@@ -22,6 +22,7 @@ import {
   entryCalendarDate,
   formatEntryDate,
   isLimited,
+  groupByKind,
   isOwnerFull,
   isSharedFull,
 } from '@tally-trace/shared'
@@ -36,6 +37,7 @@ import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
+import { MarkPaidDialog } from '../components/MarkPaidDialog'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -227,6 +229,7 @@ export function AllocationsPage() {
   const [recurringModal, setRecurringModal] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry | null } | null>(
     null
   )
+  const [markPaidFor, setMarkPaidFor] = useState<FullBudgetEntry | SharedFullBudgetEntry | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
@@ -1279,6 +1282,22 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
+          {entry.permissions.can_post && entry.is_active && remaining !== 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setMarkPaidFor(entry)
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+                className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
+                data-testid="entry-mark-paid-button"
+              >
+                Mark paid
+              </button>
+            </div>
+          )}
           {!canEdit && entry.permissions.can_delete && (
             <div>
               <button
@@ -1317,28 +1336,30 @@ export function AllocationsPage() {
     </section>
   )
 
-  const renderRecurringSection = (
-    title: string,
-    subtitle: string,
-    entries: BudgetEntry[],
-    emptyMessage: string
-  ) => (
-    <section className="space-y-3">
-      <header className="space-y-1">
-        <h2 className="text-xl font-semibold text-ink">{title}</h2>
-        <p className="text-sm text-muted">{subtitle}</p>
-      </header>
-      {isRecurringLoading ? (
-        <div className="card p-6 text-center text-muted">Loading recurring entries…</div>
-      ) : entries.length === 0 ? (
-        <div className="card p-6 text-center text-muted">{emptyMessage}</div>
-      ) : (
-        <div className="grid grid-cols-1 gap-3">
-          {entries.map(renderBudgetEntryCard)}
-                  </div>
-                )}
-    </section>
-  )
+  // Recurring entries by kind: subscriptions, card installments, cash expenses,
+  // card-billed bills, then income and transfers, then what is shared with you.
+  const renderRecurringKindSections = () => {
+    if (isRecurringLoading) {
+      return <div className="card p-6 text-center text-muted">Loading recurring entries…</div>
+    }
+    const groups = groupByKind([...recurringExpenses, ...recurringIncome])
+    if (groups.length === 0) {
+      return (
+        <div className="card p-6 text-center text-muted">
+          No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead.
+        </div>
+      )
+    }
+    return groups.map((group) => (
+      <section key={group.key} className="space-y-3" data-testid={`kind-section-${group.key}`}>
+        <header className="flex items-baseline gap-2 border-b border-line pb-1">
+          <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
+          <span className="text-sm text-muted">{group.entries.length}</span>
+        </header>
+        <div className="grid grid-cols-1 gap-3">{group.entries.map(renderBudgetEntryCard)}</div>
+      </section>
+    ))
+  }
 
   if (isInitialLoading) {
     return (
@@ -1405,21 +1426,7 @@ export function AllocationsPage() {
 
       {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={setSelectedTag} />}
 
-      {activeTab === 'subscriptions' &&
-        renderRecurringSection(
-          'Recurring Income',
-          'Expected paychecks, retainers, and other income that feed your plans.',
-          recurringIncome,
-          'No recurring income entries yet. Add one to keep future deposits on your radar.'
-        )}
-
-      {activeTab === 'subscriptions' &&
-        renderRecurringSection(
-          'Recurring Expenses & Subscriptions',
-          'Upcoming statements and auto-payments that will hit your accounts soon.',
-          recurringExpenses,
-          'No recurring expenses yet. Add your regular bills and subscriptions to stay ahead.'
-        )}
+      {activeTab === 'subscriptions' && renderRecurringKindSections()}
 
       {activeTab === 'budgets' &&
         renderAllocationSection(
@@ -2005,6 +2012,17 @@ export function AllocationsPage() {
           </div>
           </div>
         </div>
+      )}
+
+      {markPaidFor && (
+        <MarkPaidDialog
+          entryId={markPaidFor.id}
+          name={markPaidFor.name}
+          occurrenceDate={markPaidFor.next_occurrence.slice(0, 10)}
+          entry={markPaidFor}
+          onClose={() => setMarkPaidFor(null)}
+          onPaid={() => void loadBudgetEntriesRef.current()}
+        />
       )}
 
       {recurringModal && (
