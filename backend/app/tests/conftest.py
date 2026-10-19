@@ -7,13 +7,20 @@ editor), a viewer (V) and an admin (D), plus private accounts on both sides
 and a stranger (S) with an account of their own. Every name the owner gives a
 private record carries ``PRIVATE``; tests assert it never reaches anyone else.
 """
+# The database guard runs before anything else: no import below may reach `app` or
+# `sqlalchemy` until DATABASE_URL has been vetted as a local throwaway database.
 import os
-import secrets
-from datetime import datetime, timedelta
-from decimal import Decimal
 
-import pytest
-from sqlalchemy import create_engine, text
+from app.tests import _db_guard
+
+_db_guard.guard()
+
+import secrets  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
+from decimal import Decimal  # noqa: E402
+
+import pytest  # noqa: E402
+from sqlalchemy import create_engine, text  # noqa: E402
 
 API = "/api/v1"
 PASSWORD = "Password123!"
@@ -50,6 +57,14 @@ def _fx_store():
 
 
 FX_STORE = _fx_store()
+
+# `_fx_store` imported app.services.fx, so the application's engine now exists.
+from app.core.database import engine as _app_engine  # noqa: E402
+
+_reason = _db_guard.check_engine(_app_engine.url, os.environ["DATABASE_URL"])
+if _reason:
+    pytest.exit(f"refusing: {_reason}", returncode=2)
+_db_guard.require_reachable(_app_engine)
 
 
 def fx_rates():

@@ -1148,6 +1148,26 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     db_transaction = locking.lock_transaction(db, transaction_id)
     if db_transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = apply_transaction_update(db, current_user, db_transaction,
+                                              transaction_update)
+    db.commit()
+    db.refresh(db_transaction)
+    return serialize_transaction(db, current_user, db_transaction)
+
+
+def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
+                             update: TransactionUpdate) -> Transaction:
+    """Apply ``update`` to ``txn`` as ``current_user``, without committing.
+
+    The body of ``PUT /transactions/{id}``: the permission checks, the account
+    and allocation locks, the validation (rolling back on a validation
+    failure), the balance reversal and reapply, the flush, the budget
+    recompute and the tags, in the global lock order. The caller must already
+    hold ``locking.lock_owner_budgets(db, txn.user_id)`` and then
+    ``locking.lock_transaction`` on ``txn``, and commits (or rolls back)
+    afterwards.
+    """
+    db_transaction, transaction_update = txn, update
     owner = db_transaction.user
 
     # Validate before any balance reversal or write.
@@ -1379,9 +1399,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
 
     if tag_ids is not None:
         replace_own_tags(db, Transaction, db_transaction.id, current_user, tag_ids)
-    db.commit()
-    db.refresh(db_transaction)
-    return serialize_transaction(db, current_user, db_transaction)
+    return db_transaction
 
 @router.delete("/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):

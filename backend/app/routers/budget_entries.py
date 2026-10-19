@@ -1,9 +1,8 @@
 from collections import Counter
-from calendar import monthrange
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core import locking
@@ -22,14 +21,14 @@ from app.core.access import (
     viewable_account_ids,
 )
 from app.core.tags import (
-    TAG_FILTER_HELP, copy_explicit_tags, effective_tag_criterion,
+    TAG_FILTER_HELP, effective_tag_criterion,
     filter_tag_id, own_tag_ids, replace_own_tags,
 )
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.allocation import Allocation
-from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
+from app.models.transaction import Transaction
 from app.models.user import User
 from app.core.redaction import (
     full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
@@ -40,12 +39,15 @@ from app.schemas.budget_entry import (
     BudgetEntryOut,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    EntryOccurrences,
+    MaterializeDueResult,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services import posting
+from app.services.recurring_kinds import default_billing_kind, entry_kind, is_capped
 from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
-from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -384,6 +386,9 @@ def create_budget_entry(
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
     entry_data.update(day_fields)
     entry = BudgetEntry(**entry_data)
+    if "billing_kind" not in entry_in.model_fields_set:
+        entry.billing_kind = default_billing_kind(
+            db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
 
     db.add(entry)
     db.flush()
@@ -487,6 +492,9 @@ def update_budget_entry(
 
     for field, value in prospective_data.items():
         setattr(entry, field, value)
+    if entry.billing_kind is None and "billing_kind" not in prospective_data:
+        entry.billing_kind = default_billing_kind(
+            db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
 
     db.add(entry)
     if tag_ids is not None:
@@ -533,106 +541,19 @@ def delete_budget_entry(
     db.commit()
 
 
-def _advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
-    """Return the occurrence following ``current`` for this entry's cadence.
+SKIPPED_HEADER_LIMIT = 60  # the most skipped dates ``X-Occurrences-Skipped`` lists
 
-    Fixed-step cadences go through ``step_occurrence`` (services/recurrence.py),
-    which follows the entry's ``anchor_day`` or ``day_rule`` and keeps the aware
-    value's tzinfo, so materialize's ``end_date`` comparison never mixes naive and
-    aware values.
+
+def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> BudgetEntry:
+    """The entry, locked in the ledger's order and checked for posting.
+
+    The owner's budget lock, then the entry (``FOR NO KEY UPDATE``), before
+    anything is checked (``app.core.locking``): two payments of one entry then
+    queue here and the second sees the first's advance; a payment queued behind
+    a delete of the entry finds it gone. The caller needs the write rule on the
+    entry (404 otherwise), and the entry needs an account to post to.
     """
-    from app.services.forecast import _next_occurrence
-    from app.services.recurrence import step_occurrence
-
-    if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
-        d1 = entry.semi_monthly_day_1 or 1
-        d2 = entry.semi_monthly_day_2 or 15
-        days = sorted({d1, d2})
-        months = [(current.year, current.month)]
-        months.append((current.year + 1, 1) if current.month == 12 else (current.year, current.month + 1))
-        candidates = []
-        for (y, m) in months:
-            last = monthrange(y, m)[1]
-            for d in days:
-                candidates.append(current.replace(year=y, month=m, day=min(d, last)))
-        future = sorted(c for c in candidates if c > current)
-        return future[0] if future else _next_occurrence(current, RecurrenceFrequency.MONTHLY)
-
-    return step_occurrence(entry, current)
-
-
-@router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)
-def materialize_budget_entry(
-    entry_id: int,
-    payload: BudgetEntryMaterialize = BudgetEntryMaterialize(),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
-    """
-    Post a due recurring entry as an actual transaction and advance its schedule.
-
-    Reuses the transaction-create path (so account balances and budget-allocation
-    deltas stay consistent), then moves ``next_occurrence`` to the following one —
-    deactivating the entry when it passes its end date or exhausts its occurrences.
-
-    A capped installment (``end_mode`` "after_occurrences" with ``max_occurrences``
-    set) always advances: a finished or inactive one is refused with a 409 and
-    ``advance`` False with a 400, because a payment
-    that doesn't use up an occurrence would pass the installment's total.
-
-    With ``advance`` False the schedule stays put, so the projection would list
-    that occurrence AND the new transaction. It doesn't, for every entry type
-    (cash, card or transfer): the transaction records the occurrence it fulfils
-    (``occurrence_date``, the ``next_occurrence`` read before any advance), and
-    the transaction suppresses that one occurrence while it is still on the
-    entry's account(s) (see ``_linked_occurrence_days`` and its use in
-    ``collect_events`` in services/forecast.py). This holds with a custom
-    ``transaction_date`` on another day too; and a late payment that advances
-    the schedule leaves the occurrence it moved to projected.
-
-    A recurring transfer into a loan posts as a scheduled loan payment
-    (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in
-    routers/transactions.py: the loan-payment endpoint's rules, except that a
-    spending wallet may fund it), so it settles that due date instead of
-    leaving it projected after the money left the source. Without a
-    ``transfer_fee`` its amount is split into principal and interest; when the
-    entry's amount is more than the loan owes plus a month's interest (the
-    final, smaller payment) it is refused with a 400 asking for the final
-    ``amount`` (``loan_svc.split_payment``).
-
-    An entry in another currency than its account's (for a transfer, the
-    source's) needs ``amount``, the figure charged in the account's currency,
-    or it is refused with a 400 "Enter the amount charged in {CUR}". The
-    transaction is recorded in the account's currency with the entry's figure
-    as ``projected_*`` and ``original_*``, and ``exchange_rate`` = ``amount``
-    / the entry's amount (6 places).
-
-    A recurring transfer between accounts in different currencies needs
-    ``received_amount`` (what the destination received, in its currency), or
-    it is refused with a 400 "Enter the amount received".
-
-    The transaction belongs to the entry's creator (``created_by_actor`` is the
-    caller), so its category, allocation and tags stay one owner's. The caller
-    needs the write rule on the entry: an edit role on every account it
-    touches, which its creator must still hold too.
-
-    The entry's explicit tags are copied onto the new transaction in the same
-    commit (never the tags it gets from its accounts); later changes to the
-    entry's tags leave the transaction as it is.
-
-    One commit covers the transaction, its tags and the schedule's advance. The
-    owner's budget lock and then the entry (``FOR NO KEY UPDATE``) are taken before
-    anything is checked (``app.core.locking``), so concurrent payments of one entry
-    run one after another.
-    """
-    from app.routers.transactions import add_transaction, exchange_rate
-    from app.schemas.transaction import TransactionCreate
-
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
-    # The ledger's lock order (app.core.locking): the owner's budget lock, then the
-    # entry, before anything is checked. Two payments of one entry then queue here
-    # and the second sees the first's advance; a payment queued behind a delete of
-    # the entry finds it gone.
     locking.lock_owner_budgets(db, entry.user_id)
     entry = locking.lock_entry(db, entry_id)
     if entry is None:
@@ -641,7 +562,118 @@ def materialize_budget_entry(
         raise HTTPException(status_code=404, detail="Budget entry not found")
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
-    if entry.end_mode == "after_occurrences" and entry.max_occurrences is not None:
+    return entry
+
+
+@router.get("/{entry_id}/occurrences", response_model=EntryOccurrences)
+def list_entry_occurrences(
+    entry_id: int,
+    include: Optional[date] = Query(
+        None, description="An occurrence (YYYY-MM-DD) to list whatever its distance from today"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """The occurrences a Mark paid can record, with what each is already linked
+    to (services/posting.py ``entry_occurrences``). Needs ``can_post`` on the
+    entry (404 otherwise); an ``include`` off the schedule, or more than two
+    years after Manila's today, is a 422."""
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_post"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    return posting.entry_occurrences(db, entry, include)
+
+
+def _occurrence_headers(outcome, occurrence: datetime, skipped: list) -> dict:
+    """The ``X-Occurrence*`` headers of a Mark paid (listed in main.py's CORS
+    ``expose_headers``; read by ``readMaterializeHeaders`` in the shared package)."""
+    headers = {
+        "X-Occurrence-Outcome": outcome.value,
+        "X-Occurrence-Recorded": occurrence.date().isoformat(),
+        "X-Occurrences-Skipped-Count": str(len(skipped)),
+    }
+    if skipped:
+        headers["X-Occurrences-Skipped"] = ",".join(
+            occ.date().isoformat() for occ in skipped[:SKIPPED_HEADER_LIMIT])
+    return headers
+
+
+@router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)
+def materialize_budget_entry(
+    entry_id: int,
+    payload: BudgetEntryMaterialize = BudgetEntryMaterialize(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    # Last, so a direct call (entry_id, payload, db=, current_user=) still works;
+    # FastAPI injects it by its type.
+    response: Response = None,
+):
+    """
+    Record one occurrence of a recurring entry (Mark paid) and advance its schedule.
+
+    The occurrence is ``occurrence_date`` (matched by calendar day against the
+    schedule from ``next_occurrence``; 422 when it is not one of its
+    occurrences or is more than two years after Manila's today), else the
+    schedule's first occurrence (``next_occurrence``, or for a semi-monthly one
+    stored off its days the next scheduled day). A capped installment records
+    its oldest unrecorded month only (409 for a later one). See
+    services/posting.py ``record_occurrence``: an occurrence is recorded once.
+
+    - No linked row: a new posted transaction (201, ``created``), dated
+      ``transaction_date`` or the occurrence, through the transaction-create
+      path (so account balances and budget-allocation deltas stay consistent).
+    - One pending linked row: that row is posted as the caller, through the
+      ``PUT /transactions/{id}`` path (200, ``posted_pending``); 409 when the
+      caller cannot edit it.
+    - One posted linked row: nothing new is recorded and the schedule moves on
+      (200, ``already_posted``); with ``advance`` False a 409.
+    - More than one linked row: 409.
+
+    The body is the transaction. Headers report what was recorded:
+    ``X-Occurrence-Outcome``, ``X-Occurrence-Recorded`` (the occurrence's
+    day), ``X-Occurrences-Skipped-Count`` (every earlier occurrence left
+    unrecorded, always present) and ``X-Occurrences-Skipped`` (the oldest of
+    them, at most 60 comma-separated days; absent when there are none).
+
+    With ``advance`` the schedule then moves past the recorded occurrence,
+    deactivating the entry when it passes its end date or exhausts its
+    occurrences. A capped installment (``end_mode`` "after_occurrences" with
+    ``max_occurrences`` set) always advances: a finished or inactive one is
+    refused with a 409 and ``advance`` False with a 400, because a payment that
+    doesn't use up an occurrence would pass the installment's total.
+
+    With ``advance`` False the schedule stays put, so the projection would list
+    that occurrence AND the transaction. It doesn't, for every entry type
+    (cash, card or transfer): the transaction records the occurrence it fulfils
+    (``occurrence_date``), and the transaction suppresses that one occurrence
+    while it is still on the entry's account(s) (see ``_linked_occurrence_days``
+    and its use in ``collect_events`` in services/forecast.py). This holds with
+    a custom ``transaction_date`` on another day too.
+
+    A recurring transfer into a loan posts as a scheduled loan payment
+    (``loan_payment_kind`` "scheduled", see ``_loan_payment_stamp`` in
+    routers/transactions.py). Without a ``transfer_fee`` its amount is total
+    cash, split into principal and interest; with one, the amount is the
+    principal and the fee the interest. A pending loan payment being posted
+    reads ``amount`` and ``transfer_fee`` the same way, and keeps its own split
+    when no ``amount`` is sent (``pending_update_for``).
+
+    An entry in another currency than its account's (for a transfer, the
+    source's) needs ``amount``, the figure charged in the account's currency,
+    or it is refused with a 400 "Enter the amount charged in {CUR}". A
+    recurring transfer between accounts in different currencies needs
+    ``received_amount``, or it is refused with a 400 "Enter the amount received".
+
+    A new transaction belongs to the entry's creator (``created_by_actor`` is
+    the caller) and gets the entry's explicit tags. The caller needs the write
+    rule on the entry: an edit role on every account it touches, which its
+    creator must still hold too.
+
+    One commit covers the transaction, its tags and the schedule's advance. The
+    owner's budget lock and then the entry are taken before anything is
+    checked (``_lock_entry_to_post``).
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    if is_capped(entry):
         # An installment's payments are counted down by the advance, so a payment
         # that doesn't advance, or one past the last, would pass its total. Without
         # a cap (``max_occurrences`` None) the entry is open-ended, as elsewhere.
@@ -653,88 +685,64 @@ def materialize_budget_entry(
                 status_code=400,
                 detail="An installment's payment always advances its schedule")
 
-    occurrence_date = payload.transaction_date or entry.next_occurrence
-    # An entry in another currency than its account's (for a transfer, the
-    # source's) posts the figure the account was actually charged, which only
-    # the caller knows; the entry's own figure is kept as the face.
-    account = db.get(Account, entry.account_id)
-    if account is not None and entry.currency != account.currency:
-        if payload.amount is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Enter the amount charged in {account.currency.value}")
-        currency_fields = {
-            "currency": account.currency,
-            "projected_amount": entry.amount,
-            "projected_currency": entry.currency,
-            "original_amount": entry.amount,
-            "original_currency": entry.currency,
-            "exchange_rate": exchange_rate(payload.amount, entry.amount),
-        }
-    else:
-        currency_fields = {"currency": entry.currency}
-    amount = payload.amount if payload.amount is not None else entry.amount
-    if entry.transfer_to_account_id:
-        # A recurring transfer posts as a transfer: -(amount + fee) on the source,
-        # +amount on the destination, like any other transfer transaction.
-        txn_type = TransactionType.TRANSFER
-        transfer_fields = {
-            "transfer_from_account_id": entry.account_id,
-            "transfer_to_account_id": entry.transfer_to_account_id,
-        }
-        if "transfer_fee" in payload.model_fields_set:
-            # Left out otherwise, so a loan payment is split into principal and
-            # interest (``_loan_payment_stamp``); any other transfer has no fee.
-            transfer_fields["transfer_fee"] = payload.transfer_fee
-        # Required across currencies (``_received_amount``): the entry stores no
-        # expected figure for the destination.
-        transfer_fields["received_amount"] = payload.received_amount
-    else:
-        txn_type = (
-            TransactionType.CREDIT if entry.entry_type == BudgetEntryType.INCOME else TransactionType.DEBIT
-        )
-        transfer_fields = {}
-
-    txn_create = TransactionCreate(
-        account_id=entry.account_id,
-        amount=amount,
-        transaction_type=txn_type,
-        transaction_date=occurrence_date,
-        category_id=entry.category_id,
-        allocation_id=entry.allocation_id,
-        budget_entry_id=entry.id,
-        description=entry.name,
-        is_posted=True,
-        **currency_fields,
-        **transfer_fields,
-    )
-    # The entry's creator owns the transaction; the caller is its actor.
-    db_txn = add_transaction(db, current_user, txn_create, owner=entry.user)
-    # The occurrence this row fulfils, read before the advance below: projected
-    # occurrences are suppressed by it, not by ``transaction_date``. Set on the
-    # row, not in ``TransactionCreate``, so no client can set it.
-    db_txn.occurrence_date = entry.next_occurrence
-    # The entry's explicit tags, in the same commit as the transaction.
-    copy_explicit_tags(db, entry.id, db_txn.id)
-
-    if payload.advance:
-        next_occ = _advance_occurrence(entry, entry.next_occurrence)
-        deactivate = False
-        if entry.end_mode == "on_date" and entry.end_date and next_occ > entry.end_date:
-            deactivate = True
-        if entry.end_mode == "after_occurrences" and entry.max_occurrences is not None:
-            entry.max_occurrences = max(entry.max_occurrences - 1, 0)
-            if entry.max_occurrences <= 0:
-                deactivate = True
-        if deactivate:
-            entry.is_active = False
-        else:
-            entry.next_occurrence = next_occ
-        entry.updated_at = utc_now()
+    occurrence, skipped = posting.resolve_occurrence(db, entry, payload.occurrence_date)
+    recorded = posting.record_occurrence(db, entry, current_user, payload, occurrence)
     # The transaction, its balance and budget effects, its tags and the schedule's
     # advance commit together: a failure anywhere leaves none of them.
     db.commit()
-    db.refresh(db_txn)
+    db.refresh(recorded.transaction)
 
-    return serialize_transaction(db, current_user, db_txn)
+    if response is not None:
+        response.status_code = 201 if recorded.outcome == posting.Outcome.CREATED else 200
+        response.headers.update(_occurrence_headers(recorded.outcome, occurrence, skipped))
+    return serialize_transaction(db, current_user, recorded.transaction)
 
+
+@router.post("/{entry_id}/materialize-due", response_model=MaterializeDueResult)
+def materialize_due_budget_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Post every due occurrence of a recurring expense at once (Post N due).
+
+    Due is the schedule from ``next_occurrence`` through today on the Manila
+    calendar. Each occurrence is recorded as Mark paid records it
+    (services/posting.py ``materialize_due``, ``record_occurrence``), dated on
+    its own day: a linked pending row is posted, a linked posted row only moves
+    the schedule on, anything else gets a new row. One commit covers them all;
+    a 409 on any (more than one row linked to an occurrence, or a pending row
+    the caller cannot edit) leaves nothing. Nothing due is a 200 with no
+    results.
+
+    Only a non-capped subscription or cash expense in its account's currency:
+    an installment is marked paid month by month, a bill and a foreign entry
+    each need the amount charged, and income and transfers are refused (400).
+    The caller needs the write rule on the entry, as for Mark paid.
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    account = db.get(Account, entry.account_id)
+    kind = entry_kind(entry, account)
+    if is_capped(entry):
+        raise HTTPException(status_code=400, detail="Mark each installment month paid")
+    if kind == "bill":
+        raise HTTPException(status_code=400,
+                            detail="Bills vary: mark each paid with the amount charged")
+    if account is not None and entry.currency != account.currency:
+        raise HTTPException(status_code=400, detail="Mark each paid with the amount charged")
+    if kind not in ("subscription", "cash"):
+        raise HTTPException(status_code=400, detail="Post N due is for recurring expenses")
+
+    recorded = posting.materialize_due(db, entry, current_user)
+    db.commit()
+    for item in recorded:
+        db.refresh(item.transaction)
+    db.refresh(entry)
+    return {
+        "entry_id": entry.id,
+        "results": [{"occurrence_date": item.occurrence.date(), "outcome": item.outcome.value,
+                     "transaction": serialize_transaction(db, current_user, item.transaction)}
+                    for item in recorded],
+        "next_occurrence": entry.next_occurrence,
+        "is_active": entry.is_active,
+    }

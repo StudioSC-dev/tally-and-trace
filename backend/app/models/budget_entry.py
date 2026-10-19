@@ -34,6 +34,8 @@ class BudgetEntry(Base):
     __table_args__ = (
         CheckConstraint("anchor_day BETWEEN 1 AND 31",
                         name="ck_budget_entries_anchor_day_range"),
+        CheckConstraint("billing_kind IN ('subscription','bill')",
+                        name="ck_budget_entries_billing_kind"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -74,6 +76,10 @@ class BudgetEntry(Base):
     occurrences_paid_offset = Column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+
+    # Open-ended card expenses: "subscription" or "bill". Null is unset (the kind is
+    # then derived, see services/recurring_kinds.py).
+    billing_kind = Column(String(16), nullable=True)
 
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # UC1: secondary funding source — payments draw from account_id first, overflow here.

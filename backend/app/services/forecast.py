@@ -13,7 +13,7 @@ from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from itertools import count
 from types import SimpleNamespace
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
@@ -25,7 +25,7 @@ from app.core.access import (
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import naive_utc_now
+from app.core.time import manila_today, naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
@@ -716,7 +716,9 @@ def _clamp_day(year: int, month: int, day: int) -> int:
     return min(day, monthrange(year, month)[1])
 
 
-def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime]:
+def iter_occurrences(entry, start: datetime, end: datetime,
+                     max_steps: Optional[int] = None,
+                     apply_cap: bool = True) -> Iterator[datetime]:
     """Yield naive occurrence datetimes for a budget entry in ``[start, end)``.
 
     - Fixed-step cadences (weekly/biweekly/monthly/quarterly/semi-annual/annual)
@@ -729,12 +731,19 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
       ``next_occurrence`` forward — best-effort, since elapsed count isn't stored).
     - Stops at the last date ``datetime`` can hold rather than raising, so an
       unbounded walk (``end`` of ``datetime.max``) ends there.
+    - Walks at most ``max_steps`` steps (months, for ``SEMI_MONTHLY``); by
+      default 2000 (600 months), the projection's guard, which a long-stale
+      schedule outruns. Posting passes a bound derived from ``end`` instead.
+    - ``apply_cap=False`` skips the ``max_occurrences`` cap (the end date still
+      applies): posting walks uncapped, merges clamped days, then caps
+      (``capped_distinct_days``).
     """
     start = _naive(start)
     end = _naive(end)
     anchor = _naive(entry.next_occurrence)
     end_date = _naive(entry.end_date) if getattr(entry, "end_date", None) else None
-    cap = entry.max_occurrences if getattr(entry, "end_mode", None) == "after_occurrences" else None
+    cap = (entry.max_occurrences
+           if apply_cap and getattr(entry, "end_mode", None) == "after_occurrences" else None)
     produced = 0
 
     if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
@@ -743,7 +752,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
         days = sorted({d1, d2})
         y, m = anchor.year, anchor.month
         guard = 0
-        while guard < 600:
+        limit = 600 if max_steps is None else max_steps
+        while guard < limit:
             guard += 1
             if y > MAXYEAR or datetime(y, m, 1) > end:
                 break
@@ -767,7 +777,8 @@ def iter_occurrences(entry, start: datetime, end: datetime) -> Iterator[datetime
     # Fixed-step cadences
     occ = anchor
     guard = 0
-    while occ < end and guard < 2000:
+    limit = 2000 if max_steps is None else max_steps
+    while occ < end and guard < limit:
         guard += 1
         if end_date is not None and occ > end_date:
             break
@@ -1924,6 +1935,13 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
     entry) keeps the rule above. Without ``occurrence_match`` (counting paid
     occurrences) the rule above holds for every row.
     """
+    return [(entry_id, when) for entry_id, when, _, _ in
+            _linked_rows(db, entry_ids, occurrence_match=occurrence_match)]
+
+
+def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List[tuple]:
+    """``[(entry id, day, transaction id, is_posted)]``: ``linked_transactions``
+    with each row's id and whether it is posted, under the same rule."""
     entry_ids = list(entry_ids)
     if not entry_ids:
         return []
@@ -1933,10 +1951,12 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
                  Transaction.transaction_type, Transaction.account_id,
                  Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
                  BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
-                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None))
+                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
+                 Transaction.id, Transaction.is_posted)
         .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
         .filter(Transaction.budget_entry_id.in_(entry_ids),
                 Transaction.user_id == BudgetEntry.user_id)
+        .order_by(Transaction.id)
         .all()
     )
     touched = {acc for row in rows for acc in row[6:9] if acc is not None}
@@ -1946,7 +1966,7 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
             Account.id.in_(tag_shared_account_ids())))} if touched else set()
 
     def on_entry_accounts(row) -> bool:
-        _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row
+        _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row[:10]
         if entry_dst is not None:
             return (kind == TransactionType.TRANSFER and (src or account) == entry_account
                     and dst == entry_dst)
@@ -1957,7 +1977,73 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
             return row[6] is None or on_entry_accounts(row)
         return not shared.intersection(row[6:9]) or on_entry_accounts(row)
 
-    return [(row[0], row[1]) for row in rows if counts(row)]
+    return [(row[0], row[1], row[10], bool(row[11])) for row in rows if counts(row)]
+
+
+def occurrence_links(db: Session, entry, day: date) -> List[tuple]:
+    """``[(transaction id, is_posted)]`` of the rows standing for ``entry``'s
+    occurrence on ``day``, by the projection's rule (``linked_transactions``
+    with ``occurrence_match``), in id order."""
+    return [(txn_id, is_posted)
+            for _, when, txn_id, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)
+            if _naive(when).date() == day]
+
+
+def distinct_days(occurrences: Iterable[datetime]) -> List[datetime]:
+    """``occurrences`` with each calendar day kept once (its first): a
+    semi-monthly schedule clamps both its days onto a short month's last day
+    (days 30 and 31 both fall on Feb 28), which is one occurrence to record."""
+    seen: set = set()
+    out: List[datetime] = []
+    for occ in occurrences:
+        if occ.date() not in seen:
+            seen.add(occ.date())
+            out.append(occ)
+    return out
+
+
+def capped_distinct_days(entry, start: datetime, end: datetime,
+                         max_steps: Optional[int] = None) -> List[datetime]:
+    """The entry's occurrences in ``[start, end)`` with each calendar day kept
+    once (``distinct_days``), then capped at ``max_occurrences`` on an
+    ``after_occurrences`` entry: the cap counts recorded occurrences, so a
+    semi-monthly day clamped onto another (days 30/31 on Feb 28) uses one, not
+    two. ``start`` is ``next_occurrence``, where the cap's count begins."""
+    days = distinct_days(iter_occurrences(entry, start, end, max_steps=max_steps,
+                                          apply_cap=False))
+    cap = (entry.max_occurrences
+           if getattr(entry, "end_mode", None) == "after_occurrences" else None)
+    return days if cap is None else days[:max(cap, 0)]
+
+
+def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, List[datetime]]:
+    """``{entry id: [occurrence]}``: each entry's occurrences from its
+    ``next_occurrence`` through the day ``through`` (inclusive) that no posted
+    linked row stands for, each calendar day once and capped after merging
+    (``capped_distinct_days``). Each
+    posted row stands for one occurrence on its day
+    (``occurrence_links``); a pending one records nothing yet. The walk is
+    complete through ``through``, not capped by the projection's step guard:
+    one step per day from ``next_occurrence`` (``posting.schedule_walk``'s
+    bound), so a long-stale entry counts every missed occurrence."""
+    entries = list(entries)
+    posted = Counter((entry_id, _naive(when).date())
+                     for entry_id, when, _, is_posted in _linked_rows(
+                         db, [e.id for e in entries], occurrence_match=True)
+                     if is_posted)
+    end = datetime.combine(through + timedelta(days=1), datetime.min.time())
+    out: Dict[int, List[datetime]] = {}
+    for entry in entries:
+        out[entry.id] = []
+        start = _naive(entry.next_occurrence)
+        bound = max((end - start).days, 0) + 2
+        for occ in capped_distinct_days(entry, start, end, max_steps=bound):
+            key = (entry.id, occ.date())
+            if posted[key]:
+                posted[key] -= 1
+                continue
+            out[entry.id].append(occ)
+    return out
 
 
 def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
@@ -2768,6 +2854,12 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
     return items
 
 
+def _occurrence_fields(e: dict, today: date) -> dict:
+    """``occurrence_date`` (``YYYY-MM-DD``) and ``overdue`` of a budget-entry event."""
+    occurrence = _naive(e.get("original_date") or e["date"]).date()
+    return {"occurrence_date": occurrence.isoformat(), "overdue": occurrence < today}
+
+
 def payables_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
@@ -2777,8 +2869,14 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     amount read its cash in each currency, never the raw ``amount``. A full
     payable carries ``currency`` and the B5 labels; an unconverted one moves no
     cash, so it is not a payable. ``ids`` numbers its limited payables
-    (``PublicIds``, shared across a response's lists; a new one by default)."""
+    (``PublicIds``, shared across a response's lists; a new one by default).
+
+    A full budget-entry payable also carries the occurrence it stands for
+    (``occurrence_date``: its ``original_date`` when listed overdue on the
+    window start, else its own day) and ``overdue``, that occurrence being
+    before today on the Manila calendar (``manila_today``)."""
     start, end = _upcoming_window(days, reference)
+    today = manila_today()
     accounts = get_account_balances(db, user_id)
     names = {a.id: a.name for a in accounts}
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id,
@@ -2821,6 +2919,7 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "overflow_account_name": names.get(ov),
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
+            **(_occurrence_fields(e, today) if e["source"] == "budget_entry" else {}),
         })
     public_ids = (ids or PublicIds()).assign([e for _, e in limited])
     for (position, e), public_id in zip(limited, public_ids):

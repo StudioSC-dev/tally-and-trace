@@ -315,6 +315,34 @@ def test_a_materialize_against_a_concurrent_create_keeps_both(sw_client, sw_peop
     assert _balance(client, me, checking) == Decimal("9700.00")
 
 
+def test_a_mark_paid_posting_a_pending_row_on_a_shared_account_against_a_concurrent_create_keeps_both(
+        sw_client, sw_db, sw_people, engine, holder):
+    """STU-343: Mark paid posts A's pending row through the update path, which locks
+    the joint account; B's create (another owner key) holds it, so A waits on the
+    account lock and then builds on B's committed debit: 10,000 - 100 - 200."""
+    client = sw_client
+    a, b = sw_people(), sw_people()
+    joint = _checking(client, a, name="Joint")
+    sw_share(sw_db, joint, b["id"], "editor", a["id"])
+    entry = sw_post(client, a, "/budget-entries/", {
+        "name": "Probe rent", "entry_type": "expense", "amount": 200,
+        "cadence": "monthly", "next_occurrence": "2026-11-01T00:00:00",
+        "account_id": joint})["id"]
+    pending = sw_post(client, a, "/transactions/", {
+        "account_id": joint, "transaction_type": "debit", "amount": 200,
+        "description": "Probe rent", "transaction_date": "2026-11-01T00:00:00",
+        "is_posted": False, "budget_entry_id": entry})["id"]
+    _hold_debit(holder, b["id"], joint, 100)
+
+    r = _race(engine, holder, lambda: client.post(
+        f"{API}/budget-entries/{entry}/materialize",
+        json={"occurrence_date": "2026-11-01T00:00:00Z"}, headers=a["headers"]))
+
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == pending and r.json()["is_posted"] is True
+    assert _balance(client, a, joint) == Decimal("9700.00")
+
+
 def test_a_create_against_a_concurrent_loan_payment_keeps_both(sw_client, sw_people,
                                                               engine, holder):
     """The holder runs the loan-payment endpoint's path: ``_lock`` then ``record_payment``."""

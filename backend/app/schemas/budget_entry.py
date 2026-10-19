@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from app.schemas.access import AccountRef, RecordPermissions
+from app.schemas.transaction import TransactionOut
 from app.models.budget_entry import BudgetEntryType
 from app.models.transaction import RecurrenceFrequency
 from app.models.user import CurrencyType
@@ -12,6 +13,8 @@ from app.schemas.tag import (
 
 
 DayRule = Literal["last_weekday"]
+BillingKind = Literal["subscription", "bill"]
+EntryKind = Literal["subscription", "installment", "bill", "cash"]
 
 
 class BudgetEntryBase(BaseModel):
@@ -44,6 +47,9 @@ class BudgetEntryBase(BaseModel):
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     # Installments paid before import with no linked transaction; counts toward "n of m".
     occurrences_paid_offset: int = Field(0, ge=0, le=360)
+    # Card expenses: how an open-ended entry is billed. Unset on create, an open-ended
+    # card expense gets a server default; an explicit null is stored as sent.
+    billing_kind: Optional[BillingKind] = None
 
 
 ZERO_REMAINING_MESSAGE = (
@@ -93,6 +99,7 @@ class BudgetEntryUpdate(BaseModel):
     end_date: Optional[datetime] = None
     max_occurrences: Optional[int] = Field(None, ge=0, le=360)
     occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
+    billing_kind: Optional[BillingKind] = None
     tag_ids: Optional[TagIds] = tag_ids_update_field()
 
     @field_validator("tag_ids")
@@ -117,6 +124,8 @@ class BudgetEntryFields(BudgetEntryBase):
     # Installments only ("n of m"): occurrences materialised so far, counted from the
     # linked transactions. None for open-ended entries, where the notion doesn't apply.
     occurrences_paid: Optional[int] = None
+    # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
+    kind: Optional[EntryKind] = None
     tags: TagSummaries = tags_response_field()
 
     class Config:
@@ -162,6 +171,8 @@ class SharedFullRecurringEntry(BaseModel):
     max_occurrences: Optional[int] = None
     occurrences_paid_offset: int = 0
     occurrences_paid: Optional[int] = None
+    billing_kind: Optional[BillingKind] = None
+    kind: Optional[EntryKind] = None
     category_name: Optional[str] = None
     tags: TagSummaries = tags_response_field()
     created_at: datetime
@@ -201,7 +212,10 @@ class BudgetEntryListResponse(BaseModel):
 
 class BudgetEntryMaterialize(BaseModel):
     """Post a due recurring entry as an actual transaction."""
-    transaction_date: Optional[datetime] = None  # defaults to the entry's next_occurrence
+    # The occurrence being recorded, matched by calendar day against the schedule
+    # (services/posting.py ``resolve_occurrence``); defaults to next_occurrence.
+    occurrence_date: Optional[datetime] = None
+    transaction_date: Optional[datetime] = None  # defaults to the occurrence
     amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
     advance: bool = True                          # advance next_occurrence to the following one
     transfer_fee: float = Field(0, ge=0)          # transfer entries only: fee charged on the source
@@ -209,3 +223,47 @@ class BudgetEntryMaterialize(BaseModel):
     # Required when the destination's currency differs from the source's.
     received_amount: Optional[float] = Field(None, ge=0)
 
+
+
+class EntryOccurrence(BaseModel):
+    """One occurrence offered by Mark paid."""
+    occurrence_date: date
+    due: bool  # on or before today on the Manila calendar
+    # The row(s) already standing for it: one pending (posted by Mark paid), one
+    # posted (Mark paid only moves the schedule on), or several (refused).
+    linked: Optional[Literal["pending", "posted", "ambiguous"]] = None
+    skipped_before: int  # unrecorded occurrences before it, from next_occurrence
+    # Walked occurrences left out of the listing immediately before this one
+    # (0 when it follows the previous listed one, or is the walk's first).
+    omitted_before: int
+
+
+class EntryOccurrences(BaseModel):
+    """GET /budget-entries/{id}/occurrences."""
+    entry_id: int
+    today: date
+    capped: bool
+    kind: Optional[EntryKind] = None
+    due_unposted: int
+    # The first and last of those, listed or not; None when due_unposted is 0.
+    oldest_due: Optional[date] = None
+    latest_due: Optional[date] = None
+    # The first walked occurrence, due or not, listed or not, that no posted row
+    # stands for; None when every walked occurrence is recorded.
+    oldest_unrecorded: Optional[date] = None
+    omitted: int  # walked occurrences left out of ``occurrences``
+    occurrences: List[EntryOccurrence]
+
+
+class MaterializeDueItem(BaseModel):
+    occurrence_date: date
+    outcome: Literal["created", "posted_pending", "already_posted"]
+    transaction: TransactionOut
+
+
+class MaterializeDueResult(BaseModel):
+    """POST /budget-entries/{id}/materialize-due: every due occurrence, in order."""
+    entry_id: int
+    results: List[MaterializeDueItem]
+    next_occurrence: datetime
+    is_active: bool

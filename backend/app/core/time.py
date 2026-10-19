@@ -29,7 +29,10 @@ data migration with its own semantics to reason about and is deliberately NOT
 bundled with this sweep.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+
+# The household's calendar is Manila's (UTC+8, no daylight saving).
+MANILA_OFFSET = timedelta(hours=8)
 
 
 def utc_now() -> datetime:
@@ -44,3 +47,16 @@ def naive_utc_now() -> datetime:
     deprecation. Use with ``TIMESTAMP WITHOUT TIME ZONE`` columns.
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def manila_today() -> date:
+    """Today on the Manila calendar: what every due or missed decision reads.
+
+    Due is ``occurrence.date() <= manila_today()``, missed is ``<``.
+    """
+    return (naive_utc_now() + MANILA_OFFSET).date()
+
+
+def manila_midnight() -> datetime:
+    """The start of ``manila_today()`` as a naive datetime (wall time stored as UTC)."""
+    return datetime.combine(manila_today(), time())

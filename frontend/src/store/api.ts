@@ -60,6 +60,11 @@ export type {
   NetDisposableIncome,
   DashboardSnapshot,
   BudgetEntryMaterializeInput,
+  EntryOccurrence,
+  EntryOccurrences,
+  MaterializeOutcome,
+  MaterializeDueResult,
+  OccurrenceOutcome,
   CashflowTimeline,
   CashflowTimelineEvent,
   CashflowShortfall,
@@ -100,6 +105,10 @@ import type {
   AllocationProgress,
   GoalsSummary,
   BudgetEntryMaterializeInput,
+  EntryOccurrences,
+  MaterializeOutcome,
+  MaterializeDueResult,
+  HeaderReader,
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
@@ -131,6 +140,19 @@ import type {
   BudgetEntryInput,
   TransactionInput,
 } from '@tally-trace/shared'
+import { readMaterializeHeaders } from '@tally-trace/shared'
+
+/**
+ * The response headers of a request, from the `meta` fetchBaseQuery hands to
+ * `transformResponse` (passed through untouched by baseQueryWithReauth). No
+ * response reads as no headers.
+ */
+function responseHeaders(meta: unknown): HeaderReader {
+  if (typeof meta === 'object' && meta !== null && 'response' in meta && meta.response instanceof Response) {
+    return meta.response.headers
+  }
+  return { get: () => null }
+}
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
 
@@ -273,9 +295,21 @@ export const accountingApi = createApi({
       query: (id) => ({ url: `budget-entries/${id}`, method: 'DELETE' }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
     }),
-    materializeBudgetEntry: builder.mutation<Transaction, { id: number; data?: BudgetEntryMaterializeInput }>({
-      query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data ?? {} }),
+    // Mark paid. The body is the transaction; the X-Occurrence* headers say what was recorded.
+    materializeBudgetEntry: builder.mutation<MaterializeOutcome, { id: number; data: BudgetEntryMaterializeInput }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data }),
+      transformResponse: (transaction: Transaction, meta) => ({ transaction, ...readMaterializeHeaders(responseHeaders(meta)) }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    // Post N due: every due occurrence of a non-capped subscription or cash expense at once.
+    materializeDueBudgetEntry: builder.mutation<MaterializeDueResult, number>({
+      query: (id) => ({ url: `budget-entries/${id}/materialize-due`, method: 'POST' }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    // The occurrences Mark paid can record; `include` (YYYY-MM-DD) is always listed (422 when off the schedule).
+    getEntryOccurrences: builder.query<EntryOccurrences, { id: number; include?: string }>({
+      query: ({ id, include }) => ({ url: `budget-entries/${id}/occurrences`, params: include ? { include } : {} }),
+      providesTags: ['BudgetEntry', 'Transaction'],
     }),
 
     // ── Transactions ──────────────────────────────────────────────────────────
@@ -566,6 +600,8 @@ export const {
   useUpdateBudgetEntryMutation,
   useDeleteBudgetEntryMutation,
   useMaterializeBudgetEntryMutation,
+  useMaterializeDueBudgetEntryMutation,
+  useGetEntryOccurrencesQuery,
 
   // Transaction hooks
   useGetTransactionsQuery,

@@ -97,6 +97,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # What a Mark paid recorded (routers/budget_entries.py ``materialize``).
+    expose_headers=[
+        "X-Occurrence-Outcome",
+        "X-Occurrence-Recorded",
+        "X-Occurrences-Skipped-Count",
+        "X-Occurrences-Skipped",
+    ],
 )
 
 # Uploads are never served as static files: a receipt is fetched from
