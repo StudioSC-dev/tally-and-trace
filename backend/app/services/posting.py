@@ -366,3 +366,27 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
         "omitted": len(walk) - len(listed),
         "occurrences": listed,
     }
+
+
+def materialize_due(db: Session, entry, actor: User) -> List[Recorded]:
+    """Record every due occurrence of ``entry`` (Post N due), without committing.
+
+    The caller holds the owner's budget lock and then the entry lock, and has
+    checked the entry may be posted this way (a non-capped subscription or cash
+    expense in its account's currency). The due set is the schedule from
+    ``next_occurrence`` through Manila's today. Every pending row linked to it
+    is locked first, in ascending id, before anything is created, so the lock
+    order stays owner, entry, transaction rows, accounts. Then every due
+    occurrence goes through ``record_occurrence`` in order, dated on its own
+    day; a posted one only advances the schedule, so it never stalls behind a
+    recorded month. A 409 on any occurrence leaves the caller to roll back.
+    """
+    due = schedule_walk(entry, manila_today())
+    days = {occ.date() for occ in due}
+    pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
+        db, [entry.id], occurrence_match=True)
+        if not is_posted and _naive(when).date() in days)
+    for txn_id in pending:
+        locking.lock_transaction(db, txn_id)
+    return [record_occurrence(db, entry, actor, BudgetEntryMaterialize(transaction_date=occ), occ)
+            for occ in due]

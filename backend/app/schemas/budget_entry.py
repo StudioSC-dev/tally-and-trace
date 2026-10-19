@@ -2,6 +2,7 @@ from datetime import date, datetime
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from app.schemas.access import AccountRef, RecordPermissions
+from app.schemas.transaction import TransactionOut
 from app.models.budget_entry import BudgetEntryType
 from app.models.transaction import RecurrenceFrequency
 from app.models.user import CurrencyType
@@ -243,3 +244,17 @@ class EntryOccurrences(BaseModel):
     due_unposted: int
     omitted: int  # walked occurrences left out of ``occurrences``
     occurrences: List[EntryOccurrence]
+
+
+class MaterializeDueItem(BaseModel):
+    occurrence_date: date
+    outcome: Literal["created", "posted_pending", "already_posted"]
+    transaction: TransactionOut
+
+
+class MaterializeDueResult(BaseModel):
+    """POST /budget-entries/{id}/materialize-due: every due occurrence, in order."""
+    entry_id: int
+    results: List[MaterializeDueItem]
+    next_occurrence: datetime
+    is_active: bool

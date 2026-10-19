@@ -40,12 +40,13 @@ from app.schemas.budget_entry import (
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
     EntryOccurrences,
+    MaterializeDueResult,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
 from app.services import posting
-from app.services.recurring_kinds import default_billing_kind, is_capped
+from app.services.recurring_kinds import default_billing_kind, entry_kind, is_capped
 from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 
 router = APIRouter()
@@ -692,3 +693,53 @@ def materialize_budget_entry(
         response.status_code = 201 if recorded.outcome == posting.Outcome.CREATED else 200
         response.headers.update(_occurrence_headers(recorded.outcome, occurrence, skipped))
     return serialize_transaction(db, current_user, recorded.transaction)
+
+
+@router.post("/{entry_id}/materialize-due", response_model=MaterializeDueResult)
+def materialize_due_budget_entry(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Post every due occurrence of a recurring expense at once (Post N due).
+
+    Due is the schedule from ``next_occurrence`` through today on the Manila
+    calendar. Each occurrence is recorded as Mark paid records it
+    (services/posting.py ``materialize_due``, ``record_occurrence``), dated on
+    its own day: a linked pending row is posted, a linked posted row only moves
+    the schedule on, anything else gets a new row. One commit covers them all;
+    a 409 on any (more than one row linked to an occurrence, or a pending row
+    the caller cannot edit) leaves nothing. Nothing due is a 200 with no
+    results.
+
+    Only a non-capped subscription or cash expense in its account's currency:
+    an installment is marked paid month by month, a bill and a foreign entry
+    each need the amount charged, and income and transfers are refused (400).
+    The caller needs the write rule on the entry, as for Mark paid.
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    account = db.get(Account, entry.account_id)
+    kind = entry_kind(entry, account)
+    if is_capped(entry):
+        raise HTTPException(status_code=400, detail="Mark each installment month paid")
+    if kind == "bill":
+        raise HTTPException(status_code=400,
+                            detail="Bills vary: mark each paid with the amount charged")
+    if account is not None and entry.currency != account.currency:
+        raise HTTPException(status_code=400, detail="Mark each paid with the amount charged")
+    if kind not in ("subscription", "cash"):
+        raise HTTPException(status_code=400, detail="Post N due is for recurring expenses")
+
+    recorded = posting.materialize_due(db, entry, current_user)
+    db.commit()
+    for item in recorded:
+        db.refresh(item.transaction)
+    db.refresh(entry)
+    return {
+        "entry_id": entry.id,
+        "results": [{"occurrence_date": item.occurrence.date(), "outcome": item.outcome.value,
+                     "transaction": serialize_transaction(db, current_user, item.transaction)}
+                    for item in recorded],
+        "next_occurrence": entry.next_occurrence,
+        "is_active": entry.is_active,
+    }
