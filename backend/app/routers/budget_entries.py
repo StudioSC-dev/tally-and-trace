@@ -612,9 +612,10 @@ def materialize_budget_entry(
 
     The occurrence is ``occurrence_date`` (matched by calendar day against the
     schedule from ``next_occurrence``; 422 when it is not one of its
-    occurrences or is more than two years after Manila's today), else
-    ``next_occurrence``. A capped installment records its
-    oldest unrecorded month only (409 for a later one). See
+    occurrences or is more than two years after Manila's today), else the
+    schedule's first occurrence (``next_occurrence``, or for a semi-monthly one
+    stored off its days the next scheduled day). A capped installment records
+    its oldest unrecorded month only (409 for a later one). See
     services/posting.py ``record_occurrence``: an occurrence is recorded once.
 
     - No linked row: a new posted transaction (201, ``created``), dated

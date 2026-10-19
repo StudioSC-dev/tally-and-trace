@@ -69,6 +69,20 @@ def schedule_walk(entry, through: date) -> List[datetime]:
     return distinct_days(iter_occurrences(entry, start, end, max_steps=bound))
 
 
+def first_occurrence(entry) -> datetime:
+    """The schedule's first occurrence from ``next_occurrence``, as the
+    projection shows it: ``next_occurrence`` itself, except a semi-monthly one
+    stored off its days, whose first is its next scheduled day (days 1/15 from
+    Oct 18: Nov 1). ``next_occurrence`` when the walk yields nothing (past its
+    end date or cap)."""
+    start = _naive(entry.next_occurrence)
+    try:
+        end = start + timedelta(days=32)  # a semi-monthly gap is at most 31 days
+    except OverflowError:
+        end = datetime.max
+    return next(iter_occurrences(entry, start, end, max_steps=3), start)
+
+
 OCCURRENCE_HORIZON = timedelta(days=730)  # the furthest occurrence a request may name
 
 
@@ -92,25 +106,26 @@ def resolve_occurrence(db: Session, entry, requested: Optional[datetime]
     """``(occurrence, skipped)``: the occurrence a Mark paid records and every
     earlier unrecorded one it leaves behind.
 
-    No request records ``next_occurrence`` (the legacy contract), skipping
-    nothing. A request more than two years ahead is a 422
-    (``refuse_far_occurrence``). A request is matched by calendar day against
-    the schedule from ``next_occurrence``: no match (a day before it included)
-    is a 422; on a
-    capped entry anything but ``next_occurrence`` is a 409, since its months
-    are counted down in order. ``skipped`` is every occurrence in
+    No request records the schedule's first occurrence (``first_occurrence``:
+    ``next_occurrence``, the legacy contract, unless a semi-monthly one is
+    stored off its days), skipping nothing. A request more than two years
+    ahead is a 422 (``refuse_far_occurrence``). A request is matched by
+    calendar day against the schedule from ``next_occurrence``: no match (a
+    day before it, or an off-day ``next_occurrence``, included) is a 422; on a
+    capped entry anything but the schedule's first occurrence is a 409, since
+    its months are counted down in order. ``skipped`` is every occurrence in
     ``[next_occurrence, occurrence)`` that no posted linked row stands for,
     complete however many there are.
     """
     if requested is None:
-        return _naive(entry.next_occurrence), []
+        return first_occurrence(entry), []
     day = _utc_naive(requested).date()
     refuse_far_occurrence(day)
     walk = schedule_walk(entry, day)
     match = next((occ for occ in walk if occ.date() == day), None)
     if match is None:
         raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
-    if is_capped(entry) and match != _naive(entry.next_occurrence):
+    if is_capped(entry) and match != walk[0]:
         raise HTTPException(status_code=409, detail="Record the oldest unrecorded month first")
     # ``unrecorded_occurrences``' rule over the complete walk: each posted
     # linked row stands for one occurrence on its day.
@@ -350,8 +365,8 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     one within 31 days of today, and ``include`` (a 422 when it is not an
     occurrence of the schedule from ``next_occurrence``, or more than two years
     ahead: ``refuse_far_occurrence``); ``omitted`` counts the
-    walked ones left out. A capped entry lists only ``next_occurrence``, its
-    oldest unrecorded month. ``due_unposted`` counts due occurrences no posted
+    walked ones left out. A capped entry lists only the walk's first
+    occurrence, its oldest unrecorded month. ``due_unposted`` counts due occurrences no posted
     row stands for, and ``oldest_due`` / ``latest_due`` are the first and last
     of them (None when there are none), from the whole walk, listed or not;
     each occurrence's ``skipped_before`` counts the unrecorded ones before it.
@@ -396,8 +411,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
 
     capped = is_capped(entry)
     if capped:
-        first = _naive(entry.next_occurrence).date()
-        kept = [i for i, r in enumerate(rows) if r["occurrence_date"] == first][:1]
+        kept = [0] if rows else []
     else:
         kept = [i for i, r in enumerate(rows)
                 if i < OCCURRENCES_FIRST

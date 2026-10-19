@@ -291,3 +291,63 @@ def test_occurrences_list_a_clamped_semi_monthly_day_once(sw_client, sw_people, 
         ("2027-03-31", 4), ("2027-04-30", 5)]
     assert (body["due_unposted"], body["omitted"], body["oldest_due"], body["latest_due"],
             body["oldest_unrecorded"]) == (5, 0, "2027-01-30", "2027-03-31", "2027-01-30")
+
+
+def _off_day_installment(client, who):
+    """Semi-monthly 1/15, three payments, stored on Oct 18: the walk (and the
+    projection) starts Nov 1."""
+    return sw_post(client, who, "/budget-entries/", {
+        "name": "Phone", "entry_type": "expense", "amount": 1_000,
+        "cadence": "semi_monthly", "semi_monthly_day_1": 1, "semi_monthly_day_2": 15,
+        "next_occurrence": "2026-10-18T00:00:00", "account_id": _checking(client, who),
+        "end_mode": "after_occurrences", "max_occurrences": 3})["id"]
+
+
+def _entry_state(client, who, entry_id):
+    r = client.get(f"{API}/budget-entries/{entry_id}", headers=who["headers"])
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_capped_entry_stored_off_its_days_lists_and_records_its_first_walked_one(
+        sw_client, sw_people, monkeypatch):
+    client, me = sw_client, sw_people()
+    phone = _off_day_installment(client, me)
+    pin_clock(monkeypatch, REF)
+
+    body = _occurrences(client, me, phone)
+    assert body["capped"] is True
+    assert [o["occurrence_date"] for o in body["occurrences"]] == ["2026-11-01"]
+
+    def mark_paid(day):
+        return client.post(f"{API}/budget-entries/{phone}/materialize", headers=me["headers"],
+                           json={"occurrence_date": f"{day}T00:00:00"})
+
+    r = mark_paid("2026-10-18")
+    assert (r.status_code, r.json()["detail"]) == (422, "Not an occurrence of this schedule")
+    r = mark_paid("2026-11-15")
+    assert (r.status_code, r.json()["detail"]) == (409, "Record the oldest unrecorded month first")
+
+    r = mark_paid("2026-11-01")
+    assert r.status_code == 201, r.text
+    assert r.headers["X-Occurrence-Recorded"] == "2026-11-01"
+    state = _entry_state(client, me, phone)
+    assert state["next_occurrence"].startswith("2026-11-15")
+    assert (state["max_occurrences"], state["is_active"]) == (2, True)
+
+
+def test_capped_entry_stored_off_its_days_records_its_first_walked_one_by_default(
+        sw_client, sw_people, monkeypatch):
+    """An empty body records the schedule's first occurrence (Nov 1), not the
+    stored off-day Oct 18."""
+    client, me = sw_client, sw_people()
+    phone = _off_day_installment(client, me)
+    pin_clock(monkeypatch, REF)
+
+    r = client.post(f"{API}/budget-entries/{phone}/materialize", headers=me["headers"])
+    assert r.status_code == 201, r.text
+    assert r.headers["X-Occurrence-Recorded"] == "2026-11-01"
+    assert r.json()["transaction_date"].startswith("2026-11-01")
+    state = _entry_state(client, me, phone)
+    assert state["next_occurrence"].startswith("2026-11-15")
+    assert (state["max_occurrences"], state["is_active"]) == (2, True)
