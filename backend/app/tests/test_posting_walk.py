@@ -8,6 +8,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 from app.models.transaction import RecurrenceFrequency as F
+from app.services import forecast as fc
 from app.services.forecast import iter_occurrences
 from app.services.posting import schedule_walk
 
@@ -77,3 +78,36 @@ def test_walk_lists_a_clamped_semi_monthly_day_once():
         date(2027, 3, 31)]
     assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2027, 3, 1))] == [
         date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28)]
+
+
+def test_capped_walk_counts_a_clamped_semi_monthly_day_once(monkeypatch):
+    """Days 30/31, four left: the cap applies after Feb 28's two clamped days
+    merge, so the walk is the four occurrences four Mark paids record. The
+    projection's own walk still caps first (both Feb 28s, three days)."""
+    e = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
+               semi_monthly_day_2=31, end_mode="after_occurrences", max_occurrences=4)
+    four = [date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30)]
+
+    assert [o.date() for o in schedule_walk(e, date(2027, 3, 31))] == four
+    assert [o.date() for o in schedule_walk(e, date(2027, 12, 31))] == four
+    assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2028, 1, 1))] == [
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28)]
+
+    # ``unrecorded_occurrences`` (card missed items) caps the same way.
+    monkeypatch.setattr(fc, "_linked_rows", lambda *a, **k: [])
+    e.id = 1
+    assert [o.date() for o in fc.unrecorded_occurrences(None, [e], date(2027, 12, 31))[1]] == four
+
+
+def test_capped_walk_without_clamped_days_still_stops_at_its_cap():
+    semi = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 1), end_mode="after_occurrences",
+                  max_occurrences=3)
+    assert [o.date() for o in schedule_walk(semi, date(2027, 12, 31))] == [
+        date(2027, 1, 1), date(2027, 1, 15), date(2027, 2, 1)]
+    monthly = _entry(F.MONTHLY, datetime(2027, 1, 31), end_mode="after_occurrences",
+                     max_occurrences=2)
+    assert [o.date() for o in schedule_walk(monthly, date(2027, 12, 31))] == [
+        date(2027, 1, 31), date(2027, 2, 28)]
+    done = _entry(F.MONTHLY, datetime(2027, 1, 31), end_mode="after_occurrences",
+                  max_occurrences=0)
+    assert schedule_walk(done, date(2027, 12, 31)) == []

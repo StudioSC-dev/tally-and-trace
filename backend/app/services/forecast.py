@@ -717,7 +717,8 @@ def _clamp_day(year: int, month: int, day: int) -> int:
 
 
 def iter_occurrences(entry, start: datetime, end: datetime,
-                     max_steps: Optional[int] = None) -> Iterator[datetime]:
+                     max_steps: Optional[int] = None,
+                     apply_cap: bool = True) -> Iterator[datetime]:
     """Yield naive occurrence datetimes for a budget entry in ``[start, end)``.
 
     - Fixed-step cadences (weekly/biweekly/monthly/quarterly/semi-annual/annual)
@@ -733,12 +734,16 @@ def iter_occurrences(entry, start: datetime, end: datetime,
     - Walks at most ``max_steps`` steps (months, for ``SEMI_MONTHLY``); by
       default 2000 (600 months), the projection's guard, which a long-stale
       schedule outruns. Posting passes a bound derived from ``end`` instead.
+    - ``apply_cap=False`` skips the ``max_occurrences`` cap (the end date still
+      applies): posting walks uncapped, merges clamped days, then caps
+      (``capped_distinct_days``).
     """
     start = _naive(start)
     end = _naive(end)
     anchor = _naive(entry.next_occurrence)
     end_date = _naive(entry.end_date) if getattr(entry, "end_date", None) else None
-    cap = entry.max_occurrences if getattr(entry, "end_mode", None) == "after_occurrences" else None
+    cap = (entry.max_occurrences
+           if apply_cap and getattr(entry, "end_mode", None) == "after_occurrences" else None)
     produced = 0
 
     if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
@@ -1997,10 +2002,25 @@ def distinct_days(occurrences: Iterable[datetime]) -> List[datetime]:
     return out
 
 
+def capped_distinct_days(entry, start: datetime, end: datetime,
+                         max_steps: Optional[int] = None) -> List[datetime]:
+    """The entry's occurrences in ``[start, end)`` with each calendar day kept
+    once (``distinct_days``), then capped at ``max_occurrences`` on an
+    ``after_occurrences`` entry: the cap counts recorded occurrences, so a
+    semi-monthly day clamped onto another (days 30/31 on Feb 28) uses one, not
+    two. ``start`` is ``next_occurrence``, where the cap's count begins."""
+    days = distinct_days(iter_occurrences(entry, start, end, max_steps=max_steps,
+                                          apply_cap=False))
+    cap = (entry.max_occurrences
+           if getattr(entry, "end_mode", None) == "after_occurrences" else None)
+    return days if cap is None else days[:max(cap, 0)]
+
+
 def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, List[datetime]]:
     """``{entry id: [occurrence]}``: each entry's occurrences from its
     ``next_occurrence`` through the day ``through`` (inclusive) that no posted
-    linked row stands for, each calendar day once (``distinct_days``). Each
+    linked row stands for, each calendar day once and capped after merging
+    (``capped_distinct_days``). Each
     posted row stands for one occurrence on its day
     (``occurrence_links``); a pending one records nothing yet. The walk is
     complete through ``through``, not capped by the projection's step guard:
@@ -2017,7 +2037,7 @@ def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, Lis
         out[entry.id] = []
         start = _naive(entry.next_occurrence)
         bound = max((end - start).days, 0) + 2
-        for occ in distinct_days(iter_occurrences(entry, start, end, max_steps=bound)):
+        for occ in capped_distinct_days(entry, start, end, max_steps=bound):
             key = (entry.id, occ.date())
             if posted[key]:
                 posted[key] -= 1

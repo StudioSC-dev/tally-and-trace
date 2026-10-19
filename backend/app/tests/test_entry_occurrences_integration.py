@@ -293,6 +293,37 @@ def test_occurrences_list_a_clamped_semi_monthly_day_once(sw_client, sw_people, 
             body["oldest_unrecorded"]) == (5, 0, "2027-01-30", "2027-03-31", "2027-01-30")
 
 
+def test_capped_semi_monthly_counts_a_clamped_day_once(sw_client, sw_people, monkeypatch):
+    """Days 30/31, four left, on Mar 31: the cap applies after Feb 28's two
+    clamped days merge, so four are due (Jan 30, Jan 31, Feb 28, Mar 30) and
+    Mar 30 is recorded fourth, in order."""
+    client, me = sw_client, sw_people()
+    rent = _entry(client, me, _checking(client, me), "2027-01-30", amount=1_000,
+                  cadence="semi_monthly", semi_monthly_day_1=30, semi_monthly_day_2=31,
+                  end_mode="after_occurrences", max_occurrences=4)
+    pin_clock(monkeypatch, datetime(2027, 3, 31, 2, 0))
+
+    body = _occurrences(client, me, rent)
+    assert (body["capped"], body["due_unposted"], body["omitted"], body["oldest_due"],
+            body["latest_due"]) == (True, 4, 3, "2027-01-30", "2027-03-30")
+    assert [o["occurrence_date"] for o in body["occurrences"]] == ["2027-01-30"]
+    assert _occurrences(client, me, rent, include="2027-03-30")["due_unposted"] == 4
+    _occurrences(client, me, rent, expect=422, include="2027-03-31")
+
+    def mark_paid(day):
+        return client.post(f"{API}/budget-entries/{rent}/materialize", headers=me["headers"],
+                           json={"occurrence_date": f"{day}T00:00:00"})
+
+    r = mark_paid("2027-03-30")
+    assert (r.status_code, r.json()["detail"]) == (409, "Record the oldest unrecorded month first")
+    for day in ("2027-01-30", "2027-01-31", "2027-02-28", "2027-03-30"):
+        r = mark_paid(day)
+        assert r.status_code == 201, r.text
+        assert r.headers["X-Occurrence-Recorded"] == day
+    state = _entry_state(client, me, rent)
+    assert (state["max_occurrences"], state["is_active"]) == (0, False)
+
+
 def _off_day_installment(client, who):
     """Semi-monthly 1/15, three payments, stored on Oct 18: the walk (and the
     projection) starts Nov 1."""

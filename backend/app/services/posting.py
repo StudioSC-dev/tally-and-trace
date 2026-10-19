@@ -32,7 +32,8 @@ from app.schemas.budget_entry import BudgetEntryMaterialize
 from app.schemas.transaction import TransactionUpdate
 from app.services import loans as loan_svc
 from app.services.forecast import (
-    _linked_rows, _naive, _next_occurrence, distinct_days, iter_occurrences, occurrence_links,
+    _linked_rows, _naive, _next_occurrence, capped_distinct_days, iter_occurrences,
+    occurrence_links,
 )
 from app.services.recurring_kinds import entry_kind, is_capped
 
@@ -61,12 +62,12 @@ def schedule_walk(entry, through: date) -> List[datetime]:
     of them: not the projection's step guard but one step per day from
     ``next_occurrence`` to ``through`` (every cadence moves at least a day a
     step, and a semi-monthly step is a month), which a complete walk never
-    reaches. Each calendar day is one occurrence (``distinct_days``): a
+    reaches. Each calendar day is one occurrence (``capped_distinct_days``): a
     semi-monthly schedule's two days clamped onto one are listed, counted and
-    recorded once."""
+    recorded once, and a cap counts the merged days."""
     start, end = _naive(entry.next_occurrence), _day_after(through)
     bound = max((end - start).days, 0) + 2
-    return distinct_days(iter_occurrences(entry, start, end, max_steps=bound))
+    return capped_distinct_days(entry, start, end, max_steps=bound)
 
 
 def first_occurrence(entry) -> datetime:
