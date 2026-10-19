@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   canPostAllDue,
   defaultMarkPaidDay,
+  markPaidSendsAmount,
   markPaidWireDate,
   postAllDueRange,
   readMaterializeHeaders,
@@ -197,5 +198,31 @@ describe('postAllDueRange', () => {
     const listed = [occ('2026-07-05', true, 'posted'), occ('2026-08-05', true), occ('2026-09-05', true, 'pending'), occ('2026-10-20', false)]
     expect(postAllDueRange({}, listed)).toEqual({ oldest: '2026-08-05', latest: '2026-09-05' })
     expect(postAllDueRange({}, [occ('2026-10-20', false)])).toBeNull()
+  })
+})
+
+describe('markPaidSendsAmount', () => {
+  const bill = { needsCharged: false, editableBill: true }
+
+  it('does not send the nominal amount for an unedited pending bill', () => {
+    expect(markPaidSendsAmount({ ...bill, linked: 'pending', edited: false })).toBe(false)
+  })
+
+  it('sends the amount for an edited pending bill', () => {
+    expect(markPaidSendsAmount({ ...bill, linked: 'pending', edited: true })).toBe(true)
+  })
+
+  it('sends the amount for an unlinked bill, edited or not', () => {
+    expect(markPaidSendsAmount({ ...bill, linked: null, edited: false })).toBe(true)
+    expect(markPaidSendsAmount({ ...bill, linked: null, edited: true })).toBe(true)
+  })
+
+  it('leaves a foreign entry unchanged: always sent', () => {
+    expect(markPaidSendsAmount({ needsCharged: true, editableBill: false, linked: 'pending', edited: false })).toBe(true)
+    expect(markPaidSendsAmount({ needsCharged: true, editableBill: false, linked: null, edited: false })).toBe(true)
+  })
+
+  it('sends nothing for a non-bill', () => {
+    expect(markPaidSendsAmount({ needsCharged: false, editableBill: false, linked: null, edited: true })).toBe(false)
   })
 })

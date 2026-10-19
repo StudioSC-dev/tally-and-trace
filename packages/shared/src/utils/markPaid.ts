@@ -172,3 +172,20 @@ export function postAllDueRange(
   const last = due[due.length - 1]
   return first && last ? { oldest: first.occurrence_date, latest: last.occurrence_date } : null
 }
+
+/**
+ * Whether Mark paid sends `amount`. A foreign entry always does (the charge is asked for).
+ * A bill's amount is prefilled and editable, but when its occurrence is already linked to a
+ * pending row the server would overwrite that row's recorded amount with the entry's nominal
+ * one, so it is sent only when the user edited the field.
+ */
+export function markPaidSendsAmount(args: {
+  needsCharged: boolean
+  editableBill: boolean
+  linked: EntryOccurrence['linked'] | undefined
+  edited: boolean
+}): boolean {
+  if (args.needsCharged) return true
+  if (!args.editableBill) return false
+  return args.linked === 'pending' ? args.edited : true
+}

@@ -7,6 +7,7 @@ import {
   defaultMarkPaidDay,
   formatEntryDate,
   isDetailed,
+  markPaidSendsAmount,
   markPaidWireDate,
   postAllDueRange,
   sameStatementCycle,
@@ -208,7 +209,9 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
   // A bill varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
   const editableBill = kind === 'bill' && !needsCharged
   const amountShown = amountInput ?? (editableBill && detailed ? String(detailed.amount) : '')
-  const sendsAmount = needsCharged || editableBill
+  // A pending bill keeps its recorded amount unless the field was edited.
+  const sendsAmount = markPaidSendsAmount({ needsCharged, editableBill, linked: selected?.linked, edited: amountInput !== null })
+  const showsAmount = needsCharged || editableBill
 
   const defaultDay = selected && today ? defaultMarkPaidDay({ kind, occurrenceDate: selected.occurrence_date, today }) : ''
   const day = dayInput ?? defaultDay
@@ -411,7 +414,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
                 </div>
               )}
 
-              {selected && sendsAmount && (
+              {selected && showsAmount && (
                 <div>
                   <label className="label" htmlFor={`${titleId}-amount`}>
                     {needsCharged ? `Amount charged (${chargedCurrency})` : `Amount (${chargedCurrency})`}
