@@ -9,8 +9,10 @@ import {
   isDetailed,
   markPaidSendsAmount,
   markPaidWireDate,
+  omittedRuns,
   postAllDueRange,
   sameStatementCycle,
+  skippedBefore,
   skippedNotice,
   statementCycleClose,
 } from '@tally-trace/shared'
@@ -62,33 +64,15 @@ const LINKED_NOTES: Record<'pending' | 'posted', string> = {
   posted: 'already recorded; moves the schedule on',
 }
 
-/** An occurrence no posted row stands for (an ambiguous one is left to the Transactions page). */
-const unrecorded = (occurrence: EntryOccurrence) => occurrence.linked !== 'posted'
-
-/**
- * The listed occurrences with "… N more …" where the API left a run out. A run shows
- * as a jump in `skipped_before` larger than the occurrence before it accounts for.
- * When exactly one run is found, `omitted` is its exact size.
- */
+/** The listed occurrences with "… N more …" where the listing left a run out (see `omittedRuns`). */
 function selectItems(occurrences: readonly EntryOccurrence[], omitted: number): SelectItem[] {
-  const items: SelectItem[] = []
-  const gaps: Array<{ type: 'gap'; key: string; count: number }> = []
-  occurrences.forEach((occurrence, index) => {
-    const previous = occurrences[index - 1]
-    if (previous) {
-      const expected = previous.skipped_before + (unrecorded(previous) ? 1 : 0)
-      const jump = occurrence.skipped_before - expected
-      if (jump > 0) {
-        const gap = { type: 'gap' as const, key: `gap-${occurrence.occurrence_date}`, count: jump }
-        gaps.push(gap)
-        items.push(gap)
-      }
-    }
-    items.push({ type: 'occurrence', occurrence })
+  const runs = new Map(omittedRuns(occurrences, omitted).map((run) => [run.before, run.count]))
+  return occurrences.flatMap<SelectItem>((occurrence) => {
+    const count = runs.get(occurrence.occurrence_date)
+    return count === undefined
+      ? [{ type: 'occurrence', occurrence }]
+      : [{ type: 'gap', key: `gap-${occurrence.occurrence_date}`, count }, { type: 'occurrence', occurrence }]
   })
-  const only = gaps.length === 1 ? gaps[0] : undefined
-  if (only && omitted > 0) only.count = omitted
-  return items
 }
 
 const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => {
@@ -222,10 +206,8 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
       ? `This day falls on the statement closing ${formatEntryDate(statementCycleClose(card, day) ?? day)}, not the one closing ${formatEntryDate(statementCycleClose(card, selected.occurrence_date) ?? selected.occurrence_date)} that this installment belongs to.`
       : null
 
-  const skippedDates = selected
-    ? occurrences.filter((o) => o.occurrence_date < selected.occurrence_date && unrecorded(o)).map((o) => o.occurrence_date)
-    : []
-  const skipped = selected ? skippedNotice(selected.skipped_before, skippedDates) : null
+  const skippedSummary = selected && listing ? skippedBefore(listing, occurrences, selected) : null
+  const skipped = skippedSummary ? skippedNotice(skippedSummary.count, skippedSummary.dates) : null
 
   // The range the server reports over the whole walk, not just the listed (truncated) part.
   const dueRange = listing ? postAllDueRange(listing, occurrences) : null

@@ -189,3 +189,54 @@ export function markPaidSendsAmount(args: {
   if (!args.editableBill) return false
   return args.linked === 'pending' ? args.edited : true
 }
+
+/** A run of walked occurrences the listing left out, shown before the listed occurrence on `before`. */
+export interface OmittedRun {
+  before: string
+  count: number
+}
+
+const isUnrecorded = (occurrence: EntryOccurrence): boolean => occurrence.linked !== 'posted'
+
+/**
+ * Where the listing left walked occurrences out. The server's `omitted_before` marks every
+ * run, recorded or not, with its size. An API that does not send it (undefined on every
+ * occurrence) falls back to a jump in `skipped_before` larger than the occurrence before it
+ * accounts for, which cannot see a fully recorded run; when exactly one run is found
+ * there, `omitted` is its exact size.
+ */
+export function omittedRuns(occurrences: readonly EntryOccurrence[], omitted: number): OmittedRun[] {
+  if (occurrences.some((o) => o.omitted_before !== undefined)) {
+    return occurrences.flatMap((o) => ((o.omitted_before ?? 0) > 0 ? [{ before: o.occurrence_date, count: o.omitted_before ?? 0 }] : []))
+  }
+  const runs: OmittedRun[] = []
+  occurrences.forEach((occurrence, index) => {
+    const previous = occurrences[index - 1]
+    if (!previous) return
+    const expected = previous.skipped_before + (isUnrecorded(previous) ? 1 : 0)
+    const jump = occurrence.skipped_before - expected
+    if (jump > 0) runs.push({ before: occurrence.occurrence_date, count: jump })
+  })
+  const only = runs.length === 1 ? runs[0] : undefined
+  if (only && omitted > 0) only.count = omitted
+  return runs
+}
+
+/**
+ * The unrecorded occurrences before the selected one: their number (the server's
+ * `skipped_before`) and the dates known, oldest first. The server's `oldest_unrecorded` is
+ * the true oldest, which a listing that starts on a recorded prefix does not show; without
+ * it (an older API) only the listed unrecorded dates are known.
+ */
+export function skippedBefore(
+  listing: Pick<EntryOccurrences, 'oldest_unrecorded'>,
+  occurrences: readonly EntryOccurrence[],
+  selected: EntryOccurrence,
+): { count: number; dates: string[] } {
+  const dates = occurrences
+    .filter((o) => o.occurrence_date < selected.occurrence_date && isUnrecorded(o))
+    .map((o) => o.occurrence_date)
+  const oldest = listing.oldest_unrecorded
+  if (oldest && oldest < selected.occurrence_date && !dates.includes(oldest)) dates.unshift(oldest)
+  return { count: selected.skipped_before, dates }
+}

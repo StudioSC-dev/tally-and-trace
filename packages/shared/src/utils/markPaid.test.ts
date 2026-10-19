@@ -3,10 +3,12 @@ import {
   canPostAllDue,
   defaultMarkPaidDay,
   markPaidSendsAmount,
+  omittedRuns,
   markPaidWireDate,
   postAllDueRange,
   readMaterializeHeaders,
   sameStatementCycle,
+  skippedBefore,
   skippedNotice,
   statementCycleClose,
 } from './markPaid'
@@ -224,5 +226,68 @@ describe('markPaidSendsAmount', () => {
 
   it('sends nothing for a non-bill', () => {
     expect(markPaidSendsAmount({ needsCharged: false, editableBill: false, linked: null, edited: true })).toBe(false)
+  })
+})
+
+describe('omittedRuns', () => {
+  const occ = (date: string, skipped_before: number, linked: 'pending' | 'posted' | null, omitted_before?: number) => ({
+    occurrence_date: date, due: true, linked, skipped_before, ...(omitted_before === undefined ? {} : { omitted_before }),
+  })
+
+  it('marks a fully recorded omitted run, which skipped_before cannot see', () => {
+    const listed = [occ('2026-01-05', 0, 'posted', 0), occ('2026-09-05', 0, null, 8), occ('2026-10-05', 1, null, 0)]
+    expect(omittedRuns(listed, 8)).toEqual([{ before: '2026-09-05', count: 8 }])
+  })
+
+  it('marks every run with its own server count, including one before the first listed', () => {
+    const listed = [occ('2026-03-05', 2, null, 2), occ('2026-07-05', 3, null, 3)]
+    expect(omittedRuns(listed, 5)).toEqual([
+      { before: '2026-03-05', count: 2 },
+      { before: '2026-07-05', count: 3 },
+    ])
+  })
+
+  it('has no marker when every omitted_before is 0', () => {
+    expect(omittedRuns([occ('2026-01-05', 0, null, 0), occ('2026-02-05', 1, null, 0)], 0)).toEqual([])
+  })
+
+  it('falls back to the skipped_before jump when the field is absent', () => {
+    const listed = [occ('2026-01-05', 0, null), occ('2026-02-05', 1, null), occ('2026-09-05', 7, null)]
+    expect(omittedRuns(listed, 5)).toEqual([{ before: '2026-09-05', count: 5 }])
+    expect(omittedRuns(listed, 0)).toEqual([{ before: '2026-09-05', count: 5 }])
+  })
+
+  it('falls back to no marker for a fully recorded run when the field is absent', () => {
+    expect(omittedRuns([occ('2026-01-05', 0, 'posted'), occ('2026-09-05', 0, null)], 8)).toEqual([])
+  })
+})
+
+describe('skippedBefore', () => {
+  const occ = (date: string, skipped_before: number, linked: 'pending' | 'posted' | null) => ({
+    occurrence_date: date, due: true, linked, skipped_before,
+  })
+
+  it('takes the oldest date from the server when the listed prefix is recorded', () => {
+    const listed = [occ('2026-08-05', 0, 'posted'), occ('2026-09-05', 3, null)]
+    const selected = listed[1]!
+    expect(skippedBefore({ oldest_unrecorded: '2025-02-05' }, listed, selected)).toEqual({ count: 3, dates: ['2025-02-05'] })
+  })
+
+  it('does not repeat a listed oldest date and keeps listed ones after it', () => {
+    const listed = [occ('2026-06-05', 0, null), occ('2026-07-05', 1, null), occ('2026-08-05', 2, null)]
+    expect(skippedBefore({ oldest_unrecorded: '2026-06-05' }, listed, listed[2]!)).toEqual({
+      count: 2, dates: ['2026-06-05', '2026-07-05'],
+    })
+  })
+
+  it('ignores an oldest_unrecorded on or after the selected date, or null', () => {
+    const listed = [occ('2026-08-05', 0, null), occ('2026-09-05', 1, null)]
+    expect(skippedBefore({ oldest_unrecorded: '2026-08-05' }, listed, listed[0]!)).toEqual({ count: 0, dates: [] })
+    expect(skippedBefore({ oldest_unrecorded: null }, listed, listed[0]!)).toEqual({ count: 0, dates: [] })
+  })
+
+  it('falls back to the listed unrecorded dates when the field is absent', () => {
+    const listed = [occ('2026-07-05', 0, 'posted'), occ('2026-08-05', 0, null), occ('2026-09-05', 1, null)]
+    expect(skippedBefore({}, listed, listed[2]!)).toEqual({ count: 1, dates: ['2026-08-05'] })
   })
 })

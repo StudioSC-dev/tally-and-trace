@@ -637,6 +637,11 @@ export interface EntryOccurrence {
   linked: 'pending' | 'posted' | 'ambiguous' | null
   /** Unrecorded occurrences before this one. */
   skipped_before: number
+  /**
+   * Walked occurrences omitted from the list immediately before this one; 0 when adjacent.
+   * Absent from an older API.
+   */
+  omitted_before?: number
 }
 
 /** GET /budget-entries/{id}/occurrences?include=YYYY-MM-DD */
@@ -653,6 +658,11 @@ export interface EntryOccurrences {
    */
   oldest_due?: string | null
   latest_due?: string | null
+  /**
+   * The first unrecorded occurrence of the complete walk (YYYY-MM-DD), whether or not it is
+   * listed; null when none. Absent from an older API.
+   */
+  oldest_unrecorded?: string | null
   /** Walked occurrences left out of the list. */
   omitted: number
   occurrences: EntryOccurrence[]
