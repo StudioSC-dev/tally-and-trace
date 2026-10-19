@@ -25,7 +25,7 @@ from app.core.access import (
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import naive_utc_now
+from app.core.time import manila_today, naive_utc_now
 from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
@@ -2768,6 +2768,12 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
     return items
 
 
+def _occurrence_fields(e: dict, today: date) -> dict:
+    """``occurrence_date`` (``YYYY-MM-DD``) and ``overdue`` of a budget-entry event."""
+    occurrence = _naive(e.get("original_date") or e["date"]).date()
+    return {"occurrence_date": occurrence.isoformat(), "overdue": occurrence < today}
+
+
 def payables_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
@@ -2777,8 +2783,14 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     amount read its cash in each currency, never the raw ``amount``. A full
     payable carries ``currency`` and the B5 labels; an unconverted one moves no
     cash, so it is not a payable. ``ids`` numbers its limited payables
-    (``PublicIds``, shared across a response's lists; a new one by default)."""
+    (``PublicIds``, shared across a response's lists; a new one by default).
+
+    A full budget-entry payable also carries the occurrence it stands for
+    (``occurrence_date``: its ``original_date`` when listed overdue on the
+    window start, else its own day) and ``overdue``, that occurrence being
+    before today on the Manila calendar (``manila_today``)."""
     start, end = _upcoming_window(days, reference)
+    today = manila_today()
     accounts = get_account_balances(db, user_id)
     names = {a.id: a.name for a in accounts}
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id,
@@ -2821,6 +2833,7 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "overflow_account_name": names.get(ov),
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
+            **(_occurrence_fields(e, today) if e["source"] == "budget_entry" else {}),
         })
     public_ids = (ids or PublicIds()).assign([e for _, e in limited])
     for (position, e), public_id in zip(limited, public_ids):
