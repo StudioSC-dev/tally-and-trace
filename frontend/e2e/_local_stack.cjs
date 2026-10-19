@@ -38,8 +38,11 @@ function refuseDatabaseUrl(raw) {
   if (!SCHEMES.includes(url.protocol)) return `scheme ${url.protocol.replace(/:$/, '')} is not allowed`
   if (url.search !== '' || raw.includes('?')) return 'a query string is not allowed'
   if (url.hash !== '' || raw.includes('#')) return 'a fragment is not allowed'
-  const netloc = raw.slice(raw.indexOf('//') + 2).split('/')[0].split('@').pop()
-  if (netloc.includes(',')) return 'more than one host is not allowed'
+  // Judge the whole authority: a second `@` or a `,` anywhere in it makes libpq
+  // and the WHATWG parser disagree about the host.
+  const authority = raw.slice(raw.indexOf('//') + 2).split('/')[0]
+  if (authority.split('@').length > 2) return 'more than one unescaped @ is not allowed'
+  if (authority.includes(',')) return 'more than one host is not allowed'
   if (!HOSTS.includes(url.hostname)) return `host ${url.hostname || '(none)'} is not local`
   const name = decodeURIComponent(url.pathname.replace(/^\//, ''))
   if (name !== 'tally_trace_test' && !DB_NAME.test(name)) return `database ${name || '(none)'} is not a throwaway name`
