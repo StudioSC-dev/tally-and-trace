@@ -1988,7 +1988,10 @@ def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, Lis
     """``{entry id: [occurrence]}``: each entry's occurrences from its
     ``next_occurrence`` through the day ``through`` (inclusive) that no posted
     linked row stands for. Each posted row stands for one occurrence on its day
-    (``occurrence_links``); a pending one records nothing yet."""
+    (``occurrence_links``); a pending one records nothing yet. The walk is
+    complete through ``through``, not capped by the projection's step guard:
+    one step per day from ``next_occurrence`` (``posting.schedule_walk``'s
+    bound), so a long-stale entry counts every missed occurrence."""
     entries = list(entries)
     posted = Counter((entry_id, _naive(when).date())
                      for entry_id, when, _, is_posted in _linked_rows(
@@ -1998,7 +2001,9 @@ def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, Lis
     out: Dict[int, List[datetime]] = {}
     for entry in entries:
         out[entry.id] = []
-        for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
+        start = _naive(entry.next_occurrence)
+        bound = max((end - start).days, 0) + 2
+        for occ in iter_occurrences(entry, start, end, max_steps=bound):
             key = (entry.id, occ.date())
             if posted[key]:
                 posted[key] -= 1

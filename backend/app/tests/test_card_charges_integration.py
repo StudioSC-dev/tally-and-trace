@@ -224,6 +224,24 @@ def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_
             if c["source"] == "budget_entry" and c["source_id"] == netflix] == ["2026-11-10"]
 
 
+def test_missed_count_walks_a_decades_stale_schedule_completely(sw_client, sw_people,
+                                                                monkeypatch):
+    """Past the projection's guard (2000 weekly steps): the missed count is the
+    complete one, the same as ``GET /occurrences``' ``due_unposted``."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    card = _card(client, me, checking)
+    laundry = _entry(client, me, card, "1985-01-06", 100, "Laundry", cadence="weekly")
+    pin_clock(monkeypatch, REF)
+
+    [missed] = _card_of(_snapshot(client, me), card)["missed"]
+    assert (missed["entry_id"], missed["count"], missed["due_count"], missed["oldest"]) == (
+        laundry, 2180, 2181, "1985-01-06")
+    r = client.get(f"{API}/budget-entries/{laundry}/occurrences", headers=me["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["due_unposted"] == missed["due_count"]
+
+
 def test_no_cycle_card_charge_is_listed_and_stays_a_payable(sw_client, sw_people, monkeypatch):
     client, me = sw_client, sw_people()
     _account(client, me)
