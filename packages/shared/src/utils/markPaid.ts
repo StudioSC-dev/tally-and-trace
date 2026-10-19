@@ -1,0 +1,155 @@
+import type { Account, MaterializeOutcome, OccurrenceOutcome, RecurringKind } from '../types/api'
+import { formatEntryDate } from './entryDate'
+import { daysInMonth } from './recurrence'
+import { wallDay } from './transactionList'
+
+/**
+ * Mark paid: which day a payment defaults to, which statement cycle it lands in,
+ * and how to read what the materialise endpoints report back. Days are
+ * `YYYY-MM-DD` strings and all arithmetic goes through UTC components.
+ */
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/
+
+/** The most skipped dates the notice lists before it falls back to a count. */
+const SKIPPED_LIST_LIMIT = 5
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function day(value: string): string {
+  return DAY.test(value) ? value : wallDay(value)
+}
+
+/**
+ * The day a Mark paid dialog opens on. A card installment posts on its occurrence
+ * (the statement it falls in is what matters); everything else on the earlier of
+ * the occurrence and today, so a future occurrence is never dated ahead.
+ */
+export function defaultMarkPaidDay(args: {
+  kind: RecurringKind | null | undefined
+  occurrenceDate: string
+  today: string
+}): string {
+  const occurrence = day(args.occurrenceDate)
+  if (args.kind === 'installment') return occurrence
+  const today = day(args.today)
+  return occurrence < today ? occurrence : today
+}
+
+/** A chosen day as the wire value the materialise endpoint takes: `YYYY-MM-DDT00:00:00Z`. */
+export function markPaidWireDate(value: string): string {
+  if (!DAY.test(value)) throw new RangeError(`Not a calendar day: ${value}`)
+  return `${value}T00:00:00Z`
+}
+
+/** The card terms a statement cycle is read from. */
+export type StatementCycleSettings = Pick<Account, 'billing_cycle_start' | 'due_date' | 'days_until_due_date'>
+
+/** The statement close day of month: `billing_cycle_start`, else the due day less the days until due. */
+function closeDayOfMonth(card: StatementCycleSettings): number | null {
+  if (card.billing_cycle_start) return card.billing_cycle_start
+  if (card.due_date) {
+    const anchor = new Date(Date.UTC(2000, 0, Math.min(card.due_date, 31)))
+    anchor.setUTCDate(anchor.getUTCDate() - (card.days_until_due_date ?? 21))
+    return anchor.getUTCDate()
+  }
+  return null
+}
+
+/**
+ * The close day of the statement a day falls in: this month's close when the day
+ * is on or before it, else next month's. A close day past a short month's end
+ * lands on its last day. null when the card has no cycle settings.
+ */
+export function statementCycleClose(card: StatementCycleSettings, onDay: string): string | null {
+  const closeDay = closeDayOfMonth(card)
+  if (closeDay === null) return null
+  const target = day(onDay)
+  if (!DAY.test(target)) return null
+  let year = Number(target.slice(0, 4))
+  let month = Number(target.slice(5, 7))
+  const close = (y: number, m: number): string => `${y}-${pad(m)}-${pad(Math.min(closeDay, daysInMonth(y, m)))}`
+  let result = close(year, month)
+  if (target > result) {
+    month += 1
+    if (month > 12) {
+      month = 1
+      year += 1
+    }
+    result = close(year, month)
+  }
+  return result
+}
+
+/** Whether two days fall in one statement. A card with no cycle settings has nothing to warn about, so true. */
+export function sameStatementCycle(card: StatementCycleSettings, a: string, b: string): boolean {
+  const first = statementCycleClose(card, a)
+  const second = statementCycleClose(card, b)
+  if (first === null || second === null) return true
+  return first === second
+}
+
+/**
+ * The skipped-occurrences warning, or null when none were skipped. Up to five
+ * dates are listed; above that, the count and the oldest date.
+ */
+export function skippedNotice(skippedCount: number, skipped: readonly string[]): string | null {
+  if (skippedCount <= 0) return null
+  const noun = skippedCount === 1 ? 'occurrence' : 'occurrences'
+  if (skippedCount <= SKIPPED_LIST_LIMIT && skipped.length >= skippedCount) {
+    const dates = skipped.slice(0, skippedCount).map(formatEntryDate).join(', ')
+    return `Skipping ${skippedCount} earlier ${noun}: ${dates}`
+  }
+  const oldest = skipped[0]
+  return oldest === undefined
+    ? `Skipping ${skippedCount} earlier ${noun}`
+    : `Skipping ${skippedCount} earlier ${noun}, the oldest on ${formatEntryDate(oldest)}`
+}
+
+/** Anything with a case-insensitive `get`, which is what `Headers` is. */
+export interface HeaderReader {
+  get(name: string): string | null
+}
+
+const OUTCOMES: readonly OccurrenceOutcome[] = ['created', 'posted_pending', 'already_posted']
+
+/**
+ * The `X-Occurrence-*` headers of a materialise response. Absent headers read as
+ * no outcome, no recorded day, nothing skipped; `X-Occurrences-Skipped` is a
+ * comma-separated list of days.
+ */
+export function readMaterializeHeaders(headers: HeaderReader): Omit<MaterializeOutcome, 'transaction'> {
+  const outcome = headers.get('X-Occurrence-Outcome')
+  const count = Number.parseInt(headers.get('X-Occurrences-Skipped-Count') ?? '', 10)
+  const skipped = (headers.get('X-Occurrences-Skipped') ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value !== '')
+  return {
+    outcome: OUTCOMES.find((known) => known === outcome) ?? null,
+    recorded: headers.get('X-Occurrence-Recorded'),
+    skippedCount: Number.isFinite(count) && count > 0 ? count : 0,
+    skipped,
+  }
+}
+
+/**
+ * Whether the dialog offers "Post all due": a non-capped subscription or cash
+ * expense in its account's currency with more than one due occurrence unposted.
+ * A capped entry is marked paid month by month, whatever its kind.
+ */
+export function canPostAllDue(args: {
+  kind: RecurringKind | null | undefined
+  capped: boolean
+  sameCurrency: boolean
+  due_unposted: number
+}): boolean {
+  return (
+    !args.capped &&
+    (args.kind === 'subscription' || args.kind === 'cash') &&
+    args.sameCurrency &&
+    args.due_unposted > 1
+  )
+}

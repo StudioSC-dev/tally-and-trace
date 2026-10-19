@@ -120,6 +120,7 @@ const snapshot = {
       account_name: 'Joint Account', overflow_account_id: null, overflow_account_name: null, currency: 'PHP',
     },
   ],
+  card_charges: [],
   currencies: ['PHP', 'USD'],
   fx: {
     rates: [{ base: 'USD', quote: 'PHP', rate: 58.0, as_of: '2026-10-13', source: 'currency-api', stale: false }],
@@ -130,7 +131,7 @@ const snapshot = {
 describe('DashboardSnapshot', () => {
   it('has exactly the keys routers/dashboard.py returns', () => {
     expect(Object.keys(snapshot).sort()).toEqual([
-      'account_closings', 'available_cash', 'balances', 'currencies', 'forecast_next_3_months', 'fx',
+      'account_closings', 'available_cash', 'balances', 'card_charges', 'currencies', 'forecast_next_3_months', 'fx',
       'goals_progress', 'monthly_summary', 'payables', 'upcoming_this_month', 'wishlist_next_up',
     ])
   })

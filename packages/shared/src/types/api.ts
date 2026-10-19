@@ -364,6 +364,14 @@ export type RecurrenceFrequency =
   | 'semi_annual'
   | 'annual'
 export type EndMode = 'indefinite' | 'on_date' | 'after_occurrences'
+/** What an open-ended card expense is billed as. Stored on the entry; null means "derive it". */
+export type BillingKind = 'subscription' | 'bill'
+/**
+ * The derived kind of a recurring expense (read-only `kind`): `installment` is a
+ * capped card expense, `cash` any expense off a card, `subscription` and `bill`
+ * the open-ended card expenses. Income and transfers have none (null).
+ */
+export type RecurringKind = 'installment' | 'subscription' | 'bill' | 'cash'
 /** A month-family entry's day rule: the last Monday-Friday of each month. */
 export type DayRule = 'last_weekday'
 
@@ -407,6 +415,14 @@ interface RecurringEntryDetail {
   transfer_to_account_id?: number | null
   is_autopay: boolean
   is_active: boolean
+  /**
+   * Card expenses: how an open-ended one is billed. null derives it (Utilities
+   * categories bill, the rest subscribe); a capped card expense is an installment
+   * unless this is 'bill'.
+   */
+  billing_kind?: BillingKind | null
+  /** Read-only, derived by the server. null for income and transfers. */
+  kind?: RecurringKind | null
   /** The caller's tags on the entry. */
   tags: TagRef[]
   created_at: string
@@ -461,7 +477,7 @@ export type BudgetEntry = FullBudgetEntry | SharedFullBudgetEntry | LimitedBudge
 export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
-    'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid'
+    'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
   >
 > &
   TagIdsInput & {
@@ -578,7 +594,9 @@ export type TransactionInput = Partial<
 
 /** POST /budget-entries/{id}/materialize. */
 export interface BudgetEntryMaterializeInput {
-  /** Defaults to the entry's `next_occurrence`. */
+  /** The occurrence being recorded (any wire time on its day). Defaults to `next_occurrence`. */
+  occurrence_date?: string
+  /** The day it was paid. Defaults to the occurrence. */
   transaction_date?: string
   /**
    * What was charged, in the account's currency. Required when the entry's currency
@@ -594,6 +612,56 @@ export interface BudgetEntryMaterializeInput {
    * Required when the destination's currency differs from the source's.
    */
   received_amount?: number
+}
+
+/** `X-Occurrence-Outcome`: a new row, an existing pending row posted, or a row that was already posted. */
+export type OccurrenceOutcome = 'created' | 'posted_pending' | 'already_posted'
+
+/** What the materialise mutation resolves to: the body plus the `X-Occurrence*` headers. */
+export interface MaterializeOutcome {
+  transaction: Transaction
+  outcome: OccurrenceOutcome | null
+  /** The occurrence that was recorded. */
+  recorded: string | null
+  /** Occurrences before it that stay unrecorded. */
+  skippedCount: number
+  /** The oldest of them, at most 60. */
+  skipped: string[]
+}
+
+/** One occurrence in GET /budget-entries/{id}/occurrences. */
+export interface EntryOccurrence {
+  occurrence_date: string
+  due: boolean
+  /** A pending row will be posted, a posted one only moves the schedule on, an ambiguous one blocks. */
+  linked: 'pending' | 'posted' | 'ambiguous' | null
+  /** Unrecorded occurrences before this one. */
+  skipped_before: number
+}
+
+/** GET /budget-entries/{id}/occurrences?include=YYYY-MM-DD */
+export interface EntryOccurrences {
+  entry_id: number
+  /** The Manila calendar day. */
+  today: string
+  capped: boolean
+  kind: RecurringKind | null
+  due_unposted: number
+  /** Walked occurrences left out of the list. */
+  omitted: number
+  occurrences: EntryOccurrence[]
+}
+
+/** POST /budget-entries/{id}/materialize-due */
+export interface MaterializeDueResult {
+  entry_id: number
+  results: Array<{
+    occurrence_date: string
+    outcome: OccurrenceOutcome
+    transaction: Transaction
+  }>
+  next_occurrence: string
+  is_active: boolean
 }
 
 // ─── Wishlist ────────────────────────────────────────────────────────────────
@@ -932,6 +1000,10 @@ export interface Payable extends Partial<Estimate> {
   overflow_account_name: string | null
   /** The currency of `amount`. */
   currency?: CurrencyCode
+  /** Budget-entry rows: the occurrence this payable stands for (`YYYY-MM-DD`). */
+  occurrence_date?: string
+  /** Budget-entry rows: the occurrence is before today on the Manila calendar. */
+  overdue?: boolean
 }
 
 export type PayableOrEvent = Payable | LimitedEvent
@@ -1180,6 +1252,61 @@ export interface AccountClosingCurrencyRow {
   overflow_moves: OverflowMove[]
 }
 
+// ─── Card charges ────────────────────────────────────────────────────────────
+
+/** A card charge the caller sees in full. `date` is the listing day; `original_date` the real day when overdue. */
+export interface FullCharge extends Partial<Estimate> {
+  view: 'full' | 'shared_full'
+  date: string
+  original_date: string | null
+  overdue: boolean
+  /** Entry-sourced charges only. */
+  occurrence_date: string | null
+  name: string
+  kind: 'installment' | 'subscription' | 'bill' | 'pending' | 'advance'
+  source: 'budget_entry' | 'transaction'
+  source_id: number
+  /** Null only when unconverted. */
+  amount: number | null
+  currency: CurrencyCode
+  /** True only for a budget-entry charge the caller can post. */
+  can_mark_paid: boolean
+}
+
+/** A card charge the caller sees Limited: no amount, no source. */
+export interface LimitedCharge {
+  view: 'limited'
+  public_id: string
+  date: string
+  original_date: string | null
+  overdue: boolean
+  display_name: string
+}
+
+/** A recurring card expense with occurrences nobody recorded. */
+export interface MissedCharge {
+  entry_id: number
+  name: string
+  kind: 'subscription' | 'bill'
+  /** Occurrences before today. */
+  count: number
+  /** Occurrences through today. */
+  due_count: number
+  oldest: string
+  can_mark_paid: boolean
+}
+
+/** One card's upcoming charges in `DashboardSnapshot.card_charges`. */
+export interface CardCharges {
+  account_id: number
+  account_name: string
+  currency: CurrencyCode
+  /** Whether the card has a statement cycle; one without keeps its payables. */
+  statement_cycle: boolean
+  missed: MissedCharge[]
+  charges: Array<FullCharge | LimitedCharge>
+}
+
 /** GET /dashboard/snapshot, exactly as the backend returns it. */
 export interface DashboardSnapshot {
   balances: {
@@ -1216,6 +1343,8 @@ export interface DashboardSnapshot {
     | 'overflow_moves'> & { by_currency: AccountClosingCurrencyRow[] }>
   /** Cash outflows due in the next 30 days; limited events have `view: 'limited'`. */
   payables: PayableOrEvent[]
+  /** Upcoming charges by card, for the caller's own cards. */
+  card_charges: CardCharges[]
   currencies: CurrencyCode[]
   fx: FxMeta
 }
