@@ -1,20 +1,24 @@
 import { useMemo, useState } from 'react'
 import {
-  billingKindChoices,
+  automaticOffered,
   buildEntryDayFields,
   dateForDaySetting,
   daySettingOf,
   formatEntryDate,
   fromWireWallTime,
   generateOccurrences,
+  isCappedEnd,
   isMonthFamily,
   isOwnerFull,
   isSharedFull,
+  kindChoiceFor,
+  offeredKindChoices,
   parseEntryDate,
   resolveEntryDayFields,
+  settleKindChoice,
   toWireWallTime,
 } from '@tally-trace/shared'
-import type { BillingKind, BillingKindChoice, DaySetting } from '@tally-trace/shared'
+import type { BillingKindChoice, DaySetting } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -58,23 +62,6 @@ type SubscriptionFormState = {
   day: DaySetting
   // The tags picked in the form; an edit sends them only when they changed.
   tag_ids: number[]
-}
-
-/**
- * The kind select shows for an expense paid from a credit card that is not a transfer.
- * A capped one is an installment unless it is a bill; a stored 'subscription' on it
- * shows as Installment, because the server derives it so.
- */
-const kindChoiceFor = (capped: boolean, billingKind: BillingKind | null | undefined): BillingKindChoice['id'] => {
-  if (billingKind === 'bill') return 'bill'
-  if (capped) return 'installment'
-  return billingKind === 'subscription' ? 'subscription' : 'automatic'
-}
-
-/** The pick that carries over when the Ends choice moves an entry between capped and open-ended. */
-const kindChoiceAfterEnds = (capped: boolean, choice: BillingKindChoice['id']): BillingKindChoice['id'] => {
-  if (choice === 'bill') return 'bill'
-  return capped ? 'installment' : 'automatic'
 }
 
 const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormState => ({
@@ -164,7 +151,7 @@ export function RecurringEntryFormModal({
       end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
       end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
       max_occurrences: entry.max_occurrences ?? undefined,
-      kind_choice: kindChoiceFor(entry.end_mode === 'after_occurrences', entry.billing_kind),
+      kind_choice: kindChoiceFor(isCappedEnd(entry.end_mode, entry.max_occurrences), entry.billing_kind),
       day: daySettingOf(entry),
       tag_ids: tagIdsOf(entry.tags),
     }
@@ -174,15 +161,16 @@ export function RecurringEntryFormModal({
     subscriptionForm.entry_type === 'expense' &&
     !subscriptionForm.transfer_to_account_id &&
     accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'
-  const kindCapped = subscriptionForm.end_mode === 'after_occurrences'
+  const kindCapped = isCappedEnd(subscriptionForm.end_mode, subscriptionForm.max_occurrences)
   // The pick the form opened on: an edit sends the field only when the pick moved off it.
   const openingKindChoice = editingBudgetEntry
-    ? kindChoiceFor(editingBudgetEntry.end_mode === 'after_occurrences', editingBudgetEntry.billing_kind)
+    ? kindChoiceFor(isCappedEnd(editingBudgetEntry.end_mode, editingBudgetEntry.max_occurrences), editingBudgetEntry.billing_kind)
     : null
-  // "Automatic" cannot undo a stored kind, so an edit offers it only when it opened on it.
-  const kindChoices = billingKindChoices(kindCapped).filter(
-    (choice) => choice.id !== 'automatic' || openingKindChoice === null || openingKindChoice === 'automatic',
-  )
+  // "Automatic" cannot undo a stored kind, so it is offered only to an entry with none stored.
+  const offerAutomatic = automaticOffered(editingBudgetEntry?.billing_kind)
+  const kindChoices = offeredKindChoices(kindCapped, offerAutomatic)
+  // What the select shows and a save sends: always one of the offered choices.
+  const kindValue = settleKindChoice(kindCapped, subscriptionForm.kind_choice, offerAutomatic)
 
   // The schedule a save would store: the day fields the API resolves the write to
   // (or the detail it would refuse it with), and the next three dates.
@@ -354,8 +342,8 @@ export function RecurringEntryFormModal({
       }
 
       const pickedBillingKind =
-        showKindSelect && subscriptionForm.kind_choice !== openingKindChoice
-          ? kindChoices.find((choice) => choice.id === subscriptionForm.kind_choice)?.billingKind
+        showKindSelect && kindValue !== openingKindChoice
+          ? kindChoices.find((choice) => choice.id === kindValue)?.billingKind
           : undefined
 
       const subscriptionPayload = {
@@ -768,7 +756,7 @@ export function RecurringEntryFormModal({
                             setSubscriptionForm((prev) => ({
                               ...prev,
                               end_mode: value as SubscriptionFormState['end_mode'],
-                              kind_choice: kindChoiceAfterEnds(value === 'after_occurrences', prev.kind_choice),
+                              kind_choice: settleKindChoice(value === 'after_occurrences', kindValue, offerAutomatic),
                               end_date: value === 'on_date' ? prev.end_date : undefined,
                               max_occurrences:
                                 value === 'after_occurrences'
@@ -834,7 +822,7 @@ export function RecurringEntryFormModal({
                   <label className="block text-sm font-medium text-body" htmlFor="recurring-kind">Kind</label>
                   <select
                     id="recurring-kind"
-                    value={subscriptionForm.kind_choice}
+                    value={kindValue}
                     onChange={(e) =>
                       setSubscriptionForm((prev) => ({
                         ...prev,

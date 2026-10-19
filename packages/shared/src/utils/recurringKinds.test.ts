@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import type { BudgetEntry, FullBudgetEntry, LimitedBudgetEntry, RecordPermissions, RecurringKind } from '../index'
-import { KIND_LABELS, KIND_ORDER, billingKindChoices, groupByKind } from './recurringKinds'
+import {
+  KIND_LABELS, KIND_ORDER, automaticOffered, billingKindChoices, groupByKind, isCappedEnd, kindChoiceFor, offeredKindChoices,
+  settleKindChoice,
+} from './recurringKinds'
 
 const perms: RecordPermissions = { can_edit: true, can_delete: true, can_post: true, can_revert: true, can_tag: true }
 
@@ -99,5 +102,61 @@ describe('billingKindChoices', () => {
     const choices = billingKindChoices(true)
     expect(choices.map((c) => c.id)).toEqual(['installment', 'bill'])
     expect(choices.map((c) => c.billingKind)).toEqual([null, 'bill'])
+  })
+})
+
+describe('kind choice transitions', () => {
+  const ids = (capped: boolean, offerAutomatic: boolean) => offeredKindChoices(capped, offerAutomatic).map((c) => c.id)
+
+  it('capped matches the server: runs-based end with a max set', () => {
+    expect(isCappedEnd('after_occurrences', 6)).toBe(true)
+    expect(isCappedEnd('after_occurrences', null)).toBe(false)
+    expect(isCappedEnd('after_occurrences', undefined)).toBe(false)
+    expect(isCappedEnd('indefinite', 6)).toBe(false)
+    expect(isCappedEnd('on_date', null)).toBe(false)
+  })
+
+  it('opens an uncapped after-runs entry with no max as open-ended, not an installment', () => {
+    expect(kindChoiceFor(isCappedEnd('after_occurrences', null), null)).toBe('automatic')
+    expect(kindChoiceFor(isCappedEnd('after_occurrences', 12), null)).toBe('installment')
+  })
+
+  it('offers Automatic only to an entry with no stored non-null kind', () => {
+    expect(automaticOffered(undefined)).toBe(true)
+    expect(automaticOffered(null)).toBe(true)
+    expect(automaticOffered('subscription')).toBe(false)
+    expect(automaticOffered('bill')).toBe(false)
+  })
+
+  it('a capped card expense stored null, switched to open-ended, lands on a listed Automatic', () => {
+    const opening = kindChoiceFor(true, null)
+    expect(opening).toBe('installment')
+    const after = settleKindChoice(false, opening, automaticOffered(null))
+    expect(after).toBe('automatic')
+    expect(ids(false, true)).toContain(after)
+  })
+
+  it('a stored subscription on a capped entry lands on Subscription when it goes open-ended', () => {
+    const after = settleKindChoice(false, kindChoiceFor(true, 'subscription'), automaticOffered('subscription'))
+    expect(after).toBe('subscription')
+    expect(ids(false, false)).toContain(after)
+  })
+
+  it('keeps a bill a bill and a subscription a subscription across the Ends choice', () => {
+    expect(settleKindChoice(true, 'bill', true)).toBe('bill')
+    expect(settleKindChoice(false, 'bill', false)).toBe('bill')
+    expect(settleKindChoice(false, 'subscription', false)).toBe('subscription')
+    expect(settleKindChoice(true, 'subscription', false)).toBe('installment')
+  })
+
+  it('every settled pick is an offered option for every combination', () => {
+    const choices = ['automatic', 'subscription', 'bill', 'installment'] as const
+    for (const capped of [true, false]) {
+      for (const offerAutomatic of [true, false]) {
+        for (const choice of choices) {
+          expect(ids(capped, offerAutomatic)).toContain(settleKindChoice(capped, choice, offerAutomatic))
+        }
+      }
+    }
   })
 })
