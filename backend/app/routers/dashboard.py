@@ -50,14 +50,17 @@ def get_snapshot(
     - Upcoming charges by card (``card_charges``, services/card_charges.py), each
       card the caller manages with a limit carrying its available ``credit``
       (services/card_credit.py)
+    - Each managed card's owed closed statement (``card_statements_due``,
+      ``card_credit.statements_due``): owner and admin, active credit cards,
+      with or without a limit; the amount is what Pay suggests as Full
     - Missed recurring entries outside the cards' lists (``missed``,
       services/missed.py); full budget-entry rows in ``upcoming_this_month``
       and ``payables`` carry ``kind`` and ``can_mark_paid``
 
     With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
     payables keep only tagged records (see routers/forecast.py), and so does
-    ``missed``; balances, available cash, goals, the wishlist and the card
-    charges are not tagged and stay whole.
+    ``missed``; balances, available cash, goals, the wishlist, the card
+    charges and ``card_statements_due`` are not tagged and stay whole.
 
     Split by account currency (STU-236): every scalar is the user's default
     currency, ``by_currency`` rows carry each currency's (``balances``,
@@ -213,6 +216,7 @@ def get_snapshot(
     card_charges = card_charges_svc.card_charges_by_card(
         db, current_user, fx=fx, collector=collector, ids=ids, redactor=redactor,
         credit=credit)
+    statements_due = card_credit_svc.statements_due(db, current_user, fx)
     missed = missed_svc.recurring_missed(db, current_user, redactor=redactor, tag_id=tag_id)
     # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
     missed_svc.entry_row_fields(db, upcoming, redactor)
@@ -233,6 +237,7 @@ def get_snapshot(
         "account_closings": account_closings,
         "payables": payables,
         "card_charges": card_charges,
+        "card_statements_due": statements_due,
         "missed": missed,
         # The monthly summary's currencies too (viewable accounts and entries'
         # buckets, no placeholder); ``fx.rates`` stays the full listed rows'.

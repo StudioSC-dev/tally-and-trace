@@ -15,12 +15,11 @@ from sqlalchemy.sql import func
 from app.core import locking
 from app.core.access import (
     EDIT_ROLES, MANAGE_ROLES, NONE, account_role, get_account_or_404, role_map,
-    viewable_account_ids,
 )
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.redaction import Redactor, serialize_transaction
-from app.core.time import manila_midnight, manila_today
+from app.core.time import manila_today
 from app.models.account import Account, AccountType
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.transaction import TransactionType
@@ -32,7 +31,7 @@ from app.services import card_credit
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
-from app.services.statements import iter_cycles_from, resolve_cycle_fields, statement_history
+from app.services.statements import iter_cycles_from, resolve_cycle_fields
 
 router = APIRouter()
 
@@ -79,19 +78,20 @@ def _minimum_out(result: dict) -> dict:
 
 def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates],
                     redactor: Redactor) -> List[dict]:
-    """``StatementDue[]``: the card's closed statements (closed before Manila's
-    today), the six most recent plus any older one still owed, oldest first,
-    each with its minimum amount due (``statement_minimums``)."""
-    history = statement_history(db, card, manila_midnight(), viewable_account_ids(db, user),
-                                fx=fx)
+    """``StatementDue[]``: the card's closed statements
+    (``card_credit.closed_statements``: closed before Manila's today), the six
+    most recent plus any older one still owed, oldest first, each with its
+    minimum amount due (``statement_minimums``)."""
+    history = card_credit.closed_statements(db, user, card, fx)
     if not history:
         return []
     overrides = {row.statement_close: row.amount for row in db.query(CardStatementMinimum)
                  .filter(CardStatementMinimum.account_id == card.id)}
     limit = fc._money(card.credit_limit) if card.credit_limit is not None else None
+    # Each minimum reads only the statements before it, so the closed ones
+    # alone give the same figures.
     minimums = statement_minimums(db, card, history, _rule(card), overrides, limit, redactor)
-    today = manila_today()
-    closed = [i for i, s in enumerate(history) if s["close"].date() < today]
+    closed = range(len(history))
     recent = set(closed[-RECENT_STATEMENTS:])
     listed = [i for i in closed if i in recent or history[i]["owed"] > 0]
     out = []

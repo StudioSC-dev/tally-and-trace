@@ -45,23 +45,23 @@ card charges' selection.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.access import MANAGE_ROLES, account_role, viewable_accounts
+from app.core.access import MANAGE_ROLES, account_role, viewable_account_ids, viewable_accounts
 from app.core.redaction import FULL, LIMITED, Redactor
-from app.core.time import manila_midnight
+from app.core.time import manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.services import forecast as fc
 from app.services.fx import FxRates, convert
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
-from app.services.statements import iter_cycles_from
+from app.services.statements import iter_cycles_from, statement_history
 
 CARD_FX_BUFFER = Decimal("0.03")
 WINDOW_DAYS = 30
@@ -419,3 +419,58 @@ def open_cycle(card: Account, today: date) -> Optional[dict]:
         return None
     return {"close_date": cycle["close"].date().isoformat(),
             "due_date": cycle["due"].date().isoformat()}
+
+
+def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates]) -> List[dict]:
+    """The card's closed statements, oldest first: ``statement_history`` on
+    Manila's midnight over the caller's viewable accounts, kept while the close
+    is before Manila's today (a statement closing today can still take
+    charges). Recorded rows only, in the card's currency. The one selection
+    behind the Pay dialog (``routers/cards.py: card_statements``) and the owed
+    statements in the snapshot (``statements_due``)."""
+    today = manila_today()
+    history = statement_history(db, card, manila_midnight(), viewable_account_ids(db, user),
+                                fx=fx)
+    return [s for s in history if s["close"].date() < today]
+
+
+def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
+    """``CardStatementDue[]``: each managed credit card (owner or admin, active,
+    with or without a limit: a superset of the credit pass) whose latest closed
+    statement L still has something to clear, by name.
+
+    A card is listed when L's ``clear_through`` is above 0 and its oldest owed
+    closed statement is due before E (the 30-day window from Manila's
+    midnight, its last day included) or is overdue. ``clear_through`` is
+    exactly what the Pay dialog suggests as Full, in the card's currency, from
+    recorded rows only (``closed_statements``). ``statement_count`` is the
+    number of closed statements still owed; ``overdue`` whether any of them
+    is due before Manila's today; ``incomplete`` whether a foreign line with
+    no rate may have left ``clear_through`` low.
+    """
+    end = manila_today() + timedelta(days=WINDOW_DAYS + 1)
+    cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
+        Account.account_type == AccountType.CREDIT).all()
+    items = []
+    for card in sorted(cards, key=lambda a: (a.name, a.id)):
+        closed = closed_statements(db, user, card, fx)
+        if not closed or closed[-1]["clear_through"] <= 0:
+            continue
+        latest = closed[-1]
+        owed = [s for s in closed if s["owed"] > 0]
+        oldest_due = owed[0]["due"].date()
+        if oldest_due >= end:
+            continue
+        items.append({
+            "account_id": card.id,
+            "name": card.name,
+            "currency": fc._code(card.currency),
+            "close_date": latest["close"].date().isoformat(),
+            "due_date": latest["due"].date().isoformat(),
+            "clear_through": _amount(latest["clear_through"]),
+            "statement_count": len(owed),
+            "oldest_due": oldest_due.isoformat(),
+            "overdue": any(s["status"] == "overdue" for s in owed),
+            "incomplete": latest["incomplete"],
+        })
+    return items
