@@ -546,7 +546,18 @@ def test_cover_settles_in_card_currency(hh, sw_client, sw_db, mode, currency, re
     # projected, the card figure is USD 100 x 58 = 5,800 (99.31).
     if remainder is None:
         remainder = 60.0 if mode == "recorded" else 99.31
-    _charge(sw_client, hh, mode, currency=currency)
+    charge = _charge(sw_client, hh, mode, currency=currency)
+    if mode == "recorded" and currency != "PHP":
+        # A create labels a posted row in its account's currency (STU-341), so
+        # the USD-labelled posted bill is a legacy row, relabelled here.
+        from app.models.transaction import Transaction
+        from app.models.user import CurrencyType
+
+        sw_db.expire_all()
+        row = sw_db.get(Transaction, charge)
+        assert row.currency == CurrencyType.PHP
+        row.currency = CurrencyType(currency)
+        sw_db.commit()
     _pay(sw_client, hh, 40, mode)
     months = _monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])
     assert _sum(months, currency)["paid_from_other_accounts"] == remainder
