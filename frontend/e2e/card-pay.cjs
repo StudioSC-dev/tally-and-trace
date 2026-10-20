@@ -1,18 +1,23 @@
-// Browser check for STU-343 Plan C: Pay a credit card from its account page, with a
-// suggested Full or Minimum amount. Starts its own API and web app against a throwaway
+// Browser check for STU-343 Plan C: Pay a credit card from its account page or from its
+// statement row in Transactions "Due and overdue", with a suggested Full or Minimum amount. Starts its own API and web app against a throwaway
 // database (./_local_stack.cjs). PHP only, so no exchange rate is fetched. Not wired
 // into CI and not part of `pnpm build`. Run steps: see ./README.md.
 //
-// Every expected figure is read from the API (GET /cards/{id}/credit), never
-// hard-coded; dates are relative to the Manila today. Each card closes on the Manila
+// Every expected figure is read from the API (GET /cards/{id}/credit and the snapshot's
+// card_statements_due), never hard-coded; dates are relative to the Manila today. Each card closes on the Manila
 // day-of-month of (today - 5), clamped to 1-28, is due 21 days later, carries the BDO
 // minimum due rule and has its debits dated close - 3.
 //
-// Scenarios (account page):
+// Scenarios:
+//   (a) a card's statement row shows the API's clear_through and the latest close and
+//       due; Pay prefills it; paying the Minimum lowers the row by the API's remaining;
+//       a card with only an open cycle has no row
 //   (b) another amount on today + 7 is recorded pending, and the planned flag shows
 //   (c) entering the statement's minimum makes the dialog's Minimum read "from your statement"
+//   (d) after a Full Pay from the row the row is gone from every page, and the card
+//       still has an open cycle
 //   (e) a USD account is not offered, and a direct POST from it is 400
-//   (f) an editor and a viewer get no credit panel, and POST is 404
+//   (f) an editor and a viewer get no credit panel, no statement row, and POST is 404
 //   (g) an amount above Full shows the "more than the <close> statement" note and is
 //       recorded in full
 //   (j) in a UTC browser at about 18:00Z, the dialog's default date is Manila's day and
@@ -20,9 +25,17 @@
 //   (k) when Manila's day turns with the page open, the panel and the dialog refetch and
 //       move to the statement that just closed, without a reload
 //   (l) an inactive card's Pay says so; with no account to pay from, the dialog says so
+//   (h) two owed closed statements make one Overdue row, "includes 1 earlier statement",
+//       ahead of a recurring row that is not overdue; the row and the account page both
+//       prefill their sum; the dashboard has no Pay
+//   (i) a card with no payment account still gets a row, and Pay works
 //
-// Usage: node frontend/e2e/card-pay.cjs [b|c|e|f|g|j|k|l]
+// The section shows 3 rows a page, so every count and absence check reads every page
+// (./_due_pages.cjs).
+//
+// Usage: node frontend/e2e/card-pay.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
+const { allDueRows, rowsOf, showRow } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -112,6 +125,10 @@ const debit = (u, cardId, amount, day, description) => post(u.token, '/transacti
 })
 const detailOf = (u, cardId) => get(u.token, `/cards/${cardId}/credit`)
 const latest = (detail) => detail.statements[detail.statements.length - 1]
+/** The card's item in the snapshot's card_statements_due, or undefined. */
+const statementDue = async (u, cardId) =>
+  (await get(u.token, '/dashboard/snapshot')).card_statements_due.find((s) => s.account_id === cardId)
+const cents = (n) => Math.round(n * 100) / 100
 
 // The close day: Manila's (today - 5), its day-of-month clamped to 28 (earlier, so
 // still closed).
@@ -161,6 +178,33 @@ async function openDialog(page) {
   return dialog
 }
 const text = async (locator) => (await locator.textContent())?.replace(/\s+/g, ' ').trim()
+async function openTransactions(page) {
+  await page.goto(`${stack.webUrl}/transactions`)
+  await page.locator('[data-testid="due-section"]').waitFor()
+  await page.locator('[data-testid="due-count"]').filter({ hasNotText: '…' }).waitFor()
+  await settle(page)
+}
+/** A card's statement row in the section, on the page on screen: reach it with showRow, count with statementRows. */
+const statementRow = (page, cardId) => page.locator(`[data-testid="due-row"][data-kind="statement"][data-source="statement:${cardId}"]`)
+/** The card's statement rows over every page. */
+const statementRows = async (page, cardId) =>
+  (await allDueRows(page)).filter((r) => r.kind === 'statement' && r.source === `statement:${cardId}`)
+/** The card's statement rows over every page, once they have left or `ms` has passed (the snapshot refetch can lag). */
+async function statementRowsAfterPay(page, cardId, ms = 15000) {
+  const until = Date.now() + ms
+  for (;;) {
+    const rows = await statementRows(page, cardId)
+    if (rows.length === 0 || Date.now() > until) return rows
+    await page.waitForTimeout(500)
+  }
+}
+/** Open Pay from the card's statement row. */
+async function openRowDialog(page, cardId) {
+  await (await showRow(page, statementRow(page, cardId))).locator('[data-testid="due-pay"]').click()
+  const dialog = page.locator('[data-testid="card-pay-dialog"]')
+  await dialog.locator('[data-testid="card-pay-amount"]').waitFor()
+  return dialog
+}
 const payResponse = (page, cardId) =>
   page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith(`/cards/${cardId}/payments`))
 
@@ -176,6 +220,53 @@ async function setup() {
   bdoRule = presets.find((p) => p.key === 'bdo').rule
   bank = await account(owner, 'owner Checking')
   usd = await account(owner, 'owner Dollars', 'USD', 1000)
+}
+
+// (a) The statement row: the API's figure and days, Pay prefilled, the Minimum lowers it.
+async function dueRow(browser) {
+  console.log('\n=== (a) the statement row shows the API\'s clear_through; Pay prefills it; the Minimum lowers it')
+  const card = await makeCard(owner, 'Card A', { payer: bank, debits: [[20000, close]] })
+  const openOnly = await makeCard(owner, 'Card A open', { payer: bank, debits: [[1500, addDays(today, 3)]] })
+  const L = latest(await detailOf(owner, card.id))
+  check('(a) the API has a closed statement owed', [L?.close_date, L?.clear_through > 0], [close, true])
+  const due = await statementDue(owner, card.id)
+  check('(a) the snapshot lists the card with that statement',
+    [due?.close_date, due?.due_date, due?.clear_through, due?.statement_count, due?.overdue], [L.close_date, L.due_date, L.clear_through, 1, false])
+  const openDetail = await detailOf(owner, openOnly.id)
+  check('(a) the open-cycle-only card has no closed statement owed and is not in the snapshot',
+    [openDetail.statements.filter((s) => s.clear_through > 0).length, await statementDue(owner, openOnly.id)], [0, undefined])
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  const rows = await statementRows(page, card.id)
+  check('(a) one statement row for the card, on some page', rows.length, 1)
+  check('(a) titled "<card> statement", with the latest close and due',
+    [rows[0]?.name, rows[0]?.sub, rows[0]?.overdue, rows[0]?.buttons], ['Card A statement', `Closed ${fmt(L.close_date)} · due ${fmt(L.due_date)}`, false, ['due-pay']])
+  const row = await showRow(page, statementRow(page, card.id))
+  check('(a) the row shows clear_through', await text(row.locator('[data-testid="due-amount"]')), peso(L.clear_through))
+  check('(a) the open-cycle-only card has no row on any page', (await statementRows(page, openOnly.id)).length, 0)
+
+  const dialog = await openRowDialog(page, card.id)
+  check('(a) Pay names the latest statement', await text(dialog.locator('[data-testid="card-pay-title"]')),
+    `Pay Card A: ${fmt(L.close_date)} statement, due ${fmt(L.due_date)}`)
+  check('(a) Pay prefills clear_through', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), L.clear_through)
+  check('(a) the Minimum is an estimate', await text(dialog.locator('[data-testid="card-pay-minimum-source"]')), '(estimate)')
+  await dialog.locator('[data-testid="card-pay-minimum"]').click()
+  const remaining = L.minimum_due.remaining
+  check('(a) choosing Minimum fills the API\'s remaining', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), remaining)
+  const paid = payResponse(page, card.id)
+  await dialog.locator('[data-testid="card-pay-submit"]').click()
+  const res = await paid
+  check('(a) the payment is 201, posted today', [res.status(), (await res.json()).is_posted], [201, true])
+  await dialog.waitFor({ state: 'detached' })
+  await settle(page)
+  const expected = cents(L.clear_through - remaining)
+  check('(a) the API lowers clear_through by the remaining', [latest(await detailOf(owner, card.id)).clear_through, (await statementDue(owner, card.id))?.clear_through], [expected, expected])
+  const after = await showRow(page, statementRow(page, card.id))
+  await after.locator('[data-testid="due-amount"]').filter({ hasText: peso(expected) }).waitFor({ timeout: 10000 }).catch(() => {})
+  check('(a) the row drops by the remaining, without a reload', await text(after.locator('[data-testid="due-amount"]')), peso(expected))
+  await ctx.close()
 }
 
 // (b) Another amount on today + 7 is recorded pending and flagged as planned.
@@ -244,6 +335,30 @@ async function overrideMinimum(browser) {
   await ctx.close()
 }
 
+// (d) A Full Pay from the row clears it.
+async function fullPayFromRow(browser) {
+  console.log('\n=== (d) after a Full Pay from the row the row is gone from every page; the open cycle stays')
+  const card = await makeCard(owner, 'Card D', { payer: bank, debits: [[3000, close], [700, addDays(today, 3)]] })
+  const L = latest(await detailOf(owner, card.id))
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  check('(d) the card has a statement row', (await statementRows(page, card.id)).length, 1)
+  const dialog = await openRowDialog(page, card.id)
+  check('(d) Full is prefilled', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), L.clear_through)
+  const paid = payResponse(page, card.id)
+  await dialog.locator('[data-testid="card-pay-submit"]').click()
+  check('(d) the payment is 201', (await paid).status(), 201)
+  await dialog.waitFor({ state: 'detached' })
+  await settle(page)
+  check('(d) the row is gone from every page', (await statementRowsAfterPay(page, card.id)).length, 0)
+  check('(d) and from the snapshot', await statementDue(owner, card.id), undefined)
+  const detail = await detailOf(owner, card.id)
+  check('(d) the statement is cleared and the card still has an open cycle',
+    [latest(detail).clear_through, detail.open_cycle !== null && detail.open_cycle.close_date >= today], [0, true])
+  await ctx.close()
+}
+
 // (e) A USD account can't pay a PHP card.
 async function foreignPayer(browser) {
   console.log('\n=== (e) a USD account is not offered, and a direct POST is 400')
@@ -263,7 +378,7 @@ async function foreignPayer(browser) {
 
 // (f) Only an owner or admin gets the panel and may Pay.
 async function othersGetNoPanel(browser) {
-  console.log('\n=== (f) an editor and a viewer get no credit panel, and POST is 404')
+  console.log('\n=== (f) an editor and a viewer get no credit panel, no statement row, and POST is 404')
   const card = await makeCard(owner, 'Card F', { payer: bank })
   const editor = await makeUser('editor')
   const viewer = await makeUser('viewer')
@@ -277,6 +392,10 @@ async function othersGetNoPanel(browser) {
     check(`(f) ${who}: the account page shows the card`, await text(page.locator('[data-testid="account-detail-title"]')), 'Card F')
     check(`(f) ${who}: no credit panel and no Pay`,
       await page.locator('[data-testid="card-credit-panel"], [data-testid="card-pay-open"], [data-testid="card-credit-panel-loading"]').count(), 0)
+    check(`(f) ${who}: the snapshot lists no card statement`, (await get(u.token, '/dashboard/snapshot')).card_statements_due, [])
+    await openTransactions(page)
+    check(`(f) ${who}: no statement row and no Pay on any page`,
+      (await allDueRows(page)).filter((r) => r.kind === 'statement' || r.buttons.includes('due-pay')).length, 0)
     await ctx.close()
     const direct = await api(u.token, 'POST', `/cards/${card.id}/payments`, { amount: 100, from_account_id: own.id, payment_date: today })
     check(`(f) ${who}: POST /cards/{id}/payments is 404`, direct.status, 404)
@@ -305,6 +424,76 @@ async function excessAmount(browser) {
   check('(g) recorded in full and posted today', [res.status(), txn.amount, txn.is_posted, txn.transaction_date.slice(0, 10)], [201, amount, true, today])
   await dialog.waitFor({ state: 'detached' })
   check('(g) the statement is cleared', latest(await detailOf(owner, card.id)).clear_through, 0)
+  await ctx.close()
+}
+
+// (h) Two owed closed statements: one Overdue row for their sum.
+async function twoStatements(browser) {
+  console.log('\n=== (h) two owed closed statements make one Overdue row for their sum')
+  const card = await makeCard(owner, 'Card H', { payer: bank, debits: [[1200, addDays(close, -30)], [2500, close]] })
+  await post(owner.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Water H', amount: 400,
+    account_id: bank.id, next_occurrence: wire(addDays(today, 3)),
+  })
+  const detail = await detailOf(owner, card.id)
+  const owed = detail.statements.filter((s) => s.owed > 0)
+  const L = latest(detail)
+  check('(h) the API has two owed closed statements, the older overdue',
+    [owed.length, owed[0]?.status, L.close_date], [2, 'overdue', close])
+  check('(h) the latest clear_through is their sum', L.clear_through, cents(owed.reduce((sum, s) => sum + s.owed, 0)))
+  const due = await statementDue(owner, card.id)
+  check('(h) the snapshot lists one overdue item for 2 statements',
+    [due?.statement_count, due?.overdue, due?.oldest_due, due?.clear_through], [2, true, owed[0].due_date, L.clear_through])
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  const all = await allDueRows(page)
+  const mine = all.filter((r) => r.kind === 'statement' && r.source === `statement:${card.id}`)
+  check('(h) one row for the card', mine.length, 1)
+  check('(h) marked Overdue, with the earlier statement counted',
+    [mine[0]?.overdue, mine[0]?.sub], [true, `Closed ${fmt(L.close_date)} · due ${fmt(L.due_date)} · Overdue · includes 1 earlier statement`])
+  const water = await rowsOf(page, 'Water H', 'recurring')
+  check('(h) the recurring row is listed and not overdue', [water.length, water[0]?.overdue], [1, false])
+  const at = (pred) => all.findIndex(pred)
+  check('(h) the statement row sorts ahead of it',
+    at((r) => r.source === `statement:${card.id}`) < at((r) => r.kind === 'recurring' && r.name === 'Water H'), true)
+  const row = await showRow(page, statementRow(page, card.id))
+  check('(h) the row shows the sum', await text(row.locator('[data-testid="due-amount"]')), peso(L.clear_through))
+  let dialog = await openRowDialog(page, card.id)
+  check('(h) Pay from the row prefills the sum', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), L.clear_through)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await dialog.waitFor({ state: 'detached' })
+  await openPanel(page, card.id)
+  dialog = await openDialog(page)
+  check('(h) Pay from the account page prefills the sum', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), L.clear_through)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await page.goto(`${stack.webUrl}/`)
+  await settle(page)
+  check('(h) the dashboard has no due-pay and no button named Pay',
+    [await page.locator('[data-testid="due-pay"]').count(), await page.getByRole('button', { name: 'Pay', exact: true }).count()], [0, 0])
+  await ctx.close()
+}
+
+// (i) A card with no payment account still gets a row, and Pay works.
+async function noPaymentAccount(browser) {
+  console.log('\n=== (i) a card with no payment account gets a row, and Pay works')
+  const card = await makeCard(owner, 'Card I', { debits: [[1800, close]] })
+  check('(i) the card has no payment account', (await get(owner.token, `/accounts/${card.id}`)).payment_account_id ?? null, null)
+  const L = latest(await detailOf(owner, card.id))
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  check('(i) the card has a statement row', (await statementRows(page, card.id)).length, 1)
+  const dialog = await openRowDialog(page, card.id)
+  check('(i) Full is prefilled', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), L.clear_through)
+  check('(i) an account to pay from is chosen', Number(await dialog.locator('[data-testid="card-pay-from"]').inputValue()) > 0, true)
+  const paid = payResponse(page, card.id)
+  await dialog.locator('[data-testid="card-pay-submit"]').click()
+  check('(i) the payment is 201', (await paid).status(), 201)
+  await dialog.waitFor({ state: 'detached' })
+  await settle(page)
+  check('(i) the row is gone from every page', (await statementRowsAfterPay(page, card.id)).length, 0)
   await ctx.close()
 }
 
@@ -404,11 +593,15 @@ async function edgeStates(browser) {
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
   await setup()
+  if (run('a')) await dueRow(browser)
   if (run('b')) await plannedPayment(browser)
   if (run('c')) await overrideMinimum(browser)
+  if (run('d')) await fullPayFromRow(browser)
   if (run('e')) await foreignPayer(browser)
   if (run('f')) await othersGetNoPanel(browser)
   if (run('g')) await excessAmount(browser)
+  if (run('h')) await twoStatements(browser)
+  if (run('i')) await noPaymentAccount(browser)
   if (run('j')) await manilaDayInUtc(browser)
   if (run('k')) await dayRollover(browser)
   if (run('l')) await edgeStates(browser)

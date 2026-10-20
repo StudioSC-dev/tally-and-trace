@@ -8,17 +8,30 @@ import {
   PENDING_POST_LABELS,
   dueRecurringRows,
   duePendingRows,
+  dueStatementRows,
   formatEntryDate,
   orderDueRows,
   pageWindow,
   pendingLinkIds,
   transactionDescription,
 } from '@tally-trace/shared'
-import type { DuePageState, DueEntryRow, DueLimitedRow, DueMissedRow, DuePendingRow, DueRecurringRow, RecurringAction, Transaction } from '@tally-trace/shared'
+import type {
+  DuePageState,
+  DueEntryRow,
+  DueLimitedRow,
+  DueMissedRow,
+  DuePendingRow,
+  DueRecurringRow,
+  DueStatementRow,
+  RecurringAction,
+  Transaction,
+} from '@tally-trace/shared'
+import { useManilaDay } from '../../hooks/useManilaDay'
 import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import { estimateText, estimateTitle } from '../../utils/fx'
+import { CardPayDialog } from '../CardPayDialog'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 import { Pager } from '../Pager'
 
@@ -27,8 +40,10 @@ import { Pager } from '../Pager'
  * transaction that is overdue or tied to the schedule, in one place. Recurring rows come
  * from the dashboard snapshot (the same cache the dashboard fills; no new endpoint);
  * pending rows from transaction queries (the next 30 days, and the rows missed
- * occurrences link, whatever their date, in batches of 500). The merge, the dedup and the labels live in
- * `@tally-trace/shared` (`dueSection.ts`).
+ * occurrences link, whatever their date, in batches of 500). An owner or admin also gets one
+ * row per card with an owed closed statement (`card_statements_due`), with Pay; the server
+ * decides closed and overdue on the Manila day, so the snapshot is refetched when that day
+ * changes. The merge, the dedup and the labels live in `@tally-trace/shared` (`dueSection.ts`).
  */
 
 const WINDOW_DAYS = 30
@@ -104,6 +119,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const panelId = useId()
   const [open, setOpen] = useState(true)
   const [target, setTarget] = useState<RecordTarget | null>(null)
+  // The card whose statement is being paid.
+  const [payCardId, setPayCardId] = useState<number | null>(null)
   // Pages of the window query before the one on screen ("Load more").
   const [earlier, setEarlier] = useState<Transaction[]>([])
   const [offset, setOffset] = useState(0)
@@ -111,7 +128,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
   const page = effectiveDuePage(pageState, today)
 
-  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError } = useGetDashboardSnapshotQuery({})
+  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({})
+  // A new Manila day can close a statement or make one overdue.
+  useManilaDay(() => void refetchSnapshot())
   const windowQuery = useGetTransactionsQuery({
     is_posted: false,
     end_date: `${addDays(today, WINDOW_DAYS)}T23:59:59`,
@@ -136,8 +155,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     () => (snapshot ? duePendingRows(windowTxns, linkedTxns, snapshot, today) : []),
     [snapshot, windowTxns, linkedTxns, today],
   )
-  // Overdue rows first, across both kinds, so page 1 is where they are.
-  const rows = useMemo(() => orderDueRows(recurring, pending), [recurring, pending])
+  const statements = useMemo(() => (snapshot ? dueStatementRows(snapshot) : []), [snapshot])
+  // Overdue rows first, across every kind, so page 1 is where they are.
+  const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
   const loading = snapshotLoading || windowQuery.isLoading
   const view = pageWindow(count, page, DUE_PAGE_SIZE)
@@ -270,6 +290,44 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     </li>
   )
 
+  const statementRow = (row: DueStatementRow) => (
+    <li
+      key={row.key}
+      className="flex items-start justify-between gap-3 px-4 py-3"
+      data-testid="due-row"
+      data-kind="statement"
+      data-view="full"
+      data-source={`statement:${row.cardId}`}
+    >
+      <div>
+        <p className="text-sm font-medium text-ink">{row.name} statement</p>
+        <p className="text-xs text-muted">
+          Closed {formatEntryDate(row.closeDate)} · due {formatEntryDate(row.dueDate)}
+          {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+          {row.statements > 1 && (
+            <span data-testid="due-earlier-statements">
+              {` · includes ${row.statements - 1} earlier ${row.statements - 1 === 1 ? 'statement' : 'statements'}`}
+            </span>
+          )}
+        </p>
+      </div>
+      <div className="flex-shrink-0 space-y-1 text-right">
+        <p
+          className="text-sm font-semibold text-ink"
+          data-testid="due-amount"
+          {...(row.incomplete ? { title: 'may be low: some foreign charges have no exchange rate' } : {})}
+        >
+          {formatCurrency(row.amount, row.currency)}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => setPayCardId(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
+            Pay
+          </button>
+        </div>
+      </div>
+    </li>
+  )
+
   const recurringRow = (row: DueRecurringRow) => {
     if (row.view === 'limited') return limitedRow(row)
     if (row.kind === 'missed') return missedRow(row)
@@ -306,7 +364,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           )}
           {count > 0 && (
             <ul className="divide-y divide-line" data-testid="due-list">
-              {visible.map((row) => (row.kind === 'pending' ? pendingRow(row) : recurringRow(row)))}
+              {visible.map((row) =>
+                row.kind === 'pending' ? pendingRow(row) : row.kind === 'statement' ? statementRow(row) : recurringRow(row),
+              )}
             </ul>
           )}
           {count > DUE_PAGE_SIZE && (
@@ -341,6 +401,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           onPaid={onChanged}
         />
       )}
+      {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} />}
     </section>
   )
 }

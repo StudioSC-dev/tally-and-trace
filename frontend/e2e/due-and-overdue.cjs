@@ -160,7 +160,7 @@ async function openTransactions(page) {
 const dialog = (page) => page.locator('[data-testid="mark-paid-dialog"]')
 /** A recurring or missed row by its entry name, on the page on screen: reach it with showRow, count with rowsOf. */
 const recRows = (page, name, kind) =>
-  page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"])'}`)
+  page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"]):not([data-kind="statement"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
 /** A pending row by its description, on the page on screen. */
 const pendRows = (page, name) => page.locator('[data-testid="due-row"][data-kind="pending"]').filter({ hasText: name })
