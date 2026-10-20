@@ -14,6 +14,7 @@ import type { DueEntryRow, DueMissedRow, DuePendingRow, RecurringAction, Transac
 import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
+import { estimateText, estimateTitle } from '../../utils/fx'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 
 /**
@@ -271,8 +272,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
                       </p>
                     </div>
                     <div className="flex-shrink-0 space-y-1 text-right">
-                      {row.amount !== null && row.currency !== null && (
-                        <p className="text-sm font-semibold text-ink">{formatCurrency(row.amount, row.currency)}</p>
+                      {row.currency !== null && (row.amount !== null || row.estimate.unconverted) && (
+                        <p className="text-sm font-semibold text-ink" data-testid="due-amount" title={estimateTitle(row.estimate)}>
+                          {estimateText(row.amount, row.currency, row.estimate)}
+                        </p>
                       )}
                       <div className="flex flex-wrap justify-end gap-2">{actionButtons(row)}</div>
                     </div>
