@@ -26,7 +26,10 @@ import {
   groupByKind,
   isOwnerFull,
   isSharedFull,
+  RECURRING_ACTION_LABELS,
+  recurringActionsFor,
 } from '@tally-trace/shared'
+import type { RecurringAction } from '@tally-trace/shared'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
@@ -41,6 +44,13 @@ import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+
+const ENTRY_ACTION_TEST_IDS: Record<RecurringAction, string> = {
+  mark_paid: 'entry-mark-paid-button',
+  mark_received: 'entry-mark-received-button',
+  charged: 'entry-charged-button',
+  posted: 'entry-posted-button',
+}
 
 const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate())
 
@@ -230,7 +240,7 @@ export function AllocationsPage() {
   const [recurringModal, setRecurringModal] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry | null } | null>(
     null
   )
-  const [markPaidFor, setMarkPaidFor] = useState<FullBudgetEntry | SharedFullBudgetEntry | null>(null)
+  const [markPaidFor, setMarkPaidFor] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry; action: RecurringAction } | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
@@ -1287,20 +1297,23 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
-          {entry.permissions.can_post && entry.is_active && remaining !== 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setMarkPaidFor(entry)
-                }}
-                onKeyDown={(event) => event.stopPropagation()}
-                className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
-                data-testid="entry-mark-paid-button"
-              >
-                Mark paid
-              </button>
+          {entry.is_active && remaining !== 0 && (
+            <div className="flex flex-wrap gap-2">
+              {recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }).map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setMarkPaidFor({ entry, action })
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
+                  data-testid={ENTRY_ACTION_TEST_IDS[action]}
+                >
+                  {RECURRING_ACTION_LABELS[action]}
+                </button>
+              ))}
             </div>
           )}
           {!canEdit && entry.permissions.can_delete && (
@@ -2021,10 +2034,11 @@ export function AllocationsPage() {
 
       {markPaidFor && (
         <MarkPaidDialog
-          entryId={markPaidFor.id}
-          name={markPaidFor.name}
-          occurrenceDate={markPaidFor.next_occurrence.slice(0, 10)}
-          entry={markPaidFor}
+          entryId={markPaidFor.entry.id}
+          name={markPaidFor.entry.name}
+          occurrenceDate={markPaidFor.entry.next_occurrence.slice(0, 10)}
+          entry={markPaidFor.entry}
+          action={markPaidFor.action}
           onClose={() => setMarkPaidFor(null)}
           onPaid={() => void loadBudgetEntriesRef.current()}
         />

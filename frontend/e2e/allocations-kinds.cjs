@@ -1,5 +1,5 @@
 // Browser check for STU-343: the Allocations page groups recurring entries by
-// kind, offers Mark paid on a card, and the form picks a card expense's kind.
+// kind, offers Charged and Posted on a card, and the form picks a card expense's kind.
 // Starts its own API and web app against a throwaway database
 // (./_local_stack.cjs). Not wired into CI and not part of `pnpm build`.
 // Run steps: see ./README.md.
@@ -7,11 +7,11 @@
 // Scenarios:
 //   (a) six dividers, in order: Subscriptions, Card installments, Cash expenses,
 //       Card-billed bills, Income & transfers, Shared with you
-//   (b) Mark paid on an installment advances "Next" and "Payment n of m"
+//   (b) Posted on an installment (Charged also offered) advances "Next" and "Payment n of m"
 //       without opening the edit form
 //   (c) a Utilities entry added on "Automatic" lands under bills
 //   (d) a capped Bill moves to bills; switching it back to Installment returns it
-//   (e) a viewer sees no Mark paid
+//   (e) a viewer sees no Mark paid, Mark received, Charged or Posted
 //
 // Usage: node frontend/e2e/allocations-kinds.cjs [a|b|c|d|e]
 const { startLocalStack } = require('./_local_stack.cjs')
@@ -201,9 +201,14 @@ async function markPaidInstallment(browser) {
   const card = cardNamed(page, 'installment', 'Phone plan')
   check('(b) Next is the first occurrence', await nextOf(card), fmt(world.start))
   check('(b) nothing paid yet', await card.getByText('3 payments planned').count(), 1)
-  await card.getByTestId('entry-mark-paid-button').click()
+  check('(b) a card installment offers Charged', await card.getByTestId('entry-charged-button').count(), 1)
+  check('(b) a card installment offers Posted', await card.getByTestId('entry-posted-button').count(), 1)
+  check('(b) a card installment has no Mark paid', await card.getByTestId('entry-mark-paid-button').count(), 0)
+  await card.getByTestId('entry-posted-button').click()
   await page.locator('[data-testid="mark-paid-dialog"]').waitFor()
   await page.locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  check('(b) the dialog title is Record', await page.locator('[role="dialog"] h2').innerText(), 'Record Phone plan')
+  check('(b) the dialog offers Charged', await page.getByTestId('mark-paid-charged').count(), 1)
   check('(b) the edit form did not open', await editForm(page).count(), 0)
   await page.locator('[data-testid="mark-paid-submit"]').click()
   await page.locator('[data-testid="mark-paid-dialog"]').waitFor({ state: 'detached' })
@@ -298,6 +303,9 @@ async function viewer(browser) {
   await uiLogin(own.page, owner)
   await openAllocations(own.page)
   check('(e) the owner has Mark paid buttons', (await own.page.getByTestId('entry-mark-paid-button').count()) > 0, true)
+  check('(e) the owner has Mark received buttons', (await own.page.getByTestId('entry-mark-received-button').count()) > 0, true)
+  check('(e) the owner has Charged buttons', (await own.page.getByTestId('entry-charged-button').count()) > 0, true)
+  check('(e) the owner has Posted buttons', (await own.page.getByTestId('entry-posted-button').count()) > 0, true)
   await own.ctx.close()
 
   const { ctx, page } = await newPage(browser)
@@ -305,7 +313,9 @@ async function viewer(browser) {
   await openAllocations(page)
   await settle(page)
   check('(e) the viewer sees the shared entries', (await page.locator('article').count()) > 0, true)
-  check('(e) the viewer sees no Mark paid', await page.getByTestId('entry-mark-paid-button').count(), 0)
+  for (const id of ['entry-mark-paid-button', 'entry-mark-received-button', 'entry-charged-button', 'entry-posted-button']) {
+    check(`(e) the viewer has no ${id}`, await page.getByTestId(id).count(), 0)
+  }
   await ctx.close()
 }
 
