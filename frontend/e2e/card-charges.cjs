@@ -16,8 +16,12 @@
 //   (e) a pending card transaction has no Mark paid, and a future one is not in
 //       the section
 //
+// The section shows 3 rows a page: every count and absence check reads all pages and
+// every click first goes to the row's page (./_due_pages.cjs).
+//
 // Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e]
 const { startLocalStack } = require('./_local_stack.cjs')
+const { allDueRows, rowsOf, showRow } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -131,7 +135,7 @@ async function openTransactions(page) {
   await page.locator('[data-testid="due-count"]').filter({ hasNotText: '…' }).waitFor()
   await settle(page)
 }
-/** The section's recurring or missed rows for an entry, by name; `kind` narrows to one. */
+/** The section's recurring or missed rows for an entry, by name, on the page on screen; `kind` narrows to one. Reach one with showRow, count with rowsOf. */
 const dueRows = (page, name, kind) =>
   page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
@@ -223,7 +227,8 @@ async function missedPostAll(browser) {
 
   await openTransactions(page)
   const dueMissed = dueRows(page, 'Spotify', 'missed')
-  check('(b) the section lists the missed row', await dueMissed.count(), 1)
+  check('(b) the section lists the missed row', (await rowsOf(page, 'Spotify', 'missed')).length, 1)
+  await showRow(page, dueMissed)
   const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${spotify.id}/occurrences`))
   await dueMissed.locator('[data-testid="due-posted"]').click()
   const include = new URL((await asked).url()).searchParams.get('include')
@@ -247,7 +252,7 @@ async function missedPostAll(browser) {
   // The snapshot refetch can start after the network first goes idle, so wait on the row itself.
   await gone(dueMissed)
   await settle(page)
-  check('(b) the missed row is gone from the section', await dueRows(page, 'Spotify', 'missed').count(), 0)
+  check('(b) the missed row is gone from every page of the section', (await rowsOf(page, 'Spotify', 'missed')).length, 0)
   check('(b) the API reports nothing missed', ((await snapshotCard(u, visa.id))?.missed ?? []).length, 0)
   check('(b) the schedule is on the current occurrence', (await get(u.token, `/budget-entries/${spotify.id}`)).next_occurrence.slice(0, 10), current)
   await page.goto(`${stack.webUrl}/`)
@@ -282,8 +287,9 @@ async function installmentDate(browser) {
   check('(c) the installment is listed on the card', [await row.count(), await row.locator('[data-testid="card-charge-kind"]').textContent()], [1, 'Installment'])
   check('(c) with no Mark paid on the dashboard', await row.locator('[data-testid="card-charge-mark-paid"], button').count(), 0)
   await openTransactions(page)
-  const dueRow = dueRows(page, 'Phone')
-  check('(c) the section lists the installment with Charged and Posted', [await dueRow.count(), await dueRow.locator('[data-testid="due-charged"]').count(), await dueRow.locator('[data-testid="due-posted"]').count()], [1, 1, 1])
+  const listedPhone = await rowsOf(page, 'Phone')
+  check('(c) the section lists the installment with Charged and Posted', [listedPhone.length, listedPhone[0]?.buttons.filter((b) => b === 'due-charged').length, listedPhone[0]?.buttons.filter((b) => b === 'due-posted').length], [1, 1, 1])
+  const dueRow = await showRow(page, dueRows(page, 'Phone'))
   await dueRow.locator('[data-testid="due-posted"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   const date = dialog(page).locator('[data-testid="mark-paid-date"]')
@@ -341,12 +347,14 @@ async function viewerSeesLimited(browser) {
   console.log(`    data-limited-rows: ${mode}`)
   check('(d) the section setting is text or drop', ['text', 'drop'].includes(mode), true)
   check('(d) the section shows the viewer no action button', await page.locator('[data-testid="due-section"] button[data-testid^="due-"]:not([data-testid="due-section-toggle"]):not([data-testid="due-load-more"])').count(), 0)
-  const limitedDue = page.locator('[data-testid="due-row"][data-view="limited"]')
+  const shown = await allDueRows(page)
+  const limitedDue = shown.filter((r) => r.view === 'limited')
+  check('(d) no row on any page shows a button', shown.flatMap((r) => r.buttons), [])
   if (mode === 'drop') {
-    check('(d) drop: the section has no Netflix or Pharmacy row', await page.locator('[data-testid="due-row"]').filter({ hasText: /Netflix|Pharmacy/ }).count(), 0)
+    check('(d) drop: the section has no Netflix or Pharmacy row on any page', shown.filter((r) => /Netflix|Pharmacy/.test(r.text)).length, 0)
   } else {
     check('(d) text: Netflix and Pharmacy appear as Limited rows without buttons',
-      [await limitedDue.filter({ hasText: 'Netflix' }).count(), await limitedDue.filter({ hasText: 'Pharmacy' }).count(), await limitedDue.locator('button').count()], [1, 1, 0])
+      [limitedDue.filter((r) => r.text.includes('Netflix')).length, limitedDue.filter((r) => r.text.includes('Pharmacy')).length, limitedDue.flatMap((r) => r.buttons).length], [1, 1, 0])
   }
   await ctx.close()
 }
@@ -369,7 +377,7 @@ async function pendingHasNoMarkPaid(browser) {
   check('(e) Lazada is listed on the card as Pending', [await row.count(), await row.locator('[data-testid="card-charge-kind"]').textContent()], [1, 'Pending'])
   check('(e) with no Mark paid', await row.locator('[data-testid="card-charge-mark-paid"], button').count(), 0)
   await openTransactions(page)
-  check('(e) a future pending card row is not in the section', await page.locator('[data-testid="due-row"]').filter({ hasText: 'Lazada' }).count(), 0)
+  check('(e) a future pending card row is not in the section, on any page', (await allDueRows(page)).filter((r) => r.text.includes('Lazada')).length, 0)
   await ctx.close()
 }
 

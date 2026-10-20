@@ -21,11 +21,16 @@ import {
   type DueMissedRow,
   type DueRecurringRow,
   type LimitedRowsMode,
+  DUE_PAGE_SIZE,
   duePendingRows,
   dueRecurringRows,
+  effectiveDuePage,
+  isOverdueRow,
+  orderDueRows,
   pendingLinkIds,
   pendingPostLabel,
 } from './dueSection'
+import { pageWindow } from './transactionList'
 
 const TODAY = '2026-10-20'
 const MODES: LimitedRowsMode[] = ['text', 'drop']
@@ -510,5 +515,99 @@ describe('pendingLinkIds and pendingPostLabel', () => {
   it('labels a recurring card charge Posted and anything else Mark posted', () => {
     expect(pendingPostLabel({ id: 50 }, s)).toBe('Posted')
     expect(pendingPostLabel({ id: 60 }, s)).toBe('Mark posted')
+  })
+})
+
+describe('orderDueRows', () => {
+  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z` })], [], snap({}), TODAY)
+  const names = (rows: ReturnType<typeof orderDueRows>) => rows.map((r) => (r.kind === 'pending' ? `p${r.transaction.id}` : r.name))
+
+  it('puts an overdue pending row before a non-overdue recurring row', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Rent', source_id: 1, occurrence_date: '2026-10-25', due_date: '2026-10-25' })] }), TODAY)
+    expect(names(orderDueRows(rec, pend(40, '2026-10-19')))).toEqual(['p40', 'Rent'])
+  })
+
+  it('puts missed and overdue rows ahead of due-today and future rows', () => {
+    const rec = dueRecurringRows(
+      snap({
+        missed: [missed({ entry_id: 2, name: 'Old Rent', oldest_unlinked: '2026-09-01' })],
+        payables: [
+          payable({ name: 'Later', source_id: 10, occurrence_date: '2026-10-25', due_date: '2026-10-25' }),
+          payable({ name: 'Today', source_id: 11 }),
+          payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true }),
+        ],
+      }),
+      TODAY,
+    )
+    expect(names(orderDueRows(rec, pend(40, '2026-10-19')))).toEqual(['Old Rent', 'Late', 'p40', 'Today', 'Later'])
+  })
+
+  it('puts the oldest overdue row first across kinds', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true })] }), TODAY)
+    expect(names(orderDueRows(rec, pend(40, '2026-10-05')))).toEqual(['p40', 'Late'])
+  })
+
+  it('orders a day tie by the recurring family order, then pending', () => {
+    const rec = dueRecurringRows(
+      snap({
+        missed: [missed({ entry_id: 2, name: 'Zed', oldest_unlinked: '2026-10-10' })],
+        payables: [payable({ name: 'Alpha', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true })],
+      }),
+      TODAY,
+    )
+    // dueRecurringRows' own order (name) is kept within the recurring family.
+    expect(names(orderDueRows(rec, pend(40, '2026-10-10')))).toEqual(['Alpha', 'Zed', 'p40'])
+  })
+
+  it('orders two pending rows on one day by numeric id', () => {
+    const rows = duePendingRows(
+      [txn({ id: 10, transaction_date: '2026-10-19T00:00:00Z' }), txn({ id: 9, transaction_date: '2026-10-19T00:00:00Z' })],
+      [],
+      snap({}),
+      TODAY,
+    )
+    expect(names(orderDueRows([], rows))).toEqual(['p9', 'p10'])
+  })
+
+  it("ranks a Limited overdue row as overdue under 'text'; under 'drop' it is absent", () => {
+    const s = snap({
+      payables: [limitedEvent('e2', true), payable({ name: 'Today', source_id: 11 })],
+    })
+    expect(names(orderDueRows(dueRecurringRows(s, TODAY, 'text'), []))).toEqual(['Expense', 'Today'])
+    expect(names(orderDueRows(dueRecurringRows(s, TODAY, 'drop'), []))).toEqual(['Today'])
+  })
+
+  it('does not call a row due today overdue', () => {
+    const [today] = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
+    expect(isOverdueRow(today!)).toBe(false)
+    const [late] = pend(40, '2026-10-19')
+    expect(isOverdueRow(late!)).toBe(true)
+  })
+
+  it('leaves the inputs alone and keeps every row', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
+    const pending = pend(40, '2026-10-19')
+    const recCopy = [...rec]
+    const pendCopy = [...pending]
+    const out = orderDueRows(rec, pending)
+    expect(out).toHaveLength(rec.length + pending.length)
+    expect(rec).toEqual(recCopy)
+    expect(pending).toEqual(pendCopy)
+  })
+})
+
+describe('effectiveDuePage', () => {
+  it('keeps the chosen page on the same day', () => {
+    expect(effectiveDuePage({ page: 3, day: TODAY }, TODAY)).toBe(3)
+  })
+
+  it('is page 1 on a new day, even while the list is briefly short', () => {
+    const state = { page: 3, day: '2026-10-19' }
+    // The new day's window has not fully arrived: 5 rows is 2 pages, so page 3 alone would clamp to page 2.
+    const shown = pageWindow(5, effectiveDuePage(state, TODAY), DUE_PAGE_SIZE).page
+    expect(shown).toBe(1)
+    const persisted = { page: shown, day: TODAY }
+    // When the rows arrive again the reader is still on page 1.
+    expect(pageWindow(9, effectiveDuePage(persisted, TODAY), DUE_PAGE_SIZE).page).toBe(1)
   })
 })
