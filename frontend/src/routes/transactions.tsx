@@ -21,6 +21,7 @@ import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
+import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
 
@@ -1923,6 +1924,15 @@ export function TransactionsPage() {
           </button>
         )}
       </div>
+
+      <DueAndOverdueSection
+        today={today}
+        onPost={(transaction) => {
+          openActionModal(transaction)
+          handleInitPostingForm(transaction)
+        }}
+        onChanged={() => void refreshListsRef.current()}
+      />
 
       {/* Search and Filters */}
       <div className="card p-4 sm:p-6 space-y-4">
