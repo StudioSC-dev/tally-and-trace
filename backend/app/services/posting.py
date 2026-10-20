@@ -9,6 +9,11 @@ in services/forecast.py, the projection's own rule) is reused: a posted one
 only moves the schedule on, a pending one is posted through the same update
 path as ``PUT /transactions/{id}`` (``apply_transaction_update``). Only an
 occurrence with no linked row gets a new transaction.
+
+Charged (``is_posted`` False, a card expense only, checked by the router)
+records the occurrence as one new pending debit linked to it, and refuses an
+occurrence that already has a linked row: a pending one is posted on the
+Transactions page, a posted one is already recorded.
 """
 from calendar import monthrange
 from collections import Counter, defaultdict
@@ -223,7 +228,8 @@ def advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
 
 def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
             occurrence: datetime) -> Transaction:
-    """A new posted row for ``occurrence``: the materialise create body."""
+    """A new row for ``occurrence``, posted unless ``payload.is_posted`` is
+    False (Charged): the materialise create body."""
     from app.routers.transactions import add_transaction, exchange_rate
     from app.schemas.transaction import TransactionCreate
 
@@ -278,7 +284,7 @@ def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
         allocation_id=entry.allocation_id,
         budget_entry_id=entry.id,
         description=entry.name,
-        is_posted=True,
+        is_posted=payload.is_posted,
         **currency_fields,
         **transfer_fields,
     )
@@ -324,7 +330,9 @@ def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMater
     ``apply_transaction_update``), a 409 when ``actor`` cannot edit it
     (``posted_pending``). No linked row gets a new posted transaction dated
     ``payload.transaction_date`` or the occurrence (``created``). With
-    ``payload.advance`` the schedule then moves past ``occurrence``.
+    ``payload.is_posted`` False (Charged) the new row is pending, and any
+    linked row is a 409. With ``payload.advance`` the schedule then moves past
+    ``occurrence``.
     """
     from app.routers.transactions import apply_transaction_update
 
@@ -334,6 +342,11 @@ def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMater
             status_code=409,
             detail="This occurrence has more than one linked transaction; "
                    "resolve them on the Transactions page")
+    if links and not payload.is_posted:
+        raise HTTPException(
+            status_code=409,
+            detail="This occurrence is already recorded" if links[0][1]
+            else "This occurrence is already charged; post it on the Transactions page")
     if links and links[0][1]:
         if not payload.advance:
             raise HTTPException(status_code=409, detail="This occurrence is already recorded")

@@ -1,5 +1,6 @@
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core import locking
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
+from app.core.time import manila_midnight, manila_today
 from app.core.access import (
     VIEW_ROLES,
     RecordAccess,
@@ -46,6 +48,7 @@ from app.schemas.budget_entry import (
 )
 from app.schemas.transaction import TransactionOut
 from app.services import posting
+from app.services.forecast import _naive, iter_occurrences
 from app.services.recurring_kinds import default_billing_kind, entry_kind, is_capped
 from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 
@@ -399,6 +402,45 @@ def create_budget_entry(
     return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
 
 
+ENDED_MESSAGE = "This entry has ended"
+PAUSED_MESSAGE = "This entry is paused"
+
+
+def _has_ended(e, today: date) -> bool:
+    """Whether the schedule is over: a capped entry's last occurrence used up, or
+    an end date before ``today`` (Manila). An inactive entry that has not ended
+    is paused."""
+    return bool(
+        (is_capped(e) and e.max_occurrences <= 0)
+        or (e.end_mode == "on_date" and e.end_date is not None
+            and _naive(e.end_date).date() < today))
+
+
+def _refuse_paused_or_ended(entry: BudgetEntry) -> None:
+    """409 for an entry that cannot be posted to: ended (cap used up, or inactive
+    past its end date) or paused (any other inactive entry). An active entry
+    past its end date is not refused: its unrecorded occurrences can still be
+    recorded."""
+    if is_capped(entry) and entry.max_occurrences <= 0:
+        raise HTTPException(status_code=409, detail=ENDED_MESSAGE)
+    if not entry.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail=ENDED_MESSAGE if _has_ended(entry, manila_today()) else PAUSED_MESSAGE)
+
+
+def _first_occurrence_from_today(entry: BudgetEntry) -> Optional[datetime]:
+    """The schedule's first occurrence on or after Manila's today, walked from
+    the stored ``next_occurrence`` (semi-monthly days included, ``end_date``
+    respected, the cap not applied), or None when nothing is left."""
+    start = manila_midnight()
+    end = start + timedelta(days=400)
+    anchor = _naive(entry.next_occurrence)
+    return next(iter(iter_occurrences(entry, start, end,
+                                      max_steps=(end - anchor).days + 2,
+                                      apply_cap=False)), None)
+
+
 @router.put("/{entry_id}", response_model=BudgetEntryOut)
 def update_budget_entry(
     entry_id: int,
@@ -476,6 +518,25 @@ def update_budget_entry(
     if "end_mode" in prospective_data and prospective_data["end_mode"] is not None:
         prospective_data["end_mode"] = prospective_data["end_mode"].lower()
 
+    # Resuming a paused entry (stored inactive, the request sets it active). An
+    # ended schedule cannot be resumed: checked on the request merged over the
+    # stored row, so raising the cap or moving the end date ahead in the same
+    # request is allowed. The paused months are skipped below when the request
+    # leaves next_occurrence as stored (omitted, or sent unchanged, as the form
+    # does) and it is before Manila's today.
+    resuming = not entry.is_active and prospective_data.get("is_active") is True
+    skip_paused = False
+    if resuming:
+        merged = SimpleNamespace(**{
+            f: prospective_data.get(f, getattr(entry, f))
+            for f in ("end_mode", "end_date", "max_occurrences")})
+        if _has_ended(merged, manila_today()):
+            raise HTTPException(status_code=409, detail=ENDED_MESSAGE)
+        sent = prospective_data.get("next_occurrence")
+        skip_paused = (
+            (sent is None or _naive(sent) == _naive(entry.next_occurrence))
+            and _naive(entry.next_occurrence).date() < manila_today())
+
     if not zero_remaining_allowed(
         prospective_data.get("end_mode", entry.end_mode),
         prospective_data.get("max_occurrences", entry.max_occurrences),
@@ -492,6 +553,15 @@ def update_budget_entry(
 
     for field, value in prospective_data.items():
         setattr(entry, field, value)
+    if skip_paused:
+        # Skipped occurrences are not counted: max_occurrences and
+        # occurrences_paid_offset stay as they are. Nothing left on or after
+        # today means the schedule has ended; raising before the commit leaves
+        # the row unchanged (get_db closes the session without committing).
+        resumed_at = _first_occurrence_from_today(entry)
+        if resumed_at is None:
+            raise HTTPException(status_code=409, detail=ENDED_MESSAGE)
+        entry.next_occurrence = resumed_at
     if entry.billing_kind is None and "billing_kind" not in prospective_data:
         entry.billing_kind = default_billing_kind(
             db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
@@ -628,6 +698,13 @@ def materialize_budget_entry(
       (200, ``already_posted``); with ``advance`` False a 409.
     - More than one linked row: 409.
 
+    With ``is_posted`` False (Charged, a card expense only: 400 for any other
+    entry) the occurrence gets one new pending debit linked to it (201,
+    ``created``) and the card balance does not move; it is posted later on the
+    Transactions page. An occurrence already linked is a 409: "This occurrence
+    is already charged; post it on the Transactions page" for a pending row,
+    "This occurrence is already recorded" for a posted one.
+
     The body is the transaction. Headers report what was recorded:
     ``X-Occurrence-Outcome``, ``X-Occurrence-Recorded`` (the occurrence's
     day), ``X-Occurrences-Skipped-Count`` (every earlier occurrence left
@@ -637,9 +714,13 @@ def materialize_budget_entry(
     With ``advance`` the schedule then moves past the recorded occurrence,
     deactivating the entry when it passes its end date or exhausts its
     occurrences. A capped installment (``end_mode`` "after_occurrences" with
-    ``max_occurrences`` set) always advances: a finished or inactive one is
-    refused with a 409 and ``advance`` False with a 400, because a payment that
-    doesn't use up an occurrence would pass the installment's total.
+    ``max_occurrences`` set) always advances: ``advance`` False is a 400,
+    because a payment that doesn't use up an occurrence would pass the
+    installment's total.
+
+    An entry that has ended (its cap used up, or inactive past its end date) is
+    refused with a 409 "This entry has ended", and any other inactive entry with
+    a 409 "This entry is paused", before anything else is checked or written.
 
     With ``advance`` False the schedule stays put, so the projection would list
     that occurrence AND the transaction. It doesn't, for every entry type
@@ -673,13 +754,16 @@ def materialize_budget_entry(
     checked (``_lock_entry_to_post``).
     """
     entry = _lock_entry_to_post(db, current_user, entry_id)
+    _refuse_paused_or_ended(entry)
+    if not payload.is_posted and entry_kind(entry, db.get(Account, entry.account_id)) not in (
+            "subscription", "installment", "bill"):
+        raise HTTPException(status_code=400,
+                            detail="Only a card expense can be recorded as charged")
     if is_capped(entry):
         # An installment's payments are counted down by the advance, so a payment
-        # that doesn't advance, or one past the last, would pass its total. Without
-        # a cap (``max_occurrences`` None) the entry is open-ended, as elsewhere.
-        if not entry.is_active or entry.max_occurrences <= 0:
-            raise HTTPException(status_code=409,
-                                detail="This installment is finished or inactive")
+        # that doesn't advance would pass its total (one past the last is refused
+        # as ended above). Without a cap (``max_occurrences`` None) the entry is
+        # open-ended, as elsewhere.
         if not payload.advance:
             raise HTTPException(
                 status_code=400,
@@ -718,9 +802,11 @@ def materialize_due_budget_entry(
     Only a non-capped subscription or cash expense in its account's currency:
     an installment is marked paid month by month, a bill and a foreign entry
     each need the amount charged, and income and transfers are refused (400).
-    The caller needs the write rule on the entry, as for Mark paid.
+    The caller needs the write rule on the entry, as for Mark paid. An ended or
+    paused entry is refused with a 409 first, as for Mark paid.
     """
     entry = _lock_entry_to_post(db, current_user, entry_id)
+    _refuse_paused_or_ended(entry)
     account = db.get(Account, entry.account_id)
     kind = entry_kind(entry, account)
     if is_capped(entry):

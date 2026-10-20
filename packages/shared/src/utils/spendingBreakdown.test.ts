@@ -76,6 +76,14 @@ describe('buildSpendingBreakdown', () => {
     expect(rows.find((r) => r.name === 'C')?.color).toBeUndefined()
   })
 
+  it("prefers the expense category's colour when an income category shares the name", () => {
+    const { rows } = buildSpendingBreakdown(
+      { Gifts: line(5) },
+      [{ name: 'Gifts', color: '#00ff00', kind: 'income' as const },
+        { name: 'Gifts', color: '#ff0000', kind: 'expense' as const }])
+    expect(rows[0]?.color).toBe('#ff0000')
+  })
+
   it('has no Other slice at exactly maxSlices rows', () => {
     const data = Object.fromEntries(['A', 'B', 'C'].map((n, i) => [n, line(10 - i)]))
     const { slices } = buildSpendingBreakdown(data, [], 3)

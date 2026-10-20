@@ -20,7 +20,13 @@ import {
 } from '../../src/store/api'
 import type { Transaction, Account, Category, FullTransaction, SharedFullTransaction } from '../../src/store/api'
 import { useAuth } from '../../src/contexts/AuthContext'
-import { formatCurrency, formatRelativeDate, transactionDate, transactionDescription } from '@tally-trace/shared'
+import {
+  categoryOptionLabel,
+  formatCurrency,
+  formatRelativeDate,
+  transactionDate,
+  transactionDescription,
+} from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
 import { isCrossCurrencyTransfer } from '../../src/utils/currencyDisplay'
 import { Card, Button, Input, LoadingSpinner, EmptyState, Badge, SectionHeader } from '../../src/components/ui'
@@ -305,7 +311,7 @@ function TransactionFormModal({
                           : 'text-slate-300'
                       }
                     >
-                      {cat.name}
+                      {categoryOptionLabel(cat, categories)}
                     </Text>
                   </TouchableOpacity>
                 ))}

@@ -2756,7 +2756,7 @@ def upcoming_by_currency(db: Session, user_id: int, days: int = 30,
     events = collect_events(db, start, end, user_id=user_id, accounts=accounts,
                             tag_id=tag_id, fx=fx, detail=True, keep_origin=True)
     collector = collector or FxCollector()
-    items = currency_upcoming_items(events, collector, ids)
+    items = currency_upcoming_items(events, collector, ids, today=manila_today())
     default = default_currency(db, user_id)
     return {"items": items,
             "currencies": response_currencies({_code(a.currency) for a in accounts},
@@ -2819,7 +2819,8 @@ def _occurrence_key(e: dict) -> tuple:
 
 
 def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector] = None,
-                            ids: Optional[PublicIds] = None) -> List[dict]:
+                            ids: Optional[PublicIds] = None,
+                            today: Optional[date] = None) -> List[dict]:
     """``collect_events(detail=True)`` events as upcoming items, one per currency.
 
     A full event becomes one item per listing row (a cross-currency transfer:
@@ -2827,6 +2828,10 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
     currency (None when unconverted) and the B5 labels. A limited event keeps
     the public shape (``limited_event``), split per currency it moves cash in,
     and its public ids are assigned after the split.
+
+    With ``today`` a full budget-entry item also carries the occurrence it
+    stands for and whether it is overdue (``_occurrence_fields``, as payables
+    do): an overdue capped occurrence is listed on the window start.
     """
     collector = collector or FxCollector()
     items = []
@@ -2845,6 +2850,8 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
                 **({"household_occurrence": True} if e.get("household_occurrence") else {}),
                 "currency": row["currency"],
                 **collector.row(_row_key(e, row["currency"]), row),
+                **(_occurrence_fields(e, today)
+                   if today is not None and e["source"] == "budget_entry" else {}),
             })
     limited = sorted((r for e in events if e.get("view") == LIMITED for r in _limited_rows(e)),
                      key=_event_sort_key)

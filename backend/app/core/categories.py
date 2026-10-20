@@ -22,18 +22,22 @@ with _DEFAULTS_PATH.open(encoding="utf-8") as _f:
 def ensure_default_categories(db: Session, user) -> int:
     """Give the user each default category they don't already own; returns how many were made.
 
-    A default is matched on its exact name. An inactive (soft-deleted)
-    category with the same name counts as existing, so it is not recreated.
+    A default is matched on its exact name and kind; an inactive (soft-deleted)
+    category with the same name and kind counts as existing, so it is not
+    recreated.
     Flushed, never committed: called in the same transaction that creates the
     user, so a user never exists without them.
     """
     uid = getattr(user, "id", user)
-    owned = {row[0] for row in db.query(Category.name).filter(Category.user_id == uid)}
+    owned = {
+        (name, kind)
+        for name, kind in db.query(Category.name, Category.kind).filter(Category.user_id == uid)
+    }
     created = 0
     for entry in DEFAULT_CATEGORIES:
-        if entry["name"] in owned:
-            continue
         kind = CategoryKind(entry["kind"])
+        if (entry["name"], kind) in owned:
+            continue
         db.add(Category(
             user_id=uid, name=entry["name"], description=entry["description"],
             color=entry["color"], kind=kind,

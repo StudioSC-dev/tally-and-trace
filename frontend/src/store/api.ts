@@ -324,6 +324,10 @@ export const accountingApi = createApi({
       start_date?: string
       end_date?: string
       is_reconciled?: boolean
+      /** true: posted only; false: pending only. */
+      is_posted?: boolean
+      /** Only these transaction ids. */
+      ids?: number[]
       tag?: number
       search?: string
       limit?: number
@@ -341,6 +345,8 @@ export const accountingApi = createApi({
         if (params?.start_date) searchParams.set('start_date', params.start_date)
         if (params?.end_date) searchParams.set('end_date', params.end_date)
         if (typeof params?.is_reconciled === 'boolean') searchParams.set('is_reconciled', String(params.is_reconciled))
+        if (typeof params?.is_posted === 'boolean') searchParams.set('is_posted', String(params.is_posted))
+        params?.ids?.forEach((id) => searchParams.append('ids', String(id)))
         if (typeof params?.tag === 'number') searchParams.set('tag', String(params.tag))
         if (params?.search) searchParams.set('search', params.search)
         if (typeof params?.limit === 'number') searchParams.set('limit', String(params.limit))

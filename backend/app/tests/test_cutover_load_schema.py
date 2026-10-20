@@ -446,3 +446,14 @@ def test_routing_stays_in_one_currency():
     account(data, "loan")["loan"]["payment_account_key"] = "usd"
     found = {(p.check, p.key) for p in problems_of(data)}
     assert {("currency", "card"), ("currency", "loan")} <= found
+
+
+def test_a_category_name_may_repeat_across_kinds_only():
+    data = base()
+    data["categories"].append({"key": "salary_out", "name": "Salary", "kind": "expense"})
+    plan_of(data)  # an income and an expense "Salary" pass
+    data["categories"].append({"key": "salary_out2", "name": "Salary", "kind": "expense"})
+    problems = problems_of(data)
+    assert ("duplicate_category", "Salary") in checks(problems)
+    assert any(p.detail == "category 'Salary' (expense) is used more than once"
+               for p in problems)

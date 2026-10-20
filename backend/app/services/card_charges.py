@@ -21,7 +21,14 @@ A charge the caller sees Limited keeps only ``LimitedCharge``'s keys, with the
 response's shared public id (``PublicIds``), so one occurrence has one id across
 the snapshot's lists. Only a recurring entry's charge offers Mark paid
 (``can_mark_paid``, the entry's ``can_post``); a pending card transaction is
-posted on the Transactions page, never here.
+posted on the Transactions page, never here. ``recurring`` marks a pending debit
+linked to a recurring entry (one recorded as Charged, or linked by hand); it
+names no entry, so a shared editor sees it too.
+
+Each ``missed`` item also says which of its missed occurrences a pending
+linked row already stands for (``unlinked_count``, ``oldest_unlinked``) and
+lists those rows, only the ones the caller sees in full
+(``pending_transaction_ids``).
 """
 from __future__ import annotations
 
@@ -38,6 +45,7 @@ from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face
 from app.services import forecast as fc
 from app.services.fx import FxRates
+from app.services.missed import split_pending_links
 from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible
 from app.services.statements import resolve_cycle_fields
 
@@ -196,7 +204,8 @@ def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
 
 def _full(e_view: str, *, when: datetime, original: Optional[datetime],
           occurrence: Optional[date], name: str, kind: str, source: str, source_id: int,
-          row: dict, key: tuple, collector: fc.FxCollector, can_mark_paid: bool) -> dict:
+          row: dict, key: tuple, collector: fc.FxCollector, can_mark_paid: bool,
+          recurring: bool) -> dict:
     return {
         "view": e_view,
         "date": _day(when),
@@ -207,6 +216,7 @@ def _full(e_view: str, *, when: datetime, original: Optional[datetime],
         "kind": kind,
         "source": source,
         "source_id": source_id,
+        "recurring": recurring,
         "amount": _amount(row["amount"]),
         "currency": row["currency"],
         **collector.row(key, row),
@@ -234,7 +244,8 @@ def _entry_charge(e: dict, entry: BudgetEntry, card: Account, collector: fc.FxCo
                  occurrence=(original or when).date(), name=e["name"],
                  kind=entry_kind(entry, card), source="budget_entry", source_id=entry.id,
                  row=row, key=fc._row_key(e, row["currency"]), collector=collector,
-                 can_mark_paid=bool(redactor.access.permissions(entry)["can_post"]))
+                 can_mark_paid=bool(redactor.access.permissions(entry)["can_post"]),
+                 recurring=False)
 
 
 def _debit_charge(e: dict, txn: Transaction, card: Account, collector: fc.FxCollector,
@@ -244,7 +255,7 @@ def _debit_charge(e: dict, txn: Transaction, card: Account, collector: fc.FxColl
     return _full(redactor.view(txn), when=when, original=original, occurrence=None,
                  name=e["name"], kind="pending", source="transaction", source_id=txn.id,
                  row=row, key=fc._row_key(e, row["currency"]), collector=collector,
-                 can_mark_paid=False)
+                 can_mark_paid=False, recurring=txn.budget_entry_id is not None)
 
 
 def _advance_charge(e: dict, txn: Transaction, card: Account, collector: fc.FxCollector,
@@ -262,7 +273,7 @@ def _advance_charge(e: dict, txn: Transaction, card: Account, collector: fc.FxCo
     return _full(redactor.view(txn), when=when, original=original, occurrence=None,
                  name=e["name"], kind="advance", source="transaction", source_id=txn.id,
                  row=row, key=fc._row_key(e, currency), collector=collector,
-                 can_mark_paid=False)
+                 can_mark_paid=False, recurring=False)
 
 
 def _overdue_charge(txn: Transaction, card: Account, start: datetime, original: datetime,
@@ -279,14 +290,17 @@ def _overdue_charge(txn: Transaction, card: Account, start: datetime, original: 
     key = ("transaction", txn.id, start.date(), name, currency)
     return _full(redactor.view(txn), when=start, original=original, occurrence=None,
                  name=name, kind="pending", source="transaction", source_id=txn.id,
-                 row=row, key=key, collector=collector, can_mark_paid=False)
+                 row=row, key=key, collector=collector, can_mark_paid=False,
+                 recurring=txn.budget_entry_id is not None)
 
 
 def _missed(db: Session, cards: Dict[int, Account], today: date,
             redactor: Redactor) -> Dict[int, List[dict]]:
     """``{card id: [missed item]}``: each open-ended subscription or bill on a
     card, seen in full or shared_full, with occurrences before today that no
-    posted row records (``count``), also counting today's (``due_count``)."""
+    posted row records (``count``), also counting today's (``due_count``).
+    ``unlinked_count``, ``oldest_unlinked`` and ``pending_transaction_ids``
+    split ``count`` by pending linked rows (``missed.split_pending_links``)."""
     entries = [e for e in db.query(BudgetEntry).filter(
         BudgetEntry.account_id.in_(list(cards)),
         BudgetEntry.is_active.is_(True),
@@ -295,10 +309,13 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
         and entry_kind(e, cards[e.account_id]) in ("subscription", "bill")
         and redactor.access.readable(e) and redactor.view(e) != LIMITED]
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today)
+    missed = {entry_id: [occ for occ in due if occ.date() < today]
+              for entry_id, due in unrecorded.items()}
+    links = split_pending_links(db, entries, missed, redactor)
     out: Dict[int, List[dict]] = {}
     for entry in entries:
         due = unrecorded.get(entry.id, [])
-        count = sum(1 for occ in due if occ.date() < today)
+        count = len(missed.get(entry.id, []))
         if count == 0:
             continue
         out.setdefault(entry.account_id, []).append({
@@ -308,6 +325,7 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             "count": count,
             "due_count": len(due),
             "oldest": due[0].date().isoformat(),
+            **links[entry.id],
             "can_mark_paid": bool(redactor.access.permissions(entry)["can_post"]),
         })
     return out

@@ -357,7 +357,9 @@ def test_update_to_zero_remaining_requires_inactive(client, db):
         assert resp.json()["max_occurrences"] == 0
         assert resp.json()["occurrences_paid"] == 5
         # Reactivating a completed installment without giving it occurrences is rejected.
-        assert client.put(url, json={"is_active": True}, headers=headers).status_code == 422
+        resp = client.put(url, json={"is_active": True}, headers=headers)
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == "This entry has ended"
     finally:
         _cleanup(db, entry_id)
 

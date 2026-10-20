@@ -14,6 +14,10 @@ import {
   markPaidWireDate,
   omittedRuns,
   postAllDueRange,
+  RECURRING_ACTION_LABELS,
+  recurringActionsFor,
+  recurringDialogTitle,
+  defaultRecurringAction,
   sameStatementCycle,
   skippedBefore,
   skippedNotice,
@@ -23,9 +27,11 @@ import type {
   BudgetEntryMaterializeInput,
   EntryOccurrence,
   FullBudgetEntry,
+  RecurringAction,
   SharedFullBudgetEntry,
 } from '@tally-trace/shared'
 import {
+  useGetAccountQuery,
   useGetAccountsQuery,
   useGetBudgetEntryQuery,
   useGetEntryOccurrencesQuery,
@@ -49,10 +55,11 @@ interface Props {
   occurrenceDate: string | null
   /** The entry, when the caller holds it; otherwise the dialog looks it up. */
   entry?: EditableEntry
-  /** The row as listed, e.g. "≈ PHP 4,640.00 (USD 80.00)": a hint, never a default value. */
-  estimate?: string
-  /** The listed row was converted from another currency; read only when the account's currency is unknown. */
-  estimated?: boolean
+  /**
+   * The action that opened the dialog; it is the primary button. Absent: a card
+   * entry opens on Posted and any other kind on its single action.
+   */
+  action?: RecurringAction
   onClose: () => void
   /** Called after a successful Mark paid or Post all due, before the dialog closes. */
   onPaid?: () => void
@@ -91,9 +98,11 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
 }
 
 /**
- * Mark paid for one recurring entry: which occurrence, on which day, for how much.
- * It is the only way an occurrence is marked paid, and every submit names the
- * occurrence (`occurrence_date`). A capped installment offers only its oldest
+ * Records one recurring entry's occurrence: which one, on which day, for how much.
+ * Every submit names the occurrence (`occurrence_date`). A cash expense or transfer
+ * offers Mark paid and income Mark received. A card expense offers Charged (one
+ * pending card debit, the card balance does not move) and Posted; Charged is
+ * hidden once the occurrence is already linked. A capped installment offers only its oldest
  * unrecorded month. "Post all N due" posts every due occurrence at once, for a
  * non-capped subscription or cash expense in its account's currency.
  * `transfer_fee` is never sent: a loan payment's split is the server's.
@@ -101,7 +110,7 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
-export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate, estimated, onClose, onPaid }: Props) {
+export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, onClose, onPaid }: Props) {
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -125,13 +134,23 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
   const entryLookup = useGetBudgetEntryQuery(entryId, { skip: entry !== undefined })
   const lookedUp = entryLookup.currentData
   const detailed: EditableEntry | undefined = entry ?? (lookedUp && isDetailed(lookedUp) ? lookedUp : undefined)
-  // The dashboard's arguments, so this reads the cache it already filled.
+  // The entry's accounts, for their currencies (and a card's statement cycle).
+  // One not in the first page of the list is looked up by id.
   const { data: accountsData, isLoading: accountsLoading } = useGetAccountsQuery({ limit: 200 })
   const accounts = useMemo(() => new Map((accountsData?.items ?? []).map((a) => [a.id, a])), [accountsData])
+  const sourceId = detailed?.account_id ?? null
+  const destinationId = detailed?.transfer_to_account_id ?? null
+  const sourceLookup = useGetAccountQuery(sourceId ?? 0, {
+    skip: accountsLoading || sourceId === null || accounts.has(sourceId),
+  })
+  const destinationLookup = useGetAccountQuery(destinationId ?? 0, {
+    skip: accountsLoading || destinationId === null || accounts.has(destinationId),
+  })
 
   const [materialize, { isLoading: submitting }] = useMaterializeBudgetEntryMutation()
   const [materializeDue, { isLoading: postingAll }] = useMaterializeDueBudgetEntryMutation()
   const busy = submitting || postingAll
+  const [submittingAction, setSubmittingAction] = useState<RecurringAction | null>(null)
 
   const [selectedInput, setSelectedInput] = useState<string | null>(null)
   const [dayInput, setDayInput] = useState<string | null>(null)
@@ -187,10 +206,14 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
   const selected = occurrences.find((o) => o.occurrence_date === (selectedInput ?? defaultSelected)) ?? null
 
   const kind = listing?.kind ?? detailed?.kind ?? null
-  const source = detailed?.account_id !== undefined ? accounts.get(detailed.account_id) : undefined
-  const destination = detailed?.transfer_to_account_id != null ? accounts.get(detailed.transfer_to_account_id) : undefined
+  const source = sourceId !== null ? accounts.get(sourceId) ?? sourceLookup.currentData : undefined
+  const destination = destinationId !== null ? accounts.get(destinationId) ?? destinationLookup.currentData : undefined
+  // Until both currencies are known, a foreign charge can't be told from a plain one.
+  const accountsPending =
+    (sourceId !== null && source === undefined && !sourceLookup.error) ||
+    (destinationId !== null && destination === undefined && !destinationLookup.error)
   const chargedCurrency: CurrencyCode = source?.currency ?? detailed?.currency ?? 'PHP'
-  const needsCharged = detailed !== undefined && source !== undefined ? detailed.currency !== source.currency : estimated === true
+  const needsCharged = detailed !== undefined && source !== undefined && detailed.currency !== source.currency
   const needsReceived = destination !== undefined && destination.currency !== chargedCurrency
   const receivedCurrency: CurrencyCode = destination?.currency ?? chargedCurrency
   // A bill varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
@@ -226,15 +249,27 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
     })
 
   const ambiguous = selected?.linked === 'ambiguous'
-  const loading = (occurrencesQuery.isFetching && !listing) || (detailed === undefined && !entryLookup.error) || accountsLoading
+  const loading =
+    (occurrencesQuery.isFetching && !listing) || (detailed === undefined && !entryLookup.error) || accountsLoading || accountsPending
   const loadError = occurrencesError && !(include && 'status' in occurrencesError && occurrencesError.status === 422)
     ? apiErrorMessage(occurrencesError) || "Couldn't load this entry's occurrences."
     : entryLookup.error
       ? apiErrorMessage(entryLookup.error) || "Couldn't load this entry."
-      : null
+      : sourceLookup.error || destinationLookup.error
+        ? apiErrorMessage(sourceLookup.error ?? destinationLookup.error) || "Couldn't load this entry's accounts."
+        : null
   const canSubmit = !loading && !loadError && selected !== null && !ambiguous && !busy
 
-  const handleSubmit = async () => {
+  // Each button is a recurring action; the row's kind and type decide which ones, and the opener's goes first.
+  const actionRow = { kind, entry_type: detailed?.entry_type ?? null, can_mark_paid: true }
+  const primaryAction = action ?? defaultRecurringAction(actionRow)
+  const offered = recurringActionsFor(actionRow, { linked: selected?.linked })
+  const actions: RecurringAction[] =
+    loading || offered.length === 0
+      ? [primaryAction]
+      : [...offered].sort((a, b) => Number(b === primaryAction) - Number(a === primaryAction))
+
+  const handleSubmit = async (submitted: RecurringAction) => {
     if (!selected) return
     if (!day) {
       setError('Choose the day it was paid')
@@ -244,6 +279,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
       occurrence_date: markPaidWireDate(selected.occurrence_date),
       transaction_date: markPaidWireDate(day),
     }
+    if (submitted === 'charged') data.is_posted = false
     if (sendsAmount) {
       const amount = parseFloat(amountShown)
       if (!(amount > 0)) {
@@ -261,13 +297,14 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
       data.received_amount = amount
     }
     setError(null)
+    setSubmittingAction(submitted)
     try {
       await materialize({ id: entryId, data }).unwrap()
       onPaid?.()
       onClose()
     } catch (caught) {
       // The API's reason ("Record the oldest unrecorded month first", ...) stays in the dialog.
-      setError(apiErrorMessage(caught) || 'Could not mark the entry as paid. Please try again.')
+      setError(apiErrorMessage(caught) || 'Could not record the entry. Please try again.')
     }
   }
 
@@ -301,12 +338,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 id={titleId} className="text-lg font-semibold text-ink">Mark {name} as paid</h2>
-              {estimate && (
-                <p className="mt-1 text-sm text-muted" data-testid="mark-paid-estimate">
-                  Listed as {estimate}.{needsCharged || needsReceived ? ' Enter what was actually moved; the estimate is only a guide.' : ''}
-                </p>
-              )}
+              <h2 id={titleId} className="text-lg font-semibold text-ink">{recurringDialogTitle(name, actionRow)}</h2>
             </div>
             <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
               Close
@@ -460,15 +492,18 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
           {error && <p className="text-sm text-danger" role="alert" data-testid="mark-paid-error">{error}</p>}
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => void handleSubmit()}
-              disabled={!canSubmit}
-              className="btn-primary focus-ring disabled:opacity-50"
-              data-testid="mark-paid-submit"
-            >
-              {submitting ? 'Posting…' : 'Mark paid'}
-            </button>
+            {actions.map((a, index) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => void handleSubmit(a)}
+                disabled={!canSubmit}
+                className={`${index === 0 ? 'btn-primary' : 'btn-secondary'} focus-ring disabled:opacity-50`}
+                data-testid={a === 'charged' ? 'mark-paid-charged' : 'mark-paid-submit'}
+              >
+                {submitting && submittingAction === a ? 'Posting…' : RECURRING_ACTION_LABELS[a]}
+              </button>
+            ))}
             {showPostAll && dueRange && (
               <button
                 type="button"

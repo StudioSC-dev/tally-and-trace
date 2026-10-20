@@ -221,8 +221,8 @@ class _Checker:
                 (a.name, a.account_type.value, a.currency.value) for a in d.accounts):
             self.fail("duplicate_selector", name,
                       f"more than one account is {{{name}, {kind}, {cur}}}")
-        for name in _duplicates(c.name for c in d.categories):
-            self.fail("duplicate_category", name, f"category name '{name}' is used more than once")
+        for name, kind in _duplicates((c.name, c.kind.value) for c in d.categories):
+            self.fail("duplicate_category", name, f"category '{name}' ({kind}) is used more than once")
         for name in _duplicates(t.name.lower() for t in d.tags):
             self.fail("duplicate_tag", name, f"tag name '{name}' is used more than once")
         for tag in d.tags:

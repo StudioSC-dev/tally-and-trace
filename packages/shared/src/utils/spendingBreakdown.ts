@@ -78,6 +78,9 @@ export interface SpendingBreakdown {
   slices: SpendingSlice[]
 }
 
+/** What the breakdowns read from a category: its name, colour and, when known, kind. */
+type BreakdownCategory = Pick<Category, 'name' | 'color'> & Partial<Pick<Category, 'kind'>>
+
 /**
  * Turns a summary's `category_breakdown` into the dialog's rows and donut slices.
  *
@@ -95,7 +98,7 @@ export interface SpendingBreakdown {
  */
 export function buildSpendingBreakdown(
   breakdown: Record<string, { income: number; expenses: number }>,
-  categories: readonly Pick<Category, 'name' | 'color'>[],
+  categories: readonly BreakdownCategory[],
   maxSlices = 6,
 ): SpendingBreakdown {
   const entries = Object.entries(breakdown)
@@ -105,7 +108,12 @@ export function buildSpendingBreakdown(
   const total = entries.reduce((sum, entry) => sum + entry.amount, 0)
 
   const rows: SpendingRow[] = entries.map((entry) => {
-    const color = categories.find((c) => c.name === entry.name)?.color?.trim()
+    // An income and an expense category may share a name; these are expense rows, so
+    // the expense category's colour wins, then the first category of that name.
+    const match =
+      categories.find((c) => c.name === entry.name && c.kind === 'expense') ??
+      categories.find((c) => c.name === entry.name)
+    const color = match?.color?.trim()
     const row: SpendingRow = {
       key: `category:${entry.name}`,
       name: entry.name,
@@ -175,7 +183,7 @@ export interface HouseholdPrivateBreakdown {
 export function buildHouseholdPrivateBreakdown(
   householdRows: TransactionSummary['household_private'] | undefined,
   currency: CurrencyCode,
-  categories: readonly Pick<Category, 'name' | 'color'>[],
+  categories: readonly BreakdownCategory[],
 ): HouseholdPrivateBreakdown {
   const row = (householdRows ?? []).find((r) => r.currency === currency)
   if (!row) return { total: 0, count: 0, rows: [] }

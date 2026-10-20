@@ -24,10 +24,11 @@ REF = datetime(2026, 10, 18, 2, 0)
 LIMITED_KEYS = {"view", "public_id", "date", "original_date", "overdue", "display_name"}
 CARD_KEYS = {"account_id", "account_name", "currency", "statement_cycle", "missed", "charges"}
 FULL_KEYS = {"view", "date", "original_date", "overdue", "occurrence_date", "name", "kind",
-             "source", "source_id", "amount", "currency", "can_mark_paid"}
+             "source", "source_id", "recurring", "amount", "currency", "can_mark_paid"}
 LABEL_KEYS = {"estimated", "unconverted", "original_amount", "original_currency", "rate",
               "rate_as_of", "rate_stale"}
-MISSED_KEYS = {"entry_id", "name", "kind", "count", "due_count", "oldest", "can_mark_paid"}
+MISSED_KEYS = {"entry_id", "name", "kind", "count", "due_count", "oldest", "unlinked_count",
+               "oldest_unlinked", "pending_transaction_ids", "can_mark_paid"}
 CREDIT_WORDS = ("credit", "limit", "available", "hold", "utiliz", "buffer", "total")
 
 
@@ -191,6 +192,32 @@ def test_transaction_charges_never_offer_mark_paid(card_c, monkeypatch):
     assert all(c["can_mark_paid"] is True for c in charges if c["source"] == "budget_entry")
 
 
+def test_pending_debits_linked_to_a_recurring_entry_are_flagged(sw_client, sw_people,
+                                                                monkeypatch):
+    """``recurring``: a pending debit linked to a recurring entry, in the window or
+    overdue; never a plain debit, an entry's occurrence or a cash advance."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    card = _card(client, me, checking)
+    netflix = _entry(client, me, card, "2026-11-10", 549, "Netflix")
+    linked = _debit(client, me, card, "2026-10-25", 549, "Netflix Oct", budget_entry_id=netflix)
+    overdue_linked = _debit(client, me, card, "2026-10-05", 549, "Netflix Sep",
+                            budget_entry_id=netflix)
+    plain = _debit(client, me, card, "2026-10-26", 300, "Lazada")
+    overdue_plain = _debit(client, me, card, "2026-10-06", 200, "Groceries")
+    advance = _advance(client, me, card, checking, "2026-10-28", 2_000, 100, "Cash advance")
+    pin_clock(monkeypatch, REF)
+
+    section = _card_of(_snapshot(client, me), card)
+    _assert_shapes([section])
+    flags = {(c["source"], c["source_id"]): c["recurring"] for c in section["charges"]}
+    assert flags == {
+        ("transaction", linked): True, ("transaction", overdue_linked): True,
+        ("transaction", plain): False, ("transaction", overdue_plain): False,
+        ("transaction", advance): False, ("budget_entry", netflix): False,
+    }
+
+
 def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_people,
                                                                    monkeypatch):
     client, me = sw_client, sw_people()
@@ -209,9 +236,13 @@ def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_
     _assert_shapes([section])
     assert section["missed"] == [
         {"entry_id": netflix, "name": "Netflix", "kind": "subscription", "count": 3,
-         "due_count": 3, "oldest": "2026-08-10", "can_mark_paid": True},
+         "due_count": 3, "oldest": "2026-08-10", "unlinked_count": 3,
+         "oldest_unlinked": "2026-08-10", "pending_transaction_ids": [],
+         "can_mark_paid": True},
         {"entry_id": meralco, "name": "Meralco", "kind": "bill", "count": 1,
-         "due_count": 2, "oldest": "2026-09-18", "can_mark_paid": True},
+         "due_count": 2, "oldest": "2026-09-18", "unlinked_count": 1,
+         "oldest_unlinked": "2026-09-18", "pending_transaction_ids": [],
+         "can_mark_paid": True},
     ]
 
     r = client.post(f"{API}/budget-entries/{netflix}/materialize-due", headers=me["headers"])
@@ -222,6 +253,32 @@ def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_
     assert [m["entry_id"] for m in section["missed"]] == [meralco]
     assert [c["date"] for c in section["charges"]
             if c["source"] == "budget_entry" and c["source_id"] == netflix] == ["2026-11-10"]
+
+
+def test_a_pending_linked_row_on_a_missed_month_is_split_out(sw_client, sw_people,
+                                                             monkeypatch):
+    """A pending row linked to a missed month still leaves it in ``count`` (it
+    records nothing yet), but not in ``unlinked_count``, and its id is listed;
+    one linked to today's occurrence or posted changes neither."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    card = _card(client, me, checking)
+    netflix = _entry(client, me, card, "2026-08-10", 549, "Netflix")
+    sep = _debit(client, me, card, "2026-09-10", 549, "Netflix Sep", budget_entry_id=netflix)
+    pin_clock(monkeypatch, REF)
+
+    section = _card_of(_snapshot(client, me), card)
+    _assert_shapes([section])
+    [missed] = section["missed"]
+    assert (missed["count"], missed["due_count"], missed["oldest"], missed["unlinked_count"],
+            missed["oldest_unlinked"], missed["pending_transaction_ids"]) == (
+        3, 3, "2026-08-10", 2, "2026-08-10", [sep])
+
+    # A pending row on the oldest month: the oldest unlinked moves to October.
+    aug = _debit(client, me, card, "2026-08-10", 549, "Netflix Aug", budget_entry_id=netflix)
+    [missed] = _card_of(_snapshot(client, me), card)["missed"]
+    assert (missed["count"], missed["unlinked_count"], missed["oldest_unlinked"],
+            missed["pending_transaction_ids"]) == (3, 1, "2026-10-10", sorted([aug, sep]))
 
 
 def test_missed_count_walks_a_decades_stale_schedule_completely(sw_client, sw_people,
@@ -393,7 +450,9 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
     ]
     assert _card_of(body, card)["missed"] == [
         {"entry_id": spotify, "name": "Spotify", "kind": "subscription", "count": 1,
-         "due_count": 1, "oldest": "2026-10-18", "can_mark_paid": True}]
+         "due_count": 1, "oldest": "2026-10-18", "unlinked_count": 1,
+         "oldest_unlinked": "2026-10-18", "pending_transaction_ids": [],
+         "can_mark_paid": True}]
     upcoming = [u for u in body["upcoming_this_month"]
                 if u.get("source") == "transaction" and u.get("source_id") == bookstore]
     assert [u["due_date"] for u in upcoming] == ["2026-10-18"]

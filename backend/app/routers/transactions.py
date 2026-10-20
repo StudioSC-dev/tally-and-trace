@@ -863,6 +863,9 @@ def get_transactions(
     start_date: Optional[datetime] = Query(None, description="Start date for filtering"),
     end_date: Optional[datetime] = Query(None, description="End date for filtering"),
     is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
+    is_posted: Optional[bool] = Query(None, description="Filter by posted (true) or pending (false)"),
+    ids: Optional[List[int]] = Query(
+        None, max_length=500, description="Only these transaction ids (unreadable ones match nothing)"),
     search: Optional[str] = Query(None, description="Search by description"),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(10, ge=1, le=1000),
@@ -942,6 +945,12 @@ def get_transactions(
         query = query.filter(Transaction.transaction_date >= start_date)
     if end_date:
         query = query.filter(Transaction.transaction_date <= end_date)
+    if is_posted is not None:
+        # Every view carries is_posted, the limited one included.
+        query = query.filter(Transaction.is_posted.is_(is_posted))
+    if ids:
+        # Inside readable_criterion: an id the caller cannot read matches nothing.
+        query = query.filter(Transaction.id.in_(ids))
     if is_reconciled is not None:
         # Not in the limited model: filter only the rows the caller sees in full.
         query = query.filter(

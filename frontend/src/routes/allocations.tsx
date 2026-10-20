@@ -19,13 +19,17 @@ import type {
   WishlistItem,
 } from '../store/api'
 import {
+  categoryOptionLabel,
   entryCalendarDate,
   formatEntryDate,
   isLimited,
   groupByKind,
   isOwnerFull,
   isSharedFull,
+  RECURRING_ACTION_LABELS,
+  recurringActionsFor,
 } from '@tally-trace/shared'
+import type { RecurringAction } from '@tally-trace/shared'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
@@ -40,6 +44,13 @@ import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+
+const ENTRY_ACTION_TEST_IDS: Record<RecurringAction, string> = {
+  mark_paid: 'entry-mark-paid-button',
+  mark_received: 'entry-mark-received-button',
+  charged: 'entry-charged-button',
+  posted: 'entry-posted-button',
+}
 
 const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate())
 
@@ -229,7 +240,7 @@ export function AllocationsPage() {
   const [recurringModal, setRecurringModal] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry | null } | null>(
     null
   )
-  const [markPaidFor, setMarkPaidFor] = useState<FullBudgetEntry | SharedFullBudgetEntry | null>(null)
+  const [markPaidFor, setMarkPaidFor] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry; action: RecurringAction } | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
@@ -299,8 +310,12 @@ export function AllocationsPage() {
   // Allocations are private to their owner, so only the caller's own accounts can back one.
   const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
+  // An expense or income category may share the name, so the transfer "Savings" wins.
   const savingsCategory = useMemo(
-    () => categories.find((category) => category.name.toLowerCase() === 'savings'),
+    () =>
+      categories.find(
+        (category) => category.name.toLowerCase() === 'savings' && category.kind === 'transfer'
+      ) ?? categories.find((category) => category.name.toLowerCase() === 'savings'),
     [categories]
   )
   const submitButtonLabel = editingAllocation
@@ -359,16 +374,16 @@ export function AllocationsPage() {
     ? 'Goal'
     : actionAllocation?.allocation_type ?? ''
   const actionAllocationAccount = actionAllocation ? accountsById.get(actionAllocation.account_id) ?? null : null
-  const actionAllocationCategoryNames = Array.isArray(actionAllocationConfig['category_ids'])
+  const actionAllocationCategories = Array.isArray(actionAllocationConfig['category_ids'])
     ? (actionAllocationConfig['category_ids'] as unknown[])
         .map((value) => {
           const id = Number(value)
           if (Number.isNaN(id)) {
             return null
           }
-          return categoriesById.get(id)?.name ?? null
+          return categoriesById.get(id) ?? null
         })
-        .filter((name): name is string => Boolean(name))
+        .filter((category): category is Category => Boolean(category))
     : []
   const limit = 10
   const [allocationItems, setAllocationItems] = useState<Allocation[]>([])
@@ -889,13 +904,13 @@ export function AllocationsPage() {
       !isBudget && allocation.target_amount
         ? Math.min((allocation.current_amount / allocation.target_amount) * 100, 999)
         : 0
-    const budgetCategoryNames = Array.isArray(configuration['category_ids'])
+    const budgetCategories = Array.isArray(configuration['category_ids'])
       ? (configuration['category_ids'] as Array<number | string>)
           .map((id) => {
             const parsed = Number(id)
-            return Number.isFinite(parsed) ? categoriesById.get(parsed)?.name : undefined
+            return Number.isFinite(parsed) ? categoriesById.get(parsed) : undefined
           })
-          .filter((name): name is string => Boolean(name))
+          .filter((category): category is Category => Boolean(category))
       : []
     const goalMode = configuration['goal_mode'] as AllocationGoalMode | undefined
     const linkedAccounts = Array.isArray(configuration['account_ids'])
@@ -939,14 +954,14 @@ export function AllocationsPage() {
                   {allocation.description && (
                     <p className="text-sm text-body mt-1">{allocation.description}</p>
                   )}
-                {allocation.allocation_type === 'budget' && budgetCategoryNames.length > 0 && (
+                {allocation.allocation_type === 'budget' && budgetCategories.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    {budgetCategoryNames.map((name) => (
+                    {budgetCategories.map((category) => (
                       <span
-                        key={name}
+                        key={category.id}
                         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-warn"
                       >
-                        {name}
+                        {categoryOptionLabel(category, categories)}
                       </span>
                     ))}
                 </div>
@@ -1184,6 +1199,9 @@ export function AllocationsPage() {
         ? `Ends ${formatFullDate(entry.end_date!)}`
         : installmentLabel ?? 'Indefinite'
 
+    const actions =
+      entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
+
     return (
       <article
         key={entry.id}
@@ -1282,20 +1300,23 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
-          {entry.permissions.can_post && entry.is_active && remaining !== 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setMarkPaidFor(entry)
-                }}
-                onKeyDown={(event) => event.stopPropagation()}
-                className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
-                data-testid="entry-mark-paid-button"
-              >
-                Mark paid
-              </button>
+          {actions.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {actions.map((action) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setMarkPaidFor({ entry, action })
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok transition-colors"
+                  data-testid={ENTRY_ACTION_TEST_IDS[action]}
+                >
+                  {RECURRING_ACTION_LABELS[action]}
+                </button>
+              ))}
             </div>
           )}
           {!canEdit && entry.permissions.can_delete && (
@@ -1484,14 +1505,14 @@ export function AllocationsPage() {
                 {actionAllocationAccount && (
                   <p className="text-sm text-muted">{actionAllocationAccount.name}</p>
                 )}
-                {actionAllocationIsBudget && actionAllocationCategoryNames.length > 0 && (
+                {actionAllocationIsBudget && actionAllocationCategories.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    {actionAllocationCategoryNames.map((name) => (
+                    {actionAllocationCategories.map((category) => (
                       <span
-                        key={name}
+                        key={category.id}
                         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-warn"
                       >
-                        {name}
+                        {categoryOptionLabel(category, categories)}
                       </span>
                     ))}
                 </div>
@@ -1735,7 +1756,7 @@ export function AllocationsPage() {
                               onClick={() => toggleBudgetCategory(category.id)}
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                             >
-                              {category.name}
+                              {categoryOptionLabel(category, categories)}
                             </button>
                           )
                         })}
@@ -2016,10 +2037,11 @@ export function AllocationsPage() {
 
       {markPaidFor && (
         <MarkPaidDialog
-          entryId={markPaidFor.id}
-          name={markPaidFor.name}
-          occurrenceDate={markPaidFor.next_occurrence.slice(0, 10)}
-          entry={markPaidFor}
+          entryId={markPaidFor.entry.id}
+          name={markPaidFor.entry.name}
+          occurrenceDate={markPaidFor.entry.next_occurrence.slice(0, 10)}
+          entry={markPaidFor.entry}
+          action={markPaidFor.action}
           onClose={() => setMarkPaidFor(null)}
           onPaid={() => void loadBudgetEntriesRef.current()}
         />

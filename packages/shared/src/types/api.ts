@@ -605,6 +605,11 @@ export interface BudgetEntryMaterializeInput {
   amount?: number
   /** Advance `next_occurrence` to the following one. Defaults to true. */
   advance?: boolean
+  /**
+   * False records a card expense's occurrence as charged: one pending card debit linked
+   * to it. Any other entry answers 400. Defaults to true (posted).
+   */
+  is_posted?: boolean
   /** Transfer entries only: the fee charged on the source. */
   transfer_fee?: number
   /**
@@ -992,6 +997,17 @@ export interface UpcomingItem extends Partial<Estimate> {
    * cross-currency event is one item per currency. Present on every full item.
    */
   currency?: CurrencyCode
+  /**
+   * Budget-entry items: the occurrence this item stands for (`YYYY-MM-DD`). An overdue
+   * capped occurrence is listed on the window start, so `due_date` differs.
+   */
+  occurrence_date?: string
+  /** Budget-entry items: the occurrence is before today on the Manila calendar. */
+  overdue?: boolean
+  /** Snapshot budget-entry items only: the entry's derived kind (null for income and transfers). */
+  kind?: RecurringKind | null
+  /** Snapshot budget-entry items only: the caller can record this occurrence. */
+  can_mark_paid?: boolean
 }
 
 /** GET /forecast/upcoming. No `by_currency`: the list has no totals. */
@@ -1020,6 +1036,10 @@ export interface Payable extends Partial<Estimate> {
   occurrence_date?: string
   /** Budget-entry rows: the occurrence is before today on the Manila calendar. */
   overdue?: boolean
+  /** Snapshot budget-entry rows only: the entry's derived kind (null for income and transfers). */
+  kind?: RecurringKind | null
+  /** Snapshot budget-entry rows only: the caller can record this occurrence. */
+  can_mark_paid?: boolean
 }
 
 export type PayableOrEvent = Payable | LimitedEvent
@@ -1287,6 +1307,8 @@ export interface FullCharge extends Partial<Estimate> {
   currency: CurrencyCode
   /** True only for a budget-entry charge the caller can post. */
   can_mark_paid: boolean
+  /** A pending debit linked to a recurring entry (it names no entry id). False on entry and advance charges. */
+  recurring: boolean
 }
 
 /** A card charge the caller sees Limited: no amount, no source. */
@@ -1309,6 +1331,40 @@ export interface MissedCharge {
   /** Occurrences through today. */
   due_count: number
   oldest: string
+  /** Of `count`, the occurrences with no pending linked row. */
+  unlinked_count: number
+  /** The oldest of those; null when `unlinked_count` is 0. */
+  oldest_unlinked: string | null
+  /** The readable pending rows linked to missed occurrences. */
+  pending_transaction_ids: number[]
+  can_mark_paid: boolean
+}
+
+/**
+ * A recurring entry with occurrences before today that nobody recorded, in
+ * `DashboardSnapshot.missed`: cash expenses, income, transfers and capped entries.
+ * Open-ended card subscriptions and bills are in `CardCharges.missed` instead.
+ * Limited entries are never listed.
+ */
+export interface RecurringMissed {
+  view: 'full' | 'shared_full'
+  entry_id: number
+  name: string
+  entry_type: BudgetEntryType
+  /** Null for income and transfers. */
+  kind: RecurringKind | null
+  is_transfer: boolean
+  capped: boolean
+  account_name: string | null
+  /** Occurrences before today. */
+  count: number
+  oldest: string
+  /** Of `count`, the occurrences with no pending linked row. */
+  unlinked_count: number
+  /** The oldest of those; null when `unlinked_count` is 0. */
+  oldest_unlinked: string | null
+  /** The readable pending rows linked to missed occurrences. */
+  pending_transaction_ids: number[]
   can_mark_paid: boolean
 }
 
@@ -1361,6 +1417,8 @@ export interface DashboardSnapshot {
   payables: PayableOrEvent[]
   /** Upcoming charges by card, for the caller's own cards. */
   card_charges: CardCharges[]
+  /** Missed recurring entries outside the card lists (the dashboard does not render it). */
+  missed: RecurringMissed[]
   currencies: CurrencyCode[]
   fx: FxMeta
 }

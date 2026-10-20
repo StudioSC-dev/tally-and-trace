@@ -218,6 +218,9 @@ class BudgetEntryMaterialize(BaseModel):
     transaction_date: Optional[datetime] = None  # defaults to the occurrence
     amount: Optional[float] = Field(None, gt=0)   # defaults to the entry's amount
     advance: bool = True                          # advance next_occurrence to the following one
+    # False records a card expense's occurrence as Charged: one pending debit
+    # linked to it (the card balance does not move until it is posted).
+    is_posted: bool = True
     transfer_fee: float = Field(0, ge=0)          # transfer entries only: fee charged on the source
     # Transfer entries only: what the destination received, in its own currency.
     # Required when the destination's currency differs from the source's.
