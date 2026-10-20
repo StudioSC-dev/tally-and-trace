@@ -10,7 +10,7 @@ import {
   pendingLinkIds,
   transactionDescription,
 } from '@tally-trace/shared'
-import type { DueEntryRow, DueMissedRow, DuePendingRow, RecurringAction, Transaction } from '@tally-trace/shared'
+import type { DueEntryRow, DueLimitedRow, DueMissedRow, DuePendingRow, DueRecurringRow, RecurringAction, Transaction } from '@tally-trace/shared'
 import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
@@ -188,6 +188,73 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     )
   }
 
+  const limitedRow = (row: DueLimitedRow) => (
+    <li
+      key={row.key}
+      className="flex items-start justify-between gap-3 px-4 py-3"
+      data-testid="due-row"
+      data-kind="recurring"
+      data-view="limited"
+    >
+      <div>
+        <p className="text-sm font-medium text-ink">{row.name}</p>
+        <p className="text-xs text-muted">{formatEntryDate(row.date)} · Shared item</p>
+      </div>
+      {row.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="due-overdue">Overdue</span>}
+    </li>
+  )
+
+  const missedRow = (row: DueMissedRow) => (
+    <li
+      key={row.key}
+      className="flex items-start justify-between gap-3 px-4 py-3"
+      data-testid="due-row"
+      data-kind="missed"
+      data-view={row.view ?? 'full'}
+      data-source={`budget_entry:${row.entryId}`}
+    >
+      <div>
+        <p className="text-sm font-medium text-ink">{row.name}</p>
+        <p className="text-xs text-warn" data-testid="due-missed-text">{row.text}</p>
+      </div>
+      <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">{actionButtons(row)}</div>
+    </li>
+  )
+
+  const entryRow = (row: DueEntryRow) => (
+    <li
+      key={row.key}
+      className="flex items-start justify-between gap-3 px-4 py-3"
+      data-testid="due-row"
+      data-kind="recurring"
+      data-view={row.view ?? 'full'}
+      data-source={`budget_entry:${row.entryId}`}
+    >
+      <div>
+        <p className="text-sm font-medium text-ink">{row.name}</p>
+        <p className="text-xs text-muted">
+          {formatEntryDate(row.occurrenceDate)}
+          {row.accountName && ` · ${row.accountName}`}
+          {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+        </p>
+      </div>
+      <div className="flex-shrink-0 space-y-1 text-right">
+        {row.currency !== null && (row.amount !== null || row.estimate.unconverted) && (
+          <p className="text-sm font-semibold text-ink" data-testid="due-amount" title={estimateTitle(row.estimate)}>
+            {estimateText(row.amount, row.currency, row.estimate)}
+          </p>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">{actionButtons(row)}</div>
+      </div>
+    </li>
+  )
+
+  const recurringRow = (row: DueRecurringRow) => {
+    if (row.view === 'limited') return limitedRow(row)
+    if (row.kind === 'missed') return missedRow(row)
+    return entryRow(row)
+  }
+
   return (
     <section className="card" data-testid="due-section" data-limited-rows={LIMITED_ROWS} aria-labelledby={`${panelId}-title`}>
       <h2 id={`${panelId}-title`} className="text-lg font-semibold text-ink">
@@ -218,70 +285,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           )}
           {count > 0 && (
             <ul className="divide-y divide-line" data-testid="due-list">
-              {recurring.map((row) => {
-                if (row.view === 'limited') {
-                  return (
-                    <li
-                      key={row.key}
-                      className="flex items-start justify-between gap-3 px-4 py-3"
-                      data-testid="due-row"
-                      data-kind="recurring"
-                      data-view="limited"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-ink">{row.name}</p>
-                        <p className="text-xs text-muted">{formatEntryDate(row.date)} · Shared item</p>
-                      </div>
-                      {row.overdue && <span className="badge badge-danger flex-shrink-0" data-testid="due-overdue">Overdue</span>}
-                    </li>
-                  )
-                }
-                if (row.kind === 'missed') {
-                  return (
-                    <li
-                      key={row.key}
-                      className="flex items-start justify-between gap-3 px-4 py-3"
-                      data-testid="due-row"
-                      data-kind="missed"
-                      data-view={row.view ?? 'full'}
-                      data-source={`budget_entry:${row.entryId}`}
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-ink">{row.name}</p>
-                        <p className="text-xs text-warn" data-testid="due-missed-text">{row.text}</p>
-                      </div>
-                      <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">{actionButtons(row)}</div>
-                    </li>
-                  )
-                }
-                return (
-                  <li
-                    key={row.key}
-                    className="flex items-start justify-between gap-3 px-4 py-3"
-                    data-testid="due-row"
-                    data-kind="recurring"
-                    data-view={row.view ?? 'full'}
-                    data-source={`budget_entry:${row.entryId}`}
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-ink">{row.name}</p>
-                      <p className="text-xs text-muted">
-                        {formatEntryDate(row.occurrenceDate)}
-                        {row.accountName && ` · ${row.accountName}`}
-                        {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
-                      </p>
-                    </div>
-                    <div className="flex-shrink-0 space-y-1 text-right">
-                      {row.currency !== null && (row.amount !== null || row.estimate.unconverted) && (
-                        <p className="text-sm font-semibold text-ink" data-testid="due-amount" title={estimateTitle(row.estimate)}>
-                          {estimateText(row.amount, row.currency, row.estimate)}
-                        </p>
-                      )}
-                      <div className="flex flex-wrap justify-end gap-2">{actionButtons(row)}</div>
-                    </div>
-                  </li>
-                )
-              })}
+              {recurring.map(recurringRow)}
               {pending.map(pendingRow)}
             </ul>
           )}
