@@ -23,8 +23,10 @@
 //       counts; "Post all N due" clears a row
 //   (k) Charged on a missed month leaves one fewer and a single pending row
 //   (l) an ended installment is not listed and cannot be recorded
+//   (m) more than 500 linked pending ids are fetched in batches of 500 and
+//       merged; a failed batch shows an error in the section
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -544,12 +546,61 @@ async function endedInstallment(browser) {
   await ctx.close()
 }
 
+// (m) Linked pending ids past the API's 500-id limit.
+async function manyLinkedIds(browser) {
+  console.log('\n=== (m) 601 linked pending ids: batches of 500, merged; a failed batch shows an error')
+  const u = await makeUser('m')
+  const today = manilaToday()
+  const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
+  const bank = await account(u, 'M Checking')
+  const start = addMonths(today, -2, anchor)
+  const water = await entry(u, { name: 'Water', amount: 900, account_id: bank.id, next_occurrence: wire(start), anchor_day: anchor })
+  const linked = await post(u.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 900, description: 'Water bill',
+    transaction_date: wire(start), is_posted: false, budget_entry_id: water.id,
+  })
+  const real = missedFor(await snapshotOf(u), water.id)
+  check('(m) the API names the linked pending row', real?.pending_transaction_ids, [linked.id])
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  // 600 more ids no one can read (they match nothing) on Water's missed row.
+  const padding = Array.from({ length: 600 }, (_, i) => 900_000_000 + i)
+  await page.route((url) => url.pathname.endsWith('/api/v1/dashboard/snapshot'), async (route) => {
+    const res = await route.fetch()
+    const body = await res.json()
+    for (const m of body.missed) if (m.entry_id === water.id) m.pending_transaction_ids = [...m.pending_transaction_ids, ...padding]
+    await route.fulfill({ response: res, json: body })
+  })
+  const batches = []
+  page.on('response', (r) => {
+    const url = new URL(r.url())
+    if (url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.getAll('ids').length > 0) {
+      batches.push({ size: url.searchParams.getAll('ids').length, status: r.status() })
+    }
+  })
+  await openTransactions(page)
+  check('(m) the ids are asked for in two batches of at most 500, both 200',
+    batches.map((b) => [b.size, b.status]).sort((a, b) => b[0] - a[0]), [[500, 200], [101, 200]])
+  check('(m) the linked pending row is listed once', await pendRows(page, 'Water bill').count(), 1)
+  check('(m) no error line', await page.locator('[data-testid="due-pending-error"]').count(), 0)
+
+  // A failed batch.
+  await page.route((url) => url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.getAll('ids').length > 0,
+    (route) => route.fulfill({ status: 500, json: { detail: 'boom' } }))
+  await openTransactions(page)
+  const error = page.locator('[data-testid="due-pending-error"]')
+  await error.waitFor({ timeout: 15000 }).catch(() => {})
+  check('(m) a failed batch shows an error in the section', (await error.textContent().catch(() => null))?.trim(), 'Could not load some pending transactions.')
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

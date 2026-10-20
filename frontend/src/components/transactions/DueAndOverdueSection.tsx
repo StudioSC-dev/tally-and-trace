@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from 'react'
+import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
   LIMITED_ROWS,
   RECURRING_ACTION_LABELS,
@@ -10,7 +11,8 @@ import {
   transactionDescription,
 } from '@tally-trace/shared'
 import type { DueEntryRow, DueMissedRow, DuePendingRow, RecurringAction, Transaction } from '@tally-trace/shared'
-import { useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
+import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
+import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 
@@ -18,13 +20,15 @@ import { MarkPaidDialog } from '../MarkPaidDialog'
  * "Due and overdue": every recurring occurrence the caller can record and every pending
  * transaction that is overdue or tied to the schedule, in one place. Recurring rows come
  * from the dashboard snapshot (the same cache the dashboard fills; no new endpoint);
- * pending rows from two transaction queries (the next 30 days, and the rows missed
- * occurrences link, whatever their date). The merge, the dedup and the labels live in
+ * pending rows from transaction queries (the next 30 days, and the rows missed
+ * occurrences link, whatever their date, in batches of 500). The merge, the dedup and the labels live in
  * `@tally-trace/shared` (`dueSection.ts`).
  */
 
 const WINDOW_DAYS = 30
 const PAGE = 1000
+/** The most ids one transactions request may name (the API's `ids` limit). */
+const IDS_PER_REQUEST = 500
 
 const ACTION_TEST_IDS: Record<RecurringAction, string> = {
   mark_paid: 'due-mark-paid',
@@ -37,6 +41,31 @@ const addDays = (day: string, n: number): string => {
   const d = new Date(`${day}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() + n)
   return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The pending transactions with these ids: one cached query per batch of at most
+ * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
+ * transactions change, as a query hook would.
+ */
+function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean } {
+  const dispatch = useDispatch<AppDispatch>()
+  const batches = useMemo(() => {
+    const out: { ids: number[]; is_posted: false; limit: number }[] = []
+    for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
+      const batch = ids.slice(start, start + IDS_PER_REQUEST)
+      out.push({ ids: batch, is_posted: false, limit: batch.length })
+    }
+    return out
+  }, [ids])
+  useEffect(() => {
+    const subscriptions = batches.map((args) => dispatch(accountingApi.endpoints.getTransactions.initiate(args)))
+    return () => subscriptions.forEach((subscription) => subscription.unsubscribe())
+  }, [dispatch, batches])
+  const selectors = useMemo(() => batches.map((args) => accountingApi.endpoints.getTransactions.select(args)), [batches])
+  const results = useSelector((state: RootState) => selectors.map((select) => select(state)), shallowEqual)
+  const items = useMemo(() => results.flatMap((result) => result.data?.items ?? []), [results])
+  return { items, failed: results.some((result) => result.error !== undefined) }
 }
 
 interface Props {
@@ -76,14 +105,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     offset,
   })
   const linkIds = useMemo(() => (snapshot ? pendingLinkIds(snapshot) : []), [snapshot])
-  const linkedQuery = useGetTransactionsQuery(
-    { ids: linkIds, is_posted: false, limit: Math.min(Math.max(linkIds.length, 1), PAGE) },
-    { skip: linkIds.length === 0 },
-  )
+  const { items: linkedTxns, failed: linkedFailed } = usePendingTransactionsByIds(linkIds)
 
   const windowItems = windowQuery.currentData?.items
   const windowTxns = useMemo(() => [...earlier, ...(windowItems ?? [])], [earlier, windowItems])
-  const linkedTxns = useMemo(() => (linkIds.length > 0 ? (linkedQuery.currentData?.items ?? []) : []), [linkIds, linkedQuery.currentData])
   const hasMore = windowQuery.currentData?.has_more === true
 
   // The day rolling over restarts the window.
@@ -181,6 +206,11 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
         <div id={panelId} className="border-t border-line">
           {snapshotError && (
             <p className="px-4 py-3 text-sm text-danger" role="alert">Could not load what is due.</p>
+          )}
+          {!snapshotError && (windowQuery.error !== undefined || linkedFailed) && (
+            <p className="px-4 py-3 text-sm text-danger" role="alert" data-testid="due-pending-error">
+              Could not load some pending transactions.
+            </p>
           )}
           {!loading && !snapshotError && count === 0 && (
             <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
