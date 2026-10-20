@@ -28,6 +28,31 @@ def _reconcile_kind(data: dict) -> None:
             CategoryKind.EXPENSE.value if data["is_expense"] else CategoryKind.INCOME.value
         )
 
+
+def _name_taken(
+    db: Session, user: User, name: str, kind: CategoryKind, exclude_id: Optional[int] = None
+) -> bool:
+    """Whether the user already owns a category with this exact name and kind.
+
+    Uniqueness is per (name, kind) within the caller's own categories, so an
+    income and an expense category may share a name. Inactive rows count.
+    """
+    query = db.query(Category.id).filter(
+        Category.name == name,
+        Category.kind == kind,
+        owned_criterion(Category, user),
+    )
+    if exclude_id is not None:
+        query = query.filter(Category.id != exclude_id)
+    return query.first() is not None
+
+
+def _name_taken_error(kind: CategoryKind) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail=f"A category of kind '{kind.value}' with this name already exists",
+    )
+
 @router.get("/", response_model=List[CategoryResponse])
 def get_categories(
     db: Session = Depends(get_db),
@@ -57,16 +82,15 @@ def create_category(
     current_user: User = Depends(get_current_active_user),
 ):
     """Create a new category"""
-    # Uniqueness follows the same scope as visibility: the caller's own categories.
-    existing_category = db.query(Category).filter(
-        Category.name == category.name,
-        owned_criterion(Category, current_user),
-    ).first()
-    if existing_category:
-        raise HTTPException(status_code=400, detail="Category with this name already exists")
-
     category_data = category.dict()
     _reconcile_kind(category_data)
+
+    # Uniqueness follows the same scope as visibility: the caller's own
+    # categories, per (name, kind). kind is always set here: is_expense
+    # defaults to True, so _reconcile_kind derives it when it was omitted.
+    kind = CategoryKind(category_data["kind"])
+    if _name_taken(db, current_user, category.name, kind):
+        raise _name_taken_error(kind)
 
     db_category = Category(**category_data, user_id=current_user.id)
     db.add(db_category)
@@ -93,18 +117,17 @@ def update_category(
     """Update an existing category"""
     db_category = get_owned_or_404(db, Category, category_id, current_user, "Category not found")
 
-    # Same scope as create: the owner's own categories.
-    if category_update.name and category_update.name != db_category.name:
-        existing_category = db.query(Category).filter(
-            Category.name == category_update.name,
-            Category.id != db_category.id,
-            owned_criterion(Category, current_user),
-        ).first()
-        if existing_category:
-            raise HTTPException(status_code=400, detail="Category with this name already exists")
-
     update_data = category_update.dict(exclude_unset=True)
     _reconcile_kind(update_data)
+
+    # Same scope as create: the owner's own categories, per (name, kind). A
+    # change of name, of kind (via kind or legacy is_expense), or of both is
+    # checked; an update that keeps both never clashes with itself.
+    new_name = update_data.get("name") or db_category.name
+    new_kind = CategoryKind(update_data.get("kind") or db_category.kind)
+    if (new_name, new_kind) != (db_category.name, db_category.kind):
+        if _name_taken(db, current_user, new_name, new_kind, exclude_id=db_category.id):
+            raise _name_taken_error(new_kind)
     for field, value in update_data.items():
         setattr(db_category, field, value)
 

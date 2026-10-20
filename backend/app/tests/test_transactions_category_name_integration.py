@@ -540,3 +540,25 @@ def test_uncategorized_false_is_no_filter(hh, groceries, sw_client):
     assert _list(sw_client, a, uncategorized=False)["total"] == everything["total"]
     named = _list(sw_client, a, category_names="Groceries", uncategorized=False)
     assert _ids(named) == _ids(_list(sw_client, a, category_names="Groceries"))
+
+
+# --- same-name income and expense categories (STU-384) -----------------------------------
+# One user may hold an income and an expense category with the same name. They share one
+# summary row (keyed by name) in separate columns, and category_names matches both.
+
+
+def test_a_same_name_income_and_expense_pair_shares_a_summary_row_in_separate_columns(
+        hh, sw_client):
+    a = hh["a"]
+    expense = sw_post(sw_client, a, "/categories/", {"name": "Side gig", "kind": "expense"})["id"]
+    income = sw_post(sw_client, a, "/categories/", {"name": "Side gig", "kind": "income"})["id"]
+    assert expense != income
+    credit = _credit(sw_client, a, hh["a_private"], 75.50, income)
+    debit = _debit(sw_client, a, hh["a_private"], 20.25, expense)
+    row = _summary(sw_client, a, **RANGE)["category_breakdown"]["Side gig"]
+    assert float(row["income"]) == pytest.approx(75.50)
+    assert float(row["expenses"]) == pytest.approx(20.25)
+    debits = _list(sw_client, a, category_names="Side gig", transaction_types="debit", **RANGE)
+    assert _ids(debits) == [debit]
+    assert sum(i["amount"] for i in debits["items"]) == pytest.approx(float(row["expenses"]))
+    assert _ids(_list(sw_client, a, category_names="Side gig", **RANGE)) == sorted([credit, debit])
