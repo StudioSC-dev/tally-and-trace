@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   automaticOffered,
   buildEntryDayFields,
+  categoryOptionLabel,
   dateForDaySetting,
   daySettingOf,
   formatEntryDate,
@@ -505,7 +506,7 @@ export function RecurringEntryFormModal({
                     <option value={0}>Uncategorized</option>
                     {categories.map((category) => (
                       <option key={category.id} value={category.id}>
-                        {category.name}
+                        {categoryOptionLabel(category, categories)}
                       </option>
                     ))}
                   </select>

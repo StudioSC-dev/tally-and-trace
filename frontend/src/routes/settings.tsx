@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { isPinnableAccount } from '@tally-trace/shared'
+import { categoryKindOf, isPinnableAccount } from '@tally-trace/shared'
 import {
   useGetAccountsQuery,
   useGetCategoriesQuery,
@@ -21,6 +21,14 @@ import { localToday } from '@tally-trace/shared'
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
+
+// The kind badge on each category row. Transfer has its own, so a transfer and an
+// income category of the same name read differently.
+const CATEGORY_KIND_BADGE = {
+  expense: { label: 'Expense', text: 'text-danger', dot: 'bg-danger' },
+  income: { label: 'Income', text: 'text-ok', dot: 'bg-ok' },
+  transfer: { label: 'Transfer', text: 'text-info', dot: 'bg-info' },
+} as const
 
 const DEFAULT_COLORS = ['#2563eb', '#7c3aed', '#16a34a', '#f97316', '#db2777', '#0891b2', '#ca8a04', '#dc2626']
 
@@ -226,9 +234,9 @@ function SettingsPage() {
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="h-4 w-4 rounded-full flex-shrink-0 border border-black/10" style={{ backgroundColor: c.color || '#9ca3af' }} />
                   <span className="font-medium text-ink truncate">{c.name}</span>
-                  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${c.is_expense ? 'text-danger' : 'text-ok'}`}>
-                    <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.is_expense ? 'bg-danger' : 'bg-ok'}`} />
-                    {c.is_expense ? 'Expense' : 'Income'}
+                  <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${CATEGORY_KIND_BADGE[categoryKindOf(c)].text}`}>
+                    <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${CATEGORY_KIND_BADGE[categoryKindOf(c)].dot}`} />
+                    {CATEGORY_KIND_BADGE[categoryKindOf(c)].label}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">

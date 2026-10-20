@@ -19,6 +19,7 @@ import type {
   WishlistItem,
 } from '../store/api'
 import {
+  categoryOptionLabel,
   entryCalendarDate,
   formatEntryDate,
   isLimited,
@@ -299,8 +300,12 @@ export function AllocationsPage() {
   // Allocations are private to their owner, so only the caller's own accounts can back one.
   const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
+  // An expense or income category may share the name, so the transfer "Savings" wins.
   const savingsCategory = useMemo(
-    () => categories.find((category) => category.name.toLowerCase() === 'savings'),
+    () =>
+      categories.find(
+        (category) => category.name.toLowerCase() === 'savings' && category.kind === 'transfer'
+      ) ?? categories.find((category) => category.name.toLowerCase() === 'savings'),
     [categories]
   )
   const submitButtonLabel = editingAllocation
@@ -359,16 +364,16 @@ export function AllocationsPage() {
     ? 'Goal'
     : actionAllocation?.allocation_type ?? ''
   const actionAllocationAccount = actionAllocation ? accountsById.get(actionAllocation.account_id) ?? null : null
-  const actionAllocationCategoryNames = Array.isArray(actionAllocationConfig['category_ids'])
+  const actionAllocationCategories = Array.isArray(actionAllocationConfig['category_ids'])
     ? (actionAllocationConfig['category_ids'] as unknown[])
         .map((value) => {
           const id = Number(value)
           if (Number.isNaN(id)) {
             return null
           }
-          return categoriesById.get(id)?.name ?? null
+          return categoriesById.get(id) ?? null
         })
-        .filter((name): name is string => Boolean(name))
+        .filter((category): category is Category => Boolean(category))
     : []
   const limit = 10
   const [allocationItems, setAllocationItems] = useState<Allocation[]>([])
@@ -889,13 +894,13 @@ export function AllocationsPage() {
       !isBudget && allocation.target_amount
         ? Math.min((allocation.current_amount / allocation.target_amount) * 100, 999)
         : 0
-    const budgetCategoryNames = Array.isArray(configuration['category_ids'])
+    const budgetCategories = Array.isArray(configuration['category_ids'])
       ? (configuration['category_ids'] as Array<number | string>)
           .map((id) => {
             const parsed = Number(id)
-            return Number.isFinite(parsed) ? categoriesById.get(parsed)?.name : undefined
+            return Number.isFinite(parsed) ? categoriesById.get(parsed) : undefined
           })
-          .filter((name): name is string => Boolean(name))
+          .filter((category): category is Category => Boolean(category))
       : []
     const goalMode = configuration['goal_mode'] as AllocationGoalMode | undefined
     const linkedAccounts = Array.isArray(configuration['account_ids'])
@@ -939,14 +944,14 @@ export function AllocationsPage() {
                   {allocation.description && (
                     <p className="text-sm text-body mt-1">{allocation.description}</p>
                   )}
-                {allocation.allocation_type === 'budget' && budgetCategoryNames.length > 0 && (
+                {allocation.allocation_type === 'budget' && budgetCategories.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    {budgetCategoryNames.map((name) => (
+                    {budgetCategories.map((category) => (
                       <span
-                        key={name}
+                        key={category.id}
                         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-warn"
                       >
-                        {name}
+                        {categoryOptionLabel(category, categories)}
                       </span>
                     ))}
                 </div>
@@ -1484,14 +1489,14 @@ export function AllocationsPage() {
                 {actionAllocationAccount && (
                   <p className="text-sm text-muted">{actionAllocationAccount.name}</p>
                 )}
-                {actionAllocationIsBudget && actionAllocationCategoryNames.length > 0 && (
+                {actionAllocationIsBudget && actionAllocationCategories.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    {actionAllocationCategoryNames.map((name) => (
+                    {actionAllocationCategories.map((category) => (
                       <span
-                        key={name}
+                        key={category.id}
                         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-warn"
                       >
-                        {name}
+                        {categoryOptionLabel(category, categories)}
                       </span>
                     ))}
                 </div>
@@ -1735,7 +1740,7 @@ export function AllocationsPage() {
                               onClick={() => toggleBudgetCategory(category.id)}
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                             >
-                              {category.name}
+                              {categoryOptionLabel(category, categories)}
                             </button>
                           )
                         })}
