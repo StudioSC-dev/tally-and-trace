@@ -54,10 +54,6 @@ interface Props {
   occurrenceDate: string | null
   /** The entry, when the caller holds it; otherwise the dialog looks it up. */
   entry?: EditableEntry
-  /** The row as listed, e.g. "≈ PHP 4,640.00 (USD 80.00)": a hint, never a default value. */
-  estimate?: string
-  /** The listed row was converted from another currency; read only when the account's currency is unknown. */
-  estimated?: boolean
   /**
    * The action that opened the dialog; it is the primary button. Absent: a card
    * entry opens on Posted and any other kind on its single action.
@@ -113,7 +109,7 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
-export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate, estimated, action, onClose, onPaid }: Props) {
+export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, onClose, onPaid }: Props) {
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -203,7 +199,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
   const source = detailed?.account_id !== undefined ? accounts.get(detailed.account_id) : undefined
   const destination = detailed?.transfer_to_account_id != null ? accounts.get(detailed.transfer_to_account_id) : undefined
   const chargedCurrency: CurrencyCode = source?.currency ?? detailed?.currency ?? 'PHP'
-  const needsCharged = detailed !== undefined && source !== undefined ? detailed.currency !== source.currency : estimated === true
+  const needsCharged = detailed !== undefined && source !== undefined && detailed.currency !== source.currency
   const needsReceived = destination !== undefined && destination.currency !== chargedCurrency
   const receivedCurrency: CurrencyCode = destination?.currency ?? chargedCurrency
   // A bill varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
@@ -326,11 +322,6 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, estimate,
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id={titleId} className="text-lg font-semibold text-ink">{recurringDialogTitle(name, actionRow)}</h2>
-              {estimate && (
-                <p className="mt-1 text-sm text-muted" data-testid="mark-paid-estimate">
-                  Listed as {estimate}.{needsCharged || needsReceived ? ' Enter what was actually moved; the estimate is only a guide.' : ''}
-                </p>
-              )}
             </div>
             <button ref={closeRef} type="button" onClick={onClose} className="btn-secondary focus-ring">
               Close

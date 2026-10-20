@@ -74,8 +74,6 @@ type PayableRow = {
   detail: string
   overdue: boolean
   budgetEntryId: number | null
-  /** Budget-entry rows: the occurrence this row stands for (`YYYY-MM-DD`), which Mark paid opens on. */
-  occurrenceDate: string | null
   /** What kind of payable this is; only scheduled entries have a known autopay state. */
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
   /** The payable itself, for the detail dialog; null for a Limited row, which never opens. */
@@ -95,7 +93,6 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
       overdue: payable.overdue,
       budgetEntryId: null,
-      occurrenceDate: null,
       kind: 'shared',
       payable: null,
     }
@@ -116,7 +113,6 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     // Budget-entry rows say whether their occurrence is before today on the Manila calendar.
     overdue: payable.overdue === true,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
-    occurrenceDate: payable.source === 'budget_entry' ? payable.occurrence_date ?? payable.due_date.slice(0, 10) : null,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
     payable,
   }
