@@ -1,26 +1,10 @@
-import { useState } from 'react'
 import { formatEntryDate, isLimitedEvent } from '@tally-trace/shared'
-import type { CardCharges, FullBudgetEntry, FullCharge, LimitedCharge, MissedCharge, SharedFullBudgetEntry } from '@tally-trace/shared'
-import { MarkPaidDialog } from '../MarkPaidDialog'
+import type { CardCharges, FullCharge, LimitedCharge } from '@tally-trace/shared'
 import { estimateText, estimateTitle } from '../../utils/fx'
-
-type EditableEntry = FullBudgetEntry | SharedFullBudgetEntry
 
 interface Props {
   /** `DashboardSnapshot.card_charges`: one section per card the caller holds a direct role on. */
   cards: readonly CardCharges[]
-  /** The dashboard's entries by id, so the Mark paid dialog need not look one up. */
-  entriesById: ReadonlyMap<number, EditableEntry>
-}
-
-/** What the Mark paid dialog opens on. */
-type MarkPaidTarget = {
-  key: string
-  entryId: number
-  name: string
-  occurrenceDate: string | null
-  estimate?: string
-  estimated?: boolean
 }
 
 const KIND_LABELS: Record<FullCharge['kind'], string> = {
@@ -49,27 +33,11 @@ const dayText = (charge: FullCharge | LimitedCharge): string =>
  * are listed here rather than as payables; a card with no statement cycle keeps its
  * payables too. No total and no credit figure is shown.
  *
- * Mark paid is offered only on a recurring entry the caller may post. A pending card
- * transaction is posted on the Transactions page, and a charge the caller sees Limited
- * shows its name and day only.
+ * Read only: occurrences are recorded in the Due and overdue section of the Transactions
+ * page. A charge the caller sees Limited shows its name and day only.
  */
-export function CardChargesPanel({ cards, entriesById }: Props) {
-  const [markPaid, setMarkPaid] = useState<MarkPaidTarget | null>(null)
-
+export function CardChargesPanel({ cards }: Props) {
   if (cards.length === 0) return null
-
-  const openMissed = (item: MissedCharge) =>
-    setMarkPaid({ key: `missed-${item.entry_id}`, entryId: item.entry_id, name: item.name, occurrenceDate: item.oldest })
-
-  const openCharge = (key: string, charge: FullCharge) =>
-    setMarkPaid({
-      key,
-      entryId: charge.source_id,
-      name: charge.name,
-      occurrenceDate: charge.occurrence_date,
-      estimate: estimateText(charge.amount, charge.currency, charge),
-      estimated: charge.estimated === true,
-    })
 
   return (
     <div className="bg-surface border border-line" data-testid="card-charges">
@@ -94,23 +62,10 @@ export function CardChargesPanel({ cards, entriesById }: Props) {
                   <li key={item.entry_id} className="flex items-start justify-between gap-3" data-testid="card-missed-row">
                     <div>
                       <p className="text-sm font-medium text-ink">{item.name}</p>
-                      <p className="text-xs text-warn">
+                      <p className="text-xs text-warn" data-testid="card-missed-text">
                         {item.count} missed since {formatEntryDate(item.oldest)}
                       </p>
                     </div>
-                    {item.can_mark_paid ? (
-                      <button
-                        type="button"
-                        onClick={() => openMissed(item)}
-                        disabled={markPaid?.key === `missed-${item.entry_id}`}
-                        className="flex-shrink-0 border border-warn px-2.5 py-1 text-xs font-semibold text-warn hover:bg-sunken disabled:opacity-50 transition-colors focus-ring"
-                        data-testid="card-missed-button"
-                      >
-                        {item.count} missed
-                      </button>
-                    ) : (
-                      <span className="flex-shrink-0 text-xs text-muted">{item.count} missed</span>
-                    )}
                   </li>
                 ))}
               </ul>
@@ -152,17 +107,6 @@ export function CardChargesPanel({ cards, entriesById }: Props) {
                         <p className="text-sm font-semibold text-ink" data-testid="card-charge-amount" title={estimateTitle(charge)}>
                           {estimateText(charge.amount, charge.currency, charge)}
                         </p>
-                        {charge.can_mark_paid && charge.source === 'budget_entry' && (
-                          <button
-                            type="button"
-                            onClick={() => openCharge(key, charge)}
-                            disabled={markPaid?.key === key}
-                            className="inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring"
-                            data-testid="card-charge-mark-paid"
-                          >
-                            Mark paid
-                          </button>
-                        )}
                       </div>
                     </li>
                   )
@@ -172,18 +116,6 @@ export function CardChargesPanel({ cards, entriesById }: Props) {
           </section>
         ))}
       </div>
-
-      {markPaid && (
-        <MarkPaidDialog
-          entryId={markPaid.entryId}
-          name={markPaid.name}
-          occurrenceDate={markPaid.occurrenceDate}
-          entry={entriesById.get(markPaid.entryId)}
-          estimate={markPaid.estimate}
-          estimated={markPaid.estimated}
-          onClose={() => setMarkPaid(null)}
-        />
-      )}
     </div>
   )
 }

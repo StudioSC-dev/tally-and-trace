@@ -5,6 +5,9 @@
 //
 // Scenarios (one owner is seeded with every kind of row; the steps use
 // different rows, so each can also run alone):
+//   (a) the dashboard is read-only: no Mark paid anywhere, a plain-text missed
+//       count, view-only detail dialogs; a recurring entry is still deletable
+//       from Allocations
 //   (b) the section lists recurring, missed and pending rows with the right
 //       buttons; a row due today is listed once
 //   (c) Mark paid on a cash expense records it and clears the row
@@ -20,10 +23,8 @@
 //       counts; "Post all N due" clears a row
 //   (k) Charged on a missed month leaves one fewer and a single pending row
 //   (l) an ended installment is not listed and cannot be recorded
-// Step (a), the read-only dashboard, is in the same script once the dashboard
-// change lands.
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [b|c|d|e|f|g|h|i|j|k|l]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -197,6 +198,52 @@ async function seed() {
 const missedFor = (snapshot, entryId) =>
   snapshot.missed.find((m) => m.entry_id === entryId) ??
   snapshot.card_charges.flatMap((c) => c.missed).find((m) => m.entry_id === entryId)
+
+// (a) The dashboard is read-only.
+async function dashboardReadOnly(browser) {
+  console.log('\n=== (a) the dashboard is read-only')
+  const w = await seed()
+  // A future pending debit on a cash account is a "transaction" payable on the dashboard.
+  await unposted(w.u, w.checking, addDays(w.today, 6), 321, 'Pending Bill')
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, w.u)
+  await page.locator('[data-testid="payables"]').waitFor()
+  await settle(page)
+  const more = page.locator('[data-testid="payables-more"]')
+  if (await more.count() && (await more.getAttribute('aria-expanded')) === 'false') await more.click()
+  check('(a) no payable Mark paid button', await page.locator('[data-testid="payable-mark-paid-button"]').count(), 0)
+  check('(a) no card charge Mark paid button', await page.locator('[data-testid="card-charge-mark-paid"]').count(), 0)
+  check('(a) no missed-count button', await page.locator('[data-testid="card-missed-button"]').count(), 0)
+  const missedText = page.locator('[data-testid="card-missed-text"]')
+  const missed = missedFor(await snapshotOf(w.u), w.spotify.id)
+  check('(a) the missed count is plain text, with its oldest month', [await missedText.count() > 0, (await missedText.first().textContent())?.includes(`since ${fmt(missed.oldest)}`)], [true, true])
+
+  const payableRows = page.locator('[data-testid="payable-row"]')
+  const rentOpen = payableRows.filter({ has: page.getByText('Rent', { exact: true }) }).locator('[data-testid="payable-open"]')
+  const pendingOpen = payableRows.filter({ has: page.getByText('Pending Bill', { exact: true }) }).locator('[data-testid="payable-open"]')
+  check('(a) Rent and the pending transaction are openable payables', [await rentOpen.count(), await pendingOpen.count()], [1, 1])
+  for (const [label, opener] of [['Rent', rentOpen], ['the pending transaction', pendingOpen]]) {
+    await opener.click()
+    const detail = page.locator('[data-testid="payable-dialog"]')
+    await detail.waitFor()
+    check(`(a) ${label}: the dialog has no Mark paid, Edit or Delete`,
+      await detail.locator('[data-testid="payable-mark-paid"], [data-testid="payable-edit"], [data-testid="payable-delete"]').count(), 0)
+    check(`(a) ${label}: the dialog points to Allocations and Transactions`,
+      (await detail.locator('[data-testid="payable-edit-hint"]').textContent())?.trim(),
+      'Edit recurring entries in Allocations and transactions on the Transactions page.')
+    await detail.getByRole('button', { name: 'Close' }).click()
+    await detail.waitFor({ state: 'detached' })
+  }
+
+  await page.goto(`${stack.webUrl}/allocations`)
+  await settle(page)
+  const rentCard = page.locator('article').filter({ has: page.getByText('Rent', { exact: true }) })
+  check('(a) Allocations lists Rent once', await rentCard.count(), 1)
+  await rentCard.click()
+  await page.getByRole('button', { name: 'Delete Recurring Entry' }).waitFor()
+  check('(a) Rent opens its form with a delete control', await page.getByRole('button', { name: 'Delete Recurring Entry' }).count(), 1)
+  await ctx.close()
+}
 
 // (b) The listing.
 async function listing(browser) {
@@ -502,7 +549,7 @@ async function endedInstallment(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

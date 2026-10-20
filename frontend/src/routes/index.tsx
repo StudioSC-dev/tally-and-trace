@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetAccountsQuery, useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery } from '../store/api'
+import { useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery } from '../store/api'
 import type { Allocation } from '../store/api'
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { formatCurrency } from '../utils/currency'
@@ -16,11 +16,8 @@ import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
-import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
-import { useLatestRef } from '../hooks/useRequestGeneration'
 import { payableActions, payableTarget } from '@tally-trace/shared'
-import type { FullBudgetEntry, SharedFullBudgetEntry } from '@tally-trace/shared'
 import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable } from '@tally-trace/shared'
 
@@ -139,15 +136,10 @@ export function Dashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month')
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   const tagParam = useMemo(() => (selectedTag !== undefined ? { tag: selectedTag } : {}), [selectedTag])
-  // The Mark paid dialog, open for one payable row; it is the only way an occurrence is marked paid.
-  const [markPaid, setMarkPaid] = useState<{ row: PayableRow; entry: FullBudgetEntry | SharedFullBudgetEntry | undefined } | null>(null)
-  // The payable open in the detail dialog, and a Mark paid it handed back as it closed.
+  // The payable open in the read-only detail dialog.
   const [detailRow, setDetailRow] = useState<PayableRow | null>(null)
-  const [pendingMarkPaid, setPendingMarkPaid] = useState<{ row: PayableRow; entry: FullBudgetEntry | SharedFullBudgetEntry } | null>(null)
   // Every payable, not just the first MAX_PAYABLES_SHOWN.
   const [showAllPayables, setShowAllPayables] = useState(false)
-  // Takes focus after a delete from the dialog, when the row that opened it is gone.
-  const payablesHeadingRef = useRef<HTMLHeadingElement>(null)
 
   const dateRange = useMemo(() => {
     const now = new Date()
@@ -165,13 +157,11 @@ export function Dashboard() {
     useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
   const { data: periodSummary, isLoading: summaryLoading, error: summaryError } =
     useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
-  // Only for "Mark paid": the payables carry no permissions, so the entries the caller may post are looked up here.
+  // Only for the autopay set below: the payables carry no autopay flag, so the entries are looked up here.
   const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
     useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
   const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
     useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
-  // Fills the accounts cache the Mark paid dialog reads (the currency an entry pays from and into).
-  useGetAccountsQuery({ limit: 200 }, { skip: !isAuthenticated })
 
   // The currency every total below is read in: the default one, or the first the user holds.
   const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
@@ -179,10 +169,6 @@ export function Dashboard() {
   // Budget envelopes are always in the default currency.
   const formatDefault = (amount: number) => formatCurrency(amount, defaultCurrency)
 
-  const postableEntryIds = useMemo(
-    () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.permissions.can_post).map((e) => e.id)),
-    [budgetEntriesData]
-  )
   const autopayEntryIds = useMemo(
     () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.is_autopay).map((e) => e.id)),
     [budgetEntriesData]
@@ -203,25 +189,7 @@ export function Dashboard() {
   // The day that decides Pending or Planned; it moves at midnight and on refocus.
   const today = useToday()
   const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, today)), [snapshot, defaultCurrency, today])
-  const entriesById = useMemo(
-    () => new Map((budgetEntriesData?.items ?? []).filter(isDetailed).map((e) => [e.id, e])),
-    [budgetEntriesData]
-  )
 
-  // Mark paid always opens the dialog: it names the occurrence and the day paid.
-  // `fetched` is the entry the detail dialog looked up, when the dashboard's list doesn't hold it.
-  const startMarkPaid = (row: PayableRow, fetched?: FullBudgetEntry | SharedFullBudgetEntry) => {
-    if (row.budgetEntryId === null) return
-    setMarkPaid({ row, entry: fetched ?? entriesById.get(row.budgetEntryId) })
-  }
-  // Mark paid from the detail dialog runs once the dialog has closed and handed focus back
-  // to its row, so a pay dialog that needs a figure can take focus from there.
-  const startMarkPaidRef = useLatestRef(startMarkPaid)
-  useEffect(() => {
-    if (!pendingMarkPaid) return
-    setPendingMarkPaid(null)
-    startMarkPaidRef.current(pendingMarkPaid.row, pendingMarkPaid.entry)
-  }, [pendingMarkPaid, startMarkPaidRef])
   const cardCharges = useMemo(() => snapshot?.card_charges ?? [], [snapshot])
   const otherUpcoming = useMemo(
     () => (snapshot?.upcoming_this_month ?? []).filter(isOtherUpcoming(fullCardChargeKeys(cardCharges))),
@@ -555,7 +523,7 @@ export function Dashboard() {
           <div className="p-4 sm:p-6 border-b border-line">
             <div className="flex items-center justify-between">
               <div>
-                <h2 ref={payablesHeadingRef} tabIndex={-1} className="text-lg font-semibold text-ink">Upcoming Payables</h2>
+                <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
                 <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
               <span className="badge badge-info" data-testid="payables-count">{payableRows.length}</span>
@@ -602,16 +570,6 @@ export function Dashboard() {
                       <p className="text-xs text-muted">
                         {dueLabelOf(row)}
                       </p>
-                      {row.budgetEntryId !== null && postableEntryIds.has(row.budgetEntryId) && (
-                        <button
-                          onClick={() => startMarkPaid(row)}
-                          disabled={markPaid !== null && markPaid.row.key === row.key}
-                          className="mt-1 inline-flex items-center gap-1 bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors"
-                          data-testid="payable-mark-paid-button"
-                        >
-                          Mark paid
-                        </button>
-                      )}
                     </div>
                   </div>
                 )
@@ -665,7 +623,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <CardChargesPanel cards={cardCharges} entriesById={entriesById} />
+      <CardChargesPanel cards={cardCharges} />
 
       {detailRow?.payable && (
         <PayableDetailDialog
@@ -679,28 +637,7 @@ export function Dashboard() {
             statusLabel: STATUS_LABELS[payableStatusOf(detailRow)],
             dueLabel: dueLabelOf(detailRow),
           }}
-          entry={detailRow.budgetEntryId !== null ? entriesById.get(detailRow.budgetEntryId) : undefined}
-          // The list says the caller may post it, or doesn't hold it (the dialog looks it up).
-          canMarkPaid={detailRow.budgetEntryId !== null && (postableEntryIds.has(detailRow.budgetEntryId) || !entriesById.has(detailRow.budgetEntryId))}
-          posting={false}
-          onMarkPaid={(entry) => {
-            setPendingMarkPaid({ row: detailRow, entry })
-            setDetailRow(null)
-          }}
           onClose={() => setDetailRow(null)}
-          deletedFocusRef={payablesHeadingRef}
-        />
-      )}
-
-      {markPaid && markPaid.row.budgetEntryId !== null && (
-        <MarkPaidDialog
-          entryId={markPaid.row.budgetEntryId}
-          name={markPaid.row.name}
-          occurrenceDate={markPaid.row.occurrenceDate}
-          entry={markPaid.entry}
-          estimate={estimateText(markPaid.row.amount, markPaid.row.currency, markPaid.row.labels)}
-          estimated={markPaid.row.labels.estimated === true}
-          onClose={() => setMarkPaid(null)}
         />
       )}
 
