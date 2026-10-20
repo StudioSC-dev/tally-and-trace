@@ -614,3 +614,124 @@ def test_a_posted_foreign_row_is_labelled_in_the_account_currency(sw_client, sw_
     assert _balance(db, fp["php"]) == Decimal("45350.00")
     row = _row(db, txn)
     assert (row.amount, row.currency.value) == (Decimal("4650.00"), "PHP")
+
+
+# --- F4: create normalisation (STU-341) -----------------------------------------------------
+
+def _create(client, who, account, amount, posted, **fields):
+    return client.post(f"{API}/transactions/", headers=who["headers"], json={
+        "account_id": account, "transaction_type": fields.pop("transaction_type", "debit"),
+        "amount": amount, "description": "Purchase", "transaction_date": DAY,
+        "is_posted": posted, **fields})
+
+
+def _assert_not_estimated(item, amount, currency):
+    assert (item["amount"], item["currency"]) == (amount, currency)
+    assert not set(item) & {"estimated", "original_amount", "rate", "unconverted"}
+
+
+@pytest.mark.parametrize("posted", [True, False], ids=["posted", "unposted"])
+def test_a_create_without_currency_takes_the_account_currency(sw_client, sw_db, fp, posted):
+    """N1: a debit on USD Savings sent without ``currency`` is labelled USD,
+    never the schema's PHP default, so it posts status-only."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    r = _create(client, a, fp["usd"], 10, posted)
+    assert r.status_code == 200, r.text
+    txn = r.json()["id"]
+    assert _row(db, txn).currency.value == "USD"
+    if posted:
+        assert _balance(db, fp["usd"]) == Decimal("990.00")
+        return
+    _assert_not_estimated(_forecast_row(client, a, txn), 10.0, "USD")
+    r = _put(client, a, txn, {"is_posted": True})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["usd"]) == Decimal("990.00")
+
+
+def test_a_projected_amount_without_its_currency_takes_the_face_currency(sw_client, sw_db, fp):
+    """N6 unposted (bug B): ``currency`` USD with ``projected_amount`` 80 on PHP
+    Checking is a USD 80 face, never PHP 80."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    r = _create(client, a, fp["php"], 80, False, currency="USD", projected_amount=80)
+    assert r.status_code == 200, r.text
+    txn = r.json()["id"]
+    assert _row(db, txn).projected_currency.value == "USD"
+    _assert_reestimated(client, a, txn)
+    r = _put(client, a, txn, {"is_posted": True})
+    assert r.status_code == 400 and r.json()["detail"] == FOREIGN_POST, r.text
+    assert _balance(db, fp["php"]) == Decimal("50000.00")
+
+
+@pytest.mark.parametrize("face", [{"currency": "USD"},
+                                  {"currency": "PHP", "projected_currency": "USD"}],
+                         ids=["currency", "projected_currency"])
+def test_a_pending_original_amount_takes_the_face_currency(sw_client, sw_db, fp, face):
+    """N5/X3 unposted: an ``original_amount`` sent without its currency is in
+    the face currency, never the row's label."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    r = _create(client, a, fp["php"], 80, False, original_amount=80, **face)
+    assert r.status_code == 200, r.text
+    assert _row(db, r.json()["id"]).original_currency.value == "USD"
+
+
+@pytest.mark.parametrize("projected", [None, 5_800], ids=["no_projected_amount",
+                                                          "projected_amount"])
+def test_a_pending_foreign_face_without_currency_takes_the_account_label(
+        sw_client, sw_db, fp, projected):
+    """X1/X2 unposted: a PHP 5,800 face on USD Savings sent without ``currency``
+    is labelled USD (the schema default would have said PHP) and estimated in
+    USD from the face."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    extra = {} if projected is None else {"projected_amount": projected}
+    r = _create(client, a, fp["usd"], 5_800, False, projected_currency="PHP", **extra)
+    assert r.status_code == 200, r.text
+    txn = r.json()["id"]
+    row = _row(db, txn)
+    assert row.currency.value == "USD"
+    expected = None if projected is None else Decimal("5800.00")
+    assert (row.projected_amount, row.projected_currency.value) == (expected, "PHP")
+    item = _forecast_row(client, a, txn)
+    assert (item["amount"], item["currency"], item["estimated"], item["original_amount"],
+            item["original_currency"]) == (100.0, "USD", True, 5_800.0, "PHP")
+
+
+@pytest.mark.parametrize("projected", [None, 500], ids=["no_projected_amount",
+                                                        "projected_amount"])
+def test_a_pending_local_face_with_a_foreign_label_takes_the_account_label(
+        sw_client, sw_db, fp, projected):
+    """L5/L6 unposted (bug C): ``currency`` USD with ``projected_currency`` PHP
+    on PHP Checking is a PHP face, so the row is labelled PHP and posts
+    status-only without keeping a foreign label."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    extra = {} if projected is None else {"projected_amount": projected}
+    r = _create(client, a, fp["php"], 500, False, currency="USD",
+                projected_currency="PHP", **extra)
+    assert r.status_code == 200, r.text
+    txn = r.json()["id"]
+    assert _row(db, txn).currency.value == "PHP"
+    r = _put(client, a, txn, {"is_posted": True})
+    assert r.status_code == 200, r.text
+    assert _balance(db, fp["php"]) == Decimal("49500.00")
+    assert _row(db, txn).currency.value == "PHP"
+
+
+def test_a_pending_currency_only_face_is_stored_as_sent(sw_client, sw_db, fp):
+    """N5 unposted: ``currency`` USD alone is the face's true label and is kept."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    r = _create(client, a, fp["php"], 80, False, currency="USD")
+    assert r.status_code == 200, r.text
+    txn = r.json()["id"]
+    row = _row(db, txn)
+    assert (row.currency.value, row.projected_amount, row.projected_currency) == (
+        "USD", None, None)
+    _assert_reestimated(client, a, txn)
+
+
+def test_a_pending_web_shape_create_is_stored_as_sent(sw_client, sw_db, fp):
+    """X4 unposted: the web form's pending shape is unchanged."""
+    client, db, a = sw_client, sw_db, fp["a"]
+    txn = _pending_foreign(client, a, fp["php"])
+    row = _row(db, txn)
+    assert (row.amount, row.currency.value) == (Decimal("80.00"), "PHP")
+    assert (row.projected_amount, row.projected_currency.value) == (Decimal("80.00"), "USD")
+    assert (row.original_amount, row.original_currency, row.exchange_rate) == (None, None, None)

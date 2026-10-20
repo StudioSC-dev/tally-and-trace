@@ -586,6 +586,30 @@ def _foreign_post_on_create(transaction: TransactionCreate, data: dict,
         data["exchange_rate"] = exchange_rate(transaction.amount, transaction.projected_amount)
 
 
+def _currency_on_create(transaction: TransactionCreate, data: dict,
+                        account: Account) -> None:
+    """Label a new debit or credit and default its face currencies.
+
+    The face currency is ``projected_currency``, else the ``currency`` sent,
+    else the account's. An omitted ``projected_currency`` (with a
+    ``projected_amount``) or ``original_currency`` (with an
+    ``original_amount``) defaults to it. A row sent without ``currency``, or
+    an unposted row whose face is the account's currency, is labelled in the
+    account's currency.
+    """
+    sent = transaction.model_fields_set
+    named = transaction.currency if "currency" in sent else None
+    face_currency = transaction.projected_currency or named or account.currency
+    if transaction.projected_amount is not None and transaction.projected_currency is None:
+        data["projected_currency"] = face_currency
+    if transaction.original_amount is not None and transaction.original_currency is None:
+        data["original_currency"] = face_currency
+    if named is None or (not transaction.is_posted and face_currency == account.currency):
+        data["currency"] = account.currency
+    if transaction.is_posted:
+        _foreign_post_on_create(transaction, data, account)
+
+
 def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> dict:
     """The fields posting ``txn`` sets when its face is foreign, checked before any write.
 
@@ -1079,14 +1103,7 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
             raise HTTPException(status_code=404, detail="Account not found")
         # Locked once access passes, before anything reads a balance (STU-226).
         primary_account = locking.lock_accounts(db, [primary_account.id])[primary_account.id]
-        if transaction.is_posted:
-            _foreign_post_on_create(transaction, transaction_data, primary_account)
-        if transaction_data.get("currency") is None:
-            transaction_data["currency"] = primary_account.currency
-        if transaction_data.get("projected_currency") is None and transaction.projected_amount is not None:
-            transaction_data["projected_currency"] = primary_account.currency
-        if transaction_data.get("original_currency") is None and transaction.original_amount is not None:
-            transaction_data["original_currency"] = transaction_data["currency"]
+        _currency_on_create(transaction, transaction_data, primary_account)
     
     db_transaction = Transaction(**transaction_data)
     db.add(db_transaction)
