@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.wishlist_item import WishlistItem
 from app.services import card_charges as card_charges_svc
 from app.services import forecast as forecast_svc
+from app.services import missed as missed_svc
 from app.services.fx import FxRates, get_fx
 from app.core.time import utc_now
 
@@ -46,11 +47,14 @@ def get_snapshot(
     - Per-account month-end closings over the forecast window
     - Payables (cash outflows) due in the next 30 days
     - Upcoming charges by card (``card_charges``, services/card_charges.py)
+    - Missed recurring entries outside the cards' lists (``missed``,
+      services/missed.py); full budget-entry rows in ``upcoming_this_month``
+      and ``payables`` carry ``kind`` and ``can_mark_paid``
 
     With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
-    payables keep only tagged records (see routers/forecast.py); balances,
-    available cash, goals, the wishlist and the card charges are not tagged
-    and stay whole.
+    payables keep only tagged records (see routers/forecast.py), and so does
+    ``missed``; balances, available cash, goals, the wishlist and the card
+    charges are not tagged and stay whole.
 
     Split by account currency (STU-236): every scalar is the user's default
     currency, ``by_currency`` rows carry each currency's (``balances``,
@@ -195,10 +199,15 @@ def get_snapshot(
     ]
     payables = forecast_svc.payables_by_currency(db, current_user.id, days=30, tag_id=tag_id,
                                                  fx=fx, collector=collector, ids=ids)
+    # One redactor for the lists below: accounts and roles load once.
+    redactor = Redactor(db, current_user)
     # After the other lists: its rows join the same ``fx`` and public ids.
     card_charges = card_charges_svc.card_charges_by_card(
-        db, current_user, fx=fx, collector=collector, ids=ids,
-        redactor=Redactor(db, current_user))
+        db, current_user, fx=fx, collector=collector, ids=ids, redactor=redactor)
+    missed = missed_svc.recurring_missed(db, current_user, redactor=redactor, tag_id=tag_id)
+    # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
+    missed_svc.entry_row_fields(db, upcoming, redactor)
+    missed_svc.entry_row_fields(db, payables, redactor)
 
     return {
         "balances": {
@@ -215,6 +224,7 @@ def get_snapshot(
         "account_closings": account_closings,
         "payables": payables,
         "card_charges": card_charges,
+        "missed": missed,
         # The monthly summary's currencies too (viewable accounts and entries'
         # buckets, no placeholder); ``fx.rates`` stays the full listed rows'.
         "currencies": forecast_svc.response_currencies(

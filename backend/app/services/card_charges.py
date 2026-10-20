@@ -24,6 +24,10 @@ the snapshot's lists. Only a recurring entry's charge offers Mark paid
 posted on the Transactions page, never here. ``recurring`` marks a pending debit
 linked to a recurring entry (one recorded as Charged, or linked by hand); it
 names no entry, so a shared editor sees it too.
+
+Each ``missed`` item also says which of its missed occurrences a pending
+linked row already stands for (``unlinked_count``, ``oldest_unlinked``) and
+lists those readable rows (``pending_transaction_ids``).
 """
 from __future__ import annotations
 
@@ -40,6 +44,7 @@ from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face
 from app.services import forecast as fc
 from app.services.fx import FxRates
+from app.services.missed import split_pending_links
 from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible
 from app.services.statements import resolve_cycle_fields
 
@@ -292,7 +297,9 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             redactor: Redactor) -> Dict[int, List[dict]]:
     """``{card id: [missed item]}``: each open-ended subscription or bill on a
     card, seen in full or shared_full, with occurrences before today that no
-    posted row records (``count``), also counting today's (``due_count``)."""
+    posted row records (``count``), also counting today's (``due_count``).
+    ``unlinked_count``, ``oldest_unlinked`` and ``pending_transaction_ids``
+    split ``count`` by pending linked rows (``missed.split_pending_links``)."""
     entries = [e for e in db.query(BudgetEntry).filter(
         BudgetEntry.account_id.in_(list(cards)),
         BudgetEntry.is_active.is_(True),
@@ -301,10 +308,13 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
         and entry_kind(e, cards[e.account_id]) in ("subscription", "bill")
         and redactor.access.readable(e) and redactor.view(e) != LIMITED]
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today)
+    missed = {entry_id: [occ for occ in due if occ.date() < today]
+              for entry_id, due in unrecorded.items()}
+    links = split_pending_links(db, entries, missed, redactor.access)
     out: Dict[int, List[dict]] = {}
     for entry in entries:
         due = unrecorded.get(entry.id, [])
-        count = sum(1 for occ in due if occ.date() < today)
+        count = len(missed.get(entry.id, []))
         if count == 0:
             continue
         out.setdefault(entry.account_id, []).append({
@@ -314,6 +324,7 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             "count": count,
             "due_count": len(due),
             "oldest": due[0].date().isoformat(),
+            **links[entry.id],
             "can_mark_paid": bool(redactor.access.permissions(entry)["can_post"]),
         })
     return out
