@@ -3,6 +3,17 @@ import type { Account, CardPaymentInput, MinimumDue, PayableOrEvent, StatementDu
 /** Shown in the amount field's place when the latest closed statement is already cleared. */
 export const NOTHING_DUE_NOTE = 'Nothing due on your latest statement; a payment now goes to your next statement.'
 
+const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000
+
+/**
+ * Manila's calendar day (`YYYY-MM-DD`) at `now`, the day the server uses for card payments
+ * (closed statements, posted versus planned). Manila is a fixed UTC+8 with no daylight
+ * saving, so it is the UTC day of `now + 8 h`, whatever the browser's own time zone.
+ */
+export function manilaToday(now: Date = new Date()): string {
+  return new Date(now.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10)
+}
+
 export interface PayChoices {
   /** L: the latest statement closed before today, the one coming due next. */
   statement: StatementDue

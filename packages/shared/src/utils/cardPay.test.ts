@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Account, MinimumDue, Payable, StatementDue } from '../types/api'
-import { cardPaymentBody, cardPayers, isPlannedPayment, NOTHING_DUE_NOTE, payableHasPay, payChoices } from './cardPay'
+import { cardPaymentBody, cardPayers, isPlannedPayment, manilaToday, NOTHING_DUE_NOTE, payableHasPay, payChoices } from './cardPay'
 
 function minimum(over: Partial<MinimumDue> = {}): MinimumDue {
   return {
@@ -153,6 +153,20 @@ describe('cardPayers', () => {
       account({ id: 8, permissions: { can_edit_settings: false, can_manage_shares: false, can_add_transactions: false, can_delete: false } }),
     ]
     expect(cardPayers(accounts, card).map((a) => a.id)).toEqual([2, 3])
+  })
+})
+
+describe('manilaToday', () => {
+  it('turns at Manila midnight, 16:00 UTC', () => {
+    expect(manilaToday(new Date('2027-03-24T15:59:00Z'))).toBe('2027-03-24')
+    expect(manilaToday(new Date('2027-03-24T16:01:00Z'))).toBe('2027-03-25')
+  })
+
+  it('is already the next day at UTC midnight, and rolls over months and years', () => {
+    expect(manilaToday(new Date('2027-03-24T00:00:00Z'))).toBe('2027-03-24')
+    expect(manilaToday(new Date('2027-03-23T23:59:59Z'))).toBe('2027-03-24')
+    expect(manilaToday(new Date('2027-03-31T16:00:00Z'))).toBe('2027-04-01')
+    expect(manilaToday(new Date('2027-12-31T16:00:00Z'))).toBe('2028-01-01')
   })
 })
 
