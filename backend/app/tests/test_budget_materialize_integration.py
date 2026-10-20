@@ -164,7 +164,7 @@ def test_a_finished_installment_refuses_another_payment(sw_client, sw_people, en
     r = _materialize(client, me, entry)
 
     assert r.status_code == 409, r.text
-    assert r.json()["detail"] == "This installment is finished or inactive"
+    assert r.json()["detail"] == "This entry has ended"
     assert _linked_rows(engine, entry) == 0
     assert _balance(client, me, checking) == Decimal("10000.00")
     assert _entry_state(client, me, entry)["occurrences_paid"] == 0
