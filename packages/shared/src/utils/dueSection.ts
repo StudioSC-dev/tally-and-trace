@@ -445,3 +445,52 @@ export function duePendingRows(
   }
   return rows.sort((a, b) => a.date.localeCompare(b.date) || a.transaction.id - b.transaction.id)
 }
+
+/**
+ * Rows per page of the "Due and overdue" section. Short on purpose, so the section
+ * does not take over the screen.
+ */
+export const DUE_PAGE_SIZE = 3
+
+export type DueRow = DueRecurringRow | DuePendingRow
+
+/** Overdue: a missed row, or a recurring, Limited or pending row flagged overdue. A row due today is not. */
+export function isOverdueRow(row: DueRow): boolean {
+  return row.kind === 'missed' || row.overdue
+}
+
+function rowDay(row: DueRow): string {
+  return row.kind === 'pending' ? row.date : sortDay(row)
+}
+
+/**
+ * Recurring and pending rows as one list: overdue rows first, then by day ascending
+ * (the oldest overdue row first), the recurring family before pending on the same
+ * day. Recurring rows keep `dueRecurringRows`' relative order, pending rows go by
+ * numeric id. Returns a new array and leaves both inputs alone.
+ */
+export function orderDueRows(recurring: readonly DueRecurringRow[], pending: readonly DuePendingRow[]): DueRow[] {
+  const indexed = [...recurring, ...pending].map((row, index) => ({ row, index }))
+  indexed.sort((a, b) => {
+    const tier = Number(!isOverdueRow(a.row)) - Number(!isOverdueRow(b.row))
+    if (tier !== 0) return tier
+    const byDay = rowDay(a.row).localeCompare(rowDay(b.row))
+    if (byDay !== 0) return byDay
+    if (a.row.kind === 'pending' && b.row.kind === 'pending') return a.row.transaction.id - b.row.transaction.id
+    const family = Number(a.row.kind === 'pending') - Number(b.row.kind === 'pending')
+    if (family !== 0) return family
+    return a.index - b.index
+  })
+  return indexed.map((x) => x.row)
+}
+
+/** The page the reader chose, and the day they chose it on. */
+export interface DuePageState {
+  page: number
+  day: string
+}
+
+/** The chosen page, or page 1 once the day has changed since it was chosen. */
+export function effectiveDuePage(state: DuePageState, today: string): number {
+  return state.day === today ? state.page : 1
+}
