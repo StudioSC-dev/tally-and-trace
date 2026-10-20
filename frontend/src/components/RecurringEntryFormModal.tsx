@@ -167,6 +167,15 @@ export function RecurringEntryFormModal({
   const openingKindChoice = editingBudgetEntry
     ? kindChoiceFor(isCappedEnd(editingBudgetEntry.end_mode, editingBudgetEntry.max_occurrences), editingBudgetEntry.billing_kind)
     : null
+  // The date input as loaded. A paused entry turned active with this date untouched is resumed: the
+  // server moves it to the first scheduled date on or after today, so the date is left out of the save.
+  const [loadedNextOccurrence] = useState(() => (editingBudgetEntry ? fromWireWallTime(editingBudgetEntry.next_occurrence) : null))
+  const resuming =
+    editingBudgetEntry != null &&
+    !editingBudgetEntry.is_active &&
+    subscriptionForm.is_active &&
+    subscriptionForm.next_occurrence === loadedNextOccurrence
+
   // "Automatic" cannot undo a stored kind, so it is offered only to an entry with none stored.
   const offerAutomatic = automaticOffered(editingBudgetEntry?.billing_kind)
   const kindChoices = offeredKindChoices(kindCapped, offerAutomatic)
@@ -363,7 +372,8 @@ export function RecurringEntryFormModal({
         category_id: subscriptionForm.category_id || undefined,
         allocation_id: subscriptionForm.allocation_id ?? undefined,
         cadence: subscriptionForm.cadence,
-        next_occurrence: nextOccurrenceWire,
+        // Omitted on a resume with the date untouched, so the server skips the paused months.
+        ...(resuming ? {} : { next_occurrence: nextOccurrenceWire }),
         ...dayFields,
         lead_time_days: subscriptionForm.lead_time_days,
         is_autopay: subscriptionForm.is_autopay,
@@ -883,6 +893,11 @@ export function RecurringEntryFormModal({
                   <div>
                     <p className="text-sm font-medium text-body">Entry status</p>
                     <p className="text-xs text-muted">Pause recurring entries without deleting them.</p>
+                    {resuming && (
+                      <p className="mt-1 text-xs text-muted" data-testid="recurring-resume-note">
+                        Paused months are skipped. The next date moves to the first scheduled date on or after today.
+                      </p>
+                    )}
         </div>
                   <button
                     type="button"
