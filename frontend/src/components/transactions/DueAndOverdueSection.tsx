@@ -128,7 +128,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
   const page = effectiveDuePage(pageState, today)
 
-  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({})
+  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(() => void refetchSnapshot())
   const windowQuery = useGetTransactionsQuery({

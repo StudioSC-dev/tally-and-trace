@@ -29,11 +29,13 @@
 //       exactly 7 rows): the pager, the order, Next and Previous, the first page
 //       on a fresh load, and the last page emptying (Mark paid) lands on the
 //       new last page and stays there when the list grows again
+//   (o) opening Transactions in-app from the dashboard refetches the snapshot
+//       (a day can turn while the dashboard is open)
 //
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
 
@@ -682,12 +684,27 @@ async function pagination(browser) {
   await ctx.close()
 }
 
+// (o) In-app navigation from the dashboard to Transactions.
+async function inAppRefetch(browser) {
+  console.log('\n=== (o) opening Transactions in-app from the dashboard refetches the snapshot')
+  const w = await seed()
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, w.u)
+  await page.locator('[data-testid="payables"]').waitFor()
+  await settle(page)
+  const snap = page.waitForResponse((r) => r.request().method() === 'GET' && new URL(r.url()).pathname.endsWith('/api/v1/dashboard/snapshot'), { timeout: 15000 }).catch(() => null)
+  await page.locator('a[data-onboarding="nav-transactions"]:visible').first().click()
+  await page.waitForURL((url) => url.pathname === '/transactions')
+  check('(o) the section asks for a fresh snapshot after the in-app navigation', (await snap)?.status() ?? null, 200)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
