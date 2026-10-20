@@ -13,6 +13,7 @@
   {"name": "Education", "description": "Tuition, courses and books", "color": "#FFB347", "kind": "expense"},
   {"name": "Travel", "description": "Flights, hotels, tours and travel connectivity", "color": "#3BC9DB", "kind": "expense"},
   {"name": "Fees & Charges", "description": "Bank, card and government fees", "color": "#ADB5BD", "kind": "expense"},
+  {"name": "Gifts & Donations", "description": "Gifts and donations given", "color": "#E599F7", "kind": "expense"},
   {"name": "Salary", "description": "Regular employment income", "color": "#DDA0DD", "kind": "income"},
   {"name": "Freelance", "description": "Freelance and contract income", "color": "#98D8C8", "kind": "income"},
   {"name": "Investment Income", "description": "Dividends, interest and capital gains", "color": "#F7DC6F", "kind": "income"},

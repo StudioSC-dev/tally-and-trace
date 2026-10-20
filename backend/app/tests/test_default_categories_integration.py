@@ -98,6 +98,14 @@ def test_registration_creates_exactly_the_defaults(client, db, created):
         assert (c.color, c.description) == (d["color"], d["description"])
 
 
+def test_registration_gives_the_gifts_given_expense_beside_the_gifts_income(client, db, created):
+    rows = _categories(db, _register(client, created))
+    given = [c for c in rows if c.name == "Gifts & Donations"]
+    assert [(c.kind.value, c.is_expense, c.is_active) for c in given] == [("expense", True, True)]
+    assert (given[0].description, given[0].color) == ("Gifts and donations given", "#E599F7")
+    assert [c.kind.value for c in rows if c.name == "Gifts"] == ["income"]
+
+
 def test_ensure_default_categories_is_idempotent(client, db, created):
     from app.core.categories import ensure_default_categories
     from app.models.user import User
@@ -105,7 +113,7 @@ def test_ensure_default_categories_is_idempotent(client, db, created):
     uid = _register(client, created)
     assert ensure_default_categories(db, db.get(User, uid)) == 0
     db.commit()
-    assert len(_categories(db, uid)) == 22
+    assert len(_categories(db, uid)) == 23
 
 
 def test_an_existing_category_named_like_a_default_is_kept(client, db, created):
@@ -121,7 +129,7 @@ def test_an_existing_category_named_like_a_default_is_kept(client, db, created):
     assert ensure_default_categories(db, db.get(User, uid)) == 1
     db.commit()
     names = [c.name for c in _categories(db, uid)]
-    assert len(names) == 22 and len(set(names)) == 22
+    assert len(names) == 23 and len(set(names)) == 23
 
 
 def test_a_same_name_category_of_another_kind_does_not_hide_the_default(client, db, created):
