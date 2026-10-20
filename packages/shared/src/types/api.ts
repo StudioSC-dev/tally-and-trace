@@ -1375,6 +1375,32 @@ export interface RecurringMissed {
   can_mark_paid: boolean
 }
 
+/**
+ * One card's owed closed statement in `DashboardSnapshot.card_statements_due`: an
+ * active credit card the caller owns or administers, whose latest closed statement
+ * still has money owed and whose oldest owed statement is due within 30 days or
+ * overdue. Recorded figures only; the server makes every day decision (Manila).
+ */
+export interface CardStatementDue {
+  account_id: number
+  name: string
+  /** The card's currency, whatever account pays it. */
+  currency: CurrencyCode
+  /** The latest closed statement's close and due days (`YYYY-MM-DD`). */
+  close_date: string
+  due_date: string
+  /** What clears every closed statement through the latest one. */
+  clear_through: number
+  /** How many closed statements still have money owed. */
+  statement_count: number
+  /** The oldest owed statement's due day. */
+  oldest_due: string
+  /** Any owed statement is past its due day. */
+  overdue: boolean
+  /** Some foreign charge has no exchange rate, so `clear_through` may be low. */
+  incomplete: boolean
+}
+
 /** One card's upcoming charges in `DashboardSnapshot.card_charges`. */
 export interface CardCharges {
   account_id: number
@@ -1619,6 +1645,8 @@ export interface DashboardSnapshot {
   payables: PayableOrEvent[]
   /** Upcoming charges by card, for the caller's own cards. */
   card_charges: CardCharges[]
+  /** Owed closed statements of the cards the caller owns or administers. */
+  card_statements_due: CardStatementDue[]
   /** Missed recurring entries outside the card lists (the dashboard does not render it). */
   missed: RecurringMissed[]
   currencies: CurrencyCode[]

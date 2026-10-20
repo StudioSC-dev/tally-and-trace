@@ -13,7 +13,8 @@ import { wallDay } from './transactionList'
 
 /**
  * The Transactions page's "Due and overdue" section, built from the dashboard
- * snapshot (Group A, recurring) and the pending transactions (Group B). Days are
+ * snapshot (Group A, recurring; Group C, card statements) and the pending
+ * transactions (Group B). Days are
  * `YYYY-MM-DD`; `today` is the Manila calendar day.
  */
 
@@ -447,6 +448,49 @@ export function duePendingRows(
 }
 
 /**
+ * One card's owed closed statements: an owner or admin's card in
+ * `card_statements_due`. The server decides closed, due and overdue on the Manila
+ * day, so no client day is needed. `amount` clears every closed statement through
+ * the latest; `statements` mirrors `statement_count`.
+ */
+export interface DueStatementRow {
+  kind: 'statement'
+  /** `statement:cardId`. */
+  key: string
+  cardId: number
+  name: string
+  /** The latest closed statement's close and due days. */
+  closeDate: string
+  dueDate: string
+  /** The oldest owed statement's due day, where the row sorts. */
+  oldestDue: string
+  overdue: boolean
+  statements: number
+  amount: number
+  currency: CurrencyCode
+  /** Some foreign charge has no exchange rate, so `amount` may be low. */
+  incomplete: boolean
+}
+
+/** Group C. One row per card in `card_statements_due`, in the server's order. */
+export function dueStatementRows(snapshot: DashboardSnapshot): DueStatementRow[] {
+  return snapshot.card_statements_due.map((s) => ({
+    kind: 'statement',
+    key: `statement:${s.account_id}`,
+    cardId: s.account_id,
+    name: s.name,
+    closeDate: s.close_date,
+    dueDate: s.due_date,
+    oldestDue: s.oldest_due,
+    overdue: s.overdue,
+    statements: s.statement_count,
+    amount: s.clear_through,
+    currency: s.currency,
+    incomplete: s.incomplete,
+  }))
+}
+
+/**
  * Rows per page of the "Due and overdue" section. Short on purpose, so the section
  * does not take over the screen.
  */
@@ -454,31 +498,68 @@ export const DUE_PAGE_SIZE = 3
 
 export type DueRow = DueRecurringRow | DuePendingRow
 
-/** Overdue: a missed row, or a recurring, Limited or pending row flagged overdue. A row due today is not. */
-export function isOverdueRow(row: DueRow): boolean {
+/** Any row of the section, card statements included. */
+export type DueSectionRow = DueRow | DueStatementRow
+
+/** Overdue: a missed row, or a recurring, Limited, pending or statement row flagged overdue. A row due today is not. */
+export function isOverdueRow(row: DueSectionRow): boolean {
   return row.kind === 'missed' || row.overdue
 }
 
-function rowDay(row: DueRow): string {
-  return row.kind === 'pending' ? row.date : sortDay(row)
+function rowDay(row: DueSectionRow): string {
+  switch (row.kind) {
+    case 'pending':
+      return row.date
+    case 'statement':
+      return row.oldestDue
+    default:
+      return sortDay(row)
+  }
+}
+
+/** On a day tie: the recurring family, then statements, then pending. */
+function familyRank(row: DueSectionRow): number {
+  switch (row.kind) {
+    case 'statement':
+      return 1
+    case 'pending':
+      return 2
+    default:
+      return 0
+  }
 }
 
 /**
- * Recurring and pending rows as one list: overdue rows first, then by day ascending
- * (the oldest overdue row first), the recurring family before pending on the same
- * day. Recurring rows keep `dueRecurringRows`' relative order, pending rows go by
- * numeric id. Returns a new array and leaves both inputs alone.
+ * Recurring, pending and (when given) statement rows as one list: overdue rows
+ * first, then by day ascending (the oldest overdue row first; a statement row's day
+ * is its oldest owed due day). On the same day the recurring family comes first,
+ * then statements, then pending. Recurring rows keep `dueRecurringRows`' relative
+ * order, statement rows go by name then card id, pending rows by numeric id.
+ * Returns a new array and leaves every input alone.
  */
-export function orderDueRows(recurring: readonly DueRecurringRow[], pending: readonly DuePendingRow[]): DueRow[] {
-  const indexed = [...recurring, ...pending].map((row, index) => ({ row, index }))
+export function orderDueRows(recurring: readonly DueRecurringRow[], pending: readonly DuePendingRow[]): DueRow[]
+export function orderDueRows(
+  recurring: readonly DueRecurringRow[],
+  pending: readonly DuePendingRow[],
+  statements: readonly DueStatementRow[],
+): DueSectionRow[]
+export function orderDueRows(
+  recurring: readonly DueRecurringRow[],
+  pending: readonly DuePendingRow[],
+  statements: readonly DueStatementRow[] = [],
+): DueSectionRow[] {
+  const indexed = [...recurring, ...statements, ...pending].map((row, index) => ({ row, index }))
   indexed.sort((a, b) => {
     const tier = Number(!isOverdueRow(a.row)) - Number(!isOverdueRow(b.row))
     if (tier !== 0) return tier
     const byDay = rowDay(a.row).localeCompare(rowDay(b.row))
     if (byDay !== 0) return byDay
-    if (a.row.kind === 'pending' && b.row.kind === 'pending') return a.row.transaction.id - b.row.transaction.id
-    const family = Number(a.row.kind === 'pending') - Number(b.row.kind === 'pending')
+    const family = familyRank(a.row) - familyRank(b.row)
     if (family !== 0) return family
+    if (a.row.kind === 'pending' && b.row.kind === 'pending') return a.row.transaction.id - b.row.transaction.id
+    if (a.row.kind === 'statement' && b.row.kind === 'statement') {
+      return a.row.name.localeCompare(b.row.name) || a.row.cardId - b.row.cardId
+    }
     return a.index - b.index
   })
   return indexed.map((x) => x.row)

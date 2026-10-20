@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type {
   CardCharges,
+  CardStatementDue,
   DashboardSnapshot,
   FullCharge,
   FullTransaction,
@@ -20,10 +21,14 @@ import {
   type DueLimitedRow,
   type DueMissedRow,
   type DueRecurringRow,
+  type DueRow,
+  type DueSectionRow,
+  type DueStatementRow,
   type LimitedRowsMode,
   DUE_PAGE_SIZE,
   duePendingRows,
   dueRecurringRows,
+  dueStatementRows,
   effectiveDuePage,
   isOverdueRow,
   orderDueRows,
@@ -35,7 +40,9 @@ import { pageWindow } from './transactionList'
 const TODAY = '2026-10-20'
 const MODES: LimitedRowsMode[] = ['text', 'drop']
 
-function snap(parts: Partial<Pick<DashboardSnapshot, 'payables' | 'upcoming_this_month' | 'card_charges' | 'missed'>>): DashboardSnapshot {
+function snap(
+  parts: Partial<Pick<DashboardSnapshot, 'payables' | 'upcoming_this_month' | 'card_charges' | 'card_statements_due' | 'missed'>>,
+): DashboardSnapshot {
   return {
     balances: { total: 0, by_account: [], by_currency: [] },
     upcoming_this_month: [],
@@ -47,6 +54,7 @@ function snap(parts: Partial<Pick<DashboardSnapshot, 'payables' | 'upcoming_this
     account_closings: [],
     payables: [],
     card_charges: [],
+    card_statements_due: [],
     missed: [],
     currencies: ['PHP'],
     fx: { rates: [], unconverted_count: 0 },
@@ -593,6 +601,138 @@ describe('orderDueRows', () => {
     expect(out).toHaveLength(rec.length + pending.length)
     expect(rec).toEqual(recCopy)
     expect(pending).toEqual(pendCopy)
+  })
+})
+
+const statementDue = (d: Partial<CardStatementDue> & Pick<CardStatementDue, 'account_id' | 'name'>): CardStatementDue => ({
+  currency: 'PHP',
+  close_date: '2026-10-03',
+  due_date: '2026-10-24',
+  clear_through: 4200,
+  statement_count: 1,
+  oldest_due: '2026-10-24',
+  overdue: false,
+  incomplete: false,
+  ...d,
+})
+
+describe('dueStatementRows', () => {
+  it('maps each card statement to one row, in the server order', () => {
+    const s = snap({
+      card_statements_due: [
+        statementDue({ account_id: 9, name: 'Visa' }),
+        statementDue({
+          account_id: 4, name: 'Zed Card', currency: 'USD', close_date: '2026-09-28', due_date: '2026-10-19',
+          clear_through: 310.5, statement_count: 2, oldest_due: '2026-09-19', overdue: true, incomplete: true,
+        }),
+      ],
+    })
+    expect(dueStatementRows(s)).toEqual<DueStatementRow[]>([
+      {
+        kind: 'statement', key: 'statement:9', cardId: 9, name: 'Visa', closeDate: '2026-10-03', dueDate: '2026-10-24',
+        oldestDue: '2026-10-24', overdue: false, statements: 1, amount: 4200, currency: 'PHP', incomplete: false,
+      },
+      {
+        kind: 'statement', key: 'statement:4', cardId: 4, name: 'Zed Card', closeDate: '2026-09-28', dueDate: '2026-10-19',
+        oldestDue: '2026-09-19', overdue: true, statements: 2, amount: 310.5, currency: 'USD', incomplete: true,
+      },
+    ])
+  })
+
+  it('is empty when the snapshot lists no statement', () => {
+    expect(dueStatementRows(snap({}))).toEqual([])
+  })
+
+  it('leaves a payables statement row and card charges to Group A, unchanged', () => {
+    const parts = {
+      payables: [payable({ name: 'Visa statement', source: 'statement', source_id: 9, statement_close: '2026-10-03' })],
+      card_charges: [card({ charges: [charge({ name: 'Spotify', source_id: 5 })] })],
+    }
+    const without = dueRecurringRows(snap(parts), TODAY)
+    const withStatement = dueRecurringRows(snap({ ...parts, card_statements_due: [statementDue({ account_id: 9, name: 'Visa' })] }), TODAY)
+    expect(withStatement).toEqual(without)
+  })
+
+  it("keeps the card's missed subscription row once the statement is paid", () => {
+    // After a Full Pay the card leaves card_statements_due; the unrecorded subscription
+    // in the paid cycle stays in the card's missed list.
+    const s = snap({
+      card_statements_due: [],
+      card_charges: [card({ missed: [cardMissed({ entry_id: 5, name: 'Spotify', count: 1, unlinked_count: 1, oldest: '2026-09-28', oldest_unlinked: '2026-09-28' })] })],
+    })
+    expect(dueStatementRows(s)).toEqual([])
+    expect(missedRows(dueRecurringRows(s, TODAY))).toMatchObject([{ key: 'missed:5', name: 'Spotify', count: 1, oldest: '2026-09-28' }])
+  })
+})
+
+describe('orderDueRows with statements', () => {
+  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z` })], [], snap({}), TODAY)
+  const stmts = (...due: CardStatementDue[]) => dueStatementRows(snap({ card_statements_due: due }))
+  const names = (rows: readonly DueSectionRow[]) =>
+    rows.map((r) => (r.kind === 'pending' ? `p${r.transaction.id}` : r.kind === 'statement' ? `s${r.cardId}` : r.name))
+
+  it('keeps the two-argument form and its return type', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
+    const out: DueRow[] = orderDueRows(rec, pend(40, '2026-10-19'))
+    expect(names(out)).toEqual(['p40', 'Today'])
+  })
+
+  it('puts an overdue statement ahead of a non-overdue recurring row, by its oldest owed due day', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
+    const statements = stmts(statementDue({ account_id: 9, name: 'Visa', overdue: true, statement_count: 2, oldest_due: '2026-09-24' }))
+    expect(names(orderDueRows(rec, pend(40, '2026-10-01'), statements))).toEqual(['s9', 'p40', 'Today'])
+  })
+
+  it('sorts a non-overdue statement among the future rows by day', () => {
+    const rec = dueRecurringRows(
+      snap({
+        payables: [
+          payable({ name: 'Today', source_id: 11 }),
+          payable({ name: 'Later', source_id: 12, occurrence_date: '2026-10-28', due_date: '2026-10-28' }),
+        ],
+      }),
+      TODAY,
+    )
+    expect(names(orderDueRows(rec, [], stmts(statementDue({ account_id: 9, name: 'Visa', oldest_due: '2026-10-24' }))))).toEqual(
+      ['Today', 's9', 'Later'],
+    )
+  })
+
+  it('orders a day tie as recurring family, then statements by name and card id, then pending', () => {
+    const day = '2026-10-10'
+    const rec = dueRecurringRows(
+      snap({ payables: [payable({ name: 'Zulu', source_id: 12, occurrence_date: day, due_date: TODAY, overdue: true })] }),
+      TODAY,
+    )
+    const statements = stmts(
+      statementDue({ account_id: 8, name: 'Visa', overdue: true, oldest_due: day }),
+      statementDue({ account_id: 3, name: 'Visa', overdue: true, oldest_due: day }),
+      statementDue({ account_id: 1, name: 'Amex', overdue: true, oldest_due: day }),
+    )
+    expect(names(orderDueRows(rec, pend(40, day), statements))).toEqual(['Zulu', 's1', 's3', 's8', 'p40'])
+  })
+
+  it('calls an overdue statement row overdue and a current one not', () => {
+    const [late, current] = stmts(
+      statementDue({ account_id: 1, name: 'Amex', overdue: true }),
+      statementDue({ account_id: 2, name: 'Visa' }),
+    )
+    expect(isOverdueRow(late!)).toBe(true)
+    expect(isOverdueRow(current!)).toBe(false)
+  })
+
+  it('leaves the inputs alone and keeps every row', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
+    const pending = pend(40, '2026-10-19')
+    const statements = stmts(
+      statementDue({ account_id: 2, name: 'Visa' }),
+      statementDue({ account_id: 1, name: 'Amex', overdue: true }),
+    )
+    const copies = [structuredClone(rec), structuredClone(pending), structuredClone(statements)]
+    const out = orderDueRows(rec, pending, statements)
+    expect(out).toHaveLength(rec.length + pending.length + statements.length)
+    expect([rec, pending, statements]).toEqual(copies)
+    expect(names(statements)).toEqual(['s2', 's1'])
   })
 })
 
