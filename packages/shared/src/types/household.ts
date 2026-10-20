@@ -28,7 +28,10 @@ export interface HouseholdMonthCurrency {
   moved_in: number
   /** Transfers out of the view's accounts to outside it. */
   moved_out: number
-  /** What the view's accounts did not pay of Household bills that sit on other accounts. */
+  /**
+   * What the view's accounts did not pay of Household bills that sit on other accounts.
+   * A payment from one of the view's spending wallets counts as paid (the top-up was the expense).
+   */
   paid_from_other_accounts: number
 }
 
