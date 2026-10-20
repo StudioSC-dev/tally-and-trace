@@ -1199,6 +1199,9 @@ export function AllocationsPage() {
         ? `Ends ${formatFullDate(entry.end_date!)}`
         : installmentLabel ?? 'Indefinite'
 
+    const actions =
+      entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
+
     return (
       <article
         key={entry.id}
@@ -1297,9 +1300,9 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
-          {entry.is_active && remaining !== 0 && (
+          {actions.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }).map((action) => (
+              {actions.map((action) => (
                 <button
                   key={action}
                   type="button"
