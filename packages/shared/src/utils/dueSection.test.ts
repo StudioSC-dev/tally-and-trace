@@ -255,6 +255,39 @@ describe('dueRecurringRows: sources and merge', () => {
     expect(entries(dueRecurringRows(s, TODAY))[0]?.actions).toEqual([])
   })
 
+  it('keeps a converted row\'s estimate labels with its amount', () => {
+    const s = snap({
+      payables: [payable({
+        name: 'Hosting', source_id: 12, amount: 4640, currency: 'PHP',
+        estimated: true, original_amount: 80, original_currency: 'USD', rate: 58, rate_as_of: '2026-10-19', rate_stale: false,
+      })],
+    })
+    expect(entries(dueRecurringRows(s, TODAY))[0]).toMatchObject({
+      amount: 4640,
+      currency: 'PHP',
+      estimate: { estimated: true, original_amount: 80, original_currency: 'USD', rate: 58, rate_as_of: '2026-10-19', rate_stale: false },
+    })
+  })
+
+  it('keeps an unconverted row\'s original figure, from the winning card row', () => {
+    const s = snap({
+      payables: [payable({ name: 'Cloud', source_id: 13, kind: 'subscription', account_name: 'Visa' })],
+      card_charges: [card({ charges: [charge({
+        name: 'Cloud', source_id: 13, amount: null, unconverted: true, original_amount: 20, original_currency: 'USD',
+        rate_as_of: '2026-10-19', rate_stale: false,
+      })] })],
+    })
+    const rows = entries(dueRecurringRows(s, TODAY))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.amount).toBeNull()
+    expect(rows[0]?.estimate).toEqual({ unconverted: true, original_amount: 20, original_currency: 'USD', rate_as_of: '2026-10-19', rate_stale: false })
+  })
+
+  it('carries no estimate labels for a row in its own currency', () => {
+    const s = snap({ payables: [payable({ name: 'Rent', source_id: 14 })] })
+    expect(entries(dueRecurringRows(s, TODAY))[0]?.estimate).toEqual({})
+  })
+
   it('skips non-entry payables (statements, loans, transactions)', () => {
     const s = snap({
       payables: [

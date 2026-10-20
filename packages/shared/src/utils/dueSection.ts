@@ -1,5 +1,6 @@
 import type {
   DashboardSnapshot,
+  Estimate,
   FullTransaction,
   SharedFullTransaction,
   Transaction,
@@ -44,6 +45,12 @@ export interface DueEntryRow {
   recurring_kind: string | null
   amount: number | null
   currency: CurrencyCode | null
+  /**
+   * The source row's estimate labels: `amount` was converted from another currency
+   * (`estimated`), or could not be (`unconverted`, `amount` null). Empty when no
+   * conversion was needed.
+   */
+  estimate: Partial<Estimate>
   accountName: string | null
   can_mark_paid: boolean
   actions: RecurringAction[]
@@ -118,8 +125,22 @@ interface Candidate {
   recurring_kind: string | null
   amount: number | null
   currency: CurrencyCode | null
+  estimate: Partial<Estimate>
   accountName: string | null
   can_mark_paid: boolean
+}
+
+/** Only the estimate labels a row carries, so they travel with its amount. */
+function estimateOf(row: Partial<Estimate>): Partial<Estimate> {
+  return {
+    ...(row.estimated !== undefined ? { estimated: row.estimated } : {}),
+    ...(row.unconverted !== undefined ? { unconverted: row.unconverted } : {}),
+    ...(row.original_amount !== undefined ? { original_amount: row.original_amount } : {}),
+    ...(row.original_currency !== undefined ? { original_currency: row.original_currency } : {}),
+    ...(row.rate !== undefined ? { rate: row.rate } : {}),
+    ...(row.rate_as_of !== undefined ? { rate_as_of: row.rate_as_of } : {}),
+    ...(row.rate_stale !== undefined ? { rate_stale: row.rate_stale } : {}),
+  }
 }
 
 const day = (value: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : wallDay(value))
@@ -140,6 +161,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
         recurring_kind: charge.kind,
         amount: charge.amount,
         currency: charge.currency,
+        estimate: estimateOf(charge),
         accountName: card.account_name,
         can_mark_paid: charge.can_mark_paid,
       })
@@ -158,6 +180,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       recurring_kind: payable.kind ?? null,
       amount: payable.amount,
       currency: payable.currency ?? null,
+      estimate: estimateOf(payable),
       accountName: payable.account_name,
       can_mark_paid: payable.can_mark_paid === true,
     })
@@ -176,6 +199,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       recurring_kind: item.kind ?? null,
       amount: item.amount,
       currency: item.currency ?? null,
+      estimate: estimateOf(item),
       accountName: null,
       can_mark_paid: item.can_mark_paid === true,
     })
@@ -322,6 +346,7 @@ export function dueRecurringRows(
       recurring_kind: c.recurring_kind,
       amount: c.amount,
       currency: c.currency,
+      estimate: c.estimate,
       accountName: c.accountName,
       can_mark_paid: c.can_mark_paid,
       actions: recurringActionsFor(fields),
