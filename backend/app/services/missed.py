@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.access import (
     VIEW_ROLES, readable_criterion, touches_accounts, viewable_account_ids,
 )
-from app.core.redaction import LIMITED, Redactor
+from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.tags import effective_tag_criterion
 from app.core.time import manila_today
 from app.models.account import AccountType
@@ -46,9 +46,10 @@ def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetim
     for one occurrence on its day, so each missed occurrence takes at most one
     pending row on that day. ``unlinked_count`` and ``oldest_unlinked`` are the
     occurrences left without one; ``pending_transaction_ids`` are the rows
-    taken. Only a row the caller may read and does not see Limited is taken:
-    naming a Limited row beside its entry would link the two, which the
-    redaction rules hide, so its occurrence stays unlinked.
+    taken. Only a row the caller may read and sees in full (its creator) is
+    taken: shared_full and Limited views drop a row's ``budget_entry_id``, and
+    naming the row beside its entry would rebuild that link, so for anyone else
+    its occurrence stays unlinked.
     """
     entries = list(entries)
     linked = [(entry_id, when, txn_id) for entry_id, when, txn_id, is_posted in fc._linked_rows(
@@ -58,7 +59,7 @@ def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetim
     pending: Dict[tuple, List[int]] = defaultdict(list)
     for entry_id, when, txn_id in linked:
         txn = txns.get(txn_id)
-        if txn is not None and redactor.access.readable(txn) and redactor.view(txn) != LIMITED:
+        if txn is not None and redactor.access.readable(txn) and redactor.view(txn) == FULL:
             pending[(entry_id, fc._naive(when).date())].append(txn_id)
 
     taken: Dict[int, List[int]] = {}

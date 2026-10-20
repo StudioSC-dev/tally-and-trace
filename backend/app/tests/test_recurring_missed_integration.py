@@ -240,7 +240,7 @@ def test_visibility(sw, sw_client, sw_db, monkeypatch):
 
 
 def test_pending_ids_hold_only_readable_full_rows(me, sw_db):
-    from app.core.redaction import FULL, LIMITED
+    from app.core.redaction import FULL, LIMITED, SHARED_FULL
     from app.models.budget_entry import BudgetEntry
     from app.services import forecast as fc
     from app.services.missed import split_pending_links
@@ -262,8 +262,9 @@ def test_pending_ids_hold_only_readable_full_rows(me, sw_db):
     assert split_pending_links(sw_db, [entry], unrecorded, Redactor(True, FULL))[rent] == {
         "unlinked_count": 1, "oldest_unlinked": "2026-10-01",
         "pending_transaction_ids": [pending]}
-    # Unreadable or Limited: never named, and the occurrence stays unlinked.
-    for redactor in (Redactor(False, FULL), Redactor(True, LIMITED)):
+    # Unreadable, shared_full or Limited: never named, and the occurrence stays unlinked.
+    for redactor in (Redactor(False, FULL), Redactor(True, SHARED_FULL),
+                     Redactor(True, LIMITED)):
         assert split_pending_links(sw_db, [entry], unrecorded, redactor)[rent] == {
             "unlinked_count": 2, "oldest_unlinked": "2026-09-01",
             "pending_transaction_ids": []}
@@ -295,6 +296,25 @@ def test_a_limited_pending_row_stays_unlinked(sw, sw_client, sw_db, monkeypatch)
                 row["pending_transaction_ids"])
 
     assert links(a) == ("full", 2, 1, "2026-10-05", [txn.id])
+    assert links(b) == ("shared_full", 2, 2, "2026-09-05", [])
+
+
+def test_a_shared_full_pending_row_stays_unlinked(sw, sw_client, monkeypatch):
+    """B, an editor, sees both the entry and its pending linked row shared_full,
+    which drops the row's ``budget_entry_id``: naming the row beside its entry
+    would rebuild that link, so it is not named and its occurrence stays
+    unlinked. A, the creator, still sees it linked."""
+    client, a, b = sw_client, sw["a"], sw["b"]
+    rent = _entry(client, a, sw["joint"], "2026-09-05", "Joint rent")
+    pending = _debit(client, a, sw["joint"], "2026-09-05", "Rent Sep", budget_entry_id=rent)
+    pin_clock(monkeypatch, REF)
+
+    def links(who):
+        row = _missed(_snapshot(client, who))[rent]
+        return (row["view"], row["count"], row["unlinked_count"], row["oldest_unlinked"],
+                row["pending_transaction_ids"])
+
+    assert links(a) == ("full", 2, 1, "2026-10-05", [pending])
     assert links(b) == ("shared_full", 2, 2, "2026-09-05", [])
 
 

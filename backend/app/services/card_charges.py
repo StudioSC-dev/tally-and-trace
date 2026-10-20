@@ -27,7 +27,7 @@ names no entry, so a shared editor sees it too.
 
 Each ``missed`` item also says which of its missed occurrences a pending
 linked row already stands for (``unlinked_count``, ``oldest_unlinked``) and
-lists those rows, the ones it may read and does not see Limited
+lists those rows, only the ones the caller sees in full
 (``pending_transaction_ids``).
 """
 from __future__ import annotations
