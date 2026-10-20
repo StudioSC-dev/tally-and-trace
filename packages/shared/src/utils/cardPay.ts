@@ -1,4 +1,4 @@
-import type { Account, CardPaymentInput, MinimumDue, PayableOrEvent, StatementDue } from '../types/api'
+import type { Account, CardPaymentInput, MinimumDue, StatementDue } from '../types/api'
 
 /** Shown in the amount field's place when the latest closed statement is already cleared. */
 export const NOTHING_DUE_NOTE = 'Nothing due on your latest statement; a payment now goes to your next statement.'
@@ -66,12 +66,6 @@ export function payChoices(
     incomplete: latest.incomplete,
     excess: amount !== undefined && amount > full ? cents(amount - full) : 0,
   }
-}
-
-/** A statement row offers Pay once its statement has closed (before `today`). */
-export function payableHasPay(row: PayableOrEvent, today: string): boolean {
-  if (row.view === 'limited') return false
-  return row.source === 'statement' && row.statement_close !== undefined && row.statement_close < today
 }
 
 /**

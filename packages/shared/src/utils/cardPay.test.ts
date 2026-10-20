@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import type { Account, MinimumDue, Payable, StatementDue } from '../types/api'
-import { cardPaymentBody, cardPayers, isPlannedPayment, manilaToday, NOTHING_DUE_NOTE, payableHasPay, payChoices } from './cardPay'
+import type { Account, MinimumDue, StatementDue } from '../types/api'
+import { cardPaymentBody, cardPayers, isPlannedPayment, manilaToday, NOTHING_DUE_NOTE, payChoices } from './cardPay'
 
 function minimum(over: Partial<MinimumDue> = {}): MinimumDue {
   return {
@@ -93,36 +93,6 @@ describe('payChoices', () => {
 
   it('carries the incomplete flag', () => {
     expect(payChoices([statement({ incomplete: true })], TODAY)?.incomplete).toBe(true)
-  })
-})
-
-describe('payableHasPay', () => {
-  const row = (over: Partial<Payable>): Payable => ({
-    due_date: '2027-03-24',
-    name: 'Card statement',
-    amount: 100,
-    source: 'statement',
-    source_id: 5,
-    account_id: 1,
-    account_name: 'Checking',
-    overflow_account_id: null,
-    overflow_account_name: null,
-    ...over,
-  })
-
-  it('is true for a statement that closed before today', () => {
-    expect(payableHasPay(row({ statement_close: '2027-03-03' }), TODAY)).toBe(true)
-  })
-
-  it('is false for a statement closing today or later', () => {
-    expect(payableHasPay(row({ statement_close: TODAY }), TODAY)).toBe(false)
-    expect(payableHasPay(row({ statement_close: '2027-03-24' }), TODAY)).toBe(false)
-  })
-
-  it('is false without a close, for other sources and for a limited event', () => {
-    expect(payableHasPay(row({}), TODAY)).toBe(false)
-    expect(payableHasPay(row({ source: 'loan', statement_close: '2027-03-03' }), TODAY)).toBe(false)
-    expect(payableHasPay({ view: 'limited', public_id: 'x', due_date: TODAY, display_name: 'x' } as never, TODAY)).toBe(false)
   })
 })
 
