@@ -24,7 +24,7 @@ REF = datetime(2026, 10, 18, 2, 0)
 LIMITED_KEYS = {"view", "public_id", "date", "original_date", "overdue", "display_name"}
 CARD_KEYS = {"account_id", "account_name", "currency", "statement_cycle", "missed", "charges"}
 FULL_KEYS = {"view", "date", "original_date", "overdue", "occurrence_date", "name", "kind",
-             "source", "source_id", "amount", "currency", "can_mark_paid"}
+             "source", "source_id", "recurring", "amount", "currency", "can_mark_paid"}
 LABEL_KEYS = {"estimated", "unconverted", "original_amount", "original_currency", "rate",
               "rate_as_of", "rate_stale"}
 MISSED_KEYS = {"entry_id", "name", "kind", "count", "due_count", "oldest", "can_mark_paid"}
@@ -189,6 +189,32 @@ def test_transaction_charges_never_offer_mark_paid(card_c, monkeypatch):
     assert len(from_transactions) == 3
     assert all(c["can_mark_paid"] is False for c in from_transactions)
     assert all(c["can_mark_paid"] is True for c in charges if c["source"] == "budget_entry")
+
+
+def test_pending_debits_linked_to_a_recurring_entry_are_flagged(sw_client, sw_people,
+                                                                monkeypatch):
+    """``recurring``: a pending debit linked to a recurring entry, in the window or
+    overdue; never a plain debit, an entry's occurrence or a cash advance."""
+    client, me = sw_client, sw_people()
+    checking = _account(client, me)
+    card = _card(client, me, checking)
+    netflix = _entry(client, me, card, "2026-11-10", 549, "Netflix")
+    linked = _debit(client, me, card, "2026-10-25", 549, "Netflix Oct", budget_entry_id=netflix)
+    overdue_linked = _debit(client, me, card, "2026-10-05", 549, "Netflix Sep",
+                            budget_entry_id=netflix)
+    plain = _debit(client, me, card, "2026-10-26", 300, "Lazada")
+    overdue_plain = _debit(client, me, card, "2026-10-06", 200, "Groceries")
+    advance = _advance(client, me, card, checking, "2026-10-28", 2_000, 100, "Cash advance")
+    pin_clock(monkeypatch, REF)
+
+    section = _card_of(_snapshot(client, me), card)
+    _assert_shapes([section])
+    flags = {(c["source"], c["source_id"]): c["recurring"] for c in section["charges"]}
+    assert flags == {
+        ("transaction", linked): True, ("transaction", overdue_linked): True,
+        ("transaction", plain): False, ("transaction", overdue_plain): False,
+        ("transaction", advance): False, ("budget_entry", netflix): False,
+    }
 
 
 def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_people,

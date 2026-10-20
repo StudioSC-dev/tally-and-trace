@@ -698,6 +698,13 @@ def materialize_budget_entry(
       (200, ``already_posted``); with ``advance`` False a 409.
     - More than one linked row: 409.
 
+    With ``is_posted`` False (Charged, a card expense only: 400 for any other
+    entry) the occurrence gets one new pending debit linked to it (201,
+    ``created``) and the card balance does not move; it is posted later on the
+    Transactions page. An occurrence already linked is a 409: "This occurrence
+    is already charged; post it on the Transactions page" for a pending row,
+    "This occurrence is already recorded" for a posted one.
+
     The body is the transaction. Headers report what was recorded:
     ``X-Occurrence-Outcome``, ``X-Occurrence-Recorded`` (the occurrence's
     day), ``X-Occurrences-Skipped-Count`` (every earlier occurrence left
@@ -748,6 +755,10 @@ def materialize_budget_entry(
     """
     entry = _lock_entry_to_post(db, current_user, entry_id)
     _refuse_paused_or_ended(entry)
+    if not payload.is_posted and entry_kind(entry, db.get(Account, entry.account_id)) not in (
+            "subscription", "installment", "bill"):
+        raise HTTPException(status_code=400,
+                            detail="Only a card expense can be recorded as charged")
     if is_capped(entry):
         # An installment's payments are counted down by the advance, so a payment
         # that doesn't advance would pass its total (one past the last is refused
