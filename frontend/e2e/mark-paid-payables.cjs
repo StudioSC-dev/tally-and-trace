@@ -25,9 +25,13 @@
 //       Mark paid stays disabled
 //
 // (b) to (g) open each dialog from the section's row for the entry, by name.
+// The section shows 3 rows a page: a row can be on any page, so every count and
+// absence check reads all pages and every click first goes to the row's page
+// (./_due_pages.cjs).
 //
 // Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
+const { allDueRows, rowsOf, showRow, showLastRow } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -147,7 +151,7 @@ async function openTransactions(page) {
   await page.locator('[data-testid="due-count"]').filter({ hasNotText: '…' }).waitFor()
   await settle(page)
 }
-/** The section's recurring or missed rows for an entry, by name; `kind` narrows to one. */
+/** The section's recurring or missed rows for an entry, by name, on the page on screen; `kind` narrows to one. Reach one with showRow, count with rowsOf. */
 const dueRows = (page, name, kind) =>
   page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
@@ -198,8 +202,8 @@ async function expandAndMarkPaid(browser) {
   check('(a) the dashboard has no Mark paid button', await page.locator('[data-testid="payable-mark-paid-button"]').count(), 0)
 
   await openTransactions(page)
-  check('(a) the section lists rent once', await dueRows(page, 'Rent').count(), 1)
-  await openMarkPaid(page, dueRows(page, 'Rent').first(), rent.id)
+  check('(a) the section lists rent once', (await rowsOf(page, 'Rent')).length, 1)
+  await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent'))).first(), rent.id)
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   check('(a) the dialog opens on the clicked occurrence', await select.inputValue(), rentDay)
   check('(a) a future occurrence defaults to today', await dialog(page).locator('[data-testid="mark-paid-date"]').inputValue(), today)
@@ -211,7 +215,7 @@ async function expandAndMarkPaid(browser) {
   check('(a) Mark paid is 201 created', [res.status(), res.headers()['x-occurrence-outcome']], [201, 'created'])
   await dialog(page).waitFor({ state: 'detached' })
   await gone(dueRows(page, 'Rent'))
-  check('(a) the rent row is gone from the section', await dueRows(page, 'Rent').count(), 0)
+  check('(a) the rent row is gone from every page of the section', (await rowsOf(page, 'Rent')).length, 0)
   const txns = await entryTransactions(u, rent.id)
   check('(a) one posted rent transaction dated yesterday', txns.map((t) => [t.is_posted, t.transaction_date.slice(0, 10)]), [[true, yesterday]])
   check('(a) rent moved on a month', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(rentDay, 1))
@@ -230,9 +234,8 @@ async function staleRent(browser) {
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, u)
   await openTransactions(page)
-  const rentRows = dueRows(page, 'Rent', 'missed')
-  check('(b) rent is listed in the section as a missed row', await rentRows.count(), 1)
-  const include = await openMarkPaid(page, rentRows.first(), rent.id)
+  check('(b) rent is listed in the section as a missed row', (await rowsOf(page, 'Rent', 'missed')).length, 1)
+  const include = await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent', 'missed'))).first(), rent.id)
   check('(b) the dialog asked for the missed row\'s oldest occurrence', typeof include === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(include), true)
   const listing = await get(u.token, `/budget-entries/${rent.id}/occurrences${include ? `?include=${include}` : ''}`)
   const n = listing.due_unposted
@@ -256,8 +259,8 @@ async function staleRent(browser) {
 
   await settle(page)
   const currentRow = dueRows(page, 'Rent').filter({ hasText: fmt(current) })
-  check('(b) the current rent row remains', await currentRow.count(), 1)
-  await openMarkPaid(page, currentRow.first(), rent.id)
+  check('(b) the current rent row remains', (await rowsOf(page, 'Rent', undefined, fmt(current))).length, 1)
+  await openMarkPaid(page, (await showRow(page, currentRow)).first(), rent.id)
   check('(b) the dialog opens on the current occurrence', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), current)
   check('(b) nothing earlier is skipped now', await dialog(page).locator('[data-testid="mark-paid-skipped"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${rent.id}/materialize`))
@@ -266,7 +269,7 @@ async function staleRent(browser) {
   check('(b) Mark paid on the current rent is 201', [last.status(), last.headers()['x-occurrence-recorded']], [201, current])
   await dialog(page).waitFor({ state: 'detached' })
   await gone(dueRows(page, 'Rent').filter({ hasText: fmt(current) }))
-  check('(b) the current rent row is gone', await dueRows(page, 'Rent').filter({ hasText: fmt(current) }).count(), 0)
+  check('(b) the current rent row is gone from every page', (await rowsOf(page, 'Rent', undefined, fmt(current))).length, 0)
   check('(b) rent moved past the current occurrence', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(current, 1, anchor))
   await ctx.close()
 }
@@ -294,9 +297,10 @@ async function staleInstallment(browser) {
   check('(c) the missed months show as overdue on the dashboard', statuses.includes('Overdue'), true)
   await openTransactions(page)
   const gadgetRows = dueRows(page, 'Gadget')
-  console.log(`    the section has ${await gadgetRows.count()} Gadget row(s): ${(await gadgetRows.evaluateAll((els) => els.map((e) => e.getAttribute('data-kind')))).join(', ')}`)
-  // The last listed row, so the dialog is asked for a later month than the oldest.
-  await openMarkPaid(page, gadgetRows.last(), gadget.id)
+  const listedGadget = await rowsOf(page, 'Gadget')
+  console.log(`    the section has ${listedGadget.length} Gadget row(s): ${listedGadget.map((r) => r.kind).join(', ')}`)
+  // The last listed row (on the last page that holds one), so the dialog is asked for a later month than the oldest.
+  await openMarkPaid(page, (await showLastRow(page, gadgetRows)).last(), gadget.id)
   const options = await dialog(page).locator('[data-testid="mark-paid-occurrence"] option').evaluateAll((els) => els.map((e) => e.value))
   check('(c) only the oldest month is offered', options, [start])
   check('(c) no "Post all" button', await dialog(page).locator('[data-testid="mark-paid-post-all"]').count(), 0)
@@ -326,8 +330,8 @@ async function loanPayment(browser) {
   await uiLogin(page, u)
   await openTransactions(page)
   const row = dueRows(page, 'Car loan payment').filter({ has: page.locator('[data-testid="due-mark-paid"]') })
-  check('(d) the loan transfer is a section row with Mark paid', await row.count(), 1)
-  await openMarkPaid(page, row.first(), entry.id)
+  check('(d) the loan transfer is a section row with Mark paid', (await rowsOf(page, 'Car loan payment')).filter((r) => r.buttons.includes('due-mark-paid')).length, 1)
+  await openMarkPaid(page, (await showRow(page, row)).first(), entry.id)
   check('(d) no amount fields for a same-currency transfer', await dialog(page).locator('[data-testid="mark-paid-amount"], [data-testid="mark-paid-received"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${entry.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -365,7 +369,7 @@ async function switchOccurrenceClearsAmount(browser) {
   await uiLogin(page, u)
   await openTransactions(page)
   // The bill is on a card, so its missed row offers Charged and Posted; Posted is the Mark paid of this check.
-  await openMarkPaid(page, dueRows(page, 'Rent', 'missed').first(), rent.id, 'due-posted')
+  await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent', 'missed'))).first(), rent.id, 'due-posted')
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
@@ -405,7 +409,7 @@ async function missingSourceAccount(browser) {
     await route.fulfill({ response: res, json: body })
   })
   await openTransactions(page)
-  const row = dueRows(page, 'Streaming').first()
+  const row = (await showRow(page, dueRows(page, 'Streaming'))).first()
   // Lookups by id are held until released.
   const held = []
   let holding = true
@@ -435,6 +439,8 @@ async function missingSourceAccount(browser) {
   await dialog(page).waitFor({ state: 'detached' })
   const txns = await entryTransactions(u, sub.id)
   check('(g) the transaction is recorded in PHP', txns.map((t) => [t.currency, t.amount]), [['PHP', 4640]])
+  // A refetch can still be in a route handler when the context closes; let it end quietly.
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
   await ctx.close()
 
   // A failed lookup: an error, and nothing to submit.
@@ -450,12 +456,13 @@ async function missingSourceAccount(browser) {
   })
   await p2.route((url) => url.pathname === accountPath, (route) => route.fulfill({ status: 500, json: { detail: 'Account lookup failed' } }))
   await openTransactions(p2)
-  await dueRows(p2, 'Cloud').first().locator('[data-testid="due-mark-paid"]').click()
+  await (await showRow(p2, dueRows(p2, 'Cloud'))).first().locator('[data-testid="due-mark-paid"]').click()
   const loadError = dialog(p2).locator('[data-testid="mark-paid-load-error"]')
   await loadError.waitFor()
   check('(g) a failed lookup shows its error', (await loadError.textContent())?.trim(), 'Account lookup failed')
   check('(g) Mark paid stays disabled', await dialog(p2).locator('[data-testid="mark-paid-submit"]').isDisabled(), true)
   check('(g) nothing was recorded', (await entryTransactions(u, sub2.id)).length, 0)
+  await p2.unrouteAll({ behavior: 'ignoreErrors' })
   await second.ctx.close()
 }
 

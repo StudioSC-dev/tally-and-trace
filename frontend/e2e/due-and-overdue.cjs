@@ -25,9 +25,17 @@
 //   (l) an ended installment is not listed and cannot be recorded
 //   (m) more than 500 linked pending ids are fetched in batches of 500 and
 //       merged; a failed batch shows an error in the section
+//   (n) the section shows 3 rows a page, overdue first (a fresh user with
+//       exactly 7 rows): the pager, the order, Next and Previous, the first page
+//       on a fresh load, and the last page emptying (Mark paid) lands on the
+//       new last page and stays there when the list grows again
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
+// The section is paged, so a row can be on any page: every count and every
+// absence check reads all pages (./_due_pages.cjs).
+//
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n]
 const { startLocalStack } = require('./_local_stack.cjs')
+const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -150,15 +158,12 @@ async function openTransactions(page) {
 }
 
 const dialog = (page) => page.locator('[data-testid="mark-paid-dialog"]')
-const dueRows = (page) => page.locator('[data-testid="due-row"]')
-/** A recurring or missed row by its entry name. */
+/** A recurring or missed row by its entry name, on the page on screen: reach it with showRow, count with rowsOf. */
 const recRows = (page, name, kind) =>
   page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
-/** A pending row by its description. */
+/** A pending row by its description, on the page on screen. */
 const pendRows = (page, name) => page.locator('[data-testid="due-row"][data-kind="pending"]').filter({ hasText: name })
-const buttonIds = (row) =>
-  row.locator('button[data-testid^="due-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))
 const gone = (locator) => locator.first().waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
 const ACTION_BUTTONS = 'button[data-testid="due-mark-paid"], button[data-testid="due-mark-received"], button[data-testid="due-charged"], button[data-testid="due-posted"], button[data-testid="due-mark-posted"]'
 
@@ -255,32 +260,35 @@ async function listing(browser) {
   const toggle = page.locator('[data-testid="due-section-toggle"]')
   const list = page.locator('[data-testid="due-list"]')
   check('(b) the section starts open', await toggle.getAttribute('aria-expanded'), 'true')
-  check('(b) the count is the number of rows', Number(await page.locator('[data-testid="due-count"]').textContent()), await dueRows(page).count())
+  const all = await allDueRows(page)
+  check('(b) the count is the number of rows over every page', Number(await page.locator('[data-testid="due-count"]').textContent()), all.length)
+  check('(b) the first page has at most 3 rows, and a pager only past 3', [await page.locator('[data-testid="due-row"]').count(), await hasPager(page)],
+    [Math.min(3, all.length), all.length > 3])
   await toggle.click()
   check('(b) the toggle collapses the section', [await toggle.getAttribute('aria-expanded'), await list.count()], ['false', 0])
   await toggle.click()
   check('(b) and opens it again', [await toggle.getAttribute('aria-expanded'), await list.count()], ['true', 1])
 
-  const rent = recRows(page, 'Rent')
-  check('(b) Rent: Mark paid', [await rent.count(), await buttonIds(rent)], [1, ['due-mark-paid']])
-  const netflix = recRows(page, 'Netflix')
-  check('(b) Netflix: Charged, Posted', [await netflix.count(), await buttonIds(netflix)], [1, ['due-charged', 'due-posted']])
-  const spotify = recRows(page, 'Spotify', 'missed')
+  const rent = await rowsOf(page, 'Rent')
+  check('(b) Rent: Mark paid', [rent.length, rent[0]?.buttons], [1, ['due-mark-paid']])
+  const netflix = await rowsOf(page, 'Netflix')
+  check('(b) Netflix: Charged, Posted', [netflix.length, netflix[0]?.buttons], [1, ['due-charged', 'due-posted']])
+  const spotify = await rowsOf(page, 'Spotify', 'missed')
   const snapshot = await snapshotOf(w.u)
   const missed = missedFor(snapshot, w.spotify.id)
-  check('(b) Spotify: a missed row with the API\'s count', [await spotify.count(), (await spotify.locator('[data-testid="due-missed-text"]').textContent())?.trim()],
+  check('(b) Spotify: a missed row with the API\'s count', [spotify.length, spotify[0]?.sub],
     [1, `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`])
-  check('(b) Spotify missed: Charged, Posted', await buttonIds(spotify), ['due-charged', 'due-posted'])
-  const salary = recRows(page, 'Salary')
-  check('(b) Salary: Mark received', [await salary.count(), await buttonIds(salary)], [1, ['due-mark-received']])
-  const save = recRows(page, 'Save')
-  check('(b) Save: Mark paid', [await save.count(), await buttonIds(save)], [1, ['due-mark-paid']])
-  const coffee = pendRows(page, 'Coffee')
-  check('(b) Coffee: a pending row, Overdue, Mark posted', [await coffee.count(), await coffee.locator('[data-testid="due-overdue"]').count(), await buttonIds(coffee)],
-    [1, 1, ['due-mark-posted']])
-  const todayBill = dueRows(page).filter({ hasText: 'Today Bill' })
-  check('(b) Today Bill is listed once, as a recurring row', [await todayBill.count(), await todayBill.getAttribute('data-kind')], [1, 'recurring'])
-  check('(b) the paused Gym is not listed', await dueRows(page).filter({ hasText: 'Gym' }).count(), 0)
+  check('(b) Spotify missed: Charged, Posted', spotify[0]?.buttons, ['due-charged', 'due-posted'])
+  const salary = await rowsOf(page, 'Salary')
+  check('(b) Salary: Mark received', [salary.length, salary[0]?.buttons], [1, ['due-mark-received']])
+  const save = await rowsOf(page, 'Save')
+  check('(b) Save: Mark paid', [save.length, save[0]?.buttons], [1, ['due-mark-paid']])
+  const coffee = await rowsOf(page, 'Coffee', 'pending')
+  check('(b) Coffee: a pending row, Overdue, Mark posted', [coffee.length, coffee[0]?.overdue, coffee[0]?.buttons],
+    [1, true, ['due-mark-posted']])
+  const todayBill = all.filter((r) => r.text.includes('Today Bill'))
+  check('(b) Today Bill is listed once, as a recurring row', [todayBill.length, todayBill[0]?.kind], [1, 'recurring'])
+  check('(b) the paused Gym is not listed', all.filter((r) => r.text.includes('Gym')).length, 0)
   await ctx.close()
 }
 
@@ -289,7 +297,7 @@ async function markPaidRent(browser) {
   console.log('\n=== (c) Mark paid on Rent records it and clears the row')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
-  await recRows(page, 'Rent').locator('[data-testid="due-mark-paid"]').click()
+  await (await showRow(page, recRows(page, 'Rent'))).locator('[data-testid="due-mark-paid"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.rent.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -297,7 +305,7 @@ async function markPaidRent(browser) {
   check('(c) the dialog posts the occurrence (201)', res.status(), 201)
   await dialog(page).waitFor({ state: 'detached' })
   await gone(recRows(page, 'Rent'))
-  check('(c) the Rent row is gone', await recRows(page, 'Rent').count(), 0)
+  check('(c) the Rent row is gone from every page', (await rowsOf(page, 'Rent')).length, 0)
   const posted = (await allTransactions(w.u)).filter((t) => t.budget_entry_id === w.rent.id)
   check('(c) one posted row for Rent', posted.map((t) => t.is_posted), [true])
   await ctx.close()
@@ -309,7 +317,7 @@ async function chargedThenPosted(browser) {
   const w = await seed()
   const before = await accountBalance(w.u, w.visa.id)
   const { ctx, page } = await openDue(browser, w.u)
-  await recRows(page, 'Netflix').locator('[data-testid="due-charged"]').click()
+  await (await showRow(page, recRows(page, 'Netflix'))).locator('[data-testid="due-charged"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   check('(d) the dialog is titled "Record Netflix"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Record Netflix')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.netflix.id}/materialize`))
@@ -322,14 +330,14 @@ async function chargedThenPosted(browser) {
   const pending = (await allTransactions(w.u)).filter((t) => t.budget_entry_id === w.netflix.id)
   check('(d) one pending row linked to Netflix', pending.map((t) => t.is_posted), [false])
 
-  const row = pendRows(page, 'Netflix')
-  await row.locator('[data-testid="due-posted"]').waitFor()
-  check('(d) the charge is listed once as a pending row with Posted', [await row.count(), await buttonIds(row)], [1, ['due-posted']])
-  await row.locator('[data-testid="due-posted"]').click()
+  await waitForRow(page, 'Netflix', 'pending')
+  const listed = await rowsOf(page, 'Netflix', 'pending')
+  check('(d) the charge is listed once as a pending row with Posted', [listed.length, listed[0]?.buttons], [1, ['due-posted']])
+  await (await showRow(page, pendRows(page, 'Netflix'))).locator('[data-testid="due-posted"]').click()
   const put = await savePosted(page, pending[0].id)
   check('(d) Posted posts the same row (200)', put.status(), 200)
   await gone(pendRows(page, 'Netflix'))
-  check('(d) the pending row leaves the section', await pendRows(page, 'Netflix').count(), 0)
+  check('(d) the pending row leaves the section', (await rowsOf(page, 'Netflix', 'pending')).length, 0)
   const after = (await allTransactions(w.u)).filter((t) => t.budget_entry_id === w.netflix.id)
   check('(d) exactly one posted row remains', [after.length, after.map((t) => t.is_posted)], [1, [true]])
   await ctx.close()
@@ -340,11 +348,11 @@ async function markPostedCoffee(browser) {
   console.log('\n=== (e) Mark posted on Coffee posts it and it leaves the section')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
-  await pendRows(page, 'Coffee').locator('[data-testid="due-mark-posted"]').click()
+  await (await showRow(page, pendRows(page, 'Coffee'))).locator('[data-testid="due-mark-posted"]').click()
   const put = await savePosted(page, w.coffee.id)
   check('(e) the page\'s posting flow saves it (200)', put.status(), 200)
   await gone(pendRows(page, 'Coffee'))
-  check('(e) the Coffee row leaves the section', await pendRows(page, 'Coffee').count(), 0)
+  check('(e) the Coffee row leaves the section', (await rowsOf(page, 'Coffee', 'pending')).length, 0)
   const txn = (await allTransactions(w.u)).find((t) => t.id === w.coffee.id)
   check('(e) Coffee is posted', txn?.is_posted, true)
   await ctx.close()
@@ -355,7 +363,7 @@ async function markReceivedSalary(browser) {
   console.log('\n=== (f) Mark received on Salary')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
-  await recRows(page, 'Salary').locator('[data-testid="due-mark-received"]').click()
+  await (await showRow(page, recRows(page, 'Salary'))).locator('[data-testid="due-mark-received"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   check('(f) the dialog is titled "Mark Salary as received"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Mark Salary as received')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
@@ -363,7 +371,7 @@ async function markReceivedSalary(browser) {
   check('(f) Mark received posts the occurrence (201)', (await done).status(), 201)
   await dialog(page).waitFor({ state: 'detached' })
   await gone(recRows(page, 'Salary'))
-  check('(f) the Salary row is gone', await recRows(page, 'Salary').count(), 0)
+  check('(f) the Salary row is gone from every page', (await rowsOf(page, 'Salary')).length, 0)
   await ctx.close()
 }
 
@@ -408,15 +416,19 @@ async function viewer(browser) {
   const mode = await page.locator('[data-testid="due-section"]').getAttribute('data-limited-rows')
   console.log(`    data-limited-rows: ${mode}`)
   check('(h) the setting is text or drop', ['text', 'drop'].includes(mode), true)
-  check('(h) no row shows a button', await page.locator(`[data-testid="due-section"] ${ACTION_BUTTONS}`).count(), 0)
-  const limited = page.locator('[data-testid="due-row"][data-view="limited"]')
+  const shown = await allDueRows(page)
+  check('(h) no row on any page shows a button', [await page.locator(`[data-testid="due-section"] ${ACTION_BUTTONS}`).count(), shown.flatMap((r) => r.buttons)], [0, []])
+  const limited = shown.filter((r) => r.view === 'limited')
   if (mode === 'drop') {
-    check('(h) drop: no Limited rows', await limited.count(), 0)
-    check('(h) drop: no rows at all', await dueRows(page).count(), 0)
+    check('(h) drop: no Limited rows', limited.length, 0)
+    check('(h) drop: no rows at all', shown.length, 0)
+    check('(h) drop: no pager', await hasPager(page), false)
   } else {
-    check('(h) text: each Limited item is listed once', [limitedIds.size > 0, await limited.count()], [true, limitedIds.size])
-    check('(h) text: the rows carry the API\'s display names', (await limited.locator('p.text-ink').allInnerTexts()).sort(), [...limitedItems.values()].sort())
-    check('(h) text: every row is Limited', await dueRows(page).count(), await limited.count())
+    check('(h) text: each Limited item is listed once', [limitedIds.size > 0, limited.length], [true, limitedIds.size])
+    check('(h) text: the rows carry the API\'s display names', limited.map((r) => r.name).sort(), [...limitedItems.values()].sort())
+    check('(h) text: every row is Limited', shown.length, limited.length)
+    // 3 rows or fewer fit on one page; more get a pager.
+    check(`(h) text: ${limitedIds.size <= 3 ? 'no pager' : 'a pager'} for ${limitedIds.size} Limited item(s)`, await hasPager(page), limitedIds.size > 3)
   }
   // The dashboard keeps showing the viewer its Limited charges as text.
   await page.goto(`${stack.webUrl}/`)
@@ -432,7 +444,7 @@ async function pausedEntry(browser) {
   console.log('\n=== (i) a paused entry is not listed; resuming skips the paused months')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
-  check('(i) the paused Gym is not listed', await dueRows(page).filter({ hasText: 'Gym' }).count(), 0)
+  check('(i) the paused Gym is not listed on any page', (await allDueRows(page)).filter((r) => r.text.includes('Gym')).length, 0)
   check('(i) the API lists no missed Gym', missedFor(await snapshotOf(w.u), w.gym.id), undefined)
 
   await page.goto(`${stack.webUrl}/allocations`)
@@ -452,7 +464,7 @@ async function pausedEntry(browser) {
   check('(i) the API\'s next_occurrence is on or after today', next >= w.today, true)
   check('(i) the API lists no missed Gym', missedFor(await snapshotOf(w.u), w.gym.id), undefined)
   await openTransactions(page)
-  check('(i) no missed Gym row appears', await recRows(page, 'Gym', 'missed').count(), 0)
+  check('(i) no missed Gym row appears on any page', (await rowsOf(page, 'Gym', 'missed')).length, 0)
   await ctx.close()
 }
 
@@ -469,13 +481,13 @@ async function missedKinds(browser) {
   ]
   for (const [name, e, button] of cases) {
     const missed = missedFor(snapshot, e.id)
-    const row = recRows(page, name, 'missed')
-    check(`(j) ${name}: one missed row with the API's count`, [await row.count(), (await row.locator('[data-testid="due-missed-text"]').textContent())?.trim()],
+    const rows = await rowsOf(page, name, 'missed')
+    check(`(j) ${name}: one missed row with the API's count`, [rows.length, rows[0]?.sub],
       [1, `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`])
-    check(`(j) ${name}: ${button}`, await buttonIds(row), [button])
+    check(`(j) ${name}: ${button}`, rows[0]?.buttons, [button])
   }
 
-  const row = recRows(page, 'Old Rent', 'missed')
+  const row = await showRow(page, recRows(page, 'Old Rent', 'missed'))
   const n = missedFor(snapshot, w.oldRent.id).unlinked_count
   await row.locator('[data-testid="due-mark-paid"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
@@ -491,7 +503,7 @@ async function missedKinds(browser) {
   check('(j) Post all due is 200 with N created', [res.status(), (await res.json()).results.map((r) => r.outcome)], [200, Array(due).fill('created')])
   await dialog(page).waitFor({ state: 'detached' })
   await gone(recRows(page, 'Old Rent', 'missed'))
-  check('(j) the Old Rent missed row is gone', await recRows(page, 'Old Rent', 'missed').count(), 0)
+  check('(j) the Old Rent missed row is gone from every page', (await rowsOf(page, 'Old Rent', 'missed')).length, 0)
   check('(j) the API reports nothing missed for it', missedFor(await snapshotOf(w.u), w.oldRent.id), undefined)
   await ctx.close()
 }
@@ -503,7 +515,7 @@ async function chargedMissed(browser) {
   const before = missedFor(await snapshotOf(w.u), w.spotify.id)
   console.log(`    unlinked_count ${before.unlinked_count}; oldest_unlinked ${before.oldest_unlinked}`)
   const { ctx, page } = await openDue(browser, w.u)
-  const row = recRows(page, 'Spotify', 'missed')
+  const row = await showRow(page, recRows(page, 'Spotify', 'missed'))
   await row.locator('[data-testid="due-charged"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   check('(k) the dialog opens on the oldest missed month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), before.oldest_unlinked)
@@ -520,10 +532,10 @@ async function chargedMissed(browser) {
     (text) => !text || [...document.querySelectorAll('[data-testid="due-missed-text"]')].some((e) => e.textContent.startsWith(text)),
     left > 0 ? `${left} missed since` : '', { timeout: 15000 }).catch(() => {})
   await settle(page)
-  const text = left > 0 ? (await recRows(page, 'Spotify', 'missed').locator('[data-testid="due-missed-text"]').textContent())?.trim() : null
+  const text = left > 0 ? (await rowsOf(page, 'Spotify', 'missed'))[0]?.sub : null
   check('(k) the missed row shows one fewer', text, left > 0 ? `${left} missed since ${fmt(after.oldest_unlinked)}` : null)
-  const pending = pendRows(page, 'Spotify')
-  check('(k) the charged month is listed once as a pending row with Posted', [await pending.count(), await buttonIds(pending)], [1, ['due-posted']])
+  const pending = await rowsOf(page, 'Spotify', 'pending')
+  check('(k) the charged month is listed once as a pending row with Posted', [pending.length, pending[0]?.buttons], [1, ['due-posted']])
   await ctx.close()
 }
 
@@ -540,7 +552,7 @@ async function endedInstallment(browser) {
   const ended = await get(w.u.token, `/budget-entries/${gadget.id}`)
   check('(l) the entry has ended', ended.is_active, false)
   const { ctx, page } = await openDue(browser, w.u)
-  check('(l) the ended installment is not listed', await dueRows(page).filter({ hasText: 'Gadget' }).count(), 0)
+  check('(l) the ended installment is not listed on any page', (await allDueRows(page)).filter((r) => r.text.includes('Gadget')).length, 0)
   const again = await api(w.u.token, 'POST', `/budget-entries/${gadget.id}/materialize`, {})
   check('(l) recording it again is refused: 409 "This entry has ended"', [again.status, again.json?.detail], [409, 'This entry has ended'])
   await ctx.close()
@@ -582,7 +594,7 @@ async function manyLinkedIds(browser) {
   await openTransactions(page)
   check('(m) the ids are asked for in two batches of at most 500, both 200',
     batches.map((b) => [b.size, b.status]).sort((a, b) => b[0] - a[0]), [[500, 200], [101, 200]])
-  check('(m) the linked pending row is listed once', await pendRows(page, 'Water bill').count(), 1)
+  check('(m) the linked pending row is listed once', (await rowsOf(page, 'Water bill', 'pending')).length, 1)
   check('(m) no error line', await page.locator('[data-testid="due-pending-error"]').count(), 0)
 
   // A failed batch.
@@ -595,12 +607,87 @@ async function manyLinkedIds(browser) {
   await ctx.close()
 }
 
+// (n) Pagination and order, on a fresh user with exactly 7 rows.
+async function pagination(browser) {
+  console.log('\n=== (n) 3 rows a page, overdue first: a fresh user with exactly 7 rows')
+  const u = await makeUser('n')
+  const today = manilaToday()
+  const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
+  const stale = (months) => addMonths(today, -months, anchor)
+  const bank = await account(u, 'N Checking')
+  const cash = (name, day, extra = {}) => entry(u, { name, amount: 1000, account_id: bank.id, next_occurrence: wire(day), ...extra })
+  // Overdue: two entries whose occurrences passed unrecorded (the backend lists those as missed rows,
+  // one per entry) and that end with the last of them, so no later occurrence adds a row; and a pending
+  // transaction dated 20 days ago.
+  await cash('Zulu Old', stale(3), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 3 })
+  await cash('Mid Fee', stale(1), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 1 })
+  await unposted(u, bank, addDays(today, -20), 180, 'Coffee')
+  // Not overdue: due today and in the next 9 days. Zeta Bill is the last row, on page 3.
+  await cash('Today Bill', today)
+  await cash('Rent', addDays(today, 3))
+  await entry(u, { name: 'Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(addDays(today, 5)) })
+  await cash('Zeta Bill', addDays(today, 9))
+
+  const { ctx, page } = await openDue(browser, u)
+  const names = async () => (await page.locator('[data-testid="due-row"]').evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent.trim())))
+  const badge = async () => (await page.locator('[data-testid="due-count"]').textContent())?.trim()
+  const all = await allDueRows(page)
+  check('(n) exactly 7 rows: the 2 overdue entries are missed rows, plus 1 pending and 4 recurring',
+    [all.length, all.map((r) => r.kind).sort()], [7, ['missed', 'missed', 'pending', 'recurring', 'recurring', 'recurring', 'recurring']])
+  check('(n) the badge is the total', await badge(), '7')
+  check('(n) the pager reads 1–3 of 7', await pagerLabel(page), '1–3 of 7')
+  check('(n) page 1 has exactly 3 rows, oldest overdue first (the overdue pending row is among them)', await names(), ['Zulu Old', 'Mid Fee', 'Coffee'])
+  const first = await allDueRows(page)
+  check('(n) all 3 rows on page 1 are overdue', first.slice(0, 3).map((r) => r.kind === 'missed' || r.overdue), [true, true, true])
+  check('(n) the overdue pending row is ahead of every non-overdue recurring row',
+    first.findIndex((r) => r.name === 'Coffee') < first.findIndex((r) => r.name === 'Today Bill'), true)
+  check('(n) the order over all pages', first.map((r) => r.name), ['Zulu Old', 'Mid Fee', 'Coffee', 'Today Bill', 'Rent', 'Salary', 'Zeta Bill'])
+
+  await nextButton(page).click()
+  await page.locator('[data-testid="due-pager"] button[aria-current="page"]').filter({ hasText: /^2$/ }).waitFor()
+  check('(n) Next goes to page 2: 4–6 of 7, the badge unchanged', [await pagerLabel(page), await names(), await badge()], ['4–6 of 7', ['Today Bill', 'Rent', 'Salary'], '7'])
+  await previousButton(page).click()
+  await page.locator('[data-testid="due-pager"] button[aria-current="page"]').filter({ hasText: /^1$/ }).waitFor()
+  check('(n) Previous goes back to page 1', [await pagerLabel(page), await names()], ['1–3 of 7', ['Zulu Old', 'Mid Fee', 'Coffee']])
+
+  await goToPage(page, 3)
+  check('(n) page 3 has the last row, 7–7 of 7', [await pagerLabel(page), await names()], ['7–7 of 7', ['Zeta Bill']])
+  await openTransactions(page)
+  check('(n) a fresh load lands on page 1', [await currentPage(page), await pagerLabel(page)], [1, '1–3 of 7'])
+
+  // The last page empties: the view lands on the new last page, not an empty one.
+  await goToPage(page, 3)
+  await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Zeta Bill$/ }) }).locator('[data-testid="due-mark-paid"]').click()
+  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  const done = page.waitForResponse((r) => r.url().endsWith('/materialize'))
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  check('(n) Mark paid on the only row of page 3 is created (201)', (await done).status(), 201)
+  await dialog(page).waitFor({ state: 'detached' })
+  await page.locator('[data-testid="due-count"]').filter({ hasText: /^6$/ }).waitFor({ timeout: 15000 }).catch(() => {})
+  await settle(page)
+  check('(n) the view lands on the new last page, not an empty one', [await badge(), await currentPage(page), await pagerLabel(page), await names()],
+    ['6', 2, '4–6 of 6', ['Today Bill', 'Rent', 'Salary']])
+
+  // The clamp sticks: when the list grows back to 7 rows, page 2 stays page 2.
+  await cash('Eta Bill', addDays(today, 10))
+  await cash('Theta Bill', addDays(today, 11))
+  await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Salary$/ }) }).locator('[data-testid="due-mark-received"]').click()
+  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await page.locator('[data-testid="due-count"]').filter({ hasText: /^7$/ }).waitFor({ timeout: 15000 }).catch(() => {})
+  await settle(page)
+  check('(n) after the list grows back to 7 the view stays on page 2', [await badge(), await currentPage(page), await pagerLabel(page), await names()],
+    ['7', 2, '4–6 of 7', ['Today Bill', 'Rent', 'Eta Bill']])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

@@ -1,21 +1,26 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
+  DUE_PAGE_SIZE,
+  effectiveDuePage,
   LIMITED_ROWS,
   RECURRING_ACTION_LABELS,
   PENDING_POST_LABELS,
   dueRecurringRows,
   duePendingRows,
   formatEntryDate,
+  orderDueRows,
+  pageWindow,
   pendingLinkIds,
   transactionDescription,
 } from '@tally-trace/shared'
-import type { DueEntryRow, DueLimitedRow, DueMissedRow, DuePendingRow, DueRecurringRow, RecurringAction, Transaction } from '@tally-trace/shared'
+import type { DuePageState, DueEntryRow, DueLimitedRow, DueMissedRow, DuePendingRow, DueRecurringRow, RecurringAction, Transaction } from '@tally-trace/shared'
 import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { MarkPaidDialog } from '../MarkPaidDialog'
+import { Pager } from '../Pager'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -49,7 +54,7 @@ const addDays = (day: string, n: number): string => {
  * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
  * transactions change, as a query hook would.
  */
-function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean } {
+function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
   const dispatch = useDispatch<AppDispatch>()
   const batches = useMemo(() => {
     const out: { ids: number[]; is_posted: false; limit: number }[] = []
@@ -66,7 +71,12 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
   const selectors = useMemo(() => batches.map((args) => accountingApi.endpoints.getTransactions.select(args)), [batches])
   const results = useSelector((state: RootState) => selectors.map((select) => select(state)), shallowEqual)
   const items = useMemo(() => results.flatMap((result) => result.data?.items ?? []), [results])
-  return { items, failed: results.some((result) => result.error !== undefined) }
+  return {
+    items,
+    failed: results.some((result) => result.error !== undefined),
+    // A batch with nothing yet (first load, or new ids): its rows are missing, not gone.
+    loading: results.some((result) => result.data === undefined && result.error === undefined),
+  }
 }
 
 interface Props {
@@ -97,6 +107,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   // Pages of the window query before the one on screen ("Load more").
   const [earlier, setEarlier] = useState<Transaction[]>([])
   const [offset, setOffset] = useState(0)
+  // The page the reader chose and the day they chose it on: a new day is page 1, whatever else is loading.
+  const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
+  const page = effectiveDuePage(pageState, today)
 
   const { data: snapshot, isLoading: snapshotLoading, error: snapshotError } = useGetDashboardSnapshotQuery({})
   const windowQuery = useGetTransactionsQuery({
@@ -106,7 +119,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     offset,
   })
   const linkIds = useMemo(() => (snapshot ? pendingLinkIds(snapshot) : []), [snapshot])
-  const { items: linkedTxns, failed: linkedFailed } = usePendingTransactionsByIds(linkIds)
+  const { items: linkedTxns, failed: linkedFailed, loading: linkedLoading } = usePendingTransactionsByIds(linkIds)
 
   const windowItems = windowQuery.currentData?.items
   const windowTxns = useMemo(() => [...earlier, ...(windowItems ?? [])], [earlier, windowItems])
@@ -123,8 +136,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
     () => (snapshot ? duePendingRows(windowTxns, linkedTxns, snapshot, today) : []),
     [snapshot, windowTxns, linkedTxns, today],
   )
-  const count = recurring.length + pending.length
+  // Overdue rows first, across both kinds, so page 1 is where they are.
+  const rows = useMemo(() => orderDueRows(recurring, pending), [recurring, pending])
+  const count = rows.length
   const loading = snapshotLoading || windowQuery.isLoading
+  const view = pageWindow(count, page, DUE_PAGE_SIZE)
+  const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
+  // A list that shrank leaves the reader on the last page that exists, and stays there if it grows again.
+  useEffect(() => {
+    if (!loading && !linkedLoading && view.page !== page) setPageState({ page: view.page, day: today })
+  }, [loading, linkedLoading, view.page, page, today])
 
   const loadMore = () => {
     if (!windowItems) return
@@ -285,9 +306,21 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           )}
           {count > 0 && (
             <ul className="divide-y divide-line" data-testid="due-list">
-              {recurring.map(recurringRow)}
-              {pending.map(pendingRow)}
+              {visible.map((row) => (row.kind === 'pending' ? pendingRow(row) : recurringRow(row)))}
             </ul>
+          )}
+          {count > DUE_PAGE_SIZE && (
+            <div className="px-4 py-3">
+              <Pager
+                total={count}
+                page={view.page}
+                pageSize={DUE_PAGE_SIZE}
+                onPage={(next) => setPageState({ page: next, day: today })}
+                label="Due and overdue pages"
+                testId="due-pager"
+                disabled={loading}
+              />
+            </div>
           )}
           {hasMore && (
             <div className="px-4 py-3">

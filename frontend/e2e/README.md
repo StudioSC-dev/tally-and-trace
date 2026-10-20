@@ -10,7 +10,7 @@ on Playwright. Run them by hand when you change the auth or session code.
 | `mark-paid-payables.cjs` | STU-343: expandable payables on the dashboard; Mark paid on a chosen occurrence and date; Post all due, recorded from the Transactions "Due and overdue" section |
 | `card-charges.cjs` | STU-343: upcoming charges by card on the dashboard (read-only, missed count as text); Posted, Charged and Post all due from the "Due and overdue" section |
 | `allocations-kinds.cjs` | STU-343: Allocations groups recurring entries by kind; Charged and Posted on a card; the form picks a card expense's kind |
-| `due-and-overdue.cjs` | STU-384: the read-only dashboard; the Transactions page's "Due and overdue" section; Mark paid, Mark received, Charged and Posted on recurring rows; missed months; pending rows; viewers; paused and ended entries |
+| `due-and-overdue.cjs` | STU-384: the read-only dashboard; the Transactions page's "Due and overdue" section; Mark paid, Mark received, Charged and Posted on recurring rows; missed months; pending rows; viewers; paused and ended entries; STU-394: 3 rows a page, overdue first |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
