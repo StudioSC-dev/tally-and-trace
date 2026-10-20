@@ -12,6 +12,7 @@ on Playwright. Run them by hand when you change the auth or session code.
 | `allocations-kinds.cjs` | STU-343: Allocations groups recurring entries by kind; Charged and Posted on a card; the form picks a card expense's kind |
 | `due-and-overdue.cjs` | STU-384: the read-only dashboard; the Transactions page's "Due and overdue" section; Mark paid, Mark received, Charged and Posted on recurring rows; missed months; pending rows; viewers; paused and ended entries; STU-394: 3 rows a page, overdue first |
 | `card-credit.cjs` | STU-343 Plan C: available credit on the card panel and Accounts rows; the will-it-fail and planned-payment badges; the minimum due rule in the card form; no credit for an editor or viewer |
+| `card-pay.cjs` | STU-343 Plan C: the card's credit panel on its account page; Pay with a suggested Full or Minimum, another amount, a planned payment and the excess note; the statement's own minimum; Manila's day in a UTC browser and at midnight; inactive cards and no payer; no panel or Pay for an editor or viewer |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
