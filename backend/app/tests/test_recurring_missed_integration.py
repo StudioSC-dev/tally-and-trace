@@ -239,7 +239,8 @@ def test_visibility(sw, sw_client, sw_db, monkeypatch):
     assert _snapshot(client, a, tag=999_999_999)["missed"] == []
 
 
-def test_pending_ids_hold_only_readable_rows(me, sw_db):
+def test_pending_ids_hold_only_readable_full_rows(me, sw_db):
+    from app.core.redaction import FULL, LIMITED
     from app.models.budget_entry import BudgetEntry
     from app.services import forecast as fc
     from app.services.missed import split_pending_links
@@ -250,19 +251,51 @@ def test_pending_ids_hold_only_readable_rows(me, sw_db):
     entry = sw_db.query(BudgetEntry).filter(BudgetEntry.id == rent).one()
     unrecorded = fc.unrecorded_occurrences(sw_db, [entry], through=date(2026, 10, 17))
 
-    class Access:
-        def __init__(self, readable):
-            self._readable = readable
+    class Redactor:
+        def __init__(self, readable, view):
+            self.access = SimpleNamespace(readable=lambda record: readable)
+            self._view = view
 
-        def readable(self, record):
-            return self._readable
+        def view(self, record):
+            return self._view
 
-    assert split_pending_links(sw_db, [entry], unrecorded, Access(True))[rent] == {
+    assert split_pending_links(sw_db, [entry], unrecorded, Redactor(True, FULL))[rent] == {
         "unlinked_count": 1, "oldest_unlinked": "2026-10-01",
         "pending_transaction_ids": [pending]}
-    # Unreadable: still linked (the occurrence is not shown twice), never named.
-    assert split_pending_links(sw_db, [entry], unrecorded, Access(False))[rent] == {
-        "unlinked_count": 1, "oldest_unlinked": "2026-10-01", "pending_transaction_ids": []}
+    # Unreadable or Limited: never named, and the occurrence stays unlinked.
+    for redactor in (Redactor(False, FULL), Redactor(True, LIMITED)):
+        assert split_pending_links(sw_db, [entry], unrecorded, redactor)[rent] == {
+            "unlinked_count": 2, "oldest_unlinked": "2026-09-01",
+            "pending_transaction_ids": []}
+
+
+def test_a_limited_pending_row_stays_unlinked(sw, sw_client, sw_db, monkeypatch):
+    """B sees the entry shared_full but its hand-linked pending row Limited (it
+    also touches A's private account): the row is not named, and its occurrence
+    stays unlinked, so it is still listed as missed."""
+    from app.models.transaction import Transaction, TransactionType
+    from app.tests.conftest import sw_share
+
+    client, db, a, b = sw_client, sw_db, sw["a"], sw["b"]
+    savings = _account(client, a, "Joint savings", "savings", 0)
+    sw_share(db, savings, b["id"], "editor", a["id"])
+    save = _entry(client, a, sw["joint"], "2026-09-05", "Save", transfer_to_account_id=savings)
+    txn = Transaction(user_id=a["id"], account_id=sw["a_private"], budget_entry_id=save,
+                      amount=1_000, transaction_type=TransactionType.TRANSFER,
+                      transfer_from_account_id=sw["joint"], transfer_to_account_id=savings,
+                      description="Save Sep", is_posted=False,
+                      transaction_date=datetime(2026, 9, 5))
+    db.add(txn)
+    db.commit()
+    pin_clock(monkeypatch, REF)
+
+    def links(who):
+        row = _missed(_snapshot(client, who))[save]
+        return (row["view"], row["count"], row["unlinked_count"], row["oldest_unlinked"],
+                row["pending_transaction_ids"])
+
+    assert links(a) == ("full", 2, 1, "2026-10-05", [txn.id])
+    assert links(b) == ("shared_full", 2, 2, "2026-09-05", [])
 
 
 def test_row_fields_on_snapshot_rows_only(sw, sw_client, sw_db, monkeypatch):

@@ -27,7 +27,8 @@ names no entry, so a shared editor sees it too.
 
 Each ``missed`` item also says which of its missed occurrences a pending
 linked row already stands for (``unlinked_count``, ``oldest_unlinked``) and
-lists those readable rows (``pending_transaction_ids``).
+lists those rows, the ones it may read and does not see Limited
+(``pending_transaction_ids``).
 """
 from __future__ import annotations
 
@@ -310,7 +311,7 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today)
     missed = {entry_id: [occ for occ in due if occ.date() < today]
               for entry_id, due in unrecorded.items()}
-    links = split_pending_links(db, entries, missed, redactor.access)
+    links = split_pending_links(db, entries, missed, redactor)
     out: Dict[int, List[dict]] = {}
     for entry in entries:
         due = unrecorded.get(entry.id, [])

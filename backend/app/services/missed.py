@@ -37,7 +37,7 @@ from app.services.recurring_kinds import BILLING_KINDS, entry_kind, is_capped, i
 
 
 def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetime]],
-                        access) -> Dict[int, dict]:
+                        redactor: Redactor) -> Dict[int, dict]:
     """``{entry id: {"unlinked_count", "oldest_unlinked", "pending_transaction_ids"}}``.
 
     ``unrecorded`` is each entry's missed occurrences (``unrecorded_occurrences``,
@@ -46,13 +46,19 @@ def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetim
     for one occurrence on its day, so each missed occurrence takes at most one
     pending row on that day. ``unlinked_count`` and ``oldest_unlinked`` are the
     occurrences left without one; ``pending_transaction_ids`` are the rows
-    taken, only those the caller may read (``access.readable``).
+    taken. Only a row the caller may read and does not see Limited is taken:
+    naming a Limited row beside its entry would link the two, which the
+    redaction rules hide, so its occurrence stays unlinked.
     """
     entries = list(entries)
+    linked = [(entry_id, when, txn_id) for entry_id, when, txn_id, is_posted in fc._linked_rows(
+        db, [e.id for e in entries], occurrence_match=True) if not is_posted]
+    txns = {t.id: t for t in db.query(Transaction).filter(
+        Transaction.id.in_([txn_id for _, _, txn_id in linked]))} if linked else {}
     pending: Dict[tuple, List[int]] = defaultdict(list)
-    for entry_id, when, txn_id, is_posted in fc._linked_rows(
-            db, [e.id for e in entries], occurrence_match=True):
-        if not is_posted:
+    for entry_id, when, txn_id in linked:
+        txn = txns.get(txn_id)
+        if txn is not None and redactor.access.readable(txn) and redactor.view(txn) != LIMITED:
             pending[(entry_id, fc._naive(when).date())].append(txn_id)
 
     taken: Dict[int, List[int]] = {}
@@ -69,16 +75,8 @@ def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetim
         out[entry.id] = {
             "unlinked_count": len(unlinked),
             "oldest_unlinked": unlinked[0].date().isoformat() if unlinked else None,
-            "pending_transaction_ids": [],
+            "pending_transaction_ids": sorted(taken[entry.id]),
         }
-
-    all_taken = [txn_id for ids in taken.values() for txn_id in ids]
-    if all_taken:
-        txns = {t.id: t for t in db.query(Transaction).filter(
-            Transaction.id.in_(all_taken)).all()}
-        for entry_id, ids in taken.items():
-            out[entry_id]["pending_transaction_ids"] = sorted(
-                i for i in ids if i in txns and access.readable(txns[i]))
     return out
 
 
@@ -135,7 +133,7 @@ def recurring_missed(db: Session, user, *, redactor: Redactor,
 
     today = manila_today()
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today - timedelta(days=1))
-    links = split_pending_links(db, entries, unrecorded, access)
+    links = split_pending_links(db, entries, unrecorded, redactor)
     out = []
     for entry in entries:
         missed = unrecorded.get(entry.id, [])
