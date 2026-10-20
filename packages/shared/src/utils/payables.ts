@@ -1,4 +1,3 @@
-import type { RecordPermissions, RecordView } from '../types/access'
 import type { PayableOrEvent } from '../types/api'
 
 /**
@@ -26,45 +25,27 @@ export function payableTarget(payable: PayableOrEvent): PayableTarget {
   }
 }
 
-/** What a payable row and its detail dialog may offer. */
+/** What a payable row and its read-only detail dialog may offer. */
 export interface PayableActions {
   /** The row opens the detail dialog. */
   open: boolean
-  edit: boolean
-  delete: boolean
-  /** Budget entries only. */
-  markPaid: boolean
   /** The card or loan account to link, for a statement or loan. */
   accountId: number | null
 }
 
-const NO_ACTIONS: PayableActions = { open: false, edit: false, delete: false, markPaid: false, accountId: null }
-
 /**
- * The actions for a payable target. `record` is the looked-up entry or transaction;
- * undefined or null means not loaded yet, or gone, so the row is view only. Controls
- * follow the permission flags, never `view`, except that a Limited record offers none.
+ * The actions for a payable target. Every target but none opens the dialog; a
+ * statement or loan also links its card or loan account. Recording, editing and
+ * deleting live in Allocations and on the Transactions page, never here.
  */
-export function payableActions(
-  target: PayableTarget,
-  record: { view: RecordView; permissions: RecordPermissions } | null | undefined,
-): PayableActions {
+export function payableActions(target: PayableTarget): PayableActions {
   switch (target.kind) {
     case 'none':
-      return NO_ACTIONS
+      return { open: false, accountId: null }
     case 'account':
-      return { ...NO_ACTIONS, open: true, accountId: target.accountId }
+      return { open: true, accountId: target.accountId }
     case 'budget_entry':
-    case 'transaction': {
-      if (!record || record.view === 'limited') return { ...NO_ACTIONS, open: true }
-      const { can_edit, can_delete, can_post } = record.permissions
-      return {
-        open: true,
-        edit: can_edit,
-        delete: can_delete,
-        markPaid: target.kind === 'budget_entry' && can_post,
-        accountId: null,
-      }
-    }
+    case 'transaction':
+      return { open: true, accountId: null }
   }
 }

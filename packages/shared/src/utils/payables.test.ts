@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import type { LimitedEvent, Payable, RecordPermissions } from '../index'
+import type { LimitedEvent, Payable } from '../index'
 import { payableActions, payableTarget } from './payables'
-
-const none: RecordPermissions = { can_edit: false, can_delete: false, can_post: false, can_revert: false, can_tag: false }
 
 const payable: Payable = {
   due_date: '2026-10-20',
@@ -64,52 +62,21 @@ describe('payableTarget', () => {
 })
 
 describe('payableActions', () => {
-  const entry = { kind: 'budget_entry', id: 3 } as const
-  const txn = { kind: 'transaction', id: 7 } as const
-  const viewOnly = { open: true, edit: false, delete: false, markPaid: false, accountId: null }
-
   it('offers nothing for no target', () => {
-    expect(payableActions({ kind: 'none' }, undefined))
-      .toEqual({ open: false, edit: false, delete: false, markPaid: false, accountId: null })
+    expect(payableActions({ kind: 'none' })).toEqual({ open: false, accountId: null })
   })
 
-  it('opens an account target with its account id and nothing else', () => {
-    expect(payableActions({ kind: 'account', source: 'statement', accountId: 9 }, undefined))
-      .toEqual({ ...viewOnly, accountId: 9 })
+  it('opens an account target with its account id', () => {
+    expect(payableActions({ kind: 'account', source: 'statement', accountId: 9 })).toEqual({ open: true, accountId: 9 })
+    expect(payableActions({ kind: 'account', source: 'loan', accountId: 4 })).toEqual({ open: true, accountId: 4 })
   })
 
-  it('is view only while the record is not loaded, or gone', () => {
-    expect(payableActions(entry, undefined)).toEqual(viewOnly)
-    expect(payableActions(entry, null)).toEqual(viewOnly)
-    expect(payableActions(txn, undefined)).toEqual(viewOnly)
+  it('opens an entry or a transaction without an account link', () => {
+    expect(payableActions({ kind: 'budget_entry', id: 3 })).toEqual({ open: true, accountId: null })
+    expect(payableActions({ kind: 'transaction', id: 7 })).toEqual({ open: true, accountId: null })
   })
 
-  it('is view only for a Limited record, whatever its flags say', () => {
-    expect(payableActions(entry, { view: 'limited', permissions: { ...none, can_edit: true, can_delete: true, can_post: true } }))
-      .toEqual(viewOnly)
-  })
-
-  it('is view only for a viewer on the full shape', () => {
-    expect(payableActions(entry, { view: 'full', permissions: none })).toEqual(viewOnly)
-    expect(payableActions(txn, { view: 'shared_full', permissions: none })).toEqual(viewOnly)
-  })
-
-  it('offers edit and delete to an editor', () => {
-    expect(payableActions(txn, { view: 'shared_full', permissions: { ...none, can_edit: true, can_delete: true } }))
-      .toEqual({ ...viewOnly, edit: true, delete: true })
-  })
-
-  it('offers delete without edit to a creator who lost edit', () => {
-    expect(payableActions(entry, { view: 'full', permissions: { ...none, can_delete: true } }))
-      .toEqual({ ...viewOnly, delete: true })
-  })
-
-  it('offers mark paid on an entry the caller may post', () => {
-    expect(payableActions(entry, { view: 'full', permissions: { ...none, can_edit: true, can_post: true } }))
-      .toEqual({ ...viewOnly, edit: true, markPaid: true })
-  })
-
-  it('never offers mark paid on a transaction', () => {
-    expect(payableActions(txn, { view: 'full', permissions: { ...none, can_post: true } })).toEqual(viewOnly)
+  it('offers no account link for a Limited row, which has no target', () => {
+    expect(payableActions(payableTarget(limited))).toEqual({ open: false, accountId: null })
   })
 })

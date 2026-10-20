@@ -43,7 +43,7 @@ export function PayableDetailDialog({ payable, display, onClose }: Props) {
   onCloseRef.current = onClose
 
   const target = payableTarget(payable)
-  const actions = payableActions(target, null)
+  const actions = payableActions(target)
 
   // Focus into the dialog, make the page behind inert, and undo both on close.
   useEffect(() => {
