@@ -559,43 +559,26 @@ def exchange_rate(actual, face) -> Optional[Decimal]:
     return (_D(actual) / _D(face)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
-def _foreign_post_on_create(transaction: TransactionCreate, data: dict,
-                            account: Account) -> None:
-    """Check and fill a debit or credit created posted with a foreign face.
-
-    The face currency is ``projected_currency``, else ``currency``. When it is
-    not the account's, the request's ``amount`` is the actual figure in the
-    account's currency and must be greater than 0, else 400. With a face
-    figure in ``projected_amount``, ``original_*`` and ``exchange_rate`` are
-    filled from it where the request sent none.
-    """
-    sent = transaction.model_fields_set
-    named = transaction.currency if "currency" in sent else None
-    face_currency = transaction.projected_currency or named or account.currency
-    if face_currency == account.currency:
-        return
-    if _D(transaction.amount) <= 0:
-        raise HTTPException(status_code=400, detail=foreign_post_detail(account))
-    if transaction.projected_amount is None:
-        return
-    if "original_amount" not in sent:
-        data["original_amount"] = transaction.projected_amount
-    if "original_currency" not in sent:
-        data["original_currency"] = face_currency
-    if "exchange_rate" not in sent:
-        data["exchange_rate"] = exchange_rate(transaction.amount, transaction.projected_amount)
-
-
 def _currency_on_create(transaction: TransactionCreate, data: dict,
                         account: Account) -> None:
-    """Label a new debit or credit and default its face currencies.
+    """Label a new debit or credit and record its face, as posting a row does.
 
     The face currency is ``projected_currency``, else the ``currency`` sent,
     else the account's. An omitted ``projected_currency`` (with a
     ``projected_amount``) or ``original_currency`` (with an
-    ``original_amount``) defaults to it. A row sent without ``currency``, or
-    an unposted row whose face is the account's currency, is labelled in the
-    account's currency.
+    ``original_amount``) defaults to it.
+
+    An unposted row keeps its face unconverted: it is labelled in the
+    account's currency when the face is, else in the ``currency`` sent (the
+    face's own label), or the account's when none was sent.
+
+    A posted row is always labelled in the account's currency. When its face
+    is foreign, ``amount`` is the actual figure in the account's currency and
+    must be greater than 0, else 400. With a face figure in
+    ``projected_amount``, ``projected_*`` hold the face and ``original_*`` and
+    ``exchange_rate`` are filled from it where the request sent none. Without
+    one, ``amount`` is all there is: ``projected_*`` are cleared, so no row
+    keeps a ``projected_currency`` without its figure.
     """
     sent = transaction.model_fields_set
     named = transaction.currency if "currency" in sent else None
@@ -604,10 +587,26 @@ def _currency_on_create(transaction: TransactionCreate, data: dict,
         data["projected_currency"] = face_currency
     if transaction.original_amount is not None and transaction.original_currency is None:
         data["original_currency"] = face_currency
-    if named is None or (not transaction.is_posted and face_currency == account.currency):
-        data["currency"] = account.currency
-    if transaction.is_posted:
-        _foreign_post_on_create(transaction, data, account)
+    if not transaction.is_posted:
+        data["currency"] = (account.currency if face_currency == account.currency
+                            else named or account.currency)
+        return
+    data["currency"] = account.currency
+    if face_currency == account.currency:
+        return
+    if _D(transaction.amount) <= 0:  # only 0 gets here: a negative amount is a 422
+        raise HTTPException(status_code=400, detail=foreign_post_detail(account))
+    if transaction.projected_amount is None:
+        data["projected_currency"] = None  # also clears a client-sent one
+        return
+    # ``projected_*`` already hold (projected_amount, face_currency): the
+    # currency was sent as the face's or defaulted to it above.
+    if "original_amount" not in sent:
+        data["original_amount"] = transaction.projected_amount
+    if "original_currency" not in sent:
+        data["original_currency"] = face_currency
+    if "exchange_rate" not in sent:
+        data["exchange_rate"] = exchange_rate(transaction.amount, transaction.projected_amount)
 
 
 def _foreign_post_on_update(db: Session, txn: Transaction, requested: dict) -> dict:
@@ -670,9 +669,13 @@ def _revert_provenance(db: Session, txn: Transaction, requested: dict) -> dict:
     stays as posted (an actual figure in the account's currency). When no
     ``projected_amount`` holds a face figure, ``pending_face`` reads that
     ``amount`` as the face, in ``projected_currency`` or else ``currency``;
-    a row created posted with a foreign ``currency`` and no projected figure
-    would have its actual figure converted again. Its face currency is set
-    to the account's, so the forecast reads ``amount`` as it is.
+    a posted row with a foreign ``currency`` and no projected figure would
+    have its actual figure converted again. Its face currency is set to the
+    account's, so the forecast reads ``amount`` as it is.
+
+    No create produces such a row after STU-341. It still guards legacy rows,
+    and posted rows edited by PUT to a foreign ``currency`` or to a null
+    ``projected_amount``.
     """
     if requested.get("is_posted", True) or not txn.is_posted:
         return {}
@@ -1026,6 +1029,16 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     ``created_by_actor`` records the caller. Every account it touches must be
     one both the caller and the owner may change, and every other reference
     (category, allocation, recurring entry) must be the owner's.
+
+    A debit or credit is labelled as posting a row would leave it
+    (``_currency_on_create``, STU-341). A posted row is always in its
+    account's currency, with a foreign face in ``projected_*`` when
+    ``projected_amount`` gives its figure (else ``projected_*`` are empty and
+    ``amount`` is all there is). An unposted row is in the account's currency
+    when its face is or no ``currency`` was sent, else in the ``currency``
+    sent. An omitted ``projected_currency`` or ``original_currency`` defaults
+    to the face currency (``projected_currency``, else ``currency``, else the
+    account's). ``amount`` is never converted.
     """
     owner = owner or current_user
     # The owner's budget lock comes before every other lock (STU-222, STU-226).
