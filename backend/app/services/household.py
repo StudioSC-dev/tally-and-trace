@@ -11,12 +11,14 @@ that touch no account of the view scope. A Household bill on U's private card
 or wallet is one. They are listed, never cash (``cash_delta`` 0), and each
 appears once.
 
-An occurrence on a credit card is de-duplicated against the in-scope CASH
-payments into that card: every transfer into it from a projection-cash
-account of the view scope (posted, planned or recurring) that the caller can
-read, so that it is among the cash the caller's Household totals count (a
-payment they can't read still settles the statement, but never covers a
-Household line for them), settled once in the card's currency (STU-236, plan
+An occurrence on a credit card is de-duplicated against the in-scope
+payments from cash accounts and spending wallets into that card: every
+transfer into it from a projection-cash account or spending wallet of the
+view scope (posted, planned or recurring) that the caller can read, so that
+it is among the money the caller's Household totals count (a payment they
+can't read still settles the statement, but never covers a Household line
+for them). A wallet's payment covers a bill without adding expense, because
+the wallet's top-up was the expense (STU-342). Payments are settled once in the card's currency (STU-236, plan
 D4: a line in another currency is estimated at the stored rate, a pending
 one from its ``pending_face``) with every other payment and credit in the
 statement engine's order (``_settle_with_sources``, mirroring
@@ -26,7 +28,8 @@ charges added and paid from what is left, so a payment the rows already used
 never covers a charge projected later. Recurring transfers into the card,
 which the engine does not net, are applied last. A virtual overflow move is
 not cash and never counts. When the card's primary payment account is in the
-view scope, its routed statement payment pays whatever the statement still
+view scope (a cash account, or, on legacy data only, a scope spending
+wallet), its routed statement payment pays whatever the statement still
 owes, in the card's currency, so that counts as covered too (in the
 projection). The in-scope part allocated to a statement covers its Household
 lines first, in date order, capped at their total; each line's remainder is
@@ -69,11 +72,12 @@ that month is in range, and otherwise still covers.
 **A posted charge on an open statement is left to the projection.** In a
 recorded month, a posted Household charge whose statement the posted
 payments have not settled is covered as the projection covers it: by the
-posted, planned and recurring in-scope cash payments and the routed payment,
+posted, planned and recurring in-scope payments and the routed payment,
 over the projection's horizon (above), from today (``projection_start``).
-Those planned payments are counted as joint outflow by the projection, so
-the charge is counted once: the joint outflow plus its remainder is the
-charge, across the recorded and projected months together. A statement the
+The projection counts those from a cash account as joint outflow, and those
+from a scope spending wallet were already counted when the wallet was
+topped up; either way the charge is counted once: the joint outflow plus its
+remainder is the charge, across the recorded and projected months together. A statement the
 posted payments settled keeps the posted-only rule, and so does one past due
 with no further planned payment (the projection then adds nothing in scope;
 a routed overdue statement is still projected, from the joint account, and
@@ -186,8 +190,10 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     viewable_ids = set(viewable_ids)
     scope = list(scope)
     scope_ids = {a.id for a in scope}
-    cash_ids = {a.id for a in scope if a.account_type not in (AccountType.CREDIT, AccountType.LOAN)
-                and not a.is_spending_wallet}
+    # In-scope accounts whose payments into a card cover its Household lines: cash
+    # accounts and spending wallets (STU-342). A wallet's money was counted when it
+    # was topped up, so its payment covers a line without adding to any total.
+    paying_ids = {a.id for a in scope if a.account_type not in (AccountType.CREDIT, AccountType.LOAN)}
 
     txn_query = db.query(Transaction).filter(
         household_explicit_criterion(Transaction, grant), touches_none(Transaction, scope_ids))
@@ -313,7 +319,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
 
     for card_id, lines in card_lines.items():
         card = billed[card_id]
-        covered = _card_household_cover(db, card, cash_ids, start, end,
+        covered = _card_household_cover(db, card, paying_ids, start, end,
                                         recorded=recorded, viewable_ids=viewable_ids,
                                         readable=access.readable, money=money)
         # Projected cover, per statement: from the projection's first day through
@@ -330,7 +336,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
                 if due not in by_due:
                     horizon = max(begin, _naive(due) + timedelta(days=1))
                     by_due[due] = _card_household_cover(
-                        db, card, cash_ids, begin, horizon, recorded=False,
+                        db, card, paying_ids, begin, horizon, recorded=False,
                         viewable_ids=viewable_ids, readable=access.readable, money=money)
         for occ, key in lines:
             if key not in covered:
@@ -349,7 +355,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     return [o for o in out if o.remainder > 0]
 
 
-def _card_household_cover(db: Session, card: Account, cash_ids: set, start: datetime,
+def _card_household_cover(db: Session, card: Account, paying_ids: set, start: datetime,
                           end: datetime, *, recorded: bool, viewable_ids: Iterable[int],
                           readable, money=None
                           ) -> Dict[tuple, Tuple[Decimal, bool, datetime, Decimal]]:
@@ -364,8 +370,9 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
     rows are read and split as the statement engine reads them (``_card_rows``,
     ``_split_card_rows``, with ``viewable_ids`` the caller's viewable accounts)
     and settled in its order (``_settle_with_sources``). A payment is in scope
-    when it comes from a cash account of ``cash_ids`` and ``readable`` (the
-    caller's read rule) accepts its record. Everything is settled once, in
+    when it comes from an account of ``paying_ids`` (a cash account or spending
+    wallet of the view scope) and ``readable`` (the caller's read rule) accepts
+    its record. Everything is settled once, in
     the card's currency (plan D4): a pending line's figure is its
     ``pending_face`` estimated at the stored rate (``statements.normalise_lines``;
     one with no stored rate is left out), a projected entry charge is the
@@ -424,18 +431,18 @@ def _card_household_cover(db: Session, card: Account, cash_ids: set, start: date
                 amount, _ = money.to(entry.amount, entry.currency, card_currency)
                 if amount is not None:
                     recurring.append((when, amount,
-                                      entry.account_id in cash_ids and readable(entry)))
+                                      entry.account_id in paying_ids and readable(entry)))
 
     if not keys:
         return {}
     days = [line.transaction_date.date() for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
-    paying = [(when, amount, src in cash_ids and readable(row))
+    paying = [(when, amount, src in paying_ids and readable(row))
               for when, amount, src, row in payments]
     owed, in_scope = _settle_with_sources(cycles, lines, paying, projected, recurring,
                                           amount_of=amount_of)
     # Projected only: in a recorded month only posted payments cover anything.
-    routed = not recorded and card.payment_account_id in cash_ids
+    routed = not recorded and card.payment_account_id in paying_ids
 
     out: Dict[tuple, Tuple[Decimal, bool, datetime, Decimal]] = {}
     for idx, c in enumerate(cycles):
@@ -470,7 +477,8 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     projected credit pays from the first statement due on or after its date
     (``settle_projected``). ``owed`` is what each cycle still owes, exactly
     as the engine computes it. ``in_scope`` is the part of each cycle paid by
-    a payment flagged True (an in-scope cash payment); credits are never in
+    a payment flagged True (an in-scope payment from a cash account or
+    spending wallet); credits are never in
     scope. Recurring transfers into the card, which the engine does not net,
     are applied last, in date order, oldest statement first. ``amount_of``
     reads a line's figure in the card's currency (``normalise_lines``).
@@ -655,8 +663,10 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
     - ``paid_from_other_accounts``: the remainders of the sharer's Household
       expense occurrences outside the scope (see the module docstring). A
       posted charge on a statement not yet settled is left to the projection:
-      it is covered by the planned and routed in-scope payments the
-      projection counts as expense, so it is counted once.
+      it is covered by the planned and routed in-scope payments, those from a
+      cash account counted as expense by the projection and those from a
+      scope spending wallet counted when the wallet was topped up, so it is
+      counted once.
 
     Transfers between two scope cash accounts in one currency count only
     their fee; across currencies they also count the money moved

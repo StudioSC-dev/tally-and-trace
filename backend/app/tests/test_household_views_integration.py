@@ -672,3 +672,160 @@ def test_two_statements_with_different_due_dates_each_keep_their_remainder(
     dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
     assert dashboard["month"]["month"] == "2026-10"
     assert dashboard["month"]["currencies"] == to_dec["2026-10"]
+
+
+# --- A Household wallet's card payment counts once (STU-342) ------------------------------------
+#
+# A's statement closes October 15 and is due November 5. The joint account tops
+# up A's spending wallet on October 11, the Household bill is on A's private card
+# on October 12, and the wallet pays the card on November 1. Tagged Household,
+# the wallet is in the view scope: the top-up is the Household's expense, and the
+# wallet's payment covers the bill without adding to any total.
+
+Z = dict.fromkeys(FIELDS, 0.0)
+
+
+def _hh_wallet(client, hh):
+    """Tag A's spending wallet with A's Household tag, so it joins the view scope."""
+    _put(client, hh["a"], f"/accounts/{hh['a_wallet']}", {"tag_ids": [hh["hh_a"]]})
+
+
+def _top_up(client, hh, mode, frm="joint", amount=1000):
+    _transfer(client, hh["a"], hh[frm], hh["a_wallet"], amount, "2026-10-11T00:00:00",
+              posted=MODES[mode][0])
+
+
+def _wallet_pays(client, hh, mode, amount=1000):
+    _transfer(client, hh["a"], hh["a_wallet"], hh["a_card"], amount, "2026-11-01T00:00:00",
+              posted=MODES[mode][0])
+
+
+def _card_entry(client, hh, amount, when, name="Household cable"):
+    """A one-off Household charge scheduled on A's private card (a recurring entry)."""
+    sw_post(client, hh["a"], "/budget-entries/", {
+        "name": name, "entry_type": "expense", "amount": amount, "account_id": hh["a_card"],
+        "next_occurrence": when, "end_date": "2026-10-31T00:00:00", "tag_ids": [hh["hh_a"]]})
+
+
+def _route_card_to_wallet(db, hh):
+    """Route A's card's statement payment to A's wallet, written directly: the API refuses
+    a spending wallet as a payment account, so this row stands for legacy data."""
+    from app.models.account import Account
+
+    db.expire_all()
+    db.get(Account, hh["a_card"]).payment_account_id = hh["a_wallet"]
+    db.commit()
+
+
+@pytest.mark.parametrize("payer", ["household_wallet", "joint"])
+@pytest.mark.parametrize("mode", list(MODES))
+def test_household_bill_paid_via_household_wallet_or_joint_counts_once(hh, sw_client, sw_db,
+                                                                       mode, payer):
+    if payer == "household_wallet":
+        _hh_wallet(sw_client, hh)
+        _top_up(sw_client, hh, mode)
+        _wallet_pays(sw_client, hh, mode)
+    else:
+        _pay(sw_client, hh, 1000, mode)
+    _charge(sw_client, hh, mode, 1000)
+    assert _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])) == {**Z, "expense": 1000.0}
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+def test_private_wallet_paying_the_card_leaves_the_bill_paid_from_other_accounts(
+        hh, sw_client, sw_db, mode):
+    _top_up(sw_client, hh, mode)
+    _wallet_pays(sw_client, hh, mode)
+    _charge(sw_client, hh, mode, 1000)
+    assert _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])) == {
+        **Z, "moved_out": 1000.0, "paid_from_other_accounts": 1000.0}
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+def test_household_wallet_purchases_count_once_at_top_up(hh, sw_client, sw_db, mode):
+    _hh_wallet(sw_client, hh)
+    _top_up(sw_client, hh, mode)
+    _txn(sw_client, hh["a"], hh["a_wallet"], 1000, "2026-10-12T00:00:00",
+         posted=MODES[mode][0], tags=[hh["hh_a"]], description="Household groceries")
+    assert _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])) == {**Z, "expense": 1000.0}
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+@pytest.mark.parametrize("paid,remainder", [(0, 1000.0), (400, 600.0), (1000, 0.0)])
+def test_household_wallet_partial_payment_leaves_the_rest(hh, sw_client, sw_db, mode, paid,
+                                                          remainder):
+    _hh_wallet(sw_client, hh)
+    _top_up(sw_client, hh, mode)
+    if paid:
+        _wallet_pays(sw_client, hh, mode, paid)
+    _charge(sw_client, hh, mode, 1000)
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1]))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (1000.0, remainder)
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+@pytest.mark.parametrize("paid,remainder", [(1000, 0.0), (600, 400.0)])
+def test_household_wallet_covers_the_household_line_first_on_a_mixed_card(
+        hh, sw_client, sw_db, mode, paid, remainder):
+    _hh_wallet(sw_client, hh)
+    _top_up(sw_client, hh, mode)
+    _charge(sw_client, hh, mode, 1000)
+    _charge(sw_client, hh, mode, 500, tags=[], when="2026-10-13T00:00:00",
+            description=f"{PRIVATE} gift")
+    _wallet_pays(sw_client, hh, mode, paid)
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1]))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (1000.0, remainder)
+
+
+@pytest.mark.parametrize("via", ["none", "planned", "recurring", "routed"])
+def test_household_wallet_covers_a_projected_card_entry(hh, sw_client, sw_db, monkeypatch,
+                                                        via):
+    # A projected Household entry on A's card, with the wallet's payment planned
+    # (through the API), recurring or routed (both written directly: legacy data
+    # only). With no payment (the control) the bill stays paid from other
+    # accounts, in the month, on the dashboard and in Upcoming.
+    import app.core.time as time_module
+    import app.routers.household as household_router
+    import app.services.forecast as forecast_module
+
+    _hh_wallet(sw_client, hh)
+    _top_up(sw_client, hh, "projected")
+    _card_entry(sw_client, hh, 1000, "2026-10-12T00:00:00")
+    if via == "planned":
+        _wallet_pays(sw_client, hh, "projected")
+    elif via == "recurring":
+        _recurring_payment(sw_db, hh["a"], hh["a_wallet"], hh["a_card"], 1000,
+                           datetime(2026, 11, 1))
+    elif via == "routed":
+        _route_card_to_wallet(sw_db, hh)
+    for module in (time_module, household_router, forecast_module):
+        monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
+
+    months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED)
+    expected = {**Z, "expense": 1000.0}
+    if via == "none":
+        expected["paid_from_other_accounts"] = 1000.0
+    assert _sum(months) == expected
+
+    expected_upcoming = [1000.0] if via == "none" else []
+    sharer = hh["a"]["id"]
+    items = _get(sw_client, hh["c"], f"/household/{sharer}/upcoming?days=60")["items"]
+    assert [i["face_amount"] for i in items if i.get("kind") == "household"] == expected_upcoming
+    dashboard = _get(sw_client, hh["c"], f"/household/{sharer}/dashboard")
+    [october] = [m for m in months if m["month"] == "2026-10"]
+    assert dashboard["month"]["month"] == "2026-10"
+    assert dashboard["month"]["currencies"] == october["currencies"]
+    assert [i["face_amount"] for i in dashboard["upcoming"]
+            if i.get("kind") == "household"] == expected_upcoming
+
+
+@pytest.mark.parametrize("mode", list(MODES))
+def test_privately_funded_household_wallet_paying_the_card(hh, sw_client, sw_db, mode):
+    # The wallet's money came from A's private bank, never through the view's
+    # totals; its payment still covers the bill (owner ruling: only in-scope
+    # spending wallets count as payers, with no tracking of their funding).
+    _hh_wallet(sw_client, hh)
+    _top_up(sw_client, hh, mode, frm="a_private")
+    _wallet_pays(sw_client, hh, mode)
+    _charge(sw_client, hh, mode, 1000)
+    assert _sum(_monthly(sw_db, hh["c"], hh["a"], MODES[mode][1])) == Z
