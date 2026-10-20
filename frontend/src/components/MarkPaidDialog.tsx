@@ -31,6 +31,7 @@ import type {
   SharedFullBudgetEntry,
 } from '@tally-trace/shared'
 import {
+  useGetAccountQuery,
   useGetAccountsQuery,
   useGetBudgetEntryQuery,
   useGetEntryOccurrencesQuery,
@@ -133,9 +134,18 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const entryLookup = useGetBudgetEntryQuery(entryId, { skip: entry !== undefined })
   const lookedUp = entryLookup.currentData
   const detailed: EditableEntry | undefined = entry ?? (lookedUp && isDetailed(lookedUp) ? lookedUp : undefined)
-  // The dashboard's arguments, so this reads the cache it already filled.
+  // The entry's accounts, for their currencies (and a card's statement cycle).
+  // One not in the first page of the list is looked up by id.
   const { data: accountsData, isLoading: accountsLoading } = useGetAccountsQuery({ limit: 200 })
   const accounts = useMemo(() => new Map((accountsData?.items ?? []).map((a) => [a.id, a])), [accountsData])
+  const sourceId = detailed?.account_id ?? null
+  const destinationId = detailed?.transfer_to_account_id ?? null
+  const sourceLookup = useGetAccountQuery(sourceId ?? 0, {
+    skip: accountsLoading || sourceId === null || accounts.has(sourceId),
+  })
+  const destinationLookup = useGetAccountQuery(destinationId ?? 0, {
+    skip: accountsLoading || destinationId === null || accounts.has(destinationId),
+  })
 
   const [materialize, { isLoading: submitting }] = useMaterializeBudgetEntryMutation()
   const [materializeDue, { isLoading: postingAll }] = useMaterializeDueBudgetEntryMutation()
@@ -196,8 +206,12 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const selected = occurrences.find((o) => o.occurrence_date === (selectedInput ?? defaultSelected)) ?? null
 
   const kind = listing?.kind ?? detailed?.kind ?? null
-  const source = detailed?.account_id !== undefined ? accounts.get(detailed.account_id) : undefined
-  const destination = detailed?.transfer_to_account_id != null ? accounts.get(detailed.transfer_to_account_id) : undefined
+  const source = sourceId !== null ? accounts.get(sourceId) ?? sourceLookup.currentData : undefined
+  const destination = destinationId !== null ? accounts.get(destinationId) ?? destinationLookup.currentData : undefined
+  // Until both currencies are known, a foreign charge can't be told from a plain one.
+  const accountsPending =
+    (sourceId !== null && source === undefined && !sourceLookup.error) ||
+    (destinationId !== null && destination === undefined && !destinationLookup.error)
   const chargedCurrency: CurrencyCode = source?.currency ?? detailed?.currency ?? 'PHP'
   const needsCharged = detailed !== undefined && source !== undefined && detailed.currency !== source.currency
   const needsReceived = destination !== undefined && destination.currency !== chargedCurrency
@@ -235,12 +249,15 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
     })
 
   const ambiguous = selected?.linked === 'ambiguous'
-  const loading = (occurrencesQuery.isFetching && !listing) || (detailed === undefined && !entryLookup.error) || accountsLoading
+  const loading =
+    (occurrencesQuery.isFetching && !listing) || (detailed === undefined && !entryLookup.error) || accountsLoading || accountsPending
   const loadError = occurrencesError && !(include && 'status' in occurrencesError && occurrencesError.status === 422)
     ? apiErrorMessage(occurrencesError) || "Couldn't load this entry's occurrences."
     : entryLookup.error
       ? apiErrorMessage(entryLookup.error) || "Couldn't load this entry."
-      : null
+      : sourceLookup.error || destinationLookup.error
+        ? apiErrorMessage(sourceLookup.error ?? destinationLookup.error) || "Couldn't load this entry's accounts."
+        : null
   const canSubmit = !loading && !loadError && selected !== null && !ambiguous && !busy
 
   // Each button is a recurring action; the row's kind and type decide which ones, and the opener's goes first.

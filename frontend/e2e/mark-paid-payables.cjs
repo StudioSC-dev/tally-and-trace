@@ -19,10 +19,14 @@
 //   (e) every materialise request body carries occurrence_date
 //   (f) an amount typed for one occurrence is cleared when another is chosen:
 //       a pending-linked occurrence shows a blank field and sends no amount
+//   (g) a USD expense on a PHP account missing from the accounts list: the
+//       dialog looks the account up by id and holds Mark paid until it has it,
+//       then asks for the PHP charge; a failed lookup shows an error and
+//       Mark paid stays disabled
 //
-// (b) to (f) open each dialog from the section's row for the entry, by name.
+// (b) to (g) open each dialog from the section's row for the entry, by name.
 //
-// Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -382,6 +386,79 @@ async function switchOccurrenceClearsAmount(browser) {
   await ctx.close()
 }
 
+// (g) The source account is not in the accounts list: looked up by id before Mark paid.
+async function missingSourceAccount(browser) {
+  console.log('\n=== (g) a foreign expense whose account is not in the accounts list')
+  const u = await makeUser('g')
+  const bank = await checking(u, 100000)
+  const today = manilaToday()
+  const sub = await expense(u, { name: 'Streaming', amount: 80, currency: 'USD', next_occurrence: wire(addDays(today, 3)), account_id: bank.id })
+  const accountPath = `/api/v1/accounts/${bank.id}`
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  // Every accounts list leaves the bank out, as if it were past the list's first page.
+  await page.route((url) => url.pathname.endsWith('/api/v1/accounts/'), async (route) => {
+    const res = await route.fetch()
+    const body = await res.json()
+    body.items = body.items.filter((a) => a.id !== bank.id)
+    await route.fulfill({ response: res, json: body })
+  })
+  await openTransactions(page)
+  const row = dueRows(page, 'Streaming').first()
+  // Lookups by id are held until released.
+  const held = []
+  let holding = true
+  await page.route((url) => url.pathname === accountPath, async (route) => {
+    if (holding) await new Promise((resolve) => held.push(resolve))
+    await route.continue()
+  })
+  const release = () => { holding = false; held.splice(0).forEach((resolve) => resolve()) }
+
+  const looked = page.waitForRequest((r) => new URL(r.url()).pathname === accountPath)
+  await row.locator('[data-testid="due-mark-paid"]').click()
+  await dialog(page).waitFor()
+  await looked
+  check('(g) the account is looked up by id', true, true)
+  check('(g) Mark paid is disabled until the account is known', await dialog(page).locator('[data-testid="mark-paid-submit"]').isDisabled(), true)
+  check('(g) no amount field before the currency is known', await dialog(page).locator('[data-testid="mark-paid-amount"]').count(), 0)
+  release()
+  const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
+  await amount.waitFor()
+  check('(g) the dialog asks for the charge in the account\'s currency',
+    (await dialog(page).locator(`label[for="${await amount.getAttribute('id')}"]`).textContent())?.trim(), 'Amount charged (PHP)')
+  await amount.fill('4640')
+  const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${sub.id}/materialize`))
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  const res = await done
+  check('(g) Mark paid sends the PHP charge', [res.status(), parseBody(res.request().postData() || '')?.amount], [201, 4640])
+  await dialog(page).waitFor({ state: 'detached' })
+  const txns = await entryTransactions(u, sub.id)
+  check('(g) the transaction is recorded in PHP', txns.map((t) => [t.currency, t.amount]), [['PHP', 4640]])
+  await ctx.close()
+
+  // A failed lookup: an error, and nothing to submit.
+  const second = await newPage(browser)
+  const p2 = second.page
+  const sub2 = await expense(u, { name: 'Cloud', amount: 20, currency: 'USD', next_occurrence: wire(addDays(today, 4)), account_id: bank.id })
+  await uiLogin(p2, u)
+  await p2.route((url) => url.pathname.endsWith('/api/v1/accounts/'), async (route) => {
+    const res2 = await route.fetch()
+    const body = await res2.json()
+    body.items = body.items.filter((a) => a.id !== bank.id)
+    await route.fulfill({ response: res2, json: body })
+  })
+  await p2.route((url) => url.pathname === accountPath, (route) => route.fulfill({ status: 500, json: { detail: 'Account lookup failed' } }))
+  await openTransactions(p2)
+  await dueRows(p2, 'Cloud').first().locator('[data-testid="due-mark-paid"]').click()
+  const loadError = dialog(p2).locator('[data-testid="mark-paid-load-error"]')
+  await loadError.waitFor()
+  check('(g) a failed lookup shows its error', (await loadError.textContent())?.trim(), 'Account lookup failed')
+  check('(g) Mark paid stays disabled', await dialog(p2).locator('[data-testid="mark-paid-submit"]').isDisabled(), true)
+  check('(g) nothing was recorded', (await entryTransactions(u, sub2.id)).length, 0)
+  await second.ctx.close()
+}
+
 // (e) Every materialise body named its occurrence.
 function everyBodyNamesItsOccurrence() {
   console.log('\n=== (e) every materialise request body carries occurrence_date')
@@ -403,6 +480,7 @@ function everyBodyNamesItsOccurrence() {
   if (run('d')) await loanPayment(browser)
   if (run('e')) everyBodyNamesItsOccurrence()
   if (run('f')) await switchOccurrenceClearsAmount(browser)
+  if (run('g')) await missingSourceAccount(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)
