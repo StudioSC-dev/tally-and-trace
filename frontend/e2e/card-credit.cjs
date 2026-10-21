@@ -17,8 +17,11 @@
 //   (e) the edit form stores a bank preset (BDO), its edited floor, and None clears it;
 //       Security Bank's empty effective date is handled
 //   (f) an editor and a viewer see no credit text, and /cards/{id}/credit is 404
+//   (g) charges dated later in the next 30 days come off on their date, are not in the
+//       headline, and show on their own line apart from the installment hold; a charge
+//       beyond the window counts nowhere
 //
-// Usage: node frontend/e2e/card-credit.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/card-credit.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -324,6 +327,62 @@ async function othersSeeNoCredit(browser) {
   }
 }
 
+// (g) Planned card charges come off on their date and show apart from the installment hold.
+async function plannedCharges(browser) {
+  console.log('\n=== (g) planned charges come off on their date and show apart from the installment hold')
+  const today = manilaToday()
+  const cardD = await card(owner, bank, 'Card D', 50000)
+  await expense(owner, {
+    name: 'Phone installment D', amount: 1000, next_occurrence: wire(addDays(today, 10)), account_id: cardD.id,
+    end_mode: 'after_occurrences', max_occurrences: 3,
+  })
+  const pending = (description, amount, day) => post(owner.token, '/transactions/', {
+    account_id: cardD.id, transaction_type: 'debit', amount, description,
+    transaction_date: wire(day), is_posted: false,
+  })
+  await pending('Today charge', 2000, today)
+  const planned = await pending('Planned charge', 4000, addDays(today, 7))
+  const far = await pending('Far charge', 8000, addDays(today, 40))
+  const subDay = addDays(today, 12)
+  const sub = await expense(owner, { name: 'Sub D', amount: 500, next_occurrence: wire(subDay), account_id: cardD.id })
+
+  const credit = await cardCredit(owner, cardD.id)
+  console.log(`    API: available_now ${credit.available_now}; pending ${credit.opening.pending_total}; planned ${credit.planned_charges_total}`)
+  check('(g) the API counts only the charge dated today',
+    [credit.opening.pending_total, credit.opening.installment_hold, credit.planned_charges_total, credit.available_now],
+    [2000, 3000, 4000, 45000])
+  const txnCheck = (id) => credit.checks.find((c) => c.source === 'transaction' && c.source_id === id)
+  check('(g) the planned charge comes off on its own date',
+    [txnCheck(planned.id)?.date, txnCheck(planned.id)?.available_after], [addDays(today, 7), 41000])
+  check('(g) the subscription after it sees the charge taken off',
+    credit.checks.find((c) => c.source === 'budget_entry' && c.source_id === sub.id)?.available_after, 40500)
+  check('(g) the charge beyond the window has no check', txnCheck(far.id), undefined)
+  const snapshot = (await get(owner.token, '/dashboard/snapshot')).card_charges.find((c) => c.account_id === cardD.id)
+  check('(g) the snapshot carries the same credit', snapshot?.credit, credit)
+
+  const plannedLine = `${peso(4000)} in charges dated later in the next 30 days, taken off on their dates`
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await settle(page)
+  const section = cardSection(page, 'Card D')
+  check('(g) the dashboard headline is the available figure',
+    (await section.locator('[data-testid="credit-available"]').textContent())?.trim(), `Available ${peso(45000)}`)
+  const held = (await section.locator('[data-testid="credit-held"]').textContent()) ?? ''
+  check('(g) the hold line names the installments and not the planned charge',
+    [held.includes(`Includes ${peso(3000)} held for installments`), held.includes('4,000')], [true, false])
+  check('(g) the dashboard shows the planned charges on their own line',
+    (await section.locator('[data-testid="credit-planned"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(), plannedLine)
+  await page.goto(`${stack.webUrl}/accounts/${cardD.id}`)
+  await page.locator('[data-testid="card-credit-panel"]').waitFor()
+  await settle(page)
+  const panel = page.locator('[data-testid="card-credit-panel"]')
+  check('(g) the account page shows the same line',
+    (await panel.locator('[data-testid="credit-planned"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(), plannedLine)
+  check('(g) the opening line says what is counted now',
+    (await panel.locator('[data-testid="card-credit-opening"]').textContent())?.includes(`pending counted now ${peso(2000)}`), true)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -336,6 +395,7 @@ async function othersSeeNoCredit(browser) {
   if (run('d')) await accountsRows(browser)
   if (run('e')) await ruleForm(browser)
   if (run('f')) await othersSeeNoCredit(browser)
+  if (run('g')) await plannedCharges(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

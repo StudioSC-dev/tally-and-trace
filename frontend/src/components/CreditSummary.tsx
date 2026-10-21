@@ -1,4 +1,4 @@
-import { availableCreditText, creditStatusText } from '@tally-trace/shared'
+import { availableCreditText, creditStatusText, plannedChargesText } from '@tally-trace/shared'
 import type { CardCredit, CreditCheck } from '@tally-trace/shared'
 import { formatCurrency } from '../utils/currency'
 
@@ -12,11 +12,13 @@ interface Props {
 /**
  * A card's available credit: the headline ("Available ₱X", or "at most" when something
  * is left out), the figure with the counted planned payments, and, in full, what the
- * figure already holds for installments and missed months. A planned payment is a
+ * figure already holds for installments and missed months, and the charges dated later
+ * in the next 30 days, which come off on their own dates. A planned payment is a
  * transfer into the card dated after today.
  */
 export function CreditSummary({ credit, compact = false }: Props) {
   const { available, withPlanned } = availableCreditText(credit)
+  const plannedCharges = plannedChargesText(credit)
   const missedMonths = credit.missed.reduce((sum, item) => sum + item.count, 0)
   const held = credit.opening.installment_hold
   const holds: string[] = []
@@ -33,6 +35,9 @@ export function CreditSummary({ credit, compact = false }: Props) {
       )}
       {!compact && holds.length > 0 && (
         <p className="text-xs text-muted" data-testid="credit-held">{holds.join(' · ')}</p>
+      )}
+      {!compact && plannedCharges && (
+        <p className="text-xs text-muted" data-testid="credit-planned">{plannedCharges}</p>
       )}
       {!compact && !credit.complete && (
         <p className="text-xs text-warn" data-testid="credit-incomplete">
