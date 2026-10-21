@@ -64,21 +64,14 @@ const addDays = (day: string, n: number): string => {
   return d.toISOString().slice(0, 10)
 }
 
+type TransactionsArgs = typeof accountingApi.endpoints.getTransactions.Types.QueryArg
+
 /**
- * The pending transactions with these ids: one cached query per batch of at most
- * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
- * transactions change, as a query hook would.
+ * One cached transactions query per entry of `batches` (memoise the array), merged in order.
+ * Each batch stays subscribed, so it refetches when transactions change, as a query hook would.
  */
-function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
+function useTransactionQueries(batches: readonly TransactionsArgs[]): { items: Transaction[]; failed: boolean; loading: boolean } {
   const dispatch = useDispatch<AppDispatch>()
-  const batches = useMemo(() => {
-    const out: { ids: number[]; is_posted: false; limit: number }[] = []
-    for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
-      const batch = ids.slice(start, start + IDS_PER_REQUEST)
-      out.push({ ids: batch, is_posted: false, limit: batch.length })
-    }
-    return out
-  }, [ids])
   useEffect(() => {
     const subscriptions = batches.map((args) => dispatch(accountingApi.endpoints.getTransactions.initiate(args)))
     return () => subscriptions.forEach((subscription) => subscription.unsubscribe())
@@ -89,9 +82,26 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
   return {
     items,
     failed: results.some((result) => result.error !== undefined),
-    // A batch with nothing yet (first load, or new ids): its rows are missing, not gone.
+    // A batch with nothing yet (first load, or new args): its rows are missing, not gone.
     loading: results.some((result) => result.data === undefined && result.error === undefined),
   }
+}
+
+/**
+ * The pending transactions with these ids: one cached query per batch of at most
+ * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
+ * transactions change, as a query hook would.
+ */
+function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
+  const batches = useMemo(() => {
+    const out: { ids: number[]; is_posted: false; limit: number }[] = []
+    for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
+      const batch = ids.slice(start, start + IDS_PER_REQUEST)
+      out.push({ ids: batch, is_posted: false, limit: batch.length })
+    }
+    return out
+  }, [ids])
+  return useTransactionQueries(batches)
 }
 
 interface Props {
