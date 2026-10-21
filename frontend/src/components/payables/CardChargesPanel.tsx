@@ -1,5 +1,5 @@
 import { creditCheckKey, formatEntryDate, isLimitedEvent } from '@tally-trace/shared'
-import type { CardCharges, CreditCheck, FullCharge, LimitedCharge } from '@tally-trace/shared'
+import type { CardCharges, CreditCheck, FullCharge, LimitedCharge, MissedCharge } from '@tally-trace/shared'
 import { CreditCheckBadge, CreditSummary } from '../CreditSummary'
 import { estimateText, estimateTitle } from '../../utils/fx'
 
@@ -15,6 +15,10 @@ const KIND_LABELS: Record<FullCharge['kind'], string> = {
   pending: 'Pending',
   advance: 'Cash advance',
 }
+
+/** Missed months nobody has recorded yet: a month with a pending linked row is already Charged. */
+const unrecorded = (card: CardCharges): Array<MissedCharge & { oldest_unlinked: string }> =>
+  card.missed.filter((m): m is MissedCharge & { oldest_unlinked: string } => m.unlinked_count > 0 && m.oldest_unlinked !== null)
 
 const chargeKey = (cardId: number, charge: FullCharge | LimitedCharge, index: number): string =>
   isLimitedEvent(charge)
@@ -75,14 +79,14 @@ export function CardChargesPanel({ cards }: Props) {
 
             {card.credit && <CreditSummary credit={card.credit} />}
 
-            {card.missed.length > 0 && (
+            {unrecorded(card).length > 0 && (
               <ul className="space-y-2" data-testid="card-missed">
-                {card.missed.map((item) => (
+                {unrecorded(card).map((item) => (
                   <li key={item.entry_id} className="flex items-start justify-between gap-3" data-testid="card-missed-row">
                     <div>
                       <p className="text-sm font-medium text-ink">{item.name}</p>
                       <p className="text-xs text-warn" data-testid="card-missed-text">
-                        {item.count} missed since {formatEntryDate(item.oldest)}
+                        {item.unlinked_count} missed since {formatEntryDate(item.oldest_unlinked)}
                       </p>
                     </div>
                   </li>

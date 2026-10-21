@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CardCredit, CreditCheck, CreditStatus } from '../types/api'
-import { availableCreditText, creditCheckKey, creditStatusText, entryCreditWarnings } from './cardCredit'
+import { availableCreditText, creditCheckKey, creditStatusText, entryCreditWarning, entryCreditWarnings } from './cardCredit'
 
 function check(over: Partial<CreditCheck> = {}): CreditCheck {
   return {
@@ -78,5 +78,70 @@ describe('entryCreditWarnings', () => {
       check({ source: 'transaction', source_id: 7, occurrence_date: null, status: 'at_risk' }),
     ]
     expect(entryCreditWarnings(checks, 7).map((c) => c.occurrence_date)).toEqual(['2027-04-12', '2027-05-12'])
+  })
+})
+
+describe('entryCreditWarning', () => {
+  it('returns null for no checks, and for only ok and installment checks', () => {
+    expect(entryCreditWarning([], 7)).toBeNull()
+    expect(entryCreditWarning([check({ status: 'ok' }), check({ status: 'installment' })], 7)).toBeNull()
+  })
+
+  // The more severe check is dated later, so date order cannot give the right answer.
+  const severity: Array<[CreditStatus, CreditStatus, number]> = [
+    ['at_risk', 'unchecked', 1],
+    ['unchecked', 'incomplete', 1],
+    ['incomplete', 'ok_with_planned', 0],
+  ]
+  it.each(severity)('%s beats %s in either input order', (severe, mild, more) => {
+    const a = check({ status: severe, date: '2027-04-20', occurrence_date: '2027-04-20' })
+    const b = check({ status: mild, date: '2027-04-05', occurrence_date: '2027-04-05' })
+    for (const input of [[a, b], [b, a]]) {
+      const got = entryCreditWarning(input, 7)
+      expect(got?.check).toBe(a)
+      expect(got?.more).toBe(more)
+    }
+  })
+
+  it('picks the earliest of two checks with the same status', () => {
+    const may = check({ status: 'at_risk', date: '2027-05-12', occurrence_date: '2027-05-12' })
+    const apr = check({ status: 'at_risk', date: '2027-04-12', occurrence_date: '2027-04-12' })
+    const got = entryCreditWarning([may, apr], 7)
+    expect(got?.check).toBe(apr)
+    expect(got?.more).toBe(1)
+  })
+
+  it('counts warnings only in more', () => {
+    const got = entryCreditWarning([
+      check({ status: 'at_risk', occurrence_date: '2027-04-01', date: '2027-04-01' }),
+      check({ status: 'incomplete', occurrence_date: '2027-04-08', date: '2027-04-08' }),
+      check({ status: 'ok_with_planned', occurrence_date: '2027-04-15', date: '2027-04-15' }),
+      check({ status: 'ok_with_planned', occurrence_date: '2027-04-22', date: '2027-04-22' }),
+    ], 7)
+    expect(got?.check.status).toBe('at_risk')
+    expect(got?.more).toBe(1)
+  })
+
+  it('ignores other entries and transaction checks with the same id', () => {
+    expect(entryCreditWarning([
+      check({ source_id: 8, status: 'at_risk' }),
+      check({ source: 'transaction', source_id: 7, status: 'at_risk', occurrence_date: null }),
+    ], 7)).toBeNull()
+  })
+
+  it('falls back to date when occurrence_date is null', () => {
+    const late = check({ status: 'at_risk', date: '2027-04-20', occurrence_date: null })
+    const early = check({ status: 'at_risk', date: '2027-04-05', occurrence_date: null })
+    expect(entryCreditWarning([late, early], 7)?.check).toBe(early)
+  })
+
+  it('does not change its input', () => {
+    const input = [
+      check({ status: 'incomplete', date: '2027-04-20', occurrence_date: '2027-04-20' }),
+      check({ status: 'at_risk', date: '2027-04-05', occurrence_date: '2027-04-05' }),
+    ]
+    const copy = structuredClone(input)
+    entryCreditWarning(input, 7)
+    expect(input).toEqual(copy)
   })
 })

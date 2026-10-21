@@ -3,6 +3,7 @@ import {
   useLazyGetAllocationsQuery,
   useLazyGetBudgetEntriesQuery,
   useGetAccountsQuery,
+  useGetCardCreditsQuery,
   useGetCategoriesQuery,
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
@@ -22,6 +23,7 @@ import {
   categoryOptionLabel,
   entryCalendarDate,
   formatEntryDate,
+  entryCreditWarning,
   isLimited,
   groupByKind,
   isOwnerFull,
@@ -29,16 +31,19 @@ import {
   RECURRING_ACTION_LABELS,
   recurringActionsFor,
 } from '@tally-trace/shared'
-import type { RecurringAction } from '@tally-trace/shared'
+import type { CardCredit, KindGroup, RecurringAction } from '@tally-trace/shared'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
+import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { formatCurrency, CurrencyCode } from '../utils/currency'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { WishlistPanel } from '../components/WishlistPanel'
 import { RecurringEntryFormModal } from '../components/RecurringEntryFormModal'
+import { EntryCreditWarningRow, KindCreditLines } from '../components/AllocationsCredit'
+import type { KindCreditState } from '../components/AllocationsCredit'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
@@ -297,6 +302,16 @@ export function AllocationsPage() {
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
   )
+  // Every mount fetches: Accounts holds this cache entry too, and its copy can predate Manila midnight.
+  const {
+    currentData: creditData,
+    error: creditError,
+    refetch: refetchCredit,
+  } = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated, refetchOnMountOrArgChange: true })
+  // The checks' window starts at Manila midnight, so refetch when the day turns.
+  useManilaDay(() => {
+    if (isAuthenticated) void refetchCredit()
+  })
   const { data: categoriesData } = useGetCategoriesQuery(
     { is_active: true },
     { skip: !isAuthenticated }
@@ -328,6 +343,12 @@ export function AllocationsPage() {
     accounts.forEach((account) => map.set(account.id, account))
     return map
   }, [accounts])
+  // The server fills this only for cards the caller owns or administers that have a limit.
+  const creditByCard = useMemo(() => {
+    const map = new Map<number, CardCredit>()
+    creditData?.items.forEach((credit) => map.set(credit.account_id, credit))
+    return map
+  }, [creditData])
   const categoriesById = useMemo(() => {
     const map = new Map<number, Category>()
     categories.forEach((category) => map.set(category.id, category))
@@ -1175,6 +1196,10 @@ export function AllocationsPage() {
       : undefined
     const allocation = isOwnerFull(entry) && entry.allocation_id ? allocationsById.get(entry.allocation_id) : undefined
     const cadenceLabel = formatScheduleLabel(entry.cadence, entry)
+    const creditWarning =
+      entry.is_active && (entry.kind === 'subscription' || entry.kind === 'bill') && entry.account_id !== undefined
+        ? entryCreditWarning(creditByCard.get(entry.account_id)?.checks ?? [], entry.id)
+        : null
     const amountLabel = formatAmount(entry.amount, entry.currency)
     const endDate = entry.end_date ? new Date(entry.end_date) : undefined
     // Installment "n of m". The backend decrements max_occurrences on each payment
@@ -1300,6 +1325,7 @@ export function AllocationsPage() {
             )}
             <TagChips tags={entry.tags} />
           </div>
+          {creditWarning && <EntryCreditWarningRow warning={creditWarning} />}
           {actions.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {actions.map((action) => (
@@ -1357,6 +1383,41 @@ export function AllocationsPage() {
     </section>
   )
 
+  // Active, non-limited entries of a group: the only ones a credit line or placeholder is about.
+  const creditEntries = (group: KindGroup): Array<FullBudgetEntry | SharedFullBudgetEntry> =>
+    group.entries.filter((e): e is FullBudgetEntry | SharedFullBudgetEntry => !isLimited(e) && e.is_active)
+
+  // Placeholders show only for a card the caller manages; a figure comes only from creditData.
+  const managesCredit = (accountId: number | undefined) => {
+    const account = accountId === undefined ? undefined : accountsById.get(accountId)
+    return !!account && account.account_type === 'credit' && account.permissions.can_edit_settings && account.credit_limit != null
+  }
+
+  const renderKindCredit = (group: KindGroup) => {
+    if (group.key !== 'subscription' && group.key !== 'bill') return null
+    const entries = creditEntries(group)
+    const cardIds = [
+      ...new Set(
+        entries.flatMap((e) => (e.account_id !== undefined && creditByCard.has(e.account_id) && accountsById.has(e.account_id) ? [e.account_id] : []))
+      ),
+    ].sort((a, b) => (accountsById.get(a)?.name ?? '').localeCompare(accountsById.get(b)?.name ?? '') || a - b)
+    let state: KindCreditState = 'hidden'
+    if (creditData) {
+      if (cardIds.length > 0) state = creditError ? 'ready-error' : 'ready'
+    } else if (entries.some((e) => managesCredit(e.account_id))) {
+      state = creditError ? 'error' : 'loading'
+    }
+    return (
+      <KindCreditLines
+        cardIds={cardIds}
+        accountsById={accountsById}
+        creditByCard={creditByCard}
+        state={state}
+        onRetry={() => void refetchCredit()}
+      />
+    )
+  }
+
   // Recurring entries by kind: subscriptions, card installments, cash expenses,
   // card-billed bills, then income and transfers, then what is shared with you.
   const renderRecurringKindSections = () => {
@@ -1377,6 +1438,7 @@ export function AllocationsPage() {
           <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
           <span className="text-sm text-muted">{group.entries.length}</span>
         </header>
+        {renderKindCredit(group)}
         <div className="grid grid-cols-1 gap-3">{group.entries.map(renderBudgetEntryCard)}</div>
       </section>
     ))
