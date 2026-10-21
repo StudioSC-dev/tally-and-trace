@@ -14,6 +14,9 @@ import {
   markPaidWireDate,
   omittedRuns,
   postAllDueRange,
+  RECORD_DATE_MIN,
+  recordDateError,
+  recordDateMax,
   RECURRING_ACTION_LABELS,
   recurringActionsFor,
   recurringDialogTitle,
@@ -275,6 +278,11 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
       setError('Choose the day it was paid')
       return
     }
+    const dateError = recordDateError(day)
+    if (dateError) {
+      setError(dateError)
+      return
+    }
     const data: BudgetEntryMaterializeInput = {
       occurrence_date: markPaidWireDate(selected.occurrence_date),
       transaction_date: markPaidWireDate(day),
@@ -425,6 +433,8 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
                       setDayInput(e.target.value)
                       setError(null)
                     }}
+                    min={RECORD_DATE_MIN}
+                    max={recordDateMax()}
                     className="input-field focus-ring"
                     data-testid="mark-paid-date"
                   />

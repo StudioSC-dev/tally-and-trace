@@ -8,34 +8,51 @@ figure is in the card's own currency K.
     available_now = limit - (balance_owed + pending_total + installment_hold + missed_total)
 
 1. ``balance_owed`` is ``-balance``: posted rows only.
-2. ``pending_total`` is every unposted row on the card, whatever its date:
-   debits at their face (a foreign face at the buffered live rate) and
-   transfers out of the card at amount plus fee. A row linked to a recurring
-   entry is counted here once and nowhere else.
+2. ``pending_total``: the unposted charges placed ``now`` (below), debits at
+   their face (a foreign face at the buffered live rate) and transfers out of
+   the card at amount plus fee. A row linked to a recurring entry is counted
+   at most once: here, or as a ``planned`` charge in the walk.
 3. ``installment_hold``: each active card installment's remaining occurrences
    from ``next_occurrence`` (the cap applied after clamped days merge), less
    those a linked row stands for, at the entry amount.
 4. ``missed_total``: each active subscription or bill's occurrences before
    today with no linked row, posted or pending, at the entry amount.
 
+**Placement** of each unposted charge (``_placement``), by its own day (the
+date part of ``transaction_date``) against Manila's today ``S``:
+
+- ``now``: dated today or earlier; or (the replacement exception) a linked
+  row whose occurrence the stream consumed for a held installment month or a
+  missed month (``replacing_ids``), whatever its date, since that month has
+  left the hold or the missed list. Counted in ``pending_total``.
+- ``planned``: otherwise, dated inside the window. Not in the opening; it
+  subtracts on its own day in the walk, and its figure is summed in
+  ``planned_charges_total`` (known rates only).
+- ``beyond``: otherwise (dated on or after ``E``). Ignored.
+
 **Walk** over ``[S, E)`` (Manila midnight, 30 days with the last included), in
 date order, a day's payments after its charges: subscription and bill
-occurrences with no linked row subtract; pending rows dated in the window and
-installment occurrences subtract 0 (the opening holds them); unposted
-transfers into the card (planned payments) dated in the window add. Each
-charge gets a check with ``available_after`` (counted planned payments
-included) and ``available_after_without_planned``.
+occurrences with no linked row and ``planned`` rows subtract; ``now`` rows
+dated in the window and installment occurrences subtract 0 (the opening holds
+them); unposted transfers into the card (planned payments) dated in the window
+add. Each charge gets a check with ``available_after`` (counted planned
+payments included) and ``available_after_without_planned``. A subtracting
+check is never short-circuited as an installment: a ``planned`` row linked to
+an installment carries its own kind (``pending`` or ``advance``).
 
 Every recurring occurrence comes from one stream, ``capped_distinct_days``
 (each calendar day once, a cap applied after merging), and each linked row
 (``_linked_rows`` with ``occurrence_match``) hides exactly one occurrence on
-its day, as ``unrecorded_occurrences`` consumes them.
+its day, as ``unrecorded_occurrences`` consumes them; on a day with several
+linked rows, posted rows are taken first, then by ascending id.
 
 A foreign figure is ``convert(face, rate x (1 + CARD_FX_BUFFER))`` at the
 request's live stored rate, never a row's own ``exchange_rate``; with no rate
-it is unknown (``unknown_count`` in the opening, ``unchecked`` in the walk).
-A row or entry the caller sees Limited is left out and counted in
-``uncounted_shared``; a Limited planned payment is neither counted nor listed.
+it is unknown (``unknown_count`` in the opening for a ``now`` row, ``unchecked``
+in the walk). A row or entry the caller sees Limited is left out and counted in
+``uncounted_shared`` (a ``planned`` Limited row marks checks from its day, a
+``beyond`` one is ignored); a Limited planned payment is neither counted nor
+listed.
 Anything uncounted at or before a check turns its ``ok`` or
 ``ok_with_planned`` into ``incomplete``.
 
@@ -44,10 +61,9 @@ card charges' selection.
 """
 from __future__ import annotations
 
-from collections import Counter
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -94,6 +110,15 @@ def _amount(value: Optional[Decimal]) -> Optional[float]:
 
 def _day(value) -> date:
     return fc._naive(value).date() if isinstance(value, datetime) else value
+
+
+def _placement(txn: Transaction, s_day: date, e_day: date, replacing_ids: Set[int]) -> str:
+    """``now``, ``planned`` or ``beyond`` for an unposted charge on the card
+    (see the module docstring), by its own day."""
+    day = _day(txn.transaction_date)
+    if day <= s_day or txn.id in replacing_ids:
+        return "now"
+    return "planned" if day < e_day else "beyond"
 
 
 class _Converter:
@@ -177,9 +202,12 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
         if is_kind_eligible(e)
         and entry_kind(e, cards[e.account_id]) in ("installment", "subscription", "bill")]
     redactor.prepare(list(rows) + entries)
-    linked = Counter((entry_id, fc._naive(when).date())
-                     for entry_id, when, _, _ in fc._linked_rows(
-                         db, [e.id for e in entries], occurrence_match=True))
+    # {(entry id, day): [transaction id]}: posted rows first, then by id.
+    linked: Dict[tuple, List[int]] = {}
+    for entry_id, when, txn_id, _ in sorted(
+            fc._linked_rows(db, [e.id for e in entries], occurrence_match=True),
+            key=lambda row: (not row[3], row[2])):
+        linked.setdefault((entry_id, fc._naive(when).date()), []).append(txn_id)
     entry_by_id = {e.id: e for e in entries}
 
     def view(record) -> str:
@@ -203,7 +231,8 @@ def _touches(txn: Transaction, card_id: int) -> bool:
 
 
 def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
-                 rows: List[Transaction], entries: List[BudgetEntry], linked: Counter,
+                 rows: List[Transaction], entries: List[BudgetEntry],
+                 linked: Dict[tuple, List[int]],
                  entry_by_id: Dict[int, BudgetEntry], view) -> dict:
     currency = fc._code(card.currency)
     money = _Converter(fx, currency)
@@ -212,6 +241,7 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
 
     balance_owed = -fc._money(card.balance or 0)
     pending_total = _ZERO
+    planned_charges = _ZERO
     hold = _ZERO
     missed_total = _ZERO
     unknown = 0
@@ -220,6 +250,25 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
     # (day, phase, order, payload)
     walk: List[tuple] = []
     planned: List[dict] = []
+
+    # --- streams: each entry's occurrences, less those a linked row takes -----
+    # A taken row replaces a held installment month or a missed month (before
+    # today) only there; it then counts now whatever its own date.
+    replacing_ids: Set[int] = set()
+    streams = []
+    for entry in entries:
+        installment = is_card_installment(entry, card)
+        occurrences = []
+        for occ in _stream(entry, end, whole=installment):
+            key = (entry.id, occ.date())
+            taken = linked.get(key)
+            if taken:
+                txn_id = taken.pop(0)
+                if installment or occ.date() < s_day:
+                    replacing_ids.add(txn_id)
+                continue
+            occurrences.append(occ.date())
+        streams.append((entry, installment, occurrences))
 
     # --- transactions ---------------------------------------------------------
     for txn in rows:
@@ -240,9 +289,15 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
             if reason is None:
                 walk.append((day, _PAYMENT, (0, txn.id), {"amount": amount}))
             continue
+        placement = _placement(txn, s_day, e_day, replacing_ids)
+        if placement == "beyond":
+            continue
         if record_view == LIMITED:
             uncounted_shared += 1
-            opening_uncounted = True
+            if placement == "now":
+                opening_uncounted = True
+            else:
+                walk.append((day, _MARK, (0, txn.id), None))
             continue
         if txn.transaction_type == TransactionType.DEBIT:
             face, face_currency = pending_face(txn)
@@ -254,7 +309,17 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
         entry = entry_by_id.get(txn.budget_entry_id) if txn.budget_entry_id else None
         if record_view == FULL and entry is not None and entry.account_id == card.id:
             # The caller made the row, so its link is theirs to see.
-            kind = entry_kind(entry, card) or kind
+            linked_kind = entry_kind(entry, card)
+            if not (placement == "planned" and linked_kind == "installment"):
+                kind = linked_kind or kind
+        if placement == "planned":
+            if figure is not None:
+                planned_charges += figure
+            walk.append((day, _CHARGE, (0, txn.id), {
+                "source": "transaction", "source_id": txn.id, "date": day,
+                "occurrence_date": None, "kind": kind, "amount": figure,
+                "subtract": True}))
+            continue
         if figure is None:
             unknown += 1
             opening_uncounted = True
@@ -268,16 +333,8 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
 
     # --- recurring entries ----------------------------------------------------
     missed: List[dict] = []
-    for entry in entries:
+    for entry, installment, occurrences in streams:
         kind = entry_kind(entry, card)
-        installment = is_card_installment(entry, card)
-        occurrences = []
-        for occ in _stream(entry, end, whole=installment):
-            key = (entry.id, occ.date())
-            if linked[key]:
-                linked[key] -= 1
-                continue
-            occurrences.append(occ.date())
         if view(entry) == LIMITED:
             # Left out: the opening when it holds or missed anything, else
             # every check from its first occurrence in the window.
@@ -340,7 +397,7 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
             continue
         figure = item["amount"]
         relies = None
-        if item["kind"] == "installment":
+        if item["kind"] == "installment" and not item["subtract"]:
             status = "installment"
             values = (after, without)
         elif figure is None:
@@ -393,6 +450,7 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
         "as_of": s_day.isoformat(),
         "available_now": _amount(available_now),
         "available_with_planned": _amount(with_planned),
+        "planned_charges_total": _amount(planned_charges),
         "planned_by": max(p["date"] for p in counted) if counted else None,
         "complete": unknown == 0 and uncounted_shared == 0,
         "uncounted_shared": uncounted_shared,

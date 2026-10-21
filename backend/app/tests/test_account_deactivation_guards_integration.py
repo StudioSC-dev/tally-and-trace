@@ -264,7 +264,9 @@ def test_a_recorded_occurrence_in_the_last_representable_year_ends_the_walk(
         account = sw["a_loan"]
         entry = _entry(sw_client, a, sw["a_private"], name="Loan payment", cadence="annual",
                        transfer_to_account_id=account, next_occurrence="9999-01-20T00:00:00")
-    r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize", {"advance": False})
+    # An in-range transaction date: the API bounds dates, and without one the 9999 occurrence would be used.
+    r = _call(sw_client, a, "POST", f"/budget-entries/{entry}/materialize",
+              {"advance": False, "transaction_date": _days_from_today(0)})
     assert r.status_code == 201, r.text
 
     r = _deactivate(sw_client, a, account, how)

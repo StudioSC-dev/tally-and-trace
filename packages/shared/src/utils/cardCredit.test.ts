@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CardCredit, CreditCheck, CreditStatus } from '../types/api'
-import { availableCreditText, creditCheckKey, creditStatusText, entryCreditWarning, entryCreditWarnings } from './cardCredit'
+import { availableCreditText, creditCheckKey, creditStatusText, entryCreditWarning, entryCreditWarnings, plannedChargesText } from './cardCredit'
 
 function check(over: Partial<CreditCheck> = {}): CreditCheck {
   return {
@@ -65,6 +65,26 @@ describe('availableCreditText', () => {
 
   it('has no planned line without a planned payment', () => {
     expect(availableCreditText({ ...credit, available_with_planned: 1851.1, planned_by: null }).withPlanned).toBeNull()
+  })
+})
+
+describe('plannedChargesText', () => {
+  it('reads the amount in the card currency', () => {
+    expect(plannedChargesText({ currency: 'PHP', planned_charges_total: 4000 })).toBe(
+      '₱4,000.00 in charges dated later in the next 30 days, taken off on their dates',
+    )
+    expect(plannedChargesText({ currency: 'USD', planned_charges_total: 4000 })).toBe(
+      '$4,000.00 in charges dated later in the next 30 days, taken off on their dates',
+    )
+  })
+
+  it('is null for zero', () => {
+    expect(plannedChargesText({ currency: 'PHP', planned_charges_total: 0 })).toBeNull()
+  })
+
+  it('is null when the field is missing', () => {
+    const missing = { currency: 'PHP' } as Pick<CardCredit, 'currency' | 'planned_charges_total'>
+    expect(plannedChargesText(missing)).toBeNull()
   })
 })
 

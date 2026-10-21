@@ -13,6 +13,7 @@ Pins the "typed + account-aware" behaviour:
 """
 import os
 import uuid
+from calendar import monthrange
 from decimal import Decimal
 
 import pytest
@@ -120,8 +121,15 @@ def test_categorised_transfer_moves_balances_and_stays_out_of_totals(client):
     before_checking = _balance(client, h, checking)
     before_savings = _balance(client, h, savings)
 
-    # Isolated future window so only our transfer falls in the summary period.
-    window = {"start_date": "2035-01-01T00:00:00", "end_date": "2035-01-31T23:59:59"}
+    # Isolated future window (the month four years ahead, inside the allowed
+    # date range) so only our transfer falls in the summary period.
+    from app.core.time import manila_today
+
+    ahead = manila_today()
+    first = ahead.replace(year=ahead.year + 4, month=ahead.month, day=1)
+    last = first.replace(day=monthrange(first.year, first.month)[1])
+    window = {"start_date": f"{first.isoformat()}T00:00:00",
+              "end_date": f"{last.isoformat()}T23:59:59"}
 
     def _summary():
         body = client.get(f"{API}/transactions/summary/period", headers=h, params=window).json()
@@ -138,7 +146,7 @@ def test_categorised_transfer_moves_balances_and_stays_out_of_totals(client):
         "amount": 1500.00,
         "transfer_fee": 25.00,
         "category_id": contribution["id"],
-        "transaction_date": "2035-01-15T00:00:00",
+        "transaction_date": f"{first.replace(day=15).isoformat()}T00:00:00",
         "is_posted": True,
         "description": "Monthly savings contribution",
     })

@@ -9,6 +9,9 @@ import {
   isPlannedPayment,
   NOTHING_DUE_NOTE,
   payChoices,
+  RECORD_DATE_MIN,
+  recordDateError,
+  recordDateMax,
 } from '@tally-trace/shared'
 import type { PayChoices } from '@tally-trace/shared'
 import { useGetAccountsQuery, useGetCardCreditQuery, usePayCardMutation } from '../store/api'
@@ -157,6 +160,11 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
     }
     if (!validDate) {
       setError('Choose the payment date')
+      return
+    }
+    const dateError = recordDateError(paymentDate)
+    if (dateError) {
+      setError(dateError)
       return
     }
     setError(null)
@@ -319,6 +327,8 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
                     setDateInput(e.target.value)
                     setError(null)
                   }}
+                  min={RECORD_DATE_MIN}
+                  max={recordDateMax()}
                   className="input-field focus-ring"
                   data-testid="card-pay-date"
                 />

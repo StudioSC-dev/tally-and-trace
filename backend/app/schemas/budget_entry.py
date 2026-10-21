@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
+from app.core.record_dates import check_record_date
 from app.schemas.access import AccountRef, RecordPermissions
 from app.schemas.transaction import TransactionOut
 from app.models.budget_entry import BudgetEntryType
@@ -226,6 +227,10 @@ class BudgetEntryMaterialize(BaseModel):
     # Required when the destination's currency differs from the source's.
     received_amount: Optional[float] = Field(None, ge=0)
 
+    @field_validator("transaction_date")
+    @classmethod
+    def _transaction_date_in_range(cls, v):
+        return check_record_date(v)
 
 
 class EntryOccurrence(BaseModel):
