@@ -7,8 +7,10 @@
 // Scenarios:
 //   (a) a card subscription is listed in the card section, not in the payables
 //       or "Also coming up" (nor is a foreign one, converted or not)
-//   (b) "N missed" is plain text on the dashboard; the section's Posted opens
-//       Mark paid and "Post all N due" clears the missed row (N read from the API)
+//   (b) "N missed" is plain text on the dashboard and counts only the months with no
+//       pending row (unlinked_count since oldest_unlinked); after Charged on the oldest
+//       missed month (b2) it counts one fewer; the section's Posted opens Mark paid and
+//       "Post all N due" clears the missed row (N read from the API)
 //   (c) an installment's Posted defaults to its occurrence date, with Charged
 //       beside it; another statement cycle's day shows the cycle warning
 //   (d) a viewer sees Limited rows and an overdue Limited row on the dashboard,
@@ -211,8 +213,8 @@ async function missedPostAll(browser) {
   console.log(`    anchor day ${anchor}; next_occurrence ${start}; current occurrence ${current}`)
   const spotify = await expense(u, { name: 'Spotify', amount: 279, next_occurrence: wire(start), anchor_day: anchor, account_id: visa.id })
 
-  const missed = (await snapshotCard(u, visa.id))?.missed.find((m) => m.entry_id === spotify.id)
-  console.log(`    snapshot missed: count ${missed?.count}; due_count ${missed?.due_count}; oldest ${missed?.oldest}`)
+  let missed = (await snapshotCard(u, visa.id))?.missed.find((m) => m.entry_id === spotify.id)
+  console.log(`    snapshot missed: count ${missed?.count}; unlinked ${missed?.unlinked_count}; due_count ${missed?.due_count}; oldest ${missed?.oldest}; oldest_unlinked ${missed?.oldest_unlinked}`)
   check('(b) the API reports missed months', (missed?.count ?? 0) >= 2, true)
 
   const { ctx, page } = await newPage(browser)
@@ -223,7 +225,21 @@ async function missedPostAll(browser) {
   check('(b) the missed row is listed', await missedRow.count(), 1)
   check('(b) it has no button', await missedRow.locator('button, [data-testid="card-missed-button"]').count(), 0)
   const missedText = missedRow.locator('[data-testid="card-missed-text"]')
-  check('(b) the plain text reads the API\'s count and oldest month', (await missedText.textContent())?.replace(/\s+/g, ' ').trim(), `${missed.count} missed since ${fmt(missed.oldest)}`)
+  check('(b) the plain text reads the API\'s unlinked count and oldest unlinked month', (await missedText.textContent())?.replace(/\s+/g, ' ').trim(), `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`)
+
+  // (b2) Charged on the oldest missed month leaves a pending row, which is no longer missed.
+  const charged = await api(u.token, 'POST', `/budget-entries/${spotify.id}/materialize`, {
+    occurrence_date: wire(missed.oldest), transaction_date: wire(missed.oldest), is_posted: false, advance: false,
+  })
+  check('(b2) Charged on the oldest missed month is 201', charged.status, 201)
+  const unchargedCount = missed.unlinked_count
+  missed = (await snapshotCard(u, visa.id))?.missed.find((m) => m.entry_id === spotify.id)
+  console.log(`    after Charged: count ${missed?.count}; unlinked ${missed?.unlinked_count}; oldest ${missed?.oldest}; oldest_unlinked ${missed?.oldest_unlinked}`)
+  check('(b2) the API still counts the Charged month in count, but not in unlinked_count', [missed.count > missed.unlinked_count, missed.unlinked_count], [true, unchargedCount - 1])
+  await page.reload()
+  await page.locator('[data-testid="card-charges"]').waitFor()
+  await settle(page)
+  check('(b2) the panel counts only the unrecorded months', (await missedText.textContent())?.replace(/\s+/g, ' ').trim(), `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`)
 
   await openTransactions(page)
   const dueMissed = dueRows(page, 'Spotify', 'missed')
@@ -233,12 +249,12 @@ async function missedPostAll(browser) {
   await dueMissed.locator('[data-testid="due-posted"]').click()
   const include = new URL((await asked).url()).searchParams.get('include')
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
-  check('(b) the dialog asked for the oldest missed month', include, missed.oldest)
+  check('(b) the dialog asked for the oldest unrecorded missed month', include, missed.oldest_unlinked)
   const listing = await get(u.token, `/budget-entries/${spotify.id}/occurrences?include=${include}`)
   const due = listing.occurrences.filter((o) => o.due && o.linked !== 'posted').map((o) => o.occurrence_date)
   console.log(`    /occurrences: due_unposted ${listing.due_unposted}; due ${due.join(', ')}`)
   check('(b) the API\'s due count matches the snapshot\'s', listing.due_unposted, missed.due_count)
-  check('(b) the dialog opens on the oldest month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), missed.oldest)
+  check('(b) the dialog opens on the oldest unrecorded month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), missed.oldest_unlinked)
   const postAll = dialog(page).locator('[data-testid="mark-paid-post-all"]')
   check('(b) the button shows the API\'s count and dates', (await postAll.textContent())?.trim(),
     `Post all ${listing.due_unposted} due (${fmt(due[0])} – ${fmt(due[due.length - 1])})`)
@@ -247,7 +263,10 @@ async function missedPostAll(browser) {
   await postAll.click()
   const res = await posted
   const result = await res.json()
-  check('(b) Post all due is 200 with N created', [res.status(), result.results.map((r) => r.outcome)], [200, Array(listing.due_unposted).fill('created')])
+  // The Charged month keeps its pending row, which Post all posts (posted_pending); the rest are created.
+  const expectedOutcomes = listing.occurrences.filter((o) => o.due && o.linked !== 'posted').map((o) => (o.linked === 'pending' ? 'posted_pending' : 'created'))
+  check('(b) Post all due is 200 with N results, the Charged month posted_pending', [res.status(), result.results.map((r) => r.outcome)], [200, expectedOutcomes])
+  check('(b) exactly one is posted_pending, and N is the API\'s due count', [expectedOutcomes.filter((o) => o === 'posted_pending').length, expectedOutcomes.length], [1, listing.due_unposted])
   await dialog(page).waitFor({ state: 'detached' })
   // The snapshot refetch can start after the network first goes idle, so wait on the row itself.
   await gone(dueMissed)
