@@ -1487,10 +1487,19 @@ export interface CardCredit {
   unknown_count: number
   opening: {
     balance_owed: number
+    /**
+     * Unposted charges dated today or earlier (Manila day), plus any future-dated row that
+     * stands in for an installment month the hold no longer counts or for a missed month.
+     */
     pending_total: number
     installment_hold: number
     missed_total: number
   }
+  /**
+   * Unposted charges dated after today and inside the 30-day window, with a known rate. Not in
+   * `available_now`; each comes off on its own date in `checks`.
+   */
+  planned_charges_total: number
   missed: CreditMissedEntry[]
   planned_payments: CreditPlannedPayment[]
   checks: CreditCheck[]

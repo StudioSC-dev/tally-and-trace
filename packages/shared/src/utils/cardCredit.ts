@@ -47,6 +47,17 @@ export function availableCreditText(credit: Pick<
   return { available, withPlanned }
 }
 
+/**
+ * The line for charges dated later in the 30-day outlook, which come off on their own dates
+ * and are not in the headline figure. Null when there are none (or the field is missing).
+ */
+export function plannedChargesText(
+  credit: Pick<CardCredit, 'currency' | 'planned_charges_total'>,
+): string | null {
+  if (!(credit.planned_charges_total > 0)) return null
+  return `${formatCurrency(credit.planned_charges_total, credit.currency)} in charges dated later in the next 30 days, taken off on their dates`
+}
+
 /** The non-ok checks for one budget entry, in date order. */
 export function entryCreditWarnings(checks: readonly CreditCheck[], entryId: number): CreditCheck[] {
   return checks
