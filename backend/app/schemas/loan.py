@@ -2,7 +2,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.record_dates import check_record_date
 
 
 class LoanPaymentCreate(BaseModel):
@@ -21,6 +23,11 @@ class LoanPaymentCreate(BaseModel):
     is_posted: bool = True
     description: Optional[str] = None
 
+    @field_validator("transaction_date")
+    @classmethod
+    def _transaction_date_in_range(cls, v):
+        return check_record_date(v)
+
 
 class LoanPrepaymentCreate(BaseModel):
     """Extra principal on a ``reduce_term`` loan (finite, at most 2 decimals)."""
@@ -29,3 +36,8 @@ class LoanPrepaymentCreate(BaseModel):
     transaction_date: Optional[datetime] = None  # default: now
     is_posted: bool = True
     description: Optional[str] = None
+
+    @field_validator("transaction_date")
+    @classmethod
+    def _transaction_date_in_range(cls, v):
+        return check_record_date(v)

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Annotated, Literal, Optional, List, Union
 from datetime import datetime
+from app.core.record_dates import check_record_date
 from app.schemas.access import AccountRef, RecordPermissions
 from app.models.transaction import TransactionType, RecurrenceFrequency
 from app.models.user import CurrencyType
@@ -45,6 +46,13 @@ class TransactionBase(BaseModel):
 class TransactionCreate(TransactionBase):
     tag_ids: TagIds = tag_ids_create_field()
 
+    # Here, not on ``TransactionBase``: ``TransactionFields`` (the response
+    # model) inherits that, and a stored row outside the range must stay readable.
+    @field_validator("transaction_date", "posting_date")
+    @classmethod
+    def _date_in_range(cls, v):
+        return check_record_date(v)
+
 class TransactionUpdate(BaseModel):
     account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
@@ -77,6 +85,11 @@ class TransactionUpdate(BaseModel):
     @classmethod
     def _tag_ids_not_null(cls, v):
         return tag_ids_not_null(v)
+
+    @field_validator("transaction_date", "posting_date")
+    @classmethod
+    def _date_in_range(cls, v):
+        return check_record_date(v)
 
 class TransactionFields(TransactionBase):
     """A transaction's stored fields as its creator sees them (no access fields)."""

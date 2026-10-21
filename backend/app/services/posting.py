@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core import locking
 from app.core.access import RecordAccess
+from app.core.record_dates import refuse_record_date
 from app.core.tags import copy_explicit_tags
 from app.core.time import manila_today, utc_now
 from app.models.account import Account
@@ -275,6 +276,10 @@ def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
         )
         transfer_fields = {}
 
+    if payload.transaction_date is None:
+        # The date is the server's own (the occurrence): a legacy schedule's
+        # old occurrence is a 422 here, not a ValidationError from the model.
+        refuse_record_date(occurrence)
     txn_create = TransactionCreate(
         account_id=entry.account_id,
         amount=amount,
@@ -473,6 +478,11 @@ def materialize_due(db: Session, entry, actor: User) -> List[Recorded]:
     recorded month. A 409 on any occurrence leaves the caller to roll back.
     """
     due = schedule_walk(entry, manila_today())
+    # Each due occurrence is posted on its own day, so one outside the allowed
+    # range refuses the whole request, before anything is written (Post N due
+    # on a decades-old schedule would otherwise write rows the bounds forbid).
+    for occ in due:
+        refuse_record_date(occ)
     days = {occ.date() for occ in due}
     pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
         db, [entry.id], occurrence_match=True)
