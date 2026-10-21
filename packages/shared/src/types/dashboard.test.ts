@@ -121,6 +121,7 @@ const snapshot = {
     },
   ],
   card_charges: [],
+  card_statements_due: [],
   missed: [],
   currencies: ['PHP', 'USD'],
   fx: {
@@ -132,8 +133,9 @@ const snapshot = {
 describe('DashboardSnapshot', () => {
   it('has exactly the keys routers/dashboard.py returns', () => {
     expect(Object.keys(snapshot).sort()).toEqual([
-      'account_closings', 'available_cash', 'balances', 'card_charges', 'currencies', 'forecast_next_3_months', 'fx',
-      'goals_progress', 'missed', 'monthly_summary', 'payables', 'upcoming_this_month', 'wishlist_next_up',
+      'account_closings', 'available_cash', 'balances', 'card_charges', 'card_statements_due', 'currencies',
+      'forecast_next_3_months', 'fx', 'goals_progress', 'missed', 'monthly_summary', 'payables', 'upcoming_this_month',
+      'wishlist_next_up',
     ])
   })
 

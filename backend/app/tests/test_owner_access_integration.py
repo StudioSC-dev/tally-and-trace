@@ -167,6 +167,14 @@ def _id_routes(w):
         ("delete", f"/accounts/{w['card']}", {}),
         ("get", f"/accounts/{w['bank']}/balance", {}),
         ("get", f"/accounts/{w['card']}/statements", {}),
+        ("get", f"/cards/{w['card']}/credit", {}),
+        # close_date is read as text after the access check, so the literal
+        # placeholder reaches the 404 like any date would.
+        ("put", f"/cards/{w['card']}/statements/{{close_date}}/minimum-due",
+         {"json": {"amount": 100}}),
+        ("delete", f"/cards/{w['card']}/statements/{{close_date}}/minimum-due", {}),
+        ("post", f"/cards/{w['card']}/payments",
+         {"json": {"amount": 100, "from_account_id": sb, "payment_date": "2026-10-05"}}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
         ("post", f"/accounts/{w['loan']}/loan-payment",
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),

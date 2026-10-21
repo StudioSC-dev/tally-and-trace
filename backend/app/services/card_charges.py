@@ -14,8 +14,13 @@ by where each charge comes from:
 
 Recurring card payments are not charges and recurring transfers out of a card
 stay refused, so neither is listed. A card is listed only when it has a charge
-or a missed item. The ``?tag=`` filter is ignored, and no total or
-credit-derived figure is returned.
+or a missed item. The ``?tag=`` filter is ignored, and no total is returned.
+
+Available credit (``credit``, services/card_credit.py) is attached only to a
+card in ``credit``, which the caller passes for the cards it may see credit on
+(owner or admin, with a limit); such a card is listed even with no charges.
+Nothing credit-derived reaches anyone else, and the charges themselves keep
+their shapes.
 
 A charge the caller sees Limited keeps only ``LimitedCharge``'s keys, with the
 response's shared public id (``PublicIds``), so one occurrence has one id across
@@ -83,12 +88,16 @@ class _Charge:
 
 def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
                          collector: fc.FxCollector, ids: fc.PublicIds,
-                         redactor: Redactor) -> List[dict]:
+                         redactor: Redactor,
+                         credit: Optional[Dict[int, dict]] = None) -> List[dict]:
     """``card_charges`` of the snapshot (see the module docstring).
 
     ``collector`` and ``ids`` are the snapshot's own, so the response's ``fx``
     covers these rows and a Limited occurrence keeps its id in every list.
+    ``credit`` is ``card_credit.credit_for_cards``' result: each card in it
+    gains its ``credit`` key.
     """
+    credit = credit or {}
     user_id = user.id
     accounts = fc.get_account_balances(db, user_id)
     cards = {a.id: a for a in accounts
@@ -189,16 +198,20 @@ def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
     for card in sorted(cards.values(), key=lambda a: (a.name, a.id)):
         rows = [c.full for c in charges if c.card_id == card.id]
         card_missed = missed.get(card.id, [])
-        if not rows and not card_missed:
+        card_credit = credit.get(card.id)
+        if not rows and not card_missed and card_credit is None:
             continue
-        out.append({
+        section = {
             "account_id": card.id,
             "account_name": card.name,
             "currency": fc._code(card.currency),
             "statement_cycle": resolve_cycle_fields(card) is not None,
             "missed": card_missed,
             "charges": rows,
-        })
+        }
+        if card_credit is not None:
+            section["credit"] = card_credit
+        out.append(section)
     return out
 
 

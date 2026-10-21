@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from typing import Optional
+from typing import List, Optional
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -30,11 +30,13 @@ from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
+from app.schemas.minimum_due import MinimumDuePresetOut, MinimumDueRule
 from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
+from app.services.minimum_due import PRESETS as MINIMUM_DUE_PRESETS
 from app.services.fx import FxRates, get_fx
 from app.services.statements import resolve_cycle_fields
-from app.core.time import naive_utc_now, utc_now
+from app.core.time import manila_midnight, naive_utc_now, utc_now
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -312,8 +314,8 @@ LOAN_PENDING_PAYMENT_DETAIL = (
 
 
 def _start_of_today() -> datetime:
-    """The projection's window start (``_upcoming_window``): today at midnight."""
-    return naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    """The projection's window start (``_upcoming_window``): Manila today at midnight."""
+    return manila_midnight()
 
 
 def _validate_deactivation(db: Session, current_user: User, data: dict,
@@ -387,7 +389,7 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
         ).all()
         if card_entries_still_bill(db, account, entries, _start_of_today()):
             raise HTTPException(status_code=400, detail=CARD_RECURRING_ENTRY_DETAIL)
-        history = statement_history(db, account, naive_utc_now(),
+        history = statement_history(db, account, manila_midnight(),
                                     viewable_account_ids(db, current_user))
         if any(statement["owed"] > 0 or statement["unconverted"] for statement in history):
             raise HTTPException(status_code=400, detail=CARD_OPEN_STATEMENT_DETAIL)
@@ -470,6 +472,25 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
         )
 
 
+def _validate_minimum_due_rule(data: dict, rule: Optional[MinimumDueRule],
+                               account: Optional[Account] = None) -> None:
+    """Store a validated rule as JSON; only a credit card may hold one.
+
+    ``rule`` is the request's parsed ``MinimumDueRule`` (``data`` holds its plain
+    dump). It is stored as ``rule.model_dump(mode="json")``, so its Decimals are
+    strings. A rule on an account whose resulting type is not a credit card is
+    refused, including a stored rule left on a card being changed to another type.
+    """
+    if "minimum_due_rule" in data:
+        data["minimum_due_rule"] = rule.model_dump(mode="json") if rule is not None else None
+        stored = data["minimum_due_rule"]
+    else:
+        stored = account.minimum_due_rule if account is not None else None
+    account_type = data.get("account_type", account.account_type if account else None)
+    if stored is not None and account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="Only a credit card has a minimum due rule")
+
+
 @router.get("/", response_model=AccountListResponse)
 def get_accounts(
     db: Session = Depends(get_db),
@@ -514,6 +535,16 @@ def get_accounts(
     return {"items": serialize_accounts(db, current_user, accounts), "total": total,
             "has_more": has_more}
 
+@router.get("/minimum-due-presets", response_model=List[MinimumDuePresetOut])
+def get_minimum_due_presets(current_user: User = Depends(get_current_active_user)):
+    """The bank presets for a card's minimum due rule (``app/services/minimum_due.py``).
+
+    Each is ``{key, label, effective_from, rule}``; the rule's Decimals are strings.
+    ``effective_from`` is empty when the bank's wording names no date.
+    """
+    return [preset.served() for preset in MINIMUM_DUE_PRESETS.values()]
+
+
 @router.post("/", response_model=AccountResponse)
 def create_account(
     account: AccountCreate,
@@ -528,6 +559,7 @@ def create_account(
     _validate_payment_routing(db, current_user, account_data)
     _validate_spending_wallet(db, account_data)
     _validate_loan(db, account_data)
+    _validate_minimum_due_rule(account_data, account.minimum_due_rule)
 
     db_account = Account(**account_data, user_id=current_user.id)
     db.add(db_account)
@@ -571,6 +603,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_card_loan_payments(db, current_user, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
+    _validate_minimum_due_rule(update_data, account_update.minimum_due_rule, db_account)
     for field, value in update_data.items():
         setattr(db_account, field, value)
 
@@ -704,7 +737,7 @@ def get_card_statements(
         raise HTTPException(status_code=400, detail="Account is not a credit card")
     role = account_role(current_user, card)
     limited = role not in EDIT_ROLES
-    history = statement_history(db, card, naive_utc_now(),
+    history = statement_history(db, card, manila_midnight(),
                                 viewable_account_ids(db, current_user), fx=fx)
     redactor = Redactor(db, current_user)
     redactor.prepare([line["transaction"] for s in history

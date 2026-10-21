@@ -432,12 +432,13 @@ def serialize_entry(db: Session, user, entry: BudgetEntry):
 
 
 # Account fields only an owner or admin is shown: loan terms, limits, the
-# description and routing ids. Every role sees the rest (name, type, currency,
-# balance, cycle days).
+# minimum due rule, the description and routing ids. Every role sees the rest
+# (name, type, currency, balance, cycle days).
 MANAGER_ONLY_ACCOUNT_FIELDS = (
-    "description", "credit_limit", "payment_account_id", "payment_overflow_account_id",
-    "loan_annual_rate", "loan_term_months", "loan_payment_amount", "loan_first_payment_date",
-    "loan_amortization", "loan_payments_made_offset",
+    "description", "credit_limit", "minimum_due_rule", "payment_account_id",
+    "payment_overflow_account_id", "loan_annual_rate", "loan_term_months",
+    "loan_payment_amount", "loan_first_payment_date", "loan_amortization",
+    "loan_payments_made_offset",
 )
 
 

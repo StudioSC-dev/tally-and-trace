@@ -25,7 +25,10 @@ from app.core.access import (
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import manila_today, naive_utc_now
+from app.core.time import manila_today, manila_wall_now
+# Unused here since the window moved to Manila, but tests pin the clock by
+# patching this module's ``naive_utc_now``.
+from app.core.time import naive_utc_now  # noqa: F401
 from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
     get_statement_payables, resolve_cycle_fields, statement_due_date,
@@ -248,8 +251,9 @@ LEGACY_PERIOD_KEYS = (
 
 
 def _month_boundaries(months: int, reference: Optional[datetime]) -> list:
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = start.replace(day=1)
     return [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
@@ -341,8 +345,9 @@ def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
 
 def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=days + 1)
 
@@ -2377,8 +2382,9 @@ def project_running_balance(
 
 
 def _timeline_window(days: int, reference: Optional[datetime]) -> tuple:
-    # Naive: compared against the naive next_occurrence / transaction_date columns.
-    now = reference or naive_utc_now()
+    # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
+    # compared against the naive next_occurrence / transaction_date columns.
+    now = reference or manila_wall_now()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=days)
 
@@ -2867,6 +2873,13 @@ def _occurrence_fields(e: dict, today: date) -> dict:
     return {"occurrence_date": occurrence.isoformat(), "overdue": occurrence < today}
 
 
+def _statement_fields(e: dict) -> dict:
+    """A card statement payable's close day (``statement_close``, ``YYYY-MM-DD``),
+    so the row can name its statement; nothing for any other payable."""
+    close = e.get("statement_close") if e["source"] == "statement" else None
+    return {"statement_close": _naive(close).date().isoformat()} if close is not None else {}
+
+
 def payables_by_currency(db: Session, user_id: int, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          fx: Optional[FxRates] = None,
@@ -2881,7 +2894,8 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     A full budget-entry payable also carries the occurrence it stands for
     (``occurrence_date``: its ``original_date`` when listed overdue on the
     window start, else its own day) and ``overdue``, that occurrence being
-    before today on the Manila calendar (``manila_today``)."""
+    before today on the Manila calendar (``manila_today``). A full card
+    statement payable carries its ``statement_close`` (``_statement_fields``)."""
     start, end = _upcoming_window(days, reference)
     today = manila_today()
     accounts = get_account_balances(db, user_id)
@@ -2927,6 +2941,7 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
             **(_occurrence_fields(e, today) if e["source"] == "budget_entry" else {}),
+            **_statement_fields(e),
         })
     public_ids = (ids or PublicIds()).assign([e for _, e in limited])
     for (position, e), public_id in zip(limited, public_ids):

@@ -3,7 +3,8 @@
 Each card the caller holds a direct role on lists its recurring expenses'
 occurrences, unposted debits (overdue ones included) and cash advances over the
 next 30 days from Manila midnight. Only a recurring entry's charge offers Mark
-paid; a Limited one keeps six keys and the response's shared public id. No
+paid; a Limited one keeps six keys and the response's shared public id. Only an
+owner or admin of a card with a limit gets its ``credit`` (Plan C); no other
 credit-derived figure is returned. Skips without a database.
 """
 import json
@@ -80,9 +81,12 @@ def _card_of(body, card_id):
     return next((c for c in body["card_charges"] if c["account_id"] == card_id), None)
 
 
-def _assert_shapes(card_charges):
+def _assert_shapes(card_charges, credit_cards=()):
+    """Plan A's shapes; ``credit`` only on ``credit_cards`` (Plan C), whose
+    contents are checked in test_card_credit_integration.py."""
     for card in card_charges:
-        assert set(card) == CARD_KEYS
+        expected = CARD_KEYS | {"credit"} if card["account_id"] in credit_cards else CARD_KEYS
+        assert set(card) == expected
         for item in card["missed"]:
             assert set(item) == MISSED_KEYS
         for charge in card["charges"]:
@@ -102,7 +106,7 @@ def _assert_shapes(card_charges):
             for v in node:
                 walk(v)
 
-    walk(card_charges)
+    walk([{k: v for k, v in card.items() if k != "credit"} for card in card_charges])
     assert not [k for k in keys if any(w in k for w in CREDIT_WORDS)], keys
 
 
@@ -362,11 +366,21 @@ def test_card_charges_per_role(sw, sw_client, sw_db, sw_people, monkeypatch):
 
     bodies = {k: _snapshot(client, w) for k, w in (("a", a), ("b", b), ("d", d), ("v", v),
                                                      ("c", c))}
+    # A and D (owner and admin) get the joint card's credit; A's own card with a
+    # limit is listed for A too, with no charges. B, V and C get no credit key.
+    credit_cards = {"a": {joint_card, sw["a_card"]}, "d": {joint_card}}
     for k, body in bodies.items():
-        _assert_shapes(body["card_charges"])
-        assert "77777" not in json.dumps(body["card_charges"])
-        if k != "a":
+        _assert_shapes(body["card_charges"], credit_cards.get(k, ()))
+        if k in credit_cards:
+            assert _card_of(body, joint_card)["credit"]["limit"] == 77_777.0
+        else:
+            assert "77777" not in json.dumps(body["card_charges"])
             assert sw_leaks(body["card_charges"], numbers=[77_777]) == []
+    assert [c["account_id"] for c in bodies["a"]["card_charges"]
+            if c["account_id"] == sw["a_card"]] == [sw["a_card"]]
+    assert _card_of(bodies["a"], sw["a_card"])["charges"] == []
+    for k in ("b", "v"):
+        assert "credit" not in _card_of(bodies[k], joint_card)
 
     # A: everything in full, and Netflix's Oct 10 is missed.
     section, full = charges(bodies["a"])
@@ -429,7 +443,9 @@ def test_card_charges_ignore_the_tag_filter(card_c, monkeypatch):
 
 def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, monkeypatch):
     """16:30 UTC on Oct 18 is 00:30 on Oct 19 in Manila: the card window runs from
-    Oct 19 to Nov 18 inclusive, while the (UTC) upcoming window still starts Oct 18."""
+    Oct 19 to Nov 18 inclusive, and so does the upcoming window, so the Oct 18 debit
+    is before its start and skipped there as an overdue card charge (it reaches cash
+    through its statement)."""
     client, me = sw_client, sw_people()
     checking = _account(client, me)
     card = _card(client, me, checking)
@@ -455,7 +471,7 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
          "can_mark_paid": True}]
     upcoming = [u for u in body["upcoming_this_month"]
                 if u.get("source") == "transaction" and u.get("source_id") == bookstore]
-    assert [u["due_date"] for u in upcoming] == ["2026-10-18"]
+    assert upcoming == []
 
     pin_clock(monkeypatch, REF)
     body = _snapshot(client, me)

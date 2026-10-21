@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+import app.core.time as time_module
 import app.routers.accounts as accounts_router
 from app.routers.accounts import (
     CARD_OPEN_STATEMENT_DETAIL,
@@ -33,6 +34,8 @@ DEACTIVATIONS = ["put", "delete"]
 @pytest.fixture(autouse=True)
 def _frozen_today(monkeypatch):
     monkeypatch.setattr(accounts_router, "naive_utc_now", lambda: TODAY)
+    # The guard's today is Manila midnight (``manila_midnight``), read from here.
+    monkeypatch.setattr(time_module, "naive_utc_now", lambda: TODAY)
 
 
 def _call(client, who, method, path, body=None):

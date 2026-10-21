@@ -4,6 +4,7 @@ from datetime import date, datetime
 from app.models.account import AccountType
 from app.models.user import CurrencyType
 from app.schemas.access import AccountPermissions
+from app.schemas.minimum_due import MinimumDueRule
 from app.schemas.tag import (
     TagIds, TagSummaries, tag_ids_create_field, tag_ids_not_null, tag_ids_update_field,
     tags_response_field,
@@ -36,6 +37,9 @@ class AccountBase(BaseModel):
     due_date: Optional[int] = Field(None, ge=1, le=31)  # Day of month (legacy support)
     billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)  # Day of month the statement closes
     days_until_due_date: Optional[int] = Field(21, ge=1, le=90)
+    # Credit cards only: how the bank works out the minimum amount due. Decimals
+    # are strings on the wire. Null for anyone but an owner or admin.
+    minimum_due_rule: Optional[MinimumDueRule] = None
     # Where the statement payment is funded from (primary -> overflow, as on budget entries).
     payment_account_id: Optional[int] = Field(None, gt=0)
     payment_overflow_account_id: Optional[int] = Field(None, gt=0)
@@ -67,6 +71,8 @@ class AccountUpdate(BaseModel):
     due_date: Optional[int] = Field(None, ge=1, le=31)
     billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)
     days_until_due_date: Optional[int] = Field(None, ge=1, le=90)
+    # Credit cards only; null clears the rule.
+    minimum_due_rule: Optional[MinimumDueRule] = None
     payment_account_id: Optional[int] = Field(None, gt=0)
     payment_overflow_account_id: Optional[int] = Field(None, gt=0)
     is_spending_wallet: Optional[bool] = None
@@ -118,10 +124,10 @@ class AccountFields(AccountBase):
 class DirectAccountResponse(AccountFields):
     """An account as a caller with a direct role sees it.
 
-    ``description``, ``credit_limit``, the routing ids and the loan terms are
-    null unless ``my_role`` is "owner" or "admin". ``is_shared`` is set only for
-    the owner (true when the account has an account share or carries the owner's
-    Household tag); null for every other role.
+    ``description``, ``credit_limit``, ``minimum_due_rule``, the routing ids and
+    the loan terms are null unless ``my_role`` is "owner" or "admin". ``is_shared``
+    is set only for the owner (true when the account has an account share or
+    carries the owner's Household tag); null for every other role.
     """
     my_role: Literal["owner", "admin", "editor", "viewer"]
     permissions: AccountPermissions

@@ -14,6 +14,7 @@ from app.models.tag import Tag as Tag
 from app.models.account_share import AccountShare as AccountShare
 from app.models.tag_share import TagShare as TagShare
 from app.models.fx_rate import FxRate as FxRate
+from app.models.card_statement_minimum import CardStatementMinimum as CardStatementMinimum
 
 # ---------------------------------------------------------------------------
 # User relationships

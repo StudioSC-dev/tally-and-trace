@@ -1,6 +1,6 @@
 from sqlalchemy import (
     CheckConstraint, Column, Integer, String, Numeric, Date, DateTime, Text, Boolean,
-    ForeignKey, Enum, text,
+    ForeignKey, Enum, JSON, text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -53,6 +53,10 @@ class Account(Base):
     due_date = Column(Integer, nullable=True)  # Day of month for due date (legacy support)
     billing_cycle_start = Column(Integer, nullable=True)  # Day of month the statement closes
     days_until_due_date = Column(Integer, nullable=True, default=21)
+    # How the bank works out the minimum amount due (credit cards only): a
+    # MinimumDueRule stored as rule.model_dump(mode="json"), so Decimals are
+    # strings; parsed back through the schema on read. Null means no rule.
+    minimum_due_rule = Column(JSON, nullable=True)
 
     # Where this card's statement payment is funded from. Mirrors the UC1
     # primary -> overflow routing on budget_entries: the statement draws on

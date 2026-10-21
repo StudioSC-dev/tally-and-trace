@@ -153,7 +153,7 @@ async function openTransactions(page) {
 }
 /** The section's recurring or missed rows for an entry, by name, on the page on screen; `kind` narrows to one. Reach one with showRow, count with rowsOf. */
 const dueRows = (page, name, kind) =>
-  page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"])'}`)
+  page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"]):not([data-kind="statement"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
 const gone = (locator) => locator.first().waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
 

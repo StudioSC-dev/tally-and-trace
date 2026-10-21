@@ -67,6 +67,11 @@ export interface Account {
    */
   description?: string | null
   credit_limit?: number | null
+  /**
+   * Credit cards: how the minimum amount due is estimated. Owner or admin only: null for
+   * an editor or viewer, absent for a tag viewer. Null also means no rule is set.
+   */
+  minimum_due_rule?: MinimumDueRule | null
   /** Day of month the payment is due. Legacy: prefer billing_cycle_start. */
   due_date?: number
   /** Day of month the statement closes. */
@@ -1040,6 +1045,8 @@ export interface Payable extends Partial<Estimate> {
   kind?: RecurringKind | null
   /** Snapshot budget-entry rows only: the caller can record this occurrence. */
   can_mark_paid?: boolean
+  /** Statement rows: the statement's close day (`YYYY-MM-DD`). */
+  statement_close?: string
 }
 
 export type PayableOrEvent = Payable | LimitedEvent
@@ -1368,6 +1375,32 @@ export interface RecurringMissed {
   can_mark_paid: boolean
 }
 
+/**
+ * One card's owed closed statement in `DashboardSnapshot.card_statements_due`: an
+ * active credit card the caller owns or administers, whose latest closed statement
+ * still has money owed and whose oldest owed statement is due within 30 days or
+ * overdue. Recorded figures only; the server makes every day decision (Manila).
+ */
+export interface CardStatementDue {
+  account_id: number
+  name: string
+  /** The card's currency, whatever account pays it. */
+  currency: CurrencyCode
+  /** The latest closed statement's close and due days (`YYYY-MM-DD`). */
+  close_date: string
+  due_date: string
+  /** What clears every closed statement through the latest one. */
+  clear_through: number
+  /** How many closed statements still have money owed. */
+  statement_count: number
+  /** The oldest owed statement's due day. */
+  oldest_due: string
+  /** Any owed statement is past its due day. */
+  overdue: boolean
+  /** Some foreign charge has no exchange rate, so `clear_through` may be low. */
+  incomplete: boolean
+}
+
 /** One card's upcoming charges in `DashboardSnapshot.card_charges`. */
 export interface CardCharges {
   account_id: number
@@ -1377,6 +1410,201 @@ export interface CardCharges {
   statement_cycle: boolean
   missed: MissedCharge[]
   charges: Array<FullCharge | LimitedCharge>
+  /** Owner or admin on a card with a limit only; the key is absent for everyone else. */
+  credit?: CardCredit
+}
+
+// ─── Available credit, minimum due and card payments ─────────────────────────
+
+/**
+ * How one upcoming item fares against the card's available credit. `incomplete`: something
+ * at or before the item is uncounted, so an ok can't be vouched for.
+ */
+export type CreditStatus = 'ok' | 'ok_with_planned' | 'at_risk' | 'installment' | 'unchecked' | 'incomplete'
+
+export type CreditCheckKind = 'installment' | 'subscription' | 'bill' | 'pending' | 'advance'
+
+/** One item in the next 30 days that the credit walk looked at. */
+export interface CreditCheck {
+  source: 'budget_entry' | 'transaction'
+  source_id: number
+  /** The item's date (`YYYY-MM-DD`). */
+  date: string
+  /** Budget-entry items: the occurrence this stands for. Null for a transaction. */
+  occurrence_date: string | null
+  kind: CreditCheckKind
+  /** In the card's currency; null when unchecked (no exchange rate). */
+  amount: number | null
+  available_after: number | null
+  available_after_without_planned: number | null
+  status: CreditStatus
+  /** `ok_with_planned` only: the date of the planned payment it relies on. */
+  relies_on_planned: string | null
+}
+
+export interface CreditMissedEntry {
+  entry_id: number
+  name: string
+  kind: 'subscription' | 'bill'
+  count: number
+  /** Null when the amount can't be converted. */
+  total: number | null
+}
+
+export interface CreditPlannedPayment {
+  date: string
+  amount: number
+  counted: boolean
+  /** Why a payment is not counted. */
+  reason: 'before_today' | 'after_window' | null
+}
+
+export interface CreditFxRate {
+  base: CurrencyCode
+  quote: CurrencyCode
+  rate: number
+  /** The rate with the 3% buffer applied. */
+  buffered_rate: number
+  as_of: string
+  stale: boolean
+}
+
+/** A card's available credit, in the card's currency. Owner and admin only. */
+export interface CardCredit {
+  account_id: number
+  currency: CurrencyCode
+  limit: number
+  as_of: string
+  /** The limit less everything recorded or already committed. */
+  available_now: number
+  /** `available_now` plus the counted planned payments. */
+  available_with_planned: number
+  /** The latest counted planned payment's date; null when there is none. */
+  planned_by: string | null
+  /** False when something is left out, so the figure is "at most". */
+  complete: boolean
+  uncounted_shared: number
+  unknown_count: number
+  opening: {
+    balance_owed: number
+    pending_total: number
+    installment_hold: number
+    missed_total: number
+  }
+  missed: CreditMissedEntry[]
+  planned_payments: CreditPlannedPayment[]
+  checks: CreditCheck[]
+  fx: CreditFxRate[]
+  fx_buffer_pct: number
+}
+
+/** Decimal fields travel as strings so no precision is lost. */
+export type MinimumDueTerm =
+  | 'installments'
+  | 'overdue'
+  | 'overlimit'
+  | 'annual_fee_twelfth'
+  | 'max_overdue_overlimit'
+
+export type MinimumDueBaseExclusion = 'installments' | 'overlimit' | 'overdue' | 'new_transactions'
+
+export type MinimumDuePresetKey = 'bdo' | 'bdo_installment' | 'metrobank' | 'security_bank' | 'hsbc' | 'custom'
+
+export type MinimumDueRounding = 'half_up' | 'down' | 'up'
+
+/** How a card's bank works out the minimum amount due (`accounts.minimum_due_rule`). */
+export interface MinimumDueRule {
+  version: 1
+  preset: MinimumDuePresetKey
+  /** Percent of the base, above 0 and at most 100. */
+  base_percent: string
+  base_excludes: MinimumDueBaseExclusion[]
+  installment_percent: string | null
+  /** Minimum per card currency. */
+  floor: Partial<Record<CurrencyCode, string>>
+  floored_terms: MinimumDueTerm[]
+  added_terms: MinimumDueTerm[]
+  annual_fee: string | null
+  rounding: MinimumDueRounding
+}
+
+/** GET /accounts/minimum-due-presets. */
+export interface MinimumDuePreset {
+  key: Exclude<MinimumDuePresetKey, 'custom'>
+  label: string
+  effective_from: string
+  rule: MinimumDueRule
+}
+
+/** What an estimate could not account for. */
+export type MinimumDueAssumption =
+  | 'fees_not_itemised'
+  | 'annual_fee_not_set'
+  | 'floor_not_set_for_currency'
+  | 'installments_linked_only'
+  | 'new_transactions_excluded'
+  | 'unconverted_lines_left_out'
+
+export interface MinimumDue {
+  /** Null when unavailable. */
+  amount: number | null
+  /** What is still to pay toward the minimum; null when unavailable. */
+  remaining: number | null
+  /** `statement`: entered from the bank's statement. `estimate`: from the card's rule. */
+  source: 'statement' | 'estimate' | 'unavailable'
+  reason: 'no_rule' | null
+  /** False when the estimate leaves something out. An override is complete. */
+  complete: boolean
+  assumptions: MinimumDueAssumption[]
+  /** Null when unavailable or entered from the statement. */
+  inputs: {
+    outstanding: number
+    installments: number
+    new_transactions: number
+    overdue: number
+    overlimit: number
+  } | null
+}
+
+/** One closed statement of a card. */
+export interface StatementDue {
+  close_date: string
+  due_date: string
+  status: 'open' | 'overdue' | 'paid'
+  owed: number
+  /** What clears this statement and every one before it. */
+  clear_through: number
+  outstanding: number
+  /** True when a foreign line has no rate, so `owed` and `clear_through` may be low. */
+  incomplete: boolean
+  minimum_due: MinimumDue
+}
+
+/** GET /cards/{id}/credit. Owner and admin only; anyone else gets 404. */
+export interface CardCreditDetail {
+  account_id: number
+  name: string
+  currency: CurrencyCode
+  /** Null when the card has no limit. */
+  credit: CardCredit | null
+  rule: MinimumDueRule | null
+  /** The six most recent closed statements plus any older one still owed, oldest first. */
+  statements: StatementDue[]
+  open_cycle: { close_date: string; due_date: string } | null
+}
+
+/** POST /cards/{id}/payments. Money has at most 2 decimals. */
+export interface CardPaymentInput {
+  amount: number
+  from_account_id: number
+  /** `YYYY-MM-DD`; a later day than today is a planned payment. */
+  payment_date: string
+  description?: string | null
+}
+
+/** PUT /cards/{id}/statements/{close_date}/minimum-due. */
+export interface StatementMinimumInput {
+  amount: number
 }
 
 /** GET /dashboard/snapshot, exactly as the backend returns it. */
@@ -1417,6 +1645,8 @@ export interface DashboardSnapshot {
   payables: PayableOrEvent[]
   /** Upcoming charges by card, for the caller's own cards. */
   card_charges: CardCharges[]
+  /** Owed closed statements of the cards the caller owns or administers. */
+  card_statements_due: CardStatementDue[]
   /** Missed recurring entries outside the card lists (the dashboard does not render it). */
   missed: RecurringMissed[]
   currencies: CurrencyCode[]

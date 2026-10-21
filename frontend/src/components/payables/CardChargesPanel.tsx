@@ -1,5 +1,6 @@
-import { formatEntryDate, isLimitedEvent } from '@tally-trace/shared'
-import type { CardCharges, FullCharge, LimitedCharge } from '@tally-trace/shared'
+import { creditCheckKey, formatEntryDate, isLimitedEvent } from '@tally-trace/shared'
+import type { CardCharges, CreditCheck, FullCharge, LimitedCharge } from '@tally-trace/shared'
+import { CreditCheckBadge, CreditSummary } from '../CreditSummary'
 import { estimateText, estimateTitle } from '../../utils/fx'
 
 interface Props {
@@ -20,6 +21,17 @@ const chargeKey = (cardId: number, charge: FullCharge | LimitedCharge, index: nu
     ? `${cardId}-${charge.public_id}-${index}`
     : `${cardId}-${charge.source}-${charge.source_id}-${charge.date}-${index}`
 
+/** The credit check for a charge, keyed on its entry occurrence or its own day. */
+const checkFor = (checks: readonly CreditCheck[], charge: FullCharge): CreditCheck | undefined => {
+  const key = creditCheckKey({
+    source: charge.source,
+    source_id: charge.source_id,
+    date: charge.original_date ?? charge.date,
+    occurrence_date: charge.occurrence_date,
+  })
+  return checks.find((check) => creditCheckKey(check) === key)
+}
+
 /** "Oct 18th, 2026", or "Oct 18th, 2026 · was due Oct 12th, 2026" for an overdue one. */
 const dayText = (charge: FullCharge | LimitedCharge): string =>
   charge.overdue && charge.original_date
@@ -31,7 +43,12 @@ const dayText = (charge: FullCharge | LimitedCharge): string =>
  * unposted card transactions and cash advances, plus any subscription or bill with
  * months nobody recorded. A card's charges reach cash through its statement, so they
  * are listed here rather than as payables; a card with no statement cycle keeps its
- * payables too. No total and no credit figure is shown.
+ * payables too. No total is shown.
+ *
+ * An owner or admin sees the card's available credit under its name (`credit`, which the
+ * API serves to no one else), and a badge on each charge the credit check flags: it would
+ * exceed available credit, is fine only with a planned payment, or could not be checked.
+ * A card with a limit is listed even with no charges, for that line alone.
  *
  * Read only: occurrences are recorded in the Due and overdue section of the Transactions
  * page. A charge the caller sees Limited shows its name and day only.
@@ -55,6 +72,8 @@ export function CardChargesPanel({ cards }: Props) {
                 {!card.statement_cycle && <span data-testid="card-charges-no-cycle"> · no statement cycle, also in payables</span>}
               </span>
             </div>
+
+            {card.credit && <CreditSummary credit={card.credit} />}
 
             {card.missed.length > 0 && (
               <ul className="space-y-2" data-testid="card-missed">
@@ -88,6 +107,7 @@ export function CardChargesPanel({ cards }: Props) {
                       </li>
                     )
                   }
+                  const check = card.credit ? checkFor(card.credit.checks, charge) : undefined
                   return (
                     <li
                       key={key}
@@ -102,6 +122,7 @@ export function CardChargesPanel({ cards }: Props) {
                           {dayText(charge)} · <span data-testid="card-charge-kind">{KIND_LABELS[charge.kind]}</span>
                           {charge.overdue && <span className="text-danger" data-testid="card-charge-overdue"> · Overdue</span>}
                         </p>
+                        {check && <CreditCheckBadge check={check} />}
                       </div>
                       <div className="text-right space-y-1 flex-shrink-0">
                         <p className="text-sm font-semibold text-ink" data-testid="card-charge-amount" title={estimateTitle(charge)}>

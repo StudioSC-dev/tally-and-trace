@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { listBounds, pageWindow, parsePage, parsePositiveId } from '@tally-trace/shared'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
 import { AccountTransactionList } from '../components/AccountTransactionList'
+import { CardCreditPanel } from '../components/CardCreditPanel'
 import { Pager } from '../components/Pager'
 import { TagChips } from '../components/TagChips'
 import { useAuth } from '../contexts/AuthContext'
@@ -26,7 +27,8 @@ const PAGE_SIZE = 25
 
 /**
  * One account: its header and balance, and the transactions that touch it (a transfer
- * shows on both of its accounts), newest first, a page at a time. Read-only.
+ * shows on both of its accounts), newest first, a page at a time. Read-only, except a
+ * credit card's credit panel for its owner or admin (statement minimums and Pay).
  */
 function AccountDetailPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth()
@@ -178,6 +180,8 @@ function AccountDetailPage() {
           </p>
         )}
       </div>
+
+      {account.account_type === 'credit' && account.permissions.can_edit_settings && <CardCreditPanel account={account} />}
 
       <section className="space-y-3" data-testid="account-transactions">
         <div>
