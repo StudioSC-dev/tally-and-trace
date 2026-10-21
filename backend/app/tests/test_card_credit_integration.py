@@ -28,7 +28,7 @@ REF = datetime(2027, 3, 18, 2, 0)
 CREDIT_KEYS = {"account_id", "currency", "limit", "as_of", "available_now",
                "available_with_planned", "planned_by", "complete", "uncounted_shared",
                "unknown_count", "opening", "missed", "planned_payments", "checks", "fx",
-               "fx_buffer_pct"}
+               "fx_buffer_pct", "planned_charges_total"}
 CHECK_KEYS = {"source", "source_id", "date", "occurrence_date", "kind", "amount",
               "available_after", "available_after_without_planned", "status",
               "relies_on_planned"}
@@ -205,10 +205,11 @@ def test_available_credit_walk(walk, sw_db):
     credit = _credit(client, me, card)
     assert (credit["account_id"], credit["currency"], credit["limit"], credit["as_of"]) == (
         card, "PHP", 128_000.0, "2027-03-18")
-    assert credit["opening"] == {"balance_owed": 24_000.0, "pending_total": 2_148.9,
+    assert credit["opening"] == {"balance_owed": 24_000.0, "pending_total": 1_500.0,
                                  "installment_hold": 100_000.0, "missed_total": 0.0}
-    assert credit["available_now"] == 1_851.1
-    assert (credit["available_with_planned"], credit["planned_by"]) == (11_851.1, "2027-04-01")
+    assert credit["available_now"] == 2_500.0
+    assert credit["planned_charges_total"] == 648.9
+    assert (credit["available_with_planned"], credit["planned_by"]) == (12_500.0, "2027-04-01")
     assert (credit["complete"], credit["uncounted_shared"], credit["unknown_count"],
             credit["missed"]) == (True, 0, 0, [])
     assert credit["planned_payments"] == [
@@ -218,8 +219,8 @@ def test_available_credit_walk(walk, sw_db):
         ("budget_entry", w["fridge"]), ("budget_entry", w["music"]),
         ("budget_entry", w["phone"])]
     assert [_row(c) for c in credit["checks"]] == [
-        ("2027-03-18", "pending", 500.0, 1_851.1, 1_851.1, "ok", None),
-        ("2027-03-20", "subscription", 1_297.8, 553.3, 553.3, "ok", None),
+        ("2027-03-18", "pending", 500.0, 2_500.0, 2_500.0, "ok", None),
+        ("2027-03-20", "subscription", 1_297.8, 1_202.2, 1_202.2, "ok", None),
         ("2027-03-22", "pending", 648.9, 553.3, 553.3, "ok", None),
         ("2027-04-05", "installment", 5_000.0, 10_553.3, 553.3, "installment", None),
         ("2027-04-10", "subscription", 549.0, 10_004.3, 4.3, "ok", None),
@@ -239,13 +240,41 @@ def test_available_credit_walk(walk, sw_db):
     assert _listed(client, me)["items"][0] == credit
 
 
-def test_pending_row_after_the_window_is_reserved(walk):
+def test_pending_row_after_the_window_is_not_counted(walk):
     w = walk
     late = _debit(w["client"], w["me"], w["card"], "2027-04-25", 700, "Late order")
     credit = _credit(w["client"], w["me"], w["card"])
-    assert credit["available_now"] == 1_151.1
-    assert credit["opening"]["pending_total"] == 2_848.9
+    assert credit["available_now"] == 2_500.0
+    assert credit["opening"]["pending_total"] == 1_500.0
     assert _checks(credit, "transaction", late) == []
+    assert credit["planned_charges_total"] == 648.9
+
+
+def test_future_pending_row_comes_off_on_its_date(walk):
+    w = walk
+    credit = _credit(w["client"], w["me"], w["card"])
+    # Mar 15 (1,000) and Mar 18 (500) are counted now; Mar 22 (USD 10 -> 648.9) is not.
+    assert credit["opening"]["pending_total"] == 1_500.0
+    (online,) = _checks(credit, "transaction", w["online"])
+    index = credit["checks"].index(online)
+    before = credit["checks"][index - 1]
+    assert (before["source_id"], before["available_after"]) == (w["cloud"], 1_202.2)
+    assert (online["kind"], online["amount"], online["status"]) == ("pending", 648.9, "ok")
+    assert online["available_after"] == round(before["available_after"] - 648.9, 2) == 553.3
+    assert credit["planned_charges_total"] == 648.9
+
+
+def test_future_charge_puts_a_later_subscription_at_risk(walk):
+    w = walk
+    soon = _debit(w["client"], w["me"], w["card"], "2027-03-19", 1_500, "Furniture")
+    credit = _credit(w["client"], w["me"], w["card"])
+    assert credit["available_now"] == 2_500.0
+    (check,) = _checks(credit, "transaction", soon)
+    assert (check["date"], check["available_after"], check["status"]) == (
+        "2027-03-19", 1_000.0, "ok")
+    (cloud,) = _checks(credit, "budget_entry", w["cloud"])
+    assert (cloud["date"], cloud["available_after"], cloud["status"]) == (
+        "2027-03-20", -297.8, "at_risk")
 
 
 def test_expired_planned_payment_does_not_count(walk):
@@ -255,7 +284,7 @@ def test_expired_planned_payment_does_not_count(walk):
     assert credit["planned_payments"] == [
         {"date": "2027-03-10", "amount": 10_000.0, "counted": False, "reason": "before_today"}]
     assert (credit["available_now"], credit["available_with_planned"],
-            credit["planned_by"]) == (1_851.1, 1_851.1, None)
+            credit["planned_by"]) == (2_500.0, 2_500.0, None)
     (phone,) = _checks(credit, "budget_entry", w["phone"])
     assert (phone["status"], phone["available_after"],
             phone["available_after_without_planned"]) == ("at_risk", -1_794.7, -1_794.7)
@@ -268,7 +297,7 @@ def test_payment_after_the_window_is_listed_not_counted(walk):
     assert credit["planned_payments"] == [
         {"date": "2027-04-20", "amount": 10_000.0, "counted": False, "reason": "after_window"}]
     assert (credit["available_now"], credit["available_with_planned"],
-            credit["planned_by"]) == (1_851.1, 1_851.1, None)
+            credit["planned_by"]) == (2_500.0, 2_500.0, None)
     (phone,) = _checks(credit, "budget_entry", w["phone"])
     assert (phone["status"], phone["available_after"]) == ("at_risk", -1_794.7)
 
@@ -401,33 +430,152 @@ def test_posting_an_installment_month_leaves_available_credit_unchanged(
     assert credit["available_now"] == 90_000.0
     assert _checks(credit, "transaction", row) == []
 
-    # Deactivating Bike: the pending row stays reserved and nothing is held.
+    # Deactivating Bike: nothing is held and the Apr 5 row replaces nothing, so it
+    # comes off on its own date.
     me, card, bike, row = _bike(client, sw_people, monkeypatch, sw_db)
     r = client.put(f"{API}/budget-entries/{bike}", json={"is_active": False},
                    headers=me["headers"])
     assert r.status_code == 200, r.text
     credit = _credit(client, me, card)
     assert (credit["available_now"], credit["opening"]["pending_total"],
-            credit["opening"]["installment_hold"]) == (95_000.0, 5_000.0, 0.0)
+            credit["opening"]["installment_hold"]) == (100_000.0, 0.0, 0.0)
+    assert credit["planned_charges_total"] == 5_000.0
+
+
+def test_rows_replacing_a_held_or_missed_month_keep_counting(
+        sw_client, sw_people, sw_db, monkeypatch):
+    """Regression guard (passes before and after STU-404): a future-dated row
+    whose key the stream consumed for a held installment month or a missed
+    month stays counted now, or that month would vanish from both figures."""
+    client = sw_client
+    # The Apr 5 Bike row stands for the held Apr 5 month.
+    me, card, bike, row = _bike(client, sw_people, monkeypatch, sw_db)
+    credit = _credit(client, me, card)
+    assert credit["opening"]["pending_total"] == 5_000.0
+    assert credit["opening"]["installment_hold"] == 5_000.0
+    assert credit["available_now"] == 90_000.0
+
+    # A row dated Apr 20 (after the window) standing for the missed Mar 10 Music month.
+    w = _world(client, sw_people, monkeypatch, music_next="2027-02-10")
+    row = _debit(client, w["me"], w["card"], "2027-04-20", 549, "Music Plus",
+                 budget_entry_id=w["music"])
+    _set_row(sw_db, row, occurrence_date=datetime(2027, 3, 10))
+    credit = _credit(client, w["me"], w["card"])
+    assert [(m["count"], m["total"]) for m in credit["missed"]] == [(1, 549.0)]
+    assert credit["opening"]["pending_total"] == 549.0
+    assert credit["available_now"] == 128_000.0 - 1_098.0
+    assert _checks(credit, "transaction", row) == []
+
+    # A row dated Mar 15 (before today) for Music Plus's May 10 month, which is never
+    # streamed: counted now because of its own date, with no check.
+    w = _world(client, sw_people, monkeypatch)
+    row = _debit(client, w["me"], w["card"], "2027-03-15", 549, "Music Plus",
+                 budget_entry_id=w["music"])
+    _set_row(sw_db, row, occurrence_date=datetime(2027, 5, 10))
+    credit = _credit(client, w["me"], w["card"])
+    assert credit["opening"]["pending_total"] == 549.0
+    assert credit["available_now"] == 128_000.0 - 549.0
+    assert _checks(credit, "transaction", row) == []
+
+
+def test_linked_rows_that_replace_no_held_or_missed_month_follow_their_date(
+        sw_client, sw_people, sw_db, monkeypatch):
+    client = sw_client
+    # Off-schedule: a row for Apr 6 on an installment that falls on the 5th.
+    me, card, bike, row = _bike(client, sw_people, monkeypatch, sw_db, row_day="2027-04-06")
+    _set_row(sw_db, row, occurrence_date=datetime(2027, 4, 6))
+    credit = _credit(client, me, card)
+    assert credit["opening"]["installment_hold"] == 10_000.0
+    assert credit["opening"]["pending_total"] == 0.0
+    assert credit["available_now"] == 90_000.0
+    (check,) = _checks(credit, "transaction", row)
+    index = credit["checks"].index(check)
+    before = credit["checks"][index - 1]
+    assert (before["source_id"], before["date"], before["available_after"]) == (
+        bike, "2027-04-05", 90_000.0)
+    assert (check["date"], check["kind"], check["status"], check["available_after"]) == (
+        "2027-04-06", "pending", "ok", 85_000.0)
+    assert credit["planned_charges_total"] == 5_000.0
+
+    # Posted and pending on one key: the posted row takes the Apr 5 month even
+    # though the pending row was recorded first, so the pending row follows its
+    # own date (Apr 8).
+    pin_clock(monkeypatch, REF)
+    me = sw_people()
+    card = _card(client, me, "Card B", limit=100_000)
+    bike = _entry(client, me, card, "2027-04-05", 5_000, "Bike",
+                  end_mode="after_occurrences", max_occurrences=2)["id"]
+    pending = _debit(client, me, card, "2027-04-08", 5_000, "Bike", budget_entry_id=bike)
+    posted = _debit(client, me, card, "2027-03-10", 5_000, "Bike", posted=True,
+                    budget_entry_id=bike)
+    for txn in (pending, posted):
+        _set_row(sw_db, txn, occurrence_date=datetime(2027, 4, 5))
+    credit = _credit(client, me, card)
+    assert credit["opening"] == {"balance_owed": 5_000.0, "pending_total": 0.0,
+                                 "installment_hold": 5_000.0, "missed_total": 0.0}
+    assert credit["available_now"] == 90_000.0
+    assert [(c["source"], c["source_id"]) for c in credit["checks"]] == [
+        ("transaction", pending)]
+    (check,) = credit["checks"]
+    assert (check["date"], check["kind"], check["status"], check["available_after"]) == (
+        "2027-04-08", "pending", "ok", 85_000.0)
+    assert credit["planned_charges_total"] == 5_000.0
+
+    # A row for Cloud Tools' in-window Mar 20 month, dated Apr 25 (after the window):
+    # the occurrence is consumed as before, and the row counts nowhere.
+    w = _walk_rows(_world(client, sw_people, monkeypatch), sw_db)
+    row = _debit(client, w["me"], w["card"], "2027-04-25", 1_300, "Cloud Tools",
+                 budget_entry_id=w["cloud"])
+    _set_row(sw_db, row, occurrence_date=datetime(2027, 3, 20))
+    credit = _credit(client, w["me"], w["card"])
+    assert credit["opening"]["pending_total"] == 1_500.0
+    assert credit["available_now"] == 2_500.0
+    assert _checks(credit, "transaction", row) == []
+    assert _checks(credit, "budget_entry", w["cloud"]) == []
+    assert [(c["date"], c["available_after"], c["status"]) for c in credit["checks"]] == [
+        ("2027-03-18", 2_500.0, "ok"), ("2027-03-22", 1_851.1, "ok"),
+        ("2027-04-05", 1_851.1, "installment"), ("2027-04-10", 1_302.1, "ok"),
+        ("2027-04-12", -496.9, "at_risk")]
+    assert credit["planned_charges_total"] == 648.9
+
+    # The same row dated Mar 30: planned, taken off on its date.
+    w = _walk_rows(_world(client, sw_people, monkeypatch), sw_db)
+    row = _debit(client, w["me"], w["card"], "2027-03-30", 1_300, "Cloud Tools",
+                 budget_entry_id=w["cloud"])
+    _set_row(sw_db, row, occurrence_date=datetime(2027, 3, 20))
+    credit = _credit(client, w["me"], w["card"])
+    assert credit["opening"]["pending_total"] == 1_500.0
+    assert credit["available_now"] == 2_500.0
+    assert _checks(credit, "budget_entry", w["cloud"]) == []
+    (check,) = _checks(credit, "transaction", row)
+    assert (check["date"], check["kind"], check["amount"], check["available_after"],
+            check["status"]) == ("2027-03-30", "subscription", 1_300.0, 551.1, "ok")
+    assert credit["planned_charges_total"] == 1_948.9
 
 
 # --- advances, transfers, refunds -------------------------------------------------------------
 
 def test_pending_advance_reserves_amount_plus_fee(sw_client, sw_people, monkeypatch):
-    for day, has_check in (("2027-03-25", True), ("2027-03-10", False)):
-        w = _world(sw_client, sw_people, monkeypatch)
-        adv = _transfer(sw_client, w["me"], w["card"], w["checking"], day, 2_000, fee=100,
-                        description="Cash advance")
-        credit = _credit(sw_client, w["me"], w["card"])
-        assert credit["opening"]["pending_total"] == 2_100.0, day
-        assert credit["available_now"] == 125_900.0, day
-        checks = _checks(credit, "transaction", adv)
-        assert bool(checks) is has_check, day
-        if has_check:
-            (check,) = checks
-            # After Cloud Tools on Mar 20; the advance itself subtracts nothing more.
-            assert (check["kind"], check["amount"], check["available_after"]) == (
-                "advance", 2_100.0, 125_900.0 - 1_297.8)
+    # Mar 25 is planned: out of the opening, taken off on its date at amount plus fee.
+    w = _world(sw_client, sw_people, monkeypatch)
+    adv = _transfer(sw_client, w["me"], w["card"], w["checking"], "2027-03-25", 2_000,
+                    fee=100, description="Cash advance")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert credit["opening"]["pending_total"] == 0.0
+    assert credit["available_now"] == 128_000.0
+    (check,) = _checks(credit, "transaction", adv)
+    # After Cloud Tools on Mar 20.
+    assert (check["kind"], check["amount"], check["available_after"]) == (
+        "advance", 2_100.0, round(128_000.0 - 1_297.8 - 2_100.0, 2))
+
+    # Mar 10 is dated before today: counted now, with no check.
+    w = _world(sw_client, sw_people, monkeypatch)
+    adv = _transfer(sw_client, w["me"], w["card"], w["checking"], "2027-03-10", 2_000,
+                    fee=100, description="Cash advance")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert credit["opening"]["pending_total"] == 2_100.0
+    assert credit["available_now"] == 125_900.0
+    assert _checks(credit, "transaction", adv) == []
 
 
 def test_card_to_card_transfer_consumes_source_and_plans_destination(world):
@@ -437,8 +585,11 @@ def test_card_to_card_transfer_consumes_source_and_plans_destination(world):
     move = _transfer(client, me, w["card"], card_d, "2027-03-25", 3_000,
                      description="Balance move")
     c = _credit(client, me, w["card"])
-    assert c["available_now"] == 125_000.0
-    assert [ch["kind"] for ch in _checks(c, "transaction", move)] == ["advance"]
+    assert c["available_now"] == 128_000.0
+    # Planned: subtracts on Mar 25, after Cloud Tools on Mar 20.
+    assert [(ch["kind"], ch["amount"], ch["available_after"])
+            for ch in _checks(c, "transaction", move)] == [
+        ("advance", 3_000.0, round(128_000.0 - 1_297.8 - 3_000.0, 2))]
     d = _credit(client, me, card_d)
     assert d["planned_payments"] == [
         {"date": "2027-03-25", "amount": 3_000.0, "counted": True, "reason": None}]
@@ -453,32 +604,65 @@ def test_pending_refund_is_not_counted(walk):
         "account_id": w["card"], "transaction_type": "credit", "amount": 400,
         "description": "Refund", "transaction_date": "2027-03-20T00:00:00",
         "is_posted": False})["id"]
-    assert _credit(client, me, w["card"])["available_now"] == 1_851.1
+    assert _credit(client, me, w["card"])["available_now"] == 2_500.0
     r = client.put(f"{API}/transactions/{refund}", json={"is_posted": True},
                    headers=me["headers"])
     assert r.status_code == 200, r.text
-    assert _credit(client, me, w["card"])["available_now"] == 2_251.1
+    assert _credit(client, me, w["card"])["available_now"] == 2_900.0
 
 
 # --- rates ------------------------------------------------------------------------------------
 
 def test_unknown_rate_makes_checks_incomplete(sw_client, sw_people, sw_db, monkeypatch):
-    for day, has_check in (("2027-03-20", True), ("2027-03-10", False), ("2027-04-25", False)):
-        w = _walk_rows(_world(sw_client, sw_people, monkeypatch), sw_db)
-        euro = _foreign_debit(sw_client, w["me"], w["card"], day, 10, "EUR", "Euro shop")
-        credit = _credit(sw_client, w["me"], w["card"])
-        assert (credit["unknown_count"], credit["complete"]) == (1, False), day
-        assert credit["available_now"] == 1_851.1, day
-        checks = _checks(credit, "transaction", euro)
-        assert bool(checks) is has_check, day
-        if has_check:
-            (check,) = checks
-            assert (check["status"], check["amount"], check["available_after"]) == (
-                "unchecked", None, None)
-        others = [c for c in credit["checks"] if c["source_id"] != euro]
-        statuses = {c["status"] for c in others}
-        assert "ok" not in statuses and "ok_with_planned" not in statuses, day
-        assert statuses == {"incomplete", "installment", "at_risk"}, day
+    # A past-dated row with no rate: unknown in the opening, every ok incomplete.
+    w = _walk_rows(_world(sw_client, sw_people, monkeypatch), sw_db)
+    euro = _foreign_debit(sw_client, w["me"], w["card"], "2027-03-10", 10, "EUR", "Euro shop")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert (credit["unknown_count"], credit["complete"]) == (1, False)
+    assert credit["available_now"] == 2_500.0
+    assert _checks(credit, "transaction", euro) == []
+    statuses = {c["status"] for c in credit["checks"]}
+    assert "ok" not in statuses and "ok_with_planned" not in statuses
+    assert statuses == {"incomplete", "installment", "at_risk"}
+
+
+def test_unknown_rate_planned_row_leaves_available_complete(
+        sw_client, sw_people, sw_db, monkeypatch):
+    # Mar 20, in the window: the opening stays complete; the row's check is
+    # unchecked and every later check is incomplete.
+    w = _walk_rows(_world(sw_client, sw_people, monkeypatch), sw_db)
+    euro = _foreign_debit(sw_client, w["me"], w["card"], "2027-03-20", 10, "EUR", "Euro shop")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert (credit["unknown_count"], credit["complete"]) == (0, True)
+    assert credit["available_now"] == 2_500.0
+    (check,) = _checks(credit, "transaction", euro)
+    assert (check["kind"], check["status"], check["amount"], check["available_after"]) == (
+        "pending", "unchecked", None, None)
+    index = credit["checks"].index(check)
+    assert [c["status"] for c in credit["checks"][:index]] == ["ok"]
+    later = {c["status"] for c in credit["checks"][index + 1:]}
+    assert later == {"incomplete", "installment", "at_risk"}
+    assert credit["planned_charges_total"] == 648.9
+
+    # Apr 25, after the window: ignored entirely.
+    w = _walk_rows(_world(sw_client, sw_people, monkeypatch), sw_db)
+    euro = _foreign_debit(sw_client, w["me"], w["card"], "2027-04-25", 10, "EUR", "Euro shop")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert (credit["unknown_count"], credit["complete"]) == (0, True)
+    assert credit["available_now"] == 2_500.0
+    assert _checks(credit, "transaction", euro) == []
+    assert [c["status"] for c in credit["checks"]] == [
+        "ok", "ok", "ok", "installment", "ok", "at_risk"]
+    assert credit["planned_charges_total"] == 648.9
+
+    # Mar 10, dated before today: as before, unknown in the opening.
+    w = _walk_rows(_world(sw_client, sw_people, monkeypatch), sw_db)
+    euro = _foreign_debit(sw_client, w["me"], w["card"], "2027-03-10", 10, "EUR", "Euro shop")
+    credit = _credit(sw_client, w["me"], w["card"])
+    assert (credit["unknown_count"], credit["complete"]) == (1, False)
+    assert credit["available_now"] == 2_500.0
+    assert _checks(credit, "transaction", euro) == []
+    assert {c["status"] for c in credit["checks"]} == {"incomplete", "installment", "at_risk"}
 
 
 def test_stale_rate_is_labelled_stale(walk, monkeypatch):
@@ -489,7 +673,7 @@ def test_stale_rate_is_labelled_stale(walk, monkeypatch):
     w = walk
     credit = _credit(w["client"], w["me"], w["card"])
     assert [(r["base"], r["rate"], r["stale"]) for r in credit["fx"]] == [("USD", 63.0, True)]
-    assert credit["available_now"] == 1_851.1
+    assert credit["available_now"] == 2_500.0
 
 
 def test_credit_uses_the_manila_day(world, monkeypatch):
@@ -511,6 +695,32 @@ def test_credit_uses_the_manila_day(world, monkeypatch):
     assert credit["planned_payments"] == [
         {"date": "2027-03-17", "amount": 2_000.0, "counted": False, "reason": "before_today"}]
     assert _checks(credit, "transaction", p500) == []
+
+
+def test_today_is_the_manila_day_for_pending_rows(world, monkeypatch):
+    w = world
+    client, me, card = w["client"], w["me"], w["card"]
+    p500 = _debit(client, me, card, "2027-03-18", 500, "Midnight order")
+
+    # Mar 17, 23:59 in Manila: the Mar 18 row is dated after today, so planned.
+    pin_clock(monkeypatch, datetime(2027, 3, 17, 15, 59))
+    credit = _credit(client, me, card)
+    assert credit["opening"]["pending_total"] == 0.0
+    assert credit["available_now"] == 128_000.0
+    (check,) = _checks(credit, "transaction", p500)
+    assert (check["date"], check["available_after"], check["status"]) == (
+        "2027-03-18", 127_500.0, "ok")
+    assert credit["planned_charges_total"] == 500.0
+
+    # Mar 18, 00:01 in Manila: dated today, so counted now.
+    pin_clock(monkeypatch, datetime(2027, 3, 17, 16, 1))
+    credit = _credit(client, me, card)
+    assert credit["opening"]["pending_total"] == 500.0
+    assert credit["available_now"] == 127_500.0
+    (check,) = _checks(credit, "transaction", p500)
+    assert (check["date"], check["available_after"], check["status"]) == (
+        "2027-03-18", 127_500.0, "ok")
+    assert credit["planned_charges_total"] == 0.0
 
 
 # --- what each caller gets --------------------------------------------------------------------
@@ -552,20 +762,38 @@ def test_limited_rows_are_not_counted_and_mark_incomplete(sw, sw_client, sw_db, 
     for body in (credit, _section(_snapshot(client, a), card)["credit"]):
         assert sw_leaks(body, private_ids=[secret], numbers=[4_321.09]) == []
 
-    # B's unposted advance from the joint card into B's private bank: Limited for A,
-    # left out of the opening, so every ok is incomplete.
+    # Editors still receive no credit key.
+    section = _section(_snapshot(client, b), card)
+    assert section is not None and "credit" not in section
+
+
+def test_limited_planned_row_marks_only_later_checks(sw, sw_client, sw_db, monkeypatch):
+    client, db = sw_client, sw_db
+    a, b = sw["a"], sw["b"]
+    pin_clock(monkeypatch, REF)
+    card = _joint_card(client, db, sw)
+    utilities = sw_post(client, a, "/categories/", {"name": "Utilities"})["id"]
+    p500 = _debit(client, a, card, "2027-03-18", 500, "Pharmacy")
+    cloud = _entry(client, a, card, "2027-03-20", 20, "Cloud Tools", currency="USD")["id"]
+    music = _entry(client, a, card, "2027-04-10", 549, "Music Plus")["id"]
+    phone = _entry(client, a, card, "2027-04-12", 1_799, "Phone Plan",
+                   category_id=utilities)["id"]
+    secret = _entry(client, b, card, "2027-04-11", 4_321.09, f"{PRIVATE} gym",
+                    overflow_account_id=sw["b_private"])["id"]
+
+    # B's unposted advance on Mar 25 from the joint card into B's private bank:
+    # Limited for A and dated after today, so only checks from Mar 25 are incomplete.
     advance = _transfer(client, b, card, sw["b_private"], "2027-03-25", 2_000, fee=100,
                         description="Advance")
     credit = _credit(client, a, card)
     assert (credit["uncounted_shared"], credit["complete"]) == (2, False)
     assert credit["opening"]["pending_total"] == 500.0
     assert _checks(credit, "transaction", advance) == []
-    assert {c["status"] for c in credit["checks"]} == {"incomplete"}
+    assert [(c["source_id"], c["date"], c["status"]) for c in credit["checks"]] == [
+        (p500, "2027-03-18", "ok"), (cloud, "2027-03-20", "ok"),
+        (music, "2027-04-10", "incomplete"), (phone, "2027-04-12", "incomplete")]
+    assert credit["planned_charges_total"] == 0.0
     assert sw_leaks(credit, private_ids=[secret, advance], numbers=[4_321.09, 2_100]) == []
-
-    # Editors still receive no credit key.
-    section = _section(_snapshot(client, b), card)
-    assert section is not None and "credit" not in section
 
 
 def test_card_without_limit_has_no_credit(sw_client, sw_people, monkeypatch):
@@ -600,8 +828,8 @@ def test_credit_per_role(sw, sw_client, sw_db, sw_people, monkeypatch):
     hh_tag_share(db, a, c)
     _entry(client, a, card, "2027-04-05", 3_333, "Bike",
            end_mode="after_occurrences", max_occurrences=3)
-    _debit(client, a, card, "2027-03-20", 1_000.01, "Pharmacy")
-    _debit(client, a, card, "2027-03-25", 234.55, "Bakery")
+    _debit(client, a, card, "2027-02-20", 1_000.01, "Pharmacy")
+    _debit(client, a, card, "2027-03-18", 234.55, "Bakery")
 
     mine = _credit(client, a, card)
     assert (mine["limit"], mine["opening"]["installment_hold"],
