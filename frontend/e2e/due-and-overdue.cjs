@@ -31,11 +31,17 @@
 //       new last page and stays there when the list grows again
 //   (o) opening Transactions in-app from the dashboard refetches the snapshot
 //       (a day can turn while the dashboard is open)
+//   (p) Load more batches stay live: a row posted from an earlier batch leaves,
+//       a row that slides across the batch boundary stays, and a new day
+//       restarts the window
+//   (q) out-of-order window refetches: with batch responses held and released
+//       in either order, the selected page survives and a row in two batches
+//       counts once
 //
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
 
@@ -131,8 +137,8 @@ const accountBalance = async (u, id) => (await get(u.token, `/accounts/${id}`)).
 /** Every transaction the user can read (the e2e users have a handful). */
 const allTransactions = async (u) => (await get(u.token, '/transactions/?limit=1000')).items
 
-async function newPage(browser) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 } })
+async function newPage(browser, contextOptions = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 }, ...contextOptions })
   const page = await ctx.newPage()
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page }
@@ -174,6 +180,23 @@ async function savePosted(page, txnId) {
   const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${txnId}`))
   await page.getByRole('button', { name: 'Save Posted Amount' }).click()
   return put
+}
+
+/** In-flight requests while seeding filler rows. */
+const FILLER_CONCURRENCY = 8
+/**
+ * `fillerCount` pending "Filler" debits dated today+5 (future and unlinked, so the section never
+ * lists them), then the `named` rows ([description, day]) in order. Returns the named rows by description.
+ */
+async function seedWindow(u, acct, fillerCount, named) {
+  const today = manilaToday()
+  for (let start = 0; start < fillerCount; start += FILLER_CONCURRENCY) {
+    const n = Math.min(FILLER_CONCURRENCY, fillerCount - start)
+    await Promise.all(Array.from({ length: n }, () => unposted(u, acct, addDays(today, 5), 10, 'Filler')))
+  }
+  const rows = {}
+  for (const [name, day] of named) rows[name] = await unposted(u, acct, day, 100, name)
+  return rows
 }
 
 // ─── Seed ────────────────────────────────────────────────────────────────────
@@ -699,12 +722,213 @@ async function inAppRefetch(browser) {
   await ctx.close()
 }
 
+/** A GET of the section's window query (no ids, no start_date), optionally at one of `offsets`. */
+const isWindowUrl = (url, offsets) =>
+  url.pathname.endsWith('/api/v1/transactions/') &&
+  url.searchParams.get('is_posted') === 'false' && url.searchParams.get('limit') === '1000' &&
+  url.searchParams.has('end_date') && !url.searchParams.has('ids') && !url.searchParams.has('start_date') &&
+  (offsets === undefined || offsets.includes(url.searchParams.get('offset')))
+const isWindowRequest = (request, offsets) => request.method() === 'GET' && isWindowUrl(new URL(request.url()), offsets)
+/** The next response of the window query at `offset`, or null after `ms`. */
+const windowResponse = (page, offset, ms = 15000) =>
+  page.waitForResponse((r) => isWindowRequest(r.request(), [offset]), { timeout: ms }).catch(() => null)
+/** The section's rows on the page on screen, by their first line. */
+const dueNames = (page) => page.locator('[data-testid="due-row"]').evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent.trim()))
+const dueBadge = async (page) => (await page.locator('[data-testid="due-count"]').textContent())?.trim()
+const waitForBadge = (page, text, ms = 15000) =>
+  page.locator('[data-testid="due-count"]').filter({ hasText: new RegExp(`^${text}$`) }).waitFor({ timeout: ms }).catch(() => {})
+const loadMoreButton = (page) => page.locator('[data-testid="due-load-more"]')
+/** A pending row whose description is exactly `name`, on the page on screen (pendRows matches any substring, ignoring case). */
+const pendRow = (page, name) =>
+  page.locator('[data-testid="due-row"][data-kind="pending"]').filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
+/** Posting keeps the actions modal open, and its overlay blocks later clicks: close it. */
+async function closeActions(page) {
+  const close = page.getByRole('button', { name: 'Close actions modal' })
+  await close.click()
+  await close.waitFor({ state: 'hidden' })
+}
+/** Mark posted on the pending row named `name` (on the page on screen), then save: the PUT's status. */
+async function postFromSection(page, name, txnId) {
+  await pendRow(page, name).locator('[data-testid="due-mark-posted"]').click()
+  return (await savePosted(page, txnId)).status()
+}
+
+// (p) Load-more batches stay live.
+async function loadMoreLive(browser) {
+  console.log('\n=== (p) Load more batches stay live: a posted row leaves, a slid row stays, a new day restarts the window')
+  const u = await makeUser('p')
+  const today = manilaToday()
+  const bank = await account(u, 'P Checking')
+  const t0 = Date.now()
+  const rows = await seedWindow(u, bank, 999, [['Early', addDays(today, -3)], ['Edge', addDays(today, -4)], ['Tail', addDays(today, -6)]])
+  console.log(`    seeded 1002 pending rows in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+  const first = await get(u.token, '/transactions/?is_posted=false&limit=1000&offset=0')
+  check('(p) API: batch 0 has more and ends with Early', [first.has_more, first.items.at(-1)?.description], [true, 'Early'])
+  const second = await get(u.token, '/transactions/?is_posted=false&limit=1000&offset=1000')
+  check('(p) API: batch 1 is Edge and Tail', second.items.map((t) => t.description), ['Edge', 'Tail'])
+
+  const { ctx, page } = await openDue(browser, u)
+  check('(p) before Load more: badge 1, Early only, Load more offered',
+    [await dueBadge(page), await dueNames(page), await loadMoreButton(page).isVisible()], ['1', ['Early'], true])
+  await loadMoreButton(page).click()
+  await waitForBadge(page, '3')
+  await settle(page)
+  check('(p) after Load more: Tail, Edge, Early on one page, Load more hidden',
+    [await dueNames(page), await loadMoreButton(page).isVisible()], [['Tail', 'Edge', 'Early'], false])
+
+  // Post Early, the last row of batch 0: Edge slides from batch 1 into batch 0.
+  await pendRow(page, 'Early').locator('[data-testid="due-mark-posted"]').click()
+  const refetched = [windowResponse(page, '0'), windowResponse(page, '1000')]
+  const early = await savePosted(page, rows.Early.id)
+  check('(p) posting Early saves it (200)', early.status(), 200)
+  await closeActions(page)
+  await Promise.all(refetched)
+  await gone(pendRow(page, 'Early'))
+  await settle(page)
+  const afterEarly = await dueNames(page)
+  check('(p) the row posted from the earlier batch is gone', [afterEarly.includes('Early'), (await rowsOf(page, 'Early', 'pending')).length], [false, 0])
+  check('(p) the row that slid across the batch boundary is still listed', await dueNames(page), ['Tail', 'Edge'])
+
+  // A new day, in a second context whose clock is two minutes before Manila's midnight.
+  const night = await newPage(browser, { timezoneId: 'Asia/Manila' })
+  await night.page.clock.install({ time: new Date(`${today}T15:58:00Z`) })
+  await uiLogin(night.page, u)
+  await openTransactions(night.page)
+  await loadMoreButton(night.page).click()
+  await waitForBadge(night.page, '2')
+  await settle(night.page)
+  let secondBatch = 0
+  night.page.on('request', (r) => { if (isWindowRequest(r, ['1000'])) secondBatch++ })
+  // Playwright reads '03:00' as mm:ss: three minutes, 23:58 to 00:01 Manila.
+  await night.page.clock.fastForward('03:00')
+  await loadMoreButton(night.page).waitFor({ timeout: 15000 }).catch(() => {})
+  await settle(night.page)
+  check('(p) a new day restarts the window: one batch, Load more again',
+    [await dueNames(night.page), await dueBadge(night.page), await loadMoreButton(night.page).isVisible()], [['Edge'], '1', true])
+  check('(p) no request for the second batch after the day turned', secondBatch, 0)
+  await night.ctx.close()
+
+  // Back on the first page (real clock): post Tail, the only row of the last loaded batch.
+  const tail = await postFromSection(page, 'Tail', rows.Tail.id)
+  if (tail !== 200) throw new Error(`(p) posting Tail returned ${tail}: the first context's session may have ended after the second login; stopping`)
+  check('(p) posting Tail from the first context saves it (200)', tail, 200)
+  await closeActions(page)
+  await waitForBadge(page, '1')
+  await settle(page)
+  check('(p) the row posted from the last loaded batch is gone', (await rowsOf(page, 'Tail', 'pending')).length, 0)
+  check('(p) after posting from the last batch only Edge is listed and Load more is hidden',
+    [await dueNames(page), await loadMoreButton(page).isVisible()], [['Edge'], false])
+  await ctx.close()
+}
+
+// (q) Out-of-order window refetches.
+async function outOfOrderRefetch(browser) {
+  console.log('\n=== (q) out-of-order window refetches: the selected page survives and a row in two batches counts once')
+  const u = await makeUser('q')
+  const today = manilaToday()
+  const bank = await account(u, 'Q Checking')
+  const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  const t0 = Date.now()
+  const rows = await seedWindow(u, bank, 996, names.map((name, i) => [name, addDays(today, -(i + 1))]))
+  console.log(`    seeded 1004 pending rows in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+  const second = await get(u.token, '/transactions/?is_posted=false&limit=1000&offset=1000')
+  check('(q) API: batch 1 is E, F, G, H', second.items.map((t) => t.description), ['E', 'F', 'G', 'H'])
+
+  const { ctx, page } = await openDue(browser, u)
+  await loadMoreButton(page).click()
+  await waitForBadge(page, '8')
+  await settle(page)
+  check('(q) after Load more: 8 rows, H G F on page 1', [await dueBadge(page), await dueNames(page)], ['8', ['H', 'G', 'F']])
+
+  /**
+   * Holds the next GET of each window batch (offset 0 and 1000). Returns the held routes, or null
+   * (after releasing whatever was held and removing the route) unless exactly those two were held in 10 s.
+   */
+  const hold = async () => {
+    const held = []
+    const matcher = (url) => isWindowUrl(url, ['0', '1000'])
+    const handler = (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      held.push({ route, offset: new URL(route.request().url()).searchParams.get('offset') })
+    }
+    await page.route(matcher, handler)
+    return {
+      wait: async (round) => {
+        const until = Date.now() + 10000
+        while (held.length < 2 && Date.now() < until) await page.waitForTimeout(100)
+        const offsets = held.map((h) => h.offset).sort()
+        check(`(q) round ${round}: both window batches were requested and held`, offsets, ['0', '1000'])
+        if (JSON.stringify(offsets) === JSON.stringify(['0', '1000'])) return true
+        await Promise.all(held.map((h) => h.route.continue().catch(() => {})))
+        await page.unroute(matcher, handler)
+        return false
+      },
+      release: async (offset) => {
+        const h = held.find((x) => x.offset === offset)
+        const response = page.waitForResponse((r) => r.request() === h.route.request(), { timeout: 15000 }).catch(() => null)
+        await h.route.continue()
+        return (await response)?.status() ?? null
+      },
+      remove: () => page.unroute(matcher, handler),
+    }
+  }
+
+  // Round 1: H moves into batch 0 (pushing D into batch 1); posting G refetches; batch 1 lands first.
+  const moveH = await api(u.token, 'PUT', `/transactions/${rows.H.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q) round 1: the API moves H to yesterday (200)', moveH.status, 200)
+  let held = await hold()
+  check('(q) round 1: posting G saves it (200)', await postFromSection(page, 'G', rows.G.id), 200)
+  await closeActions(page)
+  if (await held.wait(1)) {
+    await goToPage(page, 3)
+    const late = await held.release('1000')
+    await waitForBadge(page, '6')
+    check('(q) round 1: while batch 0 is held the badge reads 6 and the pager reads 4–6 of 6',
+      [await dueBadge(page), await currentPage(page), await pagerLabel(page)], ['6', 2, '4–6 of 6'])
+    const early = await held.release('0')
+    check('(q) round 1: both held window responses completed with 200', [late, early], [200, 200])
+    await held.remove()
+    await waitForBadge(page, '7')
+    await settle(page)
+    check('(q) round 1: page 3 survives the out-of-order refetch',
+      [await currentPage(page), await pagerLabel(page), await dueBadge(page)], [3, '7–7 of 7', '7'])
+  }
+
+  // Round 2: F moves into batch 0 (pushing C into batch 1); posting E refetches; batch 0 lands first.
+  const moveF = await api(u.token, 'PUT', `/transactions/${rows.F.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q) round 2: the API moves F to yesterday (200)', moveF.status, 200)
+  held = await hold()
+  await goToPage(page, 1)
+  check('(q) round 2: posting E saves it (200)', await postFromSection(page, 'E', rows.E.id), 200)
+  await closeActions(page)
+  if (await held.wait(2)) {
+    await goToPage(page, 2)
+    const early = await held.release('0')
+    await waitForBadge(page, '6')
+    check('(q) round 2: the row in two batches counts once while batch 1 is held', await dueBadge(page), '6')
+    const late = await held.release('1000')
+    check('(q) round 2: both held window responses completed with 200', [early, late], [200, 200])
+    await held.remove()
+    await settle(page)
+    // C is on page 1, and reading other pages moves the view, so the page is read first.
+    const onScreen = [await currentPage(page), await dueBadge(page)]
+    let all = []
+    for (const until = Date.now() + 15000; ; await page.waitForTimeout(300)) {
+      all = (await allDueRows(page)).map((r) => r.name)
+      if (all.includes('C') || Date.now() > until) break
+    }
+    check('(q) round 2: page 2 survives', onScreen, [2, '6'])
+    check('(q) round 2: every row is listed once', [all.includes('C'), all.length === new Set(all).size, [...all].sort()], [true, true, ['A', 'B', 'C', 'D', 'F', 'H']])
+  }
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
