@@ -27,7 +27,7 @@ import type {
   Transaction,
 } from '@tally-trace/shared'
 import { useManilaDay } from '../../hooks/useManilaDay'
-import { accountingApi, useGetDashboardSnapshotQuery, useGetTransactionsQuery } from '../../store/api'
+import { accountingApi, useGetDashboardSnapshotQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import { estimateText, estimateTitle } from '../../utils/fx'
@@ -39,8 +39,9 @@ import { Pager } from '../Pager'
  * "Due and overdue": every recurring occurrence the caller can record and every pending
  * transaction that is overdue or tied to the schedule, in one place. Recurring rows come
  * from the dashboard snapshot (the same cache the dashboard fills; no new endpoint);
- * pending rows from transaction queries (the next 30 days, and the rows missed
- * occurrences link, whatever their date, in batches of 500). An owner or admin also gets one
+ * pending rows from transaction queries (the next 30 days, in batches of 1000 that "Load more"
+ * adds to, every loaded batch staying subscribed; and the rows missed occurrences link,
+ * whatever their date, in batches of 500). An owner or admin also gets one
  * row per card with an owed closed statement (`card_statements_due`), with Pay; the server
  * decides closed and overdue on the Manila day, so the snapshot is refetched when that day
  * changes. The merge, the dedup and the labels live in `@tally-trace/shared` (`dueSection.ts`).
@@ -64,21 +65,25 @@ const addDays = (day: string, n: number): string => {
   return d.toISOString().slice(0, 10)
 }
 
+type TransactionsArgs = typeof accountingApi.endpoints.getTransactions.Types.QueryArg
+type TransactionsResult = ReturnType<ReturnType<typeof accountingApi.endpoints.getTransactions.select>>
+
+interface TransactionQueries {
+  items: Transaction[]
+  failed: boolean
+  loading: boolean
+  /** Some batch is loading or refetching, so the merged rows may be mid-change. */
+  fetching: boolean
+  /** The last batch's result. */
+  last: TransactionsResult | undefined
+}
+
 /**
- * The pending transactions with these ids: one cached query per batch of at most
- * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
- * transactions change, as a query hook would.
+ * One cached transactions query per entry of `batches` (memoise the array), merged in order.
+ * Each batch stays subscribed, so it refetches when transactions change, as a query hook would.
  */
-function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
+function useTransactionQueries(batches: readonly TransactionsArgs[]): TransactionQueries {
   const dispatch = useDispatch<AppDispatch>()
-  const batches = useMemo(() => {
-    const out: { ids: number[]; is_posted: false; limit: number }[] = []
-    for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
-      const batch = ids.slice(start, start + IDS_PER_REQUEST)
-      out.push({ ids: batch, is_posted: false, limit: batch.length })
-    }
-    return out
-  }, [ids])
   useEffect(() => {
     const subscriptions = batches.map((args) => dispatch(accountingApi.endpoints.getTransactions.initiate(args)))
     return () => subscriptions.forEach((subscription) => subscription.unsubscribe())
@@ -89,9 +94,28 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
   return {
     items,
     failed: results.some((result) => result.error !== undefined),
-    // A batch with nothing yet (first load, or new ids): its rows are missing, not gone.
+    // A batch with nothing yet (first load, or new args): its rows are missing, not gone.
     loading: results.some((result) => result.data === undefined && result.error === undefined),
+    fetching: results.some((result) => result.status === 'pending'),
+    last: results[results.length - 1],
   }
+}
+
+/**
+ * The pending transactions with these ids: one cached query per batch of at most
+ * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
+ * transactions change, as a query hook would.
+ */
+function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
+  const batches = useMemo(() => {
+    const out: { ids: number[]; is_posted: false; limit: number }[] = []
+    for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
+      const batch = ids.slice(start, start + IDS_PER_REQUEST)
+      out.push({ ids: batch, is_posted: false, limit: batch.length })
+    }
+    return out
+  }, [ids])
+  return useTransactionQueries(batches)
 }
 
 interface Props {
@@ -121,9 +145,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const [target, setTarget] = useState<RecordTarget | null>(null)
   // The card whose statement is being paid.
   const [payCardId, setPayCardId] = useState<number | null>(null)
-  // Pages of the window query before the one on screen ("Load more").
-  const [earlier, setEarlier] = useState<Transaction[]>([])
-  const [offset, setOffset] = useState(0)
+  // How many batches of the window query are loaded ("Load more") and the day they were: a new day is one batch.
+  const [loaded, setLoaded] = useState({ count: 1, day: today })
+  const batchCount = loaded.day === today ? loaded.count : 1
   // The page the reader chose and the day they chose it on: a new day is page 1, whatever else is loading.
   const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
   const page = effectiveDuePage(pageState, today)
@@ -131,24 +155,18 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(() => void refetchSnapshot())
-  const windowQuery = useGetTransactionsQuery({
-    is_posted: false,
-    end_date: `${addDays(today, WINDOW_DAYS)}T23:59:59`,
-    limit: PAGE,
-    offset,
-  })
+  const endDate = `${addDays(today, WINDOW_DAYS)}T23:59:59`
+  // Every loaded batch stays subscribed, so all of them refetch together when transactions change.
+  const windowBatches = useMemo(
+    () => Array.from({ length: batchCount }, (_, i) => ({ is_posted: false, end_date: endDate, limit: PAGE, offset: i * PAGE })),
+    [endDate, batchCount],
+  )
+  const windowResult = useTransactionQueries(windowBatches)
   const linkIds = useMemo(() => (snapshot ? pendingLinkIds(snapshot) : []), [snapshot])
   const { items: linkedTxns, failed: linkedFailed, loading: linkedLoading } = usePendingTransactionsByIds(linkIds)
 
-  const windowItems = windowQuery.currentData?.items
-  const windowTxns = useMemo(() => [...earlier, ...(windowItems ?? [])], [earlier, windowItems])
-  const hasMore = windowQuery.currentData?.has_more === true
-
-  // The day rolling over restarts the window.
-  useEffect(() => {
-    setEarlier([])
-    setOffset(0)
-  }, [today])
+  const windowTxns = windowResult.items
+  const hasMore = windowResult.last?.data?.has_more === true
 
   const recurring = useMemo(() => (snapshot ? dueRecurringRows(snapshot, today) : []), [snapshot, today])
   const pending = useMemo(
@@ -159,19 +177,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   // Overdue rows first, across every kind, so page 1 is where they are.
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
-  const loading = snapshotLoading || windowQuery.isLoading
+  const loading = snapshotLoading || windowResult.loading
   const view = pageWindow(count, page, DUE_PAGE_SIZE)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
   // A list that shrank leaves the reader on the last page that exists, and stays there if it grows again.
+  // Not while a window batch refetches: the batches land in any order, so a row can be briefly missing.
   useEffect(() => {
-    if (!loading && !linkedLoading && view.page !== page) setPageState({ page: view.page, day: today })
-  }, [loading, linkedLoading, view.page, page, today])
+    if (!loading && !linkedLoading && !windowResult.fetching && view.page !== page) setPageState({ page: view.page, day: today })
+  }, [loading, linkedLoading, windowResult.fetching, view.page, page, today])
 
-  const loadMore = () => {
-    if (!windowItems) return
-    setEarlier((prev) => [...prev, ...windowItems])
-    setOffset((prev) => prev + PAGE)
-  }
+  const loadMore = () => setLoaded({ count: batchCount + 1, day: today })
 
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
     setTarget({
@@ -354,7 +369,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           {snapshotError && (
             <p className="px-4 py-3 text-sm text-danger" role="alert">Could not load what is due.</p>
           )}
-          {!snapshotError && (windowQuery.error !== undefined || linkedFailed) && (
+          {!snapshotError && (windowResult.failed || linkedFailed) && (
             <p className="px-4 py-3 text-sm text-danger" role="alert" data-testid="due-pending-error">
               Could not load some pending transactions.
             </p>
