@@ -451,7 +451,9 @@ async function whoSees(browser) {
     await page.waitForTimeout(800) // the held request keeps the network from idling
     await checkVisible(`(e) ${who}: the Subscriptions section renders`, section(page, 'subscription'))
     if (who !== 'editor') {
-      check(`(e) ${who}: a limited entry (Big Sub is one) renders under Shared with you`, (await section(page, 'shared').locator('article').count()) > 0, true)
+      const bigSub = (key) => section(page, key).locator('[data-testid="limited-entry"]').filter({ has: page.getByText('Big Sub', { exact: true }) })
+      check(`(e) ${who}: exactly one Big Sub renders under Shared with you`, await bigSub('shared').count(), 1)
+      check(`(e) ${who}: and none under Subscriptions`, await bigSub('subscription').count(), 0)
     }
     check(`(e) ${who}: during the hold, no credit element`, await countOf(page, CREDIT_IDS), [0, 0, 0, 0, 0, 0])
     const failed = creditResponse(page, 500)
@@ -585,7 +587,9 @@ async function freshFetch(browser) {
   const passed = creditResponse(page, 200)
   hold.release('pass')
   await passed('(g)')
-  await settle(page)
+  // The response is in; wait for the line itself rather than for the network to idle.
+  await checkVisible('(g) the line is still shown after the response', cardLine(page, 'subscription', w.A.id))
+  await page.waitForTimeout(500)
   check('(g) after the response the line equals the API figure',
     await text(cardLine(page, 'subscription', w.A.id).locator('[data-testid="kind-credit-available"]')), availText(await cardCredit(w.owner, w.A.id)))
   await ctx.close()
