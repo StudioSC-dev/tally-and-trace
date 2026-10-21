@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RECORD_DATE_MIN, recordDateError, recordDateMax } from '@tally-trace/shared'
 import {
   Account,
   useGetLoanScheduleQuery,
@@ -115,6 +116,11 @@ export function LoanActions({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setError(null)
+    const dateError = recordDateError(form.date)
+    if (dateError) {
+      setError(dateError)
+      return
+    }
     const common = {
       from_account_id: form.from_account_id,
       transaction_date: form.date ? `${form.date}T00:00:00` : undefined,
@@ -244,8 +250,14 @@ export function LoanActions({
             <input
               type="date"
               value={form.date}
-              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              onChange={(e) => {
+                setForm({ ...form, date: e.target.value })
+                setError(null)
+              }}
+              min={RECORD_DATE_MIN}
+              max={recordDateMax()}
               className="input-field focus-ring"
+              data-testid="loan-payment-date"
               required
             />
           </div>

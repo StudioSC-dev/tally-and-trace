@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
 import type { ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -335,6 +335,9 @@ export function TransactionsPage() {
   const [fetchReceipt, { isLoading: isReceiptLoading }] = useFetchReceiptMutation()
   const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  const [dateErrors, setDateErrors] = useState<{ transaction_date?: string | undefined; posting_date?: string | undefined }>({})
+  const transactionDateInput = useRef<HTMLInputElement>(null)
+  const postingDateInput = useRef<HTMLInputElement>(null)
   const receiptFor = useRef<number | null>(null)
   // The object URL is owned here, not by `receipt` state, so one accepted
   // before its state commits is still revoked.
@@ -1031,6 +1034,7 @@ export function TransactionsPage() {
   const resetForm = () => {
     setFormData(createInitialFormState())
     setEditingTransaction(null)
+    setDateErrors({})
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1044,6 +1048,17 @@ export function TransactionsPage() {
       return
     }
     try {
+      const transactionDateError = recordDateError(formData.transaction_date)
+      const postingDateError = formData.is_posted && formData.posting_date ? recordDateError(formData.posting_date) : null
+      if (transactionDateError || postingDateError) {
+        setDateErrors({
+          ...(transactionDateError ? { transaction_date: transactionDateError } : {}),
+          ...(postingDateError ? { posting_date: postingDateError } : {}),
+        })
+        ;(transactionDateError ? transactionDateInput : postingDateInput).current?.focus()
+        return
+      }
+      setDateErrors({})
       if (!formData.account_id) {
         alert('Please select an account for this transaction.')
         return
@@ -1207,6 +1222,7 @@ export function TransactionsPage() {
       return
     }
     setEditingTransaction(transaction)
+    setDateErrors({})
     // A loan payment's form amount is the whole payment (principal + interest).
     const intoLoan = isLoanPayment(transaction)
     const total = intoLoan
@@ -3033,32 +3049,56 @@ export function TransactionsPage() {
               <div>
                   <label className="label">Transaction Date</label>
                 <input
+                  ref={transactionDateInput}
                   type="date"
                   value={formData.transaction_date}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setFormData((prev) => ({
                         ...prev,
                         transaction_date: e.target.value,
                       }))
-                    }
+                      setDateErrors((prev) => ({ ...prev, transaction_date: undefined }))
+                    }}
+                    min={RECORD_DATE_MIN}
+                    max={recordDateMax()}
                     className="input-field focus-ring"
+                    aria-invalid={dateErrors.transaction_date ? true : undefined}
+                    aria-describedby={dateErrors.transaction_date ? 'transaction-date-error' : undefined}
+                    data-testid="transaction-date"
                   required
                 />
+                {dateErrors.transaction_date && (
+                  <p id="transaction-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
+                    {dateErrors.transaction_date}
+                  </p>
+                )}
               </div>
               <div>
                   <label className="label">Posting Date (optional)</label>
                 <input
+                  ref={postingDateInput}
                   type="date"
                   value={formData.posting_date || ''}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setFormData((prev) => ({
                         ...prev,
                         posting_date: e.target.value || undefined,
                       }))
-                    }
+                      setDateErrors((prev) => ({ ...prev, posting_date: undefined }))
+                    }}
+                    min={RECORD_DATE_MIN}
+                    max={recordDateMax()}
                     className="input-field focus-ring disabled:cursor-not-allowed disabled:bg-sunken disabled:text-muted"
                     disabled={!formData.is_posted}
+                    aria-invalid={dateErrors.posting_date ? true : undefined}
+                    aria-describedby={dateErrors.posting_date ? 'posting-date-error' : undefined}
+                    data-testid="posting-date"
                   />
+                  {dateErrors.posting_date && (
+                    <p id="posting-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
+                      {dateErrors.posting_date}
+                    </p>
+                  )}
                 </div>
               </div>
               
