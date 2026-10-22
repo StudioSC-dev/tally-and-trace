@@ -77,6 +77,7 @@ async function apiNames(u) {
 
 const tid = (id) => `[data-testid="${id}"]`
 const isAllocationsList = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/allocations/')
+const isEntriesList = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/budget-entries/')
 const offsetOf = (url) => Number(new URL(url).searchParams.get('offset') ?? '0')
 /** A response wait that never rejects: null at its bound. */
 const waitResponse = (page, pred, timeout = 10000) => page.waitForResponse(pred, { timeout }).catch(() => null)
@@ -280,10 +281,51 @@ async function scenarioE(browser) {
   }
 }
 
+// (c) A tag change keeps the recurring sections on screen while the entries reload.
+async function scenarioC(browser) {
+  console.log('\n=== (c) a tag change keeps the recurring sections while the entries reload')
+  const u = await seedUser('c')
+  const tag = await client.post(u.token, '/tags/', { name: 'C Household' })
+  await entry(u, { name: 'C Tagged', tag_ids: [tag.id] })
+  await entry(u, { name: 'C Untagged' })
+  const { ctx, page } = await openPage(browser)
+  let g = null
+  try {
+    await h.uiLogin(page, stack, u)
+    await openAllocations(page)
+    await page.locator('[data-testid^="kind-section-"]').first().waitFor()
+    await h.waitQuiet(page)
+    g = await h.gate(page, isEntriesList)
+    await page.locator(tid('tag-filter')).selectOption(String(tag.id))
+    await h.check('c.held', 'S', async () => (await g.waitHits(1)) || 'no budget-entries request')
+    await h.check('c.no-loading-text', 'B', async () =>
+      (await h.expectAbsentFor(page, page.getByText('Loading recurring entries…'))) || '"Loading recurring entries…" shown on a reload')
+    await h.check('c.sections-stay', 'B', async () => {
+      const sections = await page.locator('[data-testid^="kind-section-"]').count()
+      const both = (await page.getByText('C Tagged').count()) > 0 && (await page.getByText('C Untagged').count()) > 0
+      return (sections > 0 && both) || `sections ${sections} both entries ${both}`
+    })
+    g.release({ disarm: true })
+    await h.waitQuiet(page)
+    await h.check('c.equals-api', 'B', async () => {
+      const [income, expense] = await Promise.all(['income', 'expense'].map((t) =>
+        client.get(u.token, `/budget-entries/?entry_type=${t}&limit=100&tag=${tag.id}`)))
+      const expected = [...income.items, ...expense.items].map((e) => e.name).sort()
+      const shown = []
+      for (const name of ['C Tagged', 'C Untagged']) if ((await page.getByText(name, { exact: true }).count()) > 0) shown.push(name)
+      return JSON.stringify(shown.sort()) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
+    })
+  } finally {
+    g?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['e', scenarioE],
+  ['c', scenarioC],
 ]
 
 ;(async () => {

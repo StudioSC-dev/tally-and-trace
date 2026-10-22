@@ -47,6 +47,7 @@ import type { KindCreditState } from '../components/AllocationsCredit'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
+import { SkeletonRows } from '../components/Loading'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
 
@@ -417,7 +418,8 @@ export function AllocationsPage() {
   const [hasLoaded, setHasLoaded] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
-  const [isRecurringLoading, setIsRecurringLoading] = useState(true)
+  // The first recurring load has settled; later reloads keep the sections on screen.
+  const [recurringLoaded, setRecurringLoaded] = useState(false)
   const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
   const [recurringExpenses, setRecurringExpenses] = useState<BudgetEntry[]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
@@ -486,7 +488,6 @@ export function AllocationsPage() {
       return
     }
     const isCurrent = beginBudgetEntriesRequest(true)
-    setIsRecurringLoading(true)
     try {
       const tagParam = selectedTag !== undefined ? { tag: selectedTag } : {}
       const [incomeResult, expenseResult] = await Promise.all([
@@ -503,7 +504,7 @@ export function AllocationsPage() {
       setRecurringExpenses([])
     } finally {
       if (isCurrent()) {
-        setIsRecurringLoading(false)
+        setRecurringLoaded(true)
       }
     }
   }, [isAuthenticated, triggerBudgetEntries, beginBudgetEntriesRequest, selectedTag])
@@ -1432,8 +1433,13 @@ export function AllocationsPage() {
   // Recurring entries by kind: subscriptions, card installments, cash expenses,
   // card-billed bills, then income and transfers, then what is shared with you.
   const renderRecurringKindSections = () => {
-    if (isRecurringLoading) {
-      return <div className="card p-6 text-center text-muted">Loading recurring entries…</div>
+    if (!recurringLoaded) {
+      return (
+        <div className="card p-6" aria-busy="true" data-testid="recurring-pending">
+          <span role="status" className="sr-only">Loading recurring entries</span>
+          <SkeletonRows rows={3} />
+        </div>
+      )
     }
     const groups = groupByKind([...recurringExpenses, ...recurringIncome])
     if (groups.length === 0) {
