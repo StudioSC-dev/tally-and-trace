@@ -4,12 +4,15 @@ import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { ShortfallBanner } from './ShortfallBanner'
 import { RunningBalanceChart } from './RunningBalanceChart'
+import { Skeleton } from './Loading'
 
-export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency: CurrencyCode }) {
-  const format = (amount: number) => formatCurrency(amount, currency)
+/** `currency` is null until the caller knows which currency to read the timeline in. */
+export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency: CurrencyCode | null }) {
+  // Only called where `currency` is known; the pending branch renders no figure.
+  const format = (amount: number) => formatCurrency(amount, currency ?? 'PHP')
   const { data, isLoading, error } = useGetForecastTimelineQuery({ days: 60, ...(tag !== undefined ? { tag } : {}) })
 
-  const row = data?.by_currency.find((r) => r.currency === currency)
+  const row = currency === null ? undefined : data?.by_currency.find((r) => r.currency === currency)
   // Funding shortfalls in every currency, like the solvency banner.
   const shortfalls = data?.by_currency.flatMap((r) => r.account_shortfalls.map((s) => ({ ...s, currency: r.currency }))) ?? []
 
@@ -28,9 +31,17 @@ export function CashflowTimelineCard({ tag, currency }: { tag?: number; currency
       </div>
 
       <div className="p-4 sm:p-6 space-y-4">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-40">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-ink" />
+        {currency === null || isLoading ? (
+          <div className="space-y-4" aria-busy="true" data-testid="timeline-pending">
+            <span role="status" className="sr-only">Loading the cash-flow timeline</span>
+            <Skeleton className="h-[150px] w-full" />
+            <div className="grid grid-cols-3 gap-2">
+              {[0, 1, 2].map((index) => (
+                <div key={index} className="bg-sunken/50 py-2 flex justify-center">
+                  <Skeleton tone="strong" className="h-8 w-16" />
+                </div>
+              ))}
+            </div>
           </div>
         ) : error || !data ? (
           <p className="text-sm text-muted">Could not load the cash-flow timeline.</p>

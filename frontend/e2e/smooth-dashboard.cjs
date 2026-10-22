@@ -262,11 +262,50 @@ async function scenarioF(browser) {
   }
 }
 
+// (d) The profile says USD, every account is PHP, the snapshot is held: nothing reads in USD.
+async function scenarioD(browser) {
+  console.log('\n=== (d) snapshot held with a USD profile: no USD figure and no "No USD cash" line')
+  const u = await seed('d')
+  const { ctx, page } = await openPage(browser)
+  let g, me
+  try {
+    me = await h.rewrite(page, isGet('/auth/me'), (json) => ({ ...json, default_currency: 'USD' }))
+    g = await h.gate(page, isSnapshot)
+    await h.uiLogin(page, stack, u)
+    await h.check('d.snapshot-held', 'S', async () => (await g.waitHits(1)) || 'snapshot never requested')
+    await h.check('d.profile-rewritten', 'S', async () => me.hits >= 1 || 'no /auth/me response was rewritten')
+    await page.locator(tid('actual-totals')).waitFor()
+    const timelineLine = page.getByText('No USD cash is projected in this window.')
+    await h.sleep(750)
+    await h.check('d.timeline-pending', 'S', async () => (await page.locator(tid('timeline-pending')).count()) === 1 || 'no timeline-pending while held')
+    await h.check('d.no-usd-timeline-while-held', 'B', async () => (await h.expectAbsentFor(page, timelineLine, 750)) || 'timeline said "No USD cash" while held')
+    g.release({ disarm: true })
+    await page.locator(tid('net-worth')).waitFor()
+    await h.waitQuiet(page)
+    await h.check('d.no-usd-timeline-after', 'B', async () => (await h.expectAbsentFor(page, timelineLine, 1500)) || 'timeline said "No USD cash" after release')
+    const texts = await h.readTexts(page)
+    for (const id of ['net-worth', 'available-cash', 'period-income', 'period-expenses', 'period-net-flow']) {
+      await h.check(`d.${id}-no-dollar`, 'B', async () => !shownTexts(texts, id).some((t) => t.includes('$')) || `${id} history ${JSON.stringify(shownTexts(texts, id))}`)
+    }
+    await h.check('d.final-values', 'B', async () => {
+      const balance = rowOf((await snapshotOf(u)).balances.by_currency, 'PHP')
+      const shown = [await textOf(page.locator(tid('net-worth'))), await textOf(page.locator(tid('available-cash')))]
+      const expected = [peso(balance.total), peso(balance.available_cash)]
+      return JSON.stringify(shown) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
+    })
+  } finally {
+    g?.release({ disarm: true })
+    await me?.stop()
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
   ['f', scenarioF],
+  ['d', scenarioD],
 ]
 
 ;(async () => {

@@ -165,7 +165,9 @@ export function Dashboard() {
   const summaryPhase = queryPhase(periodSummary, summaryQuery)
   const allocationsPhase = queryPhase(allocationsData, allocationsQuery)
   const entriesPhase = queryPhase(budgetEntriesData, entriesQuery)
-  const totalsPending = summaryPhase === 'pending'
+  // Every total is read in the snapshot's currency; until it lands the profile default may be the wrong one.
+  const currencyReady = snapshotPhase === 'ready'
+  const totalsPending = summaryPhase === 'pending' || !currencyReady
   const payablesPending = snapshotPhase === 'pending' || entriesPhase === 'pending'
 
   // The currency every total below is read in: the default one, or the first the user holds.
@@ -372,7 +374,7 @@ export function Dashboard() {
       <FxNotice fx={snapshot?.fx} />
 
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
-      <CashflowTimelineCard tag={selectedTag} currency={currency} />
+      <CashflowTimelineCard tag={selectedTag} currency={currencyReady ? currency : null} />
 
       {/* Financial Snapshot */}
       <div className="bg-surface border border-line" data-onboarding="financial-snapshot">
