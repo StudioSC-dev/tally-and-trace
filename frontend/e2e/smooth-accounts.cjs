@@ -280,10 +280,13 @@ async function scenarioF(browser) {
   let gate = null
   try {
     gate = await h.gate(page, isViews)
+    const listSeen = page.waitForResponse((r) => isList()(r.request()))
     await page.goto(`${stack.webUrl}/accounts`)
     await h.check('f.held', 'S', async () => (await gate.waitHits(1)) || 'no /household/ request')
-    // The list request itself is free, so give it time to land before reading the page.
-    await h.sleep(1200)
+    // The list request itself is free: wait for it to land before reading the page.
+    await listSeen
+    // Let the response reach the store and the page render once, so a premature paint would show.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))))
     await h.check('f.no-rows-while-held', 'B', async () => {
       const rows = await page.locator('[data-testid^="account-detail-link-"]').count()
       return rows === 0 || `${rows} account rows painted while the household views were held`
