@@ -566,6 +566,14 @@ export function TransactionsPage() {
   // It ends once both lists have settled, so the empty state never shows before Upcoming is known.
   const [mainSettled, setMainSettled] = useState(false)
   const [upcomingSettled, setUpcomingSettled] = useState(false)
+  // Whether each list reflects its latest request, and whether that request failed. A
+  // failure keeps the rows already on screen and never turns them into an empty list.
+  const [mainCurrent, setMainCurrent] = useState(false)
+  const [upcomingCurrent, setUpcomingCurrent] = useState(false)
+  const [mainError, setMainError] = useState(false)
+  const [upcomingError, setUpcomingError] = useState(false)
+  const listError = mainError || upcomingError
+  const listsCurrent = mainCurrent && upcomingCurrent
   const [isMainLoading, setIsMainLoading] = useState(false)
   const [isUpcomingLoading, setIsUpcomingLoading] = useState(false)
   const isInitialLoading = !(mainSettled && upcomingSettled)
@@ -648,9 +656,12 @@ export function TransactionsPage() {
       let refetching = false
       try {
         setIsMainLoading(true)
+        setMainCurrent(false)
         if (bounds.main === null) {
           setTransactions([])
           setTotalTransactions(0)
+          setMainError(false)
+          setMainCurrent(true)
           return
         }
         const offset = (page - 1) * pageSize
@@ -664,11 +675,12 @@ export function TransactionsPage() {
         }
         setTransactions(result.items)
         setTotalTransactions(result.total)
+        setMainError(false)
+        setMainCurrent(true)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading transactions:', error)
-        setTransactions([])
-        setTotalTransactions(0)
+        setMainError(true)
       } finally {
         if (isCurrent() && !refetching) {
           setIsMainLoading(false)
@@ -690,9 +702,12 @@ export function TransactionsPage() {
       const isCurrent = beginUpcomingRequest(true)
       try {
         setIsUpcomingLoading(true)
+        setUpcomingCurrent(false)
         if (bounds.upcoming === null) {
           setUpcomingTransactions([])
           setUpcomingTotal(0)
+          setUpcomingError(false)
+          setUpcomingCurrent(true)
           return
         }
         const query = { ...filterParams, ...rangeParams(bounds.upcoming), limit: UPCOMING_LIMIT }
@@ -706,11 +721,12 @@ export function TransactionsPage() {
         }
         setUpcomingTransactions(head.total === 0 ? [] : [...items].reverse())
         setUpcomingTotal(head.total)
+        setUpcomingError(false)
+        setUpcomingCurrent(true)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading upcoming transactions:', error)
-        setUpcomingTransactions([])
-        setUpcomingTotal(0)
+        setUpcomingError(true)
       } finally {
         if (isCurrent()) {
           setIsUpcomingLoading(false)
@@ -1927,6 +1943,20 @@ export function TransactionsPage() {
     </div>
   )
 
+  const loadErrorAlert = (
+    <div className="card p-4 space-y-3" role="alert" data-testid="transactions-load-error">
+      <p className="text-sm text-danger">Could not load transactions.</p>
+      <button
+        type="button"
+        className="btn-secondary focus-ring"
+        onClick={() => void refreshLists()}
+        data-testid="transactions-retry"
+      >
+        Retry
+      </button>
+    </div>
+  )
+
   return (
     <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2243,9 +2273,10 @@ export function TransactionsPage() {
       </p>
       {transactions.length === 0 && upcomingTransactions.length === 0 ? (
         // Not before the first load settles; after that the previous state stays up while refreshing.
-        isInitialLoading ? null : emptyState
+        isInitialLoading ? null : listError ? loadErrorAlert : emptyState
       ) : (
         <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
+          {listError && !listsCurrent && loadErrorAlert}
           {upcomingTransactions.length > 0 && (
             <section className="space-y-3" data-testid="upcoming-transactions">
               <button
@@ -2274,7 +2305,7 @@ export function TransactionsPage() {
             </section>
           )}
           {transactions.length === 0 ? (
-            <p className="text-sm text-muted">Nothing on or before today in this range.</p>
+            mainError ? null : <p className="text-sm text-muted">Nothing on or before today in this range.</p>
           ) : (
             <div className="grid grid-cols-1 gap-3">
               {transactions.map(renderTransactionRow)}
