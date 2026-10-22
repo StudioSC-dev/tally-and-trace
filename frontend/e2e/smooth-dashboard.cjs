@@ -373,6 +373,9 @@ async function retryRun(browser, name, snapshotFailures) {
 const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', 1))
 const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', 2))
 
+// An envelope row, found by structure so the scenario also runs where the row has no test id.
+const ENVELOPE_ROW = '[data-onboarding="budget-envelopes"] .space-y-5 > .space-y-3'
+
 // (h) The snapshot is held while allocations land: no envelope row, no numeric badge. Once
 // it lands, FxNotice and the card charges appear with the envelopes in one render, so the
 // first envelope row does not move.
@@ -393,11 +396,11 @@ async function scenarioH(browser) {
   })
   const { ctx, page } = await openPage(browser)
   // The envelope row's page-top at its first appearance, and at every later frame.
-  await page.addInitScript(() => {
+  await page.addInitScript((sel) => {
     const seen = { first: null, tops: [] }
     window.__stu335Env = seen
     const top = () => {
-      const el = document.querySelector('[data-testid="envelope-row"]')
+      const el = document.querySelector(sel)
       return el ? Math.round((el.getBoundingClientRect().top + window.scrollY) * 10) / 10 : null
     }
     const tick = () => {
@@ -409,7 +412,7 @@ async function scenarioH(browser) {
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
-  })
+  }, ENVELOPE_ROW)
   let g
   try {
     g = await h.gate(page, isSnapshot)
@@ -420,10 +423,10 @@ async function scenarioH(browser) {
     await page.locator(tid('actual-totals')).waitFor()
     await h.sleep(750)
     await h.check('h.envelopes-pending', 'S', async () => (await page.locator(tid('envelopes-pending')).count()) === 1 || 'no envelopes-pending while held')
-    await h.check('h.no-envelope-row-while-held', 'B', async () => (await page.locator(tid('envelope-row')).count()) === 0 || 'an envelope row showed while the snapshot was held')
+    await h.check('h.no-envelope-row-while-held', 'B', async () => (await page.locator(ENVELOPE_ROW).count()) === 0 || 'an envelope row showed while the snapshot was held')
     await h.check('h.no-badge-while-held', 'B', async () => (await page.locator('[data-onboarding="budget-envelopes"] .badge').count()) === 0 || 'a numeric badge showed while the snapshot was held')
     g.release({ disarm: true })
-    await page.locator(tid('envelope-row')).first().waitFor()
+    await page.locator(ENVELOPE_ROW).first().waitFor()
     await h.sleep(500)
     await h.waitQuiet(page)
     const env = await page.evaluate(() => window.__stu335Env)
