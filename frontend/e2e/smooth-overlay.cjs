@@ -361,6 +361,12 @@ async function scenarioO(browser) {
       const card = await page.locator(OVERLAY).textContent()
       return (stuck === 'true' && (await reload.isVisible()) && card.includes('This is taking longer than usual.')) || `stuck ${stuck} text "${card}"`
     })
+    await h.check('o1.no-tab-hint', 'B', async () => {
+      const holders = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
+        .filter((el) => Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent || '').includes('Press Tab to reach Reload page.')))
+        .map((el) => el.outerHTML.slice(0, 120)))
+      return holders.length === 0 || `hint held by ${JSON.stringify(holders)}`
+    })
     await h.clickBox(page, cancelBox)
     await h.sleep(300)
     await h.check('o1.cancel-blocked', 'B', async () => (await dialog.isVisible()) || 'dialog closed')

@@ -60,9 +60,11 @@ interface View {
   status: string
   /** A search passthrough is running and its element holds focus. */
   passthrough: boolean
+  /** A search passthrough ran at some point in this episode. */
+  hadPassthrough: boolean
 }
 
-const hiddenView: View = { phase: 'hidden', stuck: false, label: '', status: '', passthrough: false }
+const hiddenView: View = { phase: 'hidden', stuck: false, label: '', status: '', passthrough: false, hadPassthrough: false }
 
 interface ControllerRefs {
   layer: { readonly current: HTMLDivElement | null }
@@ -95,6 +97,8 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
   /** The passthrough's own changes, reverted alone when it ends early. */
   const passRecorded: RecordedChange[] = []
   let passthrough: HTMLElement | null = null
+  /** Set when a passthrough starts, cleared when the block ends. */
+  let hadPassthrough = false
   const history: HTMLElement[] = []
   let bodyObserver: MutationObserver | null = null
 
@@ -128,6 +132,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
    */
   const startPassthrough = (el: HTMLElement, shell: Element) => {
     passthrough = el
+    hadPassthrough = true
     const chain = new Set<Element>()
     for (let node: Element | null = el; node !== null; node = node.parentElement) {
       chain.add(node)
@@ -238,6 +243,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
 
   const endBlock = () => {
     blocked = false
+    hadPassthrough = false
     bodyObserver?.disconnect()
     bodyObserver = null
     undoRecorded()
@@ -272,7 +278,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     let label = ''
     if (phase === 'visible') label = episodeSaving ? 'Saving…' : 'Loading…'
     const status = passing && stuck ? `${STUCK_TEXT} ${STUCK_TAB_HINT}` : label
-    setView({ phase, stuck, label, status, passthrough: passing })
+    setView({ phase, stuck, label, status, passthrough: passing, hadPassthrough })
   }
 
   const step = (frameTick: boolean) => {
@@ -459,13 +465,15 @@ export function BusyOverlay() {
             {view.stuck && (
               <>
                 <p className="text-sm text-body">{STUCK_TEXT}</p>
-                {/* Kept in the layout when the passthrough ends, so Reload page never moves under a press. */}
-                <p
-                  className={view.passthrough ? 'text-sm text-body' : 'text-sm text-body invisible'}
-                  aria-hidden={view.passthrough ? undefined : 'true'}
-                >
-                  {STUCK_TAB_HINT}
-                </p>
+                {/* Kept in the layout once a passthrough ran, so Reload page never moves under a press. */}
+                {view.hadPassthrough && (
+                  <p
+                    className={view.passthrough ? 'text-sm text-body' : 'text-sm text-body invisible'}
+                    aria-hidden={view.passthrough ? undefined : 'true'}
+                  >
+                    {STUCK_TAB_HINT}
+                  </p>
+                )}
                 <button
                   ref={reloadRef}
                   type="button"
