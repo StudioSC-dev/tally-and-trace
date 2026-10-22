@@ -1,5 +1,6 @@
 // Browser checks for STU-335 PR 2's Household polish (plan 3.6 Q7, scenarios in 5.2): the
-// title waits for the views instead of flipping from "Household" to the sharer's name.
+// title waits for the views instead of flipping from "Household" to the sharer's name, and
+// the Transactions tab waits for the dashboard's account names before it lists rows.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API; every expected figure is read from the API. Not wired into CI and
 // not part of `pnpm build`. Run steps: see ./README.md.
@@ -96,9 +97,111 @@ async function scenarioA2(browser) {
   }
 }
 
+const isDashboard = (r) => r.method() === 'GET' && /\/household\/\d+\/dashboard$/.test(new URL(r.url()).pathname)
+
+/** A shares a Household-tagged account with one transaction; B holds it as an editor, so B reads the record in full. */
+async function seedFull(tag) {
+  const w = await seedShare(tag)
+  const name = `Joint ${tag}`
+  const account = await client.post(w.a.token, '/accounts/', { name, account_type: 'checking', balance: 50000, currency: 'PHP' })
+  const household = (await client.get(w.a.token, '/tags/')).find((t) => t.is_system)
+  if (!household) throw new Error('STOP: A has no Household system tag')
+  await client.put(w.a.token, `/accounts/${account.id}`, { tag_ids: [household.id] })
+  await client.post(w.a.token, `/accounts/${account.id}/shares`, { email: w.b.email, role: 'editor' })
+  await client.post(w.a.token, '/transactions/', {
+    account_id: account.id, transaction_type: 'debit', amount: 321, description: `Groceries ${tag}`,
+    transaction_date: `${new Date().toISOString().slice(0, 10)}T00:00:00`, is_posted: true,
+  })
+  const listed = await client.get(w.b.token, `/household/${w.sharerId}/transactions?limit=20&offset=0`)
+  const row = listed.items[0]
+  if (!row || row.view === 'limited') throw new Error(`STOP: B does not read the record in full: ${JSON.stringify(row)}`)
+  const dashboard = await client.get(w.b.token, `/household/${w.sharerId}/dashboard`)
+  if (!dashboard.accounts.some((a) => a.name === name)) throw new Error(`STOP: the dashboard lacks ${name}: ${JSON.stringify(dashboard.accounts)}`)
+  return { ...w, name }
+}
+
+/** Opens B's view of A's Household on the Transactions tab with the dashboard request intercepted by `setup`. */
+async function openTransactionsTab(browser, w, setup) {
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  await h.recordTexts(page, ['household-transaction'])
+  const handle = await setup(page)
+  await h.uiLogin(page, stack, w.b)
+  await page.goto(`${stack.webUrl}/accounts/household?sharer=${w.sharerId}`)
+  // The dashboard tab opens first and its request is the one set up; settle it, then open the tab.
+  await page.locator(tid('household-tab-transactions')).waitFor()
+  await h.waitQuiet(page)
+  await page.locator(tid('household-tab-transactions')).click()
+  return { ctx, page, handle }
+}
+
+// (b) The dashboard is held (on the request the Transactions tab makes): no row until the account names are there.
+async function scenarioB(browser) {
+  console.log('\n=== (b) dashboard held: no transaction row until its account name can be shown')
+  const w = await seedFull('hh-b')
+  const { ctx, page, handle: g } = await openTransactionsTab(browser, w, async (p) => {
+    // The dashboard tab's own request fails once, so opening the Transactions tab asks again: that second request is the one held.
+    const held = await h.gate(p, isDashboard)
+    const first = await h.failWith(p, isDashboard, 500, { times: 1 })
+    return {
+      get hits() { return held.hits },
+      waitHits: (n, ms) => held.waitHits(n, ms),
+      release: (o) => held.release(o),
+      async stop() { await first.stop(); await held.stop() },
+    }
+  })
+  try {
+    await h.check('b.dashboard-held', 'S', async () => (await g.waitHits(1)) || 'dashboard never requested')
+    await page.locator(tid('household-transactions')).waitFor()
+    await h.sleep(750)
+    await h.check('b.loading-shown', 'S', async () => (await page.locator(tid('household-transactions-loading')).count()) === 1 || 'no household-transactions-loading while held')
+    await h.check('b.no-rows-while-held', 'B', async () => (await page.locator(tid('household-transaction')).count()) === 0 || 'a transaction row showed while the names were held')
+    g.release({ disarm: true })
+    await page.locator(tid('household-transaction')).first().waitFor()
+    await h.waitQuiet(page)
+    const texts = (await h.readTexts(page))['household-transaction'].texts
+    await h.check('b.rows-listed', 'S', async () => texts.length > 0 || 'no row text recorded')
+    await h.check('b.every-text-has-the-name', 'B', async () => texts.every((t) => t.includes(w.name)) || `row text history ${JSON.stringify(texts)}, account ${w.name}`)
+    await h.check('b.loading-gone', 'B', async () => (await page.locator(tid('household-transactions-loading')).count()) === 0 || 'skeleton still shown')
+  } finally {
+    g.release({ disarm: true })
+    await g.stop()
+    await ctx.close()
+  }
+}
+
+// (c1) guard / (c2) The dashboard fails: the rows still render (c1), with a note that the
+// account names could not be loaded (c2).
+async function failedNames(browser, id, title, checks) {
+  console.log(`\n=== (${id}) ${title}`)
+  const w = await seedFull(`hh-${id}`)
+  const { ctx, page, handle: f } = await openTransactionsTab(browser, w, (p) => h.failWith(p, isDashboard, 500))
+  try {
+    await page.locator(tid('household-transaction')).first().waitFor()
+    await h.waitQuiet(page)
+    await checks(page)
+  } finally {
+    await f?.stop()
+    await ctx.close()
+  }
+}
+const scenarioC1 = (browser) => failedNames(browser, 'c1', 'dashboard fails: the rows still render', async (page) => {
+  await h.check('c1.rows-render', 'G', async () => (await page.locator(tid('household-transaction')).count()) >= 1 || 'no rows after the dashboard failed')
+  await h.check('c1.no-endless-loading', 'G', async () => (await page.locator(tid('household-transactions-loading')).count()) === 0 || 'skeleton still shown after the failure')
+})
+const scenarioC2 = (browser) => failedNames(browser, 'c2', 'dashboard fails: a note says the names are missing', async (page) => {
+  await h.check('c2.names-error', 'B', async () => {
+    const shown = ((await page.locator(tid('household-names-error')).textContent().catch(() => null)) || '').trim()
+    return shown === 'Account names could not be loaded.' || `household-names-error "${shown}"`
+  })
+})
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['a2', scenarioA2],
+  ['b', scenarioB],
+  ['c1', scenarioC1],
+  ['c2', scenarioC2],
 ]
 
 ;(async () => {
