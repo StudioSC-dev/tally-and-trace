@@ -15,6 +15,13 @@ on Playwright. Run them by hand when you change the auth or session code.
 | `card-pay.cjs` | STU-343 Plan C: the card's credit panel on its account page; Pay with a suggested Full or Minimum, another amount, a planned payment and the excess note; the statement's own minimum; Manila's day in a UTC browser and at midnight; inactive cards and no payer; no panel or Pay for an editor or viewer; the card's statement row in "Due and overdue" (its figure, Pay from it, Minimum and Full, two owed statements as one Overdue row, no payment account) on any page, and none for an editor or viewer |
 | `allocations-credit.cjs` | STU-373 Plan C W3: Allocations shows "Available credit on <card>" under Subscriptions and Card-billed bills for each managed card with an active entry there, and each entry's worst upcoming credit check as a badge; planned payments; no credit for an editor, viewer or tag viewer under a held and a failed request; loading, error and error with stale data; a fresh fetch on client navigation and when Manila's day turns |
 | `record-dates.cjs` | STU-404: transaction dates run from 2000-01-01 to Manila today plus 5 years; the Add and Edit forms, Mark paid, card Pay and the loan payment form carry min and max and refuse an out-of-range date before any request, with an inline message in the transaction form and the dialogs' error lines elsewhere; no browser dialog fires |
+| `smooth-overlay.cjs` | STU-335: the screen loader. One overlay blocks input while any request is in flight and dims after 300 ms; shield, visible and held timing; a failed save; Reload page after 20 s; the search box stays typeable; dialog semantics and reduced motion; input isolation; Pay, Mark paid and Due blocked until their loads land |
+| `smooth-dashboard.cjs` | STU-335: no zero or empty flash before a dashboard figure loads; totals wait for the snapshot currency; Retry refetches only the failed queries without reloading |
+| `smooth-accounts.cjs` | STU-335: the Accounts list stays on screen while it reloads; a failed load shows an alert with Retry, never "No accounts yet"; a card row holds a place for its available credit |
+| `smooth-allocations.cjs` | STU-335: Allocations and its recurring sections stay on screen while they reload; a stale load-more page is dropped; a failed load shows an alert with Retry instead of an empty list |
+| `smooth-settings.cjs` | STU-335: the category and tag lists show a loader, never their empty text, while they load |
+| `smooth-account-detail.cjs` | STU-335: account transaction rows wait for account and category names; a failed names lookup shows fallbacks and a note |
+| `smooth-transactions.cjs` | STU-335: a failed first load shows an error with Retry, not "No transactions found"; a failed month change keeps the rows with the alert above |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
@@ -68,7 +75,7 @@ real database. The script refuses to run unless `DATABASE_URL` is on
    export PLAYWRIGHT_PATH=/tmp/pw/node_modules/playwright
    export E2E_API_URL=http://localhost:8000 E2E_WEB_URL=http://localhost:5173
    node frontend/e2e/refresh-session-switch.cjs        # all scenarios
-   node frontend/e2e/refresh-session-switch.cjs e      # one scenario: a..f
+   node frontend/e2e/refresh-session-switch.cjs e      # one scenario: c..f
    ```
 
    `DATABASE_URL` must still be exported in this shell. Set `DEBUG=1` to log
@@ -124,3 +131,32 @@ themselves through `_local_stack.cjs`, which is the only way they reach an API:
    Set `DEBUG=1` to log the children's output and every API response. The
    script exits 0 only when every assertion passes, and prints
    `RESULT: <passed>/<total>`. Drop the database afterwards.
+
+## Page smoothness and screen loader checks
+
+The `smooth-*.cjs` scripts start their own stack, as above. Each takes an
+optional scenario name (`node frontend/e2e/smooth-accounts.cjs c`), prints
+`RESULT: <passed>/<total>`, and exits 0 only when every check passed, 1 when a
+check failed, 2 when setup (stack, seed or login) failed. Each check is
+behavioural, structural or a guard; a failed structural check means the run is
+invalid, not that the app is wrong. Use a database name of its own per run, for
+example `tt_test_stu335_a`, and run two scripts at once only with two databases.
+
+```bash
+export VIRTUAL_ENV=/path/to/a/venv/with/backend/requirements   # else backend/.venv
+export DATABASE_URL='postgresql://postgres:pw@127.0.0.1:55432/tt_test_stu335_a'
+export PLAYWRIGHT_PATH=/tmp/pw/node_modules/playwright
+node frontend/e2e/smooth-overlay.cjs
+node frontend/e2e/smooth-dashboard.cjs g2     # one scenario
+```
+
+Their shared helpers live in `_smooth.cjs`: held and gated responses, a request
+recorder, the overlay's recorded `data-phase` history, and `waitQuiet(page)`.
+
+Since the screen loader blocks input while any request is in flight, a script
+that acts right after a navigation or a dialog opens must call
+`waitQuiet(page)` first. It waits, bounded and never throwing, for the overlay
+to be hidden. Scripts also must not click while they hold a request on purpose:
+do the click before the hold starts or after it is released. The older scripts
+(`card-pay`, `mark-paid-payables`, `due-and-overdue` and the shared
+`_due_pages.cjs`) call `waitQuiet` for this reason.
