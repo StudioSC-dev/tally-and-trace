@@ -337,7 +337,8 @@ async function scenarioI(browser) {
   }
 }
 
-// (o) A load that never settles: after STUCK_MS the card offers Reload page (o1).
+// (o) A load that never settles: after STUCK_MS the card offers Reload page (o1), and a
+// focused search box reaches it with Tab (o2).
 async function scenarioO(browser) {
   console.log('\n=== (o) o1: a save that never settles offers Reload page after 20 s')
   const card = await makeCard(owner, 'Card O')
@@ -369,6 +370,137 @@ async function scenarioO(browser) {
     await h.check('o1.reloads', 'B', async () => (await loaded) || 'no load event')
   } finally {
     post?.release({ disarm: true })
+    await ctx.close()
+  }
+  await scenarioO2(browser)
+  await scenarioO2Press(browser)
+}
+
+// ─── Search passthrough helpers (commit 6a) ──────────────────────────────────
+
+const SEARCH = tid('transactions-search')
+const BOX = '[data-busy-passthrough-box]'
+const PREV_MONTH = 'button[aria-label="View previous month"]'
+const monthLabel = (page) => text(page.locator(`${PREV_MONTH} + span`))
+/** Main-list GETs that carry a `search` param; `urls` records each hit. */
+async function searchGate(page) {
+  const urls = []
+  const g = await h.gate(page, (r) => {
+    if (r.method() !== 'GET') return false
+    const url = new URL(r.url())
+    if (!url.pathname.endsWith('/transactions/') || !url.searchParams.has('search')) return false
+    urls.push(url)
+    return true
+  })
+  return { g, urls }
+}
+const apiRequests = (log) => log.filter((r) => r.url.includes('/api/')).length
+
+// (o) o2: a focused search box stuck for 20 s keeps focus and typing; Tab reaches Reload.
+async function scenarioO2(browser) {
+  console.log('\n=== (o) o2: a stuck search load: focus stays in the box, Tab reaches Reload page')
+  const { ctx, page, requests } = await openPage(browser, {}, { clock: new Date() })
+  let gate = null
+  try {
+    await h.uiLogin(page, stack, owner)
+    await openTransactions(page)
+    const search = page.locator(SEARCH)
+    await search.click()
+    await pauseNow(page)
+    ;({ g: gate } = await searchGate(page))
+    await search.pressSequentially('ab')
+    await page.clock.runFor(500)
+    await h.check('o2.search-hit', 'S', async () => (await gate.waitHits(1)) || 'the search request never started')
+    await page.clock.runFor(STUCK_MS + 100)
+    await h.sleep(200)
+    await h.check('o2.stuck', 'B', async () => (await page.locator(OVERLAY).getAttribute('data-stuck')) === 'true' || 'not stuck')
+    await h.check('o2.card-stuck-once', 'B', async () => {
+      const card = await text(page.locator(OVERLAY))
+      const count = (needle) => card.split(needle).length - 1
+      return (count('This is taking longer than usual.') === 1 && count('Press Tab to reach Reload page.') === 1) || `card "${card}"`
+    })
+    await h.check('o2.status-stuck', 'B', async () => {
+      const status = await text(page.locator(tid('busy-status')))
+      return status === 'This is taking longer than usual. Press Tab to reach Reload page.' || `status "${status}"`
+    })
+    await h.check('o2.focus-kept', 'B', async () => (await activeTestId(page)) === 'transactions-search' || `active ${await activeTestId(page)}`)
+    await h.check('o2.reload-exposed', 'B', async () => {
+      const r = await page.getByRole('button', { name: 'Reload page' }).evaluate((el) => ({
+        id: el.getAttribute('data-testid'), hidden: el.closest('[aria-hidden="true"]') !== null,
+      })).catch((e) => ({ error: e.message.split('\n')[0] }))
+      return (r.id === 'busy-reload' && r.hidden === false) || JSON.stringify(r)
+    })
+    await page.keyboard.type('c')
+    await h.check('o2.typing', 'B', async () => (await search.inputValue()) === 'abc' || `value "${await search.inputValue()}"`)
+    const label = await monthLabel(page)
+    const before = apiRequests(requests)
+    await h.clickBox(page, await boxOf(page.locator(PREV_MONTH)))
+    await h.sleep(300)
+    await h.check('o2.month-blocked', 'B', async () => {
+      const after = await monthLabel(page)
+      return (after === label && apiRequests(requests) === before) || `label "${label}" -> "${after}", ${apiRequests(requests) - before} requests`
+    })
+    await page.keyboard.press('Tab')
+    await h.check('o2.tab-to-reload', 'B', async () => (await activeTestId(page)) === 'busy-reload' || `active ${await activeTestId(page)}`)
+    await h.check('o2.passthrough-ended', 'B', async () => {
+      const r = await page.evaluate(([sel, box]) => ({
+        raised: document.querySelector(box)?.classList.contains('z-[10051]') ?? null,
+        inert: document.querySelector(sel)?.closest('[inert]') !== null,
+      }), [SEARCH, BOX])
+      return (r.raised === false && r.inert === true) || JSON.stringify(r)
+    })
+    const value = await search.inputValue()
+    const beforeKey = apiRequests(requests)
+    await page.keyboard.press('x')
+    await h.sleep(200)
+    await h.check('o2.letter-blocked', 'B', async () => {
+      const inputs = await page.evaluate(() => Array.from(document.querySelectorAll('input')).map((i) => i.value).join('|'))
+      return ((await search.inputValue()) === value && !inputs.includes('x') && apiRequests(requests) === beforeKey) || `value "${await search.inputValue()}" inputs ${inputs}`
+    })
+    const loaded = page.waitForEvent('load', { timeout: 10000 }).then(() => true, () => false)
+    await page.keyboard.press('Enter')
+    await h.check('o2.enter-reloads', 'B', async () => (await loaded) || 'no load event')
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (o) o2: a mouse press near Reload page's bottom edge during a stuck search reloads the page.
+// The press ends the passthrough; the card must not move Reload out from under the pointer.
+async function scenarioO2Press(browser) {
+  console.log('\n=== (o) o2: a press near the bottom of Reload page during a stuck search reloads')
+  const { ctx, page } = await openPage(browser, {}, { clock: new Date() })
+  let gate = null
+  try {
+    await h.uiLogin(page, stack, owner)
+    await openTransactions(page)
+    const search = page.locator(SEARCH)
+    await search.click()
+    await pauseNow(page)
+    ;({ g: gate } = await searchGate(page))
+    await search.pressSequentially('ab')
+    await page.clock.runFor(500)
+    await h.check('o2.press-search-hit', 'S', async () => (await gate.waitHits(1)) || 'the search request never started')
+    await page.clock.runFor(STUCK_MS + 100)
+    await h.sleep(200)
+    await h.check('o2.press-stuck', 'S', async () => (await activeTestId(page)) === 'transactions-search' || `active ${await activeTestId(page)}`)
+    await page.evaluate(() => { window.__stu335Marker = 1 })
+    const box = await boxOf(page.locator(tid('busy-reload')))
+    const x = box.x + box.width / 2
+    const y = box.y + box.height - 3
+    const loaded = page.waitForEvent('load', { timeout: 10000 }).then(() => true, () => false)
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await h.sleep(100)
+    await page.mouse.up()
+    await h.check('o2.press-reloads', 'B', async () => {
+      if (!(await loaded)) return 'no load event'
+      const marker = await page.evaluate(() => window.__stu335Marker ?? null)
+      return marker === null || 'the window marker survived'
+    })
+  } finally {
+    gate?.release({ disarm: true })
     await ctx.close()
   }
 }
@@ -1373,6 +1505,247 @@ async function scenarioW(browser) {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+// (y) The search passthrough: the focused search box keeps focus and every kind of typing
+// while its own load runs, raised above the scrim; the rest of the page stays blocked.
+async function scenarioY(browser) {
+  console.log('\n=== (y) search passthrough: typing continues in the search box while its load runs')
+  const u = await h.makeUser(stack, 'y')
+  const acct = await client.post(u.token, '/accounts/', { name: 'Y Checking', account_type: 'checking', balance: 5000, currency: 'PHP' })
+  for (const description of ['Yarn abcdefgh shop', 'Yeast abcdefgh bakery', 'Yam stall']) {
+    await client.post(u.token, '/transactions/', {
+      account_id: acct.id, transaction_type: 'debit', amount: 10, description, transaction_date: wire(today), is_posted: true,
+    })
+  }
+  const { ctx, page, requests } = await openPage(browser, { permissions: ['clipboard-read', 'clipboard-write'] })
+  let gate = null
+  try {
+    await h.uiLogin(page, stack, u)
+    await openTransactions(page)
+    // The runtime stacking-context walk: no ancestor of the box (to <html>) may form one.
+    await h.check('y.no-stacking-context', 'S', async () => {
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null))))
+      const found = await page.evaluate((box) => {
+        const out = []
+        for (let el = document.querySelector(box)?.parentElement; el; el = el.parentElement) {
+          const cs = getComputedStyle(el)
+          const reasons = []
+          if (cs.position !== 'static' && cs.zIndex !== 'auto') reasons.push(`z-index ${cs.zIndex}`)
+          if (cs.position === 'fixed' || cs.position === 'sticky') reasons.push(cs.position)
+          if (Number(cs.opacity) < 1) reasons.push(`opacity ${cs.opacity}`)
+          if (cs.transform !== 'none') reasons.push(`transform ${cs.transform}`)
+          if (cs.filter !== 'none') reasons.push('filter')
+          if (cs.backdropFilter && cs.backdropFilter !== 'none') reasons.push('backdrop-filter')
+          if (cs.isolation === 'isolate') reasons.push('isolation')
+          if (cs.mixBlendMode !== 'normal') reasons.push('mix-blend-mode')
+          if (/transform|opacity|filter|z-index/.test(cs.willChange)) reasons.push(`will-change ${cs.willChange}`)
+          if (/paint|layout|strict|content/.test(cs.contain)) reasons.push(`contain ${cs.contain}`)
+          if (reasons.length) out.push(`${el.tagName}.${el.className}: ${reasons.join(', ')}`)
+        }
+        return out
+      }, BOX)
+      console.log(`  stacking contexts above the box: ${JSON.stringify(found)}`)
+      return found.length === 0 || found.join(' | ')
+    })
+    await page.evaluate(() => navigator.clipboard.writeText('ef'))
+    const search = page.locator(SEARCH)
+    await search.click()
+    await page.evaluate((sel) => {
+      window.__yFocusOut = []
+      document.querySelector(sel).addEventListener('focusout', (e) => window.__yFocusOut.push(e.relatedTarget?.tagName ?? 'null'))
+    }, SEARCH)
+    const gated = await searchGate(page)
+    gate = gated.g
+    const focused = []
+    const step = async (name) => focused.push([name, await activeTestId(page)])
+    await search.pressSequentially('ab')
+    await step('ab')
+    await h.check('y.search-hit', 'S', async () => (await gate.waitHits(1)) || 'the search request never started')
+    await h.check('y.visible', 'S', async () => (await visible(page)) || `phase ${await h.overlayPhase(page)}`)
+    const boxCentre = await boxOf(search)
+    const monthBox = await boxOf(page.locator(PREV_MONTH))
+    const label = await monthLabel(page)
+    await h.check('y.box-above-scrim', 'B', async () => {
+      const r = await page.evaluate(([sel, box, x, y]) => {
+        const hit = document.elementFromPoint(x, y)
+        return {
+          phase: document.querySelector('[data-testid="busy-overlay"]').getAttribute('data-phase'),
+          hit: hit?.getAttribute('data-testid') ?? hit?.tagName ?? null,
+          bg: getComputedStyle(document.querySelector(box)).backgroundColor,
+        }
+      }, [SEARCH, BOX, boxCentre.x + boxCentre.width / 2, boxCentre.y + boxCentre.height / 2])
+      const m = /rgba?\(([^)]+)\)/.exec(r.bg)
+      const parts = m ? m[1].split(',').map((x) => x.trim()) : []
+      const alpha = parts.length === 4 ? Number(parts[3]) : parts.length === 3 ? 1 : 0
+      return (r.phase === 'visible' && r.hit === 'transactions-search' && alpha === 1) || JSON.stringify(r)
+    })
+    await h.check('y.month-covered', 'B', async () => {
+      const r = await page.evaluate(([sel, x, y]) => {
+        const hit = document.elementFromPoint(x, y)
+        const button = document.querySelector(sel)
+        return { phase: document.querySelector('[data-testid="busy-overlay"]').getAttribute('data-phase'), covered: !!hit && hit !== button && !button.contains(hit), hit: hit?.getAttribute('data-testid') ?? hit?.tagName ?? null }
+      }, [PREV_MONTH, monthBox.x + monthBox.width / 2, monthBox.y + monthBox.height / 2])
+      return (r.phase === 'visible' && r.covered) || JSON.stringify(r)
+    })
+    await page.keyboard.type('c')
+    await step('c')
+    await h.sleep(400)
+    await page.keyboard.type('d')
+    await step('d')
+    await page.keyboard.press('Control+V')
+    await step('paste')
+    const cdp = await ctx.newCDPSession(page)
+    await cdp.send('Input.imeSetComposition', { text: 'gh', selectionStart: 2, selectionEnd: 2 })
+    await cdp.send('Input.insertText', { text: 'gh' })
+    await step('ime')
+    await page.keyboard.press('Control+A')
+    await page.keyboard.press('Control+X')
+    await step('cut')
+    await page.keyboard.press('Control+V')
+    await step('paste-back')
+    const valueAfter = await search.inputValue()
+    const phaseBeforeLast = await h.overlayPhase(page)
+    await page.keyboard.press('Tab')
+    await step('tab')
+    const before = apiRequests(requests)
+    await h.clickBox(page, monthBox)
+    await step('click-month')
+    await h.check('y.visible-before-last-key', 'B', async () => phaseBeforeLast === 'visible' || `phase ${phaseBeforeLast}`)
+    await h.check('y.month-click-blocked', 'B', async () => {
+      await h.sleep(300)
+      const after = await monthLabel(page)
+      const sentByClick = apiRequests(requests) - before
+      return (after === label && sentByClick === 0) || `label "${label}" -> "${after}", ${sentByClick} requests`
+    })
+    await h.check('y.focus-kept', 'B', async () => {
+      const outs = await page.evaluate(() => window.__yFocusOut)
+      const lost = focused.filter(([, id]) => id !== 'transactions-search')
+      return (lost.length === 0 && outs.length === 0) || `lost ${JSON.stringify(lost)} focusout ${JSON.stringify(outs)}`
+    })
+    await h.check('y.value', 'B', async () => valueAfter === 'abcdefgh' || `value "${valueAfter}"`)
+    const sent = await (async () => {
+      const until = Date.now() + 3000
+      while (Date.now() < until) {
+        if (gated.urls.some((url) => url.searchParams.get('search') === 'abcdefgh')) return true
+        await h.sleep(50)
+      }
+      return false
+    })()
+    const lastUrl = gated.urls[gated.urls.length - 1]
+    await h.check('y.last-search', 'B', async () => (sent && lastUrl?.searchParams.get('search') === 'abcdefgh') || `searches ${JSON.stringify(gated.urls.map((url) => url.searchParams.get('search')))}`)
+    gate.release({ disarm: true })
+    await h.check('y.clears', 'B', async () => (await clears(page)) || `phase ${await h.overlayPhase(page)}`)
+    await h.check('y.restored', 'B', async () => {
+      const r = await page.evaluate((box) => {
+        const el = document.querySelector(box)
+        return { z: el?.classList.contains('z-[10051]'), bg: el?.classList.contains('bg-surface'), inert: document.querySelectorAll('[inert]').length }
+      }, BOX)
+      return (r.z === false && r.bg === false && r.inert === 0) || JSON.stringify(r)
+    })
+    await h.check('y.list-matches-api', 'B', async () => {
+      await h.waitQuiet(page)
+      // The main list is the abcdefgh request with the earliest start (the other runs from tomorrow).
+      const main = gated.urls
+        .filter((url) => url.searchParams.get('search') === 'abcdefgh')
+        .sort((x, y) => (x.searchParams.get('start_date') || '').localeCompare(y.searchParams.get('start_date') || ''))[0]
+      if (!main) return 'no main-list request carried search=abcdefgh'
+      const query = main.search
+      const rows = await client.get(u.token, `/transactions/${query}`)
+      const expected = (Array.isArray(rows) ? rows : rows.items || []).map((t) => t.description).sort()
+      const shown = (await page.locator('article[role="button"]').allTextContents()).map((t) => t.replace(/\s+/g, ' '))
+      const ok = expected.length === shown.length && expected.every((d) => shown.some((t) => t.includes(d)))
+      return (ok && expected.length === 2) || `api ${JSON.stringify(expected)} shown ${JSON.stringify(shown)} query ${query}`
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+  await scenarioY2(browser, { spec: true })
+  await scenarioY2(browser, { spec: false })
+}
+
+// (y) y2: the page unmounts under a held search (browser Back): removing the focused box
+// need not fire focusout, so the passthrough ends on detach and the whole shell blocks.
+// Chromium fires blur and focusout on the box as it is removed; the spec's focus fixup
+// (and Firefox) fires neither. y2 swallows both before the overlay sees them, so the run
+// takes the spec's path [B]; y2c keeps Chromium's own events, a guard [G].
+async function scenarioY2(browser, { spec }) {
+  const n = spec ? 'y2' : 'y2c'
+  const kind = spec ? 'B' : 'G'
+  console.log(`\n=== (y) ${n}: browser Back during a held search ends the passthrough (${spec ? 'no focusout on removal' : "Chromium's focusout"})`)
+  const { ctx, page } = await openPage(browser)
+  let gate = null
+  try {
+    await h.uiLogin(page, stack, owner)
+    await h.waitQuiet(page)
+    await navLink(page, '/transactions').click()
+    await page.waitForURL((url) => url.pathname === '/transactions')
+    await page.locator(tid('due-section')).waitFor()
+    await page.locator(tid('due-count')).filter({ hasNotText: '…' }).waitFor()
+    await h.waitQuiet(page)
+    await page.evaluate(() => { window.__y2Marker = 1 })
+    const search = page.locator(SEARCH)
+    await search.click()
+    ;({ g: gate } = await searchGate(page))
+    await search.pressSequentially('ab')
+    await h.check(`${n}.search-hit`, 'S', async () => (await gate.waitHits(1)) || 'the search request never started')
+    await h.check(`${n}.visible`, 'S', async () => (await visible(page)) || `phase ${await h.overlayPhase(page)}`)
+    await h.check(`${n}.passthrough-started`, 'S', async () => {
+      const r = await page.evaluate((box) => ({
+        raised: document.querySelector(box)?.classList.contains('z-[10051]') ?? null,
+        active: document.activeElement?.getAttribute('data-testid') ?? null,
+      }), BOX)
+      return (r.raised === true && r.active === 'transactions-search') || JSON.stringify(r)
+    })
+    if (spec) {
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel)
+        for (const type of ['blur', 'focusout']) {
+          window.addEventListener(type, (e) => { if (e.target === el) e.stopImmediatePropagation() }, { capture: true })
+        }
+      }, SEARCH)
+    }
+    await page.goBack({ timeout: 5000 }).catch(() => null)
+    await h.check(`${n}.same-document`, 'S', async () => {
+      try { await page.waitForURL((url) => url.pathname === '/', { timeout: 3000 }) } catch { return `url ${page.url()}` }
+      const r = await page.evaluate((sel) => ({ marker: window.__y2Marker ?? null, box: document.querySelector(sel) !== null }), SEARCH)
+      return (r.marker === 1 && r.box === false) || JSON.stringify(r)
+    })
+    await h.sleep(300)
+    await h.check(`${n}.passthrough-ended`, kind, async () => {
+      const r = await page.evaluate((overlay) => ({
+        raised: document.querySelectorAll('[class~="z-[10051]"]').length,
+        layerHidden: document.querySelector(overlay)?.getAttribute('aria-hidden') ?? null,
+        phase: document.querySelector(overlay)?.getAttribute('data-phase') ?? null,
+        shellInert: document.querySelector('[data-app-shell]')?.hasAttribute('inert') ?? null,
+      }), OVERLAY)
+      return (r.raised === 0 && r.layerHidden === null && r.phase === 'visible' && r.shellInert === true) || JSON.stringify(r)
+    })
+    await h.check(`${n}.focus-in-overlay`, kind, async () => {
+      const r = await page.evaluate(() => ({
+        inHost: document.querySelector('[data-busy-host]')?.contains(document.activeElement) ?? false,
+        active: document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? null,
+      }))
+      return r.inHost || JSON.stringify(r)
+    })
+    gate.release({ disarm: true })
+    await h.check(`${n}.clears`, kind, async () => (await clears(page)) || `phase ${await h.overlayPhase(page)}`)
+    await h.check(`${n}.no-inert`, kind, async () => (await inertCount(page)) === 0 || `inert ${await inertCount(page)}`)
+    await h.check(`${n}.next-page-usable`, kind, async () => {
+      await h.waitQuiet(page)
+      await navLink(page, '/transactions').click()
+      try { await page.waitForURL((url) => url.pathname === '/transactions', { timeout: 3000 }) } catch { return `url ${page.url()}` }
+      await search.waitFor({ timeout: 5000 }).catch(() => null)
+      await h.waitQuiet(page)
+      await search.click()
+      await search.pressSequentially('zq')
+      return (await search.inputValue()) === 'zq' || `value "${await search.inputValue()}"`
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 async function setup() {
   today = manilaToday()
   const anchor = addDays(today, -5)
@@ -1407,6 +1780,7 @@ const SCENARIOS = [
   ['v', scenarioV],
   ['z', scenarioZ],
   ['w', scenarioW],
+  ['y', scenarioY],
 ]
 
 ;(async () => {

@@ -1955,7 +1955,7 @@ export function TransactionsPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:max-w-md">
             <label className="label">Search transactions</label>
-            <div className="relative">
+            <div className="relative" data-busy-passthrough-box>
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                 <svg className="h-5 w-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1963,6 +1963,8 @@ export function TransactionsPage() {
               </div>
               <input
                 type="text"
+                data-busy-passthrough
+                data-testid="transactions-search"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input-field pl-10 focus-ring"
