@@ -423,6 +423,53 @@ async function scenarioF(browser) {
   }
 }
 
+// (g) A failed wishlist load shows an alert with Retry, never "Nothing on your wishlist yet."
+const WISHLIST_EMPTY = 'Nothing on your wishlist yet.'
+const isWishlistList = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/wishlist/')
+async function scenarioG(browser) {
+  console.log('\n=== (g) a failed wishlist load shows an error with Retry, not an empty wishlist')
+  const u = await seedUser('g')
+  const item = await client.post(u.token, '/wishlist/', { name: 'G Standing Desk', estimated_cost: 12000, currency: 'PHP', priority: 'high' })
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    // Keeps, from the first document, whether the empty text ever appeared in the body
+    // (a MutationObserver, so a one-frame flash counts).
+    await page.addInitScript((phrase) => {
+      window.__wishSeen = false
+      const scan = () => { if ((document.body ? document.body.textContent || '' : '').includes(phrase)) window.__wishSeen = true }
+      const start = () => { new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true, characterData: true }); scan() }
+      if (document.documentElement) start()
+      else document.addEventListener('DOMContentLoaded', start, { once: true })
+    }, WISHLIST_EMPTY)
+    await h.uiLogin(page, stack, u)
+    await openAllocations(page)
+    fail = await h.failWith(page, isWishlistList, 500, { times: 1 })
+    await page.getByRole('button', { name: 'Wishlist', exact: true }).click()
+    await h.check('g.failed', 'S', async () => (await waitFailed(fail, 1)) || `failures delivered: ${fail.failed}`)
+    await h.check('g.alert', 'B', async () => {
+      try { await page.locator(tid('wishlist-error')).waitFor({ timeout: 3000 }) } catch { return 'no wishlist-error' }
+      return (await page.locator(tid('wishlist-retry')).count()) === 1 || 'no wishlist-retry'
+    })
+    await h.check('g.no-empty', 'B', async () => {
+      const absent = await h.expectAbsentFor(page, page.getByText(WISHLIST_EMPTY), 1500)
+      const seen = await page.evaluate(() => window.__wishSeen === true)
+      return (absent && !seen) || `"${WISHLIST_EMPTY}" shown (absent for 1.5 s: ${absent}, seen at any time: ${seen})`
+    })
+    await page.locator(tid('wishlist-retry')).click({ timeout: 3000 }).catch(() => null)
+    await page.getByText(item.name, { exact: true }).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('g.retry-lists', 'B', async () => {
+      const shown = (await page.getByText(item.name, { exact: true }).count()) === 1
+      const alert = await page.locator(tid('wishlist-error')).count()
+      return (shown && alert === 0) || `item shown ${shown}, alerts ${alert}`
+    })
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
@@ -430,6 +477,7 @@ const SCENARIOS = [
   ['c', scenarioC],
   ['d', scenarioD],
   ['f', scenarioF],
+  ['g', scenarioG],
 ]
 
 ;(async () => {
