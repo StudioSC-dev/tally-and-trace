@@ -419,9 +419,9 @@ async function scenarioTap(browser) {
     const messages = await watchConsole(ctx, page)
     await page.touchscreen.tap(cancelBox.x + cancelBox.width / 2, cancelBox.y + cancelBox.height / 2)
     await h.sleep(300)
-    await h.check('tap.cancel-blocked', 'B', async () => (await dialog.isVisible()) || 'dialog closed')
-    await h.check('tap.one-post', 'B', async () => post.gate.hits === 1 || `hits ${post.gate.hits}`)
-    await h.check('tap.cancel-no-intervention', 'B', () => interventions(messages))
+    await h.check('tap.cancel-blocked', 'G', async () => (await dialog.isVisible()) || 'dialog closed')
+    await h.check('tap.one-post', 'G', async () => post.gate.hits === 1 || `hits ${post.gate.hits}`)
+    await h.check('tap.cancel-no-intervention', 'G', () => interventions(messages))
   } finally {
     post.gate?.release({ disarm: true })
     await ctx.close()
@@ -446,7 +446,7 @@ async function scenarioTap(browser) {
     await page.touchscreen.tap(box.x + 12, box.y + box.height / 2)
     await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
     await h.sleep(300)
-    await h.check('tap.search-unchanged', 'B', async () => {
+    await h.check('tap.search-unchanged', 'G', async () => {
       const r = { active: await activeTestId(page), value: await search.inputValue(), requests: apiRequests(requests) - before }
       return (r.active === 'transactions-search' && r.value === 'ab' && r.requests === 0) || JSON.stringify(r)
     })
