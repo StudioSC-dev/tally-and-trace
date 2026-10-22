@@ -361,6 +361,10 @@ async function scenarioO(browser) {
       const card = await page.locator(OVERLAY).textContent()
       return (stuck === 'true' && (await reload.isVisible()) && card.includes('This is taking longer than usual.')) || `stuck ${stuck} text "${card}"`
     })
+    await h.check('o1.status-stuck', 'B', async () => {
+      const status = await text(page.locator(tid('busy-status')))
+      return status === 'This is taking longer than usual.' || `status "${status}"`
+    })
     await h.check('o1.no-tab-hint', 'B', async () => {
       const holders = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
         .filter((el) => Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent || '').includes('Press Tab to reach Reload page.')))

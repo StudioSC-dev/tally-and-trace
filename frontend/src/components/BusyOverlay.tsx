@@ -56,7 +56,7 @@ interface View {
   stuck: boolean
   /** The card's phase label, "Saving…" or "Loading…". */
   label: string
-  /** What `busy-status` announces: the label, or the stuck text in a stuck passthrough. */
+  /** What `busy-status` announces: the label, or the stuck text once stuck (with the Tab hint in a passthrough). */
   status: string
   /** A search passthrough is running and its element holds focus. */
   passthrough: boolean
@@ -277,7 +277,8 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     const passing = passthrough !== null
     let label = ''
     if (phase === 'visible') label = episodeSaving ? 'Saving…' : 'Loading…'
-    const status = passing && stuck ? `${STUCK_TEXT} ${STUCK_TAB_HINT}` : label
+    let status = label
+    if (stuck) status = passing ? `${STUCK_TEXT} ${STUCK_TAB_HINT}` : STUCK_TEXT
     setView({ phase, stuck, label, status, passthrough: passing, hadPassthrough })
   }
 
