@@ -23,6 +23,14 @@ const GUARDED_EVENTS = [
   'paste', 'cut', 'drop', 'dragstart', 'compositionstart', 'compositionupdate', 'compositionend', 'submit',
 ] as const
 
+/**
+ * Registered passive, as Chromium treats a window touchstart listener anyway: the guard only
+ * stops it, and the synthesized pointer, mouse, click and touchend events stay guarded.
+ */
+const PASSIVE_EVENTS = new Set<string>(['touchstart'])
+const listenerOptions = (type: string): AddEventListenerOptions =>
+  PASSIVE_EVENTS.has(type) ? { capture: true, passive: true } : { capture: true }
+
 /** The composition commit the overlay's own blur causes; swallowing it would split DOM and state. */
 const OWN_BLUR_EVENTS = new Set(['compositionend', 'beforeinput', 'input', 'change'])
 
@@ -319,6 +327,12 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     }
   }
 
+  /** Swallows an event; a passive one can only be stopped. */
+  const swallow = (event: Event) => {
+    if (!PASSIVE_EVENTS.has(event.type)) event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+
   const onGuard = (event: Event) => {
     if (!blocked) return
     const target = event.target
@@ -327,8 +341,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
       // Typing, composition, paste and cut reach the box; Tab and pointer input do not.
       const isTab = isKey && event.key === 'Tab'
       if (!isTab && PASSTHROUGH_EVENTS.has(event.type)) return
-      event.preventDefault()
-      event.stopImmediatePropagation()
+      swallow(event)
       // Once stuck, Tab (not Shift+Tab) is the keyboard route to Reload page.
       if (isTab && event.type === 'keydown' && !event.shiftKey && stuck) refs.reload.current?.focus()
       return
@@ -358,8 +371,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
       event.stopImmediatePropagation()
       return
     }
-    event.preventDefault()
-    event.stopImmediatePropagation()
+    swallow(event)
   }
 
   const onFocusIn = (event: FocusEvent) => {
@@ -373,7 +385,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     if (event.relatedTarget !== null || document.hasFocus()) endPassthrough()
   }
 
-  for (const type of GUARDED_EVENTS) window.addEventListener(type, onGuard, { capture: true })
+  for (const type of GUARDED_EVENTS) window.addEventListener(type, onGuard, listenerOptions(type))
   document.addEventListener('focusin', onFocusIn, { capture: true })
   document.addEventListener('focusout', onFocusOut, { capture: true })
   const unsubscribe = busySignal.subscribe((next) => {
@@ -386,7 +398,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
   return () => {
     destroyed = true
     unsubscribe()
-    for (const type of GUARDED_EVENTS) window.removeEventListener(type, onGuard, { capture: true })
+    for (const type of GUARDED_EVENTS) window.removeEventListener(type, onGuard, listenerOptions(type))
     document.removeEventListener('focusin', onFocusIn, { capture: true })
     document.removeEventListener('focusout', onFocusOut, { capture: true })
     bodyObserver?.disconnect()
