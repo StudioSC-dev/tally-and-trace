@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { SignupForm } from '../components/auth/SignupForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useEffect } from 'react'
+import { PageLoader } from '../components/Loading'
 
 export const Route = createFileRoute('/register')({
   component: RegisterPage,
@@ -26,11 +27,7 @@ export function RegisterPage() {
   }
 
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="loading-spinner"></div>
-      </div>
-    )
+    return <PageLoader />
   }
 
   if (isAuthenticated) {

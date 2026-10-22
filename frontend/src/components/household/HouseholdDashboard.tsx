@@ -1,3 +1,4 @@
+import { LoadingLine } from '../Loading'
 import { useGetHouseholdDashboardQuery } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
 import { AccountRoleBadge } from '../AccountRoleBadge'
@@ -10,7 +11,7 @@ import { formatMonth, money } from './format'
 export function HouseholdDashboardTab({ sharerId }: { sharerId: number }) {
   const { data, isLoading, error } = useGetHouseholdDashboardQuery(sharerId)
 
-  if (isLoading) return <p className="text-sm text-muted">Loading...</p>
+  if (isLoading) return <LoadingLine>Loading...</LoadingLine>
   if (error || !data) {
     return (
       <p className="text-sm text-danger" role="alert">

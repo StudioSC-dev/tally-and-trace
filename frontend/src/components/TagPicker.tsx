@@ -1,3 +1,4 @@
+import { LoadingLine } from './Loading'
 import { Link } from '@tanstack/react-router'
 import { useGetTagsQuery } from '../store/api'
 
@@ -28,7 +29,7 @@ export function TagPicker({
     <div data-testid="tag-picker">
       <label className="label">{label} (optional)</label>
       {isLoading ? (
-        <p className="text-sm text-muted">Loading tags…</p>
+        <LoadingLine>Loading tags…</LoadingLine>
       ) : isError ? (
         <p className="text-sm text-danger">Could not load your tags.</p>
       ) : tags.length === 0 ? (

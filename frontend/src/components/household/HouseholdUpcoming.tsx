@@ -1,3 +1,4 @@
+import { LoadingLine } from '../Loading'
 import { isLimitedEvent, upcomingItemAmount } from '@tally-trace/shared'
 import { useGetHouseholdUpcomingQuery } from '../../store/api'
 import type { UpcomingItemOrEvent } from '../../store/api'
@@ -59,7 +60,7 @@ export function UpcomingList({ items }: { items: UpcomingItemOrEvent[] }) {
 
 export function HouseholdUpcomingTab({ sharerId }: { sharerId: number }) {
   const { data, isLoading, error } = useGetHouseholdUpcomingQuery({ sharerId, days: 30 })
-  if (isLoading) return <p className="text-sm text-muted">Loading...</p>
+  if (isLoading) return <LoadingLine>Loading...</LoadingLine>
   if (error || !data) {
     return (
       <p className="text-sm text-danger" role="alert">

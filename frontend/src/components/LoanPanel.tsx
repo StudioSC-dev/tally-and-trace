@@ -1,3 +1,4 @@
+import { LoadingLine } from './Loading'
 import { useState } from 'react'
 import { RECORD_DATE_MIN, recordDateError, recordDateMax } from '@tally-trace/shared'
 import {
@@ -35,7 +36,7 @@ export function LoanSummary({ account }: { account: Account }) {
   const { data: schedule, isLoading, isError } = useGetLoanScheduleQuery(account.id)
   const currency = account.currency as CurrencyCode
 
-  if (isLoading) return <p className="text-xs text-muted">Loading loan details...</p>
+  if (isLoading) return <LoadingLine size="xs">Loading loan details...</LoadingLine>
   if (isError || !schedule) return <p className="text-xs text-muted">Loan details unavailable.</p>
 
   return (

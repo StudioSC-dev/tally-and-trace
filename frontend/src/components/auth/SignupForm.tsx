@@ -1,3 +1,4 @@
+import { Spinner } from '../Loading'
 import React, { useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link } from '@tanstack/react-router'
@@ -332,7 +333,7 @@ export const SignupForm: React.FC<SignupFormProps> = ({ onSuccess }) => {
             >
               {isLoading ? (
                 <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  <Spinner size="xs" tone="current" className="mr-2" />
                   Creating account...
                 </div>
               ) : (

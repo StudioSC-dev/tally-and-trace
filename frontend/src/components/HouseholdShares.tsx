@@ -1,3 +1,4 @@
+import { LoadingLine } from './Loading'
 import { useState } from 'react'
 import {
   useCreateHouseholdShareMutation,
@@ -97,7 +98,7 @@ export function HouseholdShares() {
         </p>
       </div>
 
-      {isLoading && <p className="p-4 sm:p-6 text-sm text-muted">Loading...</p>}
+      {isLoading && <LoadingLine className="p-4 sm:p-6">Loading...</LoadingLine>}
 
       {loadError && (
         <p className="p-4 sm:p-6 text-sm text-danger" role="alert" data-testid="household-shares-load-error">

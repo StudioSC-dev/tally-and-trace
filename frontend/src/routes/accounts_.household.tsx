@@ -1,3 +1,4 @@
+import { LoadingLine } from '../components/Loading'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -83,7 +84,7 @@ function HouseholdPage() {
         )}
       </div>
 
-      {isLoading && <p className="text-sm text-muted">Loading...</p>}
+      {isLoading && <LoadingLine>Loading...</LoadingLine>}
       {error && (
         <p className="text-sm text-danger" role="alert">
           {apiErrorMessage(error) || 'Could not load your Households.'}

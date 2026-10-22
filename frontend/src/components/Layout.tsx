@@ -4,6 +4,7 @@ import { BottomNav } from './BottomNav'
 import { useAuth } from '../contexts/AuthContext'
 import { OnboardingFlow } from './onboarding/OnboardingFlow'
 import { BusyOverlay } from './BusyOverlay'
+import { PageLoader } from './Loading'
 import { useEffect, useState } from 'react'
 
 export function Layout() {
@@ -17,11 +18,7 @@ export function Layout() {
   }, [isLoading, isAuthenticated, user])
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="loading-spinner" />
-      </div>
-    )
+    return <PageLoader />
   }
 
   if (!isAuthenticated) {

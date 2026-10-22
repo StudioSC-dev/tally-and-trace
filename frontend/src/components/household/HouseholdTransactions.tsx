@@ -1,3 +1,4 @@
+import { LoadingLine } from '../Loading'
 import { useEffect, useState } from 'react'
 import { transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
 import { useGetHouseholdDashboardQuery, useGetHouseholdTransactionsQuery } from '../../store/api'
@@ -81,7 +82,7 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
   const { data: dashboard } = useGetHouseholdDashboardQuery(sharerId)
   const accountNames = new Map((dashboard?.accounts ?? []).map((account) => [account.id, account.name]))
 
-  if (isLoading) return <p className="text-sm text-muted">Loading...</p>
+  if (isLoading) return <LoadingLine>Loading...</LoadingLine>
   if (error || !data) {
     return (
       <p className="text-sm text-danger" role="alert">

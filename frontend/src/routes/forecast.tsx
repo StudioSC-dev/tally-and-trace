@@ -1,3 +1,4 @@
+import { Spinner } from '../components/Loading'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -155,7 +156,7 @@ function ForecastPage() {
 
       {!data && (!error || refused) ? (
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" />
+          <Spinner size="md" />
         </div>
       ) : error || !data ? (
         <div className="bg-surface border border-line p-6 text-sm text-muted">

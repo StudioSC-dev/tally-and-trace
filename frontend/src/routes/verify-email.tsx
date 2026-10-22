@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useVerifyEmailMutation } from '../store/authApi'
+import { PageLoader } from '../components/Loading'
 
 export const Route = createFileRoute('/verify-email')({
   component: VerifyEmailPage,
@@ -51,14 +52,7 @@ export function VerifyEmailPage() {
   }, [isError, error])
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-paper">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-ink mx-auto mb-4"></div>
-          <p className="text-body">Verifying your email...</p>
-        </div>
-      </div>
-    )
+    return <PageLoader label="Verifying your email..." className="bg-paper" />
   }
 
   if (isError) {
