@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useGetCardCreditsQuery, useGetHouseholdViewsQuery, useGetMinimumDuePresetsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
-import { groupAccounts } from '@tally-trace/shared'
-import type { CardCredit, MinimumDuePreset, MinimumDueRule } from '@tally-trace/shared'
+import { groupAccounts, queryPhase } from '@tally-trace/shared'
+import type { CardCredit, MinimumDuePreset, MinimumDueRule, QueryPhase } from '@tally-trace/shared'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -17,6 +17,7 @@ import { SharedWithMe } from '../components/SharedWithMe'
 import { HouseholdLinks } from '../components/household/HouseholdLinks'
 import { StatementsPanel } from '../components/StatementsPanel'
 import { CreditSummary } from '../components/CreditSummary'
+import { Skeleton } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
@@ -36,8 +37,28 @@ function NotCountedTag() {
   )
 }
 
-/** One account row. A click (or Enter/Space) hands the account to `onOpen`. */
-function AccountCard({ account, credit, onOpen }: { account: Account; credit?: CardCredit; onOpen: (account: Account) => void }) {
+/**
+ * `GET /cards/credit` serves a row: an active card with a limit the caller manages. Mirrors
+ * the backend's `card_credit.managed_card_ids`.
+ */
+const servesCredit = (account: Account): boolean =>
+  account.account_type === 'credit' &&
+  account.is_active === true &&
+  account.credit_limit != null &&
+  account.permissions.can_edit_settings
+
+/**
+ * One account row. A click (or Enter/Space) hands the account to `onOpen`. `creditPhase` is
+ * the card credits query's phase: a row it serves holds the headline's place while it is
+ * pending and says so when it fails.
+ */
+function AccountCard({ account, credit, creditPhase, onOpen }: {
+  account: Account
+  credit?: CardCredit
+  creditPhase: QueryPhase
+  onOpen: (account: Account) => void
+}) {
+  const managed = servesCredit(account)
   return (
     <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
@@ -71,11 +92,19 @@ function AccountCard({ account, credit, onOpen }: { account: Account; credit?: C
 
             {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
 
-            {credit && (
+            {managed && creditPhase === 'error' ? (
+              <p className="text-xs text-muted" data-testid={`account-credit-error-${account.id}`}>
+                Available credit could not be loaded
+              </p>
+            ) : credit ? (
               <div data-testid={`account-credit-${account.id}`}>
                 <CreditSummary credit={credit} compact />
               </div>
-            )}
+            ) : managed && creditPhase === 'pending' ? (
+              <div data-testid={`account-credit-pending-${account.id}`}>
+                <Skeleton className="h-4 w-32" />
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-2 text-xs text-body">
               <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
@@ -340,7 +369,9 @@ export function AccountsPage() {
   // Why the last save failed, shown in the form until the next attempt or close.
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const { data: cardCredits } = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
+  const cardCreditsQuery = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
+  const cardCredits = cardCreditsQuery.data
+  const creditPhase = queryPhase(cardCredits, cardCreditsQuery, !isAuthenticated)
   const creditById = useMemo(() => new Map((cardCredits?.items ?? []).map((c) => [c.account_id, c])), [cardCredits])
   const { data: presets } = useGetMinimumDuePresetsQuery(undefined, {
     skip: !isAuthenticated || !isCreateModalOpen || formData.account_type !== 'credit',
@@ -677,7 +708,13 @@ export function AccountsPage() {
         </h3>
         <div className="grid grid-cols-1 gap-3">
           {inGroup.map((account) => (
-            <AccountCard key={account.id} account={account} credit={creditById.get(account.id)} onOpen={openActionModal} />
+            <AccountCard
+              key={account.id}
+              account={account}
+              credit={creditById.get(account.id)}
+              creditPhase={creditPhase}
+              onOpen={openActionModal}
+            />
           ))}
         </div>
       </div>

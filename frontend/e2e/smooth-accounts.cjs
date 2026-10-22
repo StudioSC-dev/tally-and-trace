@@ -1,6 +1,6 @@
 // Browser checks for STU-335 on the Accounts page (plan 3.2, accounts scenarios in 5.2):
 // the list stays on screen while it reloads, and a failed load shows an alert with Retry,
-// never the empty text. Starts its own API and web app against a
+// never the empty text, and a card row holds a place for its available credit. Starts its own API and web app against a
 // throwaway database (./_local_stack.cjs) and seeds through the API; every expected figure
 // is read from the API. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -28,7 +28,7 @@ const only = process.argv[2]
 const EMPTY_ALL = 'No accounts yet. Start by adding your first account.'
 const EMPTY_TAG = 'No accounts have this tag.'
 
-let stack, client, owner, tag, alpha, bravo
+let stack, client, owner, sharer, tag, alpha, bravo, ownerCard, sharedCard
 
 // ─── Page helpers ────────────────────────────────────────────────────────────
 
@@ -91,6 +91,12 @@ async function tagRequested(requestPromise) {
   const value = new URL(request.url()).searchParams.get('tag')
   return value === String(tag.id) || `tag=${value}`
 }
+
+/** As the app shows PHP money: "₱1,851.10". */
+const peso = (n) => `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/** An account's row (`article`) on the list. */
+const rowOf = (page, id) => page.locator('article', { has: page.locator(rowLink(id)) })
 
 /** The account names the list shows, sorted. */
 const shownNames = (page) =>
@@ -219,6 +225,51 @@ async function scenarioE(browser) {
   }
 }
 
+// (d) A managed card row holds the credit headline's place while /cards/credit loads.
+async function scenarioD(browser) {
+  console.log('\n=== (d) a managed card row holds a place for its available credit')
+  const { ctx, page } = await openPage(browser)
+  let gate = null
+  try {
+    gate = await h.gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/cards/credit'))
+    await page.goto(`${stack.webUrl}/accounts`)
+    await page.locator(rowLink(ownerCard.id)).waitFor()
+    await h.check('d.held', 'S', async () => (await gate.waitHits(1)) || 'no /cards/credit request')
+    await h.check('d.shared-row', 'S', async () =>
+      (await page.locator(rowLink(sharedCard.id)).isVisible()) || 'the editor-shared card is not listed')
+    await h.check('d.placeholder', 'S', async () => {
+      const shown = await page.locator(tid(`account-credit-pending-${ownerCard.id}`)).waitFor({ timeout: 3000 }).then(() => true, () => false)
+      return shown || 'no account-credit-pending for the owner card'
+    })
+    await h.check('d.no-placeholder-for-editor', 'S', async () => {
+      const n = await page.locator(tid(`account-credit-pending-${sharedCard.id}`)).count()
+      return n === 0 || `${n} placeholders on the editor-shared card`
+    })
+    await h.sleep(300)
+    const held = await rowOf(page, ownerCard.id).boundingBox()
+    gate.release({ disarm: true })
+    const summary = page.locator(`${tid(`account-credit-${ownerCard.id}`)} ${tid('credit-available')}`)
+    await summary.waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('d.credit-matches-api', 'B', async () => {
+      const { items } = await client.get(owner.token, '/cards/credit')
+      const credit = items.find((c) => c.account_id === ownerCard.id)
+      if (!credit) return 'the API serves no credit for the owner card'
+      const expected = `Available ${credit.complete ? '' : 'at most '}${peso(credit.available_now)}`
+      const shown = ((await summary.textContent().catch(() => null)) || '').replace(/\s+/g, ' ').trim()
+      return shown === expected || `shown "${shown}" api "${expected}"`
+    })
+    await h.check('d.height-held', 'B', async () => {
+      const after = await rowOf(page, ownerCard.id).boundingBox()
+      if (!held || !after) return 'no row box'
+      return Math.abs(after.height - held.height) <= 2 || `held ${held.height} px, landed ${after.height} px`
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'acct')
   tag = await client.post(owner.token, '/tags/', { name: 'Quarterly' })
@@ -228,12 +279,23 @@ async function setup() {
   bravo = await client.post(owner.token, '/accounts/', {
     name: 'Bravo Savings', account_type: 'savings', balance: 3400, currency: 'PHP',
   })
+  ownerCard = await client.post(owner.token, '/accounts/', {
+    name: 'Charlie Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
+    billing_cycle_start: 15, days_until_due_date: 21,
+  })
+  sharer = await h.makeUser(stack, 'sharer')
+  sharedCard = await client.post(sharer.token, '/accounts/', {
+    name: 'Delta Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 30000,
+    billing_cycle_start: 10, days_until_due_date: 21,
+  })
+  await client.post(sharer.token, `/accounts/${sharedCard.id}/shares`, { email: owner.email, role: 'editor' })
 }
 
 const SCENARIOS = [
   ['a', scenarioA],
   ['c', scenarioC],
   ['e', scenarioE],
+  ['d', scenarioD],
 ]
 
 ;(async () => {
