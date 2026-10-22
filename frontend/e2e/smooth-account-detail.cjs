@@ -87,8 +87,12 @@ async function scenarioA(browser) {
       const n = await rows(page).count()
       return n === 0 || `${n} rows rendered while the names were held`
     })
-    await h.check('a.loading-shown', 'S', async () =>
-      (await page.locator(tid('account-transactions-loading')).isVisible()) || 'no account-transactions-loading while held')
+    await h.check('a.names-pending-shown', 'B', async () =>
+      (await page.locator(tid('account-transactions-names-pending')).isVisible()) || 'no account-transactions-names-pending while held')
+    await h.check('a.loading-not-placeholder', 'B', async () => {
+      const n = await page.locator(tid('account-transactions-loading')).count()
+      return n === 0 || `account-transactions-loading on the names placeholder (${n})`
+    })
     gate.release({ disarm: true })
     await rows(page).first().waitFor({ timeout: 5000 }).catch(() => null)
     await h.waitQuiet(page)
