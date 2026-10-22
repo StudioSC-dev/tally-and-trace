@@ -1294,6 +1294,83 @@ async function scenarioZ(browser) {
   }
 }
 
+/**
+ * Opens a dialog from a focused opener with its first load held, presses Escape at once
+ * and again at `visible`, releases, waits, and closes it with `closeName`. Returns the
+ * dialog's state after the Escapes and the focused element after the close.
+ */
+async function openerRoundTrip(page, { opener, held, dialog, closeName }) {
+  await opener.focus()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Escape')
+  const hit = await held.waitHits(1)
+  await visible(page)
+  await page.keyboard.press('Escape')
+  await h.sleep(200)
+  const openAfterEscapes = (await dialog.count()) > 0 && (await dialog.isVisible())
+  held.release({ disarm: true })
+  await h.waitQuiet(page)
+  if (openAfterEscapes) await dialog.getByRole('button', { name: closeName, exact: true }).click()
+  await h.sleep(300)
+  const marker = await opener.evaluate((el) => el === document.activeElement).catch(() => false)
+  return { hit, openAfterEscapes, focusOnOpener: marker, active: await activeTestId(page) }
+}
+
+// (w) Dialog openers survive the screen loader's blur (StrictMode dev stack).
+async function scenarioW(browser) {
+  console.log('\n=== (w) each dialog returns focus to its opener after a blocked first load')
+  const u = await h.makeUser(stack, 'w')
+  const checking = await client.post(u.token, '/accounts/', { name: 'W Checking', account_type: 'checking', balance: 50000, currency: 'PHP' })
+  const presets = await client.get(u.token, '/accounts/minimum-due-presets')
+  const wCard = await client.post(u.token, '/accounts/', {
+    name: 'W Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
+    billing_cycle_start: closeDom, days_until_due_date: 21, minimum_due_rule: presets.find((p) => p.key === 'bdo').rule, payment_account_id: checking.id,
+  })
+  await client.post(u.token, '/transactions/', { account_id: wCard.id, transaction_type: 'debit', amount: 900, description: 'W purchase', transaction_date: wire(addDays(close, -3)), is_posted: true })
+  const bill = await entry(u, { name: 'W Bill', amount: 700, account_id: checking.id, next_occurrence: wire(addDays(today, 3)) })
+  await client.post(u.token, '/transactions/', { account_id: checking.id, transaction_type: 'debit', amount: 120, description: 'W spend', transaction_date: wire(today), is_posted: true })
+  const { ctx, page } = await openPage(browser)
+  const gates = []
+  try {
+    await h.uiLogin(page, stack, u)
+    // w1: Card Pay from the account page.
+    await openCardPanel(page, wCard.id)
+    const credit = await creditGate(page, wCard.id)
+    gates.push(credit)
+    const w1 = await openerRoundTrip(page, {
+      opener: page.locator(tid('card-pay-open')), held: credit, dialog: page.locator(tid('card-pay-dialog')), closeName: 'Cancel',
+    })
+    await h.check('w1.held', 'S', async () => w1.hit || 'the mount refetch never started')
+    await h.check('w1.open-after-escapes', 'B', async () => w1.openAfterEscapes || 'dialog closed by Escape')
+    await h.check('w1.focus-opener', 'B', async () => w1.focusOnOpener || `active ${w1.active}`)
+
+    // w2: Mark paid from a Due row.
+    await openTransactions(page)
+    const row = await showRow(page, dueRecurring(page, 'W Bill'))
+    const occurrences = await h.gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith(`/budget-entries/${bill.id}/occurrences`))
+    gates.push(occurrences)
+    const w2 = await openerRoundTrip(page, {
+      opener: row.locator(tid('due-mark-paid')), held: occurrences, dialog: page.locator(tid('mark-paid-dialog')), closeName: 'Cancel',
+    })
+    await h.check('w2.held', 'S', async () => w2.hit || 'the occurrences load never started')
+    await h.check('w2.open-after-escapes', 'B', async () => w2.openAfterEscapes || 'dialog closed by Escape')
+    await h.check('w2.focus-opener', 'B', async () => w2.focusOnOpener || `active ${w2.active}`)
+
+    // w3: the spending breakdown (opened from Transactions).
+    const summary = await h.gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/transactions/summary/period'))
+    gates.push(summary)
+    const w3 = await openerRoundTrip(page, {
+      opener: page.getByRole('button', { name: 'Spending breakdown' }), held: summary, dialog: page.locator(tid('spending-breakdown-dialog')), closeName: 'Close',
+    })
+    await h.check('w3.held', 'S', async () => w3.hit || 'the breakdown load never started')
+    await h.check('w3.open-after-escapes', 'B', async () => w3.openAfterEscapes || 'dialog closed by Escape')
+    await h.check('w3.focus-opener', 'B', async () => w3.focusOnOpener || `active ${w3.active}`)
+  } finally {
+    for (const g of gates) g.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function setup() {
@@ -1329,6 +1406,7 @@ const SCENARIOS = [
   ['u', scenarioU],
   ['v', scenarioV],
   ['z', scenarioZ],
+  ['w', scenarioW],
 ]
 
 ;(async () => {
