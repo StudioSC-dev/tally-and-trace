@@ -280,11 +280,16 @@ async function scenarioF(browser) {
   let gate = null
   try {
     gate = await h.gate(page, isViews)
-    const listSeen = page.waitForResponse((r) => isList()(r.request()))
+    const listSeen = page.waitForResponse((r) => isList()(r.request())).catch(() => null)
     await page.goto(`${stack.webUrl}/accounts`)
     await h.check('f.held', 'S', async () => (await gate.waitHits(1)) || 'no /household/ request')
-    // The list request itself is free: wait for it to land before reading the page.
-    await listSeen
+    // The list request itself is free: wait for it to land, body included, before reading the page.
+    await h.check('f.list-landed', 'S', async () => {
+      const res = await listSeen
+      if (!res) return 'no accounts list response'
+      const failure = await res.finished()
+      return !failure || 'the accounts list body did not finish'
+    })
     // Let the response reach the store and the page render once, so a premature paint would show.
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))))
     await h.check('f.no-rows-while-held', 'B', async () => {
