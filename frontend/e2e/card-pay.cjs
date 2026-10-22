@@ -36,6 +36,7 @@
 // Usage: node frontend/e2e/card-pay.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, showRow } = require('./_due_pages.cjs')
+const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -175,6 +176,7 @@ async function openDialog(page) {
   await page.locator('[data-testid="card-pay-open"]').click()
   const dialog = page.locator('[data-testid="card-pay-dialog"]')
   await dialog.locator('[data-testid="card-pay-amount"]').waitFor()
+  await waitQuiet(page)
   return dialog
 }
 const text = async (locator) => (await locator.textContent())?.replace(/\s+/g, ' ').trim()
@@ -203,6 +205,7 @@ async function openRowDialog(page, cardId) {
   await (await showRow(page, statementRow(page, cardId))).locator('[data-testid="due-pay"]').click()
   const dialog = page.locator('[data-testid="card-pay-dialog"]')
   await dialog.locator('[data-testid="card-pay-amount"]').waitFor()
+  await waitQuiet(page)
   return dialog
 }
 const payResponse = (page, cardId) =>

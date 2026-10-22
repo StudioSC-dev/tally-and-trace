@@ -34,9 +34,9 @@
 //   (p) Load more batches stay live: a row posted from an earlier batch leaves,
 //       a row that slides across the batch boundary stays, and a new day
 //       restarts the window
-//   (q) out-of-order window refetches: with batch responses held and released
-//       in either order, the selected page survives and a row in two batches
-//       counts once
+//   (q) out-of-order window refetches: a row is posted from the page under test,
+//       the batch responses are held and released in either order, the selected
+//       page survives and a row in two batches counts once
 //
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
@@ -44,6 +44,7 @@
 // Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
+const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -873,14 +874,37 @@ async function outOfOrderRefetch(browser) {
     }
   }
 
-  // Round 1: H moves into batch 0 (pushing D into batch 1); posting G refetches; batch 1 lands first.
+  /**
+   * Mark posted on `name`, a row of the page on screen: opens the form, waits for the screen loader to
+   * clear, arms the hold, then saves, so the hold catches the window refetch that this post starts.
+   * Returns { held, status }.
+   */
+  const postHeld = async (name, txnId) => {
+    await pendRow(page, name).locator('[data-testid="due-mark-posted"]').click()
+    await page.getByRole('button', { name: 'Save Posted Amount' }).waitFor()
+    await waitQuiet(page)
+    const held = await hold()
+    return { held, status: (await savePosted(page, txnId)).status() }
+  }
+
+  // Round 1, page 3. The section lists the oldest first, 3 a page: H G F | E D C | B A. Batch 0 holds
+  // the 996 fillers (today+5, never listed) and the 4 newest named rows A B C D; batch 1 is E F G H.
+  // B is on page 3 and in batch 0, so posting it frees a batch-0 slot: for a row to be pushed into
+  // batch 1, two rows must move in, so the API moves H and G to yesterday (the old round moved only H,
+  // because it posted G from batch 1). After the post, batch 0 = A H G C, batch 1 = D E F.
+  // Batch 1 lands first: old batch 0 (A B C D) + new batch 1 (D E F) = 6 rows with D once, so the
+  // badge reads 6 and the view shows page 2, 4–6 of 6 (a double count reads 7; no merge keeps 8).
+  // Batch 0 then lands: A H G C D E F = 7, and the selected page 3 is back: 7–7 of 7.
+  await goToPage(page, 3)
+  check('(q) round 1: page 3 is on screen with B on it', [await currentPage(page), await pendRow(page, 'B').count()], [3, 1])
   const moveH = await api(u.token, 'PUT', `/transactions/${rows.H.id}`, { transaction_date: wire(addDays(today, -1)) })
   check('(q) round 1: the API moves H to yesterday (200)', moveH.status, 200)
-  let held = await hold()
-  check('(q) round 1: posting G saves it (200)', await postFromSection(page, 'G', rows.G.id), 200)
-  await closeActions(page)
+  const moveG = await api(u.token, 'PUT', `/transactions/${rows.G.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q) round 1: the API moves G to yesterday (200)', moveG.status, 200)
+  let posted = await postHeld('B', rows.B.id)
+  let held = posted.held
+  check('(q) round 1: posting B from page 3 saves it (200)', posted.status, 200)
   if (await held.wait(1)) {
-    await goToPage(page, 3)
     const late = await held.release('1000')
     await waitForBadge(page, '6')
     check('(q) round 1: while batch 0 is held the badge reads 6 and the pager reads 4–6 of 6',
@@ -889,36 +913,41 @@ async function outOfOrderRefetch(browser) {
     check('(q) round 1: both held window responses completed with 200', [late, early], [200, 200])
     await held.remove()
     await waitForBadge(page, '7')
+    await waitQuiet(page)
+    await closeActions(page)
     await settle(page)
     check('(q) round 1: page 3 survives the out-of-order refetch',
       [await currentPage(page), await pagerLabel(page), await dueBadge(page)], [3, '7–7 of 7', '7'])
   }
 
-  // Round 2: F moves into batch 0 (pushing C into batch 1); posting E refetches; batch 0 lands first.
+  // Round 2, page 2. Now listed oldest first: F E D C, then A H G (all yesterday, in either order), so
+  // C is 4th, on page 2; batch 0 = A H G C, batch 1 = D E F. The API moves F to yesterday and C is
+  // posted from page 2: batch 0 = A H G F, batch 1 = D E. Batch 0 lands first: new batch 0 (A H G F) +
+  // old batch 1 (D E F) = 6 rows with F once, so the badge reads 6 (a double count, or no merge, reads
+  // 7) and page 2 reads 4–6 of 6. Batch 1 then lands: A H G F D E = 6, still page 2.
   const moveF = await api(u.token, 'PUT', `/transactions/${rows.F.id}`, { transaction_date: wire(addDays(today, -1)) })
   check('(q) round 2: the API moves F to yesterday (200)', moveF.status, 200)
-  held = await hold()
-  await goToPage(page, 1)
-  check('(q) round 2: posting E saves it (200)', await postFromSection(page, 'E', rows.E.id), 200)
-  await closeActions(page)
+  await goToPage(page, 2)
+  check('(q) round 2: page 2 is on screen with C on it', [await currentPage(page), await pendRow(page, 'C').count()], [2, 1])
+  posted = await postHeld('C', rows.C.id)
+  held = posted.held
+  check('(q) round 2: posting C from page 2 saves it (200)', posted.status, 200)
   if (await held.wait(2)) {
-    await goToPage(page, 2)
     const early = await held.release('0')
     await waitForBadge(page, '6')
-    check('(q) round 2: the row in two batches counts once while batch 1 is held', await dueBadge(page), '6')
+    check('(q) round 2: the row in two batches counts once while batch 1 is held: badge 6, page 2, 4–6 of 6',
+      [await dueBadge(page), await currentPage(page), await pagerLabel(page)], ['6', 2, '4–6 of 6'])
     const late = await held.release('1000')
     check('(q) round 2: both held window responses completed with 200', [early, late], [200, 200])
     await held.remove()
+    await waitQuiet(page)
+    await closeActions(page)
     await settle(page)
-    // C is on page 1, and reading other pages moves the view, so the page is read first.
-    const onScreen = [await currentPage(page), await dueBadge(page)]
-    let all = []
-    for (const until = Date.now() + 15000; ; await page.waitForTimeout(300)) {
-      all = (await allDueRows(page)).map((r) => r.name)
-      if (all.includes('C') || Date.now() > until) break
-    }
-    check('(q) round 2: page 2 survives', onScreen, [2, '6'])
-    check('(q) round 2: every row is listed once', [all.includes('C'), all.length === new Set(all).size, [...all].sort()], [true, true, ['A', 'B', 'C', 'D', 'F', 'H']])
+    // Reading other pages moves the view, so the page is read first.
+    const onScreen = [await currentPage(page), await pagerLabel(page), await dueBadge(page)]
+    const all = (await allDueRows(page)).map((r) => r.name)
+    check('(q) round 2: page 2 survives', onScreen, [2, '4–6 of 6', '6'])
+    check('(q) round 2: every row is listed once', [all.length === new Set(all).size, [...all].sort()], [true, ['A', 'D', 'E', 'F', 'G', 'H']])
   }
   await ctx.close()
 }

@@ -6,6 +6,7 @@
 //   - rowsOf(page, name, kind): the rows of allDueRows that match a name.
 //   - showRow(page, locator): go to the page that holds the locator and return it,
 //     for clicking a button on it.
+const { waitQuiet } = require('./_smooth.cjs')
 const ROWS = '[data-testid="due-row"]'
 
 const pager = (page) => page.locator('[data-testid="due-pager"]')
@@ -27,6 +28,7 @@ async function step(page, button, to) {
 
 /** Step to page `n` with Previous and Next; the list has no pager while it fits on one page. */
 async function goToPage(page, n) {
+  await waitQuiet(page)
   if (!(await hasPager(page))) {
     if (n !== 1) throw new Error(`no pager, so no page ${n}`)
     return
