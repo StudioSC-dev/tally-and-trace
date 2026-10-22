@@ -1,5 +1,6 @@
 // Browser checks for STU-335 on the Accounts page (plan 3.2, accounts scenarios in 5.2):
-// the list stays on screen while it reloads. Starts its own API and web app against a
+// the list stays on screen while it reloads, and a failed load shows an alert with Retry,
+// never the empty text. Starts its own API and web app against a
 // throwaway database (./_local_stack.cjs) and seeds through the API; every expected figure
 // is read from the API. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -147,6 +148,77 @@ async function scenarioA(browser) {
   }
 }
 
+// (c) A failed first load shows the alert with Retry in place of the list.
+async function scenarioC(browser) {
+  console.log('\n=== (c) a failed first load shows an error with Retry, not "No accounts yet"')
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    fail = await h.failWith(page, isList(), 500, { times: 1 })
+    await page.goto(`${stack.webUrl}/accounts`)
+    const alert = page.locator(tid('accounts-load-error'))
+    await h.check('c.alert', 'B', async () => {
+      const shown = await alert.waitFor({ timeout: 5000 }).then(() => true, () => false)
+      return shown || `no accounts-load-error (failures delivered: ${fail.failed})`
+    })
+    await h.check('c.retry-shown', 'B', async () =>
+      (await alert.locator(tid('accounts-retry')).isVisible()) || 'no accounts-retry in the alert')
+    await h.waitQuiet(page)
+    await h.check('c.no-empty-text', 'B', async () => {
+      const absent = await h.expectAbsentFor(page, page.getByText(EMPTY_ALL), 1500)
+      const seen = await seenEmpty(page)
+      return (absent && seen.length === 0) || `showed ${JSON.stringify(seen)}, absent for 1.5 s: ${absent}`
+    })
+    await page.locator(tid('accounts-retry')).click({ timeout: 3000 }).catch(() => null)
+    await page.locator(rowLink(alpha.id)).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('c.retry-lists', 'B', () => namesMatchApi(page, undefined))
+    await h.check('c.alert-gone', 'B', async () => (await alert.count()) === 0 || 'the alert stayed after a successful Retry')
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
+// (e) A failed reload keeps the rows live with the alert and Retry above them.
+async function scenarioE(browser) {
+  console.log('\n=== (e) a failed reload keeps the rows, with the alert and Retry above them')
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    await openAccounts(page)
+    fail = await h.failWith(page, isList({ tagged: true }), 500, { times: 1 })
+    const request = page.waitForRequest(isList({ tagged: true }), { timeout: 5000 }).catch(() => null)
+    await pickTagByKeyboard(page)
+    await h.check('e.tag-picked', 'S', () => tagRequested(request))
+    await page.locator(tid('accounts-load-error')).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('e.failed', 'S', async () => fail.failed === 1 || `failures delivered: ${fail.failed}`)
+    await h.check('e.rows-kept', 'B', async () =>
+      (await page.locator(rowLink(bravo.id)).isVisible()) || 'the retained rows are gone after the failed reload')
+    await h.check('e.alert-above', 'B', async () => {
+      const alert = await page.locator(tid('accounts-load-error')).boundingBox()
+      const retry = await page.locator(`${tid('accounts-load-error')} ${tid('accounts-retry')}`).isVisible().catch(() => false)
+      const firstRow = await page.locator('[data-testid^="account-detail-link-"]').first().boundingBox()
+      if (!alert || !retry) return 'no alert with Retry'
+      if (!firstRow) return 'no rows'
+      return alert.y + alert.height <= firstRow.y || `alert bottom ${alert.y + alert.height} below row top ${firstRow.y}`
+    })
+    await h.check('e.no-empty-text', 'B', async () => {
+      const absent = await h.expectAbsentFor(page, page.getByText(/No accounts (yet|have this tag)/), 1500)
+      const seen = await seenEmpty(page)
+      return (absent && seen.length === 0) || `showed ${JSON.stringify(seen)}, absent for 1.5 s: ${absent}`
+    })
+    await page.locator(tid('accounts-retry')).click({ timeout: 3000 }).catch(() => null)
+    await page.locator(rowLink(bravo.id)).waitFor({ state: 'detached', timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('e.retry-lists-tagged', 'B', () => namesMatchApi(page, tag.id))
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'acct')
   tag = await client.post(owner.token, '/tags/', { name: 'Quarterly' })
@@ -160,6 +232,8 @@ async function setup() {
 
 const SCENARIOS = [
   ['a', scenarioA],
+  ['c', scenarioC],
+  ['e', scenarioE],
 ]
 
 ;(async () => {

@@ -361,6 +361,9 @@ export function AccountsPage() {
   // new response replaces it.
   const [hasLoaded, setHasLoaded] = useState(false)
   const [isReloading, setIsReloading] = useState(false)
+  // Set by the current load's failure and cleared by its success: a failed load keeps the
+  // rows it had (none on a first load) and shows an alert with Retry.
+  const [loadError, setLoadError] = useState(false)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   // The list above is narrowed by the tag filter, but payment routing can pick any account.
   const { data: householdViews } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
@@ -437,11 +440,11 @@ export function AccountsPage() {
         if (!isCurrent()) return
         setAccounts(result.items)
         setTotalAccounts(result.total)
+        setLoadError(false)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading accounts:', error)
-        setAccounts([])
-        setTotalAccounts(0)
+        setLoadError(true)
       } finally {
         if (isCurrent()) {
           setIsReloading(false)
@@ -705,12 +708,27 @@ export function AccountsPage() {
 
       {/* Accounts List: stays mounted while a reload runs. */}
       <div className="space-y-6" data-testid="accounts-region" aria-busy={isReloading}>
+      {loadError && (
+        <div className="card p-4 space-y-3" role="alert" data-testid="accounts-load-error">
+          <p className="text-sm text-danger">Could not load accounts.</p>
+          <button
+            type="button"
+            className="btn-secondary focus-ring"
+            onClick={() => void loadAccounts()}
+            data-testid="accounts-retry"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {orderedAccounts.length === 0 ? (
+        loadError ? null : (
         <div className="card p-6 text-center text-muted">
           {selectedTag === undefined
             ? 'No accounts yet. Start by adding your first account.'
             : 'No accounts have this tag.'}
         </div>
+        )
       ) : (
         <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-muted -mb-4">
           <span>Account</span>
