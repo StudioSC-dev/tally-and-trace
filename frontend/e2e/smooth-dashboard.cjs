@@ -373,6 +373,82 @@ async function retryRun(browser, name, snapshotFailures) {
 const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', 1))
 const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', 2))
 
+// (h) The snapshot is held while allocations land: no envelope row, no numeric badge. Once
+// it lands, FxNotice and the card charges appear with the envelopes in one render, so the
+// first envelope row does not move.
+async function scenarioH(browser) {
+  console.log('\n=== (h) snapshot held, allocations landed: envelopes wait, then do not move')
+  const u = await seed('h')
+  const visa = await client.post(u.token, '/accounts/', {
+    name: 'Visa h', account_type: 'credit', balance: 0, currency: 'PHP',
+    billing_cycle_start: 24, days_until_due_date: 21, payment_account_id: u.bank.id,
+  })
+  await client.post(u.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Netflix h', amount: 549, account_id: visa.id,
+    next_occurrence: wire(addDays(today, 5)),
+  })
+  await client.post(u.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'JPY', cadence: 'monthly', name: 'Yen app h', amount: 1000, account_id: visa.id,
+    next_occurrence: wire(addDays(today, 8)),
+  })
+  const { ctx, page } = await openPage(browser)
+  // The envelope row's page-top at its first appearance, and at every later frame.
+  await page.addInitScript(() => {
+    const seen = { first: null, tops: [] }
+    window.__stu335Env = seen
+    const top = () => {
+      const el = document.querySelector('[data-testid="envelope-row"]')
+      return el ? Math.round((el.getBoundingClientRect().top + window.scrollY) * 10) / 10 : null
+    }
+    const tick = () => {
+      const t = top()
+      if (t !== null) {
+        if (seen.first === null) seen.first = t
+        seen.tops.push(t)
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  let g
+  try {
+    g = await h.gate(page, isSnapshot)
+    const allocationsSeen = page.waitForResponse((r) => r.request().method() === 'GET' && pathIs('/allocations/')(r.request()))
+    await h.uiLogin(page, stack, u)
+    await h.check('h.snapshot-held', 'S', async () => (await g.waitHits(1)) || 'snapshot never requested')
+    await allocationsSeen
+    await page.locator(tid('actual-totals')).waitFor()
+    await h.sleep(750)
+    await h.check('h.envelopes-pending', 'S', async () => (await page.locator(tid('envelopes-pending')).count()) === 1 || 'no envelopes-pending while held')
+    await h.check('h.no-envelope-row-while-held', 'B', async () => (await page.locator(tid('envelope-row')).count()) === 0 || 'an envelope row showed while the snapshot was held')
+    await h.check('h.no-badge-while-held', 'B', async () => (await page.locator('[data-onboarding="budget-envelopes"] .badge').count()) === 0 || 'a numeric badge showed while the snapshot was held')
+    g.release({ disarm: true })
+    await page.locator(tid('envelope-row')).first().waitFor()
+    await h.sleep(500)
+    await h.waitQuiet(page)
+    const env = await page.evaluate(() => window.__stu335Env)
+    await h.check('h.first-row-does-not-move', 'B', async () => {
+      const last = env.tops[env.tops.length - 1]
+      return Math.abs(last - env.first) <= 1 || `first row top ${env.first}, later ${last}, history ${JSON.stringify([...new Set(env.tops)])}`
+    })
+    const snap = await snapshotOf(u)
+    await h.check('h.unconverted-banner-matches-api', 'G', async () => {
+      const expected = snap.fx.unconverted_count > 0 ? 1 : 0
+      const shown = await page.locator(tid('unconverted-banner')).count()
+      return shown === expected || `banner ${shown}, api unconverted_count ${snap.fx.unconverted_count}`
+    })
+    await h.check('h.card-charges-match-api', 'G', async () => {
+      const shown = await page.locator(tid('card-charges-name')).allTextContents()
+      const expected = snap.card_charges.map((c) => c.account_name)
+      return JSON.stringify(shown.map((t) => t.trim())) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
+    })
+    await h.check('h.card-charges-present', 'S', async () => (await page.locator(tid('card-charges-name')).count()) >= 1 || 'no card charges rendered')
+  } finally {
+    g?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
@@ -381,6 +457,7 @@ const SCENARIOS = [
   ['d', scenarioD],
   ['g', scenarioG],
   ['g2', scenarioG2],
+  ['h', scenarioH],
 ]
 
 ;(async () => {
