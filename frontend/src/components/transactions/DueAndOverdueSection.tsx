@@ -178,6 +178,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
   const loading = snapshotLoading || windowResult.loading
+  // First-load flags only: a refetch is not gated, it runs under the screen loader. A linked batch that lands adds rows, so the count waits for it.
+  const countPending = loading || linkedLoading
   const view = pageWindow(count, page, DUE_PAGE_SIZE)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
   // A list that shrank leaves the reader on the last page that exists, and stays there if it grows again.
@@ -361,7 +363,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           data-testid="due-section-toggle"
         >
           <span>Due and overdue</span>
-          <span className="badge" data-testid="due-count">{loading ? '…' : count}</span>
+          <span className="badge" data-testid="due-count">{countPending ? '…' : count}</span>
         </button>
       </h2>
       {open && (
@@ -374,7 +376,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
               Could not load some pending transactions.
             </p>
           )}
-          {!loading && !snapshotError && count === 0 && (
+          {!countPending && !snapshotError && count === 0 && (
             <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
           )}
           {count > 0 && (
