@@ -133,6 +133,7 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
         <div
           className="w-full max-w-lg bg-surface p-6 border border-line"
           role="dialog"
+          aria-modal="true"
           aria-label={`Share ${account.name}`}
           onClick={(event) => event.stopPropagation()}
         >

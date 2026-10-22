@@ -18,6 +18,8 @@ import type { User, LoginRequest, RegisterRequest, TokenResponse, UpdateUserRequ
 export const authApi = createApi({
   reducerPath: 'authApi',
   baseQuery: baseQueryWithReauth,
+  // See store/api.ts: invalidation runs inside the save's own settle (STU-335).
+  invalidationBehavior: 'immediately',
   tagTypes: ['User'],
   endpoints: (builder) => ({
     // Register new user

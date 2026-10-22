@@ -179,6 +179,9 @@ const HOUSEHOLD_SHARE_CHANGED = [
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
+  // A save's invalidation runs inside its own settle, so its reload is pending before
+  // the save leaves the screen loader's busy level (STU-335).
+  invalidationBehavior: 'immediately',
   tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
