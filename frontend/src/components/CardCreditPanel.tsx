@@ -12,6 +12,7 @@ import { formatCurrency } from '../utils/currency'
 import type { CurrencyCode } from '../utils/currency'
 import { CardPayDialog } from './CardPayDialog'
 import { CreditSummary } from './CreditSummary'
+import { Skeleton } from './Loading'
 
 const STATUS_STYLES: Record<StatementDue['status'], string> = { paid: 'text-ok', overdue: 'text-danger', open: 'text-warn' }
 
@@ -54,9 +55,28 @@ export function CardCreditPanel({ account }: { account: Account }) {
     )
   }
   if (!detail) {
+    // Shaped like the landed panel, in its order, so Transactions below it does not jump.
     return (
-      <section className="card p-4 sm:p-5" data-testid="card-credit-panel-loading">
-        <p className="text-sm text-body">Loading credit…</p>
+      <section className="card p-4 sm:p-5 space-y-4" data-testid="card-credit-panel-loading" aria-busy="true">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <Skeleton className="h-7 w-52" />
+          <Skeleton className="h-[38px] w-[59px]" />
+        </div>
+        <div className="space-y-1">
+          <div className="space-y-1">
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-4 w-56" />
+          </div>
+          <Skeleton className="h-4 w-full" />
+        </div>
+        <div className="border border-line p-3 space-y-1">
+          <Skeleton className="h-5 w-3/5" />
+          <Skeleton className="h-4 w-2/5" />
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-4 w-3/5" />
+        </div>
+        <Skeleton className="h-5 w-3/5" />
+        <span role="status" className="sr-only">Loading credit</span>
       </section>
     )
   }

@@ -169,6 +169,8 @@ export function Dashboard() {
   const currencyReady = snapshotPhase === 'ready'
   const totalsPending = summaryPhase === 'pending' || !currencyReady
   const payablesPending = snapshotPhase === 'pending' || entriesPhase === 'pending'
+  // The snapshot adds FxNotice above the envelopes and CardChargesPanel below them; hold both until it lands so nothing moves.
+  const envelopesPending = allocationsPhase === 'pending' || snapshotPhase === 'pending'
 
   // The currency every total below is read in: the default one, or the first the user holds.
   const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
@@ -517,15 +519,15 @@ export function Dashboard() {
                 <h2 className="text-lg font-semibold text-ink">Budget Envelope Status</h2>
                 <p className="text-sm text-muted">Current month spending against your envelope limits.</p>
               </div>
-              {allocationsPhase === 'pending' ? (
+              {envelopesPending ? (
                 <Skeleton className="h-6 w-8" />
               ) : (
                 <span className="badge badge-info">{budgetEnvelopeSummaries.length}</span>
               )}
             </div>
           </div>
-          <div className="p-4 sm:p-6 space-y-5" aria-busy={allocationsPhase === 'pending'}>
-            {allocationsPhase === 'pending' ? (
+          <div className="p-4 sm:p-6 space-y-5" aria-busy={envelopesPending}>
+            {envelopesPending ? (
               <div data-testid="envelopes-pending">
                 <span role="status" className="sr-only">Loading budget envelopes</span>
                 <SkeletonRows rows={3} />
@@ -534,7 +536,7 @@ export function Dashboard() {
               <p className="text-sm text-muted">No active budget envelopes yet.</p>
             ) : (
               budgetEnvelopeSummaries.map(({ allocation, limit, spent, remaining, usagePercentage }) => (
-                <div key={allocation.id} className="space-y-3">
+                <div key={allocation.id} className="space-y-3" data-testid="envelope-row">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="font-medium text-ink">{allocation.name}</p>

@@ -23,6 +23,14 @@ const GUARDED_EVENTS = [
   'paste', 'cut', 'drop', 'dragstart', 'compositionstart', 'compositionupdate', 'compositionend', 'submit',
 ] as const
 
+/**
+ * Registered passive, as Chromium treats a window touchstart listener anyway: the guard only
+ * stops it, and the synthesized pointer, mouse, click and touchend events stay guarded.
+ */
+const PASSIVE_EVENTS = new Set<string>(['touchstart'])
+const listenerOptions = (type: string): AddEventListenerOptions =>
+  PASSIVE_EVENTS.has(type) ? { capture: true, passive: true } : { capture: true }
+
 /** The composition commit the overlay's own blur causes; swallowing it would split DOM and state. */
 const OWN_BLUR_EVENTS = new Set(['compositionend', 'beforeinput', 'input', 'change'])
 
@@ -56,13 +64,15 @@ interface View {
   stuck: boolean
   /** The card's phase label, "Saving…" or "Loading…". */
   label: string
-  /** What `busy-status` announces: the label, or the stuck text in a stuck passthrough. */
+  /** What `busy-status` announces: the label, or the stuck text once stuck (with the Tab hint in a passthrough). */
   status: string
   /** A search passthrough is running and its element holds focus. */
   passthrough: boolean
+  /** A search passthrough ran at some point in this episode. */
+  hadPassthrough: boolean
 }
 
-const hiddenView: View = { phase: 'hidden', stuck: false, label: '', status: '', passthrough: false }
+const hiddenView: View = { phase: 'hidden', stuck: false, label: '', status: '', passthrough: false, hadPassthrough: false }
 
 interface ControllerRefs {
   layer: { readonly current: HTMLDivElement | null }
@@ -95,6 +105,8 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
   /** The passthrough's own changes, reverted alone when it ends early. */
   const passRecorded: RecordedChange[] = []
   let passthrough: HTMLElement | null = null
+  /** Set when a passthrough starts, cleared when the block ends. */
+  let hadPassthrough = false
   const history: HTMLElement[] = []
   let bodyObserver: MutationObserver | null = null
 
@@ -128,6 +140,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
    */
   const startPassthrough = (el: HTMLElement, shell: Element) => {
     passthrough = el
+    hadPassthrough = true
     const chain = new Set<Element>()
     for (let node: Element | null = el; node !== null; node = node.parentElement) {
       chain.add(node)
@@ -238,6 +251,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
 
   const endBlock = () => {
     blocked = false
+    hadPassthrough = false
     bodyObserver?.disconnect()
     bodyObserver = null
     undoRecorded()
@@ -271,8 +285,9 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     const passing = passthrough !== null
     let label = ''
     if (phase === 'visible') label = episodeSaving ? 'Saving…' : 'Loading…'
-    const status = passing && stuck ? `${STUCK_TEXT} ${STUCK_TAB_HINT}` : label
-    setView({ phase, stuck, label, status, passthrough: passing })
+    let status = label
+    if (stuck) status = passing ? `${STUCK_TEXT} ${STUCK_TAB_HINT}` : STUCK_TEXT
+    setView({ phase, stuck, label, status, passthrough: passing, hadPassthrough })
   }
 
   const step = (frameTick: boolean) => {
@@ -312,6 +327,12 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     }
   }
 
+  /** Swallows an event; a passive one can only be stopped. */
+  const swallow = (event: Event) => {
+    if (!PASSIVE_EVENTS.has(event.type)) event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+
   const onGuard = (event: Event) => {
     if (!blocked) return
     const target = event.target
@@ -320,8 +341,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
       // Typing, composition, paste and cut reach the box; Tab and pointer input do not.
       const isTab = isKey && event.key === 'Tab'
       if (!isTab && PASSTHROUGH_EVENTS.has(event.type)) return
-      event.preventDefault()
-      event.stopImmediatePropagation()
+      swallow(event)
       // Once stuck, Tab (not Shift+Tab) is the keyboard route to Reload page.
       if (isTab && event.type === 'keydown' && !event.shiftKey && stuck) refs.reload.current?.focus()
       return
@@ -351,8 +371,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
       event.stopImmediatePropagation()
       return
     }
-    event.preventDefault()
-    event.stopImmediatePropagation()
+    swallow(event)
   }
 
   const onFocusIn = (event: FocusEvent) => {
@@ -366,7 +385,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     if (event.relatedTarget !== null || document.hasFocus()) endPassthrough()
   }
 
-  for (const type of GUARDED_EVENTS) window.addEventListener(type, onGuard, { capture: true })
+  for (const type of GUARDED_EVENTS) window.addEventListener(type, onGuard, listenerOptions(type))
   document.addEventListener('focusin', onFocusIn, { capture: true })
   document.addEventListener('focusout', onFocusOut, { capture: true })
   const unsubscribe = busySignal.subscribe((next) => {
@@ -379,7 +398,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
   return () => {
     destroyed = true
     unsubscribe()
-    for (const type of GUARDED_EVENTS) window.removeEventListener(type, onGuard, { capture: true })
+    for (const type of GUARDED_EVENTS) window.removeEventListener(type, onGuard, listenerOptions(type))
     document.removeEventListener('focusin', onFocusIn, { capture: true })
     document.removeEventListener('focusout', onFocusOut, { capture: true })
     bodyObserver?.disconnect()
@@ -459,13 +478,15 @@ export function BusyOverlay() {
             {view.stuck && (
               <>
                 <p className="text-sm text-body">{STUCK_TEXT}</p>
-                {/* Kept in the layout when the passthrough ends, so Reload page never moves under a press. */}
-                <p
-                  className={view.passthrough ? 'text-sm text-body' : 'text-sm text-body invisible'}
-                  aria-hidden={view.passthrough ? undefined : 'true'}
-                >
-                  {STUCK_TAB_HINT}
-                </p>
+                {/* Kept in the layout once a passthrough ran, so Reload page never moves under a press. */}
+                {view.hadPassthrough && (
+                  <p
+                    className={view.passthrough ? 'text-sm text-body' : 'text-sm text-body invisible'}
+                    aria-hidden={view.passthrough ? undefined : 'true'}
+                  >
+                    {STUCK_TAB_HINT}
+                  </p>
+                )}
                 <button
                   ref={reloadRef}
                   type="button"

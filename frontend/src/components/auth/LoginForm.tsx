@@ -1,3 +1,4 @@
+import { Spinner } from '../Loading'
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -281,7 +282,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
             >
               {isLoading ? (
                 <>
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+                  <Spinner size="xs" tone="current" />
                   Signing in...
                 </>
               ) : (

@@ -270,6 +270,77 @@ async function scenarioD(browser) {
   }
 }
 
+/** The household views request (`GET /household/`). */
+const isViews = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/household/')
+
+// (f) The first paint holds the list until the household views land, so the Shared section arrives with it.
+async function scenarioF(browser) {
+  console.log('\n=== (f) the accounts list paints together with its shared section')
+  const { ctx, page } = await openPage(browser)
+  let gate = null
+  try {
+    gate = await h.gate(page, isViews)
+    const listSeen = page.waitForResponse((r) => isList()(r.request())).catch(() => null)
+    await page.goto(`${stack.webUrl}/accounts`)
+    await h.check('f.held', 'S', async () => (await gate.waitHits(1)) || 'no /household/ request')
+    // The list request itself is free: wait for it to land, body included, before reading the page.
+    await h.check('f.list-landed', 'S', async () => {
+      const res = await listSeen
+      if (!res) return 'no accounts list response'
+      const failure = await res.finished()
+      return !failure || 'the accounts list body did not finish'
+    })
+    // Let the response reach the store and the page render once, so a premature paint would show.
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))))
+    await h.check('f.no-rows-while-held', 'B', async () => {
+      const rows = await page.locator('[data-testid^="account-detail-link-"]').count()
+      return rows === 0 || `${rows} account rows painted while the household views were held`
+    })
+    await h.check('f.no-showing-while-held', 'B', async () => {
+      const n = await page.getByText(/Showing \d+ of \d+ accounts/).count()
+      return n === 0 || 'the "Showing X of Y" line painted while the household views were held'
+    })
+    gate.release({ disarm: true })
+    await page.locator(rowLink(alpha.id)).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('f.rows-after', 'B', () => namesMatchApi(page, undefined))
+    await h.check('f.shared-section', 'B', async () => {
+      const section = page.locator(tid('accounts-section-shared'))
+      const links = await section.locator(tid('household-links')).isVisible().catch(() => false)
+      return links || 'no accounts-section-shared with household-links after the release'
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (f2) Guard: a failed views request neither hides the list nor leaves the loader up.
+async function scenarioF2(browser) {
+  console.log('\n=== (f2) guard: a failed household views request still paints the list')
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    fail = await h.failWith(page, isViews, 500)
+    await page.goto(`${stack.webUrl}/accounts`)
+    await page.locator(rowLink(alpha.id)).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('f2.failed', 'S', async () => fail.failed >= 1 || 'the views request was never failed')
+    await h.check('f2.rows', 'G', () => namesMatchApi(page, undefined))
+    await h.check('f2.no-links', 'G', async () => {
+      const n = await page.locator(tid('household-links')).count()
+      return n === 0 || 'household-links shown although the views failed'
+    })
+    await h.check('f2.no-loader', 'G', async () => {
+      const n = await page.getByText('Loading accounts...').count()
+      return n === 0 || 'the loader is still up'
+    })
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'acct')
   tag = await client.post(owner.token, '/tags/', { name: 'Quarterly' })
@@ -296,6 +367,8 @@ const SCENARIOS = [
   ['c', scenarioC],
   ['e', scenarioE],
   ['d', scenarioD],
+  ['f', scenarioF],
+  ['f2', scenarioF2],
 ]
 
 ;(async () => {

@@ -1,3 +1,4 @@
+import { LoadingLine } from '../Loading'
 import { useState } from 'react'
 import { useGetHouseholdMonthlyQuery } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
@@ -59,7 +60,7 @@ export function HouseholdMonthlyTab({ sharerId }: { sharerId: number }) {
           {rangeError}
         </p>
       )}
-      {!rangeError && isLoading && <p className="text-sm text-muted">Loading...</p>}
+      {!rangeError && isLoading && <LoadingLine>Loading...</LoadingLine>}
       {!rangeError && error && (
         <p className="text-sm text-danger" role="alert">
           {apiErrorMessage(error) || 'Could not load the monthly totals.'}

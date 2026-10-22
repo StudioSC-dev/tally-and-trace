@@ -361,6 +361,16 @@ async function scenarioO(browser) {
       const card = await page.locator(OVERLAY).textContent()
       return (stuck === 'true' && (await reload.isVisible()) && card.includes('This is taking longer than usual.')) || `stuck ${stuck} text "${card}"`
     })
+    await h.check('o1.status-stuck', 'B', async () => {
+      const status = await text(page.locator(tid('busy-status')))
+      return status === 'This is taking longer than usual.' || `status "${status}"`
+    })
+    await h.check('o1.no-tab-hint', 'B', async () => {
+      const holders = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
+        .filter((el) => Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent || '').includes('Press Tab to reach Reload page.')))
+        .map((el) => el.outerHTML.slice(0, 120)))
+      return holders.length === 0 || `hint held by ${JSON.stringify(holders)}`
+    })
     await h.clickBox(page, cancelBox)
     await h.sleep(300)
     await h.check('o1.cancel-blocked', 'B', async () => (await dialog.isVisible()) || 'dialog closed')
@@ -374,6 +384,77 @@ async function scenarioO(browser) {
   }
   await scenarioO2(browser)
   await scenarioO2Press(browser)
+}
+
+/** Every console message and Log-domain entry (where Chromium reports interventions) from now on. */
+async function watchConsole(ctx, page) {
+  const messages = []
+  page.on('console', (m) => messages.push(`console ${m.type()}: ${m.text()}`))
+  const cdp = await ctx.newCDPSession(page)
+  cdp.on('Log.entryAdded', ({ entry }) => messages.push(`log ${entry.source} ${entry.level}: ${entry.text}`))
+  await cdp.send('Log.enable')
+  return messages
+}
+const interventions = (messages) => {
+  const bad = messages.filter((m) => /intervention|passive/i.test(m))
+  return bad.length === 0 || JSON.stringify(bad)
+}
+
+// (tap) Touch taps during a block: a covered control does not activate, a tap on the raised
+// search box changes nothing, and the touch guard logs no passive-listener intervention.
+async function scenarioTap(browser) {
+  console.log('\n=== (tap) touch taps during a block are swallowed without a console warning')
+  const card = await makeCard(owner, 'Card Tap')
+  let { ctx, page } = await openPage(browser, { hasTouch: true })
+  const post = { gate: null }
+  try {
+    await h.uiLogin(page, stack, owner)
+    await openCardPanel(page, card.id)
+    const dialog = await openPayDialog(page)
+    const cancelBox = await boxOf(dialog.getByRole('button', { name: 'Cancel' }))
+    post.gate = await payGate(page, card.id)
+    await dialog.locator(tid('card-pay-submit')).click()
+    await h.check('tap.held', 'S', async () => (await post.gate.waitHits(1)) || 'the payment request never started')
+    await h.check('tap.visible', 'S', async () => (await visible(page)) || 'never visible')
+    const messages = await watchConsole(ctx, page)
+    await page.touchscreen.tap(cancelBox.x + cancelBox.width / 2, cancelBox.y + cancelBox.height / 2)
+    await h.sleep(300)
+    await h.check('tap.cancel-blocked', 'G', async () => (await dialog.isVisible()) || 'dialog closed')
+    await h.check('tap.one-post', 'G', async () => post.gate.hits === 1 || `hits ${post.gate.hits}`)
+    await h.check('tap.cancel-no-intervention', 'G', () => interventions(messages))
+  } finally {
+    post.gate?.release({ disarm: true })
+    await ctx.close()
+  }
+
+  ;({ ctx, page } = await openPage(browser, { hasTouch: true }))
+  const requests = h.logRequests(page)
+  let gate = null
+  try {
+    await h.uiLogin(page, stack, owner)
+    await openTransactions(page)
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => null))))
+    const search = page.locator(SEARCH)
+    await search.click()
+    ;({ g: gate } = await searchGate(page))
+    await search.pressSequentially('ab')
+    await h.check('tap.search-held', 'S', async () => (await gate.waitHits(1)) || 'the search request never started')
+    await h.check('tap.search-visible', 'S', async () => (await visible(page)) || 'never visible')
+    const messages = await watchConsole(ctx, page)
+    const before = apiRequests(requests)
+    const box = await boxOf(page.locator(BOX))
+    await page.touchscreen.tap(box.x + 12, box.y + box.height / 2)
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+    await h.sleep(300)
+    await h.check('tap.search-unchanged', 'G', async () => {
+      const r = { active: await activeTestId(page), value: await search.inputValue(), requests: apiRequests(requests) - before }
+      return (r.active === 'transactions-search' && r.value === 'ab' && r.requests === 0) || JSON.stringify(r)
+    })
+    await h.check('tap.search-no-intervention', 'B', () => interventions(messages))
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
 }
 
 // ─── Search passthrough helpers (commit 6a) ──────────────────────────────────
@@ -1763,6 +1844,7 @@ const SCENARIOS = [
   ['h', scenarioH],
   ['i', scenarioI],
   ['o', scenarioO],
+  ['tap', scenarioTap],
   ['r', scenarioR],
   ['q', scenarioQ],
   ['j', scenarioJ],

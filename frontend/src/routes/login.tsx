@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { LoginForm } from '../components/auth/LoginForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useEffect } from 'react'
+import { PageLoader } from '../components/Loading'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -28,11 +29,7 @@ export function LoginPage() {
   }
 
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="loading-spinner"></div>
-      </div>
-    )
+    return <PageLoader />
   }
 
   if (isAuthenticated) {

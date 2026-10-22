@@ -1,5 +1,6 @@
+import { LoadingLine, SkeletonRows } from '../Loading'
 import { useEffect, useState } from 'react'
-import { transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
+import { queryPhase, transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
 import { useGetHouseholdDashboardQuery, useGetHouseholdTransactionsQuery } from '../../store/api'
 import type { Transaction } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
@@ -78,10 +79,13 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
     offset: page * PAGE_SIZE,
   })
   // The view's accounts name a full record's account (a limited record names its own).
-  const { data: dashboard } = useGetHouseholdDashboardQuery(sharerId)
+  const dashboardQuery = useGetHouseholdDashboardQuery(sharerId)
+  const { data: dashboard } = dashboardQuery
+  // A full record's account name comes from the dashboard, so the rows wait for it (or its failure).
+  const namesPhase = queryPhase(dashboard, dashboardQuery)
   const accountNames = new Map((dashboard?.accounts ?? []).map((account) => [account.id, account.name]))
 
-  if (isLoading) return <p className="text-sm text-muted">Loading...</p>
+  if (isLoading) return <LoadingLine>Loading...</LoadingLine>
   if (error || !data) {
     return (
       <p className="text-sm text-danger" role="alert">
@@ -93,7 +97,15 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
   return (
     <section className="card p-4 sm:p-5 space-y-3" data-testid="household-transactions">
       <h2 className="text-lg font-semibold text-ink">Transactions</h2>
-      {data.items.length === 0 ? (
+      {namesPhase === 'error' && (
+        <p className="text-xs text-muted" data-testid="household-names-error">Account names could not be loaded.</p>
+      )}
+      {namesPhase === 'pending' ? (
+        <div data-testid="household-transactions-loading" aria-busy="true">
+          <span role="status" className="sr-only">Loading transactions</span>
+          <SkeletonRows rows={3} />
+        </div>
+      ) : data.items.length === 0 ? (
         <p className="text-sm text-muted" data-testid="household-transactions-empty">
           No Household transactions yet.
         </p>

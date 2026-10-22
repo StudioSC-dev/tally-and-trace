@@ -212,7 +212,7 @@ function AccountDetailPage() {
             <p className="text-sm text-body">Loading transactions…</p>
           </div>
         ) : namesPending && transactions.total > 0 && offset < transactions.total ? (
-          <div data-testid="account-transactions-loading" aria-busy="true">
+          <div data-testid="account-transactions-names-pending" aria-busy="true">
             <SkeletonRows rows={3} />
             <span role="status" className="sr-only">Loading transactions</span>
           </div>

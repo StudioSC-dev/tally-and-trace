@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { queryPhase } from '@tally-trace/shared'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import {
@@ -67,10 +68,12 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
   const emptyForm: FormState = { name: '', estimated_cost: 0, currency: defaultCurrency, priority: 'medium', url: '', notes: '', target_date: '' }
   const [form, setForm] = useState<FormState>(emptyForm)
 
-  const { data: items = [], isLoading } = useGetWishlistQuery(
+  const wishlistQuery = useGetWishlistQuery(
     showPurchased ? undefined : { is_purchased: false },
     { skip: !isAuthenticated }
   )
+  const items = wishlistQuery.data
+  const wishlistPhase = queryPhase(items, wishlistQuery)
   const { data: plan } = useGetWishlistPlanQuery(undefined, { skip: !isAuthenticated })
   const [createItem] = useCreateWishlistItemMutation()
   const [updateItem] = useUpdateWishlistItemMutation()
@@ -188,7 +191,14 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
       </div>
 
       {/* List */}
-      {isLoading ? (
+      {wishlistPhase === 'error' ? (
+        <div className="card p-6 text-center space-y-3" role="alert" data-testid="wishlist-error">
+          <p className="text-sm text-danger">Could not load your wishlist.</p>
+          <button type="button" className="btn-secondary focus-ring" onClick={() => void wishlistQuery.refetch()} data-testid="wishlist-retry">
+            Retry
+          </button>
+        </div>
+      ) : wishlistPhase !== 'ready' || !items ? (
         <div className="flex items-center justify-center min-h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" /></div>
       ) : items.length === 0 ? (
         <div className="card p-6 text-center text-muted">Nothing on your wishlist yet.</div>

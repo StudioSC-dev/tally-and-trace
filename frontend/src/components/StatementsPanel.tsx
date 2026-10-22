@@ -1,3 +1,4 @@
+import { LoadingLine } from './Loading'
 import { useGetAccountStatementsQuery } from '../store/api'
 import type { Account } from '../store/api'
 import { formatCurrency, CurrencyCode } from '../utils/currency'
@@ -28,7 +29,7 @@ export function StatementsPanel({ account }: { account: Account }) {
   const { data, isLoading, isError } = useGetAccountStatementsQuery(account.id)
   const currency = account.currency as CurrencyCode
 
-  if (isLoading) return <p className="text-xs text-muted">Loading statements...</p>
+  if (isLoading) return <LoadingLine size="xs">Loading statements...</LoadingLine>
   if (isError || !data) return <p className="text-xs text-muted">Statements unavailable.</p>
   if (data.statements.length === 0) return <p className="text-xs text-muted">No statements yet.</p>
 

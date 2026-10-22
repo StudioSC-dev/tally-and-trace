@@ -1,3 +1,4 @@
+import { LoadingLine } from './Loading'
 import { useState } from 'react'
 import {
   useCreateAccountShareMutation,
@@ -154,7 +155,7 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
             </button>
           </div>
 
-          {isLoading && <p className="mt-4 text-sm text-muted">Loading shares...</p>}
+          {isLoading && <LoadingLine className="mt-4">Loading shares...</LoadingLine>}
 
           {loadError && (
             <p className="mt-4 text-sm text-danger" role="alert" data-testid="share-load-error">

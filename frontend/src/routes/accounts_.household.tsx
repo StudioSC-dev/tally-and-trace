@@ -1,5 +1,7 @@
+import { LoadingLine, Skeleton } from '../components/Loading'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { queryPhase } from '@tally-trace/shared'
 import { useAuth } from '../contexts/AuthContext'
 import { useGetHouseholdViewsQuery } from '../store/api'
 import { apiErrorMessage } from '../utils/apiError'
@@ -40,7 +42,10 @@ function HouseholdPage() {
     if (!authLoading && !isAuthenticated) navigate({ to: '/login', search: { message: undefined } })
   }, [authLoading, isAuthenticated, navigate])
 
-  const { data: views, isLoading, error } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
+  const viewsQuery = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
+  const { data: views, isLoading, error } = viewsQuery
+  // The title names the sharer, so it waits for the views instead of flipping from "Household".
+  const viewsPhase = queryPhase(views, viewsQuery, !isAuthenticated)
 
   if (!isAuthenticated) return null
 
@@ -56,9 +61,15 @@ function HouseholdPage() {
           <Link to="/accounts" className="text-sm text-muted hover:text-ink" data-testid="household-back">
             &larr; Accounts
           </Link>
-          <h1 className="text-2xl font-bold text-ink" data-testid="household-title">
-            {current ? (current.is_self ? 'Your Household' : `${current.sharer_name}'s Household`) : 'Household'}
-          </h1>
+          {viewsPhase === 'pending' ? (
+            <div data-testid="household-title-pending">
+              <Skeleton className="h-8 w-56" />
+            </div>
+          ) : (
+            <h1 className="text-2xl font-bold text-ink" data-testid="household-title">
+              {current ? (current.is_self ? 'Your Household' : `${current.sharer_name}'s Household`) : 'Household'}
+            </h1>
+          )}
           <p className="text-sm text-muted">
             The accounts and records tagged Household, read-only.
           </p>
@@ -83,7 +94,7 @@ function HouseholdPage() {
         )}
       </div>
 
-      {isLoading && <p className="text-sm text-muted">Loading...</p>}
+      {isLoading && <LoadingLine>Loading...</LoadingLine>}
       {error && (
         <p className="text-sm text-danger" role="alert">
           {apiErrorMessage(error) || 'Could not load your Households.'}

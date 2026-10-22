@@ -28,10 +28,11 @@ const only = process.argv[2]
 const FALLBACK_COUNTERPART = 'Other account'
 const FALLBACK_CATEGORY = 'Uncategorized'
 
-let stack, client, owner, checking, savings, category
+let stack, client, owner, checking, savings, category, card
 
 const tid = (id) => `[data-testid="${id}"]`
 const wire = (day) => `${day}T00:00:00`
+const daysFromNow = (n) => daysAgo(-n)
 const daysAgo = (n) => {
   const d = new Date(Date.now() + 8 * 3600 * 1000)
   d.setUTCDate(d.getUTCDate() - n)
@@ -86,8 +87,12 @@ async function scenarioA(browser) {
       const n = await rows(page).count()
       return n === 0 || `${n} rows rendered while the names were held`
     })
-    await h.check('a.loading-shown', 'S', async () =>
-      (await page.locator(tid('account-transactions-loading')).isVisible()) || 'no account-transactions-loading while held')
+    await h.check('a.names-pending-shown', 'B', async () =>
+      (await page.locator(tid('account-transactions-names-pending')).isVisible()) || 'no account-transactions-names-pending while held')
+    await h.check('a.loading-not-placeholder', 'B', async () => {
+      const n = await page.locator(tid('account-transactions-loading')).count()
+      return n === 0 || `account-transactions-loading on the names placeholder (${n})`
+    })
     gate.release({ disarm: true })
     await rows(page).first().waitFor({ timeout: 5000 }).catch(() => null)
     await h.waitQuiet(page)
@@ -139,6 +144,49 @@ async function scenarioB(browser) {
   }
 }
 
+// (d) The credit panel's loading card is shaped like the panel: the section below it holds still.
+async function scenarioD(browser) {
+  console.log('\n=== (d) credit held: the loading card holds the landed panel\'s place')
+  const { ctx, page } = await openPage(browser)
+  let gate = null
+  try {
+    gate = await h.gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith(`/cards/${card.id}/credit`))
+    await page.goto(`${stack.webUrl}/accounts/${card.id}`)
+    await h.check('d.held', 'S', async () => (await gate.waitHits(1)) || 'no credit detail request')
+    const loading = page.locator(tid('card-credit-panel-loading'))
+    await h.check('d.loading-shown', 'S', async () =>
+      (await loading.waitFor({ timeout: 3000 }).then(() => true, () => false)) || 'no card-credit-panel-loading while held')
+    await h.check('d.aria-busy', 'S', async () => {
+      const busy = await loading.getAttribute('aria-busy').catch(() => null)
+      return busy === 'true' || `aria-busy is ${busy}`
+    })
+    await h.sleep(300)
+    const section = page.locator(tid('account-transactions'))
+    const held = await section.boundingBox()
+    const heldPanel = await loading.boundingBox()
+    gate.release({ disarm: true })
+    await page.locator(tid('card-credit-panel')).waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    const after = await section.boundingBox()
+    const panel = await page.locator(tid('card-credit-panel')).boundingBox()
+    if (process.env.DEBUG) {
+      const parts = {}
+      for (const id of ['card-pay-open', 'credit-summary', 'credit-available', 'credit-planned', 'credit-with-planned', 'credit-held', 'credit-incomplete', 'card-credit-opening', 'card-statement', 'card-open-cycle']) {
+        parts[id] = await page.locator(tid(id)).first().boundingBox().catch(() => null)
+      }
+      console.log('  DEBUG held', JSON.stringify({ section: held, panel: heldPanel }), 'landed', JSON.stringify({ section: after, panel, parts }))
+    }
+    await h.check('d.panel-landed', 'S', async () => (panel !== null) || 'the landed panel did not show')
+    await h.check('d.section-held-still', 'B', async () => {
+      if (!held || !after) return 'no section box'
+      return Math.abs(after.y - held.y) <= 8 || `section y ${held.y} while held, ${after.y} after (${Math.abs(after.y - held.y)} px)`
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'detail')
   checking = await client.post(owner.token, '/accounts/', { name: 'Detail Checking', account_type: 'checking', balance: 5000, currency: 'PHP' })
@@ -148,6 +196,23 @@ async function setup() {
     account_id: checking.id, transaction_type: 'transfer', transfer_from_account_id: checking.id, transfer_to_account_id: savings.id,
     amount: 250, description: 'Detail transfer', transaction_date: wire(daysAgo(2)), is_posted: true,
   })
+  // A card with one closed statement, an open cycle and a charge dated later, so the
+  // landed panel shows the planned-charges line.
+  const anchor = daysAgo(5)
+  const closeDom = Math.min(Number(anchor.slice(8, 10)), 28)
+  const presets = await client.get(owner.token, '/accounts/minimum-due-presets')
+  card = await client.post(owner.token, '/accounts/', {
+    name: 'Detail Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
+    billing_cycle_start: closeDom, days_until_due_date: 21,
+    minimum_due_rule: presets.find((p) => p.key === 'bdo').rule,
+  })
+  // A posted charge before the cycle closed, and an unposted one dated 3 days ahead.
+  for (const [day, posted] of [[daysAgo(8), true], [daysFromNow(3), false]]) {
+    await client.post(owner.token, '/transactions/', {
+      account_id: card.id, transaction_type: 'debit', amount: 700, description: 'Detail card purchase',
+      transaction_date: wire(day), is_posted: posted,
+    })
+  }
   await client.post(owner.token, '/transactions/', {
     account_id: checking.id, transaction_type: 'debit', amount: 90, category_id: category.id,
     description: 'Detail groceries', transaction_date: wire(daysAgo(3)), is_posted: true,
@@ -157,6 +222,7 @@ async function setup() {
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
+  ['d', scenarioD],
 ]
 
 ;(async () => {

@@ -69,7 +69,46 @@ export function Spinner({ size = 'md', tone = 'default', className }: SpinnerPro
     <span
       data-testid="spinner"
       aria-hidden="true"
-      className={join('inline-block animate-spin rounded-full', SPINNER_SIZE[size], SPINNER_TONE[tone], className)}
+      className={join('inline-block animate-spin motion-reduce:animate-none rounded-full', SPINNER_SIZE[size], SPINNER_TONE[tone], className)}
     />
   )
+}
+
+interface PageLoaderProps {
+  label?: string
+  className?: string
+}
+
+/** A full-screen centred spinner, with an optional visible label beneath it. */
+export function PageLoader({ label, className }: PageLoaderProps) {
+  return (
+    <div role="status" className={join('flex min-h-screen items-center justify-center', className)}>
+      {label ? (
+        <div className="text-center">
+          <div className="mb-4 flex justify-center">
+            <Spinner size="lg" />
+          </div>
+          <p className="text-body">{label}</p>
+        </div>
+      ) : (
+        <>
+          <Spinner size="md" />
+          <span className="sr-only">Loading</span>
+        </>
+      )}
+    </div>
+  )
+}
+
+export type LoadingLineSize = 'xs' | 'sm'
+
+interface LoadingLineProps {
+  children: string
+  size?: LoadingLineSize
+  className?: string
+}
+
+/** A one-line muted loading message. */
+export function LoadingLine({ children, size = 'sm', className }: LoadingLineProps) {
+  return <p role="status" className={join(size === 'xs' ? 'text-xs' : 'text-sm', 'text-muted', className)}>{children}</p>
 }

@@ -1,3 +1,4 @@
+import { Spinner } from './Loading'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -126,7 +127,7 @@ export function SpendingBreakdownDialog({
   if (isLoading) {
     body = (
       <div className="flex justify-center py-12" role="status" aria-label="Loading spending breakdown">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ink" />
+        <Spinner size="md" />
       </div>
     )
   } else if (error) {
