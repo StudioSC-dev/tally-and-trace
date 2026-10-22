@@ -298,6 +298,7 @@ export function AllocationsPage() {
   const [triggerAllocations] = useLazyGetAllocationsQuery()
   const [triggerBudgetEntries] = useLazyGetBudgetEntriesQuery()
   const beginBudgetEntriesRequest = useRequestGeneration()
+  const beginAllocationsRequest = useRequestGeneration()
   const { data: accountsData } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
@@ -412,7 +413,9 @@ export function AllocationsPage() {
   const [hasMoreAllocations, setHasMoreAllocations] = useState(true)
   const offsetRef = useRef(0)
   const loadMoreObserver = useRef<IntersectionObserver | null>(null)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  // The first load has settled; later resets keep the rows on screen until they land.
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [isResetting, setIsResetting] = useState(false)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
   const [isRecurringLoading, setIsRecurringLoading] = useState(true)
   const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
@@ -425,6 +428,9 @@ export function AllocationsPage() {
         return
       }
 
+      // A reset starts a new generation; a load-more joins it, and is dropped if a
+      // reset begins before it lands.
+      const isCurrent = beginAllocationsRequest(reset)
       const nextOffset = reset ? 0 : offsetRef.current
       const params = {
         limit,
@@ -434,18 +440,20 @@ export function AllocationsPage() {
       try {
         if (reset) {
           offsetRef.current = 0
-          setIsInitialLoading(true)
-          setAllocationItems([])
+          setIsResetting(true)
+          setIsFetchingMore(false)
         } else {
           setIsFetchingMore(true)
         }
 
         const result = await triggerAllocations(params).unwrap()
+        if (!isCurrent()) return
         offsetRef.current = nextOffset + result.items.length
         setAllocationItems((prev) => (reset ? result.items : [...prev, ...result.items]))
         setTotalAllocations(result.total)
         setHasMoreAllocations(result.has_more)
       } catch (error) {
+        if (!isCurrent()) return
         console.error('Error loading allocations:', error)
         if (reset) {
           setAllocationItems([])
@@ -453,14 +461,17 @@ export function AllocationsPage() {
           setHasMoreAllocations(false)
         }
       } finally {
-        if (reset) {
-          setIsInitialLoading(false)
-        } else {
-          setIsFetchingMore(false)
+        if (isCurrent()) {
+          if (reset) {
+            setIsResetting(false)
+            setHasLoaded(true)
+          } else {
+            setIsFetchingMore(false)
+          }
         }
       }
     },
-    [triggerAllocations, isAuthenticated]
+    [triggerAllocations, isAuthenticated, beginAllocationsRequest]
   )
 
   useEffect(() => {
@@ -521,14 +532,14 @@ export function AllocationsPage() {
       }
 
       loadMoreObserver.current = new IntersectionObserver((entries) => {
-        if (entries[0]?.isIntersecting && hasMoreAllocations && !isFetchingMore && !isInitialLoading) {
+        if (entries[0]?.isIntersecting && !isResetting && !isFetchingMore && hasLoaded && hasMoreAllocations) {
           loadAllocations(false)
         }
       })
 
       loadMoreObserver.current.observe(node)
     },
-    [hasMoreAllocations, isFetchingMore, isInitialLoading, loadAllocations]
+    [hasMoreAllocations, isFetchingMore, isResetting, hasLoaded, loadAllocations]
   )
 
   const orderedAllocations = useMemo(() => {
@@ -1444,14 +1455,6 @@ export function AllocationsPage() {
     ))
   }
 
-  if (isInitialLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-xl">Loading...</div>
-      </div>
-    )
-  }
-
   const activeAllocationList =
     activeTab === 'budgets' ? budgetEnvelopes : activeTab === 'savings' ? savingsAndGoals : []
 
@@ -1465,6 +1468,15 @@ export function AllocationsPage() {
 
   if (!isAuthenticated) {
     return null
+  }
+
+  // Only the envelope tabs wait for the first allocations load.
+  if (!hasLoaded && (activeTab === 'budgets' || activeTab === 'savings')) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-xl">Loading...</div>
+      </div>
+    )
   }
 
   return (
@@ -1534,12 +1546,12 @@ export function AllocationsPage() {
       {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (
         <>
           <div ref={sentinelRef} className="h-3" />
-          {!isInitialLoading && (isFetchingMore || hasMoreAllocations) && (
+          {hasLoaded && (isFetchingMore || hasMoreAllocations) && (
             <p className="text-center text-xs text-muted pb-2">
               {isFetchingMore ? 'Loading more envelopes...' : 'Scroll for more envelopes'}
             </p>
           )}
-          {!isInitialLoading && !hasMoreAllocations && totalAllocations > 0 && (
+          {hasLoaded && !hasMoreAllocations && totalAllocations > 0 && (
             <p className="text-center text-xs text-muted pb-2">End of envelope list</p>
           )}
           <div className="flex justify-end px-4">
