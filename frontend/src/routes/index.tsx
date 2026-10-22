@@ -17,7 +17,8 @@ import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
-import { payableActions, payableTarget } from '@tally-trace/shared'
+import { payableActions, payableTarget, queryPhase } from '@tally-trace/shared'
+import { Skeleton, SkeletonRows } from '../components/Loading'
 import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable } from '@tally-trace/shared'
 
@@ -149,15 +150,23 @@ export function Dashboard() {
     return { start_date: startDate.toISOString(), end_date: now.toISOString() }
   }, [selectedPeriod])
 
-  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError } =
-    useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
-  const { data: periodSummary, isLoading: summaryLoading, error: summaryError } =
-    useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
+  const snapshotQuery = useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
+  const { data: snapshot, error: snapshotError } = snapshotQuery
+  const summaryQuery = useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
+  const { data: periodSummary, error: summaryError } = summaryQuery
   // Only for the autopay set below: the payables carry no autopay flag, so the entries are looked up here.
-  const { data: budgetEntriesData, isLoading: budgetEntriesLoading, error: budgetEntriesError } =
-    useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
-  const { data: allocationsData, isLoading: allocationsLoading, error: allocationsError } =
-    useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
+  const entriesQuery = useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
+  const { data: budgetEntriesData, error: budgetEntriesError } = entriesQuery
+  const allocationsQuery = useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
+  const { data: allocationsData, error: allocationsError } = allocationsQuery
+
+  // `data`, not `currentData`: a period or tag change keeps the old figures until the new ones land.
+  const snapshotPhase = queryPhase(snapshot, snapshotQuery)
+  const summaryPhase = queryPhase(periodSummary, summaryQuery)
+  const allocationsPhase = queryPhase(allocationsData, allocationsQuery)
+  const entriesPhase = queryPhase(budgetEntriesData, entriesQuery)
+  const totalsPending = summaryPhase === 'pending'
+  const payablesPending = snapshotPhase === 'pending' || entriesPhase === 'pending'
 
   // The currency every total below is read in: the default one, or the first the user holds.
   const [currency, setCurrency] = useSelectedCurrency(snapshot?.currencies, defaultCurrency)
@@ -278,8 +287,6 @@ export function Dashboard() {
     )
   }
 
-  const allLoading = snapshotLoading && summaryLoading && budgetEntriesLoading && allocationsLoading
-
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-paper">
@@ -305,17 +312,6 @@ export function Dashboard() {
       return (error as { message: string }).message
     }
     return undefined
-  }
-
-  if (allLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-96">
-        <div className="text-center">
-          <div className="loading-spinner mx-auto mb-4"></div>
-          <p className="text-body font-medium">Loading your financial data...</p>
-        </div>
-      </div>
-    )
   }
 
   if (snapshotError || summaryError || budgetEntriesError || allocationsError) {
@@ -396,24 +392,36 @@ export function Dashboard() {
             <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
               Actual Totals ({periodHeadingLabel})
             </h3>
-            <dl className="space-y-3" data-testid="actual-totals">
-              {[
-                { id: 'income', label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
-                { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
-                { id: 'net-flow', label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
-              ].map(({ id, label, value, color }) => (
-                <div key={id} className="flex items-center justify-between">
-                  <dt className="text-sm text-muted">{label}</dt>
-                  <dd className={`text-base font-semibold ${color}`} data-testid={`period-${id}`}>{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="border-t border-line pt-3">
+            <div aria-busy={totalsPending}>
+              {totalsPending && <span role="status" className="sr-only">Loading actual totals</span>}
+              <dl className="space-y-3" data-testid="actual-totals">
+                {[
+                  { id: 'income', label: `Total income (${periodTag})`, value: format(periodIncome), color: 'text-ok' },
+                  { id: 'expenses', label: `Total expenses (${periodTag})`, value: format(periodExpenses), color: 'text-danger' },
+                  { id: 'net-flow', label: `Net flow (${periodTag})`, value: format(periodNet), color: periodNet >= 0 ? 'text-ok' : 'text-danger' },
+                ].map(({ id, label, value, color }) => (
+                  <div key={id} className="flex items-center justify-between">
+                    <dt className="text-sm text-muted">{label}</dt>
+                    {totalsPending ? (
+                      <dd data-testid={`period-${id}-pending`}><Skeleton className="h-5 w-24" /></dd>
+                    ) : (
+                      <dd className={`text-base font-semibold ${color}`} data-testid={`period-${id}`}>{value}</dd>
+                    )}
+                  </div>
+                ))}
+              </dl>
+            </div>
+            <div className="border-t border-line pt-3" aria-busy={snapshotPhase === 'pending'}>
+              {snapshotPhase === 'pending' && <span role="status" className="sr-only">Loading net worth</span>}
               <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Today</h4>
               <dl>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-muted">Net worth</dt>
-                  <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(balanceRow?.total ?? 0)}</dd>
+                  {snapshotPhase === 'pending' ? (
+                    <dd data-testid="net-worth-pending"><Skeleton className="h-5 w-24" /></dd>
+                  ) : (
+                    <dd className="text-base font-semibold text-ink" data-testid="net-worth">{format(balanceRow?.total ?? 0)}</dd>
+                  )}
                 </div>
               </dl>
               <p className="mt-1 text-xs text-muted">
@@ -425,21 +433,32 @@ export function Dashboard() {
             <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">
               Projected{projectionEnd ? ` to ${formatDateWithOrdinal(projectionEnd)}` : ''}
             </h3>
-            <dl className="space-y-3" data-testid="projection">
-              {[
-                { id: 'available-cash', label: 'Available cash', value: format(balanceRow?.available_cash ?? 0), color: 'text-ink' },
-                ...(nextPeriodRow ? [
-                  { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriodRow.income), color: 'text-ok' },
-                  { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriodRow.net), color: nextPeriodRow.net >= 0 ? 'text-ok' : 'text-danger' },
-                  { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriodRow.closing_balance), color: nextPeriodRow.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
-                ] : []),
-              ].map(({ id, label, value, color }) => (
-                <div key={id} className="flex items-center justify-between">
-                  <dt className="text-sm text-muted">{label}</dt>
-                  <dd className={`text-base font-semibold ${color}`} data-testid={id}>{value}</dd>
-                </div>
-              ))}
-            </dl>
+            <div aria-busy={snapshotPhase === 'pending'}>
+              {snapshotPhase === 'pending' && <span role="status" className="sr-only">Loading projection</span>}
+              <dl className="space-y-3" data-testid="projection">
+                {[
+                  { id: 'available-cash', label: 'Available cash', value: format(balanceRow?.available_cash ?? 0), color: 'text-ink' },
+                  ...(snapshotPhase === 'pending' ? [
+                    { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: '', color: 'text-ok' },
+                    { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: '', color: 'text-ok' },
+                    { id: 'projected-balance', label: 'Projected month-end cash', value: '', color: 'text-ink' },
+                  ] : nextPeriodRow ? [
+                    { id: 'projected-income', label: 'Projected recurring income (rest of month)', value: format(nextPeriodRow.income), color: 'text-ok' },
+                    { id: 'projected-net-flow', label: 'Projected net flow (today to month end)', value: format(nextPeriodRow.net), color: nextPeriodRow.net >= 0 ? 'text-ok' : 'text-danger' },
+                    { id: 'projected-balance', label: 'Projected month-end cash', value: format(nextPeriodRow.closing_balance), color: nextPeriodRow.closing_balance >= 0 ? 'text-ink' : 'text-danger' },
+                  ] : []),
+                ].map(({ id, label, value, color }) => (
+                  <div key={id} className="flex items-center justify-between">
+                    <dt className="text-sm text-muted">{label}</dt>
+                    {snapshotPhase === 'pending' ? (
+                      <dd data-testid={`${id}-pending`}><Skeleton className="h-5 w-24" /></dd>
+                    ) : (
+                      <dd className={`text-base font-semibold ${color}`} data-testid={id}>{value}</dd>
+                    )}
+                  </div>
+                ))}
+              </dl>
+            </div>
             <p className="text-xs text-muted">
               Available cash includes shared and Household accounts you can see; cards, loans and spending wallets are left out. Projected month-end cash is available cash plus the rest of this month's planned flows.
               {selectedTag !== undefined ? ' With a tag filter, only tagged events move the projection; balances stay whole.' : ''}
@@ -486,11 +505,20 @@ export function Dashboard() {
                 <h2 className="text-lg font-semibold text-ink">Budget Envelope Status</h2>
                 <p className="text-sm text-muted">Current month spending against your envelope limits.</p>
               </div>
-              <span className="badge badge-info">{budgetEnvelopeSummaries.length}</span>
+              {allocationsPhase === 'pending' ? (
+                <Skeleton className="h-6 w-8" />
+              ) : (
+                <span className="badge badge-info">{budgetEnvelopeSummaries.length}</span>
+              )}
             </div>
           </div>
-          <div className="p-4 sm:p-6 space-y-5">
-            {budgetEnvelopeSummaries.length === 0 ? (
+          <div className="p-4 sm:p-6 space-y-5" aria-busy={allocationsPhase === 'pending'}>
+            {allocationsPhase === 'pending' ? (
+              <div data-testid="envelopes-pending">
+                <span role="status" className="sr-only">Loading budget envelopes</span>
+                <SkeletonRows rows={3} />
+              </div>
+            ) : budgetEnvelopeSummaries.length === 0 ? (
               <p className="text-sm text-muted">No active budget envelopes yet.</p>
             ) : (
               budgetEnvelopeSummaries.map(({ allocation, limit, spent, remaining, usagePercentage }) => (
@@ -522,10 +550,19 @@ export function Dashboard() {
                 <h2 className="text-lg font-semibold text-ink">Upcoming Payables</h2>
                 <p className="text-sm text-muted">Cash going out in the next 30 days: bills, card statements and loan payments.</p>
               </div>
-              <span className="badge badge-info" data-testid="payables-count">{payableRows.length}</span>
+              {payablesPending ? (
+                <Skeleton className="h-6 w-8" />
+              ) : (
+                <span className="badge badge-info" data-testid="payables-count">{payableRows.length}</span>
+              )}
             </div>
           </div>
-          {payableRows.length === 0 ? (
+          {payablesPending ? (
+            <div className="p-4 sm:p-6" data-testid="payables-pending" aria-busy="true">
+              <span role="status" className="sr-only">Loading upcoming payables</span>
+              <SkeletonRows rows={3} />
+            </div>
+          ) : payableRows.length === 0 ? (
             <div className="p-4 sm:p-6 text-sm text-muted">No upcoming payables in the next 30 days.</div>
           ) : (
             <div className="divide-y divide-line" data-testid="payables">
