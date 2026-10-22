@@ -3,6 +3,7 @@ import { Navigation } from './Navigation'
 import { BottomNav } from './BottomNav'
 import { useAuth } from '../contexts/AuthContext'
 import { OnboardingFlow } from './onboarding/OnboardingFlow'
+import { BusyOverlay } from './BusyOverlay'
 import { useEffect, useState } from 'react'
 
 export function Layout() {
@@ -27,31 +28,35 @@ export function Layout() {
     return <Outlet />
   }
   return (
-    // No background here on purpose: the page colour lives on <html> so the
-    // paper texture (a z-index:-1 pseudo-element) is not painted over.
-    <div className="min-h-screen">
-      <Navigation />
-      {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
-      <main className="pt-20 pb-20 sm:pb-8">
-        <div className="fade-in">
-          <Outlet />
-        </div>
-      </main>
-      <BottomNav />
-      {showOnboarding && (
-        <OnboardingFlow
-          onComplete={() => {
-            setShowOnboarding(false)
-            // Refresh user data to get updated onboarding_completed status
-            window.location.reload()
-          }}
-          onSkip={() => {
-            setShowOnboarding(false)
-            // Refresh user data to get updated onboarding_completed status
-            window.location.reload()
-          }}
-        />
-      )}
-    </div>
+    <>
+      {/* No background here on purpose: the page colour lives on <html> so the
+          paper texture (a z-index:-1 pseudo-element) is not painted over.
+          data-app-shell is what the screen loader makes inert while it blocks. */}
+      <div className="min-h-screen" data-app-shell>
+        <Navigation />
+        {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile */}
+        <main id="main-content" tabIndex={-1} className="pt-20 pb-20 sm:pb-8">
+          <div className="fade-in">
+            <Outlet />
+          </div>
+        </main>
+        <BottomNav />
+        {showOnboarding && (
+          <OnboardingFlow
+            onComplete={() => {
+              setShowOnboarding(false)
+              // Refresh user data to get updated onboarding_completed status
+              window.location.reload()
+            }}
+            onSkip={() => {
+              setShowOnboarding(false)
+              // Refresh user data to get updated onboarding_completed status
+              window.location.reload()
+            }}
+          />
+        )}
+      </div>
+      <BusyOverlay />
+    </>
   )
 }

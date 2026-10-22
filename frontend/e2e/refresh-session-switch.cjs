@@ -3,15 +3,13 @@
 // Not wired into CI and not part of `pnpm build`. Run steps: see ./README.md.
 //
 // Scenarios:
-//   (a) A's refresh succeeds late, after logout + login as B in the same tab
-//   (b) A's refresh fails late, after the same switch
 //   (c) a normal refresh still works; a failed refresh still clears and redirects
 //   (d) concurrent 401s in one session share a single /auth/refresh
 //   (e) the startup /auth/me check fails late, after a login as B
 //   (f) a 401 that lands after a failed refresh cleared the session starts no
 //       second refresh and restores no token
 //
-// Usage: node frontend/e2e/refresh-session-switch.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/refresh-session-switch.cjs [c|d|e|f]
 const { execFileSync } = require('child_process')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -97,12 +95,6 @@ async function uiLogin(page, u) {
   return token
 }
 
-async function uiLogout(page, u) {
-  await page.getByRole('button', { name: new RegExp(`User${u.tag} Test`) }).first().click()
-  await page.getByRole('button', { name: 'Sign out' }).click()
-  await page.waitForURL((url) => url.pathname === '/login')
-}
-
 const nav = (page, name) => page.locator(`a[data-onboarding="nav-${name}"]`).first().click()
 const stored = (page) => page.evaluate(() => localStorage.getItem('access_token'))
 const corrupt = (page) => page.evaluate(() => localStorage.setItem('access_token', 'garbage.token.value'))
@@ -115,69 +107,8 @@ async function inPage(page, p) {
     return { status: r.status, json: await r.json().catch(() => null) }
   }, [API, p])
 }
-async function cookieOwner(page) {
-  const r = await page.evaluate(async (api) => {
-    const r = await fetch(`${api}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-    return { status: r.status, json: await r.json().catch(() => null) }
-  }, API)
-  return r.status === 200 ? sub(r.json.access_token) : `status ${r.status}`
-}
 
-// (a) / (b): A's refresh is held across logout + login as B.
-async function switchScenario(browser, A, B, label, releaseAs) {
-  console.log(`\n=== (${label}) held refresh ${releaseAs === 'ok' ? 'success' : 'failure'} across A -> B switch`)
-  const { ctx, page } = await newPage(browser)
-  await page.goto(`${BASE}/login`)
-  await uiLogin(page, A)
-  await settle(page)
-
-  const afterRelease = []
-  let released = false
-  page.on('request', (r) => { if (released && r.url().includes('/api/v1/')) afterRelease.push({ url: r.url().replace(API, ''), sub: bearerSub(r) }) })
-
-  const [held, release] = gate()
-  let refreshSeen = 0, serverAnswered = releaseAs !== 'ok'
-  await page.route('**/api/v1/auth/refresh', async (route) => {
-    if (++refreshSeen > 1) return route.continue()
-    try {
-      // On success the server rotates A's token now; the page sees it only on release.
-      const resp = releaseAs === 'ok' ? await route.fetch() : null
-      serverAnswered = true
-      await held
-      await route.fulfill(resp ? { response: resp } : FAIL_401)
-    } catch { /* the page aborted the request */ }
-  })
-
-  await corrupt(page)
-  await nav(page, 'accounts')
-  await until(page, () => refreshSeen > 0 && serverAnswered)
-  check(`(${label}) A's refresh is in flight and held`, refreshSeen, 1)
-
-  await uiLogout(page, A)
-  const bToken = await uiLogin(page, B)
-  check(`(${label}) B logged in`, sub(await stored(page)), B.email)
-
-  released = true
-  release()
-  await page.waitForTimeout(2500)
-
-  check(`(${label}) stored token is still B's login token`, (await stored(page)) === bToken, true)
-  check(`(${label}) no redirect to /login`, path(page), '/')
-  check(`(${label}) /auth/me with stored token returns B`, (await inPage(page, '/auth/me')).json?.email, B.email)
-  check(`(${label}) /accounts/ with stored token returns B's data`, ((await inPage(page, '/accounts/')).json?.items || []).map((a) => a.name), ['B-acct'])
-  let appNames = 'no in-app request (nav unavailable)'
-  try {
-    const resp = page.waitForResponse((r) => isAccountsList(r.url()) && r.request().method() === 'GET', { timeout: 5000 })
-    resp.catch(() => {})
-    await page.locator('a[data-onboarding="nav-accounts"]').first().click({ timeout: 3000 })
-    const body = await (await resp).json()
-    appNames = body.items ? body.items.map((a) => a.name) : 'error body'
-  } catch { /* reported by the check below */ }
-  check(`(${label}) in-app /accounts/ returns B's data`, appNames, ['B-acct'])
-  check(`(${label}) no request carrying A's token after release`, afterRelease.filter((r) => r.sub === A.email).map((r) => r.url), [])
-  check(`(${label}) refresh cookie in the jar belongs to B`, await cookieOwner(page), B.email)
-  await ctx.close()
-}
+// (a) and (b) removed in STU-335: the screen loader blocks sign-out while a refresh is in flight, and two-tab use is out of scope.
 
 // (c): single user, no switch.
 async function normalScenario(browser, A) {
@@ -359,8 +290,6 @@ async function lateAfterClearScenario(browser, A) {
   const B = await makeUser('B')
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  if (run('a')) await switchScenario(browser, A, B, 'a', 'ok')
-  if (run('b')) await switchScenario(browser, A, B, 'b', 'fail')
   if (run('c')) await normalScenario(browser, A)
   if (run('d')) await coalesceScenario(browser, A)
   if (run('e')) await startupScenario(browser, A, B)

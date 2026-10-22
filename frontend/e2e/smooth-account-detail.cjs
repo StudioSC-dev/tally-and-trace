@@ -1,0 +1,185 @@
+// Browser checks for STU-335 on the account detail page (plan 4 and 5.2, account-detail
+// (a), (b1), (b2)): the transaction rows wait for the account and category names, so a
+// transfer never reads "Other account" and a category never reads "Uncategorized" before
+// the real name lands, and a failed names lookup shows rows with the fallbacks and a
+// note. Starts its own API and web app against a throwaway database
+// (./_local_stack.cjs) and seeds through the API; every expected value is read from the
+// API. Not wired into CI and not part of `pnpm build`. Run steps: see ./README.md.
+//
+// Check kinds: [B] behavioural, [S] structural (a failed one makes the run invalid),
+// [G] guard (holds at base and must keep holding). The script ends with RESULT: k/m and
+// exits 0 only when every check passed, 1 when any failed, 2 for setup.
+//
+// Usage: node frontend/e2e/smooth-account-detail.cjs [scenario]
+const { startLocalStack } = require('./_local_stack.cjs')
+const h = require('./_smooth.cjs')
+
+const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
+let chromium
+try {
+  ;({ chromium } = require(playwrightPath))
+} catch {
+  console.error(`Cannot load Playwright from "${playwrightPath}". Set PLAYWRIGHT_PATH (see frontend/e2e/README.md).`)
+  process.exit(2)
+}
+
+const only = process.argv[2]
+
+const FALLBACK_COUNTERPART = 'Other account'
+const FALLBACK_CATEGORY = 'Uncategorized'
+
+let stack, client, owner, checking, savings, category
+
+const tid = (id) => `[data-testid="${id}"]`
+const wire = (day) => `${day}T00:00:00`
+const daysAgo = (n) => {
+  const d = new Date(Date.now() + 8 * 3600 * 1000)
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+/** The names lookup the page makes: `GET /accounts/?limit=1000` (not `/accounts/<id>`). */
+const isAccountList = (r) => {
+  if (r.method() !== 'GET') return false
+  const url = new URL(r.url())
+  return url.pathname.endsWith('/accounts/') && url.searchParams.get('limit') === '1000'
+}
+
+/** A fresh signed-in page that records whether either fallback text ever appeared in the body. */
+async function openPage(browser) {
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  await page.addInitScript((phrases) => {
+    const seen = {}
+    window.__detailSeen = seen
+    const scan = () => {
+      const text = document.body ? document.body.textContent || '' : ''
+      for (const p of phrases) if (text.includes(p)) seen[p] = true
+    }
+    const start = () => {
+      new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true, characterData: true })
+      scan()
+    }
+    if (document.documentElement) start()
+    else document.addEventListener('DOMContentLoaded', start, { once: true })
+  }, [FALLBACK_COUNTERPART, FALLBACK_CATEGORY])
+  await h.uiLogin(page, stack, owner)
+  return { ctx, page }
+}
+
+const seenFallbacks = (page) => page.evaluate(() => Object.keys(window.__detailSeen || {}))
+
+const rows = (page) => page.locator(tid('account-transaction'))
+
+// (a) Rows wait for the account names: the transfer's counterpart is never "Other account".
+async function scenarioA(browser) {
+  console.log('\n=== (a) account names held: rows wait, the counterpart never reads "Other account"')
+  const { ctx, page } = await openPage(browser)
+  let gate = null
+  try {
+    gate = await h.gate(page, isAccountList)
+    await page.goto(`${stack.webUrl}/accounts/${checking.id}`)
+    await h.check('a.held', 'S', async () => (await gate.waitHits(1)) || 'no /accounts/?limit=1000 request')
+    await page.locator(tid('account-transactions')).waitFor()
+    await h.sleep(800)
+    await h.check('a.rows-wait', 'B', async () => {
+      const n = await rows(page).count()
+      return n === 0 || `${n} rows rendered while the names were held`
+    })
+    await h.check('a.loading-shown', 'S', async () =>
+      (await page.locator(tid('account-transactions-loading')).isVisible()) || 'no account-transactions-loading while held')
+    gate.release({ disarm: true })
+    await rows(page).first().waitFor({ timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('a.counterpart-matches-api', 'B', async () => {
+      const text = ((await page.locator(tid('account-transaction-counterpart')).first().textContent().catch(() => null)) || '').trim()
+      const expected = `To ${savings.name}`
+      return text === expected || `shown "${text}" expected "${expected}"`
+    })
+    await h.check('a.category-matches-api', 'B', async () => {
+      const shown = await page.getByText(category.name, { exact: true }).first().isVisible().catch(() => false)
+      return shown || `category "${category.name}" is not shown`
+    })
+    await h.check('a.never-fallback', 'B', async () => {
+      const seen = await seenFallbacks(page)
+      return seen.length === 0 || `showed ${JSON.stringify(seen)}`
+    })
+  } finally {
+    gate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (b1) guard and (b2): a failed names lookup still lists the rows, with fallbacks, and says so.
+async function scenarioB(browser) {
+  console.log('\n=== (b) account names fail: rows render with fallbacks and a note')
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    fail = await h.failWith(page, isAccountList, 500)
+    await page.goto(`${stack.webUrl}/accounts/${checking.id}`)
+    await rows(page).first().waitFor({ timeout: 8000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('b1.rows-render', 'G', async () => {
+      const n = await rows(page).count()
+      const { total } = await client.get(owner.token, `/transactions/?account_ids=${checking.id}&limit=1`).catch(() => ({ total: null }))
+      return n > 0 || `no rows rendered (api total ${total}, failures ${fail.failed})`
+    })
+    await h.check('b1.fallback-name', 'G', async () => {
+      const text = ((await page.locator(tid('account-transaction-counterpart')).first().textContent().catch(() => null)) || '').trim()
+      return text === `To ${FALLBACK_COUNTERPART}` || `shown "${text}"`
+    })
+    await h.check('b2.names-error-note', 'B', async () => {
+      const shown = await page.locator(tid('account-names-error')).waitFor({ timeout: 3000 }).then(() => true, () => false)
+      return shown || 'no account-names-error note'
+    })
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
+async function setup() {
+  owner = await h.makeUser(stack, 'detail')
+  checking = await client.post(owner.token, '/accounts/', { name: 'Detail Checking', account_type: 'checking', balance: 5000, currency: 'PHP' })
+  savings = await client.post(owner.token, '/accounts/', { name: 'Detail Savings', account_type: 'savings', balance: 0, currency: 'PHP' })
+  category = await client.post(owner.token, '/categories/', { name: 'Detail Groceries', color: '#16a34a', is_expense: true })
+  await client.post(owner.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'transfer', transfer_from_account_id: checking.id, transfer_to_account_id: savings.id,
+    amount: 250, description: 'Detail transfer', transaction_date: wire(daysAgo(2)), is_posted: true,
+  })
+  await client.post(owner.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'debit', amount: 90, category_id: category.id,
+    description: 'Detail groceries', transaction_date: wire(daysAgo(3)), is_posted: true,
+  })
+}
+
+const SCENARIOS = [
+  ['a', scenarioA],
+  ['b', scenarioB],
+]
+
+;(async () => {
+  process.on('unhandledRejection', (e) => console.log(`  NOTE unhandled rejection: ${e && e.message ? e.message.split('\n')[0] : e}`))
+  stack = await startLocalStack()
+  client = h.apiClient(stack)
+  const browser = await chromium.launch()
+  try {
+    await setup()
+  } catch (e) {
+    console.error('SETUP FAILED', e)
+    stack.stop()
+    process.exit(2)
+  }
+  for (const [name, run] of SCENARIOS) {
+    if (only && only !== name) continue
+    try {
+      await run(browser)
+    } catch (e) {
+      await h.check(`${name}.completed`, 'B', async () => `scenario threw: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`)
+    }
+  }
+  await browser.close()
+  stack.stop()
+  process.exit(h.report())
+})().catch((e) => { console.error(e); stack?.stop(); process.exit(2) })

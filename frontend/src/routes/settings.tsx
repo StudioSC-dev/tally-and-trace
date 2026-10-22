@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { categoryKindOf, isPinnableAccount } from '@tally-trace/shared'
+import { categoryKindOf, isPinnableAccount, queryPhase } from '@tally-trace/shared'
 import {
   useGetAccountsQuery,
   useGetCategoriesQuery,
@@ -16,6 +16,7 @@ import {
 import type { Category, Tag } from '../store/api'
 import { downloadAuthed } from '../utils/download'
 import { HouseholdShares } from '../components/HouseholdShares'
+import { SkeletonRows } from '../components/Loading'
 import { localToday } from '@tally-trace/shared'
 
 export const Route = createFileRoute('/settings')({
@@ -58,7 +59,9 @@ function SettingsPage() {
   const [savingMain, setSavingMain] = useState(false)
   const [mainError, setMainError] = useState<string | null>(null)
 
-  const { data: categories = [] } = useGetCategoriesQuery({}, { skip: !isAuthenticated })
+  const categoriesQuery = useGetCategoriesQuery({}, { skip: !isAuthenticated })
+  const categories = categoriesQuery.data
+  const categoriesPhase = queryPhase(categories, categoriesQuery, !isAuthenticated)
   const [createCategory] = useCreateCategoryMutation()
   const [updateCategory] = useUpdateCategoryMutation()
   const [deleteCategory] = useDeleteCategoryMutation()
@@ -69,7 +72,9 @@ function SettingsPage() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [categoryForm, setCategoryForm] = useState(emptyCategory)
 
-  const { data: tags = [] } = useGetTagsQuery(undefined, { skip: !isAuthenticated })
+  const tagsQuery = useGetTagsQuery(undefined, { skip: !isAuthenticated })
+  const tags = tagsQuery.data
+  const tagsPhase = queryPhase(tags, tagsQuery, !isAuthenticated)
   const [createTag] = useCreateTagMutation()
   const [updateTag] = useUpdateTagMutation()
   const [deleteTag] = useDeleteTagMutation()
@@ -225,7 +230,16 @@ function SettingsPage() {
           </div>
           <button onClick={openCreateCategory} className="btn-primary focus-ring">Add category</button>
         </div>
-        {categories.length === 0 ? (
+        {categories === undefined ? (
+          categoriesPhase === 'error' ? (
+            <p role="alert" data-testid="categories-error" className="p-4 sm:p-6 text-sm text-danger">Could not load categories.</p>
+          ) : (
+            <div data-testid="categories-pending" aria-busy="true" className="p-4 sm:p-6">
+              <SkeletonRows rows={3} />
+              <span role="status" className="sr-only">Loading categories</span>
+            </div>
+          )
+        ) : categories.length === 0 ? (
           <p className="p-4 sm:p-6 text-sm text-muted">No categories yet.</p>
         ) : (
           <ul className="divide-y divide-line/50">
@@ -259,7 +273,16 @@ function SettingsPage() {
           <button onClick={openCreateTag} className="btn-primary focus-ring">Add tag</button>
         </div>
         {tagListError && <p role="alert" className="px-4 sm:px-6 pt-3 text-sm text-danger">{tagListError}</p>}
-        {tags.length === 0 ? (
+        {tags === undefined ? (
+          tagsPhase === 'error' ? (
+            <p role="alert" data-testid="tags-error" className="p-4 sm:p-6 text-sm text-danger">Could not load tags.</p>
+          ) : (
+            <div data-testid="tags-pending" aria-busy="true" className="p-4 sm:p-6">
+              <SkeletonRows rows={3} />
+              <span role="status" className="sr-only">Loading tags</span>
+            </div>
+          )
+        ) : tags.length === 0 ? (
           <p className="p-4 sm:p-6 text-sm text-muted">No tags yet.</p>
         ) : (
           <ul className="divide-y divide-line/50">

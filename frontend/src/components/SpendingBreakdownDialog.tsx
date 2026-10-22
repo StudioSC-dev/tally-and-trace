@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -70,9 +70,17 @@ export function SpendingBreakdownDialog({
     [summary, currency, categoriesData],
   )
 
+  // The opener, read once per instance in a layout effect: that runs before the passive
+  // query subscriptions, which can make the screen loader blur it. StrictMode's replay
+  // keeps the first value.
+  const openerRef = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    openerRef.current ??= document.activeElement
+  }, [])
+
   // Focus into the dialog, make the page behind inert, and undo both on close.
   useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const opener = openerRef.current instanceof HTMLElement ? openerRef.current : null
     const root = document.getElementById('root')
     root?.setAttribute('inert', '')
     closeRef.current?.focus()

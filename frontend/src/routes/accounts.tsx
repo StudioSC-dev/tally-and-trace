@@ -2,8 +2,8 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useGetCardCreditsQuery, useGetHouseholdViewsQuery, useGetMinimumDuePresetsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
-import { groupAccounts } from '@tally-trace/shared'
-import type { CardCredit, MinimumDuePreset, MinimumDueRule } from '@tally-trace/shared'
+import { groupAccounts, queryPhase } from '@tally-trace/shared'
+import type { CardCredit, MinimumDuePreset, MinimumDueRule, QueryPhase } from '@tally-trace/shared'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -17,6 +17,7 @@ import { SharedWithMe } from '../components/SharedWithMe'
 import { HouseholdLinks } from '../components/household/HouseholdLinks'
 import { StatementsPanel } from '../components/StatementsPanel'
 import { CreditSummary } from '../components/CreditSummary'
+import { Skeleton } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
@@ -36,8 +37,28 @@ function NotCountedTag() {
   )
 }
 
-/** One account row. A click (or Enter/Space) hands the account to `onOpen`. */
-function AccountCard({ account, credit, onOpen }: { account: Account; credit?: CardCredit; onOpen: (account: Account) => void }) {
+/**
+ * `GET /cards/credit` serves a row: an active card with a limit the caller manages. Mirrors
+ * the backend's `card_credit.managed_card_ids`.
+ */
+const servesCredit = (account: Account): boolean =>
+  account.account_type === 'credit' &&
+  account.is_active === true &&
+  account.credit_limit != null &&
+  account.permissions.can_edit_settings
+
+/**
+ * One account row. A click (or Enter/Space) hands the account to `onOpen`. `creditPhase` is
+ * the card credits query's phase: a row it serves holds the headline's place while it is
+ * pending and says so when it fails.
+ */
+function AccountCard({ account, credit, creditPhase, onOpen }: {
+  account: Account
+  credit?: CardCredit
+  creditPhase: QueryPhase
+  onOpen: (account: Account) => void
+}) {
+  const managed = servesCredit(account)
   return (
     <article className={`card p-4 sm:p-5 transition-colors duration-200 ${isAccountActive(account) ? '' : 'opacity-60'}`}>
       <div
@@ -71,11 +92,19 @@ function AccountCard({ account, credit, onOpen }: { account: Account; credit?: C
 
             {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
 
-            {credit && (
+            {managed && creditPhase === 'error' ? (
+              <p className="text-xs text-muted" data-testid={`account-credit-error-${account.id}`}>
+                Available credit could not be loaded
+              </p>
+            ) : credit ? (
               <div data-testid={`account-credit-${account.id}`}>
                 <CreditSummary credit={credit} compact />
               </div>
-            )}
+            ) : managed && creditPhase === 'pending' ? (
+              <div data-testid={`account-credit-pending-${account.id}`}>
+                <Skeleton className="h-4 w-32" />
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-2 text-xs text-body">
               <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1">
@@ -340,7 +369,9 @@ export function AccountsPage() {
   // Why the last save failed, shown in the form until the next attempt or close.
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const { data: cardCredits } = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
+  const cardCreditsQuery = useGetCardCreditsQuery(undefined, { skip: !isAuthenticated })
+  const cardCredits = cardCreditsQuery.data
+  const creditPhase = queryPhase(cardCredits, cardCreditsQuery, !isAuthenticated)
   const creditById = useMemo(() => new Map((cardCredits?.items ?? []).map((c) => [c.account_id, c])), [cardCredits])
   const { data: presets } = useGetMinimumDuePresetsQuery(undefined, {
     skip: !isAuthenticated || !isCreateModalOpen || formData.account_type !== 'credit',
@@ -357,7 +388,13 @@ export function AccountsPage() {
   const limit = 1000
   const [accounts, setAccounts] = useState<Account[]>([])
   const [totalAccounts, setTotalAccounts] = useState(0)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  // The first load shows the page loader; later loads keep the list on screen until the
+  // new response replaces it.
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [isReloading, setIsReloading] = useState(false)
+  // Set by the current load's failure and cleared by its success: a failed load keeps the
+  // rows it had (none on a first load) and shows an alert with Retry.
+  const [loadError, setLoadError] = useState(false)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   // The list above is narrowed by the tag filter, but payment routing can pick any account.
   const { data: householdViews } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
@@ -428,21 +465,21 @@ export function AccountsPage() {
 
       const isCurrent = beginAccountsRequest(true)
       try {
-        setIsInitialLoading(true)
-        setAccounts([])
+        setIsReloading(true)
 
         const result = await triggerAccounts(params).unwrap()
         if (!isCurrent()) return
         setAccounts(result.items)
         setTotalAccounts(result.total)
+        setLoadError(false)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading accounts:', error)
-        setAccounts([])
-        setTotalAccounts(0)
+        setLoadError(true)
       } finally {
         if (isCurrent()) {
-          setIsInitialLoading(false)
+          setIsReloading(false)
+          setHasLoaded(true)
         }
       }
     },
@@ -486,7 +523,7 @@ export function AccountsPage() {
   const individualSection = sections.find((section) => section.section === 'individual')
   const sharedSection = sections.find((section) => section.section === 'shared')
 
-  if (isInitialLoading) {
+  if (!hasLoaded) {
     return (
         <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -671,7 +708,13 @@ export function AccountsPage() {
         </h3>
         <div className="grid grid-cols-1 gap-3">
           {inGroup.map((account) => (
-            <AccountCard key={account.id} account={account} credit={creditById.get(account.id)} onOpen={openActionModal} />
+            <AccountCard
+              key={account.id}
+              account={account}
+              credit={creditById.get(account.id)}
+              creditPhase={creditPhase}
+              onOpen={openActionModal}
+            />
           ))}
         </div>
       </div>
@@ -700,13 +743,29 @@ export function AccountsPage() {
 
       <TagFilter value={selectedTag} onChange={setSelectedTag} />
 
-      {/* Accounts List */}
+      {/* Accounts List: stays mounted while a reload runs. */}
+      <div className="space-y-6" data-testid="accounts-region" aria-busy={isReloading}>
+      {loadError && (
+        <div className="card p-4 space-y-3" role="alert" data-testid="accounts-load-error">
+          <p className="text-sm text-danger">Could not load accounts.</p>
+          <button
+            type="button"
+            className="btn-secondary focus-ring"
+            onClick={() => void loadAccounts()}
+            data-testid="accounts-retry"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {orderedAccounts.length === 0 ? (
+        loadError ? null : (
         <div className="card p-6 text-center text-muted">
           {selectedTag === undefined
             ? 'No accounts yet. Start by adding your first account.'
             : 'No accounts have this tag.'}
         </div>
+        )
       ) : (
         <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_160px] items-center gap-3 px-4 text-xs font-semibold uppercase tracking-wide text-muted -mb-4">
           <span>Account</span>
@@ -740,6 +799,7 @@ export function AccountsPage() {
           </p>
         </div>
       )}
+      </div>
 
       <SharedWithMe onLeft={() => void loadAccountsRef.current()} />
 

@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef } from 'react'
-import { listBounds, pageWindow, parsePage, parsePositiveId } from '@tally-trace/shared'
+import { listBounds, pageWindow, parsePage, parsePositiveId, queryPhase } from '@tally-trace/shared'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
 import { AccountTransactionList } from '../components/AccountTransactionList'
 import { CardCreditPanel } from '../components/CardCreditPanel'
+import { SkeletonRows } from '../components/Loading'
 import { Pager } from '../components/Pager'
 import { TagChips } from '../components/TagChips'
 import { useAuth } from '../contexts/AuthContext'
@@ -56,8 +57,16 @@ function AccountDetailPage() {
     error: accountError,
     refetch: refetchAccount,
   } = useGetAccountQuery(id ?? 0, { skip })
-  const { currentData: accountList } = useGetAccountsQuery({ limit: 1000 }, { skip })
-  const { currentData: categories } = useGetCategoriesQuery({}, { skip })
+  const accountListQuery = useGetAccountsQuery({ limit: 1000 }, { skip })
+  const accountList = accountListQuery.currentData
+  const categoriesQuery = useGetCategoriesQuery({}, { skip })
+  const categories = categoriesQuery.currentData
+  const accountListPhase = queryPhase(accountList, accountListQuery, skip)
+  const categoriesPhase = queryPhase(categories, categoriesQuery, skip)
+  // Rows wait for both name lookups, so a transfer never reads "Other account" and a
+  // category never reads "Uncategorized" before the real name lands.
+  const namesPending = accountListPhase === 'pending' || categoriesPhase === 'pending'
+  const namesError = accountListPhase === 'error' || categoriesPhase === 'error'
   const {
     currentData: transactions,
     error: transactionsError,
@@ -202,6 +211,11 @@ function AccountDetailPage() {
           <div className="card p-4" data-testid="account-transactions-loading">
             <p className="text-sm text-body">Loading transactions…</p>
           </div>
+        ) : namesPending && transactions.total > 0 && offset < transactions.total ? (
+          <div data-testid="account-transactions-loading" aria-busy="true">
+            <SkeletonRows rows={3} />
+            <span role="status" className="sr-only">Loading transactions</span>
+          </div>
         ) : transactions.total === 0 ? (
           <div className="card p-4" data-testid="account-transactions-empty">
             <p className="text-sm text-body">No transactions on this account yet.</p>
@@ -213,6 +227,11 @@ function AccountDetailPage() {
           </div>
         ) : (
           <>
+            {namesError && (
+              <p className="text-xs text-muted" data-testid="account-names-error">
+                Account or category names could not be loaded, so some rows show a generic name.
+              </p>
+            )}
             <div className={transactionsFetching ? 'opacity-60' : ''}>
               <AccountTransactionList
                 items={transactions.items}

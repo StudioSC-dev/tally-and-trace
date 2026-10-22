@@ -32,6 +32,7 @@
 // Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, showRow, showLastRow } = require('./_due_pages.cjs')
+const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -164,6 +165,7 @@ async function openMarkPaid(page, row, entryId, button = 'due-mark-paid') {
   const request = await asked
   await dialog(page).waitFor()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  await waitQuiet(page)
   return new URL(request.url()).searchParams.get('include')
 }
 
@@ -429,6 +431,7 @@ async function missingSourceAccount(browser) {
   release()
   const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
   await amount.waitFor()
+  await waitQuiet(page)
   check('(g) the dialog asks for the charge in the account\'s currency',
     (await dialog(page).locator(`label[for="${await amount.getAttribute('id')}"]`).textContent())?.trim(), 'Amount charged (PHP)')
   await amount.fill('4640')

@@ -2,6 +2,7 @@ import { configureStore } from '@reduxjs/toolkit'
 import { setupListeners } from '@reduxjs/toolkit/query'
 import { accountingApi } from './api'
 import { authApi } from './authApi'
+import { busyMiddleware } from './busy'
 
 export const store = configureStore({
   reducer: {
@@ -9,7 +10,7 @@ export const store = configureStore({
     [authApi.reducerPath]: authApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(accountingApi.middleware, authApi.middleware),
+    getDefaultMiddleware().concat(busyMiddleware, accountingApi.middleware, authApi.middleware),
 })
 
 setupListeners(store.dispatch)
