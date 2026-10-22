@@ -300,12 +300,87 @@ async function scenarioD(browser) {
   }
 }
 
+// (g) The snapshot and allocations fail once on the first load; Retry refetches just those two.
+// (g2) The snapshot fails twice: the screen comes back after the first Retry and the second loads.
+async function retryRun(browser, name, snapshotFailures) {
+  const u = await seed(name)
+  const { ctx, page, requests } = await openPage(browser)
+  let snapFail, allocFail
+  try {
+    snapFail = await h.failWith(page, isSnapshot, 500, { times: snapshotFailures })
+    allocFail = await h.failWith(page, isAllocations, 500, { times: 1 })
+    await h.uiLogin(page, stack, u)
+    const retry = page.getByRole('button', { name: 'Retry', exact: true })
+    await h.check(`${name}.error-screen`, 'B', async () => {
+      await retry.waitFor({ timeout: 5000 })
+      return (await page.getByText('Error Loading Data').count()) === 1 || 'no error screen'
+    })
+    await h.check(`${name}.retry-testid`, 'S', async () => (await page.locator(tid('dashboard-retry')).count()) === 1 || 'no dashboard-retry testid')
+    await h.waitQuiet(page)
+    await page.evaluate(() => { window.__stu335Marker = 1 })
+    const count = (pred) => requests.filter(pred).length
+    const asSnapshot = (r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/dashboard/snapshot')
+    const asAllocations = (r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/allocations/')
+    const marked = () => page.evaluate(() => window.__stu335Marker === 1)
+    const before = { snapshot: count(asSnapshot), allocations: count(asAllocations), total: requests.length }
+    await retry.click()
+    if (snapshotFailures === 1) {
+      await page.locator(tid('net-worth')).waitFor({ timeout: 8000 }).catch(() => {})
+      await h.waitQuiet(page)
+      await h.sleep(750)
+      const snap = await snapshotOf(u)
+      const balance = rowOf(snap.balances.by_currency, 'PHP')
+      await h.check(`${name}.marker-survives`, 'B', async () => (await marked()) || 'the page reloaded (marker gone)')
+      await h.check(`${name}.one-more-each`, 'B', async () => {
+        const got = { snapshot: count(asSnapshot) - before.snapshot, allocations: count(asAllocations) - before.allocations }
+        return (got.snapshot === 1 && got.allocations === 1) || `extra requests ${JSON.stringify(got)}`
+      })
+      await h.check(`${name}.only-failed-queries`, 'B', async () => {
+        const after = requests.slice(before.total)
+        const other = after.filter((r) => /\/transactions\/summary\/period|\/budget-entries\/|\/auth\/me/.test(new URL(r.url).pathname))
+        return other.length === 0 || `refetched ${JSON.stringify(other.map((r) => `${r.method} ${new URL(r.url).pathname}`))}`
+      })
+      await h.check(`${name}.values`, 'B', async () => {
+        const api = await client.get(u.token, '/allocations/?limit=1000&offset=0')
+        const badge = String(api.items.filter((a) => a.allocation_type === 'budget' && a.is_active).length)
+        const shown = [await textOf(page.locator(tid('net-worth'))), await textOf(page.locator('[data-onboarding="budget-envelopes"] .badge'))]
+        const expected = [peso(balance.total), badge]
+        return JSON.stringify(shown) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
+      })
+    } else {
+      const until = Date.now() + 5000
+      while (snapFail.failed < snapshotFailures && Date.now() < until) await h.sleep(50)
+      await retry.waitFor({ timeout: 5000 }).catch(() => {})
+      await h.check(`${name}.screen-returns`, 'B', async () => (await retry.count()) === 1 || 'error screen did not return after the first Retry')
+      await h.check(`${name}.marker-survives-first`, 'B', async () => (await marked()) || 'the page reloaded on the first Retry')
+      await h.waitQuiet(page)
+      await retry.click()
+      await page.locator(tid('net-worth')).waitFor({ timeout: 8000 }).catch(() => {})
+      await h.waitQuiet(page)
+      const balance = rowOf((await snapshotOf(u)).balances.by_currency, 'PHP')
+      await h.check(`${name}.second-retry-loads`, 'B', async () => {
+        const shown = await textOf(page.locator(tid('net-worth')))
+        return shown === peso(balance.total) || `net-worth "${shown}", api ${peso(balance.total)}`
+      })
+      await h.check(`${name}.marker-survives`, 'B', async () => (await marked()) || 'the page reloaded')
+    }
+  } finally {
+    await snapFail?.stop()
+    await allocFail?.stop()
+    await ctx.close()
+  }
+}
+const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', 1))
+const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', 2))
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
   ['f', scenarioF],
   ['d', scenarioD],
+  ['g', scenarioG],
+  ['g2', scenarioG2],
 ]
 
 ;(async () => {

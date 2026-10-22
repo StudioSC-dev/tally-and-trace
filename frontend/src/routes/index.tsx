@@ -303,6 +303,14 @@ export function Dashboard() {
   if (summaryError) console.error('Summary error:', summaryError)
   if (allocationsError) console.error('Allocations error:', allocationsError)
 
+  // Refetch only the queries that failed; the rest keep their figures and the page keeps its state.
+  const retryFailed = () => {
+    if (snapshotQuery.isError) void snapshotQuery.refetch()
+    if (summaryQuery.isError) void summaryQuery.refetch()
+    if (entriesQuery.isError) void entriesQuery.refetch()
+    if (allocationsQuery.isError) void allocationsQuery.refetch()
+  }
+
   const getErrorDetail = (error: unknown): string | undefined => {
     if (!error || typeof error !== 'object') return undefined
     const withData = error as { data?: unknown }
@@ -316,7 +324,7 @@ export function Dashboard() {
     return undefined
   }
 
-  if (snapshotError || summaryError || budgetEntriesError || allocationsError) {
+  if ([snapshotPhase, summaryPhase, entriesPhase, allocationsPhase].includes('error')) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -328,13 +336,15 @@ export function Dashboard() {
           <h3 className="text-lg font-semibold text-ink mb-2">Error Loading Data</h3>
           <p className="text-body mb-4">There was an issue loading your financial data.</p>
           <div className="text-sm text-muted space-y-1">
-            {snapshotError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
-            {summaryError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
-            {budgetEntriesError && <p>• Schedules: {getErrorDetail(budgetEntriesError) ?? 'Failed to load'}</p>}
-            {allocationsError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
+            {snapshotQuery.isError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
+            {summaryQuery.isError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
+            {entriesQuery.isError && <p>• Schedules: {getErrorDetail(budgetEntriesError) ?? 'Failed to load'}</p>}
+            {allocationsQuery.isError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
           </div>
           <button
-            onClick={() => window.location.reload()}
+            type="button"
+            data-testid="dashboard-retry"
+            onClick={retryFailed}
             className="mt-4 px-4 py-2 bg-ink text-paper hover:bg-ink transition-colors duration-200"
           >
             Retry
