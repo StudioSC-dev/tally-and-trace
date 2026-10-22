@@ -357,7 +357,10 @@ export function AccountsPage() {
   const limit = 1000
   const [accounts, setAccounts] = useState<Account[]>([])
   const [totalAccounts, setTotalAccounts] = useState(0)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
+  // The first load shows the page loader; later loads keep the list on screen until the
+  // new response replaces it.
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [isReloading, setIsReloading] = useState(false)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   // The list above is narrowed by the tag filter, but payment routing can pick any account.
   const { data: householdViews } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
@@ -428,8 +431,7 @@ export function AccountsPage() {
 
       const isCurrent = beginAccountsRequest(true)
       try {
-        setIsInitialLoading(true)
-        setAccounts([])
+        setIsReloading(true)
 
         const result = await triggerAccounts(params).unwrap()
         if (!isCurrent()) return
@@ -442,7 +444,8 @@ export function AccountsPage() {
         setTotalAccounts(0)
       } finally {
         if (isCurrent()) {
-          setIsInitialLoading(false)
+          setIsReloading(false)
+          setHasLoaded(true)
         }
       }
     },
@@ -486,7 +489,7 @@ export function AccountsPage() {
   const individualSection = sections.find((section) => section.section === 'individual')
   const sharedSection = sections.find((section) => section.section === 'shared')
 
-  if (isInitialLoading) {
+  if (!hasLoaded) {
     return (
         <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -700,7 +703,8 @@ export function AccountsPage() {
 
       <TagFilter value={selectedTag} onChange={setSelectedTag} />
 
-      {/* Accounts List */}
+      {/* Accounts List: stays mounted while a reload runs. */}
+      <div className="space-y-6" data-testid="accounts-region" aria-busy={isReloading}>
       {orderedAccounts.length === 0 ? (
         <div className="card p-6 text-center text-muted">
           {selectedTag === undefined
@@ -740,6 +744,7 @@ export function AccountsPage() {
           </p>
         </div>
       )}
+      </div>
 
       <SharedWithMe onLeft={() => void loadAccountsRef.current()} />
 
