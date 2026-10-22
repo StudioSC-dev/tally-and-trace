@@ -418,8 +418,11 @@ export function AllocationsPage() {
   const [hasLoaded, setHasLoaded] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
+  // The last reset failed: an alert with Retry shows, above any rows still on screen.
+  const [loadError, setLoadError] = useState(false)
   // The first recurring load has settled; later reloads keep the sections on screen.
   const [recurringLoaded, setRecurringLoaded] = useState(false)
+  const [recurringError, setRecurringError] = useState(false)
   const [recurringIncome, setRecurringIncome] = useState<BudgetEntry[]>([])
   const [recurringExpenses, setRecurringExpenses] = useState<BudgetEntry[]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
@@ -454,13 +457,16 @@ export function AllocationsPage() {
         setAllocationItems((prev) => (reset ? result.items : [...prev, ...result.items]))
         setTotalAllocations(result.total)
         setHasMoreAllocations(result.has_more)
+        if (reset) {
+          setLoadError(false)
+        }
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading allocations:', error)
         if (reset) {
-          setAllocationItems([])
-          setTotalAllocations(0)
+          // The rows already on screen stay; no load-more runs until a Retry lands.
           setHasMoreAllocations(false)
+          setLoadError(true)
         }
       } finally {
         if (isCurrent()) {
@@ -497,11 +503,11 @@ export function AllocationsPage() {
       if (!isCurrent()) return
       setRecurringIncome(incomeResult.items)
       setRecurringExpenses(expenseResult.items)
+      setRecurringError(false)
     } catch (error) {
       if (!isCurrent()) return
       console.error('Error loading budget entries:', error)
-      setRecurringIncome([])
-      setRecurringExpenses([])
+      setRecurringError(true)
     } finally {
       if (isCurrent()) {
         setRecurringLoaded(true)
@@ -1387,8 +1393,21 @@ export function AllocationsPage() {
         <h2 className="text-xl font-semibold text-ink">{title}</h2>
         <p className="text-sm text-muted">{subtitle}</p>
       </header>
+      {loadError && (
+        <div className="card p-4 space-y-3" role="alert" data-testid="allocations-load-error">
+          <p className="text-sm text-danger">Could not load allocations.</p>
+          <button
+            type="button"
+            className="btn-secondary focus-ring"
+            data-testid="allocations-retry"
+            onClick={() => void loadAllocations(true)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {allocations.length === 0 ? (
-        <div className="card p-6 text-center text-muted">{emptyMessage}</div>
+        loadError ? null : <div className="card p-6 text-center text-muted">{emptyMessage}</div>
       ) : (
         <div className="grid grid-cols-1 gap-3">{allocations.map(renderAllocationCard)}</div>
       )}
@@ -1442,23 +1461,43 @@ export function AllocationsPage() {
       )
     }
     const groups = groupByKind([...recurringExpenses, ...recurringIncome])
+    const errorAlert = recurringError && (
+      <div className="card p-4 space-y-3" role="alert" data-testid="recurring-load-error">
+        <p className="text-sm text-danger">Could not load recurring entries.</p>
+        <button
+          type="button"
+          className="btn-secondary focus-ring"
+          data-testid="recurring-retry"
+          onClick={() => void loadBudgetEntries()}
+        >
+          Retry
+        </button>
+      </div>
+    )
     if (groups.length === 0) {
       return (
-        <div className="card p-6 text-center text-muted">
-          No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead.
-        </div>
+        errorAlert || (
+          <div className="card p-6 text-center text-muted">
+            No recurring entries yet. Add your regular income, bills and subscriptions to stay ahead.
+          </div>
+        )
       )
     }
-    return groups.map((group) => (
-      <section key={group.key} className="space-y-3" data-testid={`kind-section-${group.key}`}>
-        <header className="flex items-baseline gap-2 border-b border-line pb-1">
-          <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
-          <span className="text-sm text-muted">{group.entries.length}</span>
-        </header>
-        {renderKindCredit(group)}
-        <div className="grid grid-cols-1 gap-3">{group.entries.map(renderBudgetEntryCard)}</div>
-      </section>
-    ))
+    return (
+      <>
+        {errorAlert}
+        {groups.map((group) => (
+          <section key={group.key} className="space-y-3" data-testid={`kind-section-${group.key}`}>
+            <header className="flex items-baseline gap-2 border-b border-line pb-1">
+              <h2 className="text-xl font-semibold text-ink">{group.label}</h2>
+              <span className="text-sm text-muted">{group.entries.length}</span>
+            </header>
+            {renderKindCredit(group)}
+            <div className="grid grid-cols-1 gap-3">{group.entries.map(renderBudgetEntryCard)}</div>
+          </section>
+        ))}
+      </>
+    )
   }
 
   const activeAllocationList =
@@ -1557,7 +1596,7 @@ export function AllocationsPage() {
               {isFetchingMore ? 'Loading more envelopes...' : 'Scroll for more envelopes'}
             </p>
           )}
-          {hasLoaded && !hasMoreAllocations && totalAllocations > 0 && (
+          {!loadError && hasLoaded && !hasMoreAllocations && totalAllocations > 0 && (
             <p className="text-center text-xs text-muted pb-2">End of envelope list</p>
           )}
           <div className="flex justify-end px-4">

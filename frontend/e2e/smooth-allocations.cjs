@@ -321,11 +321,115 @@ async function scenarioC(browser) {
   }
 }
 
+/** Waits (bounded) until `fail.failed >= n`. */
+async function waitFailed(fail, n, ms = 5000) {
+  const until = Date.now() + ms
+  while (fail.failed < n) {
+    if (Date.now() > until) return false
+    await h.sleep(25)
+  }
+  return true
+}
+
+// (d) A failed first load shows an alert, never the empty texts.
+async function scenarioD(browser) {
+  console.log('\n=== (d) a failed first load shows an alert instead of empty allocations')
+  const u = await seedUser('d')
+  await envelopes(u, 'D Env', 1)
+  await entry(u, { name: 'D Streaming' })
+  const { ctx, page } = await openPage(browser)
+  let allocFail = null, entriesFail = null
+  try {
+    await h.uiLogin(page, stack, u)
+    await h.waitQuiet(page)
+    allocFail = await h.failWith(page, isAllocationsList, 500, { times: 1 })
+    entriesFail = await h.failWith(page, isEntriesList, 500, { times: 1 })
+    await page.goto(`${stack.webUrl}/allocations`)
+    await h.check('d.failed', 'S', async () =>
+      ((await waitFailed(allocFail, 1)) && (await waitFailed(entriesFail, 1))) || `failed allocations ${allocFail.failed} entries ${entriesFail.failed}`)
+    await h.waitQuiet(page)
+    await h.check('d.recurring-alert', 'B', async () => {
+      try { await page.locator(tid('recurring-load-error')).waitFor({ timeout: 3000 }) } catch { return 'no recurring-load-error' }
+      return (await page.locator(tid('recurring-retry')).count()) === 1 || 'no recurring-retry'
+    })
+    await h.check('d.recurring-no-empty', 'B', async () =>
+      (await h.expectAbsentFor(page, page.getByText('No recurring entries yet', { exact: false }), 1500)) || '"No recurring entries yet" shown')
+    await page.getByRole('button', { name: 'Budgets', exact: true }).click()
+    await h.check('d.alert', 'B', async () => {
+      try { await page.locator(tid('allocations-load-error')).waitFor({ timeout: 3000 }) } catch { return 'no allocations-load-error' }
+      return (await page.locator(tid('allocations-retry')).count()) === 1 || 'no allocations-retry'
+    })
+    await h.check('d.no-empty', 'B', async () =>
+      (await h.expectAbsentFor(page, page.getByText('No budget envelopes yet', { exact: false }), 1500)) || '"No budget envelopes yet" shown')
+    await page.getByRole('button', { name: 'Subscriptions', exact: true }).click()
+    await page.locator(tid('recurring-retry')).click()
+    await h.waitQuiet(page)
+    await h.check('d.recurring-retry-lists', 'B', async () =>
+      ((await page.getByText('D Streaming', { exact: true }).count()) > 0 && (await page.locator(tid('recurring-load-error')).count()) === 0) || 'entry not listed after Retry')
+  } finally {
+    await allocFail?.stop()
+    await entriesFail?.stop()
+    await ctx.close()
+  }
+}
+
+// (f) A failed reset after a create keeps the cards, with the alert and Retry above them.
+async function scenarioF(browser) {
+  console.log('\n=== (f) a failed reload keeps the cards with an alert and Retry above')
+  const u = await seedUser('f')
+  await envelopes(u, 'F Env', 2)
+  const { ctx, page } = await openPage(browser)
+  let fail = null
+  try {
+    await h.uiLogin(page, stack, u)
+    await openBudgets(page)
+    const before = await cardNames(page)
+    await h.check('f.seeded', 'S', () => before.length === 2 || `cards ${JSON.stringify(before)}`)
+    const submit = await fillEnvelope(page, u, 'F Env new')
+    fail = await h.failWith(page, isAllocationsList, 500, { times: 1 })
+    await submit.click()
+    await h.check('f.failed', 'S', async () => (await waitFailed(fail, 1)) || 'the reset did not fail')
+    await h.waitQuiet(page)
+    await h.check('f.cards-stay', 'B', async () => {
+      const shown = await cardNames(page)
+      return (shown.length === before.length && before.every((n) => shown.includes(n))) || `cards ${JSON.stringify(shown)}`
+    })
+    await h.check('f.alert-above', 'B', async () => {
+      const alert = page.locator(tid('allocations-load-error'))
+      try { await alert.waitFor({ timeout: 3000 }) } catch { return 'no allocations-load-error' }
+      const alertBox = await alert.boundingBox()
+      const cardBox = await page.locator('article[role="button"]').first().boundingBox()
+      const retry = await page.locator(tid('allocations-retry')).count()
+      return (retry === 1 && alertBox && cardBox && alertBox.y + alertBox.height <= cardBox.y) || `retry ${retry} alert ${JSON.stringify(alertBox)} card ${JSON.stringify(cardBox)}`
+    })
+    await h.check('f.no-end-footer', 'B', async () => {
+      const alerts = await page.locator(tid('allocations-load-error')).count()
+      const footer = await page.getByText('End of envelope list', { exact: true }).count()
+      return (alerts === 1 && footer === 0) || `alerts ${alerts} footer ${footer}`
+    })
+    await h.check('f.no-empty', 'B', async () =>
+      (await h.expectAbsentFor(page, page.getByText('No budget envelopes yet', { exact: false }), 1500)) || '"No budget envelopes yet" shown')
+    await page.locator(tid('allocations-retry')).click()
+    await h.waitQuiet(page)
+    await h.check('f.retry-restores', 'B', async () => {
+      if ((await page.locator(tid('allocations-load-error')).count()) > 0) return 'alert still shown after Retry'
+      const shown = await cardNames(page)
+      if (!shown.includes('F Env new')) return `new envelope missing: ${JSON.stringify(shown)}`
+      return namesMatchApi(page, u)
+    })
+  } finally {
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['e', scenarioE],
   ['c', scenarioC],
+  ['d', scenarioD],
+  ['f', scenarioF],
 ]
 
 ;(async () => {
