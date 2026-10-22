@@ -397,7 +397,14 @@ export function AccountsPage() {
   const [loadError, setLoadError] = useState(false)
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
   // The list above is narrowed by the tag filter, but payment routing can pick any account.
-  const { data: householdViews } = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
+  const householdViewsQuery = useGetHouseholdViewsQuery(undefined, { skip: !isAuthenticated })
+  const householdViews = householdViewsQuery.data
+  // The first paint waits for the views, so the Shared section arrives with the list. Only
+  // the first settle counts: after a failure, `HouseholdLinks` mounting refetches the
+  // errored query, and a loader that came back would unmount it and loop.
+  const householdPhase = queryPhase(householdViews, householdViewsQuery, !isAuthenticated)
+  const [householdSettled, setHouseholdSettled] = useState(false)
+  if (!householdSettled && householdPhase !== 'pending') setHouseholdSettled(true)
   const hasHouseholdViews = (householdViews?.length ?? 0) > 0
   const { data: allAccountsData } = useGetAccountsQuery(
     { limit: 100 },
@@ -523,7 +530,7 @@ export function AccountsPage() {
   const individualSection = sections.find((section) => section.section === 'individual')
   const sharedSection = sections.find((section) => section.section === 'shared')
 
-  if (!hasLoaded) {
+  if (!hasLoaded || !householdSettled) {
     return (
         <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
