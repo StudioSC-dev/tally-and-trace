@@ -2175,6 +2175,7 @@ export function AllocationsPage() {
           budgetEnvelopes={budgetEnvelopes}
           onClose={() => setRecurringModal(null)}
           onSaved={handleBudgetEntrySaved}
+          onStale={() => void loadBudgetEntriesRef.current()}
           onDeleted={handleBudgetEntryDeleted}
         />
       )}
