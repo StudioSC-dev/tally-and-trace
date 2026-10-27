@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Optional
 
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core import locking
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.time import manila_midnight, manila_today
+from app.core.time import manila_midnight, manila_today, utc_now
 from app.core.access import (
     VIEW_ROLES,
     RecordAccess,
@@ -441,6 +441,18 @@ def _first_occurrence_from_today(entry: BudgetEntry) -> Optional[datetime]:
                                       apply_cap=False)), None)
 
 
+STALE_COPY_MESSAGE = "This entry changed since you opened it; reopen it to edit"
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Aware UTC, microseconds kept; a naive value is read as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 @router.put("/{entry_id}", response_model=BudgetEntryOut)
 def update_budget_entry(
     entry_id: int,
@@ -458,6 +470,12 @@ def update_budget_entry(
         raise HTTPException(status_code=404, detail="Budget entry not found")
     owner = entry.user
     prospective_data = entry_update.dict(exclude_unset=True)
+    # The stale-copy guard, after the edit check so a caller who cannot edit
+    # gets 404 and learns nothing. Popped so it is never set on the row.
+    if "expected_updated_at" in prospective_data:
+        expected = prospective_data.pop("expected_updated_at")
+        if _as_utc(expected) != _as_utc(entry.updated_at):
+            raise HTTPException(status_code=409, detail=STALE_COPY_MESSAGE)
     # The creator's private references, which a non-creator is never shown:
     # any request naming one is refused, null included (clearing is a change),
     # so it can neither change them nor probe their stored values.
@@ -566,6 +584,9 @@ def update_budget_entry(
         entry.billing_kind = default_billing_kind(
             db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
 
+    # Set explicitly so every successful edit moves the version the guard
+    # reads, a tag-only edit (no column change) included.
+    entry.updated_at = utc_now()
     db.add(entry)
     if tag_ids is not None:
         replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
