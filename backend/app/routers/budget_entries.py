@@ -1,3 +1,4 @@
+from calendar import monthrange
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -30,7 +31,7 @@ from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.allocation import Allocation
-from app.models.transaction import Transaction
+from app.models.transaction import RecurrenceFrequency, Transaction
 from app.models.user import User
 from app.core.redaction import (
     full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
@@ -48,9 +49,11 @@ from app.schemas.budget_entry import (
 )
 from app.schemas.transaction import TransactionOut
 from app.services import posting
-from app.services.forecast import _naive, iter_occurrences
+from app.services.forecast import _clamp_day, _naive, capped_distinct_days, iter_occurrences
 from app.services.recurring_kinds import default_billing_kind, entry_kind, is_capped
-from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
+from app.services.recurrence import (
+    DAY_FIELDS, MONTH_FAMILY, DayRuleError, canon, resolve_day_fields,
+)
 
 router = APIRouter()
 
@@ -291,6 +294,103 @@ def _day_fields(cadence, next_occurrence, sent: dict, stored=None) -> dict:
                                   sent=sent, stored=stored)
     except DayRuleError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+MAX_PAYMENTS = 360  # the schema's maximum for max_occurrences and occurrences_paid_offset
+SCHEDULE_FIELDS = ("next_occurrence", "cadence", "anchor_day", "day_rule",
+                   "semi_monthly_day_1", "semi_monthly_day_2")
+
+
+def _kept_end(stored, merged, old_final: datetime) -> date:
+    """The last day a payment may fall on once the schedule changes: the old
+    final payment's month for a month-family cadence (a day change keeps the
+    month), the same slot of that month for semi-monthly, else its day."""
+    if merged.cadence != stored.cadence:
+        return old_final.date()
+    year, month = old_final.year, old_final.month
+    if merged.cadence in MONTH_FAMILY:
+        return date(year, month, monthrange(year, month)[1])
+    if merged.cadence == RecurrenceFrequency.SEMI_MONTHLY:
+        def month_days(e) -> list:
+            return sorted({_clamp_day(year, month, getattr(e, f, None) or default)
+                           for f, default in (("semi_monthly_day_1", 1),
+                                              ("semi_monthly_day_2", 15))})
+        stored_days, merged_days = month_days(stored), month_days(merged)
+        slot = stored_days.index(old_final.day)
+        return date(year, month, merged_days[min(slot, len(merged_days) - 1)])
+    return old_final.date()
+
+
+def _keep_final_month(entry: BudgetEntry, prospective_data: dict) -> None:
+    """The final-month rule (STU-343 Plan B section 2.6): on a capped entry with
+    payments left, an edit that moves the schedule (next date, cadence or a
+    day field) but leaves the count as stored keeps the last payment where it
+    was. The remaining count is recounted to that end and, with the cadence
+    unchanged, the months moved over count as paid outside the app (moving
+    back lowers that). A changed count is respected as sent. 422, before any
+    write, when the new date is after the last payment or a derived figure
+    passes the schema's 360. A sent ``occurrences_paid_offset`` is the base
+    the derived change is added to, as the stored one is when none is sent.
+    Dates are compared and walked as their UTC components (``recurrence.canon``,
+    as the day rules and the stored row read them), so one instant sent with
+    any offset gives the same result. ``prospective_data`` is the request
+    merged with its resolved day fields; the derived fields are written into
+    it."""
+    merged = SimpleNamespace(**{
+        f: prospective_data.get(f, getattr(entry, f))
+        for f in (*SCHEDULE_FIELDS, "end_mode", "end_date", "max_occurrences",
+                  "occurrences_paid_offset")})
+    for f in ("next_occurrence", "end_date"):
+        if getattr(merged, f) is not None:
+            setattr(merged, f, canon(getattr(merged, f)))
+    if not (is_capped(entry) and is_capped(merged) and entry.max_occurrences > 0):
+        return
+    if prospective_data.get("max_occurrences", entry.max_occurrences) != entry.max_occurrences:
+        return
+    def differs(field: str) -> bool:
+        new, old = getattr(merged, field), getattr(entry, field)
+        if field == "next_occurrence":
+            return new != canon(old)
+        return new != old
+    if not any(differs(f) for f in SCHEDULE_FIELDS):
+        return
+
+    old_count = entry.max_occurrences
+    stored_walk = capped_distinct_days(entry, canon(entry.next_occurrence), datetime.max,
+                                       max_steps=2 * old_count + 2)
+    if not stored_walk:
+        return
+    old_final = stored_walk[-1]
+    kept_end = _kept_end(entry, merged, old_final)
+    after_final = HTTPException(
+        status_code=422,
+        detail=(f"The new date is after the plan's last payment "
+                f"({old_final.date().isoformat()}); change the number of payments too"))
+    new_next = merged.next_occurrence
+    if new_next.date() > kept_end:
+        raise after_final
+    merged.max_occurrences = None
+    # The walk's end is exclusive: the day after the kept end, or, when that
+    # day is past the last date a datetime holds, datetime.max (the same days).
+    walk_end = (datetime.max if kept_end == date.max
+                else datetime.combine(kept_end + timedelta(days=1), datetime.min.time()))
+    new_count = len(capped_distinct_days(merged, new_next, walk_end,
+                                         max_steps=2 * (MAX_PAYMENTS + 1) + 2))
+    if new_count > MAX_PAYMENTS:
+        raise HTTPException(
+            status_code=422,
+            detail="That makes more than 360 payments; change the number of payments too")
+    if new_count == 0:
+        raise after_final
+    prospective_data["max_occurrences"] = new_count
+    if merged.cadence == entry.cadence:
+        new_offset = max(0, merged.occurrences_paid_offset + old_count - new_count)
+        if new_offset > MAX_PAYMENTS:
+            raise HTTPException(
+                status_code=422,
+                detail=("That counts more than 360 payments made outside the app; "
+                        "change the number of payments too"))
+        prospective_data["occurrences_paid_offset"] = new_offset
 
 
 @router.get("/", response_model=BudgetEntryListResponse)
@@ -568,6 +668,7 @@ def update_budget_entry(
         prospective_data.get("next_occurrence") or entry.next_occurrence,
         {f: prospective_data[f] for f in DAY_FIELDS if f in prospective_data},
         stored=entry))
+    _keep_final_month(entry, prospective_data)
 
     for field, value in prospective_data.items():
         setattr(entry, field, value)
