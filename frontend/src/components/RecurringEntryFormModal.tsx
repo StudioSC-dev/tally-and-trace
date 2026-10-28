@@ -409,11 +409,18 @@ export function RecurringEntryFormModal({
       } else {
         await createBudgetEntry(subscriptionPayload).unwrap()
       }
-      await onSaved()
     } catch (error) {
       console.error('Error saving allocation data:', error)
       if (apiErrorStatus(error) === 409) onStale?.()
       setSaveError(apiErrorMessage(error) || 'Could not save the recurring entry. Please try again.')
+      return
+    }
+    // The save went through: a failed reload after it is not a failed save, so
+    // it is logged rather than reported as one.
+    try {
+      await onSaved()
+    } catch (error) {
+      console.error('Error reloading after saving the recurring entry:', error)
     }
   }
 
