@@ -836,7 +836,10 @@ export function RecurringEntryFormModal({
                     <p className="mt-1 text-xs text-muted">
                       Stop once this many transactions have been created.
                     </p>
-                    {editingBudgetEntry && (
+                    {/* Only a stored capped entry with payments left has a last payment to keep. */}
+                    {editingBudgetEntry &&
+                      editingBudgetEntry.end_mode === 'after_occurrences' &&
+                      (editingBudgetEntry.max_occurrences ?? 0) > 0 && (
                       <p className="mt-1 text-xs text-muted" data-testid="final-month-help">
                         {finalMonthHelp}
                       </p>

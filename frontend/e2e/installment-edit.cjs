@@ -11,7 +11,8 @@
 //       "This entry changed since you opened it; reopen it to edit"; the API is
 //       unchanged by the refused save, and the reopened form (no page reload) shows the
 //       current entry and saves. The entry has never been saved before, so its version is null
-//   (c) the edit form explains the count (the final-month help); the add form does not
+//   (c) the edit form explains the count (the final-month help); the add form does not,
+//       and neither does an open-ended entry's edit form switched to "After runs"
 //   (d) a date after the plan's last payment is refused with the server's reason
 //       inline, the form stays open, and changing the count too saves
 //
@@ -136,15 +137,16 @@ async function openAllocations(page) {
   await waitQuiet(page)
 }
 
-const planCard = (page) => page.locator('article').filter({ has: page.getByText('Gadget plan', { exact: true }) })
+const entryCard = (page, name) => page.locator('article').filter({ has: page.getByText(name, { exact: true }) })
+const planCard = (page) => entryCard(page, 'Gadget plan')
 const modalClose = (page) => page.getByLabel('Close allocation modal')
 const updateButton = (page) => page.getByRole('button', { name: 'Update Recurring Entry' })
 const editForm = (page) => page.locator('form').filter({ has: updateButton(page) })
 const nextInput = (form) => form.locator('input[type="datetime-local"]').first()
 const runsInput = (form) => form.getByText('Number of runs', { exact: true }).locator('xpath=following-sibling::input')
 
-async function openEdit(page) {
-  await planCard(page).click()
+async function openEdit(page, card = planCard(page)) {
+  await card.click()
   await modalClose(page).waitFor()
   await waitQuiet(page)
   return editForm(page)
@@ -207,7 +209,11 @@ async function staleForm(browser) {
 async function help(browser) {
   console.log('(c) the final-month help')
   const me = await makeUser('c')
-  await seed(me, 4)
+  const { bank } = await seed(me, 4)
+  await post(me.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Streaming', amount: 500,
+    account_id: bank.id, next_occurrence: wire(firstDate()), end_mode: 'indefinite',
+  })
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, me)
   await openAllocations(page)
@@ -221,6 +227,14 @@ async function help(browser) {
   await waitQuiet(page)
   const add = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
   check('(c) the add form has no final-month help', await add.getByTestId('final-month-help').count(), 0)
+  await modalClose(page).click()
+  await modalClose(page).waitFor({ state: 'detached' })
+  await waitQuiet(page)
+  // An open-ended entry has no last payment to keep: switching its form to a count shows none.
+  const openEnded = await openEdit(page, entryCard(page, 'Streaming'))
+  await openEnded.getByRole('button', { name: 'After runs', exact: true }).click()
+  check('(c) the open-ended entry now shows the count', await runsInput(openEnded).count(), 1)
+  check('(c) the open-ended entry has no final-month help', await openEnded.getByTestId('final-month-help').count(), 0)
   await ctx.close()
 }
 
