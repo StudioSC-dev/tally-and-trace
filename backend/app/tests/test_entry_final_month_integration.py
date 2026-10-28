@@ -6,7 +6,8 @@ payment: the remaining count is recounted to it, and with the cadence
 unchanged the months moved over count as paid outside the app. A changed
 count is respected as sent. A date after the last payment, more than 360
 payments, or more than 360 paid outside the app is a 422 and nothing is
-written. Skips without a database.
+written. A PUT that resumes a paused entry skips the rule. Skips without a
+database.
 """
 import sys
 from datetime import date, datetime
@@ -351,3 +352,47 @@ def test_ending_indefinitely_while_moving_the_date_is_not_recounted(world):
     assert body["next_occurrence"].startswith("2026-11-05")
     assert body["max_occurrences"] == 24
     assert body["occurrences_paid_offset"] == 0
+
+
+# --- Resuming a paused entry skips the rule (owner ruling 2026-10-28) -------------------------
+# A PUT that turns a paused entry back on keeps the pause behaviour from before
+# the rule (905b562): the paused months are not counted, the count and the
+# paid-outside offset stay as stored and the last payment moves later.
+
+def test_resuming_with_a_new_date_keeps_the_count(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    body = _ok(client, o, tablet, {"is_active": True, "next_occurrence": _day("2027-01-05")})
+
+    assert body["is_active"] is True
+    assert body["next_occurrence"].startswith("2027-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+    assert _last_payment(sw_db, tablet) == date(2028, 12, 5)
+
+
+def test_resuming_after_the_plan_would_have_ended_is_not_refused(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    body = _ok(client, o, tablet, {"is_active": True, "next_occurrence": _day("2029-01-05")})
+
+    assert body["next_occurrence"].startswith("2029-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+    assert _last_payment(sw_db, tablet) == date(2030, 12, 5)
+
+
+def test_resuming_with_a_cadence_change_is_not_recounted(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    body = _ok(client, o, tablet, {"is_active": True, "cadence": "quarterly"})
+
+    assert body["cadence"] == "quarterly"
+    # The paused months are skipped: the first quarterly date on or after today.
+    assert body["next_occurrence"].startswith("2027-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+    assert _last_payment(sw_db, tablet) == date(2032, 10, 5)
