@@ -390,8 +390,9 @@ async function retryRun(browser, name, failsAgain) {
 const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', false))
 const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', true))
 
-// An envelope row, found by structure so the scenario also runs where the row has no test id.
-const ENVELOPE_ROW = '[data-onboarding="budget-envelopes"] .space-y-5 > .space-y-3'
+// An envelope row: the stable test id, or the structural match so the scenario also runs where
+// the row has no test id (the pre-STU-335 parent).
+const ENVELOPE_ROW = '[data-testid="envelope-row"], [data-onboarding="budget-envelopes"] .space-y-5 > .space-y-3'
 
 // (h) The snapshot is held while allocations land: no envelope row, no numeric badge. Once
 // it lands, FxNotice and the card charges appear with the envelopes in one render, so the

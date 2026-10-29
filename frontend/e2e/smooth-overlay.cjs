@@ -405,7 +405,7 @@ const interventions = (messages) => {
 async function scenarioTap(browser) {
   console.log('\n=== (tap) touch taps during a block are swallowed without a console warning')
   const card = await makeCard(owner, 'Card Tap')
-  let { ctx, page } = await openPage(browser, { hasTouch: true })
+  let { ctx, page, requests } = await openPage(browser, { hasTouch: true })
   const post = { gate: null }
   try {
     await h.uiLogin(page, stack, owner)
@@ -427,8 +427,7 @@ async function scenarioTap(browser) {
     await ctx.close()
   }
 
-  ;({ ctx, page } = await openPage(browser, { hasTouch: true }))
-  const requests = h.logRequests(page)
+  ;({ ctx, page, requests } = await openPage(browser, { hasTouch: true }))
   let gate = null
   try {
     await h.uiLogin(page, stack, owner)
