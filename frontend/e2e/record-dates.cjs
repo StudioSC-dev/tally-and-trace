@@ -21,9 +21,13 @@
 //   (e) card Pay: min/max on the date; the dialog's error line; no payment request
 //   (f) loan payment: min/max on the date; the panel's error line; no loan-payment request
 //
+// The screen loader (STU-335) blocks input while any request is in flight, so every form
+// or dialog waits for it (`waitQuiet`) after it opens and before anything is filled.
+//
 // Usage: node frontend/e2e/record-dates.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { showRow } = require('./_due_pages.cjs')
+const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -167,6 +171,7 @@ async function openAddForm(page) {
   await page.getByRole('button', { name: 'Add Transaction' }).first().click()
   const modal = formModal(page, 'Create Transaction')
   await modal.waitFor()
+  await waitQuiet(page)
   return modal
 }
 async function fillAdd(modal, description) {
@@ -245,10 +250,14 @@ async function edit(browser) {
   const { ctx, page, sent, mark } = await newPage(browser)
   await uiLogin(page, owner)
   await page.goto(`${stack.webUrl}/transactions`)
+  await rows(page, 'Edit me').first().waitFor()
+  await waitQuiet(page)
   await rows(page, 'Edit me').first().click()
+  await waitQuiet(page)
   await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
   const modal = formModal(page, 'Edit Transaction')
   await modal.waitFor()
+  await waitQuiet(page)
   const input = dateInput(modal)
   check('(c) the edit form\'s date input carries min and max', await bounds(input), ['2000-01-01', MAX])
   await input.fill(TOO_EARLY)
@@ -287,6 +296,7 @@ async function markPaid(browser) {
   await (await showRow(page, row)).first().locator('[data-testid="due-mark-paid"]').click()
   const dialog = page.locator('[data-testid="mark-paid-dialog"]')
   await dialog.locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  await waitQuiet(page)
   const input = dialog.locator('[data-testid="mark-paid-date"]')
   check('(d) the date input carries min and max', await bounds(input), ['2000-01-01', MAX])
   await disableNative(input)
@@ -311,6 +321,7 @@ async function cardPay(browser) {
   const dialog = page.locator('[data-testid="card-pay-dialog"]')
   const amount = dialog.locator('[data-testid="card-pay-amount"]')
   await amount.waitFor()
+  await waitQuiet(page)
   if (!(Number(await amount.inputValue()) > 0)) await amount.fill('100')
   const input = dialog.locator('[data-testid="card-pay-date"]')
   check('(e) the date input carries min and max', await bounds(input), ['2000-01-01', MAX])
@@ -337,6 +348,7 @@ async function loanPayment(browser) {
   const form = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Record payment', exact: true }) })
   const input = form.locator('input[type="date"]')
   await input.waitFor()
+  await waitQuiet(page)
   check('(f) the date input has its test id', await form.locator('[data-testid="loan-payment-date"]').count(), 1)
   check('(f) the date input carries min and max', await bounds(input), ['2000-01-01', MAX])
   await disableNative(input)
