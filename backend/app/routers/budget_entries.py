@@ -50,7 +50,8 @@ from app.schemas.budget_entry import (
 from app.schemas.transaction import TransactionOut
 from app.services import posting
 from app.services.forecast import _clamp_day, _naive, capped_distinct_days, iter_occurrences
-from app.services.recurring_kinds import default_billing_kind, entry_kind, is_capped
+from app.services.recurring_kinds import (
+    auto_post_block, default_billing_kind, entry_kind, is_capped)
 from app.services.recurrence import (
     DAY_FIELDS, MONTH_FAMILY, DayRuleError, canon, resolve_day_fields,
 )
@@ -494,6 +495,12 @@ def create_budget_entry(
     if "billing_kind" not in entry_in.model_fields_set:
         entry.billing_kind = default_billing_kind(
             db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
+    # A new installment dated from today starts reviewed and auto-posting; a
+    # backdated one starts with both off and waits for its review (Plan B, Q2).
+    if (auto_post_block(entry, db.get(Account, entry.account_id) if entry.account_id else None)
+            is None and _naive(entry.next_occurrence).date() >= manila_today()):
+        entry.installment_reviewed_at = utc_now()
+        entry.auto_post_enabled = True
 
     db.add(entry)
     db.flush()
@@ -678,6 +685,8 @@ def update_budget_entry(
     if entry.is_active:
         _keep_final_month(entry, prospective_data)
 
+    stored_next = _naive(entry.next_occurrence)
+    stored_account_id = entry.account_id
     for field, value in prospective_data.items():
         setattr(entry, field, value)
     if skip_paused:
@@ -692,6 +701,18 @@ def update_budget_entry(
     if entry.billing_kind is None and "billing_kind" not in prospective_data:
         entry.billing_kind = default_billing_kind(
             db, entry, db.get(Account, entry.account_id) if entry.account_id else None)
+
+    # An edit never turns review or auto-post on. On a reviewed entry it clears
+    # both when the card changes, the next date moves earlier, or the edited
+    # entry cannot auto-post for any reason but being paused (Plan B).
+    if entry.installment_reviewed_at is not None:
+        block = auto_post_block(
+            entry, db.get(Account, entry.account_id) if entry.account_id else None)
+        if (entry.account_id != stored_account_id
+                or _naive(entry.next_occurrence) < stored_next
+                or block not in (None, "inactive")):
+            entry.installment_reviewed_at = None
+            entry.auto_post_enabled = False
 
     # Set explicitly so every successful edit moves the version the guard
     # reads, a tag-only edit (no column change) included.

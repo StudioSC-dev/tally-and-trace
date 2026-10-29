@@ -131,6 +131,9 @@ class BudgetEntryFields(BudgetEntryBase):
     occurrences_paid: Optional[int] = None
     # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
     kind: Optional[EntryKind] = None
+    # Read-only (STU-343 Plan B): set by create and the review, never by an edit.
+    installment_reviewed: bool = False
+    auto_post_enabled: bool = False
     tags: TagSummaries = tags_response_field()
 
     class Config:
@@ -178,6 +181,8 @@ class SharedFullRecurringEntry(BaseModel):
     occurrences_paid: Optional[int] = None
     billing_kind: Optional[BillingKind] = None
     kind: Optional[EntryKind] = None
+    installment_reviewed: bool = False
+    auto_post_enabled: bool = False
     category_name: Optional[str] = None
     tags: TagSummaries = tags_response_field()
     created_at: datetime

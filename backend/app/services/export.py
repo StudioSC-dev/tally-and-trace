@@ -88,7 +88,8 @@ BUDGET_ENTRY_FIELDS = (
     "anchor_day", "day_rule", "end_mode", "end_date", "max_occurrences",
     "occurrences_paid_offset", "account_id", "overflow_account_id",
     "transfer_to_account_id", "category_id", "allocation_id", "is_autopay", "is_active",
-    "billing_kind", "created_at", "updated_at",
+    "billing_kind", "auto_post_enabled", "installment_reviewed_at", "created_at",
+    "updated_at",
 )
 
 CATEGORY_FIELDS = (
