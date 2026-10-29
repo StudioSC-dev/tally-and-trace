@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { FullTransaction, LimitedTransaction, SharedFullTransaction } from '../types/api'
 import type { RecordPermissions } from '../types/access'
-import { accountLeg, parsePage, parsePositiveId, transactionCategoryName } from './accountActivity'
+import { accountLeg, rowAmount, parsePage, parsePositiveId, transactionCategoryName } from './accountActivity'
 
 const none: RecordPermissions = { can_edit: false, can_delete: false, can_post: false, can_revert: false, can_tag: false }
 
@@ -313,5 +313,46 @@ describe('parsePage', () => {
 
   it.each([1e308, 2 ** 53, 1.5, 0, -1, '3', 1_000_001, NaN, null, undefined])('drops %s', (raw) => {
     expect(parsePage(raw)).toBeUndefined()
+  })
+})
+
+describe('rowAmount', () => {
+  const pending: FullTransaction = { ...full, is_posted: false }
+
+  it('lists an unposted PHP-card debit with a USD face as the face in USD', () => {
+    const row: FullTransaction = { ...pending, amount: 131, currency: 'PHP', projected_amount: 131, projected_currency: 'USD' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 131, currency: 'USD' })
+  })
+
+  it('keeps the account currency when the face is the account currency, whatever projected_amount says', () => {
+    const row: FullTransaction = { ...pending, amount: 100, currency: 'PHP', projected_amount: 80, projected_currency: 'PHP' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 100, currency: 'PHP' })
+  })
+
+  it('leaves a posted row with a foreign currency code unchanged', () => {
+    const row: FullTransaction = { ...full, amount: 4700, currency: 'USD' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 4700, currency: 'USD' })
+  })
+
+  it('leaves an unposted Limited row unchanged', () => {
+    const row: LimitedTransaction = { ...limited, is_posted: false, amount: 80, currency: 'USD' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 80, currency: 'USD' })
+  })
+
+  it('leaves an unposted transfer unchanged', () => {
+    const row = transfer({ is_posted: false, amount: 250, currency: 'PHP' })
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 250, currency: 'PHP' })
+  })
+
+  it('lists an unposted credit with a foreign face as the face in its own currency', () => {
+    const row: FullTransaction = { ...pending, transaction_type: 'credit', amount: 90, currency: 'PHP', projected_amount: 90, projected_currency: 'USD' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 90, currency: 'USD' })
+  })
+
+  it('uses the face, not the retained actual, when the account currency is passed (never the row currency)', () => {
+    const row: FullTransaction = { ...pending, amount: 4700, currency: 'USD', projected_amount: 80, projected_currency: 'USD' }
+    expect(rowAmount(row, 'PHP')).toEqual({ amount: 80, currency: 'USD' })
+    // Passing the row's own currency would treat the face as the account's and return the actual.
+    expect(rowAmount(row, row.currency)).toEqual({ amount: 4700, currency: 'USD' })
   })
 })
