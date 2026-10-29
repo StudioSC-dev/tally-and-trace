@@ -6,8 +6,8 @@ payment: the remaining count is recounted to it, and with the cadence
 unchanged the months moved over count as paid outside the app. A changed
 count is respected as sent. A date after the last payment, more than 360
 payments, or more than 360 paid outside the app is a 422 and nothing is
-written. A PUT that resumes a paused entry skips the rule. Skips without a
-database.
+written. A PUT on a paused entry, resuming it or leaving it paused, skips
+the rule. Skips without a database.
 """
 import sys
 from datetime import date, datetime
@@ -396,3 +396,47 @@ def test_resuming_with_a_cadence_change_is_not_recounted(world, sw_db):
     assert body["max_occurrences"] == 24
     assert body["occurrences_paid_offset"] == 0
     assert _last_payment(sw_db, tablet) == date(2032, 10, 5)
+
+
+# --- A still-paused edit skips the rule too (owner ruling 2026-10-29) -------------------------
+# The rule applies only to an entry stored as active. An edit that leaves a
+# paused entry paused keeps the pause behaviour, so moving the date and then
+# resuming in two saves ends where one resuming save does.
+
+def test_a_still_paused_date_edit_keeps_the_count(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    body = _ok(client, o, tablet, {"next_occurrence": _day("2027-01-05")})
+
+    assert body["is_active"] is False
+    assert body["next_occurrence"].startswith("2027-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+
+
+def test_a_still_paused_date_after_the_old_final_is_not_refused(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    body = _ok(client, o, tablet, {"next_occurrence": _day("2029-01-05")})
+
+    assert body["is_active"] is False
+    assert body["next_occurrence"].startswith("2029-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+
+
+def test_moving_the_date_while_paused_then_resuming_matches_one_resume(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"], is_active=False)
+
+    _ok(client, o, tablet, {"next_occurrence": _day("2027-01-05")})
+    body = _ok(client, o, tablet, {"is_active": True, "next_occurrence": _day("2027-01-05")})
+
+    # As test_resuming_with_a_new_date_keeps_the_count, in one save.
+    assert body["is_active"] is True
+    assert body["next_occurrence"].startswith("2027-01-05")
+    assert body["max_occurrences"] == 24
+    assert body["occurrences_paid_offset"] == 0
+    assert _last_payment(sw_db, tablet) == date(2028, 12, 5)

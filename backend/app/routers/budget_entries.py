@@ -335,8 +335,9 @@ def _keep_final_month(entry: BudgetEntry, prospective_data: dict) -> None:
     as the day rules and the stored row read them), so one instant sent with
     any offset gives the same result. ``prospective_data`` is the request
     merged with its resolved day fields; the derived fields are written into
-    it. Not called on a PUT that resumes a paused entry, which keeps the
-    pause behaviour (owner ruling 2026-10-28)."""
+    it. Called only on an entry stored as active: a PUT on a paused entry,
+    resuming it or leaving it paused, keeps the pause behaviour (owner rulings
+    2026-10-28 and 2026-10-29)."""
     merged = SimpleNamespace(**{
         f: prospective_data.get(f, getattr(entry, f))
         for f in (*SCHEDULE_FIELDS, "end_mode", "end_date", "max_occurrences",
@@ -669,10 +670,12 @@ def update_budget_entry(
         prospective_data.get("next_occurrence") or entry.next_occurrence,
         {f: prospective_data[f] for f in DAY_FIELDS if f in prospective_data},
         stored=entry))
-    # The final-month rule, except on a resume: resuming keeps the pause
-    # behaviour (paused months are not counted, the count and the offset stay,
-    # the last payment moves later; owner ruling 2026-10-28).
-    if not resuming:
+    # The final-month rule, only on an entry stored as active: any edit to a
+    # paused entry, resuming it or leaving it paused, keeps the pause behaviour
+    # (paused months are not counted, the count and the offset stay, the last
+    # payment moves later; owner rulings 2026-10-28 and 2026-10-29). Read from
+    # the stored row, before the request is set on it.
+    if entry.is_active:
         _keep_final_month(entry, prospective_data)
 
     for field, value in prospective_data.items():
