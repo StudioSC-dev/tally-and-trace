@@ -23,7 +23,8 @@ from app.tests.test_statement_minimum_integration import REF, _account, _card, _
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
 ITEM_KEYS = {"account_id", "name", "currency", "close_date", "due_date", "clear_through",
-             "statement_count", "oldest_due", "overdue", "incomplete"}
+             "statement_count", "oldest_due", "overdue", "incomplete", "unposted_installments",
+             "unposted_postable"}
 
 # The public shape of a Limited row (``forecast.limited_event``).
 LIMITED_KEYS = {"view", "public_id", "date", "original_date", "overdue", "display_name",
@@ -114,13 +115,13 @@ def test_lists_the_latest_closed_statement(world):
         "account_id": card, "name": "Card M", "currency": "PHP", "close_date": "2027-03-03",
         "due_date": "2027-03-24", "clear_through": latest["clear_through"],
         "statement_count": 1, "oldest_due": "2027-03-24", "overdue": False,
-        "incomplete": False}
+        "incomplete": False, "unposted_installments": 0, "unposted_postable": 0}
     assert latest["clear_through"] == 55_000.0
     assert due[m2] == {
         "account_id": m2, "name": "Card M2", "currency": "PHP", "close_date": "2027-03-03",
         "due_date": "2027-03-24", "clear_through": m2_latest["clear_through"],
         "statement_count": 2, "oldest_due": "2027-01-24", "overdue": True,
-        "incomplete": False}
+        "incomplete": False, "unposted_installments": 0, "unposted_postable": 0}
     assert m2_latest["clear_through"] == 21_000.0
 
 

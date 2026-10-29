@@ -67,6 +67,7 @@ card charges' selection.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
@@ -520,43 +521,134 @@ def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates]) -
     return [s for s in history if s["close"].date() < today]
 
 
+@dataclass(frozen=True)
+class UnpostedMonth:
+    """One unposted installment month on a closed cycle (``unposted_months``)."""
+    entry_id: int
+    day: date
+    close: date
+    due: date
+    postable: bool
+
+
+def unposted_months(db: Session, card: Account, caller) -> List[UnpostedMonth]:
+    """The months the card's statements leave out because no recorder has run.
+
+    Over the card's active, reviewed card installments (any creator, as
+    ``statement_history`` takes every row on the card): each month of
+    ``post_plan``'s ``due`` through Manila's today (no posted row stands for
+    it) that has no pending linked row (that row is already on the card) and
+    is not held (its possible duplicate is), on a cycle that closed before
+    Manila's today (a month in the open cycle is on no closed statement).
+    One ``held_occurrences`` call (the canonical assignment). ``postable`` is
+    whether the month is in ``post_plan(..., caller)``'s ``postable``: what
+    the caller's Post now would record. Computed over cycles, not recorded
+    statements, so it is defined on a card with no recorded statement.
+    Ordered by close, day, then entry id. Counts only, never amounts; the
+    callers are the managers' surfaces (``statements_due``, the credit detail).
+    """
+    from app.core.access import RecordAccess
+    from app.services.posting import post_plan
+
+    today = manila_today()
+    entries = [e for e in db.query(BudgetEntry).filter(
+        BudgetEntry.account_id == card.id,
+        BudgetEntry.is_active.is_(True),
+        BudgetEntry.installment_reviewed_at.isnot(None),
+    ).order_by(BudgetEntry.id).all() if is_card_installment(e, card)]
+    if not entries:
+        return []
+    held = held_occurrences(db, entries, today)
+    pending = {(entry_id, fc._naive(when).date())
+               for entry_id, when, _, is_posted in fc._linked_rows(
+                   db, [e.id for e in entries], occurrence_match=True)
+               if not is_posted}
+    access = RecordAccess(db, caller)
+    out: List[UnpostedMonth] = []
+    for entry in entries:
+        plan = post_plan(db, entry, caller, today, held, access)
+        postable = {occ.date() for occ in plan.postable}
+        for occ in plan.due:
+            day = occ.date()
+            if (entry.id, day) in pending or held[(entry.id, day)]:
+                continue
+            cycle = next(iter_cycles_from(card, day, datetime.min, through=day), None)
+            if cycle is None or cycle["close"].date() >= today:
+                continue
+            out.append(UnpostedMonth(entry_id=entry.id, day=day, close=cycle["close"].date(),
+                                     due=cycle["due"].date(), postable=day in postable))
+    out.sort(key=lambda m: (m.close, m.day, m.entry_id))
+    return out
+
+
+def unposted_summary(months: List[UnpostedMonth]) -> Optional[dict]:
+    """The credit detail's ``unposted``: ``{count, postable, oldest_close,
+    oldest_due}`` over ``months``, or None when there are none."""
+    if not months:
+        return None
+    oldest = min(months, key=lambda m: (m.close, m.due))
+    return {"count": len(months), "postable": sum(1 for m in months if m.postable),
+            "oldest_close": oldest.close.isoformat(), "oldest_due": oldest.due.isoformat()}
+
+
 def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
     """``CardStatementDue[]``: each managed credit card (owner or admin, active,
-    with or without a limit: a superset of the credit pass) whose latest closed
-    statement L still has something to clear, by name.
+    with or without a limit: a superset of the credit pass) with something to
+    clear on its closed statements, by name.
 
-    A card is listed when L's ``clear_through`` is above 0 and its oldest owed
-    closed statement is due before E (the 30-day window from Manila's
-    midnight, its last day included) or is overdue. ``clear_through`` is
-    exactly what the Pay dialog suggests as Full, in the card's currency, from
-    recorded rows only (``closed_statements``). ``statement_count`` is the
-    number of closed statements still owed; ``overdue`` whether any of them
-    is due before Manila's today; ``incomplete`` whether a foreign line with
-    no rate may have left ``clear_through`` low.
+    The owed statements are the closed statements (``closed_statements``,
+    recorded rows only) that still owe, counted only while the latest one's
+    ``clear_through`` is above 0. The unposted months are ``unposted_months``
+    for the caller. A card is listed when either is non-empty and the oldest
+    due date among them is before E (the 30-day window from Manila's
+    midnight, its last day included), which an overdue one always is.
+
+    ``clear_through`` is exactly what the Pay dialog suggests as Full, in the
+    card's currency, from recorded rows only (0 with no owed statement).
+    ``close_date`` and ``due_date`` are the latest closed statement's, or the
+    latest unposted month's cycle when nothing is recorded.
+    ``statement_count`` is the number of distinct closes among the owed
+    statements and the unposted months; ``overdue`` whether an owed statement
+    has the ``overdue`` status or an unposted month's due date is before
+    Manila's today; ``incomplete`` whether a foreign line with no rate may
+    have left ``clear_through`` low. ``unposted_installments`` and
+    ``unposted_postable`` count the unposted months and those the caller's
+    Post now would record. With no unposted month the row is exactly the
+    recorded one.
     """
-    end = manila_today() + timedelta(days=WINDOW_DAYS + 1)
+    today = manila_today()
+    end = today + timedelta(days=WINDOW_DAYS + 1)
     cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
         Account.account_type == AccountType.CREDIT).all()
     items = []
     for card in sorted(cards, key=lambda a: (a.name, a.id)):
         closed = closed_statements(db, user, card, fx)
-        if not closed or closed[-1]["clear_through"] <= 0:
+        months = unposted_months(db, card, user)
+        latest_clear = closed[-1]["clear_through"] if closed else _ZERO
+        owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
+        if not owed and not months:
             continue
-        latest = closed[-1]
-        owed = [s for s in closed if s["owed"] > 0]
-        oldest_due = owed[0]["due"].date()
+        oldest_due = min([s["due"].date() for s in owed] + [m.due for m in months])
         if oldest_due >= end:
             continue
+        if closed:
+            close, due = closed[-1]["close"].date(), closed[-1]["due"].date()
+        else:
+            last = max(months, key=lambda m: (m.close, m.due))
+            close, due = last.close, last.due
         items.append({
             "account_id": card.id,
             "name": card.name,
             "currency": fc._code(card.currency),
-            "close_date": latest["close"].date().isoformat(),
-            "due_date": latest["due"].date().isoformat(),
-            "clear_through": _amount(latest["clear_through"]),
-            "statement_count": len(owed),
+            "close_date": close.isoformat(),
+            "due_date": due.isoformat(),
+            "clear_through": _amount(max(latest_clear, _ZERO)),
+            "statement_count": len({s["close"].date() for s in owed} | {m.close for m in months}),
             "oldest_due": oldest_due.isoformat(),
-            "overdue": any(s["status"] == "overdue" for s in owed),
-            "incomplete": latest["incomplete"],
+            "overdue": (any(s["status"] == "overdue" for s in owed)
+                        or any(m.due < today for m in months)),
+            "incomplete": closed[-1]["incomplete"] if closed else False,
+            "unposted_installments": len(months),
+            "unposted_postable": sum(1 for m in months if m.postable),
         })
     return items

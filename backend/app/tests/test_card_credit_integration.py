@@ -32,7 +32,8 @@ CREDIT_KEYS = {"account_id", "currency", "limit", "as_of", "available_now",
 CHECK_KEYS = {"source", "source_id", "date", "occurrence_date", "kind", "amount",
               "available_after", "available_after_without_planned", "status",
               "relies_on_planned"}
-DETAIL_KEYS = {"account_id", "name", "currency", "credit", "rule", "statements", "open_cycle"}
+DETAIL_KEYS = {"account_id", "name", "currency", "credit", "rule", "statements", "open_cycle",
+               "unposted"}
 
 
 def _rates(hours_old=1):

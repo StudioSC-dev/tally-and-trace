@@ -31,7 +31,7 @@ BDO = {"version": 1, "preset": "bdo", "base_percent": "3",
        "rounding": "down"}
 
 STATEMENT_KEYS = {"close_date", "due_date", "status", "owed", "clear_through", "outstanding",
-                  "incomplete", "minimum_due"}
+                  "incomplete", "minimum_due", "unposted_installments", "unposted_postable"}
 MINIMUM_KEYS = {"amount", "remaining", "source", "reason", "complete", "assumptions", "inputs"}
 
 
