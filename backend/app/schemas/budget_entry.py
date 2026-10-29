@@ -313,3 +313,93 @@ class PostDueInstallmentsResult(BaseModel):
     posted: int
     skipped: dict[str, int]
     entries: List[PostDueEntry]
+
+
+AutoPostBlock = Literal["foreign_currency", "no_statement_cycle", "inactive", "not_installment"]
+
+
+class ReviewMissedMonth(BaseModel):
+    """A due month no posted row stands for; ``pending`` when a pending row is
+    linked to it (the review posts that row, keeping its date)."""
+    occurrence_date: date
+    linked: Optional[Literal["pending"]] = None
+
+
+class ReviewCandidateRow(BaseModel):
+    """A possible duplicate: the creator's own unlinked charge on the card."""
+    id: int
+    date: date
+    amount: float
+    is_posted: bool
+    description: Optional[str] = None
+
+
+class ReviewCandidates(BaseModel):
+    occurrence_date: date
+    transactions: List[ReviewCandidateRow]
+
+
+class ReviewEnvelope(BaseModel):
+    allocation_name: str
+
+
+class AutoPostReview(BaseModel):
+    """GET /budget-entries/{id}/auto-post-review (STU-343 Plan B).
+
+    ``envelope`` is the entry's allocation, for its creator only.
+    ``entry_version`` (the stored ``updated_at``) and ``review_token`` are sent
+    back unchanged with the POST. ``remaining_after`` is null for an
+    open-ended entry.
+    """
+    entry_id: int
+    name: str
+    account_name: Optional[str] = None
+    currency: CurrencyType
+    amount: float
+    reviewed: bool
+    auto_post_enabled: bool
+    block: Optional[AutoPostBlock] = None
+    missed: List[ReviewMissedMonth]
+    candidates: List[ReviewCandidates]
+    remaining_after: Optional[int] = None
+    envelope: Optional[ReviewEnvelope] = None
+    past_cycles: bool
+    entry_version: Optional[datetime] = None
+    review_token: str
+
+
+class ReviewLink(BaseModel):
+    """Link one candidate to the missed month it stands for."""
+    transaction_id: int
+    occurrence_date: date
+
+
+class AutoPostReviewRequest(BaseModel):
+    """POST /budget-entries/{id}/auto-post-review. ``entry_version`` (null for
+    an entry never updated) and ``review_token`` are the GET's, unchanged;
+    both are required."""
+    entry_version: Optional[datetime]
+    review_token: str
+    links: List[ReviewLink] = Field(default_factory=list)
+
+
+class ReviewOutcome(BaseModel):
+    occurrence_date: date
+    outcome: Literal["created", "posted_pending", "already_posted"]
+
+
+class AutoPostReviewResult(BaseModel):
+    """The review's result; ``replayed`` when the same review had already been
+    applied (nothing written, ``outcomes`` empty)."""
+    replayed: bool
+    reviewed: bool
+    auto_post_enabled: bool
+    next_occurrence: datetime
+    max_occurrences: Optional[int] = None
+    outcomes: List[ReviewOutcome]
+
+
+class AutoPostToggle(BaseModel):
+    """POST /budget-entries/{id}/auto-post: only ``false`` (turn off) is
+    accepted; turning on is the review's."""
+    enabled: bool

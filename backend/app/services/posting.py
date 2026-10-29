@@ -756,3 +756,181 @@ def claim_page_open(db: Session, user: User) -> bool:
     claimed = _claim_page_open_sql(db, user, utc_now())
     db.commit()
     return claimed
+
+
+# --- Card installment review (STU-343 Plan B) -------------------------------------------------
+
+REVIEW_CHANGED = "This installment changed since you opened the review; reopen it"
+
+
+@dataclass
+class ReviewState:
+    """The review of one card installment for one caller (``review_state``).
+
+    ``missed`` is every due month no posted row stands for, through ``through``;
+    ``linked`` is each missed day's linked rows (a pending one, posted by the
+    review); ``candidates`` is each missed day with no linked row and its
+    possible duplicates the caller reads. ``body`` is the GET response and
+    ``token`` binds it.
+    """
+    through: date
+    missed: List[datetime]
+    linked: dict
+    candidates: dict
+    body: dict
+    token: str
+
+
+def _aware_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Aware UTC, microseconds kept; a naive value is read as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    aware = _aware_utc(value)
+    return aware.isoformat() if aware is not None else None
+
+
+def _money(value) -> str:
+    from decimal import Decimal
+
+    return str(Decimal(str(value)))
+
+
+def _row_version(txn: Transaction) -> Optional[str]:
+    """A transaction's version: ``updated_at``, else ``created_at``."""
+    return _iso(txn.updated_at or txn.created_at)
+
+
+def review_token(payload: dict) -> str:
+    """``sha256`` over the canonical JSON (sorted keys) of ``payload``."""
+    import hashlib
+    import json
+
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
+    """What the installment review shows ``caller`` for ``entry`` on Manila's ``today``.
+
+    The caller has already passed ``can_edit`` on the entry. The GET body and
+    the POST's binding both come from here.
+
+    - ``missed``: the due months no posted row stands for
+      (``unrecorded_occurrences`` through ``today``), each with ``linked``
+      "pending" when a pending row is linked to it.
+    - ``candidates``: for each missed month with no linked row, its possible
+      duplicates (``installment_duplicates.duplicate_candidates``: the
+      creator's own unlinked debits of the amount on the card within three
+      days), kept only when ``caller`` reads the row (each is checked). No
+      row's entry, category or allocation is returned.
+    - ``remaining_after``: ``max_occurrences`` less the whole walk through
+      ``today`` (``schedule_walk``, posted-linked months included, since the
+      review advances past them); None for an open-ended entry.
+    - ``envelope``: the entry's allocation name for its creator only
+      (allocations are creator-private), else None.
+    - ``past_cycles``: some missed month's statement cycle closed before ``today``.
+    - ``review_token``: ``review_token`` over ``today``, the caller, the
+      entry's stored state and version, each missed month with its linked
+      rows and each candidate with its version, so a change to any of them,
+      another caller or another Manila day gives another token.
+    """
+    from app.models.allocation import Allocation
+    from app.services.forecast import unrecorded_occurrences
+    from app.services.installment_duplicates import duplicate_candidates
+    from app.services.recurring_kinds import auto_post_block
+    from app.services.statements import iter_cycles_from
+
+    card = db.get(Account, entry.account_id) if entry.account_id else None
+    block = auto_post_block(entry, card)
+    missed = unrecorded_occurrences(db, [entry], today)[entry.id]
+    missed_days = {occ.date() for occ in missed}
+    linked: dict = defaultdict(list)
+    for _, when, txn_id, _ in _linked_rows(db, [entry.id], occurrence_match=True):
+        day = _naive(when).date()
+        if day in missed_days:
+            linked[day].append(db.get(Transaction, txn_id))
+    linked = dict(linked)
+    access = RecordAccess(db, caller)
+    candidates = {}
+    for day, rows in duplicate_candidates(
+            db, entry, [occ for occ in missed if occ.date() not in linked]).items():
+        readable = [txn for txn in rows if access.readable(txn)]
+        if readable:
+            candidates[day] = readable
+
+    walk = schedule_walk(entry, today)
+    remaining_after = (entry.max_occurrences - len(walk)
+                       if is_capped(entry) and entry.max_occurrences is not None else None)
+    envelope = None
+    if entry.user_id == caller.id and entry.allocation_id is not None:
+        allocation = db.get(Allocation, entry.allocation_id)
+        if allocation is not None:
+            envelope = {"allocation_name": allocation.name}
+    past_cycles = False
+    if card is not None:
+        for occ in missed:
+            cycle = next(iter_cycles_from(card, occ.date(), datetime.min, through=occ.date()),
+                         None)
+            if cycle is not None and cycle["close"].date() < today:
+                past_cycles = True
+                break
+
+    reviewed = entry.installment_reviewed_at is not None
+    binding = {
+        "through": today.isoformat(),
+        "caller_id": caller.id,
+        "entry_id": entry.id,
+        "entry_version": _iso(entry.updated_at),
+        "next_occurrence": _naive(entry.next_occurrence).isoformat(),
+        "max_occurrences": entry.max_occurrences,
+        "is_active": bool(entry.is_active),
+        "account_id": entry.account_id,
+        "amount": _money(entry.amount),
+        "currency": getattr(entry.currency, "value", entry.currency),
+        "reviewed": reviewed,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "missed": [[occ.date().isoformat(),
+                    [[txn.id, bool(txn.is_posted), _row_version(txn)]
+                     for txn in linked.get(occ.date(), [])]]
+                   for occ in missed],
+        "candidates": [[day.isoformat(), txn.id, _row_version(txn), _money(txn.amount),
+                        _naive(txn.transaction_date).isoformat(), bool(txn.is_posted),
+                        txn.budget_entry_id]
+                       for day in sorted(candidates) for txn in candidates[day]],
+    }
+    token = review_token(binding)
+    body = {
+        "entry_id": entry.id,
+        "name": entry.name,
+        "account_name": card.name if card is not None else None,
+        "currency": entry.currency,
+        "amount": float(entry.amount),
+        "reviewed": reviewed,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "block": block,
+        "missed": [{"occurrence_date": occ.date(),
+                    "linked": "pending" if any(not txn.is_posted
+                                               for txn in linked.get(occ.date(), []))
+                    else None}
+                   for occ in missed],
+        "candidates": [{"occurrence_date": day,
+                        "transactions": [{"id": txn.id, "date": _naive(txn.transaction_date).date(),
+                                          "amount": float(txn.amount),
+                                          "is_posted": bool(txn.is_posted),
+                                          "description": txn.description}
+                                         for txn in candidates[day]]}
+                       for day in sorted(candidates)],
+        "remaining_after": remaining_after,
+        "envelope": envelope,
+        "past_cycles": past_cycles,
+        "entry_version": entry.updated_at,
+        "review_token": token,
+    }
+    return ReviewState(through=today, missed=missed, linked=linked, candidates=candidates,
+                       body=body, token=token)

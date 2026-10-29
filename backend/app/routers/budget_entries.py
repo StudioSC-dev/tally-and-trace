@@ -1,3 +1,4 @@
+import hmac
 from calendar import monthrange
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -42,6 +43,10 @@ from app.schemas.budget_entry import (
     BudgetEntryOut,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    AutoPostReview,
+    AutoPostReviewRequest,
+    AutoPostReviewResult,
+    AutoPostToggle,
     EntryOccurrences,
     MaterializeDueResult,
     PostDueInstallmentsRequest,
@@ -51,7 +56,9 @@ from app.schemas.budget_entry import (
 )
 from app.schemas.transaction import TransactionOut
 from app.services import posting
-from app.services.forecast import _clamp_day, _naive, capped_distinct_days, iter_occurrences
+from app.services.forecast import (
+    _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences,
+)
 from app.services.recurring_kinds import (
     auto_post_block, default_billing_kind, entry_kind, is_capped)
 from app.services.recurrence import (
@@ -775,9 +782,15 @@ def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> Budge
     queue here and the second sees the first's advance; a payment queued behind
     a delete of the entry finds it gone. The caller needs the write rule on the
     entry (404 otherwise), and the entry needs an account to post to.
+
+    The session is expired after the owner lock (nothing is pending: every
+    caller calls this first), so the entry, its accounts and their shares are
+    read again under the locks: a demotion committed while the caller waited
+    is seen, not the copies the first read loaded.
     """
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     locking.lock_owner_budgets(db, entry.user_id)
+    db.expire_all()
     entry = locking.lock_entry(db, entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Budget entry not found")
@@ -1012,3 +1025,187 @@ def materialize_due_budget_entry(
         "next_occurrence": entry.next_occurrence,
         "is_active": entry.is_active,
     }
+
+
+# --- Card installment review and turn off (STU-343 Plan B) ------------------------------------
+
+AUTO_POST_BLOCK_MESSAGES = {
+    "not_installment": "Only a card installment can auto-post",
+    "foreign_currency": "This installment is in another currency than its card, "
+                        "so it can't auto-post",
+    "no_statement_cycle": "This card has no statement cycle, so its installments can't auto-post",
+    "inactive": PAUSED_MESSAGE,
+}
+
+
+@router.get("/{entry_id}/auto-post-review", response_model=AutoPostReview)
+def get_auto_post_review(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """What turning on auto-post for a card installment would record
+    (services/posting.py ``review_state``): its missed months, possible
+    duplicates for each one with no linked row, the remaining count after, and
+    the binding the POST sends back. Anyone who can edit the entry (owner,
+    admin or editor on the card, its creator keeping an edit role too);
+    anyone else gets 404. ``envelope`` is shown to the creator only."""
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    return posting.review_state(db, entry, current_user, manila_today()).body
+
+
+def _review_result(entry: BudgetEntry, replayed: bool, outcomes: list) -> dict:
+    return {
+        "replayed": replayed,
+        "reviewed": entry.installment_reviewed_at is not None,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "next_occurrence": entry.next_occurrence,
+        "max_occurrences": entry.max_occurrences,
+        "outcomes": outcomes,
+    }
+
+
+def _links_stand(db: Session, entry: BudgetEntry, links) -> bool:
+    """Whether every requested link already points at this entry and month."""
+    for link in links:
+        txn = db.get(Transaction, link.transaction_id)
+        if (txn is None or txn.budget_entry_id != entry.id or txn.user_id != entry.user_id
+                or txn.occurrence_date is None
+                or _naive(txn.occurrence_date).date() != link.occurrence_date):
+            return False
+    return True
+
+
+def _refuse_invalid_links(state, links) -> None:
+    """422 unless each link names a candidate of a missed month with no linked
+    row, each row and each month at most once."""
+    missed = {occ.date() for occ in state.missed}
+    rows, months = set(), set()
+    for link in links:
+        day = link.occurrence_date
+        if day not in missed:
+            raise HTTPException(status_code=422, detail="That month isn't a missed month")
+        if day in state.linked:
+            raise HTTPException(status_code=422,
+                                detail="That month already has a linked transaction")
+        if link.transaction_id not in {txn.id for txn in state.candidates.get(day, [])}:
+            raise HTTPException(status_code=422,
+                                detail="That transaction isn't a possible duplicate of the month")
+        if link.transaction_id in rows:
+            raise HTTPException(status_code=422, detail="A transaction can stand for one month")
+        if day in months:
+            raise HTTPException(status_code=422, detail="A month can be linked once")
+        rows.add(link.transaction_id)
+        months.add(day)
+
+
+@router.post("/{entry_id}/auto-post-review", response_model=AutoPostReviewResult)
+def review_auto_post(
+    entry_id: int,
+    payload: AutoPostReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Review a card installment: link the chosen duplicates, turn auto-post
+    on and record every month due through Manila's today, in one commit.
+
+    In order:
+
+    1. The creator's owner lock, then the entry, refreshed
+       (``_lock_entry_to_post``); the caller needs ``can_edit`` on it (404).
+    2. A retry of a review already applied (reviewed and on, every link
+       already pointing at this entry and month, nothing left to walk) is a
+       200 ``replayed`` and writes nothing.
+    3. A paused or ended entry is a 409; one that can't auto-post a 400.
+    4. ``entry_version`` and ``review_token`` must match the review recomputed
+       under the locks (``posting.review_state``), else 409: a change to the
+       entry, a missed month, a candidate, the Manila day or the caller.
+    5. The link rows and the pending rows linked to a walked month are locked
+       in ascending id.
+    6. Each link must name a candidate of a missed month with no linked row,
+       each row and month once (422).
+    7. Reviewed and on. Each link row is linked to the entry and month
+       (``budget_entry_id``, ``occurrence_date``, ``is_recurring``,
+       ``recurrence_frequency``) and gets the entry's tags. Only the creator
+       may set ``budget_entry_id`` through ``PUT /transactions/{id}``; this is
+       a server-side link, under this review's authorization, of the
+       creator's own unlinked row on the entry's card, as Mark paid links a
+       row it creates for the creator. The session is flushed, then every
+       month of the walk is recorded as the caller (a linked posted row only
+       advances, a linked pending row is posted keeping its date, any other
+       month gets a new row on its day).
+    """
+    from app.core.tags import copy_explicit_tags
+
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    today = manila_today()
+    if (entry.installment_reviewed_at is not None and entry.auto_post_enabled
+            and _links_stand(db, entry, payload.links)
+            and not posting.schedule_walk(entry, today)):
+        return _review_result(entry, True, [])
+    _refuse_paused_or_ended(entry)
+    block = auto_post_block(entry, db.get(Account, entry.account_id))
+    if block is not None:
+        raise HTTPException(status_code=400, detail=AUTO_POST_BLOCK_MESSAGES[block])
+
+    state = posting.review_state(db, entry, current_user, today)
+    if (_as_utc(payload.entry_version) != _as_utc(entry.updated_at)
+            or not hmac.compare_digest(payload.review_token.encode("utf-8"),
+                                    state.token.encode("utf-8"))):
+        raise HTTPException(status_code=409, detail=posting.REVIEW_CHANGED)
+
+    walk_days = {occ.date() for occ in posting.schedule_walk(entry, today)}
+    pending = {txn_id for _, when, txn_id, is_posted in _linked_rows(
+        db, [entry.id], occurrence_match=True)
+        if not is_posted and _naive(when).date() in walk_days}
+    locked = {}
+    for txn_id in sorted(pending | {link.transaction_id for link in payload.links}):
+        locked[txn_id] = locking.lock_transaction(db, txn_id)
+    _refuse_invalid_links(state, payload.links)
+
+    now = utc_now()
+    entry.installment_reviewed_at = now
+    entry.auto_post_enabled = True
+    entry.updated_at = now
+    occurrences = {occ.date(): occ for occ in state.missed}
+    for link in payload.links:
+        txn = locked[link.transaction_id]
+        txn.budget_entry_id = entry.id
+        txn.occurrence_date = occurrences[link.occurrence_date]
+        txn.is_recurring = True
+        txn.recurrence_frequency = entry.cadence
+        txn.updated_at = utc_now()
+        copy_explicit_tags(db, entry.id, txn.id)
+    # The links must be in the database before recording: ``record_occurrence``
+    # finds a month's linked rows by query, and the session does not autoflush.
+    db.flush()
+    run = posting._post_entry_due(db, entry, current_user, today, hold_duplicates=False)
+    db.commit()
+    db.refresh(entry)
+    return _review_result(entry, False, [
+        {"occurrence_date": item.occurrence.date(), "outcome": item.outcome.value}
+        for item in run.recorded])
+
+
+@router.post("/{entry_id}/auto-post", response_model=BudgetEntryOut)
+def set_auto_post(
+    entry_id: int,
+    payload: AutoPostToggle,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Turn a card installment's auto-post off (``enabled`` false). The entry
+    stays reviewed, so its missed months still bill on their statements;
+    Mark paid still records them. Turning it on is the review's: ``enabled``
+    true is a 400. Anyone who can edit the entry, under the owner and entry
+    locks (``_lock_entry_to_post``); anyone else gets 404."""
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    if payload.enabled:
+        raise HTTPException(status_code=400, detail="Review the installment to turn auto-post on")
+    entry.auto_post_enabled = False
+    entry.updated_at = utc_now()
+    db.commit()
+    db.refresh(entry)
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
