@@ -11,6 +11,7 @@
 // Usage: node frontend/e2e/smooth-overlay.cjs [scenario]
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
+const dialogs = require('./_dialogs.cjs')
 const { allDueRows, showRow } = require('./_due_pages.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -745,6 +746,7 @@ async function scenarioQ(browser) {
     }
   }
   await scenarioQ1(browser)
+  await scenarioQ1c(browser)
   await scenarioQ4(browser)
   await scenarioQ5(browser)
 }
@@ -1198,16 +1200,18 @@ async function openAccountActions(page, name) {
   await page.locator(tid('share-account')).waitFor()
 }
 
-// (q1) An autosave select: keys after the save starts change nothing.
+// (q1) An autosave select: the role change asks through the in-app Confirm; once it is
+// accepted and the save is held, keys change nothing.
 async function scenarioQ1(browser) {
   console.log('  -- q1: an autosave select ignores keys while its save is held')
   const editor = await h.makeUser(stack, 'q1ed')
   const shared = await client.post(owner.token, '/accounts/', { name: 'Overlay Q1 Shared', account_type: 'checking', balance: 100, currency: 'PHP' })
   await client.post(owner.token, `/accounts/${shared.id}/shares`, { email: editor.email, role: 'editor' })
   const { ctx, page } = await openPage(browser)
+  const native = dialogs.trackNativeDialogs(page)
+  const cd = dialogs.confirmDialog(page)
   let patch = null
   try {
-    page.on('dialog', (d) => d.accept())
     await h.uiLogin(page, stack, owner)
     await page.goto(`${stack.webUrl}/accounts`)
     await page.getByText('Overlay Q1 Shared').first().waitFor()
@@ -1221,9 +1225,13 @@ async function scenarioQ1(browser) {
     const current = await select.inputValue()
     const target = options.find((v) => v !== current)
     await select.focus()
-    patch = await h.gate(page, { method: 'PATCH', url: new RegExp(`/accounts/${shared.id}/shares/\\d+$`) })
     await select.selectOption(target)
+    await cd.dialog.waitFor({ timeout: 3000 })
+    // Arm the gate before accepting, so the save is held from its first byte.
+    patch = await h.gate(page, { method: 'PATCH', url: new RegExp(`/accounts/${shared.id}/shares/\\d+$`) })
+    await cd.accept.click()
     await patch.waitHits(1)
+    // The shell is inert while the save is held: keys go through the keyboard, with no focus() call.
     const phases = []
     await page.keyboard.press('ArrowDown'); phases.push(await h.overlayPhase(page))
     await page.keyboard.press('ArrowDown'); phases.push(await h.overlayPhase(page))
@@ -1235,8 +1243,57 @@ async function scenarioQ1(browser) {
       const shown = await select.inputValue()
       return (patch.hits === 1 && shown === target) || `hits ${patch.hits} select ${shown} wanted ${target}`
     })
+    await dialogs.checkNoNativeDialogs(h, 'q1', native)
   } finally {
     patch?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (q1c) Cancelling the role change's Confirm with Escape: focus returns to the select, it
+// keeps the old role and no request is sent. No request is held at any point.
+async function scenarioQ1c(browser) {
+  console.log('  -- q1c: cancelling the role change keeps the select, its focus and the role')
+  const editor = await h.makeUser(stack, 'q1ced')
+  const shared = await client.post(owner.token, '/accounts/', { name: 'Overlay Q1c Shared', account_type: 'checking', balance: 100, currency: 'PHP' })
+  await client.post(owner.token, `/accounts/${shared.id}/shares`, { email: editor.email, role: 'editor' })
+  const { ctx, page } = await openPage(browser)
+  const native = dialogs.trackNativeDialogs(page)
+  const cd = dialogs.confirmDialog(page)
+  const log = h.logRequests(page)
+  try {
+    await h.uiLogin(page, stack, owner)
+    await page.goto(`${stack.webUrl}/accounts`)
+    await page.getByText('Overlay Q1c Shared').first().waitFor()
+    await h.waitQuiet(page)
+    await openAccountActions(page, 'Overlay Q1c Shared')
+    await page.locator(tid('share-account')).click()
+    const select = page.locator(tid('share-row-role')).first()
+    await select.waitFor()
+    await h.waitQuiet(page)
+    const current = await select.inputValue()
+    const options = await select.locator('option').evaluateAll((os) => os.map((o) => o.value))
+    const target = options.find((v) => v !== current)
+    await select.focus()
+    await select.selectOption(target)
+    await cd.dialog.waitFor({ timeout: 3000 })
+    await page.keyboard.press('Escape')
+    await cd.dialog.waitFor({ state: 'detached', timeout: 3000 })
+    await h.waitQuiet(page)
+    await h.check('q1c.focus-select', 'B', async () => {
+      const onSelect = await select.evaluate((el) => el === document.activeElement).catch(() => false)
+      return onSelect || `active ${await activeTestId(page)}`
+    })
+    await h.check('q1c.role-unchanged', 'B', async () => {
+      const shown = await select.inputValue()
+      return shown === current || `select shows ${shown}, wanted ${current}`
+    })
+    await h.check('q1c.nothing-sent', 'B', async () => {
+      const n = log.filter((r) => r.method === 'PATCH').length
+      return n === 0 || `${n} PATCH request(s)`
+    })
+    await dialogs.checkNoNativeDialogs(h, 'q1c', native)
+  } finally {
     await ctx.close()
   }
 }
