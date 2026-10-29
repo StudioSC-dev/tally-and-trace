@@ -8,7 +8,7 @@ on Playwright. Run them by hand when you change the auth or session code.
 |---|---|
 | `refresh-session-switch.cjs` | STU-239: a token refresh stays bound to the session that started it |
 | `mark-paid-payables.cjs` | STU-343: expandable payables on the dashboard; Mark paid on a chosen occurrence and date; Post all due, recorded from the Transactions "Due and overdue" section |
-| `card-charges.cjs` | STU-343: upcoming charges by card on the dashboard (read-only, missed count as text); Posted, Charged and Post all due from the "Due and overdue" section |
+| `card-charges.cjs` | STU-343: upcoming charges by card on the dashboard (read-only, missed count as text); Posted, Charged and Post all due from the "Due and overdue" section; STU-462: a pending foreign debit listed by its face currency in the Transactions list, its Details and the section |
 | `allocations-kinds.cjs` | STU-343: Allocations groups recurring entries by kind; Charged and Posted on a card; the form picks a card expense's kind |
 | `installment-edit.cjs` | STU-343 Plan B: moving a capped entry's next date keeps its last payment (count down, offset up); the edit form sends the version it loaded, so Save after Mark paid is refused with "This entry changed since you opened it; reopen it to edit" and writes nothing; a date after the last payment shows the server's reason inline; the count's final-month help |
 | `due-and-overdue.cjs` | STU-384: the read-only dashboard; the Transactions page's "Due and overdue" section; Mark paid, Mark received, Charged and Posted on recurring rows; missed months; pending rows; viewers; paused and ended entries; STU-394: 3 rows a page, overdue first; STU-399: Load-more batches stay live (p) and survive out-of-order refetches (q) |

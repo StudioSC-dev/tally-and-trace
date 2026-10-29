@@ -17,13 +17,17 @@
 //       no buttons, and no buttons in the section either
 //   (e) a pending card transaction has no Mark paid, and a future one is not in
 //       the section
+//   (f) a pending foreign debit on a PHP card is listed by its face in its own
+//       currency (USD) in the Transactions list, its Details, and the section, as
+//       account detail already does (STU-462)
 //
 // The section shows 3 rows a page: every count and absence check reads all pages and
 // every click first goes to the row's page (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e]
+// Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, showRow } = require('./_due_pages.cjs')
+const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -400,6 +404,90 @@ async function pendingHasNoMarkPaid(browser) {
   await ctx.close()
 }
 
+async function closeDetails(page) {
+  const close = page.getByRole('button', { name: 'Close actions modal' })
+  await close.click()
+  await close.waitFor({ state: 'detached' })
+  await waitQuiet(page)
+}
+
+// (f) A pending foreign debit: its face figure with its own currency, not the account's symbol.
+async function pendingForeignFace(browser) {
+  console.log('\n=== (f) a pending foreign debit is listed in the currency of its face')
+  const u = await makeUser('f')
+  const bank = await checking(u)
+  const today = manilaToday()
+  const visa = await card(u, bank, 'Visa F', 24)
+  // Dated before today so it is also an overdue row in the "Due and overdue" section.
+  const day = addDays(today, -2)
+  const foreign = await post(u.token, '/transactions/', {
+    account_id: visa.id, transaction_type: 'debit', currency: 'PHP', amount: 131, projected_amount: 131, projected_currency: 'USD',
+    description: 'Foreign F', transaction_date: wire(day), is_posted: false,
+  })
+  check('(f) the API keeps the stored figures (PHP 131, face USD 131)', [foreign.currency, foreign.amount, foreign.projected_currency, foreign.projected_amount], ['PHP', 131, 'USD', 131])
+  // A retained actual: the row's own currency is the foreign face, so only the account's currency gives the right figure ($80, not $4,700).
+  const retained = await post(u.token, '/transactions/', {
+    account_id: visa.id, transaction_type: 'debit', currency: 'USD', amount: 4700, projected_amount: 80, projected_currency: 'USD',
+    description: 'Retained F', transaction_date: wire(day), is_posted: false,
+  })
+  // A row whose account is not in the page's (active) accounts list keeps its stored figure: an inactive account.
+  const lost = await post(u.token, '/accounts/', {
+    name: 'Gone F', account_type: 'checking', balance: 1000, currency: 'PHP',
+  })
+  await post(u.token, '/transactions/', {
+    account_id: lost.id, transaction_type: 'debit', currency: 'PHP', amount: 77, projected_amount: 77, projected_currency: 'USD',
+    description: 'Orphan F', transaction_date: wire(day), is_posted: false,
+  })
+  const closed = await api(u.token, 'PUT', `/accounts/${lost.id}`, { is_active: false })
+  check('(f) the second account is deactivated', [closed.status, closed.json?.is_active], [200, false])
+  check('(f) the API keeps the retained actual (USD 4700, face USD 80)', [retained.currency, retained.amount, retained.projected_currency, retained.projected_amount], ['USD', 4700, 'USD', 80])
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await waitQuiet(page)
+  // Explicit range that holds the seeded rows even on the 1st or 2nd of a month, when they fall in the previous one.
+  await page.getByRole('button', { name: 'Show filters' }).click()
+  await page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input').fill(addDays(today, -3))
+  await waitQuiet(page)
+  const item = page.locator('article').filter({ has: page.getByText('Foreign F', { exact: true }) })
+  check('(f) the Transactions list has the row once', await item.count(), 1)
+  check('(f) its amount is $131.00, not ₱131.00', await item.locator('p.text-lg.font-bold').textContent(), '$131.00')
+  check('(f) the Projected line is unchanged', (await item.textContent()).includes('Projected $131.00'), true)
+  await item.click()
+  const detailAmount = page.locator('dt', { hasText: /^Amount$/ }).locator('xpath=following-sibling::dd')
+  await detailAmount.first().waitFor()
+  check('(f) the Details amount is $131.00', await detailAmount.first().textContent(), '$131.00')
+  await closeDetails(page)
+  const orphan = page.locator('article').filter({ has: page.getByText('Orphan F', { exact: true }) })
+  check('(f) a row whose account is not listed keeps its stored figure, ₱77.00', [await orphan.count(), await orphan.locator('p.text-lg.font-bold').textContent()], [1, '₱77.00'])
+  const retainedItem = page.locator('article').filter({ has: page.getByText('Retained F', { exact: true }) })
+  check('(f) the retained-actual row is listed once', await retainedItem.count(), 1)
+  check('(f) its list amount is the face, $80.00', await retainedItem.locator('p.text-lg.font-bold').textContent(), '$80.00')
+  await retainedItem.click()
+  await detailAmount.first().waitFor()
+  check('(f) its Details amount is the face, $80.00', await detailAmount.first().textContent(), '$80.00')
+  await closeDetails(page)
+
+  await openTransactions(page)
+  const due = await rowsOf(page, 'Foreign F', 'pending')
+  check('(f) the section lists it once, overdue', [due.length, due[0]?.overdue], [1, true])
+  check('(f) the section row amount is $131.00', [due[0]?.text.includes('$131.00'), due[0]?.text.includes('₱131.00')], [true, false])
+
+  const dueRetained = await rowsOf(page, 'Retained F', 'pending')
+  check('(f) the section lists the retained-actual row once', dueRetained.length, 1)
+  check('(f) its section amount is the face, $80.00', [dueRetained[0]?.text.includes('$80.00'), dueRetained[0]?.text.includes('4,700')], [true, false])
+
+  await page.goto(`${stack.webUrl}/accounts/${visa.id}`)
+  await waitQuiet(page)
+  const amounts = page.locator('[data-testid="account-transaction-amount"]')
+  await amounts.first().waitFor()
+  const texts = (await amounts.allTextContents()).map((t) => t.trim())
+  const face131 = texts.find((t) => t.includes('131.00')) ?? ''
+  check('(f) account detail still shows the USD face (regression guard)', [face131.includes('$'), face131.includes('₱'), texts.some((t) => t.includes('80.00') && t.includes('$'))], [true, false, true])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -410,6 +498,7 @@ async function pendingHasNoMarkPaid(browser) {
   if (run('c')) await installmentDate(browser)
   if (run('d')) await viewerSeesLimited(browser)
   if (run('e')) await pendingHasNoMarkPaid(browser)
+  if (run('f')) await pendingForeignFace(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)
