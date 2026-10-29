@@ -340,10 +340,13 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       on a statement not yet due (an entry that ended recently still owes it),
       or any occurrence from today on, either way unless a linked transaction
       stands for it (a materialised occurrence is a recorded row, judged by the
-      statement check below). On a card without cycle settings, where the
-      projection lists each occurrence as an event on the card, it is any
-      occurrence from today on that no linked transaction stands for. Once the
-      card is inactive their legs drop, so either is refused.
+      statement check below). A reviewed card installment's unrecorded months
+      are billed even when their statement is already due (STU-343 Plan B), so
+      a card cannot be closed while such a month is still owed. On a card
+      without cycle settings, where the projection lists each occurrence as an
+      event on the card, it is any occurrence from today on that no linked
+      transaction stands for. Once the card is inactive their legs drop, so
+      either is refused.
     - A card with an open statement: any statement in ``statement_history``
       that still owes something after payments ("open" or "overdue"). That
       includes the cycle open today and later ones, posted and unposted

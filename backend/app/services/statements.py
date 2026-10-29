@@ -405,6 +405,13 @@ def build_statement_payables(
     recorded payment or credit did for an earlier statement. A cycle still owing
     something and due in ``[start, end)`` becomes a payable for the remainder.
 
+    A projected line carrying ``settles_as_recorded`` (a reviewed card
+    installment's month dated on or before ``start``'s day, STU-343 Plan B, see
+    ``forecast._card_entry_charges``) is moved into the recorded lines first:
+    it is balanced and paid with them, exactly as the row any recorder writes
+    for that day would be, so recording it moves no payable. The set depends
+    on ``start`` alone, so the invariant below still holds.
+
     The allocation runs over every cycle up to the one holding the card's last
     line item, even when that cycle is due on or after ``end``: a net-credit cycle
     beyond the window still pays older statements. Only the emitted events are
@@ -429,6 +436,10 @@ def build_statement_payables(
         lines, payments = _split_card_rows(
             card.id, transactions_by_card.get(card.id, []), unbilled_ids)
         projected = (projected_by_card or {}).get(card.id, [])
+        lines = [*lines, *(row for row in projected
+                           if getattr(row, "settles_as_recorded", False))]
+        projected = [row for row in projected
+                     if not getattr(row, "settles_as_recorded", False)]
         amount_of, estimates = _row_amount, {}
         if normalise is not None:
             lines, amount_of, estimates, _ = normalise(card, lines)
