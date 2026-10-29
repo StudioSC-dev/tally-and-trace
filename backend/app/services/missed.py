@@ -13,10 +13,14 @@
 - ``entry_row_fields``: ``kind`` and ``can_mark_paid`` on the snapshot's full
   budget-entry rows (``payables`` and ``upcoming_this_month``), so a list can
   offer an entry's actions without loading the entries itself.
+- ``installment_snapshot``: the snapshot's ``installment_review`` and
+  ``installment_auto_post`` keys (STU-343 Plan B), and each card installment's
+  ``installment_state``, which ``recurring_missed`` repeats on its rows.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
@@ -33,7 +37,11 @@ from app.models.account import AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction
 from app.services import forecast as fc
-from app.services.recurring_kinds import BILLING_KINDS, entry_kind, is_capped, is_kind_eligible
+from app.services.installment_duplicates import held_occurrences
+from app.services.posting import PostPlan, post_plan
+from app.services.recurring_kinds import (
+    BILLING_KINDS, auto_post_block, entry_kind, is_capped, is_card_installment, is_kind_eligible,
+)
 
 
 def split_pending_links(db: Session, entries, unrecorded: Dict[int, List[datetime]],
@@ -87,9 +95,132 @@ def _card_missed_covers(entry: BudgetEntry, account) -> bool:
             and is_kind_eligible(entry) and not is_capped(entry)
             and entry_kind(entry, account) in BILLING_KINDS)
 
+def installment_state(entry: BudgetEntry, plan: PostPlan) -> str:
+    """A card installment's auto-post state from ``post_plan``'s blocker:
+    ``unreviewed``, ``off`` (reviewed, auto-post off), ``blocked`` (reviewed and
+    on, but ``blocked:<reason>`` or ``creator_no_access``), ``held`` (a due
+    month is held) or ``on``. ``caller_no_access`` leaves the state ``on``: it
+    only empties the caller's ``postable``.
+    """
+    blocker = plan.blocker
+    if blocker == "unreviewed":
+        return "unreviewed"
+    if blocker == "auto_post_off":
+        return "off"
+    if blocker == "held":
+        return "held"
+    if blocker is not None and (blocker.startswith("blocked:") or blocker == "creator_no_access"):
+        return "blocked"
+    return "on"
 
-def recurring_missed(db: Session, user, *, redactor: Redactor,
-                     tag_id: Optional[int]) -> List[dict]:
+
+def _block_reason(plan: PostPlan) -> Optional[str]:
+    """Why a ``blocked`` installment cannot auto-post: ``foreign_currency``,
+    ``no_statement_cycle``, ``ambiguous`` or ``creator_no_access``."""
+    blocker = plan.blocker or ""
+    return blocker.split(":", 1)[1] if blocker.startswith("blocked:") else blocker
+
+
+@dataclass(frozen=True)
+class InstallmentInfo:
+    """One card installment as the caller sees it (``installment_snapshot``)."""
+    entry: BudgetEntry
+    plan: PostPlan
+    state: str
+    block_reason: Optional[str]
+    can_edit: bool
+
+
+def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, InstallmentInfo]:
+    """``{entry id: InstallmentInfo}`` for every active card installment the
+    caller reads in full or shared_full (a Limited view is left out, as
+    ``recurring_missed`` leaves it out), planned for the caller through Manila's
+    today by ``post_plan``. One ``held_occurrences`` call covers the reviewed
+    ones (the canonical assignment), so every caller sees the same held months.
+    Not filtered by tag: the backstop posts whatever it can, whatever tag the
+    page is showing.
+    """
+    access = redactor.access
+    direct_ids = viewable_account_ids(db, user.id)
+    grants = list(access.grants.values())
+    candidates = db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user.id, direct_ids, grants),
+        BudgetEntry.is_active.is_(True),
+        BudgetEntry.account_id.isnot(None),
+        BudgetEntry.end_mode == "after_occurrences",
+    ).order_by(BudgetEntry.id).all()
+    candidates = [e for e in candidates if access.readable(e) and redactor.view(e) != LIMITED]
+    if not candidates:
+        return {}
+    access.load(e.account_id for e in candidates)
+    entries = [e for e in candidates if is_card_installment(e, access.account(e.account_id))]
+    if not entries:
+        return {}
+    today = manila_today()
+    reviewed = [e for e in entries if e.installment_reviewed_at is not None]
+    held = held_occurrences(db, reviewed, today) if reviewed else Counter()
+    out: Dict[int, InstallmentInfo] = {}
+    for entry in entries:
+        plan = post_plan(db, entry, user, today, held, access)
+        state = installment_state(entry, plan)
+        out[entry.id] = InstallmentInfo(
+            entry=entry, plan=plan, state=state,
+            block_reason=_block_reason(plan) if state == "blocked" else None,
+            can_edit=bool(access.permissions(entry)["can_edit"]))
+    return out
+
+
+def installment_snapshot(db: Session, user, *, redactor: Redactor,
+                         infos: Optional[Dict[int, InstallmentInfo]] = None) -> dict:
+    """The snapshot's ``installment_review`` and ``installment_auto_post``.
+
+    - ``installment_review``: active card installments the caller can edit that
+      are not reviewed and have no ``auto_post_block``, with ``missed_count``
+      (the months due through Manila's today). Empty for a viewer or a tag
+      viewer, who cannot edit.
+    - ``installment_auto_post``: active reviewed card installments the caller
+      reads in full or shared_full with at least one month due, with the
+      caller's ``postable_count``, the ``state`` and ``block_reason``;
+      ``can_post`` and ``can_review`` are both the caller's ``can_edit``. A
+      viewer's or tag viewer's view is Limited, so they get no row.
+    """
+    if infos is None:
+        infos = installment_infos(db, user, redactor=redactor)
+    access = redactor.access
+
+    def account_name(entry: BudgetEntry) -> Optional[str]:
+        account = access.account(entry.account_id)
+        return account.name if account is not None and redactor.can_view(account.id) else None
+
+    review = []
+    posting = []
+    for info in infos.values():
+        entry, plan = info.entry, info.plan
+        if entry.installment_reviewed_at is None:
+            if info.can_edit and auto_post_block(entry, access.account(entry.account_id)) is None:
+                review.append({"entry_id": entry.id, "name": entry.name,
+                               "account_name": account_name(entry),
+                               "missed_count": len(plan.due)})
+        elif plan.due:
+            posting.append({
+                "entry_id": entry.id,
+                "name": entry.name,
+                "account_name": account_name(entry),
+                "due_count": len(plan.due),
+                "postable_count": len(plan.postable),
+                "oldest": plan.due[0].date().isoformat(),
+                "state": info.state,
+                "block_reason": info.block_reason,
+                "can_post": info.can_edit,
+                "can_review": info.can_edit,
+            })
+    review.sort(key=lambda row: (row["name"], row["entry_id"]))
+    posting.sort(key=lambda row: (row["oldest"], row["name"], row["entry_id"]))
+    return {"installment_review": review, "installment_auto_post": posting}
+
+
+def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
+                     infos: Optional[Dict[int, InstallmentInfo]] = None) -> List[dict]:
     """The snapshot's ``missed`` key (see the module docstring), sorted by
     ``oldest``, then name.
 
@@ -98,7 +229,10 @@ def recurring_missed(db: Session, user, *, redactor: Redactor,
     day once, capped entries at their cap), with ``oldest`` the first. A pending
     linked row records nothing yet; ``split_pending_links`` adds the occurrences
     without one. With ``tag_id`` only entries carrying it effectively are kept,
-    as the payables are.
+    as the payables are. A card installment's row also carries ``auto_post`` (its
+    ``installment_state``), ``block_reason`` and ``can_review`` (the caller can
+    edit and ``auto_post_block`` is None, the rule that admits an entry to
+    ``installment_review``), which no other row has; ``infos`` is ``installment_infos`` when the caller has it.
     """
     user_id = user.id
     access = redactor.access
@@ -132,6 +266,8 @@ def recurring_missed(db: Session, user, *, redactor: Redactor,
                if not _card_missed_covers(e, access.account(e.account_id))
                and not (e.transfer_to_account_id is None and e.account_id in wallet_ids)]
 
+    if infos is None:
+        infos = installment_infos(db, user, redactor=redactor)
     today = manila_today()
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today - timedelta(days=1))
     links = split_pending_links(db, entries, unrecorded, redactor)
@@ -141,6 +277,7 @@ def recurring_missed(db: Session, user, *, redactor: Redactor,
         if not missed:
             continue
         account = access.account(entry.account_id)
+        info = infos.get(entry.id)
         out.append({
             "view": redactor.view(entry),
             "entry_id": entry.id,
@@ -155,6 +292,9 @@ def recurring_missed(db: Session, user, *, redactor: Redactor,
             "oldest": missed[0].date().isoformat(),
             **links[entry.id],
             "can_mark_paid": bool(access.permissions(entry)["can_post"]),
+            **({"auto_post": info.state, "block_reason": info.block_reason,
+                "can_review": info.can_edit and auto_post_block(entry, account) is None}
+               if info is not None else {}),
         })
     out.sort(key=lambda row: (row["oldest"], row["name"]))
     return out
