@@ -9,9 +9,11 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
-import type { ListRange, TransactionStatus } from '@tally-trace/shared'
+import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../hooks/useToast'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
@@ -206,6 +208,33 @@ const NO_PERMISSIONS: RecordPermissions = {
 const DESTINATION_UNAVAILABLE =
   "This transfer's destination account can't be found, so it is read-only here."
 
+// The transaction form's inline field errors (STU-410). The dates keep their own
+// `dateErrors` (STU-404); every other checked field is keyed here.
+const TRANSACTION_FIELDS = [
+  'description',
+  'account_id',
+  'transfer_to_account_id',
+  'projected_amount',
+  'received_amount',
+  'transfer_fee',
+  'amount',
+] as const
+type TransactionField = (typeof TRANSACTION_FIELDS)[number]
+const isTransactionField = (key: string | undefined): key is TransactionField =>
+  (TRANSACTION_FIELDS as readonly string[]).includes(key ?? '')
+const fieldErrorId = (key: TransactionField) => `transaction-${key}-error`
+const withoutErrors = (errors: FieldErrors<TransactionField>, keys: TransactionField[]) =>
+  keys.reduce((rest, key) => withoutError(rest, key), errors)
+
+function FieldErrorText({ field, message }: { field: TransactionField; message: string | undefined }) {
+  if (!message) return null
+  return (
+    <p id={fieldErrorId(field)} className="mt-1 text-xs text-danger" role="alert" data-testid={`field-error-${field}`}>
+      {message}
+    </p>
+  )
+}
+
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
@@ -338,6 +367,15 @@ export function TransactionsPage() {
   const [dateErrors, setDateErrors] = useState<{ transaction_date?: string | undefined; posting_date?: string | undefined }>({})
   const transactionDateInput = useRef<HTMLInputElement>(null)
   const postingDateInput = useRef<HTMLInputElement>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors<TransactionField>>({})
+  // A failed action from the action modal (mark not posted, a status-only post) shows here.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
+  const showToast = useToast()
+  const [formError, setFormError] = useState<string | null>(null)
+  const transactionForm = useRef<HTMLFormElement>(null)
+  // The controls the browser flagged in one submit attempt, in tree order.
+  const invalidControls = useRef<Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>>([])
   const receiptFor = useRef<number | null>(null)
   // The object URL is owned here, not by `receipt` state, so one accepted
   // before its state commits is still revoked.
@@ -952,6 +990,7 @@ export function TransactionsPage() {
 
   const handleAccountSelect = (value: number) => {
     const accountId = Number.isNaN(value) ? 0 : value
+    setFieldErrors((prev) => withoutError(prev, 'account_id'))
     const nextAccount = accounts.find((account) => account.id === accountId)
     setFormData((prev) => ({
       ...prev,
@@ -969,6 +1008,8 @@ export function TransactionsPage() {
   }
 
   const handleTypeChange = (nextType: Transaction['transaction_type']) => {
+    // The destination, fee and received figure come and go with the type.
+    setFieldErrors((prev) => withoutErrors(prev, ['transfer_to_account_id', 'transfer_fee', 'received_amount']))
     setFormData((prev) => {
       let nextBudgetEntryId = prev.budget_entry_id
       if (nextType === 'transfer') {
@@ -1016,6 +1057,7 @@ export function TransactionsPage() {
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = transaction.id
+    setActionError(null)
     setActionTransaction(transaction)
     setIsActionModalOpen(true)
   }
@@ -1027,6 +1069,7 @@ export function TransactionsPage() {
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = null
+    setActionError(null)
     resetPostingFormState()
   }
 
@@ -1055,16 +1098,81 @@ export function TransactionsPage() {
     setFormData(createInitialFormState())
     setEditingTransaction(null)
     setDateErrors({})
+    setFieldErrors({})
+    setFormError(null)
+  }
+
+  // One inline error per attempt, on the first invalid field, which takes focus. A chip
+  // group focuses its selected chip, else its first.
+  const fail = (key: TransactionField, message: string) => {
+    setDateErrors({})
+    setFieldErrors({ [key]: message })
+    const field = transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`)
+    const target =
+      field?.getAttribute('role') === 'group'
+        ? field.querySelector<HTMLElement>('button[data-selected="true"]') ?? field.querySelector<HTMLElement>('button')
+        : field
+    target?.focus()
+  }
+
+  // The app's own words for an empty required field, where it has them.
+  const valueMissingCopy = (key: string | undefined): string | undefined => {
+    switch (key) {
+      case 'projected_amount':
+        return 'Please enter an amount greater than zero.'
+      case 'amount':
+        return 'Please enter the actual amount posted to the account.'
+      case 'received_amount':
+        return `Please enter the amount received in ${destinationCurrency}.`
+      default:
+        return undefined
+    }
+  }
+
+  // The browser keeps every required, min, max and step check; only its bubble is
+  // replaced. The invalid events fire in tree order during the submit's check, so the
+  // first one is shown inline once they have all fired. A task, not a microtask: on a
+  // real click the microtask queue drains between one invalid event and the next.
+  // Any invalid control has its bubble suppressed. One that is not wired to a field
+  // error (no known `data-field`) falls back to the form's own error line, with focus.
+  const handleInvalidCapture = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const control = event.target
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return
+    invalidControls.current.push(control)
+    if (invalidControls.current.length > 1) return
+    window.setTimeout(() => {
+      const first = invalidControls.current[0]
+      invalidControls.current = []
+      if (!first) return
+      const key = first.dataset.field
+      const message = (first.validity.valueMissing ? valueMissingCopy(key) : undefined) || first.validationMessage
+      setFormError(null)
+      if (key === 'transaction_date' || key === 'posting_date') {
+        setFieldErrors({})
+        setDateErrors({ [key]: message })
+        first.focus()
+      } else if (isTransactionField(key)) {
+        fail(key, message)
+      } else {
+        setFieldErrors({})
+        setDateErrors({})
+        setFormError(message)
+        first.focus()
+      }
+    }, 0)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFormError(null)
+    setFieldErrors({})
     if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
-      alert('Still checking this transfer\'s destination account. Try again in a moment.')
+      setFormError('Still checking this transfer\'s destination account. Try again in a moment.')
       return
     }
     if (editingTransaction && loanPaymentStatus(editingTransaction) === 'unavailable') {
-      alert(DESTINATION_UNAVAILABLE)
+      setFormError(DESTINATION_UNAVAILABLE)
       return
     }
     try {
@@ -1080,11 +1188,11 @@ export function TransactionsPage() {
       }
       setDateErrors({})
       if (!formData.account_id) {
-        alert('Please select an account for this transaction.')
+        fail('account_id', 'Please select an account for this transaction.')
         return
       }
       if (formData.transaction_type === 'transfer' && !formData.transfer_to_account_id) {
-        alert('Please select a destination account for this transfer.')
+        fail('transfer_to_account_id', 'Please select a destination account for this transfer.')
         return
       }
 
@@ -1097,14 +1205,14 @@ export function TransactionsPage() {
         destinationAccount !== undefined &&
         destinationAccount.currency !== accountCurrency
       if (crossing && formData.is_posted && !(formData.received_amount !== undefined && formData.received_amount > 0)) {
-        alert(`Please enter the amount received in ${destinationAccount.currency}.`)
+        fail('received_amount', `Please enter the amount received in ${destinationAccount.currency}.`)
         return
       }
 
       let projectedAmount = formData.projected_amount
       if (!formData.is_posted) {
         if (!projectedAmount || projectedAmount <= 0) {
-          alert('Please enter an amount greater than zero.')
+          fail('projected_amount', 'Please enter an amount greater than zero.')
           return
         }
       }
@@ -1112,7 +1220,7 @@ export function TransactionsPage() {
       let actualAmount = formData.amount
       if (formData.is_posted) {
         if (actualAmount === undefined || actualAmount <= 0) {
-          alert('Please enter the actual amount posted to the account.')
+          fail('amount', 'Please enter the actual amount posted to the account.')
           return
         }
         if (!projectedAmount || projectedAmount <= 0) {
@@ -1138,7 +1246,7 @@ export function TransactionsPage() {
         } else {
           if (actualAmount !== undefined) {
             if (formData.transfer_fee > actualAmount) {
-              alert('The interest cannot be more than the payment amount.')
+              fail('transfer_fee', 'The interest cannot be more than the payment amount.')
               return
             }
             principal = toPrincipal(actualAmount, formData.transfer_fee)
@@ -1231,8 +1339,8 @@ export function TransactionsPage() {
       await refreshListsRef.current()
     } catch (error) {
       console.error('Error saving transaction:', error)
-      // Show the API's reason (e.g. a loan payment rule) instead of failing silently.
-      alert(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
+      // Show the API's reason (e.g. a loan payment rule) in the form, which stays open.
+      setFormError(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
     }
   }
 
@@ -1243,6 +1351,8 @@ export function TransactionsPage() {
     }
     setEditingTransaction(transaction)
     setDateErrors({})
+    setFieldErrors({})
+    setFormError(null)
     // A loan payment's form amount is the whole payment (principal + interest).
     const intoLoan = isLoanPayment(transaction)
     const total = intoLoan
@@ -1286,19 +1396,21 @@ export function TransactionsPage() {
     setIsCreateModalOpen(true)
   }
 
-  const handleDelete = async (transactionId: number) => {
-    if (confirm('Are you sure you want to delete this transaction?')) {
-      try {
-        await deleteTransaction(transactionId).unwrap()
-        if (actionTransaction?.id === transactionId) {
-          closeActionModal()
-        }
-        await refreshListsRef.current()
-      } catch (error) {
-        console.error('Error deleting transaction:', error)
-        alert(apiErrorMessage(error) || 'Could not delete the transaction. Please try again.')
-      }
+  // The delete runs from the in-app dialog, so a refusal stays there with the server's reason.
+  const handleDelete = async (transaction: Transaction) => {
+    const description = transactionDescription(transaction)
+    const deleted = await askConfirm({
+      title: 'Delete transaction?',
+      message: description ? `Delete the transaction "${description}"?` : 'Delete this transaction?',
+      confirmLabel: 'Delete transaction',
+      action: () => deleteTransaction(transaction.id).unwrap(),
+      errorFallback: 'Could not delete the transaction. Please try again.',
+    })
+    if (!deleted) return
+    if (actionTransaction?.id === transaction.id) {
+      closeActionModal()
     }
+    await refreshListsRef.current()
   }
 
   const handleMarkPostedFromModal = async (
@@ -1377,12 +1489,13 @@ export function TransactionsPage() {
           currency: accountCurrency,
           exchange_rate: undefined,
         }
+    setActionError(null)
     let updatedTransaction: Transaction
     try {
       updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     } catch (error) {
       console.error('Error reverting transaction:', error)
-      alert(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
+      setActionError(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
       return
     }
     setActionTransaction(updatedTransaction)
@@ -1408,8 +1521,9 @@ export function TransactionsPage() {
       const needsAmount = transaction.transaction_type !== 'transfer' && face !== accountCurrency
       const needsStoredReceived = needsReceived && !(transaction.received_amount != null && transaction.received_amount > 0)
       if (!needsAmount && !needsStoredReceived) {
+        setActionError(null)
         void handlePostStatusOnly(transaction).then((message) => {
-          if (message) alert(message)
+          if (message) setActionError(message)
         })
         return
       }
@@ -1553,7 +1667,8 @@ export function TransactionsPage() {
     }
     if (linkedError) {
       handledEditId.current = linkedId
-      alert(
+      // No dialog is open to hold it, and the page moves on, so the toast carries it.
+      showToast(
         'status' in linkedError && linkedError.status === 404
           ? 'This transaction is no longer available.'
           : apiErrorMessage(linkedError) || 'This transaction is no longer available.'
@@ -1594,6 +1709,7 @@ export function TransactionsPage() {
     loanPaymentStatus,
     navigate,
     openActionModalRef,
+    showToast,
   ])
 
   useEffect(() => {
@@ -2617,7 +2733,7 @@ export function TransactionsPage() {
                 )}
                 {actionPermissions.can_delete && (
                         <button
-                  onClick={() => handleDelete(actionTransaction.id)}
+                  onClick={() => handleDelete(actionTransaction)}
                   className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken"
                         >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2627,6 +2743,11 @@ export function TransactionsPage() {
                         </button>
                 )}
                       </div>
+              {actionError && (
+                <p className="text-sm text-danger" role="alert" data-testid="transaction-action-error">
+                  {actionError}
+                </p>
+              )}
               {!actionTransaction.is_posted && actionPermissions.can_post && postingFormState.visible && (
                 <div className="border border-ink p-4 space-y-3">
                   <p className="text-sm font-medium text-ink">
@@ -2773,34 +2894,46 @@ export function TransactionsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5">
               <div>
                 <label className="label">Description</label>
                 <input
                   type="text"
                   value={formData.description}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setFormData((prev) => ({
                       ...prev,
                       description: e.target.value,
                     }))
-                  }
+                    setFieldErrors((prev) => withoutError(prev, 'description'))
+                  }}
                   className="input-field focus-ring"
                   placeholder="Add notes about this transaction"
+                  data-field="description"
+                  {...fieldErrorProps(fieldErrors, 'description', fieldErrorId('description'))}
                   required
                 />
+                <FieldErrorText field="description" message={fieldErrors.description} />
               </div>
               <div>
-                <label className="label">
+                <label className="label" id="transaction-account-label">
                   {formData.transaction_type === 'transfer' ? 'From Account' : 'Account'}
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                  aria-labelledby="transaction-account-label"
+                  aria-describedby={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
+                  data-field="account_id"
+                >
                   {writableAccounts.map((account) => {
                     const isSelected = formData.account_id === account.id
                     return (
                       <button
                         type="button"
                         key={account.id}
+                        data-selected={isSelected ? 'true' : undefined}
+                        aria-describedby={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
                         onClick={() => handleAccountSelect(account.id)}
                         className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                       >
@@ -2812,6 +2945,7 @@ export function TransactionsPage() {
                     )
                   })}
                 </div>
+                <FieldErrorText field="account_id" message={fieldErrors.account_id} />
                 <p className="mt-2 text-xs text-muted">
                   {formData.transaction_type === 'transfer'
                     ? 'Funds will move out of this account.'
@@ -2826,8 +2960,14 @@ export function TransactionsPage() {
               
               {formData.transaction_type === 'transfer' && (
               <div>
-                  <label className="label">Destination Account</label>
-                  <div className="flex flex-wrap gap-2">
+                  <label className="label" id="transaction-destination-label">Destination Account</label>
+                  <div
+                    className="flex flex-wrap gap-2"
+                    role="group"
+                    aria-labelledby="transaction-destination-label"
+                    aria-describedby={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
+                    data-field="transfer_to_account_id"
+                  >
                     {transferDestinationOptions.length === 0 && (
                       <p className="text-sm text-muted">Select a different source account to see destinations.</p>
                     )}
@@ -2837,7 +2977,10 @@ export function TransactionsPage() {
                         <button
                           type="button"
                           key={account.id}
-                          onClick={() =>
+                          data-selected={isSelected ? 'true' : undefined}
+                          aria-describedby={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
+                          onClick={() => {
+                            setFieldErrors((prev) => withoutError(prev, 'transfer_to_account_id'))
                             setFormData((prev) => ({
                               ...prev,
                               transfer_to_account_id: isSelected ? undefined : account.id,
@@ -2845,7 +2988,7 @@ export function TransactionsPage() {
                                 ? prev.transfer_fee
                                 : destinationTransferFee(account, prev.transfer_fee),
                             }))
-                          }
+                          }}
                           className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                         >
                           {account.name}
@@ -2854,6 +2997,7 @@ export function TransactionsPage() {
                       )
                     })}
                   </div>
+                  <FieldErrorText field="transfer_to_account_id" message={fieldErrors.transfer_to_account_id} />
                 </div>
               )}
               
@@ -2970,12 +3114,16 @@ export function TransactionsPage() {
                             ...prev,
                             projected_amount: Number.isNaN(value) ? undefined : value,
                           }))
+                          setFieldErrors((prev) => withoutError(prev, 'projected_amount'))
                         }}
                         className="input-field pl-7 focus-ring"
                         placeholder="0.00"
+                        data-field="projected_amount"
+                        {...fieldErrorProps(fieldErrors, 'projected_amount', fieldErrorId('projected_amount'))}
                   required
                       />
                     </div>
+                    <FieldErrorText field="projected_amount" message={fieldErrors.projected_amount} />
                   </div>
                   <div>
                     <label className="label">Currency</label>
@@ -3018,12 +3166,16 @@ export function TransactionsPage() {
                           ...prev,
                           received_amount: Number.isNaN(value) ? undefined : value,
                         }))
+                        setFieldErrors((prev) => withoutError(prev, 'received_amount'))
                       }}
                       className="input-field pl-7 focus-ring"
                       placeholder="0.00"
+                      data-field="received_amount"
+                      {...fieldErrorProps(fieldErrors, 'received_amount', fieldErrorId('received_amount'))}
                       required={formData.is_posted}
                     />
                   </div>
+                  <FieldErrorText field="received_amount" message={fieldErrors.received_amount} />
                   <p className="mt-1 text-xs text-muted">
                     What lands in the destination, in {destinationCurrency}. {formData.is_posted ? 'Required to post a transfer between currencies.' : 'Needed before this transfer can be posted; until then the projection estimates it.'}
                   </p>
@@ -3048,11 +3200,15 @@ export function TransactionsPage() {
                           ...prev,
                           transfer_fee: Number.isNaN(value) ? undefined : value,
                         }))
+                        setFieldErrors((prev) => withoutError(prev, 'transfer_fee'))
                       }}
                       className="input-field pl-7 focus-ring"
                       placeholder="0.00"
+                      data-field="transfer_fee"
+                      {...fieldErrorProps(fieldErrors, 'transfer_fee', fieldErrorId('transfer_fee'))}
                 />
               </div>
+                  <FieldErrorText field="transfer_fee" message={fieldErrors.transfer_fee} />
                   <p className="mt-1 text-xs text-muted">
                     {transferIntoLoan
                       ? "The interest part of this payment. Leave blank to split the amount at the loan's rate."
@@ -3079,12 +3235,16 @@ export function TransactionsPage() {
                           ...prev,
                           amount: Number.isNaN(value) ? undefined : value,
                         }))
+                        setFieldErrors((prev) => withoutError(prev, 'amount'))
                       }}
                       className="input-field pl-7 focus-ring"
                       placeholder="0.00"
+                      data-field="amount"
+                      {...fieldErrorProps(fieldErrors, 'amount', fieldErrorId('amount'))}
                   required
                 />
               </div>
+                  <FieldErrorText field="amount" message={fieldErrors.amount} />
                 </div>
               )}
               
@@ -3108,6 +3268,7 @@ export function TransactionsPage() {
                     aria-invalid={dateErrors.transaction_date ? true : undefined}
                     aria-describedby={dateErrors.transaction_date ? 'transaction-date-error' : undefined}
                     data-testid="transaction-date"
+                    data-field="transaction_date"
                   required
                 />
                 {dateErrors.transaction_date && (
@@ -3136,6 +3297,7 @@ export function TransactionsPage() {
                     aria-invalid={dateErrors.posting_date ? true : undefined}
                     aria-describedby={dateErrors.posting_date ? 'posting-date-error' : undefined}
                     data-testid="posting-date"
+                    data-field="posting_date"
                   />
                   {dateErrors.posting_date && (
                     <p id="posting-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
@@ -3154,6 +3316,8 @@ export function TransactionsPage() {
                     onChange={(e) => {
                       const checked = e.target.checked
                       const today = localToday()
+                      // The amount fields swap with the posted state.
+                      setFieldErrors((prev) => withoutErrors(prev, ['amount', 'projected_amount', 'received_amount']))
                       setFormData((prev) => ({
                         ...prev,
                         is_posted: checked,
@@ -3214,6 +3378,11 @@ export function TransactionsPage() {
                 </div>
               )}
               
+              {formError && (
+                <p className="text-sm text-danger" role="alert" data-testid="transaction-form-error">
+                  {formError}
+                </p>
+              )}
               <div className="flex space-x-3 pt-2">
                 <button type="submit" className="flex-1 btn-primary focus-ring">
                   {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
