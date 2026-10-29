@@ -195,6 +195,69 @@ async function scenarioE(browser) {
   }
 }
 
+// (d) Delete from the edit form: a refused delete (409) keeps the Confirm open with the
+// server's reason; Cancel keeps the form; a retry deletes it and closes the form.
+async function scenarioD(browser) {
+  console.log('\n=== (d) delete a recurring entry: a refusal shows in the dialog; a retry deletes it')
+  const entry = await client.post(owner.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Dialog D Entry', amount: 300,
+    account_id: bank.id, next_occurrence: wireIn(20), end_mode: 'indefinite',
+  })
+  const { ctx, page, native, log } = await openAllocations(browser)
+  const cd = d.confirmDialog(page)
+  let fail = null
+  try {
+    await page.locator('article').filter({ has: page.getByText(entry.name, { exact: true }) }).click()
+    await modalClose(page).waitFor()
+    await h.waitQuiet(page)
+    const form = editForm(page)
+    const opener = form.getByRole('button', { name: 'Delete Recurring Entry' })
+    fail = await h.failWith(page, isDelete(entry.id), 409, { times: 1 })
+    await opener.click()
+    await h.check('d.shown', 'B', async () =>
+      (await cd.dialog.waitFor({ timeout: 3000 }).then(() => true, () => false)) || 'no confirm-dialog')
+    await h.check('d.message', 'B', async () => {
+      const text = (await cd.message.textContent().catch(() => null)) || ''
+      return text === `Delete recurring entry "${entry.name}"?` || `message ${JSON.stringify(text)}`
+    })
+    await cd.accept.click()
+    await h.check('d.refusal-shown', 'B', async () => {
+      const shown = await cd.error.waitFor({ timeout: 5000 }).then(() => true, () => false)
+      if (!shown) return 'no confirm-dialog-error'
+      const text = await cd.error.innerText()
+      return text === 'stu335 injected failure 409' || `error ${JSON.stringify(text)}`
+    })
+    await h.waitQuiet(page)
+    await h.check('d.stays-open', 'B', async () => (await cd.dialog.isVisible()) || 'dialog closed')
+    await h.check('d.one-delete', 'B', async () => fail.hits === 1 || `${fail.hits} DELETE request(s)`)
+    await cd.cancel.click()
+    await h.check('d.cancel-closes', 'B', async () =>
+      (await cd.dialog.waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) || 'dialog still open')
+    await h.check('d.form-remains', 'B', async () => (await modalClose(page).count()) === 1 || 'the form closed')
+    await h.check('d.focus-returns', 'B', async () =>
+      (await opener.evaluate((el) => el === document.activeElement)) || `active ${await d.activeTestId(page)}`)
+    await h.check('d.no-inert-left', 'B', async () => {
+      const left = await d.leftoverInert(page)
+      return left.length === 0 || `still inert: ${left.join(', ')}`
+    })
+    // The retry is not refused: it deletes the entry and the caller closes its form.
+    await opener.click()
+    await cd.dialog.waitFor({ timeout: 3000 })
+    await cd.accept.click()
+    await modalClose(page).waitFor({ state: 'detached', timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('d.retry-deletes', 'B', async () => {
+      const closed = (await modalClose(page).count()) === 0 && (await cd.dialog.count()) === 0
+      const gone = (await client.api(owner.token, 'GET', `/budget-entries/${entry.id}`)).status === 404
+      return (closed && gone) || `form closed ${closed}, entry gone ${gone}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'd', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 // (f) A negative Lead Time: the browser's min check runs, its text shown inline.
 async function scenarioF(browser) {
   console.log('\n=== (f) lead time -1 (below min): the browser\'s message shown inline, nothing sent')
@@ -282,6 +345,7 @@ const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
+  ['d', scenarioD],
   ['e', scenarioE],
   ['f', scenarioF],
   ['g', scenarioG],
