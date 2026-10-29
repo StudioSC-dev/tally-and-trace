@@ -3,6 +3,7 @@ import {
   RECURRING_ACTION_LABELS,
   defaultRecurringAction,
   isCardKind,
+  recurringDateLabel,
   recurringActionsFor,
   recurringDialogTitle,
 } from './recurringActions'
@@ -81,5 +82,21 @@ describe('labels and titles', () => {
     expect(['subscription', 'installment', 'bill', 'cash', null, undefined, 'pending'].map(isCardKind)).toEqual([
       true, true, true, false, false, false, false,
     ])
+  })
+})
+
+describe('recurringDateLabel', () => {
+  it('labels each action', () => {
+    expect(recurringDateLabel('charged')).toBe('Charged on')
+    expect(recurringDateLabel('posted')).toBe('Posted on')
+    expect(recurringDateLabel('mark_paid')).toBe('Paid on')
+    expect(recurringDateLabel('mark_received')).toBe('Received on')
+  })
+
+  it('follows the default action of the row the dialog opens on', () => {
+    expect(recurringDateLabel(defaultRecurringAction({ kind: 'installment', entry_type: 'expense' }))).toBe('Posted on')
+    expect(recurringDateLabel(defaultRecurringAction({ kind: 'cash', entry_type: 'expense' }))).toBe('Paid on')
+    expect(recurringDateLabel(defaultRecurringAction({ kind: null, entry_type: 'transfer' }))).toBe('Paid on')
+    expect(recurringDateLabel(defaultRecurringAction({ kind: null, entry_type: 'income' }))).toBe('Received on')
   })
 })
