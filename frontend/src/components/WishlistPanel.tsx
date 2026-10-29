@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { queryPhase } from '@tally-trace/shared'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { useConfirm } from '../hooks/useConfirm'
 import {
   useGetWishlistQuery,
   useGetWishlistPlanQuery,
@@ -78,6 +79,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
   const [createItem] = useCreateWishlistItemMutation()
   const [updateItem] = useUpdateWishlistItemMutation()
   const [deleteItem] = useDeleteWishlistItemMutation()
+  const askConfirm = useConfirm()
 
   const closeModal = () => {
     setIsModalOpen(false)
@@ -134,12 +136,14 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
   }
 
   const handleDelete = async (item: WishlistItem) => {
-    if (!confirm(`Delete "${item.name}" from your wishlist?`)) return
-    try {
-      await deleteItem(item.id).unwrap()
-    } catch (err) {
-      console.error('Error deleting wishlist item:', err)
-    }
+    // The delete runs from the dialog, so a refusal stays there with the server's reason.
+    await askConfirm({
+      title: 'Delete wishlist item?',
+      message: `Delete "${item.name}" from your wishlist?`,
+      confirmLabel: 'Delete item',
+      action: () => deleteItem(item.id).unwrap(),
+      errorFallback: 'Could not delete the wishlist item.',
+    })
   }
 
   const formSymbol = getCurrencySymbol(form.currency)

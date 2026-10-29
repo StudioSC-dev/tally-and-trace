@@ -8,6 +8,7 @@ import {
 } from '../store/api'
 import type { ReceivedHouseholdShare, ReceivedShare, ShareRole } from '../store/api'
 import { apiErrorMessage } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
 
 const ROLE_LABELS: Record<ShareRole, string> = { viewer: 'Viewer', editor: 'Editor', admin: 'Admin' }
 
@@ -21,14 +22,18 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
   const [leaveShare] = useLeaveShareMutation()
   const [leaveHouseholdShare] = useLeaveHouseholdShareMutation()
   const [error, setError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
 
   if (shares.length === 0 && householdShares.length === 0 && !error) return null
 
   const handleLeave = async (share: ReceivedShare) => {
     const owner = share.owner_name ?? 'the owner'
-    if (!confirm(`Leave ${share.account_name}? You lose access to it and to everything you can see through it.`)) {
-      return
-    }
+    const accepted = await askConfirm({
+      title: 'Leave this share?',
+      message: `Leave ${share.account_name}? You lose access to it and to everything you can see through it.`,
+      confirmLabel: 'Leave',
+    })
+    if (!accepted) return
     setError(null)
     try {
       await leaveShare(share.id).unwrap()
@@ -40,7 +45,12 @@ export function SharedWithMe({ onLeft }: { onLeft?: () => void }) {
 
   const handleLeaveHousehold = async (share: ReceivedHouseholdShare) => {
     const sharer = share.sharer_name ?? 'this person'
-    if (!confirm(`Leave ${sharer}'s Household? You lose sight of their Household accounts and records.`)) return
+    const accepted = await askConfirm({
+      title: 'Leave this Household?',
+      message: `Leave ${sharer}'s Household? You lose sight of their Household accounts and records.`,
+      confirmLabel: 'Leave',
+    })
+    if (!accepted) return
     setError(null)
     try {
       await leaveHouseholdShare(share.id).unwrap()

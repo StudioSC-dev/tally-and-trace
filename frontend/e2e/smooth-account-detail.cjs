@@ -38,6 +38,12 @@ const daysAgo = (n) => {
   d.setUTCDate(d.getUTCDate() - n)
   return d.toISOString().slice(0, 10)
 }
+/** A YYYY-MM-DD date `n` days before `day`. */
+const before = (day, n) => {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - n)
+  return d.toISOString().slice(0, 10)
+}
 
 /** The names lookup the page makes: `GET /accounts/?limit=1000` (not `/accounts/<id>`). */
 const isAccountList = (r) => {
@@ -177,6 +183,10 @@ async function scenarioD(browser) {
       console.log('  DEBUG held', JSON.stringify({ section: held, panel: heldPanel }), 'landed', JSON.stringify({ section: after, panel, parts }))
     }
     await h.check('d.panel-landed', 'S', async () => (panel !== null) || 'the landed panel did not show')
+    await h.check('d.statement-present', 'S', async () => {
+      const n = await page.locator(tid('card-statement')).count()
+      return n >= 1 || 'no card-statement on the landed panel, so the seed has no closed statement'
+    })
     await h.check('d.section-held-still', 'B', async () => {
       if (!held || !after) return 'no section box'
       return Math.abs(after.y - held.y) <= 8 || `section y ${held.y} while held, ${after.y} after (${Math.abs(after.y - held.y)} px)`
@@ -198,8 +208,15 @@ async function setup() {
   })
   // A card with one closed statement, an open cycle and a charge dated later, so the
   // landed panel shows the planned-charges line.
-  const anchor = daysAgo(5)
+  // Defensive hardening, not a fix for an observed failure. The anchor is 10 days back so
+  // the close day (the anchor's day, clamped to the 28th) is always 10-13 days ago, and the
+  // posted charge is dated 3 days before it, clearly inside a closed statement with margin.
+  // The backend cycle includes the close day itself, so a charge on it would also belong to
+  // the closed statement. If the seed ever stopped producing a closed statement, the [S]
+  // check d.statement-present makes the run invalid rather than silently passing.
+  const anchor = daysAgo(10)
   const closeDom = Math.min(Number(anchor.slice(8, 10)), 28)
+  const lastClose = `${anchor.slice(0, 8)}${String(closeDom).padStart(2, '0')}`
   const presets = await client.get(owner.token, '/accounts/minimum-due-presets')
   card = await client.post(owner.token, '/accounts/', {
     name: 'Detail Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
@@ -207,7 +224,7 @@ async function setup() {
     minimum_due_rule: presets.find((p) => p.key === 'bdo').rule,
   })
   // A posted charge before the cycle closed, and an unposted one dated 3 days ahead.
-  for (const [day, posted] of [[daysAgo(8), true], [daysFromNow(3), false]]) {
+  for (const [day, posted] of [[before(lastClose, 3), true], [daysFromNow(3), false]]) {
     await client.post(owner.token, '/transactions/', {
       account_id: card.id, transaction_type: 'debit', amount: 700, description: 'Detail card purchase',
       transaction_date: wire(day), is_posted: posted,

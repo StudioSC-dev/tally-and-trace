@@ -9,6 +9,7 @@ import {
 } from '../store/api'
 import type { Account, AccountShare, ShareRole, UserMatch } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
 
 const ROLE_LABELS: Record<ShareRole, string> = {
   viewer: 'Viewer',
@@ -43,6 +44,7 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
   const [createShare, { isLoading: isCreating }] = useCreateAccountShareMutation()
   const [updateShare] = useUpdateAccountShareMutation()
   const [deleteShare] = useDeleteAccountShareMutation()
+  const askConfirm = useConfirm()
 
   const [email, setEmail] = useState('')
   const [match, setMatch] = useState<UserMatch | null>(null)
@@ -97,9 +99,13 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
   const handleRoleChange = async (share: AccountShare, next: ShareRole) => {
     if (next === share.role) return
     const name = share.display_name ?? 'this person'
-    if (!confirm(`Change ${name} from ${ROLE_LABELS[share.role].toLowerCase()} to ${ROLE_LABELS[next].toLowerCase()}?`)) {
-      return
-    }
+    const accepted = await askConfirm({
+      title: 'Change role?',
+      message: `Change ${name} from ${ROLE_LABELS[share.role].toLowerCase()} to ${ROLE_LABELS[next].toLowerCase()}?`,
+      confirmLabel: 'Change role',
+      tone: 'default',
+    })
+    if (!accepted) return
     setActionError(null)
     setNotice(null)
     try {
@@ -111,7 +117,12 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
 
   const handleRemove = async (share: AccountShare) => {
     const name = share.display_name ?? 'this person'
-    if (!confirm(`Stop sharing ${account.name} with ${name}? They lose access to it straight away.`)) return
+    const accepted = await askConfirm({
+      title: 'Stop sharing?',
+      message: `Stop sharing ${account.name} with ${name}? They lose access to it straight away.`,
+      confirmLabel: 'Stop sharing',
+    })
+    if (!accepted) return
     setActionError(null)
     setNotice(null)
     try {
