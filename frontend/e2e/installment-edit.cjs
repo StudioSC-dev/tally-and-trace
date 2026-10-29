@@ -12,7 +12,8 @@
 //       unchanged by the refused save, and the reopened form (no page reload) shows the
 //       current entry and saves. The entry has never been saved before, so its version is null
 //   (c) the edit form explains the count (the final-month help); the add form does not,
-//       and neither does an open-ended entry's edit form switched to "After runs"
+//       and neither does an open-ended entry's edit form switched to "After runs", nor a
+//       paused capped entry's edit form (an edit to a paused entry skips the rule)
 //   (d) a date after the plan's last payment is refused with the server's reason
 //       inline, the form stays open, and changing the count too saves
 //
@@ -214,6 +215,11 @@ async function help(browser) {
     entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Streaming', amount: 500,
     account_id: bank.id, next_occurrence: wire(firstDate()), end_mode: 'indefinite',
   })
+  await post(me.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Paused plan', amount: 800,
+    account_id: bank.id, next_occurrence: wire(firstDate()), end_mode: 'after_occurrences', max_occurrences: 4,
+    is_active: false,
+  })
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, me)
   await openAllocations(page)
@@ -235,6 +241,13 @@ async function help(browser) {
   await openEnded.getByRole('button', { name: 'After runs', exact: true }).click()
   check('(c) the open-ended entry now shows the count', await runsInput(openEnded).count(), 1)
   check('(c) the open-ended entry has no final-month help', await openEnded.getByTestId('final-month-help').count(), 0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await modalClose(page).waitFor({ state: 'detached' })
+  await waitQuiet(page)
+  // A paused capped entry: any edit to it skips the final-month rule, so it has no help.
+  const paused = await openEdit(page, entryCard(page, 'Paused plan'))
+  check('(c) the paused entry shows the count', await runsInput(paused).count(), 1)
+  check('(c) the paused entry has no final-month help', await paused.getByTestId('final-month-help').count(), 0)
   await ctx.close()
 }
 
