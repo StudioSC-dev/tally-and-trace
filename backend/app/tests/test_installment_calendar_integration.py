@@ -152,7 +152,7 @@ def test_mixed_ledger_payables_do_not_move_when_installments_post(world):
     client, db, o = world["client"], world["db"], world["o"]
     card, checking = world["card"], world["checking"]
     _set_status(db, world["tablet"], reviewed=True, auto_post=True)
-    _txn(client, o, card, 5_000, "2026-10-03")
+    _txn(client, o, card, 5_000, "2026-10-01")
     _txn(client, o, checking, 5_000, "2026-10-10", kind="transfer",
          transfer_from_account_id=checking, transfer_to_account_id=card)
     expected = [
@@ -203,7 +203,7 @@ def test_household_card_settlement_matches(world, monkeypatch):
     _set_status(db, world["tablet"], reviewed=True, auto_post=True)
     client.put(f"/api/v1/budget-entries/{world['tablet']}", json={"tag_ids": [hh]},
                headers=o["headers"]).raise_for_status()
-    _txn(client, o, card, 5_000, "2026-10-03")
+    _txn(client, o, card, 5_000, "2026-10-01")
     _txn(client, o, checking, 5_000, "2026-10-10", kind="transfer",
          transfer_from_account_id=checking, transfer_to_account_id=card)
 

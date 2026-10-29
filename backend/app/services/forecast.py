@@ -39,6 +39,7 @@ from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType, pending_face
 from app.models.transaction import RecurrenceFrequency
 from app.services.fx import FxMeta, FxRates, convert
+from app.services.installment_duplicates import held_occurrences
 from app.services.recurrence import step_occurrence
 from app.services.recurring_kinds import is_card_installment
 
@@ -2098,6 +2099,14 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     month is recorded. Unreviewed and open-ended entries keep the drop above,
     so a charge typed by hand is never counted twice before the review.
 
+    **Held months.** A reviewed card installment's month that is held by a
+    possible duplicate (``installment_duplicates.held_occurrences`` through
+    ``start``'s day: due, unrecorded, unlinked, with an unlinked charge of the
+    creator's for the same amount on the card within three days) is
+    suppressed as a linked one is. That charge is already a line on the card,
+    so the month is counted once, as the charge, until the review links it
+    (no change) or posts the month anyway (which adds it).
+
     **Due rows settle as recorded.** A reviewed card installment's line dated
     on or before ``start``'s day carries ``settles_as_recorded=True``: the
     statement settlement (``statements.build_statement_payables``,
@@ -2163,14 +2172,28 @@ def reviewed_card_installment(entry, card) -> bool:
             and is_card_installment(entry, card))
 
 
+def _held_card_months(db: Session, entries: list, cards: dict, start: datetime) -> Counter:
+    """``Counter[(entry id, day)]`` of the held months of ``entries``' reviewed
+    card installments through ``start``'s day: the canonical assignment over
+    each (creator, card) universe (``installment_duplicates.held_occurrences``),
+    so every caller suppresses the same months. Empty, with no query, when
+    none of ``entries`` is a reviewed card installment."""
+    reviewed = [e for e in entries if reviewed_card_installment(e, cards[e.account_id])]
+    if not reviewed:
+        return Counter()
+    return held_occurrences(db, reviewed, _naive(start).date())
+
+
 def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: datetime,
                              end: datetime) -> Iterator[tuple]:
     """Lazily yield ``(entry, occurrence)`` for each card-backed occurrence before
     ``end`` that ``_card_entry_charges`` bills, in its order: linked occurrences
-    suppressed and lapsed ones (statement due before ``start``) dropped, except
-    a reviewed card installment's (``reviewed_card_installment``), whose
-    unrecorded lapsed months are billed on their own cycles."""
+    and held months (``_held_card_months``) suppressed, and lapsed ones
+    (statement due before ``start``) dropped, except a reviewed card
+    installment's (``reviewed_card_installment``), whose unrecorded lapsed
+    months are billed on their own cycles."""
     linked = _linked_occurrence_days(db, [e.id for e in entries])
+    held = _held_card_months(db, entries, cards, start)
     for entry in entries:
         card = cards[entry.account_id]
         keep_lapsed = reviewed_card_installment(entry, card)
@@ -2179,6 +2202,9 @@ def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: dat
             if linked[key]:
                 linked[key] -= 1
                 continue
+            if held[key]:
+                held[key] -= 1
+                continue  # counted once, as the possible duplicate already on the card
             if (not keep_lapsed and occ < start
                     and statement_due_date(card, occ.date()) < start):
                 continue  # lapsed: its statement fell due before the window
@@ -2213,7 +2239,8 @@ def card_entries_still_bill(db: Session, card, entries: list, start: datetime) -
     statement not yet due, or when any later occurrence is, with materialised
     occurrences suppressed; it stops at the first billed occurrence. A reviewed
     card installment's unrecorded lapsed months are billed too (STU-343 Plan
-    B), so it is True while such a month is still owed. A card
+    B), so it is True while such a month is still owed; a held month is
+    suppressed, since its possible duplicate is already on the card. A card
     without cycle settings bills no statements, so it is
     ``has_unsuppressed_occurrence``, which suppresses recorded occurrences as
     ``collect_events`` does for the occurrences it lists on such a card.
