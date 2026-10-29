@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type {
+  InstallmentAutoPostRow,
   CardCharges,
   CardStatementDue,
   DashboardSnapshot,
@@ -26,6 +27,13 @@ import {
   type DueStatementRow,
   type LimitedRowsMode,
   DUE_PAGE_SIZE,
+  dueReviewNotice,
+  dueTodayLines,
+  postNowCount,
+  postNowText,
+  postedOnOpenText,
+  shouldPostOnOpen,
+  statementRowText,
   duePendingRows,
   dueRecurringRows,
   dueStatementRows,
@@ -41,7 +49,7 @@ const TODAY = '2026-10-20'
 const MODES: LimitedRowsMode[] = ['text', 'drop']
 
 function snap(
-  parts: Partial<Pick<DashboardSnapshot, 'payables' | 'upcoming_this_month' | 'card_charges' | 'card_statements_due' | 'missed'>>,
+  parts: Partial<Pick<DashboardSnapshot, 'payables' | 'upcoming_this_month' | 'card_charges' | 'card_statements_due' | 'missed' | 'installment_review' | 'installment_auto_post' | 'auto_post_scheduled'>>,
 ): DashboardSnapshot {
   return {
     balances: { total: 0, by_account: [], by_currency: [] },
@@ -56,6 +64,9 @@ function snap(
     card_charges: [],
     card_statements_due: [],
     missed: [],
+    installment_review: [],
+    installment_auto_post: [],
+    auto_post_scheduled: false,
     currencies: ['PHP'],
     fx: { rates: [], unconverted_count: 0 },
     ...parts,
@@ -140,6 +151,9 @@ const missed = (m: Partial<RecurringMissed> & Pick<RecurringMissed, 'entry_id' |
   oldest_unlinked: '2026-08-20',
   pending_transaction_ids: [],
   can_mark_paid: true,
+  auto_post: null,
+  block_reason: null,
+  can_review: false,
   ...m,
 })
 
@@ -613,6 +627,8 @@ const statementDue = (d: Partial<CardStatementDue> & Pick<CardStatementDue, 'acc
   oldest_due: '2026-10-24',
   overdue: false,
   incomplete: false,
+  unposted_installments: 0,
+  unposted_postable: 0,
   ...d,
 })
 
@@ -631,10 +647,12 @@ describe('dueStatementRows', () => {
       {
         kind: 'statement', key: 'statement:9', cardId: 9, name: 'Visa', closeDate: '2026-10-03', dueDate: '2026-10-24',
         oldestDue: '2026-10-24', overdue: false, statements: 1, amount: 4200, currency: 'PHP', incomplete: false,
+        unposted: 0, unpostedPostable: 0,
       },
       {
         kind: 'statement', key: 'statement:4', cardId: 4, name: 'Zed Card', closeDate: '2026-09-28', dueDate: '2026-10-19',
         oldestDue: '2026-09-19', overdue: true, statements: 2, amount: 310.5, currency: 'USD', incomplete: true,
+        unposted: 0, unpostedPostable: 0,
       },
     ])
   })
@@ -749,5 +767,179 @@ describe('effectiveDuePage', () => {
     const persisted = { page: shown, day: TODAY }
     // When the rows arrive again the reader is still on page 1.
     expect(pageWindow(9, effectiveDuePage(persisted, TODAY), DUE_PAGE_SIZE).page).toBe(1)
+  })
+})
+
+const apRow = (r: Partial<InstallmentAutoPostRow> & Pick<InstallmentAutoPostRow, 'entry_id' | 'name'>): InstallmentAutoPostRow => ({
+  account_name: 'Visa',
+  due_count: 1,
+  postable_count: 1,
+  oldest: TODAY,
+  state: 'on',
+  block_reason: null,
+  can_post: true,
+  can_review: true,
+  ...r,
+})
+
+describe('installment auto-post in the due section', () => {
+  it('a missed installment row carries its state, reason and label', () => {
+    const s = snap({
+      auto_post_scheduled: true,
+      missed: [missed({ entry_id: 5, name: 'Tablet', capped: true, auto_post: 'on', can_review: true })],
+    })
+    const [row] = missedRows(dueRecurringRows(s, TODAY))
+    expect(row?.autoPost).toBe('on')
+    expect(row?.autoPostLabel).toBe('Auto-posts each morning')
+    expect(row?.review).toBe(false)
+  })
+
+  it('shows Review on an unreviewed or held row only with can_review', () => {
+    const rowFor = (auto_post: 'unreviewed' | 'held', can_review: boolean) =>
+      missedRows(dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'Tablet', auto_post, can_review })] }), TODAY))[0]
+    expect(rowFor('unreviewed', true)?.review).toBe(true)
+    expect(rowFor('held', true)?.review).toBe(true)
+    expect(rowFor('unreviewed', false)?.review).toBe(false)
+    expect(rowFor('held', false)?.review).toBe(false)
+    expect(rowFor('unreviewed', false)?.autoPostLabel).toBe('Review to auto-post')
+  })
+
+  it('carries a blocked reason into the label, and no state for a plain missed row', () => {
+    const blocked = missedRows(
+      dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'T', auto_post: 'blocked', block_reason: 'foreign_currency' })] }), TODAY),
+    )[0]
+    expect(blocked?.blockReason).toBe('foreign_currency')
+    expect(blocked?.autoPostLabel).toContain('another currency')
+    const plain = missedRows(dueRecurringRows(snap({ missed: [missed({ entry_id: 6, name: 'Rent' })] }), TODAY))[0]
+    expect(plain?.autoPost).toBeNull()
+    expect(plain?.autoPostLabel).toBeNull()
+    expect(plain?.review).toBe(false)
+  })
+
+  it('a card missed row has no auto-post state', () => {
+    const s = snap({ card_charges: [card({ missed: [cardMissed({ entry_id: 3, name: 'Netflix' })] })] })
+    expect(missedRows(dueRecurringRows(s, TODAY))[0]?.autoPost).toBeNull()
+  })
+})
+
+describe('dueReviewNotice', () => {
+  it('is null with nothing to review', () => {
+    expect(dueReviewNotice(snap({}))).toBeNull()
+  })
+  it('counts the installments and lists one entry each', () => {
+    const one = dueReviewNotice(snap({ installment_review: [{ entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 2 }] }))
+    expect(one?.text).toBe("1 card installment doesn't auto-post yet")
+    expect(one?.entries).toEqual([{ entryId: 1, name: 'Tablet', accountName: 'Visa', missedCount: 2 }])
+    const two = dueReviewNotice(
+      snap({
+        installment_review: [
+          { entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 2 },
+          { entry_id: 2, name: 'Phone', account_name: 'Visa', missed_count: 0 },
+        ],
+      }),
+    )
+    expect(two?.text).toBe("2 card installments don't auto-post yet")
+  })
+})
+
+describe('postNowCount', () => {
+  it('sums postable_count: a held row adds its postable months, off and blocked add 0', () => {
+    const s = snap({
+      installment_auto_post: [
+        apRow({ entry_id: 1, name: 'A', postable_count: 2 }),
+        apRow({ entry_id: 2, name: 'B', state: 'held', due_count: 4, postable_count: 1 }),
+        apRow({ entry_id: 3, name: 'C', state: 'off', postable_count: 0 }),
+        apRow({ entry_id: 4, name: 'D', state: 'blocked', block_reason: 'ambiguous', postable_count: 0 }),
+        apRow({ entry_id: 5, name: 'E', can_post: false, postable_count: 0 }),
+      ],
+    })
+    expect(postNowCount(s)).toBe(3)
+  })
+  it('is 0 with no rows, and has no button text then', () => {
+    expect(postNowCount(snap({}))).toBe(0)
+    expect(postNowText(0)).toBeNull()
+  })
+  it('words the button and the quiet line by count', () => {
+    expect(postNowText(1)).toBe('Post 1 due installment month now')
+    expect(postNowText(3)).toBe('Post 3 due installment months now')
+    expect(postedOnOpenText(0)).toBeNull()
+    expect(postedOnOpenText(1)).toBe('Posted 1 due installment month')
+    expect(postedOnOpenText(2)).toBe('Posted 2 due installment months')
+  })
+})
+
+describe('shouldPostOnOpen', () => {
+  it('is true exactly when postNowCount is above 0', () => {
+    expect(shouldPostOnOpen(snap({}))).toBe(false)
+    expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A', postable_count: 0, state: 'off' })] }))).toBe(false)
+    expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A' })] }))).toBe(true)
+    expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A', state: 'held', postable_count: 1, due_count: 3 })] }))).toBe(true)
+  })
+})
+
+describe('dueTodayLines', () => {
+  it('lists an installment due today that no missed row covers, with its state label', () => {
+    const s = snap({
+      auto_post_scheduled: false,
+      installment_auto_post: [apRow({ entry_id: 1, name: 'Phone', due_count: 1 })],
+    })
+    const [line] = dueTodayLines(s)
+    expect(line?.text).toBe('Phone · 1 due today · Auto-posts when you open Transactions')
+    expect(line?.canPost).toBe(true)
+  })
+  it('leaves out an entry a missed row already shows', () => {
+    const s = snap({
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3 })],
+      missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on' })],
+    })
+    expect(dueTodayLines(s)).toEqual([])
+  })
+  it('offers Review only for an unreviewed or held row the caller can review', () => {
+    const s = snap({
+      installment_auto_post: [
+        apRow({ entry_id: 1, name: 'A', state: 'unreviewed', postable_count: 0 }),
+        apRow({ entry_id: 2, name: 'B', state: 'held', can_review: false }),
+        apRow({ entry_id: 3, name: 'C', state: 'on' }),
+      ],
+    })
+    expect(dueTodayLines(s).map((l) => l.canReview)).toEqual([true, false, false])
+  })
+})
+
+describe('statementRowText', () => {
+  it('reads an unposted-only row with Review or Mark paid below and no Pay', () => {
+    const out = statementRowText({ amount: 0, unposted: 3, unpostedPostable: 0 })
+    expect(out.unpostedOnly).toBe(true)
+    expect(out.text).toBe('3 installment months not yet posted')
+    expect(out.guidance).toBe('Review or Mark paid below')
+    expect(out.pay).toBe(false)
+    expect(out.post).toBe(false)
+  })
+  it('offers Post now, and no guidance, when an unposted-only row has postable months', () => {
+    const out = statementRowText({ amount: 0, unposted: 2, unpostedPostable: 2 })
+    expect(out.post).toBe(true)
+    expect(out.guidance).toBeNull()
+    expect(out.pay).toBe(false)
+  })
+  it('keeps Pay and adds the unposted note when Full is above 0', () => {
+    const out = statementRowText({ amount: 4200, unposted: 3, unpostedPostable: 1 })
+    expect(out.unpostedOnly).toBe(false)
+    expect(out.pay).toBe(true)
+    expect(out.text).toBeNull()
+    expect(out.note).toBe(
+      'Full leaves out 3 installment months not yet posted. 2 of them need Review or Mark paid in Due and overdue',
+    )
+  })
+  it('is a plain Plan C row with no unposted months', () => {
+    expect(statementRowText({ amount: 4200, unposted: 0, unpostedPostable: 0 })).toEqual({
+      unpostedOnly: false, text: null, note: null, pay: true, post: false, guidance: null,
+    })
+  })
+  it('maps the unposted counts from the snapshot onto the row', () => {
+    const [row] = dueStatementRows(
+      snap({ card_statements_due: [statementDue({ account_id: 9, name: 'Visa', clear_through: 0, unposted_installments: 3, unposted_postable: 1 })] }),
+    )
+    expect(row?.unposted).toBe(3)
+    expect(row?.unpostedPostable).toBe(1)
   })
 })

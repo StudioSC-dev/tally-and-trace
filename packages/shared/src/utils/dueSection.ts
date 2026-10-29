@@ -2,12 +2,16 @@ import type {
   DashboardSnapshot,
   Estimate,
   FullTransaction,
+  InstallmentAutoPostState,
+  InstallmentBlockReason,
   SharedFullTransaction,
   Transaction,
 } from '../types/api'
 import { isLimitedEvent } from '../types/api'
 import type { CurrencyCode } from './currency'
 import { formatEntryDate } from './entryDate'
+import { unpostedNote } from './cardPay'
+import { autoPostLabel } from './installmentReview'
 import { type RecurringAction, recurringActionsFor } from './recurringActions'
 import { wallDay } from './transactionList'
 
@@ -77,6 +81,13 @@ export interface DueMissedRow {
   text: string
   can_mark_paid: boolean
   actions: RecurringAction[]
+  /** A card installment's auto-post state; null for any other entry. */
+  autoPost: InstallmentAutoPostState | null
+  blockReason: InstallmentBlockReason | null
+  /** The state's label (see `autoPostLabel`); null with no state. */
+  autoPostLabel: string | null
+  /** Show Review: the caller can review it, and it is unreviewed or held. */
+  review: boolean
 }
 
 /** A Limited payable or card charge, shown as text with no actions. */
@@ -221,6 +232,9 @@ interface MissedSource {
   unlinked_count: number
   oldest_unlinked: string | null
   can_mark_paid: boolean
+  auto_post: InstallmentAutoPostState | null
+  block_reason: InstallmentBlockReason | null
+  can_review: boolean
 }
 
 function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
@@ -238,6 +252,9 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
       unlinked_count: m.unlinked_count,
       oldest_unlinked: m.oldest_unlinked,
       can_mark_paid: m.can_mark_paid,
+      auto_post: null,
+      block_reason: null,
+      can_review: false,
     })),
   )
   const other: MissedSource[] = snapshot.missed.map((m) => ({
@@ -253,6 +270,9 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
     unlinked_count: m.unlinked_count,
     oldest_unlinked: m.oldest_unlinked,
     can_mark_paid: m.can_mark_paid,
+    auto_post: m.auto_post,
+    block_reason: m.block_reason,
+    can_review: m.can_review,
   }))
   return [...card, ...other]
 }
@@ -373,6 +393,10 @@ export function dueRecurringRows(
       can_mark_paid: m.can_mark_paid,
       // The oldest unlinked occurrence has no pending link and no posted one.
       actions: recurringActionsFor({ kind: m.kind, entry_type: m.entry_type, can_mark_paid: m.can_mark_paid }),
+      autoPost: m.auto_post,
+      blockReason: m.block_reason,
+      autoPostLabel: autoPostLabel(m.auto_post, snapshot.auto_post_scheduled, m.block_reason),
+      review: m.can_review && (m.auto_post === 'unreviewed' || m.auto_post === 'held'),
     })
   }
 
@@ -470,6 +494,10 @@ export interface DueStatementRow {
   currency: CurrencyCode
   /** Some foreign charge has no exchange rate, so `amount` may be low. */
   incomplete: boolean
+  /** Installment months on closed statements that are not posted yet. */
+  unposted: number
+  /** Of `unposted`, the months Post now would record. */
+  unpostedPostable: number
 }
 
 /** Group C. One row per card in `card_statements_due`, in the server's order. */
@@ -487,7 +515,117 @@ export function dueStatementRows(snapshot: DashboardSnapshot): DueStatementRow[]
     amount: s.clear_through,
     currency: s.currency,
     incomplete: s.incomplete,
+    unposted: s.unposted_installments,
+    unpostedPostable: s.unposted_postable,
   }))
+}
+
+/**
+ * How a statement row reads. `unpostedOnly`: nothing recorded is owed (`amount` 0) but
+ * installment months are not posted yet; `text` says so, there is no Pay, and `guidance`
+ * points to Review or Mark paid when Post now can record none of them. Otherwise it is a
+ * Plan C row (`pay` true), and `note` repeats the Pay dialog's warning about unposted months.
+ */
+export function statementRowText(
+  row: Pick<DueStatementRow, 'amount' | 'unposted' | 'unpostedPostable'>,
+): {
+  unpostedOnly: boolean
+  text: string | null
+  note: string | null
+  pay: boolean
+  post: boolean
+  guidance: string | null
+} {
+  const unpostedOnly = row.amount <= 0 && row.unposted > 0
+  const note = !unpostedOnly ? unpostedNote(row.unposted, row.unpostedPostable) : null
+  return {
+    unpostedOnly,
+    text: unpostedOnly ? `${row.unposted} installment ${row.unposted === 1 ? 'month' : 'months'} not yet posted` : null,
+    note: note === null ? null : note.review === null ? note.text : `${note.text}. ${note.review}`,
+    pay: row.amount > 0,
+    post: row.unpostedPostable > 0,
+    guidance: unpostedOnly && row.unpostedPostable === 0 ? 'Review or Mark paid below' : null,
+  }
+}
+
+/** The months Post now would record: the sum of `postable_count` over the snapshot's installment rows. */
+export function postNowCount(snapshot: Pick<DashboardSnapshot, 'installment_auto_post'>): number {
+  return snapshot.installment_auto_post.reduce((sum, row) => sum + row.postable_count, 0)
+}
+
+/** The Post now button's text; null at 0, when there is no button. */
+export function postNowText(count: number): string | null {
+  if (count <= 0) return null
+  return `Post ${count} due installment ${count === 1 ? 'month' : 'months'} now`
+}
+
+/** What the button reports after posting. */
+export function postedResultText(posted: number): string {
+  return `Posted ${posted}`
+}
+
+/** The quiet line after a page-open run posted months; null when it posted none. */
+export function postedOnOpenText(posted: number): string | null {
+  if (posted <= 0) return null
+  return `Posted ${posted} due installment ${posted === 1 ? 'month' : 'months'}`
+}
+
+/** Whether Due and overdue sends the page-open POST for this fresh snapshot: exactly when Post now has something. */
+export function shouldPostOnOpen(snapshot: Pick<DashboardSnapshot, 'installment_auto_post'>): boolean {
+  return postNowCount(snapshot) > 0
+}
+
+/** The notice for card installments that do not auto-post yet; null when there are none. */
+export function dueReviewNotice(
+  snapshot: Pick<DashboardSnapshot, 'installment_review'>,
+): { text: string; entries: Array<{ entryId: number; name: string; accountName: string; missedCount: number }> } | null {
+  const rows = snapshot.installment_review
+  if (rows.length === 0) return null
+  return {
+    text: rows.length === 1 ? "1 card installment doesn't auto-post yet" : `${rows.length} card installments don't auto-post yet`,
+    entries: rows.map((r) => ({ entryId: r.entry_id, name: r.name, accountName: r.account_name, missedCount: r.missed_count })),
+  }
+}
+
+/** A compact line for a reviewed installment whose only due month is today (it has no missed row). */
+export interface DueTodayLine {
+  key: string
+  entryId: number
+  name: string
+  accountName: string
+  dueCount: number
+  postableCount: number
+  state: InstallmentAutoPostState
+  label: string | null
+  /** "<name> · N due today · <state label>". */
+  text: string
+  canReview: boolean
+  canPost: boolean
+}
+
+/** One line per installment the snapshot lists as due that no missed row already covers. */
+export function dueTodayLines(snapshot: DashboardSnapshot): DueTodayLine[] {
+  const covered = new Set<number>()
+  for (const m of missedSources(snapshot)) if (m.unlinked_count > 0 && m.oldest_unlinked !== null) covered.add(m.entry_id)
+  return snapshot.installment_auto_post
+    .filter((r) => r.due_count > 0 && !covered.has(r.entry_id))
+    .map((r) => {
+      const label = autoPostLabel(r.state, snapshot.auto_post_scheduled, r.block_reason)
+      const head = `${r.name} · ${r.due_count} due today`
+      return {
+        key: `due-today:${r.entry_id}`,
+        entryId: r.entry_id,
+        name: r.name,
+        accountName: r.account_name,
+        dueCount: r.due_count,
+        postableCount: r.postable_count,
+        state: r.state,
+        label,
+        text: label === null ? head : `${head} · ${label}`,
+        canReview: r.can_review && (r.state === 'unreviewed' || r.state === 'held'),
+        canPost: r.can_post,
+      }
+    })
 }
 
 /**
