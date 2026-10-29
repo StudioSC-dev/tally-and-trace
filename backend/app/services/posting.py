@@ -732,3 +732,27 @@ def post_due_installments(db: Session, *, through: date, actor_scope: Optional[U
             result.skipped[reason] += 1
         result.entries.append({"entry_id": entry_id, "posted": posted, "skipped_reason": reason})
     return result
+
+
+def _claim_page_open_sql(db: Session, user: User, now: datetime) -> bool:
+    """Take ``user``'s page-open slot at ``now``, without committing: one atomic
+    ``UPDATE … RETURNING`` that succeeds only when the last claim is older than
+    15 minutes (or there is none). A second claim made meanwhile waits on the
+    row lock, re-reads the row once the first commits, and returns no row."""
+    from sqlalchemy import text
+
+    row = db.execute(text(
+        "UPDATE users SET installments_page_posted_at = :now "
+        "WHERE id = :uid AND (installments_page_posted_at IS NULL "
+        "OR installments_page_posted_at <= CAST(:now AS timestamptz) - interval '15 minutes') "
+        "RETURNING id"), {"now": now, "uid": user.id}).first()
+    return row is not None
+
+
+def claim_page_open(db: Session, user: User) -> bool:
+    """Whether ``user`` may run the page-open auto-post now; the claim is
+    committed on its own, before any posting lock is taken, so a run that then
+    fails still uses its 15 minutes."""
+    claimed = _claim_page_open_sql(db, user, utc_now())
+    db.commit()
+    return claimed

@@ -820,14 +820,15 @@ def test_backstop_roles(world):
     for who in ("o", "a", "e"):
         tablet = _reviewed(w, name=f"Tablet {who}")
         body = _backstop(w["client"], w[who], through="2026-08-01")  # ignored
-        assert body == {"posted": 4, "skipped": {},
+        assert body == {"trigger": "button", "throttled": False, "posted": 4, "skipped": {},
                         "entries": [{"entry_id": tablet, "posted": 4, "skipped_reason": None}]}
         assert [(r[1], r[3], r[4]) for r in _rows(db, tablet)] == [
             (m, w["o"]["id"], w[who]["id"]) for m in MONTHS]
     for who in ("v", "t"):
         tablet = _reviewed(w, name=f"Tablet {who}")
         before = _entry(db, tablet)
-        assert _backstop(w["client"], w[who]) == {"posted": 0, "skipped": {}, "entries": []}
+        assert _backstop(w["client"], w[who]) == {"trigger": "button", "throttled": False,
+                                                  "posted": 0, "skipped": {}, "entries": []}
         assert _rows(db, tablet) == []
         assert _entry(db, tablet) == before
 

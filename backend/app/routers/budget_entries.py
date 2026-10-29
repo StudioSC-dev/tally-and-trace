@@ -44,6 +44,7 @@ from app.schemas.budget_entry import (
     BudgetEntryMaterialize,
     EntryOccurrences,
     MaterializeDueResult,
+    PostDueInstallmentsRequest,
     PostDueInstallmentsResult,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
@@ -789,6 +790,7 @@ def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> Budge
 
 @router.post("/post-due-installments", response_model=PostDueInstallmentsResult)
 def post_due_installments(
+    payload: PostDueInstallmentsRequest = PostDueInstallmentsRequest(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -798,10 +800,19 @@ def post_due_installments(
     entry's creator). The same run as the daily job, under the same locks, so
     whichever runs second finds nothing due. A ``through`` is not accepted.
     Each entry commits on its own; one that cannot post is listed with its
-    reason and the rest still run."""
+    reason and the rest still run.
+
+    ``trigger`` is ``button`` (Post now, the default) or ``page_open`` (the
+    Transactions page's automatic run). A page-open run first claims the
+    caller's 15-minute slot (``posting.claim_page_open``, committed on its
+    own); without it the response is ``throttled`` and nothing is posted.
+    Post now is never throttled."""
+    if payload.trigger == "page_open" and not posting.claim_page_open(db, current_user):
+        return {"trigger": payload.trigger, "throttled": True, "posted": 0, "skipped": {},
+                "entries": []}
     result = posting.post_due_installments(db, through=manila_today(), actor_scope=current_user)
-    return {"posted": result.posted, "skipped": dict(result.skipped),
-            "entries": result.entries}
+    return {"trigger": payload.trigger, "throttled": False, "posted": result.posted,
+            "skipped": dict(result.skipped), "entries": result.entries}
 
 
 @router.get("/{entry_id}/occurrences", response_model=EntryOccurrences)

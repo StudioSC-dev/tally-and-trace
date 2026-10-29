@@ -286,6 +286,13 @@ class MaterializeDueResult(BaseModel):
     is_active: bool
 
 
+class PostDueInstallmentsRequest(BaseModel):
+    """POST /budget-entries/post-due-installments: who asked. ``page_open`` is
+    the Transactions page's automatic run, throttled per user; ``button`` is
+    Post now, never throttled."""
+    trigger: Literal["button", "page_open"] = "button"
+
+
 class PostDueEntry(BaseModel):
     """One entry of a backstop run: months posted, and why it stopped (null when it did not)."""
     entry_id: int
@@ -298,8 +305,11 @@ class PostDueInstallmentsResult(BaseModel):
 
     ``posted`` counts months that moved money (new rows and posted pending
     rows); ``skipped`` counts entries by reason. Every listed entry is one the
-    caller can edit.
+    caller can edit. ``throttled`` is a page-open run refused because the
+    caller's last one was under 15 minutes ago; it posts nothing.
     """
+    trigger: Literal["button", "page_open"]
+    throttled: bool
     posted: int
     skipped: dict[str, int]
     entries: List[PostDueEntry]

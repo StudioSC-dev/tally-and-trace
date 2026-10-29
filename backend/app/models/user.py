@@ -40,6 +40,10 @@ class User(Base):
                    use_alter=True),
         nullable=True,
     )
+    # The last page-open run of the card installment auto-post (STU-343 Plan B):
+    # one run per user per 15 minutes (services/posting.py ``claim_page_open``).
+    # Operational state: not exported, not in any response.
+    installments_page_posted_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", foreign_keys="Account.user_id")
