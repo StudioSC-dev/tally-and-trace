@@ -19,6 +19,7 @@ import {
   recordDateMax,
   RECURRING_ACTION_LABELS,
   recurringActionsFor,
+  recurringDateLabel,
   recurringDialogTitle,
   defaultRecurringAction,
   sameStatementCycle,
@@ -283,7 +284,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const handleSubmit = async (submitted: RecurringAction) => {
     if (!selected) return
     if (!day) {
-      setError('Choose the day it was paid')
+      setError('Choose the date')
       return
     }
     const dateError = recordDateError(day)
@@ -432,7 +433,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
 
               {selected && (
                 <div>
-                  <label className="label" htmlFor={`${titleId}-day`}>Paid on</label>
+                  <label className="label" htmlFor={`${titleId}-day`}>{recurringDateLabel(primaryAction)}</label>
                   <input
                     id={`${titleId}-day`}
                     type="date"

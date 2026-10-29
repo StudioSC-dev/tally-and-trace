@@ -126,6 +126,15 @@ export function accountLeg(row: Transaction, accountId: number, accountCurrency:
   return { ...NO_LEG, direction: null, currency: row.currency }
 }
 
+/** The figure a row lists as its amount, with its currency. Unposted non-Limited debit/credit with a foreign face: the face in its own currency; every other row: `amount` in `currency` (unchanged). */
+export function rowAmount(row: Transaction, accountCurrency: CurrencyCode): { amount: number; currency: CurrencyCode } {
+  if (row.view !== 'limited' && !row.is_posted && row.transaction_type !== 'transfer') {
+    const leg = accountLeg(row, row.account_id, accountCurrency)
+    return { amount: Math.abs(leg.signed), currency: leg.currency }
+  }
+  return { amount: row.amount, currency: row.currency }
+}
+
 /**
  * The category name to show. A Full row only has an id, looked up in the caller's own
  * categories; the other shapes carry the name.

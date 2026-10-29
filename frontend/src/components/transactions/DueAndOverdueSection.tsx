@@ -13,6 +13,7 @@ import {
   orderDueRows,
   pageWindow,
   pendingLinkIds,
+  rowAmount,
   transactionDescription,
 } from '@tally-trace/shared'
 import type {
@@ -30,6 +31,7 @@ import { useManilaDay } from '../../hooks/useManilaDay'
 import { accountingApi, useGetDashboardSnapshotQuery } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
+import type { CurrencyCode } from '../../utils/currency'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
 import { MarkPaidDialog } from '../MarkPaidDialog'
@@ -125,6 +127,8 @@ interface Props {
   onPost: (transaction: Transaction) => void
   /** After a recurring occurrence is recorded: refresh the page's lists. */
   onChanged: () => void
+  /** Each account's currency by id, so a pending foreign row shows its face in its own currency; a row whose account is missing keeps its stored figure. */
+  accountCurrencies?: ReadonlyMap<number, CurrencyCode>
 }
 
 interface RecordTarget {
@@ -139,7 +143,7 @@ const buttonClass =
 const primaryButtonClass =
   'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
 
-export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
+export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrencies }: Props) {
   const panelId = useId()
   const [open, setOpen] = useState(true)
   const [target, setTarget] = useState<RecordTarget | null>(null)
@@ -213,6 +217,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
 
   const pendingRow = (row: DuePendingRow) => {
     const txn = row.transaction
+    const accountCurrency = accountCurrencies?.get(txn.account_id)
+    const shown = accountCurrency ? rowAmount(txn, accountCurrency) : { amount: txn.amount, currency: txn.currency }
     return (
       <li
         key={row.key}
@@ -230,7 +236,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged }: Props) {
           </p>
         </div>
         <div className="flex-shrink-0 space-y-1 text-right">
-          <p className="text-sm font-semibold text-ink">{formatCurrency(txn.amount, txn.currency)}</p>
+          <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
           {row.action && (
             <button
               type="button"
