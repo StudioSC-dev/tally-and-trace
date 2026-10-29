@@ -102,9 +102,13 @@ const netWorthGroup = (page) => page.locator('[data-onboarding="financial-snapsh
 
 const WATCHED = ['net-worth', 'available-cash', 'period-income', 'period-expenses', 'period-net-flow', 'payables-count', 'payable-status']
 
-/** A fresh page that records the dashboard's figures from its first document. */
-async function openPage(browser) {
-  const { ctx, page } = await h.newPage(browser)
+/**
+ * A fresh page that records the dashboard's figures from its first document. `clockAt`
+ * (an ISO instant) pins the page clock there, running, in the Asia/Manila zone.
+ */
+async function openPage(browser, { clockAt } = {}) {
+  const { ctx, page } = await h.newPage(browser, clockAt ? { timezoneId: 'Asia/Manila' } : {})
+  if (clockAt) await page.clock.install({ time: new Date(clockAt) })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, WATCHED, { attributes: ['aria-label'] })
   const requests = h.logRequests(page)
@@ -163,11 +167,19 @@ async function scenarioA(browser) {
 async function scenarioB(browser) {
   console.log('\n=== (b) summary held: actual totals never flash zero')
   const u = await seed('b')
-  const { ctx, page, requests } = await openPage(browser)
+  // The page clock is pinned to Manila midday of the seeded day (04:00Z). The dashboard's
+  // period window ends at the real instant `now`, so between Manila 00:00 and 08:00 a row
+  // dated Manila today (00:00Z) falls after it and the API sums it as 0. That is an app gap
+  // (STU-466), not this scenario's concern; the pin keeps the run independent of the wall clock.
+  const { ctx, page, requests } = await openPage(browser, { clockAt: `${today}T04:00:00Z` })
   let g
   try {
     g = await h.gate(page, isSummary)
     await h.uiLogin(page, stack, u)
+    await h.check('b.page-day-is-seeded-day', 'S', async () => {
+      const day = await h.localDay(page)
+      return day === today || `page day ${day}, seeded day ${today}`
+    })
     await h.check('b.summary-held', 'S', async () => (await g.waitHits(1)) || 'summary never requested')
     await page.locator(tid('net-worth')).waitFor()
     await h.sleep(500)
