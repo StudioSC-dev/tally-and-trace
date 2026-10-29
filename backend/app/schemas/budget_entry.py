@@ -102,6 +102,10 @@ class BudgetEntryUpdate(BaseModel):
     occurrences_paid_offset: Optional[int] = Field(None, ge=0, le=360)
     billing_kind: Optional[BillingKind] = None
     tag_ids: Optional[TagIds] = tag_ids_update_field()
+    # The ``updated_at`` of the copy the edit was made from, sent back unchanged.
+    # When sent (null included) it must equal the stored value exactly, or the
+    # edit is refused with 409. Omitted, the edit is not checked. Never stored.
+    expected_updated_at: Optional[datetime] = None
 
     @field_validator("tag_ids")
     @classmethod

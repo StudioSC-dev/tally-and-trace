@@ -17,7 +17,9 @@ import {
   parseEntryDate,
   resolveEntryDayFields,
   settleKindChoice,
+  finalMonthHelp,
   toWireWallTime,
+  withLoadedVersion,
 } from '@tally-trace/shared'
 import type { BillingKindChoice, DaySetting } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
@@ -26,6 +28,7 @@ import { useCurrency } from '../hooks/useCurrency'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
+import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
 
@@ -97,6 +100,8 @@ interface RecurringEntryFormModalProps {
   budgetEnvelopes: Allocation[]
   onClose: () => void
   onSaved: () => void | Promise<void>
+  /** Called on any 409 refusal of a save (a stale copy or an ended schedule): reload the caller's entries so reopening shows the current one. */
+  onStale?: () => void
   onDeleted: () => void | Promise<void>
 }
 
@@ -111,12 +116,15 @@ export function RecurringEntryFormModal({
   budgetEnvelopes,
   onClose,
   onSaved,
+  onStale,
   onDeleted,
 }: RecurringEntryFormModalProps) {
   const { currencyCode: defaultCurrencyCode } = useCurrency()
   const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
   const [createBudgetEntry] = useCreateBudgetEntryMutation()
   const [updateBudgetEntry] = useUpdateBudgetEntryMutation()
+  // The server's reason for a refused save (a stale copy, a final-month rule), shown above Save.
+  const [saveError, setSaveError] = useState('')
   const deleteRecurringEntry = useDeleteRecurringEntry()
 
   // A recurring entry is written like a transaction: only to accounts the caller may add to.
@@ -286,6 +294,7 @@ export function RecurringEntryFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSaveError('')
     try {
       if (!subscriptionForm.name.trim()) {
         alert('Please provide a name for the recurring entry.')
@@ -395,13 +404,23 @@ export function RecurringEntryFormModal({
         // refuses an edit that sends them.
         const { category_id, allocation_id, ...sharedPayload } = subscriptionPayload
         const data = isSharedFull(editingBudgetEntry) ? sharedPayload : { ...sharedPayload, category_id, allocation_id }
-        await updateBudgetEntry({ id: editingBudgetEntry.id, data }).unwrap()
+        // The version this form loaded, so a save from a stale copy is refused rather than overwriting.
+        await updateBudgetEntry({ id: editingBudgetEntry.id, data: withLoadedVersion(data, editingBudgetEntry) }).unwrap()
       } else {
         await createBudgetEntry(subscriptionPayload).unwrap()
       }
-      await onSaved()
     } catch (error) {
       console.error('Error saving allocation data:', error)
+      if (apiErrorStatus(error) === 409) onStale?.()
+      setSaveError(apiErrorMessage(error) || 'Could not save the recurring entry. Please try again.')
+      return
+    }
+    // The save went through: a failed reload after it is not a failed save, so
+    // it is logged rather than reported as one.
+    try {
+      await onSaved()
+    } catch (error) {
+      console.error('Error reloading after saving the recurring entry:', error)
     }
   }
 
@@ -824,6 +843,16 @@ export function RecurringEntryFormModal({
                     <p className="mt-1 text-xs text-muted">
                       Stop once this many transactions have been created.
                     </p>
+                    {/* Only a stored active capped entry with payments left has a last payment to keep:
+                        an edit to a paused entry keeps the pause behaviour instead. */}
+                    {editingBudgetEntry &&
+                      editingBudgetEntry.is_active &&
+                      editingBudgetEntry.end_mode === 'after_occurrences' &&
+                      (editingBudgetEntry.max_occurrences ?? 0) > 0 && (
+                      <p className="mt-1 text-xs text-muted" data-testid="final-month-help">
+                        {finalMonthHelp}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -935,6 +964,12 @@ export function RecurringEntryFormModal({
                   rows={3}
                 />
               </div>
+
+          {saveError && (
+            <p className="text-sm text-danger" role="alert" data-testid="recurring-save-error">
+              {saveError}
+            </p>
+          )}
 
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button

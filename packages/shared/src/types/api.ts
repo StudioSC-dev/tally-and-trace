@@ -488,6 +488,12 @@ export type BudgetEntryInput = Partial<
   TagIdsInput & {
     /** Installments paid before import with no linked transaction. */
     occurrences_paid_offset?: number
+    /**
+     * PUT only: the `updated_at` of the entry the form loaded, sent back unchanged.
+     * `null` is sent for an entry never updated; only an absent field skips the
+     * check. The server refuses with 409 when the entry has changed since.
+     */
+    expected_updated_at?: string | null
   }
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
