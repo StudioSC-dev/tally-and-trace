@@ -8,6 +8,7 @@ import {
 } from '../store/api'
 import type { HouseholdShare, UserMatch } from '../store/api'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
 
 const lookupErrorMessage = (error: unknown): string => {
   if (apiErrorStatus(error) === 429) return 'Too many lookups, try again shortly'
@@ -26,6 +27,7 @@ export function HouseholdShares() {
   const [lookupUser, { isFetching: isLooking }] = useLazyLookupUserQuery()
   const [createShare, { isLoading: isCreating }] = useCreateHouseholdShareMutation()
   const [deleteShare] = useDeleteHouseholdShareMutation()
+  const askConfirm = useConfirm()
 
   const [email, setEmail] = useState('')
   const [match, setMatch] = useState<UserMatch | null>(null)
@@ -75,9 +77,12 @@ export function HouseholdShares() {
 
   const handleRemove = async (share: HouseholdShare) => {
     const name = share.display_name ?? 'this person'
-    if (!confirm(`Stop sharing your Household with ${name}? They lose sight of your Household accounts and records straight away.`)) {
-      return
-    }
+    const accepted = await askConfirm({
+      title: 'Stop sharing your Household?',
+      message: `Stop sharing your Household with ${name}? They lose sight of your Household accounts and records straight away.`,
+      confirmLabel: 'Stop sharing',
+    })
+    if (!accepted) return
     setActionError(null)
     setNotice(null)
     try {

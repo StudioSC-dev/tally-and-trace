@@ -27,6 +27,7 @@ on Playwright. Run them by hand when you change the auth or session code.
 | `smooth-due.cjs` | STU-335: the "Due and overdue" count shows a placeholder until the linked rows first load, never a number that then ticks up |
 | `smooth-household.cjs` | STU-335: the household title waits for the sharer's name (a failed request shows "Household" and the alert); household transaction rows wait for account names (a failed dashboard request shows rows and a note) |
 | `dialogs-settings.cjs` | STU-410: deleting a category or a tag asks through the in-app Confirm dialog, never the browser's: its semantics, focus on Cancel, the Tab trap and Escape (a); Confirm deletes (b); a refused category delete keeps the dialog open with the server's reason (c); a refused tag delete shows in the tag list (d); a move to another page before accepting (e) or while the delete is held (f) closes it, with no request or no error. Every scenario checks that no browser dialog fired |
+| `dialogs-sharing.cjs` | STU-410: changing a share's role (cancelled, then confirmed) (a, b), stopping an account share or the Household share (c), leaving a share or a Household (d) and deleting a wishlist item (e) ask through the in-app Confirm dialog, never the browser's; a refused wishlist delete keeps the dialog open with the server's reason. Every scenario checks that no browser dialog fired |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
