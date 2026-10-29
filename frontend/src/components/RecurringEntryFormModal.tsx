@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   automaticOffered,
   buildEntryDayFields,
@@ -19,9 +19,11 @@ import {
   settleKindChoice,
   finalMonthHelp,
   toWireWallTime,
+  fieldErrorProps,
   withLoadedVersion,
+  withoutError,
 } from '@tally-trace/shared'
-import type { BillingKindChoice, DaySetting } from '@tally-trace/shared'
+import type { BillingKindChoice, DaySetting, FieldErrors } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -91,6 +93,16 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   tag_ids: [],
 })
 
+type RecurringFieldKey = 'name' | 'account_id' | 'amount' | 'next_occurrence' | 'end_date' | 'max_occurrences' | 'day' | 'day_of_month' | 'lead_time_days'
+
+/** The app's own wording for a required field left empty; a bound such as `step` uses the browser's text. */
+const REQUIRED_COPY: Partial<Record<RecurringFieldKey, string>> = {
+  name: 'Please provide a name for the recurring entry.',
+  account_id: 'Please select an account to post this recurring entry into.',
+  amount: 'Please enter an amount greater than zero.',
+  next_occurrence: 'Please choose the next occurrence date and time.',
+}
+
 interface RecurringEntryFormModalProps {
   /** The entry to edit, or null to add one. An entry the caller can edit is never Limited. */
   entry: FullBudgetEntry | SharedFullBudgetEntry | null
@@ -126,6 +138,64 @@ export function RecurringEntryFormModal({
   // The server's reason for a refused save (a stale copy, a final-month rule), shown above Save.
   const [saveError, setSaveError] = useState('')
   const deleteRecurringEntry = useDeleteRecurringEntry()
+  // One inline message per field, shown under it in place of a browser popup (STU-410).
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors<RecurringFieldKey>>({})
+  const fieldRefs = useRef<Partial<Record<RecurringFieldKey, HTMLElement | null>>>({})
+  // The controls the browser flagged invalid in one submit attempt, in tree order.
+  const invalidTargets = useRef<HTMLElement[]>([])
+  const bindField = (key: RecurringFieldKey) => (el: HTMLElement | null) => {
+    fieldRefs.current[key] = el
+  }
+  const fieldProps = (key: RecurringFieldKey) =>
+    fieldErrorProps(fieldErrors, key, `recurring-${key}-error`)
+  const fail = (key: RecurringFieldKey, message: string) => {
+    setFieldErrors({ [key]: message })
+    fieldRefs.current[key]?.focus()
+  }
+  const renderFieldError = (key: RecurringFieldKey) =>
+    fieldErrors[key] ? (
+      <p
+        id={`recurring-${key}-error`}
+        className="mt-1 text-xs text-danger"
+        role="alert"
+        data-testid={`field-error-${key}`}
+      >
+        {fieldErrors[key]}
+      </p>
+    ) : null
+  // Editing a field clears its message (a changed date or cadence also clears the day's).
+  const handleFormChange = (e: React.ChangeEvent<HTMLFormElement>) => {
+    const key = (e.target as HTMLElement).dataset.field as RecurringFieldKey | undefined
+    if (!key) return
+    setFieldErrors((prev) =>
+      (['day', 'day_of_month'] as const).reduce<FieldErrors<RecurringFieldKey>>(withoutError, withoutError(prev, key)))
+  }
+  // The browser keeps owning every required/min/max/step; only its popup is replaced. The
+  // `invalid` events fire in tree order during the submit's validity check, so the first one
+  // collected is the first invalid field. A timer, not a microtask: on a real click the
+  // microtask queue drains between two events, so a microtask would see one field per attempt.
+  const handleInvalid = (e: React.FormEvent<HTMLFormElement>) => {
+    const target = e.target as HTMLInputElement | HTMLSelectElement
+    // Every invalid control loses its popup, wired or not: an unwired one (no data-field) is
+    // reported in the form-level message above Save, so it fails visibly, never in a bubble.
+    e.preventDefault()
+    const targets = invalidTargets.current
+    targets.push(target)
+    if (targets.length > 1) return
+    window.setTimeout(() => {
+      const first = invalidTargets.current[0]
+      invalidTargets.current = []
+      if (!first) return
+      const key = first.dataset.field as RecurringFieldKey | undefined
+      const input = first as HTMLInputElement
+      if (!key) {
+        setSaveError(input.validationMessage || 'Please check this field.')
+        first.focus()
+        return
+      }
+      fail(key, (input.validity.valueMissing && REQUIRED_COPY[key]) || input.validationMessage)
+    }, 0)
+  }
 
   // A recurring entry is written like a transaction: only to accounts the caller may add to.
   const writableAccounts = useMemo(() => accounts.filter((a) => a.permissions.can_add_transactions), [accounts])
@@ -295,21 +365,22 @@ export function RecurringEntryFormModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaveError('')
+    setFieldErrors({})
     try {
       if (!subscriptionForm.name.trim()) {
-        alert('Please provide a name for the recurring entry.')
+        fail('name', 'Please provide a name for the recurring entry.')
         return
       }
       if (!subscriptionForm.account_id) {
-        alert('Please select an account to post this recurring entry into.')
+        fail('account_id', 'Please select an account to post this recurring entry into.')
         return
       }
       if (subscriptionForm.amount <= 0) {
-        alert('Please enter an amount greater than zero.')
+        fail('amount', 'Please enter an amount greater than zero.')
         return
       }
       if (!subscriptionForm.next_occurrence) {
-        alert('Please choose the next occurrence date and time.')
+        fail('next_occurrence', 'Please choose the next occurrence date and time.')
         return
       }
 
@@ -318,7 +389,7 @@ export function RecurringEntryFormModal({
       try {
         nextOccurrenceWire = toWireWallTime(subscriptionForm.next_occurrence)
       } catch {
-        alert('Please choose a valid next occurrence date and time.')
+        fail('next_occurrence', 'Please choose a valid next occurrence date and time.')
         return
       }
 
@@ -326,18 +397,18 @@ export function RecurringEntryFormModal({
       let maxOccurrences: number | undefined
       if (subscriptionForm.end_mode === 'on_date') {
         if (!subscriptionForm.end_date) {
-          alert('Please select the end date.')
+          fail('end_date', 'Please select the end date.')
           return
         }
         try {
           endDateIso = toWireWallTime(subscriptionForm.end_date)
         } catch {
-          alert('Please choose a valid end date.')
+          fail('end_date', 'Please choose a valid end date.')
           return
         }
       } else if (subscriptionForm.end_mode === 'after_occurrences') {
         if (!subscriptionForm.max_occurrences || subscriptionForm.max_occurrences <= 0) {
-          alert('Please specify how many occurrences before the entry stops.')
+          fail('max_occurrences', 'Please specify how many occurrences before the entry stops.')
           return
         }
         maxOccurrences = Math.floor(subscriptionForm.max_occurrences)
@@ -356,7 +427,7 @@ export function RecurringEntryFormModal({
         stored: editingBudgetEntry,
       })
       if (!resolvedDay.ok) {
-        alert(resolvedDay.error)
+        fail(isMonthFamily(subscriptionForm.cadence) ? 'day' : 'next_occurrence', resolvedDay.error)
         return
       }
 
@@ -448,7 +519,7 @@ export function RecurringEntryFormModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} onChange={handleFormChange} onInvalidCapture={handleInvalid} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-body">Name</label>
                 <input
@@ -457,7 +528,11 @@ export function RecurringEntryFormModal({
                   onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, name: e.target.value }))}
                   className="mt-1 block w-full border border-line px-3 py-2"
                   required
+                  ref={bindField('name')}
+                  data-field="name"
+                  {...fieldProps('name')}
                 />
+                {renderFieldError('name')}
                 </div>
                 
               <div>
@@ -494,6 +569,9 @@ export function RecurringEntryFormModal({
                     onChange={(e) => handleSubscriptionAccountChange(parseInt(e.target.value))}
               className="mt-1 block w-full border border-line px-3 py-2"
               required
+              ref={bindField('account_id')}
+              data-field="account_id"
+              {...fieldProps('account_id')}
             >
                     <option value={0}>Select account</option>
                     {writableAccounts
@@ -511,6 +589,7 @@ export function RecurringEntryFormModal({
                 </option>
               ))}
             </select>
+            {renderFieldError('account_id')}
                 </div>
                 {editingBudgetEntry && isSharedFull(editingBudgetEntry) ? (
                 <div>
@@ -631,7 +710,11 @@ export function RecurringEntryFormModal({
                   }
               className="mt-1 block w-full border border-line px-3 py-2"
               required
+              ref={bindField('amount')}
+              data-field="amount"
+              {...fieldProps('amount')}
             />
+            {renderFieldError('amount')}
               </div>
           
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -639,6 +722,7 @@ export function RecurringEntryFormModal({
                   <label className="block text-sm font-medium text-body">Cadence</label>
             <select
                     value={subscriptionForm.cadence}
+                    data-field="cadence"
                     onChange={(e) =>
                       setSubscriptionForm((prev) => ({
                         ...prev,
@@ -669,7 +753,11 @@ export function RecurringEntryFormModal({
                     }
               className="mt-1 block w-full border border-line px-3 py-2"
               required
+                  ref={bindField('next_occurrence')}
+                  data-field="next_occurrence"
+                  {...fieldProps('next_occurrence')}
                   />
+                  {renderFieldError('next_occurrence')}
         </div>
               </div>
 
@@ -691,6 +779,9 @@ export function RecurringEntryFormModal({
                           }
                         }}
                         className="mt-1 block w-full border border-line px-3 py-2"
+                        ref={bindField('day')}
+                        data-field="day"
+                        {...fieldProps('day')}
                       >
                         {offersSameAsDate && <option value="same_as_date">Same as date</option>}
                         <option value="day">Day of month (1–31)</option>
@@ -711,10 +802,15 @@ export function RecurringEntryFormModal({
                             chooseDay({ kind: 'day', day: Math.min(31, Math.max(1, day)) })
                           }}
                           className="mt-1 block w-full border border-line px-3 py-2"
+                          ref={bindField('day_of_month')}
+                          data-field="day_of_month"
+                          {...fieldProps('day_of_month')}
                         />
+                        {renderFieldError('day_of_month')}
                       </div>
                     )}
                   </div>
+                  {renderFieldError('day')}
                   {schedulePreview && 'error' in schedulePreview ? (
                     <p className="text-xs text-danger" data-testid="schedule-error">
                       {schedulePreview.error}
@@ -742,7 +838,11 @@ export function RecurringEntryFormModal({
                       }))
                     }
                     className="mt-1 block w-full border border-line px-3 py-2"
+                    ref={bindField('lead_time_days')}
+                    data-field="lead_time_days"
+                    {...fieldProps('lead_time_days')}
                   />
+                  {renderFieldError('lead_time_days')}
               </div>
                 {!(editingBudgetEntry && isSharedFull(editingBudgetEntry)) && (
                 <div>
@@ -818,7 +918,11 @@ export function RecurringEntryFormModal({
                         }))
                       }
                       className="mt-1 block w-full border border-line px-3 py-2"
+                      ref={bindField('end_date')}
+                      data-field="end_date"
+                      {...fieldProps('end_date')}
                     />
+                    {renderFieldError('end_date')}
                     <p className="mt-1 text-xs text-muted">
                       No additional transactions will be generated after this date.
                     </p>
@@ -839,7 +943,11 @@ export function RecurringEntryFormModal({
                         }))
                       }
                       className="mt-1 block w-full border border-line px-3 py-2"
+                      ref={bindField('max_occurrences')}
+                      data-field="max_occurrences"
+                      {...fieldProps('max_occurrences')}
                     />
+                    {renderFieldError('max_occurrences')}
                     <p className="mt-1 text-xs text-muted">
                       Stop once this many transactions have been created.
                     </p>
