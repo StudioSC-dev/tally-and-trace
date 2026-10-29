@@ -15,8 +15,8 @@
 //       row; today saves
 //   (b) the same form with native validation switched off: an inline message under the
 //       date input (aria-invalid, no POST, no browser dialog)
-//   (c) Edit: native rejection with no PUT; then, with native validation off, the inline
-//       message and no PUT
+//   (c) Edit: the browser's rejection shown inline (STU-410) with no PUT; then, with
+//       native validation off, the client's inline message and no PUT
 //   (d) Mark paid: min/max on the date; the dialog's error line; no /materialize request
 //   (e) card Pay: min/max on the date; the dialog's error line; no payment request
 //   (f) loan payment: min/max on the date; the panel's error line; no loan-payment request
@@ -264,7 +264,11 @@ async function edit(browser) {
   mark()
   await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
   await page.waitForTimeout(2000)
-  check('(c) native: the browser flags 0006-05-10', (await validity(input)).under, true)
+  // The browser's own message, shown inline (STU-410). The input's value is not read
+  // here: Playwright's fill does not reach this form's React state, so the re-render
+  // that shows the message puts the stored date back into the input.
+  const nativeError = modal.locator('[data-testid="record-date-error"]')
+  check('(c) native: the inline date message is shown', ((await text(nativeError)) || '').length > 0, true)
   check('(c) native: no PUT', sent('PUT', `/transactions/${seeded.id}`), 0)
 
   await disableNative(input)
