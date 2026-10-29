@@ -17,6 +17,7 @@ import type { Category, Tag } from '../store/api'
 import { downloadAuthed } from '../utils/download'
 import { HouseholdShares } from '../components/HouseholdShares'
 import { SkeletonRows } from '../components/Loading'
+import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
 
 export const Route = createFileRoute('/settings')({
@@ -89,6 +90,7 @@ function SettingsPage() {
 
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
 
   if (!isAuthenticated) return null
 
@@ -118,9 +120,15 @@ function SettingsPage() {
       setCategoryModal(false)
     } catch (err) { console.error('Error saving category:', err) }
   }
+  // The delete runs from the dialog, so a refusal stays there with the server's reason.
   const removeCategory = async (c: Category) => {
-    if (!confirm(`Delete category "${c.name}"?`)) return
-    try { await deleteCategory(c.id).unwrap() } catch (err) { console.error('Error deleting category:', err) }
+    await askConfirm({
+      title: 'Delete category?',
+      message: `Delete category "${c.name}"?`,
+      confirmLabel: 'Delete category',
+      action: () => deleteCategory(c.id).unwrap(),
+      errorFallback: 'Could not delete the category.',
+    })
   }
 
   const openCreateTag = () => { setEditingTag(null); setTagForm(emptyTag); setTagError(null); setTagModal(true) }
@@ -147,7 +155,12 @@ function SettingsPage() {
     }
   }
   const removeTag = async (t: Tag) => {
-    if (!confirm(`Delete tag "${t.name}"? It is removed from every record that has it.`)) return
+    const accepted = await askConfirm({
+      title: 'Delete tag?',
+      message: `Delete tag "${t.name}"? It is removed from every record that has it.`,
+      confirmLabel: 'Delete tag',
+    })
+    if (!accepted) return
     setTagListError(null)
     try { await deleteTag(t.id).unwrap() } catch (err) { setTagListError(apiErrorMessage(err, 'Could not delete the tag.')) }
   }

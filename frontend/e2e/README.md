@@ -26,6 +26,7 @@ on Playwright. Run them by hand when you change the auth or session code.
 | `smooth-sweep.cjs` | STU-335: the shared loaders are announced as a status and stop spinning under reduced motion; the spinner still animates otherwise |
 | `smooth-due.cjs` | STU-335: the "Due and overdue" count shows a placeholder until the linked rows first load, never a number that then ticks up |
 | `smooth-household.cjs` | STU-335: the household title waits for the sharer's name (a failed request shows "Household" and the alert); household transaction rows wait for account names (a failed dashboard request shows rows and a note) |
+| `dialogs-settings.cjs` | STU-410: deleting a category or a tag asks through the in-app Confirm dialog, never the browser's: its semantics, focus on Cancel, the Tab trap and Escape (a); Confirm deletes (b); a refused category delete keeps the dialog open with the server's reason (c); a refused tag delete shows in the tag list (d); a move to another page before accepting (e) or while the delete is held (f) closes it, with no request or no error. Every scenario checks that no browser dialog fired |
 
 `refresh-session-switch.cjs` expects an API and dev server you start yourself
 (steps below). The newer scripts start their own through `_local_stack.cjs`
@@ -156,6 +157,11 @@ node frontend/e2e/smooth-dashboard.cjs g2     # one scenario
 
 Their shared helpers live in `_smooth.cjs`: held and gated responses, a request
 recorder, the overlay's recorded `data-phase` history, and `waitQuiet(page)`.
+
+The `dialogs-*.cjs` scripts (STU-410) start their own stack the same way and also use
+`_dialogs.cjs`: `trackNativeDialogs(page)` counts, logs and dismisses every browser
+alert, confirm or prompt, `checkNoNativeDialogs` is the check each scenario ends with (the
+count is 0), and `confirmDialog(page)` gives the in-app Confirm dialog's locators.
 
 Since the screen loader blocks input while any request is in flight, a script
 that acts right after a navigation or a dialog opens must call
