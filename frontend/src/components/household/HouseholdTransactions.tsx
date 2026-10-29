@@ -1,12 +1,13 @@
 import { LoadingLine, SkeletonRows } from '../Loading'
 import { useEffect, useState } from 'react'
-import { queryPhase, transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
+import { queryPhase, rowAmount, transactionDate, transactionDescription, transactionStatus } from '@tally-trace/shared'
 import { useGetHouseholdDashboardQuery, useGetHouseholdTransactionsQuery } from '../../store/api'
 import type { Transaction } from '../../store/api'
 import { apiErrorMessage } from '../../utils/apiError'
 import { useToday } from '../../hooks/useToday'
 import { TagChips } from '../TagChips'
 import { formatDay, money } from './format'
+import type { CurrencyCode } from '../../utils/currency'
 
 const PAGE_SIZE = 20
 
@@ -24,13 +25,26 @@ const isReadOnly = (transaction: Transaction): boolean => !Object.values(transac
  * offers no controls on them, so a row has nothing to edit, delete, post or revert whatever
  * its flags say.
  */
-function Row({ transaction, accountNames, today }: { transaction: Transaction; accountNames: Map<number, string>; today: string }) {
+function Row({
+  transaction,
+  accountNames,
+  accountCurrencies,
+  today,
+}: {
+  transaction: Transaction
+  accountNames: Map<number, string>
+  accountCurrencies: Map<number, CurrencyCode>
+  today: string
+}) {
   const limited = transaction.view === 'limited'
   const status = transactionStatus(transaction, today)
   const accountName = limited
     ? transaction.account?.name
     : accountNames.get(transaction.account_id) ?? null
   const counterpart = limited ? transaction.counterpart?.name : null
+  // An unposted foreign debit or credit shows its face in its own currency; an unknown account keeps the stored figure.
+  const accountCurrency = transaction.view === 'limited' ? undefined : accountCurrencies.get(transaction.account_id)
+  const shown = accountCurrency ? rowAmount(transaction, accountCurrency) : { amount: transaction.amount, currency: transaction.currency }
   const sign = transaction.transaction_type === 'credit' ? '+' : transaction.transaction_type === 'debit' ? '−' : ''
   return (
     <li
@@ -62,7 +76,7 @@ function Row({ transaction, accountNames, today }: { transaction: Transaction; a
       </div>
       <p className="text-sm font-semibold text-ink" data-testid="household-transaction-amount">
         {sign}
-        {money(transaction.amount, transaction.currency)}
+        {money(shown.amount, shown.currency)}
       </p>
     </li>
   )
@@ -84,6 +98,7 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
   // A full record's account name comes from the dashboard, so the rows wait for it (or its failure).
   const namesPhase = queryPhase(dashboard, dashboardQuery)
   const accountNames = new Map((dashboard?.accounts ?? []).map((account) => [account.id, account.name]))
+  const accountCurrencies = new Map((dashboard?.accounts ?? []).map((account) => [account.id, account.currency as CurrencyCode]))
 
   if (isLoading) return <LoadingLine>Loading...</LoadingLine>
   if (error || !data) {
@@ -112,7 +127,7 @@ export function HouseholdTransactionsTab({ sharerId }: { sharerId: number }) {
       ) : (
         <ul className="divide-y divide-line border border-line">
           {data.items.map((transaction) => (
-            <Row key={transaction.id} transaction={transaction} accountNames={accountNames} today={today} />
+            <Row key={transaction.id} transaction={transaction} accountNames={accountNames} accountCurrencies={accountCurrencies} today={today} />
           ))}
         </ul>
       )}

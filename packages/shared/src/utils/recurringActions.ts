@@ -15,6 +15,19 @@ export const RECURRING_ACTION_LABELS: Record<RecurringAction, string> = {
   posted: 'Posted',
 }
 
+/** The record dialog's date label per action. */
+export const RECURRING_DATE_LABELS: Record<RecurringAction, string> = {
+  mark_paid: 'Paid on',
+  mark_received: 'Received on',
+  charged: 'Charged on',
+  posted: 'Posted on',
+}
+
+/** The record dialog's date label: a card charge is dated by when it was charged or posted, anything else by when it was paid. */
+export function recurringDateLabel(action: RecurringAction): string {
+  return RECURRING_DATE_LABELS[action]
+}
+
 /**
  * What the helpers read from a row: an entry, a snapshot row or a missed row.
  * `kind` is the entry's derived kind (a card kind, `cash`, or null for income and

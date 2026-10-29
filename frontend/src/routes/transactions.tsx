@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
+import { editFormProjectedAmount, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields } from '@tally-trace/shared'
 import type { ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -536,6 +536,10 @@ export function TransactionsPage() {
   const [deleteTransaction] = useDeleteTransactionMutation()
 
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
+  const accountCurrencies = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account.currency as CurrencyCode])),
+    [accounts],
+  )
   // The form's account pickers offer only accounts the caller may add transactions to
   // (a viewer's shared account can be read and filtered by, never written to).
   const writableAccounts = useMemo(
@@ -1651,6 +1655,11 @@ export function TransactionsPage() {
       }
 
       const primaryAccount = accounts.find((a) => a.id === transaction.account_id)
+      // An unposted foreign debit or credit is listed by its face, in the face's own currency;
+      // a row whose account is not in the list keeps its stored figure.
+      const shown = primaryAccount
+        ? rowAmount(transaction, primaryAccount.currency as CurrencyCode)
+        : { amount: transaction.amount, currency: transaction.currency as CurrencyCode }
       const fromAccount = transaction.transfer_from_account_id
         ? accounts.find((a) => a.id === transaction.transfer_from_account_id)
         : undefined
@@ -1678,7 +1687,7 @@ export function TransactionsPage() {
         sourceLabel: fromAccount?.name || primaryAccount?.name || 'Source',
         destinationLabel: toAccount?.name || 'Destination',
         categoryName,
-        amountLabel,
+        amountLabel: formatCurrency(shown.amount, shown.currency),
         projectedLabel,
         transferFeeLabel,
         typeBadgeStyles,
@@ -1978,6 +1987,7 @@ export function TransactionsPage() {
           handleInitPostingForm(transaction)
         }}
         onChanged={() => void refreshListsRef.current()}
+        accountCurrencies={accountCurrencies}
       />
 
       {/* Search and Filters */}
@@ -2450,7 +2460,7 @@ export function TransactionsPage() {
                         ? 'text-danger font-medium'
                         : 'text-ink font-medium'
                     }>
-                      {formatCurrency(actionTransaction.amount, actionTransaction.currency as CurrencyCode)}
+                      {actionMeta?.amountLabel}
                     </dd>
                   </div>
                   <div className="flex justify-between">

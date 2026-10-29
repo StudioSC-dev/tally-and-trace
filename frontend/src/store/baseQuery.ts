@@ -1,5 +1,6 @@
 import { fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query/react'
+import { stepAfter401 } from '@tally-trace/shared'
 
 const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`
 
@@ -91,7 +92,8 @@ async function refreshAccessToken(): Promise<boolean> {
  * Base query with silent refresh: on a 401 it tries to rotate the refresh token
  * once and retries the original request; if that fails, it clears the session
  * and redirects to /login. If the session changes (logout / login) meanwhile,
- * the original 401 is returned untouched.
+ * the original 401 is returned untouched. A request sent with no access token
+ * never starts a refresh: its 401 clears the session and redirects directly.
  */
 export const baseQueryWithReauth: BaseQueryFn<
   string | FetchArgs,
@@ -99,13 +101,19 @@ export const baseQueryWithReauth: BaseQueryFn<
   FetchBaseQueryError
 > = async (args, api, extraOptions) => {
   const generation = sessionGeneration
+  const sentToken = Boolean(localStorage.getItem('access_token'))
   let result = await rawBaseQuery(args, api, extraOptions)
 
   if (result.error && result.error.status === 401) {
     // The session changed while this request was in flight: its 401 belongs to
     // the previous user, so return it without refreshing, retrying or clearing.
-    if (generation !== sessionGeneration) return result
-    const refreshed = await refreshAccessToken()
+    const step = stepAfter401({
+      sentToken,
+      startedGeneration: generation,
+      currentGeneration: sessionGeneration,
+    })
+    if (step === 'ignore') return result
+    const refreshed = step === 'refresh' ? await refreshAccessToken() : false
     if (generation !== sessionGeneration) return result
     if (refreshed) {
       result = await rawBaseQuery(args, api, extraOptions)

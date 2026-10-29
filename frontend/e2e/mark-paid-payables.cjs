@@ -206,6 +206,7 @@ async function expandAndMarkPaid(browser) {
   await openTransactions(page)
   check('(a) the section lists rent once', (await rowsOf(page, 'Rent')).length, 1)
   await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent'))).first(), rent.id)
+  check('(a) a planned cash expense is dated by "Paid on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Paid on')
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   check('(a) the dialog opens on the clicked occurrence', await select.inputValue(), rentDay)
   check('(a) a future occurrence defaults to today', await dialog(page).locator('[data-testid="mark-paid-date"]').inputValue(), today)
