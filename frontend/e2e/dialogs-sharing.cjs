@@ -1,10 +1,12 @@
 // Browser checks for STU-410 on sharing, the wishlist and accounts: changing a share's
-// role, stopping a share, leaving a share or a Household and deleting a wishlist item
-// all ask through the in-app Confirm dialog, never the browser's.
+// role, stopping a share, leaving a share or a Household, deleting a wishlist item and
+// deleting an account all ask through the in-app Confirm dialog, never the browser's.
 // (a) a role change cancelled keeps the old role and sends nothing; (b) a confirmed role
 // change sends one PATCH; (c) stopping an account share or the Household share; (d)
 // leaving an account share and a Household; (e) a wishlist delete, with a refusal kept in
-// the dialog. Every scenario checks that no browser dialog fired.
+// the dialog; (f) an account delete, with a refusal kept in the dialog; (g) a refused
+// active toggle shows in the account actions modal. Every scenario checks that no browser
+// dialog fired.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -314,12 +316,100 @@ async function scenarioE(browser) {
   }
 }
 
+// (f) An account delete: Cancel sends nothing, a refusal stays in the dialog, Confirm deletes.
+async function scenarioF(browser) {
+  console.log('\n=== (f) delete an account: Cancel; a refusal stays in the dialog; Confirm deletes it')
+  const account = await seedAccount(owner, 'Dialog F Doomed')
+  const { ctx, page, native, log } = await openAs(browser, owner, '/accounts', account.name)
+  const cd = d.confirmDialog(page)
+  const isDelete = new RegExp(`/accounts/${account.id}$`)
+  let fail = null
+  try {
+    await openAccountActions(page, account.name)
+    const del = page.getByRole('button', { name: 'Delete account', exact: true })
+    await del.click()
+    await h.check('f.shown', 'B', async () => (await shown(cd)) || 'no confirm-dialog')
+    await h.check('f.focus-cancel', 'B', async () => {
+      const active = await d.activeTestId(page)
+      return active === 'confirm-dialog-cancel' || `active ${active}`
+    })
+    await page.keyboard.press('Escape')
+    await h.check('f.escape-closes', 'B', async () => (await closed(cd)) || 'dialog still open')
+    await h.check('f.escape-keeps-action-modal', 'B', async () =>
+      (await page.locator(tid('share-account')).isVisible()) || 'the actions modal closed with the Confirm')
+    await h.check('f.cancel-sends-nothing', 'B', async () => {
+      const n = sent(log, 'DELETE', isDelete)
+      return n === 0 || `${n} DELETE request(s)`
+    })
+    fail = await h.failWith(page, isMethod('DELETE', isDelete), 500, { times: 1 })
+    await del.click()
+    await cd.dialog.waitFor({ timeout: 3000 }).catch(() => null)
+    await cd.accept.click()
+    await cd.error.waitFor({ timeout: 5000 }).catch(() => null)
+    await h.check('f.refusal-in-dialog', 'B', async () => {
+      const text = (await cd.error.textContent().catch(() => null)) || ''
+      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
+    })
+    await h.check('f.stays-open', 'B', async () => (await cd.dialog.isVisible()) || 'dialog closed')
+    await cd.accept.click()
+    await h.check('f.closed', 'B', async () => (await closed(cd)) || 'dialog still open')
+    await h.waitQuiet(page)
+    await h.check('f.deleted', 'B', async () => {
+      const deletes = sent(log, 'DELETE', isDelete)
+      const modal = await page.locator(tid('share-account')).count()
+      // An account delete is soft: the list may still show it, but the API reports it inactive.
+      const list = await client.get(owner.token, '/accounts/')
+      const row = (Array.isArray(list) ? list : list.items).find((a) => a.id === account.id)
+      const gone = !row || row.is_active === false
+      return (deletes === 2 && modal === 0 && gone) || `DELETE ${deletes}, modal ${modal}, account ${JSON.stringify(row && { is_active: row.is_active })}`
+    })
+    await h.check('f.no-inert-left', 'B', () => noInert(page))
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
+// (g) A refused active toggle shows the server's message in the actions modal.
+async function scenarioG(browser) {
+  console.log('\n=== (g) toggle active with a forced 500: the actions modal shows the reason')
+  const account = await seedAccount(owner, 'Dialog G Toggle')
+  const { ctx, page, native } = await openAs(browser, owner, '/accounts', account.name)
+  const error = page.locator(tid('account-action-error'))
+  let fail = null
+  try {
+    await openAccountActions(page, account.name)
+    fail = await h.failWith(page, isMethod('PUT', new RegExp(`/accounts/${account.id}$`)), 500, { times: 1 })
+    await page.getByRole('button', { name: /Mark as inactive|Activate account/ }).click()
+    await error.waitFor({ timeout: 5000 }).catch(() => null)
+    await h.check('g.error-shown', 'B', async () => {
+      const text = (await error.textContent().catch(() => null)) || ''
+      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
+    })
+    await h.check('g.error-role', 'B', async () =>
+      (await error.getAttribute('role').catch(() => null)) === 'alert' || 'error line is not role=alert')
+    await h.check('g.modal-stays', 'B', async () =>
+      (await page.locator(tid('share-account')).isVisible()) || 'the actions modal closed')
+    await page.getByRole('button', { name: /Mark as inactive|Activate account/ }).click()
+    await h.waitQuiet(page)
+    await h.check('g.error-clears-on-retry', 'B', async () =>
+      (await error.count()) === 0 || 'the error is still shown after a good retry')
+  } finally {
+    await d.checkNoNativeDialogs(h, 'g', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
   ['d', scenarioD],
   ['e', scenarioE],
+  ['f', scenarioF],
+  ['g', scenarioG],
 ]
 
 ;(async () => {

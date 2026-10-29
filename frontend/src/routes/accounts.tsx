@@ -19,6 +19,7 @@ import { StatementsPanel } from '../components/StatementsPanel'
 import { CreditSummary } from '../components/CreditSummary'
 import { Skeleton } from '../components/Loading'
 import { apiErrorMessage } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 
 export const Route = createFileRoute('/accounts')({
@@ -358,6 +359,8 @@ export function AccountsPage() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAccount, setActionAccount] = useState<Account | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
   const [shareAccount, setShareAccount] = useState<Account | null>(null)
   const [formData, setFormData] = useState(() => blankForm(defaultCurrency))
   // Once the amortization is picked by hand, changing the loan kind no longer resets it.
@@ -651,18 +654,19 @@ export function AccountsPage() {
   }
 
   const handleDelete = async (accountId: number) => {
-    if (confirm('Are you sure you want to delete this account?')) {
-      try {
-        await deleteAccount(accountId).unwrap()
-        if (actionAccount?.id === accountId) {
-          closeActionModal()
-        }
-        await loadAccountsRef.current()
-      } catch (error) {
-        console.error('Error deleting account:', error)
-        alert(apiErrorMessage(error) || 'Could not delete the account. Please try again.')
-      }
+    // The delete runs from the dialog, so a refusal stays there with the server's reason.
+    const deleted = await askConfirm({
+      title: 'Delete account?',
+      message: 'Are you sure you want to delete this account?',
+      confirmLabel: 'Delete account',
+      action: () => deleteAccount(accountId).unwrap(),
+      errorFallback: 'Could not delete the account. Please try again.',
+    })
+    if (!deleted) return
+    if (actionAccount?.id === accountId) {
+      closeActionModal()
     }
+    await loadAccountsRef.current()
   }
 
   const openActionModal = (account: Account) => {
@@ -673,9 +677,11 @@ export function AccountsPage() {
   const closeActionModal = () => {
     setIsActionModalOpen(false)
     setActionAccount(null)
+    setActionError(null)
   }
 
   const handleToggleActive = async (account: Account) => {
+    setActionError(null)
     try {
       const nextIsActive = !isAccountActive(account)
       await updateAccount({ id: account.id, data: { is_active: nextIsActive } }).unwrap()
@@ -686,7 +692,7 @@ export function AccountsPage() {
       }
     } catch (error) {
       console.error('Error updating account status:', error)
-      alert(apiErrorMessage(error) || 'Could not update the account. Please try again.')
+      setActionError(apiErrorMessage(error) || 'Could not update the account. Please try again.')
     }
   }
 
@@ -976,6 +982,11 @@ export function AccountsPage() {
               </button>
               )}
             </div>
+            {actionError && (
+              <p className="mt-3 text-sm text-danger" role="alert" data-testid="account-action-error">
+                {actionError}
+              </p>
+            )}
           </div>
           </div>
         </div>
