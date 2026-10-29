@@ -7,6 +7,8 @@ user's records on A's accounts (the tag-share invariant), never a write.
 Uses the ``hh`` world (``conftest.py``): A owner, B editor on A's joint
 account, C holding A's and B's Household tag shares.
 """
+import re
+
 import pytest
 
 from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post, sw_share
@@ -88,9 +90,53 @@ def _b_ids(rec):
     return [rec["b_lunch"], rec["b_deposit"], rec["b_entry"]]
 
 
-def _clean(body, rec):
-    return sw_leaks(body, private_ids=_b_ids(rec) + [rec["a_private"], rec["a_private_entry"]],
-                    numbers=(B_LUNCH, B_DEPOSIT, 77))
+# A row's own id in a list: ``$[0].id``, ``$.items[0].id``, ``$.balance_history[0].id``.
+_OWN_ID = re.compile(r"\$(?:\.[a-z_]+)?\[\d+\]\.id")
+
+
+_ACCOUNT_REF = re.compile(r".*\.(?:account\.id|counterpart\.id|[a-z_]*account_id)")
+
+
+def _clean(body, rec, rows=None, accounts=()):
+    """Leaks in ``body``; ``rows`` names the table its list rows come from.
+
+    The private ids are transaction and budget-entry ids. A row's own id comes
+    from its table's sequence, so one from another table can equal a private id
+    by chance: that id is let through. A row of the private ids' own table
+    (``rows`` "transactions" or "entries") is still checked, as is every
+    reference to any other account and every other field. ``accounts`` are the
+    accounts the viewer may see: a reference to one (``account.id``,
+    ``account_id``) is that account's id, not a private record's, so it passes too.
+    """
+    own = {"transactions": [rec["b_lunch"], rec["b_deposit"], rec["a_private"]],
+           "entries": [rec["b_entry"], rec["a_private_entry"]]}.get(rows, [])
+    leaks = sw_leaks(body, private_ids=_b_ids(rec) + [rec["a_private"], rec["a_private_entry"]],
+                     numbers=(B_LUNCH, B_DEPOSIT, 77))
+    return [(where, value) for where, value in leaks
+            if not (_OWN_ID.fullmatch(where) and value not in own)
+            and not (_ACCOUNT_REF.fullmatch(where) and value in accounts)]
+
+
+def test_the_leak_check_passes_a_rows_own_id_that_equals_a_private_id_and_still_catches_leaks(
+        hh, leak, sw_client):
+    """Ids from different sequences collide by chance; force it here."""
+    c, joint = hh["c"], hh["joint"]
+    visible_accounts = (joint, hh["c_private"])
+    accounts = _get(sw_client, c, "/accounts/", limit=100)["items"]
+    # A private transaction whose id equals the joint account's own id.
+    assert _clean(accounts, {**leak, "a_private": joint}, "accounts") == []
+    # The same id in a reference, a string or a private-table row is still a leak.
+    assert _clean([{"id": 1, "account_id": joint}], {**leak, "a_private": joint}, "accounts")
+    assert _clean([{"id": 1, "name": f"{PRIVATE} x"}], leak, "accounts")
+    txns = _get(sw_client, c, "/transactions/", limit=100)
+    visible = leak["a_joint"]
+    assert _clean(txns, {**leak, "b_lunch": visible}, "transactions", visible_accounts)
+    assert _clean(txns, {**leak, "b_entry": visible}, "transactions",
+                  visible_accounts) == []  # an entry id
+    # A visible account's reference passes; a hidden account's id there does not.
+    assert _clean(txns, {**leak, "a_private": joint}, "transactions", visible_accounts) == []
+    assert _clean({"account": {"id": hh["a_private"]}}, {**leak, "a_private": hh["a_private"]},
+                  "transactions", visible_accounts)
 
 
 # --- Accounts ---------------------------------------------------------------------------
@@ -108,7 +154,7 @@ def test_tag_viewer_sees_the_household_account_in_the_minimal_shape(hh, leak, sw
     assert _get(sw_client, c, f"/accounts/{hh['joint']}") == joint
     for hidden in ("a_private", "a_card", "a_loan", "a_wallet", "b_private"):
         assert _call(sw_client, c, "GET", f"/accounts/{hh[hidden]}").status_code == 404, hidden
-    assert _clean(accounts, leak) == []
+    assert _clean(accounts, leak, "accounts") == []
 
 
 def test_an_account_share_viewer_holding_the_tag_share_gets_the_higher_role(hh, leak, sw_client,
@@ -148,8 +194,8 @@ def test_third_party_records_never_reach_the_tag_viewer(hh, leak, sw_client):
                       ("budget-entries", "b_entry"), ("transactions", "a_private"),
                       ("budget-entries", "a_private_entry")):
         assert _call(sw_client, c, "GET", f"/{kind}/{leak[key]}").status_code == 404, key
-    for body in (txns, entries):
-        assert _clean(body, leak) == []
+    assert _clean(txns, leak, "transactions", (hh["joint"], hh["c_private"])) == []
+    assert _clean(entries, leak, "entries", (hh["joint"], hh["c_private"])) == []
 
 
 def test_search_history_and_summary_follow_the_invariant(hh, leak, sw_client):
@@ -163,12 +209,12 @@ def test_search_history_and_summary_follow_the_invariant(hh, leak, sw_client):
     assert [round(h["amount"], 2) for h in history["balance_history"]] == [-120.0, -500.0]
     assert [round(h["balance_after"], 2) for h in history["balance_history"]] == [-120.0, -620.0]
     assert round(history["calculated_balance"], 2) == -620.0
-    assert _clean(history, leak) == []
+    assert _clean(history, leak, "transactions", (hh["joint"], hh["c_private"])) == []
 
     summary = _get(sw_client, c, "/transactions/summary/period",
                    start_date="2026-09-01T00:00:00", end_date="2026-10-31T00:00:00")
     assert summary["summary"]["transaction_count"] == 2
-    assert _clean(summary, leak) == []
+    assert _clean(summary, leak, None, (hh["joint"], hh["c_private"])) == []
     # A direct reader of the account (B, the editor) still gets every row.
     b_history = _get(sw_client, hh["b"], f"/accounts/{hh['joint']}/balance")
     assert len(b_history["balance_history"]) == 4
