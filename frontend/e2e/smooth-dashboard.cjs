@@ -102,9 +102,13 @@ const netWorthGroup = (page) => page.locator('[data-onboarding="financial-snapsh
 
 const WATCHED = ['net-worth', 'available-cash', 'period-income', 'period-expenses', 'period-net-flow', 'payables-count', 'payable-status']
 
-/** A fresh page that records the dashboard's figures from its first document. */
-async function openPage(browser) {
-  const { ctx, page } = await h.newPage(browser)
+/**
+ * A fresh page that records the dashboard's figures from its first document. `clockAt`
+ * (an ISO instant) pins the page clock there, running, in the Asia/Manila zone.
+ */
+async function openPage(browser, { clockAt } = {}) {
+  const { ctx, page } = await h.newPage(browser, clockAt ? { timezoneId: 'Asia/Manila' } : {})
+  if (clockAt) await page.clock.install({ time: new Date(clockAt) })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, WATCHED, { attributes: ['aria-label'] })
   const requests = h.logRequests(page)
@@ -163,11 +167,19 @@ async function scenarioA(browser) {
 async function scenarioB(browser) {
   console.log('\n=== (b) summary held: actual totals never flash zero')
   const u = await seed('b')
-  const { ctx, page, requests } = await openPage(browser)
+  // The page clock is pinned to Manila midday of the seeded day (04:00Z). The dashboard's
+  // period window ends at the real instant `now`, so between Manila 00:00 and 08:00 a row
+  // dated Manila today (00:00Z) falls after it and the API sums it as 0. That is an app gap
+  // (STU-466), not this scenario's concern; the pin keeps the run independent of the wall clock.
+  const { ctx, page, requests } = await openPage(browser, { clockAt: `${today}T04:00:00Z` })
   let g
   try {
     g = await h.gate(page, isSummary)
     await h.uiLogin(page, stack, u)
+    await h.check('b.page-day-is-seeded-day', 'S', async () => {
+      const day = await h.localDay(page)
+      return day === today || `page day ${day}, seeded day ${today}`
+    })
     await h.check('b.summary-held', 'S', async () => (await g.waitHits(1)) || 'summary never requested')
     await page.locator(tid('net-worth')).waitFor()
     await h.sleep(500)
@@ -301,13 +313,14 @@ async function scenarioD(browser) {
 }
 
 // (g) The snapshot and allocations fail once on the first load; Retry refetches just those two.
-// (g2) The snapshot fails twice: the screen comes back after the first Retry and the second loads.
-async function retryRun(browser, name, snapshotFailures) {
+// (g2) The snapshot keeps failing: the screen comes back after the first Retry; once it stops failing the next Retry loads.
+// g2 does not count requests: every snapshot fails until the scenario stops the route.
+async function retryRun(browser, name, failsAgain) {
   const u = await seed(name)
   const { ctx, page, requests } = await openPage(browser)
   let snapFail, allocFail
   try {
-    snapFail = await h.failWith(page, isSnapshot, 500, { times: snapshotFailures })
+    snapFail = await h.failWith(page, isSnapshot, 500, failsAgain ? {} : { times: 1 })
     allocFail = await h.failWith(page, isAllocations, 500, { times: 1 })
     await h.uiLogin(page, stack, u)
     const retry = page.getByRole('button', { name: 'Retry', exact: true })
@@ -323,8 +336,9 @@ async function retryRun(browser, name, snapshotFailures) {
     const asAllocations = (r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/allocations/')
     const marked = () => page.evaluate(() => window.__stu335Marker === 1)
     const before = { snapshot: count(asSnapshot), allocations: count(asAllocations), total: requests.length }
+    const hitsBefore = snapFail.hits
     await retry.click()
-    if (snapshotFailures === 1) {
+    if (!failsAgain) {
       await page.locator(tid('net-worth')).waitFor({ timeout: 8000 }).catch(() => {})
       await h.waitQuiet(page)
       await h.sleep(750)
@@ -349,11 +363,14 @@ async function retryRun(browser, name, snapshotFailures) {
       })
     } else {
       const until = Date.now() + 5000
-      while (snapFail.failed < snapshotFailures && Date.now() < until) await h.sleep(50)
+      while (snapFail.hits <= hitsBefore && Date.now() < until) await h.sleep(50)
+      await h.check(`${name}.retry-refetches`, 'B', async () => snapFail.hits > hitsBefore || 'the first Retry sent no snapshot request')
       await retry.waitFor({ timeout: 5000 }).catch(() => {})
       await h.check(`${name}.screen-returns`, 'B', async () => (await retry.count()) === 1 || 'error screen did not return after the first Retry')
       await h.check(`${name}.marker-survives-first`, 'B', async () => (await marked()) || 'the page reloaded on the first Retry')
       await h.waitQuiet(page)
+      await h.check(`${name}.screen-visible-after-settle`, 'B', async () => (await retry.isVisible()) || 'error screen not visible once requests settled')
+      await snapFail.stop()
       await retry.click()
       await page.locator(tid('net-worth')).waitFor({ timeout: 8000 }).catch(() => {})
       await h.waitQuiet(page)
@@ -370,8 +387,8 @@ async function retryRun(browser, name, snapshotFailures) {
     await ctx.close()
   }
 }
-const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', 1))
-const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', 2))
+const scenarioG = (browser) => (console.log('\n=== (g) Retry refetches only the failed queries, with no reload'), retryRun(browser, 'g', false))
+const scenarioG2 = (browser) => (console.log('\n=== (g2) a Retry that fails again brings the screen back; the next one loads'), retryRun(browser, 'g2', true))
 
 // An envelope row, found by structure so the scenario also runs where the row has no test id.
 const ENVELOPE_ROW = '[data-onboarding="budget-envelopes"] .space-y-5 > .space-y-3'
