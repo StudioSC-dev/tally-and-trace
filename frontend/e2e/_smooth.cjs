@@ -10,6 +10,8 @@
 //   - routes layer: a request no layer claims, or one a layer releases, goes on to the
 //     next layer with route.fallback(), so a gate, a rewrite and a failure compose.
 //
+// Browser-free self-test of the wait helpers: node frontend/e2e/_smooth.selftest.cjs
+//
 // Check kinds: B behavioural, S structural, G guard (holds at base and must keep holding).
 //
 // Usage:
@@ -363,13 +365,16 @@ async function waitPhase(page, phase, ms = 3000) {
 }
 
 /**
- * Waits for the overlay to be `hidden`. Never throws and no check depends on it.
+ * Waits for the overlay to be `hidden` and to stay `hidden` for `settleMs` (default 150)
+ * without a break; any other phase restarts the hold, so a request that starts just after
+ * the triggering click does not slip past. `ms` bounds the whole wait. Never throws and no
+ * check depends on it. Costs about `settleMs` per call.
  * With no overlay on the page (any commit before 5) it waits for network idle (bounded),
  * prints `NOTE no busy-overlay` and returns. At the bound with the overlay still showing
  * it prints `NOTE waitQuiet bound, phase=<phase>`; if the page clock did not advance over
  * 100 ms of real time it also prints `NOTE waitQuiet clock paused`.
  */
-async function waitQuiet(page, ms = 5000) {
+async function waitQuiet(page, ms = 5000, { settleMs = 150 } = {}) {
   const until = Date.now() + ms
   // The overlay mounts with the signed-in layout; give it a moment to appear.
   const present = Date.now() + Math.min(ms, 1000)
@@ -383,7 +388,15 @@ async function waitQuiet(page, ms = 5000) {
     console.log('  NOTE no busy-overlay')
     return
   }
-  while (phase !== 'hidden' && Date.now() < until) {
+  let hiddenSince = null
+  for (;;) {
+    const now = Date.now()
+    if (phase !== 'hidden') hiddenSince = null
+    else {
+      hiddenSince ??= now
+      if (now - hiddenSince >= settleMs) return
+    }
+    if (now >= until) break
     await sleep(25)
     phase = await overlayPhase(page)
   }
