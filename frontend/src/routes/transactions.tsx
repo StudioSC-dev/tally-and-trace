@@ -12,6 +12,8 @@ import type {
 import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../hooks/useToast'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
@@ -366,6 +368,10 @@ export function TransactionsPage() {
   const transactionDateInput = useRef<HTMLInputElement>(null)
   const postingDateInput = useRef<HTMLInputElement>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors<TransactionField>>({})
+  // A failed action from the action modal (mark not posted, a status-only post) shows here.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const askConfirm = useConfirm()
+  const showToast = useToast()
   const [formError, setFormError] = useState<string | null>(null)
   const transactionForm = useRef<HTMLFormElement>(null)
   // The controls the browser flagged in one submit attempt, in tree order.
@@ -1051,6 +1057,7 @@ export function TransactionsPage() {
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = transaction.id
+    setActionError(null)
     setActionTransaction(transaction)
     setIsActionModalOpen(true)
   }
@@ -1062,6 +1069,7 @@ export function TransactionsPage() {
     setReceipt(null)
     setReceiptError(null)
     receiptFor.current = null
+    setActionError(null)
     resetPostingFormState()
   }
 
@@ -1388,19 +1396,21 @@ export function TransactionsPage() {
     setIsCreateModalOpen(true)
   }
 
-  const handleDelete = async (transactionId: number) => {
-    if (confirm('Are you sure you want to delete this transaction?')) {
-      try {
-        await deleteTransaction(transactionId).unwrap()
-        if (actionTransaction?.id === transactionId) {
-          closeActionModal()
-        }
-        await refreshListsRef.current()
-      } catch (error) {
-        console.error('Error deleting transaction:', error)
-        alert(apiErrorMessage(error) || 'Could not delete the transaction. Please try again.')
-      }
+  // The delete runs from the in-app dialog, so a refusal stays there with the server's reason.
+  const handleDelete = async (transaction: Transaction) => {
+    const description = transactionDescription(transaction)
+    const deleted = await askConfirm({
+      title: 'Delete transaction?',
+      message: description ? `Delete the transaction "${description}"?` : 'Delete this transaction?',
+      confirmLabel: 'Delete transaction',
+      action: () => deleteTransaction(transaction.id).unwrap(),
+      errorFallback: 'Could not delete the transaction. Please try again.',
+    })
+    if (!deleted) return
+    if (actionTransaction?.id === transaction.id) {
+      closeActionModal()
     }
+    await refreshListsRef.current()
   }
 
   const handleMarkPostedFromModal = async (
@@ -1479,12 +1489,13 @@ export function TransactionsPage() {
           currency: accountCurrency,
           exchange_rate: undefined,
         }
+    setActionError(null)
     let updatedTransaction: Transaction
     try {
       updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
     } catch (error) {
       console.error('Error reverting transaction:', error)
-      alert(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
+      setActionError(apiErrorMessage(error) || 'Could not mark the transaction as not posted. Please try again.')
       return
     }
     setActionTransaction(updatedTransaction)
@@ -1510,8 +1521,9 @@ export function TransactionsPage() {
       const needsAmount = transaction.transaction_type !== 'transfer' && face !== accountCurrency
       const needsStoredReceived = needsReceived && !(transaction.received_amount != null && transaction.received_amount > 0)
       if (!needsAmount && !needsStoredReceived) {
+        setActionError(null)
         void handlePostStatusOnly(transaction).then((message) => {
-          if (message) alert(message)
+          if (message) setActionError(message)
         })
         return
       }
@@ -1655,7 +1667,8 @@ export function TransactionsPage() {
     }
     if (linkedError) {
       handledEditId.current = linkedId
-      alert(
+      // No dialog is open to hold it, and the page moves on, so the toast carries it.
+      showToast(
         'status' in linkedError && linkedError.status === 404
           ? 'This transaction is no longer available.'
           : apiErrorMessage(linkedError) || 'This transaction is no longer available.'
@@ -1696,6 +1709,7 @@ export function TransactionsPage() {
     loanPaymentStatus,
     navigate,
     openActionModalRef,
+    showToast,
   ])
 
   useEffect(() => {
@@ -2719,7 +2733,7 @@ export function TransactionsPage() {
                 )}
                 {actionPermissions.can_delete && (
                         <button
-                  onClick={() => handleDelete(actionTransaction.id)}
+                  onClick={() => handleDelete(actionTransaction)}
                   className="flex items-center justify-center gap-2 bg-sunken px-4 py-3 text-sm font-semibold text-body transition-colors duration-200 hover:bg-sunken"
                         >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2729,6 +2743,11 @@ export function TransactionsPage() {
                         </button>
                 )}
                       </div>
+              {actionError && (
+                <p className="text-sm text-danger" role="alert" data-testid="transaction-action-error">
+                  {actionError}
+                </p>
+              )}
               {!actionTransaction.is_posted && actionPermissions.can_post && postingFormState.visible && (
                 <div className="border border-ink p-4 space-y-3">
                   <p className="text-sm font-medium text-ink">

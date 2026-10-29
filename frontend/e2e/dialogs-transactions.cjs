@@ -2,7 +2,11 @@
 // never in a browser popup. (a) an empty description (the browser's own required check,
 // shown inline) and then no account selected; (b) the amount: zero, empty, the planned
 // amount and the amount received on a transfer between currencies; (c) a refused save
-// keeps the form open with the server's reason.
+// keeps the form open with the server's reason; (d) a delete from the action modal asks
+// through the in-app Confirm dialog, which keeps a refusal and closes both on success;
+// (e) a refused "Mark as not posted" shows in the action modal's error line; (f) a link
+// to a transaction that no longer exists shows the in-app toast, here and after the
+// move back to the dashboard.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -33,6 +37,9 @@ const pathOf = (url) => new URL(url).pathname.replace(/\/$/, '')
 const isCreate = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith('/transactions')
 const createsIn = (log, from = 0) =>
   log.slice(from).filter((r) => r.method === 'POST' && pathOf(r.url).endsWith('/transactions')).length
+const isRow = (method, id) => (r) => r.method() === method && pathOf(r.url()).endsWith(`/transactions/${id}`)
+const deletesIn = (log, id) =>
+  log.filter((r) => r.method === 'DELETE' && pathOf(r.url).endsWith(`/transactions/${id}`)).length
 
 const formModal = (page, heading) =>
   page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: heading, exact: true }) })
@@ -92,6 +99,31 @@ async function checkFieldError(page, modal, prefix, key, wantText, focusTarget) 
     await h.check(`${prefix}.focus`, 'B', async () =>
       (await isFocused(focusTarget)) || `active ${await d.activeTestId(page)}`)
   }
+}
+
+const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
+const actionModal = (page) => formModal(page, 'Transaction Actions')
+const toast = (page) => page.locator('[data-testid="toast"]')
+
+const seedTransaction = (description, extra = {}) =>
+  client.post(owner.token, '/transactions/', {
+    account_id: checking.id,
+    transaction_type: 'debit',
+    amount: 25,
+    currency: 'PHP',
+    description,
+    transaction_date: new Date().toISOString(),
+    is_posted: true,
+    ...extra,
+  })
+
+/** Opens a row's action modal from the list. */
+async function openActions(page, description) {
+  await rowFor(page, description).click()
+  const modal = actionModal(page)
+  await modal.waitFor()
+  await h.waitQuiet(page)
+  return modal
 }
 
 async function fillValid(modal, description) {
@@ -277,7 +309,7 @@ async function scenarioC(browser) {
     fail = await h.failWith(page, isCreate, 500)
     await submit(page, modal)
     const error = modal.locator('[data-testid="transaction-form-error"]')
-    await error.waitFor({ timeout: 5000 }).catch(() => null)
+    await error.waitFor({ timeout: 5000 })
     await h.check('c.error-shown', 'B', async () => {
       const text = await textOf(error)
       return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
@@ -298,6 +330,156 @@ async function scenarioC(browser) {
   }
 }
 
+// (d) Delete from the action modal: the Confirm keeps a refusal; a delete closes both.
+async function scenarioD(browser) {
+  console.log('\n=== (d) delete from the action modal: the in-app Confirm; a refusal stays in it; Confirm deletes')
+  const row = await seedTransaction('Dialog D row')
+  const { ctx, page, native, log } = await openTransactions(browser)
+  const cd = d.confirmDialog(page)
+  let fail = null
+  try {
+    const modal = await openActions(page, row.description)
+    const opener = modal.getByRole('button', { name: 'Delete Transaction', exact: true })
+    fail = await h.failWith(page, isRow('DELETE', row.id), 500, { times: 1 })
+    await opener.click()
+    await h.check('d.shown', 'B', async () =>
+      (await cd.dialog.waitFor({ timeout: 3000 }).then(() => true, () => false)) || 'no confirm-dialog')
+    await h.check('d.texts', 'B', async () => {
+      const got = [await textOf(cd.title), await textOf(cd.message), await textOf(cd.accept)]
+      const want = ['Delete transaction?', 'Delete the transaction "Dialog D row"?', 'Delete transaction']
+      return JSON.stringify(got) === JSON.stringify(want) || `got ${JSON.stringify(got)}`
+    })
+    await h.check('d.focus-cancel', 'B', async () => {
+      const active = await d.activeTestId(page)
+      return active === 'confirm-dialog-cancel' || `active ${active}`
+    })
+
+    await cd.accept.click()
+    await cd.error.waitFor({ timeout: 5000 })
+    await h.waitQuiet(page)
+    await h.check('d.refusal-in-dialog', 'B', async () => {
+      const text = await textOf(cd.error)
+      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
+    })
+    await h.check('d.refusal-keeps-both', 'B', async () =>
+      ((await cd.dialog.isVisible()) && (await modal.isVisible())) || 'a dialog closed after the refusal')
+    await cd.cancel.click()
+    await cd.dialog.waitFor({ state: 'detached', timeout: 3000 })
+    await h.check('d.cancel-keeps-actions', 'B', async () =>
+      ((await cd.dialog.count()) === 0 && (await modal.isVisible())) || 'the Confirm is open or the action modal closed')
+    await h.check('d.cancel-focus-opener', 'B', async () =>
+      (await isFocused(opener)) || `active ${await d.activeTestId(page)}`)
+
+    await opener.click()
+    await cd.dialog.waitFor({ timeout: 3000 })
+    await cd.accept.click()
+    await cd.dialog.waitFor({ state: 'detached', timeout: 5000 })
+    await h.waitQuiet(page)
+    await h.check('d.two-deletes', 'B', async () => {
+      const n = deletesIn(log, row.id)
+      return n === 2 || `${n} DELETE request(s)`
+    })
+    await h.check('d.both-closed', 'B', async () =>
+      ((await cd.dialog.count()) === 0 && (await modal.count()) === 0) || 'a dialog is still open')
+    await h.check('d.row-gone', 'B', async () =>
+      (await h.expectAbsentFor(page, rowFor(page, row.description), 500)) || 'the row is still listed')
+    await h.check('d.no-inert-left', 'B', async () => {
+      const left = await d.leftoverInert(page)
+      return left.length === 0 || `still inert: ${left.join(', ')}`
+    })
+  } finally {
+    // Reached even when the scenario throws: a native dialog is a failure either way.
+    await d.checkNoNativeDialogs(h, 'd', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
+// (e) A refused "Mark as not posted": the reason in the action modal's error line.
+async function scenarioE(browser) {
+  console.log('\n=== (e) a refused "Mark as not posted" shows in the action modal')
+  const row = await seedTransaction('Dialog E row')
+  const { ctx, page, native } = await openTransactions(browser)
+  let fail = null
+  try {
+    const modal = await openActions(page, row.description)
+    fail = await h.failWith(page, isRow('PUT', row.id), 500)
+    await modal.getByRole('button', { name: 'Mark as not posted', exact: true }).click()
+    const error = modal.locator('[data-testid="transaction-action-error"]')
+    await error.waitFor({ timeout: 5000 })
+    await h.waitQuiet(page)
+    await h.check('e.error-shown', 'B', async () => {
+      const text = await textOf(error)
+      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
+    })
+    await h.check('e.error-role', 'B', async () =>
+      (await error.getAttribute('role').catch(() => null)) === 'alert' || 'error line is not role=alert')
+    await h.check('e.modal-open', 'B', async () => (await modal.isVisible()) || 'the action modal closed')
+    await h.check('e.one-put', 'B', async () => fail.hits === 1 || `${fail.hits} PUT request(s)`)
+    await h.check('e.still-posted', 'B', async () => {
+      const stored = await client.get(owner.token, `/transactions/${row.id}`)
+      return stored.is_posted === true || `is_posted ${stored.is_posted}`
+    })
+    await modal.getByRole('button', { name: 'Close actions modal' }).click()
+    await modal.waitFor({ state: 'detached', timeout: 3000 })
+    await openActions(page, row.description)
+    await h.check('e.cleared-on-reopen', 'B', async () =>
+      (await page.locator('[data-testid="transaction-action-error"]').count()) === 0 || 'the old error is still shown')
+  } finally {
+    // Reached even when the scenario throws: a native dialog is a failure either way.
+    await d.checkNoNativeDialogs(h, 'e', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
+// (f) A link to a transaction that no longer exists: the toast, the URL cleaned, Dismiss.
+async function scenarioF(browser) {
+  console.log('\n=== (f) a link to a deleted transaction shows the in-app toast')
+  const row = await seedTransaction('Dialog F row')
+  await client.del(owner.token, `/transactions/${row.id}`)
+  const { ctx, page, native } = await openTransactions(browser)
+  const message = 'This transaction is no longer available.'
+  try {
+    await page.goto(`${stack.webUrl}/transactions?edit=${row.id}`)
+    await toast(page).waitFor({ timeout: 5000 })
+    await h.waitQuiet(page)
+    await h.check('f.toast', 'B', async () => {
+      const text = await textOf(page.locator('[data-testid="toast-message"]'))
+      return text === message || `toast ${JSON.stringify(text)}`
+    })
+    await h.check('f.toast-role', 'B', async () =>
+      (await toast(page).getAttribute('role').catch(() => null)) === 'alert' || 'the toast is not role=alert')
+    await h.check('f.url-cleaned', 'B', async () => {
+      const url = new URL(page.url())
+      return (url.pathname === '/transactions' && url.search === '') || `url ${url.pathname}${url.search}`
+    })
+    await h.check('f.stays', 'B', async () =>
+      (await h.sleep(1500).then(() => toast(page).isVisible())) || 'the toast went away by itself')
+    await page.locator('[data-testid="toast-dismiss"]').click()
+    await h.check('f.dismissed', 'B', async () =>
+      (await toast(page).waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) || 'the toast is still shown')
+
+    // From the dashboard the page moves back there; the toast goes with it.
+    await page.goto(`${stack.webUrl}/transactions?edit=${row.id}&from=dashboard`)
+    await page.waitForURL((url) => url.pathname === '/', { timeout: 5000 })
+    await toast(page).waitFor({ timeout: 5000 })
+    await h.waitQuiet(page)
+    await h.check('f.dashboard', 'B', async () => {
+      const url = new URL(page.url())
+      const text = await textOf(page.locator('[data-testid="toast-message"]'))
+      return (url.pathname === '/' && text === message) || `url ${url.pathname}, toast ${JSON.stringify(text)}`
+    })
+    await page.locator('[data-testid="toast-dismiss"]').click()
+    await h.check('f.dashboard-dismissed', 'B', async () =>
+      (await toast(page).waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) || 'the toast is still shown')
+  } finally {
+    // Reached even when the scenario throws: a native dialog is a failure either way.
+    await d.checkNoNativeDialogs(h, 'f', native)
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'transactions')
   checking = await client.post(owner.token, '/accounts/', { name: 'Dlg Checking', account_type: 'checking', balance: 100000, currency: 'PHP' })
@@ -308,6 +490,9 @@ const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
+  ['d', scenarioD],
+  ['e', scenarioE],
+  ['f', scenarioF],
 ]
 
 ;(async () => {
