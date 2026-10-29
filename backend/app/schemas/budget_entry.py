@@ -284,3 +284,22 @@ class MaterializeDueResult(BaseModel):
     results: List[MaterializeDueItem]
     next_occurrence: datetime
     is_active: bool
+
+
+class PostDueEntry(BaseModel):
+    """One entry of a backstop run: months posted, and why it stopped (null when it did not)."""
+    entry_id: int
+    posted: int
+    skipped_reason: Optional[str] = None
+
+
+class PostDueInstallmentsResult(BaseModel):
+    """POST /budget-entries/post-due-installments (STU-343 Plan B).
+
+    ``posted`` counts months that moved money (new rows and posted pending
+    rows); ``skipped`` counts entries by reason. Every listed entry is one the
+    caller can edit.
+    """
+    posted: int
+    skipped: dict[str, int]
+    entries: List[PostDueEntry]

@@ -44,6 +44,7 @@ from app.schemas.budget_entry import (
     BudgetEntryMaterialize,
     EntryOccurrences,
     MaterializeDueResult,
+    PostDueInstallmentsResult,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
@@ -784,6 +785,23 @@ def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> Budge
     if not entry.account_id:
         raise HTTPException(status_code=400, detail="This entry has no account to post to")
     return entry
+
+
+@router.post("/post-due-installments", response_model=PostDueInstallmentsResult)
+def post_due_installments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Post due installments now: every due month of the auto-post-on card
+    installments the caller can edit, through Manila's today, as the caller
+    (services/posting.py ``post_due_installments``; the rows belong to each
+    entry's creator). The same run as the daily job, under the same locks, so
+    whichever runs second finds nothing due. A ``through`` is not accepted.
+    Each entry commits on its own; one that cannot post is listed with its
+    reason and the rest still run."""
+    result = posting.post_due_installments(db, through=manila_today(), actor_scope=current_user)
+    return {"posted": result.posted, "skipped": dict(result.skipped),
+            "entries": result.entries}
 
 
 @router.get("/{entry_id}/occurrences", response_model=EntryOccurrences)
