@@ -8,6 +8,7 @@ import {
   useCreateAllocationMutation,
   useUpdateAllocationMutation,
   useDeleteAllocationMutation,
+  useSetInstallmentAutoPostMutation,
 } from '../store/api'
 import type {
   Allocation,
@@ -47,9 +48,19 @@ import type { KindCreditState } from '../components/AllocationsCredit'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { MarkPaidDialog } from '../components/MarkPaidDialog'
+import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
+import { useToast } from '../hooks/useToast'
+import { apiErrorMessage } from '../utils/apiError'
 import { SkeletonRows } from '../components/Loading'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
+
+type AutoPostState = 'on' | 'off' | 'unreviewed'
+const AUTO_POST_STATE_LABELS: Record<AutoPostState, string> = {
+  on: 'Auto-post on',
+  off: 'Auto-post off',
+  unreviewed: 'Not reviewed',
+}
 
 const ENTRY_ACTION_TEST_IDS: Record<RecurringAction, string> = {
   mark_paid: 'entry-mark-paid-button',
@@ -246,6 +257,8 @@ export function AllocationsPage() {
   const [recurringModal, setRecurringModal] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry | null } | null>(
     null
   )
+  const [reviewFor, setReviewFor] = useState<{ entryId: number; name: string } | null>(null)
+  const [turningOffId, setTurningOffId] = useState<number | null>(null)
   const [markPaidFor, setMarkPaidFor] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry; action: RecurringAction } | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
@@ -298,6 +311,8 @@ export function AllocationsPage() {
 
   const [triggerAllocations] = useLazyGetAllocationsQuery()
   const [triggerBudgetEntries] = useLazyGetBudgetEntriesQuery()
+  const [setAutoPost] = useSetInstallmentAutoPostMutation()
+  const showToast = useToast()
   const beginBudgetEntriesRequest = useRequestGeneration()
   const beginAllocationsRequest = useRequestGeneration()
   const { data: accountsData } = useGetAccountsQuery(
@@ -686,6 +701,22 @@ export function AllocationsPage() {
       }
     },
     [deleteRecurringEntry, handleBudgetEntryDeleted]
+  )
+
+  // Turn a reviewed installment's auto-post off (it stays reviewed); a failure has no dialog, so it is toasted.
+  const handleTurnOffAutoPost = useCallback(
+    async (entry: BudgetEntry) => {
+      setTurningOffId(entry.id)
+      try {
+        await setAutoPost({ id: entry.id, data: { enabled: false } }).unwrap()
+        await loadBudgetEntriesRef.current()
+      } catch (error) {
+        showToast(apiErrorMessage(error))
+      } finally {
+        setTurningOffId(null)
+      }
+    },
+    [setAutoPost, loadBudgetEntriesRef, showToast]
   )
 
   const handleBudgetEntrySaved = useCallback(async () => {
@@ -1242,6 +1273,10 @@ export function AllocationsPage() {
         ? `Ends ${formatFullDate(entry.end_date!)}`
         : installmentLabel ?? 'Indefinite'
 
+    // A live card installment shows whether its months auto-post: on, off after a review, or not reviewed yet.
+    const showAutoPost = entry.kind === 'installment' && entry.is_active && remaining !== 0
+    const autoPostState: AutoPostState = entry.auto_post_enabled ? 'on' : entry.installment_reviewed ? 'off' : 'unreviewed'
+
     const actions =
       entry.is_active && remaining !== 0 ? recurringActionsFor({ ...entry, can_mark_paid: entry.permissions.can_post }) : []
 
@@ -1344,6 +1379,42 @@ export function AllocationsPage() {
             <TagChips tags={entry.tags} />
           </div>
           {creditWarning && <EntryCreditWarningRow warning={creditWarning} />}
+          {showAutoPost && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-body" data-testid="installment-auto-post" data-source={`budget_entry:${entry.id}`}>
+              <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1" data-testid="installment-auto-post-state" data-state={autoPostState}>
+                {AUTO_POST_STATE_LABELS[autoPostState]}
+              </span>
+              {canEdit && autoPostState !== 'on' && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setReviewFor({ entryId: entry.id, name: entry.name })
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  className="btn-secondary focus-ring"
+                  data-testid="installment-review"
+                >
+                  Review
+                </button>
+              )}
+              {canEdit && autoPostState === 'on' && (
+                <button
+                  type="button"
+                  disabled={turningOffId === entry.id}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleTurnOffAutoPost(entry)
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  className="btn-secondary focus-ring"
+                  data-testid="installment-turn-off"
+                >
+                  Turn off
+                </button>
+              )}
+            </div>
+          )}
           {actions.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {actions.map((action) => (
@@ -2152,6 +2223,16 @@ export function AllocationsPage() {
           </div>
           </div>
         </div>
+      )}
+
+      {reviewFor && (
+        <InstallmentReviewDialog
+          key={reviewFor.entryId}
+          entryId={reviewFor.entryId}
+          name={reviewFor.name}
+          onClose={() => setReviewFor(null)}
+          onReviewed={() => void loadBudgetEntriesRef.current()}
+        />
       )}
 
       {markPaidFor && (

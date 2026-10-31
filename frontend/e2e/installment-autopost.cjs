@@ -31,6 +31,9 @@
 //   (k) the review goes stale while its dialog is open (the entry is renamed through the
 //       API): submitting shows "This installment changed since you opened the review", the
 //       dialog refetches and shows the new name, and a second submit records the months
+//   (f) on Allocations a new installment reads "Auto-post on"; an editor's Turn off makes
+//       it read "Auto-post off" with Review, and the job then posts nothing for it; a
+//       viewer sees no auto-post state, Review or Turn off
 //   (g) a reviewed installment with two months on closed cycles and no recorded statement:
 //       the account page's credit panel says "2 installment months not yet posted" with
 //       the API's dates, Pay says "Post the installment months first"; Post now posts 2,
@@ -63,7 +66,7 @@
 // itself and do not. (g) and its variants open only the card's account page, which has no
 // page-open trigger; (g2) opens Transactions with auto-post off, so nothing is postable.
 //
-// Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|g|h|i|j|k]
+// Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|f|g|h|i|j|k]
 const util = require('node:util')
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { allDueRows, showRow } = require('./_due_pages.cjs')
@@ -459,6 +462,67 @@ async function roles(browser) {
   await ctx.close()
 }
 
+// ─── (f) Allocations: auto-post state, Review and Turn off ───────────────────
+async function allocationsAutoPost(browser) {
+  console.log('(f) Allocations shows auto-post; an editor turns it off; a viewer cannot')
+  // Allocations opens no page-open POST, so no consumePageOpen is needed.
+  const owner = await makeUser('f-owner')
+  const editor = await makeUser('f-editor')
+  const viewer = await makeUser('f-viewer')
+  const { bank, card } = await makeCard(owner, 'Visa F')
+  await post(owner.token, `/accounts/${card.id}/shares`, { email: editor.email, role: 'editor' })
+  await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
+  await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
+  const today = manilaToday()
+  // Due today, so the job would post the month if auto-post stayed on.
+  const entry = await installment(owner, card, 'Oven', 3300, today, 6)
+  check('(f) a new installment is created reviewed and on', flags(await entryNow(owner, entry.id)), { reviewed: true, on: true })
+
+  const state = (page) => page.locator(`[data-testid="installment-auto-post"][data-source="budget_entry:${entry.id}"]`)
+  const stateText = (page) => state(page).locator('[data-testid="installment-auto-post-state"]')
+  const openAllocations = async (page) => {
+    await page.goto(`${stack.webUrl}/allocations`)
+    await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+    await waitQuiet(page)
+  }
+
+  {
+    const { ctx, page } = await newPage(browser)
+    await uiLogin(page, viewer)
+    await openAllocations(page)
+    await page.waitForTimeout(1500)
+    // A viewer reads the entry as a Limited card, so this guards the Limited path. A Full card
+    // without can_edit cannot show the state: the creator is the only Full viewer of an entry
+    // they cannot edit, and demoting them to viewer deactivates their entries (shares.py
+    // deactivate_entries), so the can_edit gate on Review and Turn off has no e2e view.
+    check('(f) viewer: the entry is listed, as a Limited card', await testId(page, 'kind-section-shared').locator('article', { hasText: 'Oven' }).count(), 1)
+    check('(f) viewer: no auto-post state, Review or Turn off',
+      [await testId(page, 'installment-auto-post').count(), await testId(page, 'installment-review').count(), await testId(page, 'installment-turn-off').count()], [0, 0, 0])
+    await ctx.close()
+  }
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, editor)
+  await openAllocations(page)
+  check('(f) editor: the card reads "Auto-post on"', await waitText(stateText(page), 'Auto-post on'), 'Auto-post on')
+  check('(f) editor: Turn off, and no Review', [await state(page).locator('[data-testid="installment-turn-off"]').count(), await state(page).locator('[data-testid="installment-review"]').count()], [1, 0])
+  // Both buttons stopPropagation, so neither opens the card's own edit form (its close button is the probe).
+  const editForm = page.getByRole('button', { name: 'Close allocation modal' })
+  await state(page).locator('[data-testid="installment-turn-off"]').click()
+  await waitQuiet(page)
+  check('(f) editor: the card reads "Auto-post off"', await waitText(stateText(page), 'Auto-post off'), 'Auto-post off')
+  check('(f) editor: Turn off did not open the edit form', await editForm.count(), 0)
+  check('(f) editor: Review replaces Turn off', [await state(page).locator('[data-testid="installment-turn-off"]').count(), await state(page).locator('[data-testid="installment-review"]').count()], [0, 1])
+  await openReview(page, state(page).locator('[data-testid="installment-review"]'))
+  await reviewDialog(page).getByRole('button', { name: 'Close' }).click()
+  check('(f) editor: Review opened its dialog, and closing it leaves the edit form shut',
+    [await waitCount(page, reviewDialog(page), 0), await editForm.count()], [0, 0])
+  check('(f) the API shows it reviewed and off', flags(await entryNow(owner, entry.id)), { reviewed: true, on: false })
+  const job = await api('', 'POST', '/jobs/post-due-installments', undefined, { 'X-Job-Token': 'local-e2e-only' })
+  check('(f) the job ran and posted nothing for it', [job.status, (await linkedRows(owner, card, entry.id)).length, (await entryNow(owner, entry.id)).max_occurrences], [200, 0, 6])
+  await ctx.close()
+}
+
 // ─── (g) unposted months on a card with no recorded statement ────────────────
 /** A card closing on the day-of-month of (today - 5), within 2-28, and its last close before today. */
 function closedCycles() {
@@ -824,6 +888,7 @@ async function staleReview(browser) {
   if (run('c')) await postNowToday(browser)
   if (run('d')) await heldMonth(browser)
   if (run('e')) await roles(browser)
+  if (run('f')) await allocationsAutoPost(browser)
   if (run('g')) await unpostedPanel(browser)
   if (run('h')) await postOnOpen(browser)
   if (run('i')) await pageOpenIsQuiet(browser)
