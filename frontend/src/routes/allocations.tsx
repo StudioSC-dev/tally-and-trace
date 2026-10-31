@@ -38,6 +38,7 @@ import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { useConfirm } from '../hooks/useConfirm'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -374,6 +375,7 @@ export function AllocationsPage() {
   const [updateAllocation] = useUpdateAllocationMutation()
   const [deleteAllocation] = useDeleteAllocationMutation()
   const deleteRecurringEntry = useDeleteRecurringEntry()
+  const askConfirm = useConfirm()
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   // Allocations are private to their owner, so only the caller's own accounts can back one.
   const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
@@ -1026,17 +1028,19 @@ export function AllocationsPage() {
   }
 
   const handleDelete = async (allocationId: number) => {
-    if (confirm('Are you sure you want to delete this allocation?')) {
-      try {
-        await deleteAllocation(allocationId).unwrap()
-        if (actionAllocation?.id === allocationId) {
-          closeActionModal()
-        }
-        await loadAllocations(true)
-      } catch (error) {
-        console.error('Error deleting allocation:', error)
-      }
+    // The delete runs from the dialog, so a refusal stays there with the server's reason.
+    const deleted = await askConfirm({
+      title: 'Delete allocation?',
+      message: 'Are you sure you want to delete this allocation?',
+      confirmLabel: 'Delete allocation',
+      action: () => deleteAllocation(allocationId).unwrap(),
+      errorFallback: 'Could not delete the allocation. Please try again.',
+    })
+    if (!deleted) return
+    if (actionAllocation?.id === allocationId) {
+      closeActionModal()
     }
+    await loadAllocations(true)
   }
 
   const openActionModal = (allocation: Allocation) => {

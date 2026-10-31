@@ -1,10 +1,12 @@
-// Browser checks for STU-410 on the allocation form: a field the form refuses shows an
-// inline error under it (aria-invalid or, on a chip group, aria-describedby; focus moved;
-// nothing sent), never a browser popup. Every submit clicks the form's real Save button, so the
+// Browser checks for STU-410 on the allocation form and its delete: a field the form
+// refuses shows an inline error under it (aria-invalid or, on a chip group, aria-describedby;
+// focus moved; nothing sent), never a browser popup, and deleting an allocation asks
+// through the in-app Confirm. Every submit clicks the form's real Save button, so the
 // browser's own required/min checks run first and their popup is replaced by the same
 // inline error.
 // (a) an empty name (native `required`), with a second field also invalid; (b) a budget
-// with no category (the form's own check); (d) a negative current amount
+// with no category (the form's own check); (c) a refused delete (500) keeps the Confirm
+// open with the server's reason, then a retry deletes it; (d) a negative current amount
 // (the `min 0` bound) shows the browser's own text; (e) an end date not after the start;
 // (f) a combined-total tracker with no account chosen; (g) a savings-transactions tracker
 // with no "Savings" category shows the form's own line.
@@ -32,9 +34,10 @@ try {
 
 const only = process.argv[2]
 
-let stack, client, owner, bank
+let stack, client, owner, bank, utilitiesId
 
 const pathOf = (url) => new URL(url).pathname.replace(/\/$/, '')
+const isDelete = (id) => (r) => r.method() === 'DELETE' && pathOf(r.url()).endsWith(`/allocations/${id}`)
 const posts = (log) => log.filter((r) => r.method === 'POST' && pathOf(r.url).endsWith('/allocations')).length
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 
@@ -287,6 +290,74 @@ async function scenarioG(browser) {
   }
 }
 
+// (c) Delete from the action modal: a refusal keeps the Confirm open with the server's
+// reason; Cancel keeps the modal; a retry deletes the allocation and closes the modal.
+async function scenarioC(browser) {
+  console.log('\n=== (c) delete an allocation: a refusal shows in the dialog; a retry deletes it')
+  const alloc = await client.post(owner.token, '/allocations/', {
+    account_id: bank.id, name: 'Dialog C Envelope', allocation_type: 'budget', target_amount: 1000,
+    period_frequency: 'monthly', period_start: `${today().slice(0, 8)}01T00:00:00`,
+    configuration: { category_ids: [utilitiesId] },
+  })
+  const { ctx, page, native } = await openAllocations(browser, 'Budgets')
+  const cd = d.confirmDialog(page)
+  const deletes = []
+  page.on('request', (r) => { if (isDelete(alloc.id)(r)) deletes.push(r.url()) })
+  let fail = null
+  try {
+    await page.locator('article[role="button"]').filter({ has: page.getByText(alloc.name, { exact: true }) }).click()
+    const opener = page.getByRole('button', { name: 'Delete allocation' })
+    await opener.waitFor()
+    await h.waitQuiet(page)
+    fail = await h.failWith(page, isDelete(alloc.id), 500, { times: 1 })
+    await opener.click()
+    await h.check('c.shown', 'B', async () =>
+      (await cd.dialog.waitFor({ timeout: 3000 }).then(() => true, () => false)) || 'no confirm-dialog')
+    await h.check('c.focus-on-cancel', 'B', async () =>
+      (await cd.cancel.evaluate((el) => el === document.activeElement)) || `active ${await d.activeTestId(page)}`)
+    await cd.accept.click()
+    await h.check('c.refusal-shown', 'B', async () => {
+      const shown = await cd.error.waitFor({ timeout: 5000 }).then(() => true, () => false)
+      if (!shown) return 'no confirm-dialog-error'
+      const text = await cd.error.innerText()
+      return text === 'stu335 injected failure 500' || `error ${JSON.stringify(text)}`
+    })
+    await h.waitQuiet(page)
+    await h.check('c.stays-open', 'B', async () => (await cd.dialog.isVisible()) || 'dialog closed')
+    await h.check('c.one-delete', 'B', async () => fail.hits === 1 || `${fail.hits} DELETE request(s)`)
+    await cd.cancel.click()
+    await h.check('c.cancel-closes', 'B', async () =>
+      (await cd.dialog.waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)) || 'dialog still open')
+    await h.check('c.modal-remains', 'B', async () => (await opener.count()) === 1 || 'the action modal closed')
+    await h.check('c.focus-returns', 'B', async () =>
+      (await opener.evaluate((el) => el === document.activeElement)) || `active ${await d.activeTestId(page)}`)
+    await h.check('c.no-inert-left', 'B', async () => {
+      const left = await d.leftoverInert(page)
+      return left.length === 0 || `still inert: ${left.join(', ')}`
+    })
+    await h.check('c.still-exists', 'B', async () =>
+      (await client.api(owner.token, 'GET', `/allocations/${alloc.id}`)).json?.is_active === true || 'the allocation is gone')
+    // The retry is not refused: it deletes the allocation and the page closes the modal.
+    await opener.click()
+    await cd.dialog.waitFor({ timeout: 3000 })
+    await cd.accept.click()
+    await opener.waitFor({ state: 'detached', timeout: 5000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('c.retry-deletes', 'B', async () => {
+      const closed = (await opener.count()) === 0 && (await cd.dialog.count()) === 0
+      // The API's delete is soft: the allocation stays, marked inactive.
+      const after = await client.api(owner.token, 'GET', `/allocations/${alloc.id}`)
+      const gone = after.status === 200 && after.json?.is_active === false
+      return (closed && gone) || `modal closed ${closed}, allocation inactive ${gone} (status ${after.status})`
+    })
+    await h.check('c.two-deletes', 'B', async () => deletes.length === 2 || `${deletes.length} DELETE request(s)`)
+  } finally {
+    await d.checkNoNativeDialogs(h, 'c', native)
+    await fail?.stop()
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
@@ -294,6 +365,7 @@ const SCENARIOS = [
   ['e', scenarioE],
   ['f', scenarioF],
   ['g', scenarioG],
+  ['c', scenarioC],
 ]
 
 async function setup() {
@@ -303,6 +375,7 @@ async function setup() {
   const list = categories.items ?? categories
   const utilities = list.find((c) => c.name.toLowerCase() === 'utilities')
   if (!utilities) throw new Error('no Utilities category on a new account')
+  utilitiesId = utilities.id
   // (g) needs a user with no "Savings" category; a new user starts with one, so remove it.
   for (const c of list.filter((c) => c.name.toLowerCase() === 'savings')) {
     const res = await client.api(owner.token, 'DELETE', `/categories/${c.id}`)
