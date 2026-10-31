@@ -1374,6 +1374,8 @@ export interface InstallmentAutoPostRow {
   due_count: number
   /** Of `due_count`, the months Post now would record for the caller. */
   postable_count: number
+  /** Of `due_count`, the months falling on Manila today. */
+  due_today_count: number
   /** The oldest due month (`YYYY-MM-DD`). */
   oldest: string
   state: InstallmentAutoPostState

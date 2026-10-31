@@ -774,6 +774,7 @@ const apRow = (r: Partial<InstallmentAutoPostRow> & Pick<InstallmentAutoPostRow,
   account_name: 'Visa',
   due_count: 1,
   postable_count: 1,
+  due_today_count: 1,
   oldest: TODAY,
   state: 'on',
   block_reason: null,
@@ -889,14 +890,14 @@ describe('dueTodayLines', () => {
   })
   it('leaves out an entry a missed row already shows', () => {
     const s = snap({
-      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3 })],
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, due_today_count: 1 })],
       missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on' })],
     })
     expect(dueTodayLines(s)).toEqual([])
   })
   it('lists no line when every month due is before today and has a pending linked row', () => {
     const s = snap({
-      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, oldest: '2026-08-20' })],
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, due_today_count: 0, oldest: '2026-08-20' })],
       missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on', count: 3, unlinked_count: 0, oldest_unlinked: null, pending_transaction_ids: [41, 42, 43] })],
     })
     expect(dueTodayLines(s)).toEqual([])
@@ -904,7 +905,7 @@ describe('dueTodayLines', () => {
   it('counts only the month due today when the months before it have pending linked rows', () => {
     const s = snap({
       auto_post_scheduled: true,
-      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, oldest: '2026-08-20' })],
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, due_today_count: 1, oldest: '2026-08-20' })],
       missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on', count: 2, unlinked_count: 0, oldest_unlinked: null, pending_transaction_ids: [41, 42] })],
     })
     const [line, ...rest] = dueTodayLines(s)
@@ -912,6 +913,13 @@ describe('dueTodayLines', () => {
     expect(line?.dueCount).toBe(1)
     expect(line?.text).toBe('Tablet · 1 due today · Auto-posts each morning')
     expect(line?.canPost).toBe(true)
+  })
+  it('lists no line for past months only when no missed row stands for the entry', () => {
+    // A shared editor's view of an inactive card's installment: missed leaves it out for scope.
+    const s = snap({
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 0, due_today_count: 0, oldest: '2026-07-05', state: 'blocked', block_reason: 'creator_no_access' })],
+    })
+    expect(dueTodayLines(s)).toEqual([])
   })
   it('offers Review only for an unreviewed or held row the caller can review', () => {
     const s = snap({

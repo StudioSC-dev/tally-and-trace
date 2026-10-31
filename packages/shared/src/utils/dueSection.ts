@@ -593,7 +593,7 @@ export interface DueTodayLine {
   entryId: number
   name: string
   accountName: string
-  /** The months due today: `due_count` less the months before today the missed list counts. */
+  /** The months due today: the snapshot's `due_today_count`. */
   dueCount: number
   postableCount: number
   state: InstallmentAutoPostState
@@ -605,31 +605,28 @@ export interface DueTodayLine {
 }
 
 /**
- * One line per installment the snapshot lists with a month due today that no
- * missed row already covers. `due_count` counts every unposted month through
- * today, and the missed list's `count` the same months before today, so only the
- * difference is due today. Months before today with a pending linked row are
- * shown as their pending rows; an entry with only those gets no line.
+ * One line per installment the snapshot lists with a month due today
+ * (`due_today_count`, counted by the server on Manila's today) that no missed
+ * row with unlinked months already covers. Months before today are not counted:
+ * the missed list or their pending rows show them, and an entry the missed list
+ * leaves out for scope gets no line for them either.
  */
 export function dueTodayLines(snapshot: DashboardSnapshot): DueTodayLine[] {
   const covered = new Set<number>()
-  const before = new Map<number, number>()
   for (const m of missedSources(snapshot)) {
     if (m.unlinked_count > 0 && m.oldest_unlinked !== null) covered.add(m.entry_id)
-    before.set(m.entry_id, (before.get(m.entry_id) ?? 0) + m.count)
   }
   return snapshot.installment_auto_post
-    .map((r) => ({ r, dueToday: r.due_count - (before.get(r.entry_id) ?? 0) }))
-    .filter(({ r, dueToday }) => dueToday > 0 && !covered.has(r.entry_id))
-    .map(({ r, dueToday }) => {
+    .filter((r) => r.due_today_count > 0 && !covered.has(r.entry_id))
+    .map((r) => {
       const label = autoPostLabel(r.state, snapshot.auto_post_scheduled, r.block_reason)
-      const head = `${r.name} · ${dueToday} due today`
+      const head = `${r.name} · ${r.due_today_count} due today`
       return {
         key: `due-today:${r.entry_id}`,
         entryId: r.entry_id,
         name: r.name,
         accountName: r.account_name,
-        dueCount: dueToday,
+        dueCount: r.due_today_count,
         postableCount: r.postable_count,
         state: r.state,
         label,
