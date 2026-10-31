@@ -894,6 +894,25 @@ describe('dueTodayLines', () => {
     })
     expect(dueTodayLines(s)).toEqual([])
   })
+  it('lists no line when every month due is before today and has a pending linked row', () => {
+    const s = snap({
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, oldest: '2026-08-20' })],
+      missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on', count: 3, unlinked_count: 0, oldest_unlinked: null, pending_transaction_ids: [41, 42, 43] })],
+    })
+    expect(dueTodayLines(s)).toEqual([])
+  })
+  it('counts only the month due today when the months before it have pending linked rows', () => {
+    const s = snap({
+      auto_post_scheduled: true,
+      installment_auto_post: [apRow({ entry_id: 5, name: 'Tablet', due_count: 3, postable_count: 3, oldest: '2026-08-20' })],
+      missed: [missed({ entry_id: 5, name: 'Tablet', auto_post: 'on', count: 2, unlinked_count: 0, oldest_unlinked: null, pending_transaction_ids: [41, 42] })],
+    })
+    const [line, ...rest] = dueTodayLines(s)
+    expect(rest).toEqual([])
+    expect(line?.dueCount).toBe(1)
+    expect(line?.text).toBe('Tablet · 1 due today · Auto-posts each morning')
+    expect(line?.canPost).toBe(true)
+  })
   it('offers Review only for an unreviewed or held row the caller can review', () => {
     const s = snap({
       installment_auto_post: [
