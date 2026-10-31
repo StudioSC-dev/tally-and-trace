@@ -394,6 +394,13 @@ export const accountingApi = createApi({
       query: () => ({ url: 'budget-entries/post-due-installments', method: 'POST', body: { trigger: 'button' } }),
       invalidatesTags: [...INSTALLMENTS_POSTED],
     }),
+    // The page-open run (Due and overdue, on mount): the same route as the button, with its own endpoint
+    // name so the screen loader can leave it out (store/busy.ts EXEMPT_ENDPOINTS). A throttled or empty
+    // run (posted 0) starts no refetch.
+    postDueInstallmentsOnOpen: builder.mutation<PostDueInstallmentsResult, void>({
+      query: () => ({ url: 'budget-entries/post-due-installments', method: 'POST', body: { trigger: 'page_open' } }),
+      invalidatesTags: (result) => (result && result.posted > 0 ? [...INSTALLMENTS_POSTED] : []),
+    }),
     // The occurrences Mark paid can record; `include` (YYYY-MM-DD) is always listed (422 when off the schedule).
     getEntryOccurrences: builder.query<EntryOccurrences, { id: number; include?: string }>({
       query: ({ id, include }) => ({ url: `budget-entries/${id}/occurrences`, params: include ? { include } : {} }),
@@ -706,6 +713,7 @@ export const {
   useReviewInstallmentMutation,
   useSetInstallmentAutoPostMutation,
   usePostDueInstallmentsMutation,
+  usePostDueInstallmentsOnOpenMutation,
 
   // Transaction hooks
   useGetTransactionsQuery,

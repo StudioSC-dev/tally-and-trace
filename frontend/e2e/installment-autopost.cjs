@@ -41,14 +41,33 @@
 //       reading "Auto-post off · Mark paid". A card with a recorded statement and two
 //       postable unposted months opens Pay with "Full leaves out 2 installment months
 //       not yet posted" and Post due installments now
+//   (h) a reviewed installment due today is posted by opening Transactions, with no click:
+//       "Posted 1 due installment month", the API has the linked row, the due-today line
+//       is gone, leaving and coming back sends no page-open request, and a viewer opening
+//       Transactions sends none
+//   (i) the screen loader stays hidden while the page-open POST is held and input works;
+//       the refetches the post starts do block (the known limit)
+//   (j) the page-open POST is decided by a fresh snapshot, never a cached one: reached by
+//       client-side navigation from the dashboard, which shares the snapshot cache entry
+//       (j.1 cached 0 / fresh 1 posts; j.2 cached 1 / fresh 0 does not; j.3 the same JSON
+//       twice still posts, which fails an effect keyed on the snapshot alone)
 //
 // Every request-starting action is followed by waitQuiet(page) (the screen loader
-// blocks input while a request is in flight; see ./README.md). No request is held.
+// blocks input while a request is in flight; see ./README.md). Nothing is clicked or
+// typed while a request is held, except in (i), which holds the exempt page-open POST.
 //
-// Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|g|k]
-const { startLocalStack } = require('./_local_stack.cjs')
+// From commit 11, opening Transactions fires the page-open POST. Every scenario that
+// opens Transactions therefore takes each user's 15-minute claim BEFORE it creates its
+// entries (consumePageOpen, via makeOpener): the later page open is throttled and the
+// button, the job or the review is what posts. (h), (i) and (j) test the page-open POST
+// itself and do not. (g) and its variants open only the card's account page, which has no
+// page-open trigger; (g2) opens Transactions with auto-post off, so nothing is postable.
+//
+// Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|g|h|i|j|k]
+const util = require('node:util')
+const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { allDueRows, showRow } = require('./_due_pages.cjs')
-const { waitQuiet } = require('./_smooth.cjs')
+const { gate, logRequests, overlayPhase, readTexts, recordTexts, resetTexts, sleep, waitPhase, waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -135,6 +154,13 @@ async function makeUser(tag) {
   const login = await api('', 'POST', '/auth/login', { email, password })
   if (login.status !== 200) throw new Error(`login ${login.status}`)
   return { email, password, tag, token: login.json.access_token }
+}
+
+/** A user who will open Transactions: takes their page-open claim now, before any entry exists. */
+async function makeOpener(tag) {
+  const u = await makeUser(tag)
+  await consumePageOpen(api, u)
+  return u
 }
 
 /** A PHP card closing on `closeDom`, due 21 days later, paid from a checking account. */
@@ -229,7 +255,7 @@ async function submitReview(page) {
 // ─── (a) review a backdated installment, linking its duplicate ────────────────
 async function reviewWithDuplicate(browser) {
   console.log('(a) a backdated installment is reviewed, its duplicate linked')
-  const me = await makeUser('a')
+  const me = await makeOpener('a')
   const { card } = await makeCard(me, 'Visa A')
   const start = backdatedStart()
   const entry = await installment(me, card, 'Laptop', 2500, start, 12)
@@ -287,7 +313,7 @@ async function reviewWithDuplicate(browser) {
 // ─── (b) a new installment from tomorrow needs no review ─────────────────────
 async function newFromTomorrow(browser) {
   console.log('(b) a new installment from tomorrow is reviewed and on')
-  const me = await makeUser('b')
+  const me = await makeOpener('b')
   const { card } = await makeCard(me, 'Visa B')
   const tomorrow = addDays(manilaToday(), 1)
   const { ctx, page } = await newPage(browser)
@@ -320,7 +346,7 @@ async function newFromTomorrow(browser) {
 // ─── (c) Post now for a month due today ──────────────────────────────────────
 async function postNowToday(browser) {
   console.log('(c) a reviewed installment due today is posted from Post now')
-  const me = await makeUser('c')
+  const me = await makeOpener('c')
   const { card } = await makeCard(me, 'Visa C')
   const today = manilaToday()
   const entry = await installment(me, card, 'Phone', 1800, today, 6)
@@ -331,8 +357,14 @@ async function postNowToday(browser) {
     snap.installment_auto_post.map((r) => [r.entry_id, r.state, r.due_count, r.postable_count]), [[entry.id, 'on', 1, 1]])
 
   const { ctx, page } = await newPage(browser)
+  const late = watchSnapshotAfterPageOpen(page)
   await uiLogin(page, me)
   await openTransactions(page)
+  // The throttle is already taken, so the page-open POST posts 0 and must start no refetch.
+  for (const until = Date.now() + 4000; !late.answered && Date.now() < until;) await sleep(100)
+  await sleep(1500)
+  check('(c.throttled-no-refetch) a throttled page-open POST starts no snapshot refetch',
+    [late.answered, late.answer?.throttled, late.answer?.posted, late.late], [true, true, 0, 0])
   check('(c) the due-today line', await text(dueToday(page, entry.id)), 'Phone · 1 due today · Auto-posts each morning')
   check('(c) the line has no Review', await dueToday(page, entry.id).locator('[data-testid="due-today-review"]').count(), 0)
   check('(c) Post now counts the month', await text(testId(page, 'due-post-now')), 'Post 1 due installment month now')
@@ -351,7 +383,7 @@ async function postNowToday(browser) {
 // ─── (d) a held month: Review, then record without linking ───────────────────
 async function heldMonth(browser) {
   console.log('(d) a month held by a possible duplicate is reviewed')
-  const me = await makeUser('d')
+  const me = await makeOpener('d')
   const { card } = await makeCard(me, 'Visa D')
   const today = manilaToday()
   const entry = await installment(me, card, 'Fridge', 3100, today, 6)
@@ -383,9 +415,9 @@ async function heldMonth(browser) {
 // ─── (e) roles on a joint card ───────────────────────────────────────────────
 async function roles(browser) {
   console.log('(e) an editor reviews; a viewer sees no review or auto-post')
-  const owner = await makeUser('e-owner')
-  const editor = await makeUser('e-editor')
-  const viewer = await makeUser('e-viewer')
+  const owner = await makeOpener('e-owner')
+  const editor = await makeOpener('e-editor')
+  const viewer = await makeOpener('e-viewer')
   const { bank, card } = await makeCard(owner, 'Visa E')
   await post(owner.token, `/accounts/${card.id}/shares`, { email: editor.email, role: 'editor' })
   await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
@@ -534,10 +566,224 @@ async function unpostedPanel(browser) {
   await g3.ctx.close()
 }
 
+// ─── Page-open helpers ───────────────────────────────────────────────────────
+const isPageOpenPath = (url) => /\/budget-entries\/post-due-installments$/.test(new URL(url).pathname)
+const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
+const isPostDue = (r) => r.method() === 'POST' && isPageOpenPath(r.url())
+const openResult = (page) => testId(page, 'due-page-open-result')
+const POSTED_ONE = 'Posted 1 due installment month'
+
+/** A request log for counts, and the bodies of the post-due-installments POSTs (logRequests keeps no bodies). */
+function watchPostDue(page) {
+  const log = logRequests(page)
+  const bodies = []
+  page.on('request', (r) => { if (isPostDue(r)) bodies.push(r.postData() || '') })
+  return { count: () => log.filter((e) => e.method === 'POST' && isPageOpenPath(e.url)).length, bodies }
+}
+const triggers = (bodies) => bodies.map((b) => { try { return JSON.parse(b) } catch { return b } })
+
+/**
+ * Counts snapshot GETs sent after the page-open POST's response (the POST's own refetch), and keeps
+ * that response's JSON. Playwright emits `response` on headers, before RTK sees the body, so a
+ * refetch it starts is always sent after the flag is set.
+ */
+function watchSnapshotAfterPageOpen(page) {
+  const seen = { answered: false, answer: null, late: 0 }
+  page.on('response', (res) => {
+    if (!isPostDue(res.request())) return
+    seen.answered = true
+    res.json().then((j) => { seen.answer = j }, () => {})
+  })
+  page.on('request', (r) => { if (seen.answered && isSnapshot(r)) seen.late++ })
+  return seen
+}
+
+/** Waits (bounded) for `locator`'s text to equal `want`; returns the last text seen. Never throws. */
+async function waitText(locator, want, ms = 8000) {
+  const until = Date.now() + ms
+  let last = null
+  for (;;) {
+    last = (await locator.count()) ? await text(locator) : null
+    if (last === want || Date.now() > until) return last
+    await sleep(100)
+  }
+}
+
+// ─── (h) opening Transactions posts a due month ──────────────────────────────
+async function postOnOpen(browser) {
+  console.log('(h) opening Transactions posts a reviewed installment due today')
+  // No consumePageOpen: this is the page-open POST itself.
+  const owner = await makeUser('h-owner')
+  const viewer = await makeUser('h-viewer')
+  const { bank, card } = await makeCard(owner, 'Visa H')
+  await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
+  await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
+  const today = manilaToday()
+  const entry = await installment(owner, card, 'Tablet', 2900, today, 6)
+
+  // A viewer can post nothing, so their page open sends nothing. They open first, so the owner still has the month.
+  {
+    const { ctx, page } = await newPage(browser)
+    const watch = watchPostDue(page)
+    await uiLogin(page, viewer)
+    await openTransactions(page)
+    await page.waitForTimeout(1500)
+    check('(h) a viewer opening Transactions sends no page-open request', watch.count(), 0)
+    check('(h) the month is still unposted', (await linkedRows(owner, card, entry.id)).length, 0)
+    await ctx.close()
+  }
+
+  const { ctx, page } = await newPage(browser)
+  const watch = watchPostDue(page)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  const line = await waitText(openResult(page), POSTED_ONE)
+  await waitQuiet(page)
+  check('(h) opening Transactions, with no click, shows the posted line', line, POSTED_ONE)
+  check('(h) exactly one page-open request, with the page_open trigger', [watch.count(), triggers(watch.bodies)], [1, [{ trigger: 'page_open' }]])
+  const linked = await linkedRows(owner, card, entry.id)
+  check('(h) the API has the month\'s row, on its day', linked.map((t) => [t.transaction_date.slice(0, 10), t.is_posted]), [[today, true]])
+  check('(h) the due-today line is gone', await waitCount(page, dueToday(page, entry.id), 0), 0)
+  check('(h) no Post now', await testId(page, 'due-post-now').count(), 0)
+
+  // Away and back: a new mount, but nothing is postable now, so no request.
+  const sent = watch.count()
+  await page.goto(`${stack.webUrl}/allocations`)
+  await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+  await waitQuiet(page)
+  await openTransactions(page)
+  await page.waitForTimeout(1500)
+  check('(h) leaving and coming back sends no page-open request', watch.count() - sent, 0)
+  check('(h) the month was posted once', (await linkedRows(owner, card, entry.id)).length, 1)
+  await ctx.close()
+}
+
+// ─── (i) the screen loader stays hidden for the page-open POST ───────────────
+async function pageOpenIsQuiet(browser) {
+  console.log('(i) the page-open POST does not block input or gray the screen')
+  // No consumePageOpen: the POST must be sent.
+  const me = await makeUser('i')
+  const { card } = await makeCard(me, 'Visa I')
+  const today = manilaToday()
+  const entry = await installment(me, card, 'Printer', 2100, today, 6)
+
+  const { ctx, page } = await newPage(browser)
+  let openGate = null
+  let snapGate = null
+  try {
+    await recordTexts(page, ['busy-overlay'], { attributes: ['data-phase'] })
+    await uiLogin(page, me)
+    openGate = await gate(page, isPostDue)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await testId(page, 'due-section').waitFor()
+    await waitQuiet(page)
+    const hit = await openGate.waitHits(1)
+    check('(i) the page-open POST was sent and is held', [hit, hit ? JSON.parse(openGate.bodies[0] || '{}') : null], [true, { trigger: 'page_open' }])
+
+    // The POST is held and exempt: the overlay never leaves hidden.
+    await resetTexts(page)
+    await page.waitForTimeout(1200)
+    const phases = ((await readTexts(page))['busy-overlay'] || { attrs: {} }).attrs['data-phase'] || []
+    check('(i.no-block) no shield or visible phase while the POST is held', phases.filter((p) => p === 'shield' || p === 'visible'), [])
+    check('(i.no-block) the overlay is hidden', await overlayPhase(page), 'hidden')
+
+    // The one permitted click during a hold: the held request is exempt, so input works.
+    // (Post now is not clicked here: that request is not exempt and would block input.)
+    const toggle = testId(page, 'due-section-toggle')
+    await toggle.click()
+    const collapsed = await toggle.getAttribute('aria-expanded')
+    await toggle.click()
+    const expanded = await toggle.getAttribute('aria-expanded')
+    check('(i.input-works) the section toggles while the POST is held', [collapsed, expanded], ['false', 'true'])
+
+    // Release the POST while its refetch is held: the refetches are not exempt, so they block (the known limit).
+    snapGate = await gate(page, isSnapshot)
+    openGate.release({ disarm: true })
+    const snapHit = await snapGate.waitHits(1)
+    const visibleNow = snapHit ? await waitPhase(page, 'visible') : false
+    check('(i.refetch-blocks) the post\'s snapshot refetch grays the screen', [snapHit, visibleNow], [true, true])
+    snapGate.release({ disarm: true })
+    await waitQuiet(page)
+    check('(i) the posted line is shown', await waitText(openResult(page), POSTED_ONE), POSTED_ONE)
+    check('(i) the API has the month\'s row', (await linkedRows(me, card, entry.id)).length, 1)
+  } finally {
+    openGate?.release({ disarm: true })
+    snapGate?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// ─── (j) the page-open POST is decided by a fresh snapshot ───────────────────
+const navToTransactions = async (page) => {
+  await page.locator('a[data-onboarding="nav-transactions"]:visible').first().click()
+  await testId(page, 'due-section').waitFor()
+}
+/** A user with a card, logged in on the dashboard, whose snapshot is cached there. */
+async function onDashboard(browser, tag, dueToday) {
+  const me = await makeUser(tag)
+  const { card } = await makeCard(me, `Visa ${tag.toUpperCase()}`)
+  const entry = dueToday ? await installment(me, card, 'Lamp', 1200, manilaToday(), 6) : null
+  const { ctx, page } = await newPage(browser)
+  const watch = watchPostDue(page)
+  const snapshots = []
+  page.on('response', (res) => { if (isSnapshot(res.request())) snapshots.push(res.json().catch(() => null)) })
+  await uiLogin(page, me)
+  await page.goto(`${stack.webUrl}/`)
+  await waitQuiet(page)
+  return { me, card, entry, ctx, page, watch, snapshots }
+}
+
+async function freshSnapshot(browser) {
+  console.log('(j) the page-open POST is decided by a fresh snapshot, not a cached one')
+  // No consumePageOpen anywhere here: each part reads the page-open POST itself.
+
+  console.log('(j.1) cached 0, fresh 1')
+  {
+    const s = await onDashboard(browser, 'j1', false)
+    // Node-side, so the browser's cache is not invalidated: the dashboard's snapshot still says nothing is postable.
+    const entry = await installment(s.me, s.card, 'Lamp', 1200, manilaToday(), 6)
+    await navToTransactions(s.page)
+    const line = await waitText(openResult(s.page), POSTED_ONE)
+    await waitQuiet(s.page)
+    check('(j.fresh-posts) the fresh snapshot posts: line, one request, its body, the row',
+      [line, s.watch.count(), triggers(s.watch.bodies), (await linkedRows(s.me, s.card, entry.id)).length],
+      [POSTED_ONE, 1, [{ trigger: 'page_open' }], 1])
+    await s.ctx.close()
+  }
+
+  console.log('(j.2) cached 1, fresh 0')
+  {
+    const s = await onDashboard(browser, 'j2', true)
+    const backstop = await post(s.me.token, '/budget-entries/post-due-installments', { trigger: 'button' })
+    check('(j.2) the backstop posted the month and took no throttle claim', [backstop.throttled, backstop.posted], [false, 1])
+    await navToTransactions(s.page)
+    await waitQuiet(s.page)
+    await s.page.waitForTimeout(1500)
+    check('(j.fresh-skips) the fresh snapshot has nothing: no page-open request, the month posted once',
+      [s.watch.count(), (await linkedRows(s.me, s.card, s.entry.id)).length], [0, 1])
+    await s.ctx.close()
+  }
+
+  console.log('(j.3) cached 1, fresh 1, the same JSON')
+  {
+    const s = await onDashboard(browser, 'j3', true)
+    const before = s.snapshots.length
+    await navToTransactions(s.page)
+    const line = await waitText(openResult(s.page), POSTED_ONE)
+    await waitQuiet(s.page)
+    const bodies = await Promise.all(s.snapshots)
+    // The dashboard's last snapshot and the Transactions mount's first: nothing changed between them.
+    check('(j.same-json) the two snapshots are deep-equal',
+      before > 0 && bodies.length > before && util.isDeepStrictEqual(bodies[before - 1], bodies[before]), true)
+    check('(j.same-posts) the same JSON still posts once', [line, s.watch.count(), triggers(s.watch.bodies)], [POSTED_ONE, 1, [{ trigger: 'page_open' }]])
+    await s.ctx.close()
+  }
+}
+
 // ─── (k) a review gone stale while its dialog is open ────────────────────────
 async function staleReview(browser) {
   console.log('(k) the review goes stale while the dialog is open')
-  const me = await makeUser('k')
+  const me = await makeOpener('k')
   const { card } = await makeCard(me, 'Visa K')
   const start = backdatedStart()
   const entry = await installment(me, card, 'Camera', 1800, start, 12)
@@ -579,6 +825,9 @@ async function staleReview(browser) {
   if (run('d')) await heldMonth(browser)
   if (run('e')) await roles(browser)
   if (run('g')) await unpostedPanel(browser)
+  if (run('h')) await postOnOpen(browser)
+  if (run('i')) await pageOpenIsQuiet(browser)
+  if (run('j')) await freshSnapshot(browser)
   if (run('k')) await staleReview(browser)
   await browser.close()
   stack.stop()

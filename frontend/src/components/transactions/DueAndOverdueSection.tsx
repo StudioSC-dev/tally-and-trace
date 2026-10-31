@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
   DUE_PAGE_SIZE,
@@ -15,10 +15,12 @@ import {
   orderDueRows,
   pageWindow,
   pendingLinkIds,
+  postedOnOpenText,
   postedResultText,
   postNowCount,
   postNowText,
   rowAmount,
+  shouldPostOnOpen,
   statementRowText,
   transactionDescription,
 } from '@tally-trace/shared'
@@ -34,7 +36,12 @@ import type {
   Transaction,
 } from '@tally-trace/shared'
 import { useManilaDay } from '../../hooks/useManilaDay'
-import { accountingApi, useGetDashboardSnapshotQuery, usePostDueInstallmentsMutation } from '../../store/api'
+import {
+  accountingApi,
+  useGetDashboardSnapshotQuery,
+  usePostDueInstallmentsMutation,
+  usePostDueInstallmentsOnOpenMutation,
+} from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import type { CurrencyCode } from '../../utils/currency'
@@ -176,6 +183,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
   const [posted, setPosted] = useState<number | null>(null)
   const [postError, setPostError] = useState<string | null>(null)
+  // The page-open run (quiet: no loader, no toast): the months it posted, for a status line.
+  const [postOnOpen] = usePostDueInstallmentsOnOpenMutation()
+  const [openPosted, setOpenPosted] = useState<number | null>(null)
   // How many batches of the window query are loaded ("Load more") and the day they were: a new day is one batch.
   const [loaded, setLoaded] = useState({ count: 1, day: today })
   const batchCount = loaded.day === today ? loaded.count : 1
@@ -183,7 +193,36 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
   const page = effectiveDuePage(pageState, today)
 
-  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
+  const {
+    data: snapshot,
+    requestId: snapshotRequestId,
+    isSuccess: snapshotSuccess,
+    isFetching: snapshotFetching,
+    isError: snapshotIsError,
+    isLoading: snapshotLoading,
+    error: snapshotError,
+    refetch: refetchSnapshot,
+  } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
+  // The id of the request whose data was already settled when this mounted (a cache entry the dashboard filled);
+  // undefined for a hard load or a request in flight. A ref keeps its first value, so that snapshot is never fresh.
+  const mountRequestId = useRef<string | undefined>(snapshotFetching ? undefined : snapshotRequestId)
+  // Consumed when this mount's first fresh snapshot is evaluated, whether or not a POST is sent.
+  const pageOpenDone = useRef(false)
+  // Page-open auto-post (Q1): once per mount, decided by a fresh snapshot, never a cached one. The effect lists
+  // every value the gate reads: structural sharing keeps `snapshot`'s identity when a refetch returns the same
+  // JSON, so only the request id says the response is new. A failed refetch is not fresh and consumes nothing.
+  useEffect(() => {
+    if (pageOpenDone.current) return
+    if (snapshot === undefined || !snapshotSuccess || snapshotFetching || snapshotIsError) return
+    if (snapshotRequestId === mountRequestId.current) return
+    pageOpenDone.current = true
+    if (!shouldPostOnOpen(snapshot)) return
+    // Fired and forgotten: an error is swallowed (Post now stays available) and nothing awaits it in a render path.
+    postOnOpen()
+      .unwrap()
+      .then((result) => setOpenPosted(result.posted))
+      .catch(() => undefined)
+  }, [snapshot, snapshotRequestId, snapshotSuccess, snapshotFetching, snapshotIsError, postOnOpen])
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(() => void refetchSnapshot())
   const endDate = `${addDays(today, WINDOW_DAYS)}T23:59:59`
@@ -208,6 +247,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const reviewNotice = useMemo(() => (snapshot ? dueReviewNotice(snapshot) : null), [snapshot])
   const todayLines = useMemo(() => (snapshot ? dueTodayLines(snapshot) : []), [snapshot])
   const postNow = snapshot ? postNowText(postNowCount(snapshot)) : null
+  const openPostedText = openPosted === null ? null : postedOnOpenText(openPosted)
   // Overdue rows first, across every kind, so page 1 is where they are.
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
@@ -522,6 +562,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
                 </li>
               ))}
             </ul>
+          )}
+          {openPostedText !== null && (
+            <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
           )}
           {(postNow !== null || posted !== null || postError !== null) && (
             <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">

@@ -178,4 +178,18 @@ async function startLocalStack(options = {}) {
   return { apiUrl, webUrl, psql, verifyUser, stop, refuseDatabaseUrl }
 }
 
-module.exports = { startLocalStack, refuseDatabaseUrl }
+/**
+ * Takes a user's 15-minute page-open claim with a real `page_open` POST, so the next time
+ * that user opens Transactions the page-open run is throttled and posts nothing. The POST
+ * is itself a run of the posting job over the user's postable installments: call it BEFORE
+ * the scenario creates its entries, or it posts their due months. `api(token, method, url,
+ * body)` returns `{ status, json }` (the scripts' own helper); `user` carries `token`.
+ * Returns the response. Throws unless it is a 200.
+ */
+async function consumePageOpen(api, user) {
+  const res = await api(user.token, 'POST', '/budget-entries/post-due-installments', { trigger: 'page_open' })
+  if (res.status !== 200) throw new Error(`consumePageOpen: ${res.status} ${JSON.stringify(res.json)}`)
+  return res.json
+}
+
+module.exports = { startLocalStack, refuseDatabaseUrl, consumePageOpen }
