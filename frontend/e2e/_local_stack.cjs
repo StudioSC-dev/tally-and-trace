@@ -110,6 +110,9 @@ async function startLocalStack(options = {}) {
     FRONTEND_BASE_URL: webUrl,
     RESEND_API_KEY: '',
     SENTRY_DSN: '',
+    // The installment job's token (STU-343 Plan B): local only. With it set the job
+    // endpoint answers and the app labels auto-post "each morning".
+    JOB_TOKEN: 'local-e2e-only',
   })
   // psql takes a plain postgresql:// URL.
   const psqlUrl = raw.replace(/^postgresql\+\w+:/, 'postgresql:')
