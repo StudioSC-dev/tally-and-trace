@@ -58,8 +58,9 @@ def get_snapshot(
       services/missed.py), a card installment's row carrying ``auto_post``,
       ``block_reason`` and ``can_review``
     - Card installments to review (``installment_review``) and those with
-      months due (``installment_auto_post``, with the caller's ``postable_count``),
-      and whether the morning job is configured (``auto_post_scheduled``)
+      months due (``installment_auto_post``, with the caller's ``postable_count``
+      and ``due_today_count``), and whether the morning job is configured
+      (``auto_post_scheduled``)
     - Full budget-entry rows in ``upcoming_this_month``
       and ``payables`` carry ``kind`` and ``can_mark_paid``
 

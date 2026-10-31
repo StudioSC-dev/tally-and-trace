@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy import or_
@@ -129,6 +129,7 @@ class InstallmentInfo:
     state: str
     block_reason: Optional[str]
     can_edit: bool
+    today: date
 
 
 def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, InstallmentInfo]:
@@ -166,7 +167,7 @@ def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, Ins
         out[entry.id] = InstallmentInfo(
             entry=entry, plan=plan, state=state,
             block_reason=_block_reason(plan) if state == "blocked" else None,
-            can_edit=bool(access.permissions(entry)["can_edit"]))
+            can_edit=bool(access.permissions(entry)["can_edit"]), today=today)
     return out
 
 
@@ -180,7 +181,9 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
       viewer, who cannot edit.
     - ``installment_auto_post``: active reviewed card installments the caller
       reads in full or shared_full with at least one month due, with the
-      caller's ``postable_count``, the ``state`` and ``block_reason``;
+      caller's ``postable_count``, ``due_today_count`` (the due months that
+      fall on the Manila today the plan was computed through), the ``state``
+      and ``block_reason``;
       ``can_post`` and ``can_review`` are both the caller's ``can_edit``. A
       viewer's or tag viewer's view is Limited, so they get no row.
     """
@@ -208,6 +211,7 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
                 "account_name": account_name(entry),
                 "due_count": len(plan.due),
                 "postable_count": len(plan.postable),
+                "due_today_count": sum(1 for occ in plan.due if occ.date() == info.today),
                 "oldest": plan.due[0].date().isoformat(),
                 "state": info.state,
                 "block_reason": info.block_reason,

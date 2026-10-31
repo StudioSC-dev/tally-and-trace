@@ -106,8 +106,40 @@ def test_auto_post_rows_include_a_month_due_today(world):
     assert list(rows) == [phone]
     assert rows[phone] == {
         "entry_id": phone, "name": "Phone", "account_name": "Card C", "due_count": 1,
-        "postable_count": 1, "oldest": "2026-10-18", "state": "on", "block_reason": None,
-        "can_post": True, "can_review": True}
+        "postable_count": 1, "due_today_count": 1, "oldest": "2026-10-18", "state": "on",
+        "block_reason": None, "can_post": True, "can_review": True}
+
+
+def test_due_today_count_counts_only_the_months_on_todays_manila_date(world):
+    w = world
+    today_only = _reviewed(w, name="Today", next_day="2026-10-18", remaining=6)
+    with_past = _reviewed(w, name="Mixed", next_day="2026-08-18", remaining=6)
+    for day in ("2026-08-18", "2026-09-18"):
+        _txn(w, day, budget_entry_id=with_past, is_posted=False)
+    past_only = _reviewed(w, name="Past", next_day="2026-08-05", remaining=6)
+
+    rows = _by_id(_snap(w, w["o"])["installment_auto_post"])
+    assert {i: (rows[i]["due_count"], rows[i]["due_today_count"])
+            for i in (today_only, with_past, past_only)} == {
+        today_only: (1, 1), with_past: (3, 1), past_only: (3, 0)}
+
+
+def test_due_today_count_is_zero_for_a_shared_inactive_card_with_only_past_months(world):
+    """The audit's repro: on Oct 18 an editor sees O's reviewed installment on a
+    shared card that is now inactive, its Jul 5 to Sep 5 months each standing as
+    a pending linked row. ``missed`` leaves another creator's entry out unless it
+    touches an active account, so nothing there says the months are past."""
+    w, db = world, world["db"]
+    tablet = _reviewed(w, remaining=3)
+    for day in ("2026-07-05", "2026-08-05", "2026-09-05"):
+        _txn(w, day, budget_entry_id=tablet, is_posted=False)
+    db.execute(text("UPDATE accounts SET is_active = false WHERE id = :id"), {"id": w["card"]})
+    db.commit()
+
+    snap = _snap(w, w["e"])
+    row = _by_id(snap["installment_auto_post"])[tablet]
+    assert (row["due_count"], row["due_today_count"]) == (3, 0)
+    assert snap["missed"] == []
 
 
 def test_auto_post_rows_carry_state_and_guidance(world):
