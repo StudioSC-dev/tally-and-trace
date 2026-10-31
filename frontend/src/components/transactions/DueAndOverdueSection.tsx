@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
   DUE_PAGE_SIZE,
@@ -7,13 +7,21 @@ import {
   RECURRING_ACTION_LABELS,
   PENDING_POST_LABELS,
   dueRecurringRows,
+  dueReviewNotice,
   duePendingRows,
   dueStatementRows,
+  dueTodayLines,
   formatEntryDate,
   orderDueRows,
   pageWindow,
   pendingLinkIds,
+  postedOnOpenText,
+  postedResultText,
+  postNowCount,
+  postNowText,
   rowAmount,
+  shouldPostOnOpen,
+  statementRowText,
   transactionDescription,
 } from '@tally-trace/shared'
 import type {
@@ -28,12 +36,19 @@ import type {
   Transaction,
 } from '@tally-trace/shared'
 import { useManilaDay } from '../../hooks/useManilaDay'
-import { accountingApi, useGetDashboardSnapshotQuery } from '../../store/api'
+import {
+  accountingApi,
+  useGetDashboardSnapshotQuery,
+  usePostDueInstallmentsMutation,
+  usePostDueInstallmentsOnOpenMutation,
+} from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
 import type { CurrencyCode } from '../../utils/currency'
+import { apiErrorMessage } from '../../utils/apiError'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
+import { InstallmentReviewDialog } from '../InstallmentReviewDialog'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 import { Pager } from '../Pager'
 
@@ -47,6 +62,13 @@ import { Pager } from '../Pager'
  * row per card with an owed closed statement (`card_statements_due`), with Pay; the server
  * decides closed and overdue on the Manila day, so the snapshot is refetched when that day
  * changes. The merge, the dedup and the labels live in `@tally-trace/shared` (`dueSection.ts`).
+ *
+ * Card installments (STU-343 Plan B): each missed installment row says whether it
+ * auto-posts, with Review where the caller can review it; a reviewed installment whose
+ * only due month is today gets a compact line; installments that are not reviewed yet are
+ * listed in a notice, each with Review; "Post N due installment months now" posts every
+ * month the snapshot counts as postable (`postNowCount`); and a card's statement row
+ * counts its installment months not posted yet, listing a card for those alone.
  */
 
 const WINDOW_DAYS = 30
@@ -131,6 +153,11 @@ interface Props {
   accountCurrencies?: ReadonlyMap<number, CurrencyCode>
 }
 
+interface ReviewTarget {
+  entryId: number
+  name: string
+}
+
 interface RecordTarget {
   entryId: number
   name: string
@@ -149,6 +176,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [target, setTarget] = useState<RecordTarget | null>(null)
   // The card whose statement is being paid.
   const [payCardId, setPayCardId] = useState<number | null>(null)
+  // The installment being reviewed, and whether the review notice is expanded.
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
+  const [noticeOpen, setNoticeOpen] = useState(false)
+  // Post now: its last run's count and error, kept until the next run.
+  const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
+  const [posted, setPosted] = useState<number | null>(null)
+  const [postError, setPostError] = useState<string | null>(null)
+  // The page-open run (quiet: no loader, no toast): the months it posted, for a status line.
+  const [postOnOpen] = usePostDueInstallmentsOnOpenMutation()
+  const [openPosted, setOpenPosted] = useState<number | null>(null)
   // How many batches of the window query are loaded ("Load more") and the day they were: a new day is one batch.
   const [loaded, setLoaded] = useState({ count: 1, day: today })
   const batchCount = loaded.day === today ? loaded.count : 1
@@ -156,7 +193,36 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
   const page = effectiveDuePage(pageState, today)
 
-  const { data: snapshot, isLoading: snapshotLoading, error: snapshotError, refetch: refetchSnapshot } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
+  const {
+    data: snapshot,
+    requestId: snapshotRequestId,
+    isSuccess: snapshotSuccess,
+    isFetching: snapshotFetching,
+    isError: snapshotIsError,
+    isLoading: snapshotLoading,
+    error: snapshotError,
+    refetch: refetchSnapshot,
+  } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
+  // The id of the request whose data was already settled when this mounted (a cache entry the dashboard filled);
+  // undefined for a hard load or a request in flight. A ref keeps its first value, so that snapshot is never fresh.
+  const mountRequestId = useRef<string | undefined>(snapshotFetching ? undefined : snapshotRequestId)
+  // Consumed when this mount's first fresh snapshot is evaluated, whether or not a POST is sent.
+  const pageOpenDone = useRef(false)
+  // Page-open auto-post (Q1): once per mount, decided by a fresh snapshot, never a cached one. The effect lists
+  // every value the gate reads: structural sharing keeps `snapshot`'s identity when a refetch returns the same
+  // JSON, so only the request id says the response is new. A failed refetch is not fresh and consumes nothing.
+  useEffect(() => {
+    if (pageOpenDone.current) return
+    if (snapshot === undefined || !snapshotSuccess || snapshotFetching || snapshotIsError) return
+    if (snapshotRequestId === mountRequestId.current) return
+    pageOpenDone.current = true
+    if (!shouldPostOnOpen(snapshot)) return
+    // Fired and forgotten: an error is swallowed (Post now stays available) and nothing awaits it in a render path.
+    postOnOpen()
+      .unwrap()
+      .then((result) => setOpenPosted(result.posted))
+      .catch(() => undefined)
+  }, [snapshot, snapshotRequestId, snapshotSuccess, snapshotFetching, snapshotIsError, postOnOpen])
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(() => void refetchSnapshot())
   const endDate = `${addDays(today, WINDOW_DAYS)}T23:59:59`
@@ -178,6 +244,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     [snapshot, windowTxns, linkedTxns, today],
   )
   const statements = useMemo(() => (snapshot ? dueStatementRows(snapshot) : []), [snapshot])
+  const reviewNotice = useMemo(() => (snapshot ? dueReviewNotice(snapshot) : null), [snapshot])
+  const todayLines = useMemo(() => (snapshot ? dueTodayLines(snapshot) : []), [snapshot])
+  const postNow = snapshot ? postNowText(postNowCount(snapshot)) : null
+  const openPostedText = openPosted === null ? null : postedOnOpenText(openPosted)
   // Overdue rows first, across every kind, so page 1 is where they are.
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
@@ -193,6 +263,20 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   }, [loading, linkedLoading, windowResult.fetching, view.page, page, today])
 
   const loadMore = () => setLoaded({ count: batchCount + 1, day: today })
+
+  const postDueNow = async () => {
+    setPosted(null)
+    setPostError(null)
+    try {
+      const result = await postDue().unwrap()
+      setPosted(result.posted)
+      onChanged()
+    } catch (caught) {
+      setPostError(apiErrorMessage(caught) || 'Could not post the due installment months. Please try again.')
+    }
+  }
+
+  const review = (entryId: number, name: string) => setReviewTarget({ entryId, name })
 
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
     setTarget({
@@ -280,8 +364,20 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
       <div>
         <p className="text-sm font-medium text-ink">{row.name}</p>
         <p className="text-xs text-warn" data-testid="due-missed-text">{row.text}</p>
+        {row.autoPostLabel && (
+          <p className="text-xs text-muted" data-testid="due-auto-post" data-state={row.autoPost ?? undefined}>
+            {row.autoPostLabel}
+          </p>
+        )}
       </div>
-      <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">{actionButtons(row)}</div>
+      <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">
+        {row.review && (
+          <button type="button" onClick={() => review(row.entryId, row.name)} className={buttonClass} data-testid="due-review">
+            Review
+          </button>
+        )}
+        {actionButtons(row)}
+      </div>
     </li>
   )
 
@@ -313,43 +409,62 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     </li>
   )
 
-  const statementRow = (row: DueStatementRow) => (
-    <li
-      key={row.key}
-      className="flex items-start justify-between gap-3 px-4 py-3"
-      data-testid="due-row"
-      data-kind="statement"
-      data-view="full"
-      data-source={`statement:${row.cardId}`}
-    >
-      <div>
-        <p className="text-sm font-medium text-ink">{row.name} statement</p>
-        <p className="text-xs text-muted">
-          Closed {formatEntryDate(row.closeDate)} · due {formatEntryDate(row.dueDate)}
-          {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
-          {row.statements > 1 && (
-            <span data-testid="due-earlier-statements">
-              {` · includes ${row.statements - 1} earlier ${row.statements - 1 === 1 ? 'statement' : 'statements'}`}
-            </span>
+  const statementRow = (row: DueStatementRow) => {
+    const shown = statementRowText(row)
+    const postButton = shown.post && (
+      <button type="button" onClick={() => void postDueNow()} disabled={posting} className={buttonClass} data-testid="due-unposted-post">
+        {posting ? 'Posting…' : 'Post due installments now'}
+      </button>
+    )
+    return (
+      <li
+        key={row.key}
+        className="flex items-start justify-between gap-3 px-4 py-3"
+        data-testid="due-row"
+        data-kind="statement"
+        data-view="full"
+        data-source={`statement:${row.cardId}`}
+      >
+        <div>
+          {shown.unpostedOnly ? (
+            <p className="text-sm font-medium text-ink" data-testid="due-unposted-text">{`${row.name} · ${shown.text ?? ''}`}</p>
+          ) : (
+            <p className="text-sm font-medium text-ink">{row.name} statement</p>
           )}
-        </p>
-      </div>
-      <div className="flex-shrink-0 space-y-1 text-right">
-        <p
-          className="text-sm font-semibold text-ink"
-          data-testid="due-amount"
-          {...(row.incomplete ? { title: 'may be low: some foreign charges have no exchange rate' } : {})}
-        >
-          {formatCurrency(row.amount, row.currency)}
-        </p>
-        <div className="flex flex-wrap justify-end gap-2">
-          <button type="button" onClick={() => setPayCardId(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
-            Pay
-          </button>
+          <p className="text-xs text-muted">
+            Closed {formatEntryDate(row.closeDate)} · due {formatEntryDate(row.dueDate)}
+            {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {row.statements > 1 && (
+              <span data-testid="due-earlier-statements">
+                {` · includes ${row.statements - 1} earlier ${row.statements - 1 === 1 ? 'statement' : 'statements'}`}
+              </span>
+            )}
+          </p>
+          {shown.note && <p className="text-xs text-warn" data-testid="due-unposted-note">{shown.note}</p>}
+          {shown.guidance && <p className="text-xs text-warn" data-testid="due-unposted-guidance">{shown.guidance}</p>}
         </div>
-      </div>
-    </li>
-  )
+        <div className="flex-shrink-0 space-y-1 text-right">
+          {!shown.unpostedOnly && (
+            <p
+              className="text-sm font-semibold text-ink"
+              data-testid="due-amount"
+              {...(row.incomplete ? { title: 'may be low: some foreign charges have no exchange rate' } : {})}
+            >
+              {formatCurrency(row.amount, row.currency)}
+            </p>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {postButton}
+            {shown.pay && (
+              <button type="button" onClick={() => setPayCardId(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
+                Pay
+              </button>
+            )}
+          </div>
+        </div>
+      </li>
+    )
+  }
 
   const recurringRow = (row: DueRecurringRow) => {
     if (row.view === 'limited') return limitedRow(row)
@@ -381,6 +496,96 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
             <p className="px-4 py-3 text-sm text-danger" role="alert" data-testid="due-pending-error">
               Could not load some pending transactions.
             </p>
+          )}
+          {reviewNotice && (
+            <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-notice">
+              <button
+                type="button"
+                onClick={() => setNoticeOpen((prev) => !prev)}
+                aria-expanded={noticeOpen}
+                className="text-sm font-medium text-warn underline underline-offset-2 focus-ring"
+                data-testid="due-review-notice-toggle"
+              >
+                {reviewNotice.text}
+              </button>
+              {noticeOpen && (
+                <ul className="space-y-2" data-testid="due-review-notice-list">
+                  {reviewNotice.entries.map((entry) => (
+                    <li
+                      key={entry.entryId}
+                      className="flex items-center justify-between gap-3"
+                      data-testid="due-review-notice-entry"
+                      data-source={`budget_entry:${entry.entryId}`}
+                    >
+                      <span className="text-sm text-ink">
+                        {entry.name}
+                        <span className="text-xs text-muted">
+                          {` · ${entry.accountName}`}
+                          {entry.missedCount > 0 && ` · ${entry.missedCount} missed`}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => review(entry.entryId, entry.name)}
+                        className={buttonClass}
+                        data-testid="due-review-notice-review"
+                      >
+                        Review
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {todayLines.length > 0 && (
+            <ul className="divide-y divide-line border-b border-line" data-testid="due-today-lines">
+              {todayLines.map((line) => (
+                <li
+                  key={line.key}
+                  className="flex items-center justify-between gap-3 px-4 py-2"
+                  data-testid="due-today-line"
+                  data-source={`budget_entry:${line.entryId}`}
+                  data-state={line.state}
+                >
+                  <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
+                  {line.canReview && (
+                    <button
+                      type="button"
+                      onClick={() => review(line.entryId, line.name)}
+                      className={buttonClass}
+                      data-testid="due-today-review"
+                    >
+                      Review
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {openPostedText !== null && (
+            <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
+          )}
+          {(postNow !== null || posted !== null || postError !== null) && (
+            <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+              {postNow !== null && (
+                <button
+                  type="button"
+                  onClick={() => void postDueNow()}
+                  disabled={posting}
+                  className={primaryButtonClass}
+                  data-testid="due-post-now"
+                >
+                  {posting ? 'Posting…' : postNow}
+                </button>
+              )}
+              {posted !== null && (
+                <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
+              )}
+              {postError !== null && (
+                <p className="text-sm text-danger" role="alert" data-testid="due-post-now-error">{postError}</p>
+              )}
+            </div>
           )}
           {!countPending && !snapshotError && count === 0 && (
             <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
@@ -425,6 +630,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
         />
       )}
       {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} />}
+      {reviewTarget && (
+        <InstallmentReviewDialog
+          key={reviewTarget.entryId}
+          entryId={reviewTarget.entryId}
+          name={reviewTarget.name}
+          onClose={() => setReviewTarget(null)}
+          onReviewed={onChanged}
+        />
+      )}
     </section>
   )
 }

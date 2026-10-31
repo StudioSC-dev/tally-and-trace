@@ -1,6 +1,6 @@
 import os
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     # plus Sentry's free span quota means this stays low in production; 0
     # disables tracing without disabling error reporting.
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
+    # The daily card-installment job's shared secret (``X-Job-Token`` on
+    # ``POST /api/v1/jobs/post-due-installments``). Unset, empty or blank: the
+    # endpoint is a 404.
+    JOB_TOKEN: Optional[str] = None
+
+    @field_validator("JOB_TOKEN", mode="before")
+    @classmethod
+    def _blank_job_token_is_unset(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def _reject_placeholder_secrets_in_production(self) -> "Settings":

@@ -77,11 +77,16 @@ def _minimum_out(result: dict) -> dict:
 
 
 def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates],
-                    redactor: Redactor) -> List[dict]:
+                    redactor: Redactor,
+                    unposted: List[card_credit.UnpostedMonth]) -> List[dict]:
     """``StatementDue[]``: the card's closed statements
     (``card_credit.closed_statements``: closed before Manila's today), the six
     most recent plus any older one still owed, oldest first, each with its
-    minimum amount due (``statement_minimums``)."""
+    minimum amount due (``statement_minimums``). ``unposted_installments``
+    and ``unposted_postable`` count the ``unposted`` months
+    (``card_credit.unposted_months``) whose cycle closes on or before that
+    statement's close, cumulatively like ``clear_through``: what Full leaves
+    out, and how many of those the caller's Post now would record."""
     history = card_credit.closed_statements(db, user, card, fx)
     if not history:
         return []
@@ -97,6 +102,8 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
     out = []
     for i in listed:
         statement = history[i]
+        close = statement["close"].date()
+        left_out = [m for m in unposted if m.close <= close]
         out.append({
             "close_date": statement["close"].date().isoformat(),
             "due_date": statement["due"].date().isoformat(),
@@ -106,6 +113,8 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
             "outstanding": _amount(statement["outstanding"]),
             "incomplete": statement["incomplete"],
             "minimum_due": _minimum_out(minimums[i]),
+            "unposted_installments": len(left_out),
+            "unposted_postable": sum(1 for m in left_out if m.postable),
         })
     return out
 
@@ -137,10 +146,15 @@ def get_card_credit(
     not a credit card. ``credit`` is null when no limit is set. ``rule`` is the
     card's minimum due rule. ``statements`` are its closed statements with
     their minimum amount due (``card_statements``). ``open_cycle`` is the
-    cycle open on Manila's today, null without cycle settings.
+    cycle open on Manila's today, null without cycle settings. ``unposted``
+    is ``{count, postable, oldest_close, oldest_due}`` over the card's
+    unposted installment months on closed cycles
+    (``card_credit.unposted_months``), null when there are none; it exists
+    with no recorded statement at all.
     """
     card = _managed_card(db, current_user, account_id)
     redactor = Redactor(db, current_user)
+    unposted = card_credit.unposted_months(db, card, current_user)
     credit = card_credit.credit_for_cards(db, current_user, [card.id], fx=fx,
                                           redactor=redactor)
     rule = _rule(card)
@@ -150,8 +164,9 @@ def get_card_credit(
         "currency": fc._code(card.currency),
         "credit": credit.get(card.id),
         "rule": rule.model_dump(mode="json") if rule is not None else None,
-        "statements": card_statements(db, current_user, card, fx, redactor),
+        "statements": card_statements(db, current_user, card, fx, redactor, unposted),
         "open_cycle": card_credit.open_cycle(card, manila_today()),
+        "unposted": card_credit.unposted_summary(unposted),
     }
 
 

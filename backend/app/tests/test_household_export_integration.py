@@ -37,7 +37,15 @@ def _all_exports(client, who):
 
 
 def _clean(body, texts, private_ids):
-    assert sw_leaks(body, private_ids, numbers=SENTINELS) == []
+    # private_ids are account ids. A row's own id in any other table (a
+    # transaction's, an entry's, a tag's) comes from another sequence and can
+    # equal one by chance, so only those row ids are let through; every account
+    # reference (accounts, shared_accounts, account, counterpart, *_account_id)
+    # is still checked.
+    leaks = [(where, value) for where, value in sw_leaks(body, private_ids, numbers=SENTINELS)
+             if not (re.fullmatch(r"\$\.(?!(?:shared_)?accounts\[)[a-z_]+\[\d+\]\.id", where)
+                     and isinstance(value, int) and value in private_ids)]
+    assert leaks == []
     for text in texts:
         assert PRIVATE not in text
         for n in SENTINELS:

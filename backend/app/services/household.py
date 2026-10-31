@@ -482,10 +482,17 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     scope. Recurring transfers into the card, which the engine does not net,
     are applied last, in date order, oldest statement first. ``amount_of``
     reads a line's figure in the card's currency (``normalise_lines``).
+
+    A projected line carrying ``settles_as_recorded`` (a reviewed card
+    installment's month due by the window start, STU-343 Plan B) is settled
+    with the transaction rows, as the engine settles it.
     """
     from app.services.statements import _row_amount, statement_balance
 
     amount_of = amount_of or _row_amount
+    lines = [*lines, *(row for row in projected
+                       if getattr(row, "settles_as_recorded", False))]
+    projected = [row for row in projected if not getattr(row, "settles_as_recorded", False)]
     balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
                 for c in cycles]
     owed = [max(b, ZERO) for b in balances]

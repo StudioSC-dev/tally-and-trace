@@ -43,6 +43,10 @@ services:
         sync: false
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.1"
+      # Token for POST /api/v1/jobs/post-due-installments (X-Job-Token). The
+      # same value is the JOB_TOKEN GitHub secret. Unset = endpoint returns 404.
+      - key: JOB_TOKEN
+        sync: false
 
   # ── Frontend: Vite React SPA ──────────────────────────────────────────────────
   - type: web

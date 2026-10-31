@@ -27,6 +27,8 @@ REF = datetime(2026, 10, 18, 2, 0)
 MISSED_KEYS = {"view", "entry_id", "name", "entry_type", "kind", "is_transfer", "capped",
                "account_name", "count", "oldest", "unlinked_count", "oldest_unlinked",
                "pending_transaction_ids", "can_mark_paid"}
+# A card installment's row also carries its auto-post state (STU-343 Plan B).
+INSTALLMENT_KEYS = MISSED_KEYS | {"auto_post", "block_reason", "can_review"}
 
 
 def pin_clock(monkeypatch, when: datetime) -> None:
@@ -70,7 +72,7 @@ def _snapshot(client, who, **params):
     assert r.status_code == 200, r.text
     body = r.json()
     for row in body["missed"]:
-        assert set(row) == MISSED_KEYS
+        assert set(row) == (INSTALLMENT_KEYS if row["kind"] == "installment" else MISSED_KEYS)
     return body
 
 

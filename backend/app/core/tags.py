@@ -138,8 +138,9 @@ def copy_explicit_tags(db: Session, entry_id: int, transaction_id: int) -> None:
     """Put a recurring entry's explicit tags on the transaction materialised from it.
 
     Explicit tags only, never the ones it gets from its accounts, and a copy:
-    later changes to the entry's tags leave the transaction as it is. Nothing
-    is committed.
+    later changes to the entry's tags leave the transaction as it is. A tag
+    the transaction already has is skipped, so an existing row linked to the
+    entry (the installment review) gets each tag once. Nothing is committed.
     """
     db.execute(insert(transaction_tags).from_select(
         ["tag_id", "transaction_id"],
@@ -147,7 +148,10 @@ def copy_explicit_tags(db: Session, entry_id: int, transaction_id: int) -> None:
         .join(Tag, Tag.id == budget_entry_tags.c.tag_id)
         .join(BudgetEntry, BudgetEntry.id == budget_entry_tags.c.budget_entry_id)
         .where(budget_entry_tags.c.budget_entry_id == entry_id,
-               Tag.user_id == BudgetEntry.user_id),  # the entry owner's tags only
+               Tag.user_id == BudgetEntry.user_id,  # the entry owner's tags only
+               ~exists(select(1).select_from(transaction_tags).where(
+                   transaction_tags.c.transaction_id == transaction_id,
+                   transaction_tags.c.tag_id == budget_entry_tags.c.tag_id))),
     ))
 
 

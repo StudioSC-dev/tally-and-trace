@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import type { Account, MinimumDue, StatementDue } from '../types/api'
-import { cardPaymentBody, cardPayers, isPlannedPayment, manilaToday, NOTHING_DUE_NOTE, payChoices } from './cardPay'
+import type { Account, CardUnposted, MinimumDue, StatementDue } from '../types/api'
+import {
+  cardPaymentBody,
+  cardPayers,
+  creditPanelUnposted,
+  isPlannedPayment,
+  manilaToday,
+  NOTHING_DUE_NOTE,
+  payChoices,
+  payDisabledReason,
+  unpostedCounts,
+  unpostedNote,
+} from './cardPay'
 
 function minimum(over: Partial<MinimumDue> = {}): MinimumDue {
   return {
@@ -25,6 +36,8 @@ function statement(over: Partial<StatementDue> = {}): StatementDue {
     outstanding: 21000,
     incomplete: false,
     minimum_due: minimum(),
+    unposted_installments: 0,
+    unposted_postable: 0,
     ...over,
   }
 }
@@ -160,5 +173,83 @@ describe('cardPaymentBody', () => {
   it('adds a trimmed description only when there is one', () => {
     expect(cardPaymentBody({ amount: 10, fromAccountId: 2, paymentDate: '2027-03-18', description: '  Rent  ' }).description).toBe('Rent')
     expect('description' in cardPaymentBody({ amount: 10, fromAccountId: 2, paymentDate: '2027-03-18', description: '  ' })).toBe(false)
+  })
+})
+
+const unposted = (over: Partial<CardUnposted> = {}): CardUnposted => ({
+  count: 2,
+  postable: 2,
+  oldest_close: '2027-01-03',
+  oldest_due: '2027-01-24',
+  ...over,
+})
+
+describe('unpostedCounts', () => {
+  it('is 0 and 0 when nothing is unposted', () => {
+    expect(unpostedCounts({ unposted: null })).toEqual({ count: 0, postable: 0 })
+  })
+  it('reads count and postable from the detail', () => {
+    expect(unpostedCounts({ unposted: unposted({ count: 3, postable: 1 }) })).toEqual({ count: 3, postable: 1 })
+  })
+})
+
+describe('unpostedNote', () => {
+  it('says what Full leaves out and how many need Review', () => {
+    expect(unpostedNote(3, 1)).toEqual({
+      text: 'Full leaves out 3 installment months not yet posted',
+      review: '2 of them need Review or Mark paid in Due and overdue',
+    })
+  })
+  it('has no review line when every month is postable', () => {
+    expect(unpostedNote(2, 2)?.review).toBeNull()
+  })
+  it('is singular for one month', () => {
+    expect(unpostedNote(1, 0)).toEqual({
+      text: 'Full leaves out 1 installment month not yet posted',
+      review: '1 of them needs Review or Mark paid in Due and overdue',
+    })
+  })
+  it('is null with nothing unposted', () => {
+    expect(unpostedNote(0, 0)).toBeNull()
+  })
+})
+
+describe('payDisabledReason', () => {
+  const choices = payChoices([statement()], TODAY)
+  const none = { count: 0, postable: 0 }
+  it('checks inactive before anything else', () => {
+    expect(payDisabledReason({ isActive: false, choices: null, unposted: { count: 2, postable: 2 } })).toBe('This card is inactive')
+    expect(payDisabledReason({ isActive: false, choices, unposted: none })).toBe('This card is inactive')
+  })
+  it('asks to post the months first when some are postable and there is no statement', () => {
+    expect(payDisabledReason({ isActive: true, choices: null, unposted: { count: 2, postable: 2 } })).toBe(
+      'Post the installment months first',
+    )
+  })
+  it('points to Due and overdue when none are postable', () => {
+    expect(payDisabledReason({ isActive: true, choices: null, unposted: { count: 2, postable: 0 } })).toBe(
+      'Review or Mark paid the installment months in Due and overdue first',
+    )
+  })
+  it('keeps "No closed statement yet" with nothing unposted', () => {
+    expect(payDisabledReason({ isActive: true, choices: null, unposted: none })).toBe('No closed statement yet')
+  })
+  it('is null when there is a statement to pay', () => {
+    expect(payDisabledReason({ isActive: true, choices, unposted: { count: 2, postable: 2 } })).toBeNull()
+  })
+})
+
+describe('creditPanelUnposted', () => {
+  it('is null with nothing unposted', () => {
+    expect(creditPanelUnposted({ unposted: null })).toBeNull()
+  })
+  it('names the count and both dates, and posts when some are postable', () => {
+    expect(creditPanelUnposted({ unposted: unposted() })).toEqual({
+      text: '2 installment months not yet posted · oldest closed Jan 3rd, 2027, due Jan 24th, 2027',
+      action: 'post',
+    })
+  })
+  it('asks for review when none are postable', () => {
+    expect(creditPanelUnposted({ unposted: unposted({ postable: 0 }) })?.action).toBe('review')
   })
 })

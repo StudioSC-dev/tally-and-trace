@@ -91,6 +91,10 @@ export type {
   MinimumDuePreset,
   StatementDue,
   StatementMinimumInput,
+  InstallmentAutoPostToggleInput,
+  InstallmentReviewInput,
+  InstallmentReviewResult,
+  PostDueInstallmentsResult,
   BalanceHistoryEntry,
   LimitedEvent,
   LimitedTimelineEvent,
@@ -132,6 +136,11 @@ import type {
   CardPaymentInput,
   MinimumDuePreset,
   StatementMinimumInput,
+  InstallmentReview,
+  InstallmentAutoPostToggleInput,
+  InstallmentReviewInput,
+  InstallmentReviewResult,
+  PostDueInstallmentsResult,
   AccountShares,
   AccountShare,
   ReceivedShare,
@@ -167,6 +176,9 @@ function responseHeaders(meta: unknown): HeaderReader {
   }
   return { get: () => null }
 }
+
+/** What recording installment months changes: the entries, their rows, card balances and credit, and envelopes. */
+const INSTALLMENTS_POSTED = ['BudgetEntry', 'Transaction', 'Account', 'Allocation'] as const
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
 
@@ -361,6 +373,33 @@ export const accountingApi = createApi({
     materializeDueBudgetEntry: builder.mutation<MaterializeDueResult, number>({
       query: (id) => ({ url: `budget-entries/${id}/materialize-due`, method: 'POST' }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    // Card installment review (STU-343 Plan B): what turning auto-post on would record, and its binding.
+    getInstallmentReview: builder.query<InstallmentReview, number>({
+      query: (id) => `budget-entries/${id}/auto-post-review`,
+      providesTags: ['BudgetEntry', 'Transaction'],
+    }),
+    // Link the chosen duplicates, turn auto-post on and record every due month, in one commit.
+    reviewInstallment: builder.mutation<InstallmentReviewResult, { id: number; data: InstallmentReviewInput }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post-review`, method: 'POST', body: data }),
+      invalidatesTags: [...INSTALLMENTS_POSTED],
+    }),
+    // Turn a reviewed installment's auto-post off; it stays reviewed.
+    setInstallmentAutoPost: builder.mutation<BudgetEntry, { id: number; data: InstallmentAutoPostToggleInput }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post`, method: 'POST', body: data }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account'],
+    }),
+    // "Post due installments now": every postable month of the auto-post-on installments the caller can edit.
+    postDueInstallments: builder.mutation<PostDueInstallmentsResult, void>({
+      query: () => ({ url: 'budget-entries/post-due-installments', method: 'POST', body: { trigger: 'button' } }),
+      invalidatesTags: [...INSTALLMENTS_POSTED],
+    }),
+    // The page-open run (Due and overdue, on mount): the same route as the button, with its own endpoint
+    // name so the screen loader can leave it out (store/busy.ts EXEMPT_ENDPOINTS). A throttled or empty
+    // run (posted 0) starts no refetch.
+    postDueInstallmentsOnOpen: builder.mutation<PostDueInstallmentsResult, void>({
+      query: () => ({ url: 'budget-entries/post-due-installments', method: 'POST', body: { trigger: 'page_open' } }),
+      invalidatesTags: (result) => (result && result.posted > 0 ? [...INSTALLMENTS_POSTED] : []),
     }),
     // The occurrences Mark paid can record; `include` (YYYY-MM-DD) is always listed (422 when off the schedule).
     getEntryOccurrences: builder.query<EntryOccurrences, { id: number; include?: string }>({
@@ -670,6 +709,11 @@ export const {
   useMaterializeBudgetEntryMutation,
   useMaterializeDueBudgetEntryMutation,
   useGetEntryOccurrencesQuery,
+  useGetInstallmentReviewQuery,
+  useReviewInstallmentMutation,
+  useSetInstallmentAutoPostMutation,
+  usePostDueInstallmentsMutation,
+  usePostDueInstallmentsOnOpenMutation,
 
   // Transaction hooks
   useGetTransactionsQuery,

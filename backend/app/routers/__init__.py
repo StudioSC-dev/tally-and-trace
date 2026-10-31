@@ -14,6 +14,7 @@ from app.routers import (
     shares,
     household,
     cards,
+    jobs,
 )
 
 # Central API router. Every router module below is registered here; adding a
@@ -37,3 +38,5 @@ api_router.include_router(shares.tag_router, prefix="/tags", tags=["shares"])
 api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
 api_router.include_router(household.router, prefix="/household", tags=["household"])
 api_router.include_router(cards.router, prefix="/cards", tags=["cards"])
+# Called by the scheduled job with a token, not by users: kept out of the API docs.
+api_router.include_router(jobs.router, prefix="/jobs", tags=["jobs"], include_in_schema=False)

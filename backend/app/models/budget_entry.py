@@ -81,6 +81,14 @@ class BudgetEntry(Base):
     # then derived, see services/recurring_kinds.py).
     billing_kind = Column(String(16), nullable=True)
 
+    # Card installments (STU-343 Plan B). ``installment_reviewed_at`` is the settlement
+    # status (set by the review, or on create for a new installment dated from today);
+    # ``auto_post_enabled`` is the scheduling flag and is never true without it.
+    auto_post_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    installment_reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # UC1: secondary funding source — payments draw from account_id first, overflow here.
     overflow_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
@@ -107,4 +115,8 @@ class BudgetEntry(Base):
         back_populates="budget_entry",
         foreign_keys="Transaction.budget_entry_id",
     )
+
+    @property
+    def installment_reviewed(self) -> bool:
+        return self.installment_reviewed_at is not None
 

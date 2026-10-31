@@ -18,10 +18,9 @@ import type { BusyLevel, QuerySliceLike, RequestActionLike } from '@tally-trace/
  * request is exempt: the refetches its own tag invalidation starts belong to other
  * endpoints and still count.
  *
- * STU-343 hook point: Plan B's page-open auto-post gets its own endpoint name and is
- * added here.
+ * `postDueInstallmentsOnOpen` is the page-open auto-post (STU-343); the refetches it starts when it posts still count.
  */
-export const EXEMPT_ENDPOINTS: ReadonlySet<string> = new Set(['fetchReceipt'])
+export const EXEMPT_ENDPOINTS: ReadonlySet<string> = new Set(['fetchReceipt', 'postDueInstallmentsOnOpen'])
 
 /** The two APIs' reducer paths (`store/api.ts`, `store/authApi.ts`). */
 const REDUCER_PATHS = ['accountingApi', 'authApi'] as const

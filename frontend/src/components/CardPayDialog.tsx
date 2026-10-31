@@ -9,12 +9,15 @@ import {
   isPlannedPayment,
   NOTHING_DUE_NOTE,
   payChoices,
+  postedResultText,
   RECORD_DATE_MIN,
   recordDateError,
   recordDateMax,
+  unpostedCounts,
+  unpostedNote,
 } from '@tally-trace/shared'
 import type { PayChoices } from '@tally-trace/shared'
-import { useGetAccountsQuery, useGetCardCreditQuery, usePayCardMutation } from '../store/api'
+import { useGetAccountsQuery, useGetCardCreditQuery, usePayCardMutation, usePostDueInstallmentsMutation } from '../store/api'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency, getCurrencySymbol } from '../utils/currency'
@@ -51,6 +54,10 @@ interface Props {
  * payment. The statements and the day come from the server's Manila calendar, rechecked
  * when the day turns.
  *
+ * Installment months on closed cycles that are not posted yet are not in Full (STU-343
+ * Plan B): the dialog says how many, offers Post now for those it can post (the refetch
+ * then moves Full), and says how many need Review or Mark paid in Due and overdue.
+ *
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
@@ -69,6 +76,8 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
   const detail = detailQuery.currentData
   const { currentData: accountsData, error: accountsError } = useGetAccountsQuery({ is_active: true, limit: 1000 })
   const [payCard, { isLoading: submitting }] = usePayCardMutation()
+  const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
+  const [posted, setPosted] = useState<number | null>(null)
 
   const [amountInput, setAmountInput] = useState<string | null>(null)
   const [payerInput, setPayerInput] = useState<number | null>(null)
@@ -152,7 +161,21 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
         : null
   const loading = !notFound && !loadError && (!detail || !accountsData)
   const currency = detail?.currency ?? 'PHP'
-  const canSubmit = !loading && !loadError && !notFound && choices !== null && payerId !== null && !submitting
+  const canSubmit = !loading && !loadError && !notFound && choices !== null && payerId !== null && !submitting && !posting
+  const unposted = detail ? unpostedCounts(detail) : { count: 0, postable: 0 }
+  const note = unpostedNote(unposted.count, unposted.postable)
+
+  const postNow = async () => {
+    setPosted(null)
+    setError(null)
+    try {
+      // Its invalidation refetches this card's credit, so Full and the note follow.
+      const result = await postDue().unwrap()
+      setPosted(result.posted)
+    } catch (caught) {
+      setError(apiErrorMessage(caught) || 'Could not post the installment months. Please try again.')
+    }
+  }
 
   const title = detail
     ? choices
@@ -349,6 +372,27 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
                 )}
               </div>
             </>
+          )}
+
+          {!loading && !loadError && !notFound && detail && (note !== null || posted !== null) && (
+            <div className="border border-line p-3 space-y-2 text-sm" data-testid="card-pay-unposted">
+              {note !== null && <p className="text-warn" data-testid="card-pay-unposted-note">{note.text}</p>}
+              {note?.review && <p className="text-xs text-muted" data-testid="card-pay-unposted-review">{note.review}</p>}
+              {unposted.postable > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void postNow()}
+                  disabled={posting || submitting}
+                  className="btn-secondary focus-ring disabled:opacity-50"
+                  data-testid="card-pay-unposted-post"
+                >
+                  {posting ? 'Posting…' : 'Post due installments now'}
+                </button>
+              )}
+              {posted !== null && (
+                <p className="text-sm text-ok" role="status" data-testid="card-pay-unposted-result">{postedResultText(posted)}</p>
+              )}
+            </div>
           )}
 
           {error && <p className="text-sm text-danger" role="alert" data-testid="card-pay-error">{error}</p>}

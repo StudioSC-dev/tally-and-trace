@@ -491,3 +491,446 @@ def materialize_due(db: Session, entry, actor: User) -> List[Recorded]:
         locking.lock_transaction(db, txn_id)
     return [record_occurrence(db, entry, actor, BudgetEntryMaterialize(transaction_date=occ), occ)
             for occ in due]
+
+
+# --- Card installment auto-post (STU-343 Plan B) ---------------------------------------------
+
+@dataclass
+class PostPlan:
+    """What a recorder would record for one card installment, written nowhere.
+
+    ``walk`` is what the job, the page-open trigger and the backstop record, in
+    order: the schedule from ``next_occurrence`` through ``through``
+    (``schedule_walk``), posted-linked months included (they only advance the
+    schedule), cut before the first held month, or empty behind any other
+    blocker. ``due`` (the months no posted row stands for) and ``postable``
+    (the ``due`` months in ``walk``) are for counts and labels only.
+    """
+    walk: List[datetime]
+    due: List[datetime]
+    postable: List[datetime]
+    blocker: Optional[str]
+
+
+def post_plan(db: Session, entry, actor: User, through: date, held: Counter,
+              access: RecordAccess) -> PostPlan:
+    """The months ``actor`` would record for ``entry`` through ``through``, and why not.
+
+    ``held`` is ``installment_duplicates.held_occurrences`` (its keys for this
+    entry are read); ``access`` is ``actor``'s ``RecordAccess``. The blocker
+    is the first that applies: ``unreviewed``, ``auto_post_off``,
+    ``blocked:<reason>`` (``recurring_kinds.auto_post_block``),
+    ``blocked:ambiguous`` (a walk day with more than one linked row, which
+    ``record_occurrence`` refuses), ``creator_no_access``,
+    ``caller_no_access``, ``held`` (a due month is held: the months before the
+    first held one stay in ``walk``).
+    """
+    from app.services.forecast import unrecorded_occurrences
+    from app.services.recurring_kinds import auto_post_block
+
+    due = unrecorded_occurrences(db, [entry], through)[entry.id]
+    full_walk = schedule_walk(entry, through)
+    card = db.get(Account, entry.account_id) if entry.account_id else None
+    block = auto_post_block(entry, card)
+    blocker: Optional[str] = None
+    first_held: Optional[date] = None
+    if entry.installment_reviewed_at is None:
+        blocker = "unreviewed"
+    elif not entry.auto_post_enabled:
+        blocker = "auto_post_off"
+    elif block is not None:
+        blocker = f"blocked:{block}"
+    else:
+        days = {occ.date() for occ in full_walk}
+        links = Counter(_naive(when).date() for _, when, _, _ in _linked_rows(
+            db, [entry.id], occurrence_match=True))
+        creator = db.get(User, entry.user_id)
+        if any(links[day] > 1 for day in days):
+            blocker = "blocked:ambiguous"
+        elif creator is None or not RecordAccess(db, creator).permissions(entry)["can_edit"]:
+            blocker = "creator_no_access"
+        elif not access.permissions(entry)["can_edit"]:
+            blocker = "caller_no_access"
+        else:
+            held_days = [occ.date() for occ in due if held[(entry.id, occ.date())]]
+            if held_days:
+                blocker = "held"
+                first_held = min(held_days)
+    if blocker is None:
+        walk = full_walk
+    elif blocker == "held":
+        walk = [occ for occ in full_walk if occ.date() < first_held]
+    else:
+        walk = []
+    walked = {occ.date() for occ in walk}
+    postable = [occ for occ in due if occ.date() in walked]
+    return PostPlan(walk=walk, due=due, postable=postable, blocker=blocker)
+
+
+@dataclass
+class EntryPosting:
+    """One entry's run: the plan's blocker (None for an uncut walk) and what was recorded."""
+    blocker: Optional[str]
+    recorded: List[Recorded]
+
+    @property
+    def posted(self) -> int:
+        """Months that moved money: ``created`` and ``posted_pending``."""
+        return sum(1 for item in self.recorded if item.outcome != Outcome.ALREADY_POSTED)
+
+
+def _post_entry_due(db: Session, entry, actor: User, through: date, *,
+                    hold_duplicates: bool) -> EntryPosting:
+    """Record ``entry``'s walk through ``through`` as ``actor``, without committing.
+
+    The caller holds the creator's owner lock and then the entry lock, and has
+    checked the entry. With ``hold_duplicates`` the walk is ``post_plan``'s
+    (cut before the first held month, empty behind any other blocker);
+    without it (the review, which has just resolved this entry's candidates)
+    it is the uncut ``schedule_walk``. Every pending row linked to a walk day
+    is locked first, in ascending id, as ``materialize_due`` does. No
+    ``transaction_date`` is passed: a new row is dated on its occurrence and a
+    linked pending row keeps its own date. A 409 or 400 from
+    ``record_occurrence`` is left to the caller, which rolls back.
+    """
+    from app.services.installment_duplicates import held_occurrences
+
+    if hold_duplicates:
+        plan = post_plan(db, entry, actor, through, held_occurrences(db, [entry], through),
+                         RecordAccess(db, actor))
+        walk, blocker = plan.walk, plan.blocker
+    else:
+        walk, blocker = schedule_walk(entry, through), None
+    days = {occ.date() for occ in walk}
+    pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
+        db, [entry.id], occurrence_match=True)
+        if not is_posted and _naive(when).date() in days)
+    for txn_id in pending:
+        locking.lock_transaction(db, txn_id)
+    recorded = [record_occurrence(db, entry, actor, BudgetEntryMaterialize(), occ)
+                for occ in walk]
+    return EntryPosting(blocker=blocker, recorded=recorded)
+
+
+@dataclass
+class AutoPostResult:
+    posted: int = 0
+    skipped: Counter = field(default_factory=Counter)
+    entries: List[dict] = field(default_factory=list)
+
+
+# A ``post_plan`` blocker as a skip reason; None is not a skip.
+BLOCKER_REASONS = {"held": "possible_duplicate", "creator_no_access": "no_access",
+                   "caller_no_access": "no_access"}
+
+
+def _blocker_reason(blocker: Optional[str]) -> Optional[str]:
+    if blocker is None or blocker in ("unreviewed", "auto_post_off", "blocked:inactive"):
+        return None
+    if blocker.startswith("blocked:"):
+        return blocker.split(":", 1)[1]
+    return BLOCKER_REASONS[blocker]
+
+
+def _failure_reason(exc: HTTPException) -> str:
+    """The skip reason of an ``HTTPException`` from ``record_occurrence``."""
+    detail = str(exc.detail)
+    if exc.status_code == 409 and "more than one linked" in detail:
+        return "ambiguous"
+    if exc.status_code == 409 and "can't edit" in detail:
+        return "pending_not_editable"
+    if exc.status_code == 400 and "amount charged" in detail:
+        return "needs_amount"
+    return "error"
+
+
+def _auto_post_scope(db: Session, through: date, actor_scope: Optional[User],
+                     entry_ids) -> List[Tuple[int, int]]:
+    """``[(entry id, creator id)]`` in id order: active, reviewed, auto-post-on,
+    capped card entries with months left and a next occurrence on or before
+    ``through``; only ``entry_ids`` when given; for a caller, only entries the
+    caller can edit."""
+    from app.core.access import editable_account_ids
+    from app.models.account import AccountType
+
+    query = (
+        db.query(BudgetEntry)
+        .join(Account, Account.id == BudgetEntry.account_id)
+        .filter(BudgetEntry.is_active.is_(True),
+                BudgetEntry.auto_post_enabled.is_(True),
+                BudgetEntry.installment_reviewed_at.isnot(None),
+                BudgetEntry.end_mode == "after_occurrences",
+                BudgetEntry.max_occurrences > 0,
+                BudgetEntry.next_occurrence < _day_after(through),
+                Account.account_type == AccountType.CREDIT)
+    )
+    if entry_ids is not None:
+        query = query.filter(BudgetEntry.id.in_(list(entry_ids)))
+    if actor_scope is not None:
+        query = query.filter(BudgetEntry.account_id.in_(editable_account_ids(db, actor_scope)))
+    entries = query.order_by(BudgetEntry.id).all()
+    if actor_scope is not None:
+        access = RecordAccess(db, actor_scope)
+        entries = [e for e in entries if access.permissions(e)["can_edit"]]
+    return [(e.id, e.user_id) for e in entries]
+
+
+def post_due_installments(db: Session, *, through: date, actor_scope: Optional[User] = None,
+                          entry_ids=None, dry_run: bool = False) -> AutoPostResult:
+    """Post every due month of the auto-post-on card installments in scope.
+
+    The job (``actor_scope`` None) posts as each entry's creator; the
+    backstop and the page-open trigger pass the caller, who is then the actor
+    and sees only entries they can edit. Each entry runs in its own
+    transaction, committed (rolled back when ``dry_run``) before the next:
+    ``expire_all``, the creator's owner lock, the entry lock, then a recheck
+    on the locked row with a new ``RecordAccess`` (still on, reviewed, active
+    and eligible; the creator, and a caller, can still edit it; else skipped),
+    then ``_post_entry_due``. An ``HTTPException`` while recording rolls back
+    that entry only and records its reason. ``posted`` counts ``created`` and
+    ``posted_pending``; a posted-linked month only advances.
+    """
+    from app.services.recurring_kinds import auto_post_block
+
+    result = AutoPostResult()
+    for entry_id, creator_id in _auto_post_scope(db, through, actor_scope, entry_ids):
+        db.expire_all()
+        locking.lock_owner_budgets(db, creator_id)
+        entry = locking.lock_entry(db, entry_id)
+        reason: Optional[str] = None
+        posted = 0
+        if entry is None or not (entry.is_active and entry.auto_post_enabled
+                                 and entry.installment_reviewed_at is not None):
+            db.rollback()
+            if entry is not None:
+                result.entries.append({"entry_id": entry_id, "posted": 0, "skipped_reason": None})
+            continue
+        block = auto_post_block(entry, db.get(Account, entry.account_id))
+        creator = db.get(User, entry.user_id)
+        actor = creator if actor_scope is None else actor_scope
+        if block is not None:
+            reason = None if block == "inactive" else block
+        elif creator is None or not RecordAccess(db, creator).permissions(entry)["can_edit"]:
+            reason = "no_access"
+        elif actor_scope is not None and not RecordAccess(
+                db, actor_scope).permissions(entry)["can_edit"]:
+            reason = "no_access"
+        else:
+            try:
+                run = _post_entry_due(db, entry, actor, through, hold_duplicates=True)
+                posted = run.posted
+                reason = _blocker_reason(run.blocker)
+            except HTTPException as exc:
+                db.rollback()
+                posted, reason = 0, _failure_reason(exc)
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        result.posted += posted
+        if reason is not None:
+            result.skipped[reason] += 1
+        result.entries.append({"entry_id": entry_id, "posted": posted, "skipped_reason": reason})
+    return result
+
+
+def _claim_page_open_sql(db: Session, user: User, now: datetime) -> bool:
+    """Take ``user``'s page-open slot at ``now``, without committing: one atomic
+    ``UPDATE … RETURNING`` that succeeds only when the last claim is older than
+    15 minutes (or there is none). A second claim made meanwhile waits on the
+    row lock, re-reads the row once the first commits, and returns no row."""
+    from sqlalchemy import text
+
+    row = db.execute(text(
+        "UPDATE users SET installments_page_posted_at = :now "
+        "WHERE id = :uid AND (installments_page_posted_at IS NULL "
+        "OR installments_page_posted_at <= CAST(:now AS timestamptz) - interval '15 minutes') "
+        "RETURNING id"), {"now": now, "uid": user.id}).first()
+    return row is not None
+
+
+def claim_page_open(db: Session, user: User) -> bool:
+    """Whether ``user`` may run the page-open auto-post now; the claim is
+    committed on its own, before any posting lock is taken, so a run that then
+    fails still uses its 15 minutes."""
+    claimed = _claim_page_open_sql(db, user, utc_now())
+    db.commit()
+    return claimed
+
+
+# --- Card installment review (STU-343 Plan B) -------------------------------------------------
+
+REVIEW_CHANGED = "This installment changed since you opened the review; reopen it"
+
+
+@dataclass
+class ReviewState:
+    """The review of one card installment for one caller (``review_state``).
+
+    ``missed`` is every due month no posted row stands for, through ``through``;
+    ``linked`` is each missed day's linked rows (a pending one, posted by the
+    review); ``candidates`` is each missed day with no linked row and its
+    possible duplicates the caller reads. ``body`` is the GET response and
+    ``token`` binds it.
+    """
+    through: date
+    missed: List[datetime]
+    linked: dict
+    candidates: dict
+    body: dict
+    token: str
+
+
+def _aware_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Aware UTC, microseconds kept; a naive value is read as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _iso(value: Optional[datetime]) -> Optional[str]:
+    aware = _aware_utc(value)
+    return aware.isoformat() if aware is not None else None
+
+
+def _money(value) -> str:
+    from decimal import Decimal
+
+    return str(Decimal(str(value)))
+
+
+def _row_version(txn: Transaction) -> Optional[str]:
+    """A transaction's version: ``updated_at``, else ``created_at``."""
+    return _iso(txn.updated_at or txn.created_at)
+
+
+def review_token(payload: dict) -> str:
+    """``sha256`` over the canonical JSON (sorted keys) of ``payload``."""
+    import hashlib
+    import json
+
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
+    """What the installment review shows ``caller`` for ``entry`` on Manila's ``today``.
+
+    The caller has already passed ``can_edit`` on the entry. The GET body and
+    the POST's binding both come from here.
+
+    - ``missed``: the due months no posted row stands for
+      (``unrecorded_occurrences`` through ``today``), each with ``linked``
+      "pending" when a pending row is linked to it.
+    - ``candidates``: for each missed month with no linked row, its possible
+      duplicates (``installment_duplicates.duplicate_candidates``: the
+      creator's own unlinked debits of the amount on the card within three
+      days), kept only when ``caller`` reads the row (each is checked). No
+      row's entry, category or allocation is returned.
+    - ``remaining_after``: ``max_occurrences`` less the whole walk through
+      ``today`` (``schedule_walk``, posted-linked months included, since the
+      review advances past them); None for an open-ended entry.
+    - ``envelope``: the entry's allocation name for its creator only
+      (allocations are creator-private), else None.
+    - ``past_cycles``: some missed month's statement cycle closed before ``today``.
+    - ``review_token``: ``review_token`` over ``today``, the caller, the
+      entry's stored state and version, each missed month with its linked
+      rows and each candidate with its version, so a change to any of them,
+      another caller or another Manila day gives another token.
+    """
+    from app.models.allocation import Allocation
+    from app.services.forecast import unrecorded_occurrences
+    from app.services.installment_duplicates import duplicate_candidates
+    from app.services.recurring_kinds import auto_post_block
+    from app.services.statements import iter_cycles_from
+
+    card = db.get(Account, entry.account_id) if entry.account_id else None
+    block = auto_post_block(entry, card)
+    missed = unrecorded_occurrences(db, [entry], today)[entry.id]
+    missed_days = {occ.date() for occ in missed}
+    linked: dict = defaultdict(list)
+    for _, when, txn_id, _ in _linked_rows(db, [entry.id], occurrence_match=True):
+        day = _naive(when).date()
+        if day in missed_days:
+            linked[day].append(db.get(Transaction, txn_id))
+    linked = dict(linked)
+    access = RecordAccess(db, caller)
+    candidates = {}
+    for day, rows in duplicate_candidates(
+            db, entry, [occ for occ in missed if occ.date() not in linked]).items():
+        readable = [txn for txn in rows if access.readable(txn)]
+        if readable:
+            candidates[day] = readable
+
+    walk = schedule_walk(entry, today)
+    remaining_after = (entry.max_occurrences - len(walk)
+                       if is_capped(entry) and entry.max_occurrences is not None else None)
+    envelope = None
+    if entry.user_id == caller.id and entry.allocation_id is not None:
+        allocation = db.get(Allocation, entry.allocation_id)
+        if allocation is not None:
+            envelope = {"allocation_name": allocation.name}
+    past_cycles = False
+    if card is not None:
+        for occ in missed:
+            cycle = next(iter_cycles_from(card, occ.date(), datetime.min, through=occ.date()),
+                         None)
+            if cycle is not None and cycle["close"].date() < today:
+                past_cycles = True
+                break
+
+    reviewed = entry.installment_reviewed_at is not None
+    binding = {
+        "through": today.isoformat(),
+        "caller_id": caller.id,
+        "entry_id": entry.id,
+        "entry_version": _iso(entry.updated_at),
+        "next_occurrence": _naive(entry.next_occurrence).isoformat(),
+        "max_occurrences": entry.max_occurrences,
+        "is_active": bool(entry.is_active),
+        "account_id": entry.account_id,
+        "amount": _money(entry.amount),
+        "currency": getattr(entry.currency, "value", entry.currency),
+        "reviewed": reviewed,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "missed": [[occ.date().isoformat(),
+                    [[txn.id, bool(txn.is_posted), _row_version(txn)]
+                     for txn in linked.get(occ.date(), [])]]
+                   for occ in missed],
+        "candidates": [[day.isoformat(), txn.id, _row_version(txn), _money(txn.amount),
+                        _naive(txn.transaction_date).isoformat(), bool(txn.is_posted),
+                        txn.budget_entry_id]
+                       for day in sorted(candidates) for txn in candidates[day]],
+    }
+    token = review_token(binding)
+    body = {
+        "entry_id": entry.id,
+        "name": entry.name,
+        "account_name": card.name if card is not None else None,
+        "currency": entry.currency,
+        "amount": float(entry.amount),
+        "reviewed": reviewed,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "block": block,
+        "missed": [{"occurrence_date": occ.date(),
+                    "linked": "pending" if any(not txn.is_posted
+                                               for txn in linked.get(occ.date(), []))
+                    else None}
+                   for occ in missed],
+        "candidates": [{"occurrence_date": day,
+                        "transactions": [{"id": txn.id, "date": _naive(txn.transaction_date).date(),
+                                          "amount": float(txn.amount),
+                                          "is_posted": bool(txn.is_posted),
+                                          "description": txn.description}
+                                         for txn in candidates[day]]}
+                       for day in sorted(candidates)],
+        "remaining_after": remaining_after,
+        "envelope": envelope,
+        "past_cycles": past_cycles,
+        "entry_version": entry.updated_at,
+        "review_token": token,
+    }
+    return ReviewState(through=today, missed=missed, linked=linked, candidates=candidates,
+                       body=body, token=token)

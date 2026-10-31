@@ -1,9 +1,18 @@
 import { useState } from 'react'
-import { formatEntryDate, payChoices } from '@tally-trace/shared'
+import { Link } from '@tanstack/react-router'
+import {
+  creditPanelUnposted,
+  formatEntryDate,
+  payChoices,
+  payDisabledReason,
+  postedResultText,
+  unpostedCounts,
+} from '@tally-trace/shared'
 import type { Account, MinimumDueAssumption, StatementDue } from '@tally-trace/shared'
 import {
   useClearStatementMinimumMutation,
   useGetCardCreditQuery,
+  usePostDueInstallmentsMutation,
   useSetStatementMinimumMutation,
 } from '../store/api'
 import { useManilaDay } from '../hooks/useManilaDay'
@@ -35,6 +44,11 @@ const ASSUMPTION_TEXT: Record<Exclude<MinimumDueAssumption, 'fees_not_itemised'>
  * (entered from the statement, or estimated from the card's rule), the open cycle, and
  * Pay. Closed means closed before Manila's today; the panel refetches when that day
  * turns. Anyone else gets a 404 from the API and the panel renders nothing.
+ *
+ * Installment months on closed cycles that are not posted yet (STU-343 Plan B) get their
+ * own block, even when the card has no recorded statement: Post now when some of them can
+ * be posted, else a pointer to Due and overdue. Its "Posted N" outlives the refetch that
+ * removes the block, until the card changes or the next post starts.
  */
 export function CardCreditPanel({ account }: { account: Account }) {
   const { currentData: detail, error, refetch } = useGetCardCreditQuery(account.id)
@@ -42,6 +56,10 @@ export function CardCreditPanel({ account }: { account: Account }) {
     void refetch()
   })
   const [paying, setPaying] = useState(false)
+  const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
+  // Post now's last outcome, for the card it was made on: cleared when the card changes or a new post starts.
+  const [postOutcome, setPostOutcome] = useState<{ cardId: number; posted: number | null; error: string | null } | null>(null)
+  if (postOutcome !== null && postOutcome.cardId !== account.id) setPostOutcome(null)
 
   if (apiErrorStatus(error) === 404) return null
   if (error) {
@@ -84,8 +102,20 @@ export function CardCreditPanel({ account }: { account: Account }) {
   const currency = detail.currency as CurrencyCode
   const choices = payChoices(detail.statements, today)
   const closed = detail.statements.filter((s) => s.close_date < today).reverse()
-  const disabledReason =
-    account.is_active === false ? 'This card is inactive' : choices === null ? 'No closed statement yet' : null
+  const disabledReason = payDisabledReason({ isActive: account.is_active !== false, choices, unposted: unpostedCounts(detail) })
+  const unposted = creditPanelUnposted(detail)
+  const outcome = postOutcome
+
+  const postNow = async () => {
+    const cardId = account.id
+    setPostOutcome(null)
+    try {
+      const result = await postDue().unwrap()
+      setPostOutcome({ cardId, posted: result.posted, error: null })
+    } catch (caught) {
+      setPostOutcome({ cardId, posted: null, error: apiErrorMessage(caught) || 'Could not post the installment months. Please try again.' })
+    }
+  }
 
   return (
     <section className="card p-4 sm:p-5 space-y-4" data-testid="card-credit-panel">
@@ -117,6 +147,35 @@ export function CardCreditPanel({ account }: { account: Account }) {
             {formatCurrency(detail.credit.opening.missed_total, currency)}
           </p>
         </div>
+      )}
+
+      {unposted && (
+        <div className="border border-line p-3 space-y-2 text-sm" data-testid="card-unposted">
+          <p className="text-warn" data-testid="card-unposted-text">{unposted.text}</p>
+          {unposted.action === 'post' ? (
+            <button
+              type="button"
+              onClick={() => void postNow()}
+              disabled={posting}
+              className="btn-secondary focus-ring disabled:opacity-50"
+              data-testid="card-unposted-post"
+            >
+              {posting ? 'Posting…' : 'Post due installments now'}
+            </button>
+          ) : (
+            <p className="text-xs text-muted" data-testid="card-unposted-review">
+              <Link to="/transactions" className="underline underline-offset-2 text-body hover:text-ink focus-ring">
+                Review or Mark paid them in Due and overdue
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
+      {outcome !== null && outcome.posted !== null && (
+        <p className="text-sm text-ok" role="status" data-testid="card-unposted-result">{postedResultText(outcome.posted)}</p>
+      )}
+      {outcome !== null && outcome.error !== null && (
+        <p className="text-sm text-danger" role="alert" data-testid="card-unposted-error">{outcome.error}</p>
       )}
 
       {closed.length === 0 ? (

@@ -1,0 +1,32 @@
+name: Post due installments
+
+on:
+  schedule:
+    # 08:30 Manila (UTC+8)
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Count what would post without posting
+        type: boolean
+        default: false
+
+concurrency: post-due-installments
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: Post due card installments
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Post due installments
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: scripts/post-due-installments.sh

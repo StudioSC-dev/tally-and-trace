@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntryType
 from app.models.category import Category
+from app.services.statements import resolve_cycle_fields
 
 BILLING_KINDS = ("subscription", "bill")
 
@@ -60,3 +61,22 @@ def default_billing_kind(db: Session, e, account: Optional[Account]) -> Optional
         if utilities is not None:
             return "bill"
     return "subscription"
+
+
+def auto_post_block(e, account: Optional[Account]) -> Optional[str]:
+    """Why a card installment cannot auto-post, or None when it is eligible.
+
+    ``not_installment``, ``foreign_currency`` (the entry is not in the card's
+    currency), ``no_statement_cycle`` (the card has no statement cycle:
+    ``statements.resolve_cycle_fields`` is None),
+    ``inactive`` (paused or completed).
+    """
+    if not is_card_installment(e, account):
+        return "not_installment"
+    if e.currency != account.currency:
+        return "foreign_currency"
+    if resolve_cycle_fields(account) is None:
+        return "no_statement_cycle"
+    if not e.is_active:
+        return "inactive"
+    return None

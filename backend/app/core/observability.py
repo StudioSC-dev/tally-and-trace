@@ -22,6 +22,7 @@ _SENSITIVE_HEADERS = {
     "cookie",
     "set-cookie",
     "x-api-key",
+    "x-job-token",
 }
 
 
@@ -55,6 +56,8 @@ def init_sentry() -> bool:
         release=f"{settings.PROJECT_NAME}@{settings.VERSION}",
         # Never attach user emails, IPs, or request bodies automatically.
         send_default_pii=False,
+        # Stack-frame locals can carry tokens, passwords and amounts (X-Job-Token is a handler argument).
+        include_local_variables=False,
         traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
         before_send=_scrub_event,
         before_send_transaction=_scrub_event,

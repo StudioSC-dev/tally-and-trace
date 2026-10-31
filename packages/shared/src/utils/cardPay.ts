@@ -1,4 +1,5 @@
-import type { Account, CardPaymentInput, MinimumDue, StatementDue } from '../types/api'
+import type { Account, CardCreditDetail, CardPaymentInput, MinimumDue, StatementDue } from '../types/api'
+import { formatEntryDate } from './entryDate'
 
 /** Shown in the amount field's place when the latest closed statement is already cleared. */
 export const NOTHING_DUE_NOTE = 'Nothing due on your latest statement; a payment now goes to your next statement.'
@@ -103,4 +104,62 @@ export function cardPaymentBody(input: {
     payment_date: input.paymentDate.slice(0, 10),
     ...(description ? { description } : {}),
   }
+}
+
+/** Installment months a card has on closed cycles but not posted: how many, and how many Post now would record. */
+export function unpostedCounts(detail: Pick<CardCreditDetail, 'unposted'>): { count: number; postable: number } {
+  const { unposted } = detail
+  return unposted === null ? { count: 0, postable: 0 } : { count: unposted.count, postable: unposted.postable }
+}
+
+const monthsOf = (n: number): string => `${n} installment ${n === 1 ? 'month' : 'months'}`
+
+/**
+ * What the Pay dialog says when Full leaves installment months out: `text` always, and
+ * `review` for the months Post now cannot record. Null when there are none.
+ */
+export function unpostedNote(count: number, postable: number): { text: string; review: string | null } | null {
+  if (count <= 0) return null
+  const needReview = count - postable
+  return {
+    text: `Full leaves out ${monthsOf(count)} not yet posted`,
+    review:
+      needReview > 0
+        ? `${needReview} of them ${needReview === 1 ? 'needs' : 'need'} Review or Mark paid in Due and overdue`
+        : null,
+  }
+}
+
+/**
+ * The account page's card block for unposted installment months, shown even when the card
+ * has no recorded statement. `action` is `post` when Post now can record some, otherwise `review`.
+ */
+export function creditPanelUnposted(
+  detail: Pick<CardCreditDetail, 'unposted'>,
+): { text: string; action: 'post' | 'review' } | null {
+  const { unposted } = detail
+  if (unposted === null) return null
+  return {
+    text:
+      `${monthsOf(unposted.count)} not yet posted · ` +
+      `oldest closed ${formatEntryDate(unposted.oldest_close)}, due ${formatEntryDate(unposted.oldest_due)}`,
+    action: unposted.postable > 0 ? 'post' : 'review',
+  }
+}
+
+/**
+ * Why Pay is disabled; null when it is enabled. `choices` is `payChoices(detail.statements, today)`
+ * and `unposted` is `unpostedCounts(detail)`. With no closed statement to pay, unposted months
+ * are the first thing to deal with.
+ */
+export function payDisabledReason(input: {
+  isActive: boolean
+  choices: PayChoices | null
+  unposted: { count: number; postable: number }
+}): string | null {
+  if (!input.isActive) return 'This card is inactive'
+  if (input.choices !== null) return null
+  if (input.unposted.postable > 0) return 'Post the installment months first'
+  if (input.unposted.count > 0) return 'Review or Mark paid the installment months in Due and overdue first'
+  return 'No closed statement yet'
 }

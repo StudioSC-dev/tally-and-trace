@@ -31,7 +31,7 @@ BDO = {"version": 1, "preset": "bdo", "base_percent": "3",
        "rounding": "down"}
 
 STATEMENT_KEYS = {"close_date", "due_date", "status", "owed", "clear_through", "outstanding",
-                  "incomplete", "minimum_due"}
+                  "incomplete", "minimum_due", "unposted_installments", "unposted_postable"}
 MINIMUM_KEYS = {"amount", "remaining", "source", "reason", "complete", "assumptions", "inputs"}
 
 
@@ -450,7 +450,8 @@ def test_override_migration_is_the_single_head():
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [OVERRIDE_REVISION]
+    (head,) = script.get_heads()
+    assert OVERRIDE_REVISION in {rev.revision for rev in script.walk_revisions("base", head)}
     assert script.get_revision(OVERRIDE_REVISION).down_revision == RULE_REVISION
 
 

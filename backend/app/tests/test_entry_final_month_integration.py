@@ -440,3 +440,17 @@ def test_moving_the_date_while_paused_then_resuming_matches_one_resume(world, sw
     assert body["max_occurrences"] == 24
     assert body["occurrences_paid_offset"] == 0
     assert _last_payment(sw_db, tablet) == date(2028, 12, 5)
+
+
+def test_pausing_while_moving_the_date_still_applies_the_rule(world, sw_db):
+    client, o = world["client"], world["o"]
+    tablet = _entry(client, o, world["card"])
+
+    body = _ok(client, o, tablet, {"is_active": False, "next_occurrence": _day("2026-11-05")})
+
+    # The rule reads the stored is_active (true), not the request's: same recount and
+    # offset as test_moving_the_next_date_forward_keeps_the_final_month.
+    assert body["is_active"] is False
+    assert body["max_occurrences"] == 20
+    assert body["occurrences_paid_offset"] == 4
+    assert _last_payment(sw_db, tablet) == date(2028, 6, 5)

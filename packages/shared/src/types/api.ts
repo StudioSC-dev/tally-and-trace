@@ -428,6 +428,13 @@ interface RecurringEntryDetail {
   billing_kind?: BillingKind | null
   /** Read-only, derived by the server. null for income and transfers. */
   kind?: RecurringKind | null
+  /**
+   * Card installments: the settlement status. True once the installment was reviewed
+   * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
+   */
+  installment_reviewed?: boolean
+  /** Card installments: whether the job, page-open and Post now record its due months. Read-only. */
+  auto_post_enabled?: boolean
   /** The caller's tags on the entry. */
   tags: TagRef[]
   created_at: string
@@ -483,6 +490,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
+    | 'installment_reviewed' | 'auto_post_enabled'
   >
 > &
   TagIdsInput & {
@@ -1334,6 +1342,139 @@ export interface LimitedCharge {
   display_name: string
 }
 
+// ─── Card installment review and auto-post ───────────────────────────────────
+
+/** Where one card installment stands (`installment_state`). */
+export type InstallmentAutoPostState = 'unreviewed' | 'on' | 'held' | 'off' | 'blocked'
+
+/** Why a reviewed, on installment does not post. */
+export type InstallmentBlockReason =
+  | 'foreign_currency'
+  | 'no_statement_cycle'
+  | 'ambiguous'
+  | 'creator_no_access'
+
+/** Why an installment cannot be turned on at all (the review GET's `block`). */
+export type InstallmentAutoPostBlock = 'foreign_currency' | 'no_statement_cycle' | 'inactive' | 'not_installment'
+
+/** One entry of `DashboardSnapshot.installment_review`. */
+export interface InstallmentReviewRow {
+  entry_id: number
+  name: string
+  account_name: string
+  missed_count: number
+}
+
+/** One entry of `DashboardSnapshot.installment_auto_post`. */
+export interface InstallmentAutoPostRow {
+  entry_id: number
+  name: string
+  account_name: string
+  /** Unrecorded months due on or before Manila today. */
+  due_count: number
+  /** Of `due_count`, the months Post now would record for the caller. */
+  postable_count: number
+  /** Of `due_count`, the months falling on Manila today. */
+  due_today_count: number
+  /** The oldest due month (`YYYY-MM-DD`). */
+  oldest: string
+  state: InstallmentAutoPostState
+  block_reason: InstallmentBlockReason | null
+  can_post: boolean
+  can_review: boolean
+}
+
+/** A transaction the review offers as the charge for a missed month. Never an allocation or category. */
+export interface InstallmentReviewTransaction {
+  id: number
+  date: string
+  amount: number
+  is_posted: boolean
+  description: string | null
+}
+
+/** GET /budget-entries/{id}/auto-post-review. */
+export interface InstallmentReview {
+  entry_id: number
+  name: string
+  account_name: string
+  currency: CurrencyCode
+  amount: number
+  reviewed: boolean
+  auto_post_enabled: boolean
+  block: InstallmentAutoPostBlock | null
+  /** Due months with no posted row; `linked` is "pending" when a pending row is linked. */
+  missed: Array<{ occurrence_date: string; linked: 'pending' | null }>
+  candidates: Array<{ occurrence_date: string; transactions: InstallmentReviewTransaction[] }>
+  /** Null for an open-ended entry. */
+  remaining_after: number | null
+  /** The creator's allocation; null for everyone else. */
+  envelope: { allocation_name: string } | null
+  past_cycles: boolean
+  /** The entry's `updated_at` exactly as stored; null when never updated. */
+  entry_version: string | null
+  review_token: string
+}
+
+/** One chosen link in the review POST. */
+export interface InstallmentReviewLink {
+  transaction_id: number
+  occurrence_date: string
+}
+
+/** POST /budget-entries/{id}/auto-post-review. Both binding fields are required. */
+export interface InstallmentReviewInput {
+  entry_version: string | null
+  review_token: string
+  links: InstallmentReviewLink[]
+}
+
+export interface InstallmentReviewOutcome {
+  occurrence_date: string
+  outcome: string
+}
+
+/** The review POST's result; a replay carries `replayed` true and no outcomes. */
+export interface InstallmentReviewResult {
+  replayed: boolean
+  reviewed: boolean
+  auto_post_enabled: boolean
+  next_occurrence: string
+  /** Null for an open-ended entry. */
+  max_occurrences: number | null
+  outcomes: InstallmentReviewOutcome[]
+}
+
+/** POST /budget-entries/{id}/auto-post. Turning off only; `true` is a 400. */
+export interface InstallmentAutoPostToggleInput {
+  enabled: boolean
+}
+
+export type PostDueInstallmentsTrigger = 'button' | 'page_open'
+
+/** POST /budget-entries/post-due-installments. */
+export interface PostDueInstallmentsInput {
+  trigger: PostDueInstallmentsTrigger
+}
+
+export type PostDueInstallmentsSkipReason =
+  | 'foreign_currency'
+  | 'no_statement_cycle'
+  | 'no_access'
+  | 'possible_duplicate'
+  | 'ambiguous'
+  | 'pending_not_editable'
+  | 'needs_amount'
+
+export interface PostDueInstallmentsResult {
+  trigger: PostDueInstallmentsTrigger
+  /** A page-open run inside the 15-minute window posts nothing. */
+  throttled: boolean
+  posted: number
+  skipped: Partial<Record<PostDueInstallmentsSkipReason, number>>
+  entries: Array<{ entry_id: number; posted: number; skipped_reason: PostDueInstallmentsSkipReason | null }>
+}
+
 /** A recurring card expense with occurrences nobody recorded. */
 export interface MissedCharge {
   entry_id: number
@@ -1379,6 +1520,12 @@ export interface RecurringMissed {
   /** The readable pending rows linked to missed occurrences. */
   pending_transaction_ids: number[]
   can_mark_paid: boolean
+  /** Card installments: the auto-post state; null for any other entry. */
+  auto_post: InstallmentAutoPostState | null
+  /** Why a `blocked` installment does not auto-post; null otherwise. */
+  block_reason: InstallmentBlockReason | null
+  /** The caller can review the installment (can edit it, and it is not yet on). */
+  can_review: boolean
 }
 
 /**
@@ -1405,6 +1552,13 @@ export interface CardStatementDue {
   overdue: boolean
   /** Some foreign charge has no exchange rate, so `clear_through` may be low. */
   incomplete: boolean
+  /**
+   * Installment months on closed statements that are not posted yet. Counts of months,
+   * never amounts. With `clear_through` 0 the row is listed for these alone.
+   */
+  unposted_installments: number
+  /** Of `unposted_installments`, the months the caller's Post now would record. */
+  unposted_postable: number
 }
 
 /** One card's upcoming charges in `DashboardSnapshot.card_charges`. */
@@ -1593,6 +1747,20 @@ export interface StatementDue {
   /** True when a foreign line has no rate, so `owed` and `clear_through` may be low. */
   incomplete: boolean
   minimum_due: MinimumDue
+  /** Unposted installment months whose cycle closes on or before this statement's close (cumulative). */
+  unposted_installments: number
+  /** Of those, the months the caller's Post now would record. */
+  unposted_postable: number
+}
+
+/** The months of a card's reviewed installments that sit on closed cycles but are not posted. */
+export interface CardUnposted {
+  count: number
+  /** Of `count`, the months the caller's Post now would record. */
+  postable: number
+  /** Close and due days (`YYYY-MM-DD`) of the oldest such month. */
+  oldest_close: string
+  oldest_due: string
 }
 
 /** GET /cards/{id}/credit. Owner and admin only; anyone else gets 404. */
@@ -1606,6 +1774,8 @@ export interface CardCreditDetail {
   /** The six most recent closed statements plus any older one still owed, oldest first. */
   statements: StatementDue[]
   open_cycle: { close_date: string; due_date: string } | null
+  /** Present even when `statements` is empty; null when no installment month is unposted. */
+  unposted: CardUnposted | null
 }
 
 /** POST /cards/{id}/payments. Money has at most 2 decimals. */
@@ -1664,6 +1834,12 @@ export interface DashboardSnapshot {
   card_statements_due: CardStatementDue[]
   /** Missed recurring entries outside the card lists (the dashboard does not render it). */
   missed: RecurringMissed[]
+  /** Active card installments the caller can edit that are not reviewed. Empty for viewers. */
+  installment_review: InstallmentReviewRow[]
+  /** Reviewed card installments with a due month, for callers who see them in full. Empty for viewers. */
+  installment_auto_post: InstallmentAutoPostRow[]
+  /** Whether the daily job is set up; otherwise installments post when Transactions opens. */
+  auto_post_scheduled: boolean
   currencies: CurrencyCode[]
   fx: FxMeta
 }
