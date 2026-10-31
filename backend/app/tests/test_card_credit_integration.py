@@ -146,7 +146,10 @@ def _leaks(body, entries=(), transactions=(), numbers=()):
     field, and any string or sentinel number is still a leak. An ``account_id``
     is an account's id, never a private record's, so it passes too.
     """
-    private = {**{i: "budget_entry" for i in entries}, **{i: "transaction" for i in transactions}}
+    private = {}
+    for table, ids in (("budget_entry", entries), ("transaction", transactions)):
+        for i in ids:
+            private.setdefault(i, set()).add(table)
     leaks = sw_leaks(body, private_ids=list(private), numbers=numbers)
 
     def node(where):
@@ -159,11 +162,21 @@ def _leaks(body, entries=(), transactions=(), numbers=()):
         if not isinstance(value, int) or not where.endswith(".source_id"):
             return False
         sibling = node(where.rsplit(".", 1)[0])["source"]
-        return sibling != private.get(value)
+        return sibling not in private.get(value, set())
 
     return [(where, value) for where, value in leaks
             if not own_row_of_the_other_table(where, value)
             and not (where.endswith(".account_id") and isinstance(value, int))]
+
+
+def test_leaks_keeps_a_private_id_shared_by_both_tables_per_table():
+    """A budget entry and a transaction with the same private id: a check of either table is a leak."""
+    body = {"checks": [{"source": "budget_entry", "source_id": 17}]}
+    assert _leaks(body, entries=[17], transactions=[17]) == [("$.checks[0].source_id", 17)]
+    body = {"checks": [{"source": "transaction", "source_id": 17}]}
+    assert _leaks(body, entries=[17], transactions=[17]) == [("$.checks[0].source_id", 17)]
+    body = {"checks": [{"source": "transaction", "source_id": 17}]}
+    assert _leaks(body, entries=[17]) == []
 
 
 def _checks(credit, source=None, source_id=None):
