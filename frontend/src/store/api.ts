@@ -488,6 +488,13 @@ export const accountingApi = createApi({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
     }),
+    // The "Save and add another" save: the same route and invalidation as createTransaction, under its own
+    // endpoint name so the screen loader can skip it and its refetches (store/busy.ts EXEMPT_ENDPOINTS and
+    // QUIET_REFETCH_MUTATIONS). Keep the two definitions in step.
+    createTransactionQuiet: builder.mutation<Transaction, TransactionInput>({
+      query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
+      invalidatesTags: ['Transaction', 'Account', 'Allocation'],
+    }),
     updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
@@ -752,6 +759,7 @@ export const {
   useLazyGetTransactionsQuery,
   useGetTransactionQuery,
   useCreateTransactionMutation,
+  useCreateTransactionQuietMutation,
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
