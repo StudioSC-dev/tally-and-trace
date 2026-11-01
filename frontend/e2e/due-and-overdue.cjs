@@ -14,6 +14,9 @@
 //   (d) Charged then Posted on a card subscription: one pending debit, then
 //       exactly one posted row
 //   (e) Mark posted on a pending card transaction
+//       (e) also sets the posting date; (e2) requires it, in range; (e3) a status-only
+//       post has no date field and sends no posting date; (e5) the date defaults to the
+//       Manila day at the moment the form opens, even before the day hook has polled
 //   (e4) a posting date reads as its Manila day in the list and the account page,
 //       in a browser in Los Angeles and in Manila
 //   (f) Mark received on an income
@@ -43,7 +46,7 @@
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e4|f|g|h|i|j|k|l|m|n|o|p|q]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -374,18 +377,109 @@ async function chargedThenPosted(browser) {
   await ctx.close()
 }
 
+// The posting form's "Posted on" input, and what to expect in it: the Manila day, read in Node
+// just before and just after the form opened. The two agree except across Manila midnight.
+const postedOnInput = (page) => page.locator('[data-testid="posting-form-date"]')
+const expectedDefault = (shown, before, after) =>
+  before === after ? before : (shown === before || shown === after ? shown : `${before} or ${after}`)
+const putsFor = (page, txnId) => {
+  const sent = []
+  page.on('request', (r) => { if (r.method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${txnId}`)) sent.push(r) })
+  return sent
+}
+
 // (e) Mark posted on a pending card transaction.
 async function markPostedCoffee(browser) {
   console.log('\n=== (e) Mark posted on Coffee posts it and it leaves the section')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
+  const before = manilaToday()
   await (await showRow(page, pendRows(page, 'Coffee'))).locator('[data-testid="due-mark-posted"]').click()
+  await postedOnInput(page).waitFor()
+  const shown = await postedOnInput(page).inputValue()
+  const after = manilaToday()
+  check('(e) the "Posted on" date defaults to the Manila day', shown, expectedDefault(shown, before, after))
+  const chosen = addDays(manilaToday(), -3)
+  await postedOnInput(page).fill(chosen)
   const put = await savePosted(page, w.coffee.id)
   check('(e) the page\'s posting flow saves it (200)', put.status(), 200)
+  check('(e) the PUT sends the chosen day as the posting date', put.request().postDataJSON().posting_date.startsWith(chosen), true)
   await gone(pendRows(page, 'Coffee'))
   check('(e) the Coffee row leaves the section', (await rowsOf(page, 'Coffee', 'pending')).length, 0)
   const txn = (await allTransactions(w.u)).find((t) => t.id === w.coffee.id)
   check('(e) Coffee is posted', txn?.is_posted, true)
+  check('(e) Coffee\'s stored posting date is the chosen day', txn?.posting_date?.startsWith(chosen), true)
+  await ctx.close()
+}
+
+// (e2) The date is required, and held to the record range, before any request is sent.
+async function postingDateChecks(browser) {
+  console.log('\n=== (e2) Mark posted needs a date in range before it sends anything')
+  const u = await makeUser('e2')
+  const today = manilaToday()
+  const bank = await account(u, 'E2 Checking')
+  const row = await unposted(u, bank, addDays(today, -3), 75, 'E2 Bill')
+  const { ctx, page } = await openDue(browser, u)
+  const puts = putsFor(page, row.id)
+  await (await showRow(page, pendRows(page, 'E2 Bill'))).locator('[data-testid="due-mark-posted"]').click()
+  await postedOnInput(page).waitFor()
+  const error = page.locator('[data-testid="posting-form-date-error"]')
+  const stillPending = async () => (await allTransactions(u)).find((t) => t.id === row.id)?.is_posted === false
+
+  await postedOnInput(page).fill('')
+  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await error.waitFor()
+  await waitQuiet(page)
+  check('(e2) an empty date shows its message', (await error.textContent())?.trim(), 'Choose the date it posted.')
+  check('(e2) the empty date marks the input invalid', await postedOnInput(page).getAttribute('aria-invalid'), 'true')
+  check('(e2) an empty date sends no request, and the row stays pending', [puts.length, await stillPending()], [0, true])
+
+  await postedOnInput(page).fill('1999-12-31')
+  check('(e2) editing the date clears its message', await error.count(), 0)
+  await page.getByRole('button', { name: 'Save Posted Amount' }).click()
+  await error.waitFor()
+  await waitQuiet(page)
+  const [y, md] = [Number(today.slice(0, 4)), today.slice(4)]
+  const max = md === '-02-29' ? `${y + 5}-02-28` : `${y + 5}${md}`
+  check('(e2) 1999-12-31 shows the record-range message', (await error.textContent())?.trim(), `Choose a date from ${fmt('2000-01-01')} to ${fmt(max)}`)
+  check('(e2) an out-of-range date sends no request, and the row stays pending', [puts.length, await stillPending()], [0, true])
+
+  await postedOnInput(page).fill(addDays(today, -1))
+  const put = await savePosted(page, row.id)
+  check('(e2) a valid day saves it (200)', put.status(), 200)
+  await ctx.close()
+}
+
+// (e3) The owner exemption (post, never edit) carries no date: the form has none, the PUT adds none.
+async function statusOnlyPosting(browser) {
+  console.log('\n=== (e3) a status-only post with one figure has no date field and sends no posting date')
+  const owner = await makeUser('e3a')
+  const creator = await makeUser('e3b')
+  const today = manilaToday()
+  const joint = await account(owner, 'E3 Joint')
+  const share = await post(owner.token, `/accounts/${joint.id}/shares`, { email: creator.email, role: 'editor' })
+  // The creator's pending foreign purchase: its amount in the account's currency is still to be asked.
+  const row = await post(creator.token, '/transactions/', {
+    account_id: joint.id, transaction_type: 'debit', amount: 80, currency: 'PHP',
+    projected_amount: 80, projected_currency: 'USD', description: 'E3 Foreign',
+    transaction_date: wire(addDays(today, -3)), is_posted: false,
+  })
+  const revoked = await api(owner.token, 'DELETE', `/accounts/${joint.id}/shares/${share.id}`)
+  check('(e3) the creator loses access (204)', revoked.status, 204)
+  const { ctx, page } = await openDue(browser, owner)
+  const puts = putsFor(page, row.id)
+  await (await showRow(page, pendRows(page, 'E3 Foreign'))).locator('[data-testid="due-mark-posted"]').click()
+  const saveButton = page.getByRole('button', { name: 'Save Posted Amount' })
+  await saveButton.waitFor()
+  const figure = saveButton.locator('xpath=ancestor::div[contains(@class,"border-ink")][1]').locator('input[type="number"]')
+  check('(e3) the form asks for the one figure', await figure.count(), 1)
+  check('(e3) the form has no "Posted on" date', await postedOnInput(page).count(), 0)
+  await figure.fill('4700')
+  const put = await savePosted(page, row.id)
+  check('(e3) the owner posts it (200)', put.status(), 200)
+  check('(e3) the PUT carries exactly the status and the figure', Object.keys(put.request().postDataJSON()).sort(), ['amount', 'is_posted'])
+  const txn = (await allTransactions(owner)).find((t) => t.id === row.id)
+  check('(e3) the row is posted at the figure', [txn?.is_posted, Number(txn?.amount)], [true, 4700])
   await ctx.close()
 }
 
@@ -423,6 +517,85 @@ async function postingDateDisplay(browser) {
     for (const [description, day] of Object.entries(expected)) {
       check(`(e4) ${timezoneId}: the account page reads ${description} as ${day}`, await postedOn(accountRows, description), day)
     }
+    await ctx.close()
+  }
+}
+
+// (e5) The default is the Manila day when the form opens, not the browser's day or the page's cached one.
+async function postingDefaultDay(browser) {
+  console.log('\n=== (e5) the posting date defaults to the Manila day at the moment the form opens')
+  const u = await makeUser('e5')
+  const D = manilaToday()
+  const bank = await account(u, 'E5 Checking')
+  // Dated yesterday (Manila): overdue there, and inside the list's default month even in Los Angeles.
+  const pinned = await unposted(u, bank, addDays(D, -1), 60, 'E5 Pinned')
+  const eve = await unposted(u, bank, addDays(D, -1), 61, 'E5 Eve')
+  const stale = await unposted(u, bank, addDays(D, -4), 62, 'E5 Stale')
+
+  // Step 1: Manila 00:30 on D seen from Los Angeles, where the browser's day is still D-1.
+  {
+    const { ctx, page } = await newPage(browser, { timezoneId: 'America/Los_Angeles' })
+    await page.clock.install({ time: new Date(`${addDays(D, -1)}T16:30:00Z`) })
+    await uiLogin(page, u)
+    await openTransactions(page)
+    check('(e5) the browser\'s day is the day before Manila\'s', await page.evaluate(() => new Date().toLocaleDateString('en-CA')), addDays(D, -1))
+    await (await showRow(page, pendRows(page, 'E5 Pinned'))).locator('[data-testid="due-mark-posted"]').click()
+    await postedOnInput(page).waitFor()
+    check('(e5) the default is the Manila day, not the Los Angeles day', await postedOnInput(page).inputValue(), D)
+    const put = await savePosted(page, pinned.id)
+    check('(e5) saving it posts (200)', put.status(), 200)
+    check('(e5) the PUT sends the Manila day', put.request().postDataJSON().posting_date.startsWith(D), true)
+    const txn = (await allTransactions(u)).find((t) => t.id === pinned.id)
+    check('(e5) the stored posting date is the Manila day', txn?.posting_date?.startsWith(D), true)
+    const card = page.locator('article').filter({ hasText: 'E5 Pinned' }).first()
+    await card.waitFor()
+    await card.getByText(/^Posted /).waitFor()
+    check('(e5) the list shows that day', (await card.textContent())?.includes(`Posted ${fmt(D)}`), true)
+    await ctx.close()
+  }
+
+  // Step 2: the page loads at Manila 23:59:45 on D-1 with its clock paused. Controlled ticks settle the
+  // loader, then 20 s pass in all: the day has turned, but the day hook (30 s poll) has not looked yet.
+  {
+    const lastDay = addDays(D, -1)
+    const start = new Date(`${lastDay}T15:59:45Z`)
+    const { ctx, page } = await newPage(browser, { timezoneId: 'Asia/Manila' })
+    await page.clock.install({ time: new Date(start.getTime() - 5000) })
+    await page.clock.pauseAt(start)
+    await uiLogin(page, u)
+    await page.goto(`${stack.webUrl}/transactions`)
+    const startedAt = await page.evaluate(() => Date.now())
+    // The page cannot finish loading without ticks: release it 100 ms at a time (capped at 3 s)
+    // until the section has its count and the loader no longer shields input.
+    const phase = () => page.evaluate(() => document.querySelector('[data-testid="busy-overlay"]')?.getAttribute('data-phase') ?? null)
+    const ready = () => page.evaluate(() => {
+      const count = document.querySelector('[data-testid="due-count"]')?.textContent ?? '…'
+      return count !== '…' && document.querySelector('[data-testid="busy-overlay"]')?.getAttribute('data-phase') === 'hidden'
+    })
+    let settled = 0
+    while (!(await ready()) && settled < 3000) {
+      await page.waitForTimeout(40)
+      await page.clock.runFor(100)
+      settled += 100
+    }
+    console.log(`    loader settled after ${settled} ms of virtual time`)
+    check('(e5) the loader clears within 3 s of virtual time', [await ready(), await phase()], [true, 'hidden'])
+    const listed = async () => (await rowsOf(page, 'E5 Eve', 'pending')).length
+    check('(e5) the page still holds yesterday: the row dated yesterday is not due yet', await listed(), 0)
+    await page.clock.runFor(20000 - settled)
+    const virtual = (await page.evaluate(() => Date.now())) - startedAt
+    check('(e5) 20 s of virtual time have passed since the page loaded', [virtual > 19000, virtual <= 20500], [true, true])
+    check('(e5) the page clock reads the new Manila day', await page.evaluate(() => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)), D)
+    check('(e5) the day hook has not polled: the page still holds yesterday', await listed(), 0)
+    const puts = putsFor(page, stale.id)
+    await (await showRow(page, pendRows(page, 'E5 Stale'))).locator('[data-testid="due-mark-posted"]').click()
+    await postedOnInput(page).waitFor()
+    check('(e5) the default is the new Manila day', await postedOnInput(page).inputValue(), D)
+    const put = await savePosted(page, stale.id)
+    check('(e5) saving it posts (200)', put.status(), 200)
+    check('(e5) the PUT sends the new Manila day', [puts.length, put.request().postDataJSON().posting_date.startsWith(D)], [1, true])
+    const txn = (await allTransactions(u)).find((t) => t.id === stale.id)
+    check('(e5) the stored posting date is the new Manila day', txn?.posting_date?.startsWith(D), true)
     await ctx.close()
   }
 }
@@ -1000,7 +1173,7 @@ async function outOfOrderRefetch(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e4: postingDateDisplay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

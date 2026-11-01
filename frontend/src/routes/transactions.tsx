@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { addDays, editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, mergeUpcoming, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, UPCOMING_LOOKAHEAD_DAYS, withoutError } from '@tally-trace/shared'
+import { addDays, editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, mergeUpcoming, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, UPCOMING_LOOKAHEAD_DAYS, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, RecurringAction, TransactionStatus, UpcomingRow } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -286,6 +286,9 @@ type PostingFormState = {
   // The caller may post but not edit (the owner resolving a creator's record): the only
   // figure sent is the one the row needs, beside `is_posted`.
   statusOnly: boolean
+  // The day it posted (YYYY-MM-DD), asked for unless the caller may only post.
+  postedOn: string
+  dateError: string | null
 }
 
 const emptyPostingForm = (currency: CurrencyCode): PostingFormState => ({
@@ -300,6 +303,8 @@ const emptyPostingForm = (currency: CurrencyCode): PostingFormState => ({
   destinationCurrency: currency,
   received: '',
   statusOnly: false,
+  postedOn: '',
+  dateError: null,
 })
 
 export function TransactionsPage() {
@@ -1431,6 +1436,7 @@ export function TransactionsPage() {
   const handleMarkPostedFromModal = async (
     transaction: Transaction,
     actualAmount: number,
+    postedOn: string,
     exchangeRate?: number,
     receivedAmount?: number,
   ) => {
@@ -1439,14 +1445,14 @@ export function TransactionsPage() {
     }
     const account = accounts.find((item) => item.id === transaction.account_id)
     const accountCurrency = (account?.currency as CurrencyCode) || fallbackCurrency
-    const timestamp = new Date().toISOString()
     // A loan payment's posted amount is the whole payment; its interest is kept.
     const amount = isLoanPayment(transaction)
       ? toPrincipal(actualAmount, transaction.transfer_fee)
       : actualAmount
     const payload: Record<string, unknown> = {
       is_posted: true,
-      posting_date: timestamp,
+      // UTC midnight of the chosen day, as the edit form sends a posting date.
+      posting_date: new Date(postedOn).toISOString(),
       amount,
       currency: accountCurrency,
       exchange_rate: exchangeRate,
@@ -1582,6 +1588,8 @@ export function TransactionsPage() {
       destinationCurrency: destinationCurrency ?? accountCurrency,
       received: needsReceived && transaction.received_amount != null ? String(transaction.received_amount) : '',
       statusOnly: false,
+      // Read now, not from the page's cached day, which can lag Manila midnight by a poll.
+      postedOn: manilaToday(),
     })
   }
 
@@ -1609,6 +1617,14 @@ export function TransactionsPage() {
       }))
       return
     }
+    if (!postingFormState.statusOnly) {
+      const dateError =
+        postingFormState.postedOn === '' ? 'Choose the date it posted.' : recordDateError(postingFormState.postedOn)
+      if (dateError) {
+        setPostingFormState((prev) => ({ ...prev, dateError }))
+        return
+      }
+    }
     try {
       if (postingFormState.statusOnly) {
         const message = await handlePostStatusOnly(
@@ -1624,6 +1640,7 @@ export function TransactionsPage() {
       await handleMarkPostedFromModal(
         actionTransaction,
         parsed,
+        postingFormState.postedOn,
         exchangeRate,
         postingFormState.needsReceived ? received : undefined,
       )
@@ -2900,6 +2917,32 @@ export function TransactionsPage() {
                           placeholder="0.00"
                         />
                       </div>
+                    </div>
+                  )}
+                  {!postingFormState.statusOnly && (
+                    <div>
+                      <label className="label text-ink" htmlFor="posting-form-date">
+                        Posted on
+                      </label>
+                      <input
+                        id="posting-form-date"
+                        type="date"
+                        value={postingFormState.postedOn}
+                        onChange={(e) =>
+                          setPostingFormState((prev) => ({ ...prev, postedOn: e.target.value, dateError: null, error: null }))
+                        }
+                        min={RECORD_DATE_MIN}
+                        max={recordDateMax()}
+                        className="input-field focus-ring"
+                        aria-invalid={postingFormState.dateError ? true : undefined}
+                        aria-describedby={postingFormState.dateError ? 'posting-form-date-error' : undefined}
+                        data-testid="posting-form-date"
+                      />
+                      {postingFormState.dateError && (
+                        <p id="posting-form-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="posting-form-date-error">
+                          {postingFormState.dateError}
+                        </p>
+                      )}
                     </div>
                   )}
                   {postingFormState.error && (
