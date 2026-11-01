@@ -50,12 +50,12 @@ const shownTexts = (texts, id) => (texts[id] || { texts: [] }).texts
 const textOf = async (locator) => ((await locator.textContent()) || '').replace(/\s+/g, ' ').trim()
 
 /** A user with a checking account, income and an expense this month, one envelope and one autopay schedule due in 10 days. */
-async function seed(tag, { currency = 'PHP' } = {}) {
+async function seed(tag, { currency = 'PHP', day = today } = {}) {
   const u = await h.makeUser(stack, tag, { currency })
   const bank = await client.post(u.token, '/accounts/', { name: `Checking ${tag}`, account_type: 'checking', balance: 100000, currency })
   for (const [type, amount, description] of [['credit', 5000, 'Salary'], ['debit', 1200, 'Groceries run']]) {
     await client.post(u.token, '/transactions/', {
-      account_id: bank.id, transaction_type: type, amount, description, transaction_date: wire(today), is_posted: true,
+      account_id: bank.id, transaction_type: type, amount, description, transaction_date: wire(day), is_posted: true,
     })
   }
   await client.post(u.token, '/allocations/', {
@@ -63,7 +63,7 @@ async function seed(tag, { currency = 'PHP' } = {}) {
   })
   await client.post(u.token, '/budget-entries/', {
     entry_type: 'expense', currency, cadence: 'monthly', name: `Gym ${tag}`, amount: 750, account_id: bank.id,
-    is_autopay: true, next_occurrence: wire(addDays(today, 10)),
+    is_autopay: true, next_occurrence: wire(addDays(day, 10)),
   })
   return { ...u, bank }
 }
@@ -104,10 +104,10 @@ const WATCHED = ['net-worth', 'available-cash', 'period-income', 'period-expense
 
 /**
  * A fresh page that records the dashboard's figures from its first document. `clockAt`
- * (an ISO instant) pins the page clock there, running, in the Asia/Manila zone.
+ * (an ISO instant) pins the page clock there, running, in `timezoneId` (default Asia/Manila).
  */
-async function openPage(browser, { clockAt } = {}) {
-  const { ctx, page } = await h.newPage(browser, clockAt ? { timezoneId: 'Asia/Manila' } : {})
+async function openPage(browser, { clockAt, timezoneId = 'Asia/Manila' } = {}) {
+  const { ctx, page } = await h.newPage(browser, clockAt ? { timezoneId } : {})
   if (clockAt) await page.clock.install({ time: new Date(clockAt) })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, WATCHED, { attributes: ['aria-label'] })
@@ -163,46 +163,198 @@ async function scenarioA(browser) {
   }
 }
 
-// (b) The period summary is held: the actual totals never read zero.
+/** Manila's day as the page computes it from its own clock (pinned or real). */
+const pageManilaDay = (page) => page.evaluate(() => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10))
+
+/** The `end_date` of the page's last summary request, or null. */
+const lastSummaryEnd = (requests) => {
+  const asked = requests.filter((r) => r.method === 'GET' && new URL(r.url).pathname.endsWith('/transactions/summary/period'))
+  return asked.length ? new URL(asked[asked.length - 1].url).searchParams.get('end_date') : null
+}
+
+/**
+ * Runs a scenario body whose fixtures are dated by Manila's real day. `h.check` records a
+ * result at once with no rollback, so the body gets a buffered `check` (same signature)
+ * and its outcomes are published only if Manila's day did not change during the attempt.
+ * If it did, the attempt is discarded and one fresh attempt runs (fresh fixtures, fresh
+ * page). If the day changes again, a single failing `<name>.setup-day-changed` is
+ * published and nothing else, so day instability is never reported as a behaviour failure.
+ */
+async function onStableDay(name, body) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const day = manilaToday()
+    const buffer = []
+    const check = async (id, kind, fn) => {
+      let reason = null
+      try {
+        const out = await fn()
+        if (out === false) reason = 'returned false'
+        else if (typeof out === 'string') reason = out
+      } catch (e) {
+        reason = `threw ${e && e.message ? e.message : e}`
+      }
+      buffer.push({ id, kind, reason })
+    }
+    try {
+      await body(check, day)
+    } catch (e) {
+      buffer.push({ id: `${name}.completed`, kind: 'B', reason: `scenario threw: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}` })
+    }
+    if (manilaToday() === day) {
+      for (const { id, kind, reason } of buffer) await h.check(id, kind, async () => reason === null ? true : reason)
+      return
+    }
+    console.log(`  NOTE ${name}: Manila's day changed during the attempt; ${attempt === 0 ? 'retrying once' : 'giving up'}`)
+  }
+  await h.check(`${name}.setup-day-changed`, 'S', async () => "Manila's day changed during both attempts")
+}
+
+// (b) The period summary is held: the actual totals never read zero. It runs on the real
+// clock, so between Manila 00:00 and 08:00 it covers the early-hours window; b2 pins that hour.
 async function scenarioB(browser) {
   console.log('\n=== (b) summary held: actual totals never flash zero')
-  const u = await seed('b')
-  // The page clock is pinned to Manila midday of the seeded day (04:00Z). The dashboard's
-  // period window ends at the real instant `now`, so between Manila 00:00 and 08:00 a row
-  // dated Manila today (00:00Z) falls after it and the API sums it as 0. That is an app gap
-  // (STU-466), not this scenario's concern; the pin keeps the run independent of the wall clock.
-  const { ctx, page, requests } = await openPage(browser, { clockAt: `${today}T04:00:00Z` })
-  let g
-  try {
-    g = await h.gate(page, isSummary)
-    await h.uiLogin(page, stack, u)
-    await h.check('b.page-day-is-seeded-day', 'S', async () => {
-      const day = await h.localDay(page)
-      return day === today || `page day ${day}, seeded day ${today}`
-    })
-    await h.check('b.summary-held', 'S', async () => (await g.waitHits(1)) || 'summary never requested')
-    await page.locator(tid('net-worth')).waitFor()
-    await h.sleep(500)
-    await h.check('b.totals-pending', 'S', async () => (await page.locator(tid('period-income-pending')).count()) === 1 || 'no period-income-pending')
-    await h.check('b.totals-busy', 'B', () => heldBusy(totalsGroup(page)))
-    g.release({ disarm: true })
-    await page.locator(tid('period-income')).waitFor()
-    await h.waitQuiet(page)
-    const texts = await h.readTexts(page)
-    await h.check('b.totals-settled', 'B', () => settledBusy(totalsGroup(page)))
-    for (const id of ['period-income', 'period-expenses', 'period-net-flow']) {
-      await h.check(`b.${id}-never-zero`, 'B', async () => !shownTexts(texts, id).includes(peso(0)) || `${id} history ${JSON.stringify(shownTexts(texts, id))}`)
+  await onStableDay('b', async (check, day) => {
+    const u = await seed('b', { day })
+    const { ctx, page, requests } = await openPage(browser)
+    let g
+    try {
+      g = await h.gate(page, isSummary)
+      await h.uiLogin(page, stack, u)
+      await check('b.page-day-is-seeded-day', 'S', async () => {
+        const seen = await pageManilaDay(page)
+        return seen === day || `page Manila day ${seen}, seeded day ${day}`
+      })
+      await check('b.summary-held', 'S', async () => (await g.waitHits(1)) || 'summary never requested')
+      await page.locator(tid('net-worth')).waitFor()
+      await h.sleep(500)
+      await check('b.totals-pending', 'S', async () => (await page.locator(tid('period-income-pending')).count()) === 1 || 'no period-income-pending')
+      await check('b.totals-busy', 'B', () => heldBusy(totalsGroup(page)))
+      g.release({ disarm: true })
+      await page.locator(tid('period-income')).waitFor()
+      await h.waitQuiet(page)
+      const texts = await h.readTexts(page)
+      await check('b.totals-settled', 'B', () => settledBusy(totalsGroup(page)))
+      for (const id of ['period-income', 'period-expenses', 'period-net-flow']) {
+        await check(`b.${id}-never-zero`, 'B', async () => !shownTexts(texts, id).includes(peso(0)) || `${id} history ${JSON.stringify(shownTexts(texts, id))}`)
+      }
+      await check('b.final-values', 'B', async () => {
+        const expected = await summaryFor(u, requests)
+        if (!expected) return 'no summary request to replay'
+        const shown = [await textOf(page.locator(tid('period-income'))), await textOf(page.locator(tid('period-expenses'))), await textOf(page.locator(tid('period-net-flow')))]
+        return (JSON.stringify(shown) === JSON.stringify(expected) && expected[0] !== peso(0)) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
+      })
+    } finally {
+      g?.release({ disarm: true })
+      await ctx.close()
     }
-    await h.check('b.final-values', 'B', async () => {
-      const expected = await summaryFor(u, requests)
-      if (!expected) return 'no summary request to replay'
-      const shown = [await textOf(page.locator(tid('period-income'))), await textOf(page.locator(tid('period-expenses'))), await textOf(page.locator(tid('period-net-flow')))]
-      return (JSON.stringify(shown) === JSON.stringify(expected) && expected[0] !== peso(0)) || `shown ${JSON.stringify(shown)} api ${JSON.stringify(expected)}`
-    })
-  } finally {
-    g?.release({ disarm: true })
-    await ctx.close()
-  }
+  })
+}
+
+// (b2) At Manila 00:30 a row dated today still counts: the window ends at the end of the day,
+// not at the instant. The page clock is pinned; the API and the seed use the real clock (the
+// summary endpoint has no "now" of its own, so the figures do not depend on it).
+async function scenarioB2(browser) {
+  console.log('\n=== (b2) a row dated today counts at Manila 00:30')
+  await onStableDay('b2', async (check, day) => {
+    const u = await seed('b2', { day })
+    const { ctx, page, requests } = await openPage(browser, { clockAt: `${addDays(day, -1)}T16:30:00Z` })
+    try {
+      await h.uiLogin(page, stack, u)
+      await page.locator(tid('period-income')).waitFor()
+      await h.waitQuiet(page)
+      await check('b2.page-day-is-seeded-day', 'S', async () => {
+        const seen = await pageManilaDay(page)
+        return seen === day || `page Manila day ${seen}, seeded day ${day}`
+      })
+      await check('b2.end-covers-today', 'B', async () => {
+        const end = lastSummaryEnd(requests)
+        return (end !== null && end >= `${day}T00:00:00Z`) || `summary end_date ${end}, row dated ${day}T00:00:00Z`
+      })
+      await check('b2.final-values', 'B', async () => {
+        const shown = [await textOf(page.locator(tid('period-income'))), await textOf(page.locator(tid('period-expenses'))), await textOf(page.locator(tid('period-net-flow')))]
+        const expected = [peso(5000), peso(1200), peso(3800)]
+        return JSON.stringify(shown) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} expected ${JSON.stringify(expected)}`
+      })
+    } finally {
+      await ctx.close()
+    }
+  })
+}
+
+// (b4) The same hour seen from Los Angeles: the browser's own day is still the day before,
+// but the window follows Manila's day. Expected days here are Manila's, never the browser's.
+async function scenarioB4(browser) {
+  console.log('\n=== (b4) a row dated today counts at Manila 00:30 in a browser in Los Angeles')
+  await onStableDay('b4', async (check, day) => {
+    const u = await seed('b4', { day })
+    const { ctx, page, requests } = await openPage(browser, { clockAt: `${addDays(day, -1)}T16:30:00Z`, timezoneId: 'America/Los_Angeles' })
+    try {
+      await h.uiLogin(page, stack, u)
+      await page.locator(tid('period-income')).waitFor()
+      await h.waitQuiet(page)
+      await check('b4.page-day-is-seeded-day', 'S', async () => {
+        const seen = await pageManilaDay(page)
+        return seen === day || `page Manila day ${seen}, seeded day ${day}`
+      })
+      await check('b4.browser-day-differs', 'S', async () => {
+        const local = await h.localDay(page)
+        return local !== day || `browser day ${local} equals Manila's ${day}`
+      })
+      await check('b4.end-covers-today', 'B', async () => {
+        const end = lastSummaryEnd(requests)
+        return (end !== null && end >= `${day}T00:00:00Z`) || `summary end_date ${end}, row dated ${day}T00:00:00Z`
+      })
+      await check('b4.final-values', 'B', async () => {
+        const shown = [await textOf(page.locator(tid('period-income'))), await textOf(page.locator(tid('period-expenses'))), await textOf(page.locator(tid('period-net-flow')))]
+        const expected = [peso(5000), peso(1200), peso(3800)]
+        return JSON.stringify(shown) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} expected ${JSON.stringify(expected)}`
+      })
+    } finally {
+      await ctx.close()
+    }
+  })
+}
+
+// (b3) An open dashboard moves its window to the new day at Manila midnight and refetches.
+async function scenarioB3(browser) {
+  console.log('\n=== (b3) the period window rolls over at Manila midnight')
+  await onStableDay('b3', async (check, day) => {
+    const u = await seed('b3', { day })
+    const eve = addDays(day, -1)
+    const { ctx, page, requests } = await openPage(browser, { clockAt: `${eve}T15:59:00Z` })
+    try {
+      await h.uiLogin(page, stack, u)
+      await page.locator(tid('net-worth')).waitFor()
+      await h.waitQuiet(page)
+      await check('b3.starts-on-the-eve', 'S', async () => {
+        const seen = await pageManilaDay(page)
+        return seen === eve || `page Manila day ${seen}, expected ${eve}`
+      })
+      await check('b3.eve-window-ends-on-the-eve', 'B', async () => {
+        const end = lastSummaryEnd(requests)
+        return end === `${eve}T23:59:59.999999Z` || `summary end_date ${end}`
+      })
+      await check('b3.eve-totals-exclude-today', 'B', async () => {
+        const shown = await textOf(page.locator(tid('period-income')))
+        return shown !== peso(5000) || `income ${shown} already counts the rows dated ${day}`
+      })
+      const before = requests.length
+      const crossed = await h.crossDay(page)
+      await check('b3.crossed-the-day', 'S', async () => crossed.after === day || `day after the cross ${crossed.after}, expected ${day}`)
+      await h.waitQuiet(page)
+      await check('b3.new-window-requested', 'B', async () => {
+        const end = lastSummaryEnd(requests.slice(before))
+        return end === `${day}T23:59:59.999999Z` || `summary end_date after the cross ${end}`
+      })
+      await check('b3.totals-include-today', 'B', async () => {
+        const shown = [await textOf(page.locator(tid('period-income'))), await textOf(page.locator(tid('period-expenses'))), await textOf(page.locator(tid('period-net-flow')))]
+        const expected = [peso(5000), peso(1200), peso(3800)]
+        return JSON.stringify(shown) === JSON.stringify(expected) || `shown ${JSON.stringify(shown)} expected ${JSON.stringify(expected)}`
+      })
+    } finally {
+      await ctx.close()
+    }
+  })
 }
 
 // (c) Allocations are held: no empty envelope text, no zero badge.
@@ -473,6 +625,9 @@ async function scenarioH(browser) {
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
+  ['b2', scenarioB2],
+  ['b3', scenarioB3],
+  ['b4', scenarioB4],
   ['c', scenarioC],
   ['f', scenarioF],
   ['d', scenarioD],
