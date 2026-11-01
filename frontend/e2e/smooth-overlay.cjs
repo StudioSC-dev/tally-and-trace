@@ -873,7 +873,8 @@ async function scenarioK(browser) {
   console.log('\n=== (k) Mark paid from Due blocks until the snapshot and the list land')
   const u = await h.makeUser(stack, 'k')
   const checking = await client.post(u.token, '/accounts/', { name: 'K Checking', account_type: 'checking', balance: 50000, currency: 'PHP' })
-  const rent = await entry(u, { name: 'K Rent', amount: 1500, account_id: checking.id, next_occurrence: wire(addDays(today, 3)) })
+  // Due today: Due and overdue lists today and earlier, never a later day.
+  const rent = await entry(u, { name: 'K Rent', amount: 1500, account_id: checking.id, next_occurrence: wire(today) })
   const { ctx, page } = await openPage(browser)
   const gates = []
   try {
@@ -918,7 +919,8 @@ async function scenarioD(browser) {
   console.log('\n=== (d) Due first load from cache: the stale row cannot be acted on')
   const u = await h.makeUser(stack, 'd')
   const checking = await client.post(u.token, '/accounts/', { name: 'D Checking', account_type: 'checking', balance: 50000, currency: 'PHP' })
-  const bill = await entry(u, { name: 'D Bill', amount: 800, account_id: checking.id, next_occurrence: wire(addDays(today, 2)) })
+  // Due today: Due and overdue lists today and earlier, never a later day.
+  const bill = await entry(u, { name: 'D Bill', amount: 800, account_id: checking.id, next_occurrence: wire(today) })
   const { ctx, page } = await openPage(browser)
   let snap = null
   try {
@@ -1596,7 +1598,8 @@ async function scenarioW(browser) {
     billing_cycle_start: closeDom, days_until_due_date: 21, minimum_due_rule: presets.find((p) => p.key === 'bdo').rule, payment_account_id: checking.id,
   })
   await client.post(u.token, '/transactions/', { account_id: wCard.id, transaction_type: 'debit', amount: 900, description: 'W purchase', transaction_date: wire(addDays(close, -3)), is_posted: true })
-  const bill = await entry(u, { name: 'W Bill', amount: 700, account_id: checking.id, next_occurrence: wire(addDays(today, 3)) })
+  // Due today: Due and overdue lists today and earlier, never a later day.
+  const bill = await entry(u, { name: 'W Bill', amount: 700, account_id: checking.id, next_occurrence: wire(today) })
   await client.post(u.token, '/transactions/', { account_id: checking.id, transaction_type: 'debit', amount: 120, description: 'W spend', transaction_date: wire(today), is_posted: true })
   const { ctx, page } = await openPage(browser)
   const gates = []

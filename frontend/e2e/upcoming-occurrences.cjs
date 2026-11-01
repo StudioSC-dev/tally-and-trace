@@ -21,11 +21,16 @@
 //       today + 30 days ("through <date>"); the previous month has no Upcoming, and a
 //       custom range (the next month's own days, or a few days) is exact
 //   (i) over 100 items: "showing the next 100 of N"
+//   (j) Due and overdue holds Manila today and earlier only: with rows due today, in
+//       a few days (cash, card, income, transfer) and a missed month, no Due row is
+//       dated after today, none of the later entries is in Due, each entry's day is
+//       listed once across Due and Upcoming, and a future linked pending row is in
+//       Upcoming only
 //   (k) the partition is on the Manila day, with the real clock: in a browser zone
 //       whose local day differs from Manila's, a planned row dated Manila today is in
 //       the main list and one dated Manila tomorrow is in Upcoming, each once; an
 //       occurrence due Manila today is in Due and overdue and one due Manila tomorrow
-//       is in Upcoming
+//       is in Upcoming, not in Due and overdue
 //   (l) the rollover trigger, on the browser clock only: crossing Manila's midnight
 //       with no reload sends exactly one new request each for the main list, the
 //       Upcoming transactions, the Upcoming occurrences and the dashboard snapshot,
@@ -35,7 +40,7 @@
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|k|l]
+// Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -568,6 +573,69 @@ async function overHundred(browser) {
   await ctx.close()
 }
 
+/** A Due row's day from its second line ("Nov 1st, 2026 · …"), or null for a row with no leading day. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function dueRowDay(sub) {
+  const m = /^([A-Z][a-z]{2}) (\d{1,2})(?:st|nd|rd|th), (\d{4})/.exec(sub)
+  if (!m || !MONTHS.includes(m[1])) return null
+  return `${m[3]}-${String(MONTHS.indexOf(m[1]) + 1).padStart(2, '0')}-${m[2].padStart(2, '0')}`
+}
+
+// (j) Due and overdue holds Manila today and earlier only.
+async function dueIsTodayAndEarlier(browser) {
+  console.log('\n=== (j) Due and overdue lists today and earlier only; each later occurrence is in Upcoming once')
+  const today = manilaToday()
+  const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
+  const u = await makeUser('j')
+  const bank = await account(u, 'J Checking')
+  const savings = await account(u, 'J Savings', 'savings', 5000)
+  const visa = await card(u, bank, 'J Visa')
+  const todayBill = await entry(u, { name: 'J Today Bill', amount: 700, account_id: bank.id, next_occurrence: wire(today) })
+  const soon = await entry(u, { name: 'J Soon Bill', amount: 800, account_id: bank.id, next_occurrence: wire(addDays(today, 2)) })
+  const netflix = await entry(u, { name: 'J Netflix', amount: 549, account_id: visa.id, next_occurrence: wire(addDays(today, 3)) })
+  const salary = await entry(u, { name: 'J Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(addDays(today, 4)) })
+  const save = await entry(u, { name: 'J Save', amount: 2000, account_id: bank.id, transfer_to_account_id: savings.id, next_occurrence: wire(addDays(today, 5)) })
+  const old = await entry(u, { name: 'J Old Bill', amount: 900, account_id: bank.id, next_occurrence: wire(addMonths(today, -2).slice(0, 8) + String(anchor).padStart(2, '0')), anchor_day: anchor })
+  // Netflix's first month is Charged ahead of its day: a pending row linked to it, dated today+3.
+  const charged = await api(u.token, 'POST', `/budget-entries/${netflix.id}/materialize`, { is_posted: false })
+  const linked = await linkedRows(u, netflix.id)
+  check('(j) Netflix is Charged: one pending row linked to it, on today+3',
+    [charged.status, linked.map((t) => [t.is_posted, t.transaction_date.slice(0, 10)])], [201, [[false, addDays(today, 3)]]])
+
+  const { ctx, page, native } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  const dueRows = await allDueRows(page)
+  const occs = await occurrences(page)
+  const upcomingRows = await page.evaluate(() => {
+    const up = document.querySelector('[data-testid="upcoming-transactions"]')
+    return up ? [...up.querySelectorAll('article:not([data-testid="upcoming-occurrence"])')].map((a) => a.querySelector('p.text-base')?.textContent.trim() ?? '') : []
+  })
+  console.log(`    due ${JSON.stringify(dueRows.map((r) => `${r.kind}:${r.name}:${dueRowDay(r.sub)}`))}`)
+  console.log(`    upcoming occurrences ${JSON.stringify(occs.map((o) => `${o.name}:${o.day}`))}; upcoming rows ${JSON.stringify(upcomingRows)}`)
+
+  check('(j) no Due row is dated after today',
+    dueRows.filter((r) => r.kind !== 'missed' && (dueRowDay(r.sub) === null || dueRowDay(r.sub) > today)).map((r) => r.name), [])
+  const later = [soon, netflix, salary, save]
+  check('(j) none of the later entries is in Due', later.map((e) => dueRows.filter((r) => r.source === `budget_entry:${e.id}`).length), [0, 0, 0, 0])
+  check('(j) the linked pending row is not in Due', dueRows.filter((r) => r.source === `transaction:${linked[0]?.id}`).length, 0)
+  check('(j) Today Bill is in Due once, on today, and not in Upcoming on today',
+    [dueRows.filter((r) => r.source === `budget_entry:${todayBill.id}` && dueRowDay(r.sub) === today).length,
+      occs.filter((o) => o.source === `budget_entry:${todayBill.id}` && o.day === today).length], [1, 0])
+  check('(j) the missed month is in Due once', dueRows.filter((r) => r.kind === 'missed' && r.source === `budget_entry:${old.id}`).length, 1)
+  check('(j) each later entry\'s first day is in Upcoming once, "Not recorded"',
+    [[soon, 2], [salary, 4], [save, 5]].map(([e, n]) => occs.filter((o) => o.source === `budget_entry:${e.id}` && o.day === addDays(today, n) && o.notRecorded).length), [1, 1, 1])
+  check('(j) the linked pending row is in Upcoming once, and its month is not an occurrence there',
+    [countOf(upcomingRows, 'J Netflix'), occs.filter((o) => o.source === `budget_entry:${netflix.id}` && o.day === addDays(today, 3)).length], [1, 0])
+  const pairs = [
+    ...dueRows.filter((r) => r.kind === 'recurring').map((r) => `${r.source}@${dueRowDay(r.sub)}`),
+    ...occs.map((o) => `${o.source}@${o.day}`),
+  ]
+  check('(j) each entry\'s day is listed once across Due and Upcoming', pairs.filter((p, i) => pairs.indexOf(p) !== i), [])
+  checkNoNative('j', native)
+  await ctx.close()
+}
+
 // (k) The partition is on the Manila day, with the real clock.
 async function partitionOnManilaDay(browser) {
   console.log('\n=== (k) the lists split on the Manila day in a zone whose local day differs')
@@ -604,8 +672,8 @@ async function partitionOnManilaDay(browser) {
   const occs = await occurrences(page)
   check('(k) the occurrence due Manila today is in Due and overdue once, not in Upcoming or the main list',
     [dueOn(todayBill.id, today), occs.filter((o) => o.source === `budget_entry:${todayBill.id}` && o.day === today).length, countOf(shown.main, 'K Today Bill')], [1, 0, 0])
-  check('(k) the occurrence due Manila tomorrow is in Upcoming once, on that day, and not in the main list',
-    [occs.filter((o) => o.source === `budget_entry:${tomorrowBill.id}`).map((o) => o.day), countOf(shown.main, 'K Tomorrow Bill')], [[tomorrow], 0])
+  check('(k) the occurrence due Manila tomorrow is in Upcoming once, on that day, and not in the main list or Due and overdue',
+    [occs.filter((o) => o.source === `budget_entry:${tomorrowBill.id}`).map((o) => o.day), countOf(shown.main, 'K Tomorrow Bill'), dueOn(tomorrowBill.id, tomorrow)], [[tomorrow], 0, 0])
   checkNoNative('k', native)
   await ctx.close()
 }
@@ -705,7 +773,7 @@ async function rolloverCustomRange(browser, u, day, next) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: threeSalaries, b: markReceived, c: markPaidAndCard, d: installments, e: pausedEntry, f: sharedRows, g: filters, h: lookAhead, i: overHundred, k: partitionOnManilaDay, l: rolloverTrigger }
+  const steps = { a: threeSalaries, b: markReceived, c: markPaidAndCard, d: installments, e: pausedEntry, f: sharedRows, g: filters, h: lookAhead, i: overHundred, j: dueIsTodayAndEarlier, k: partitionOnManilaDay, l: rolloverTrigger }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

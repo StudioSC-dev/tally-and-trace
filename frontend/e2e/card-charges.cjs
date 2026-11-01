@@ -12,7 +12,9 @@
 //       missed month (b2) it counts one fewer; the section's Posted opens Mark paid and
 //       "Post all N due" clears the missed row (N read from the API)
 //   (c) an installment's Posted defaults to its occurrence date, with Charged
-//       beside it; another statement cycle's day shows the cycle warning
+//       beside it; another statement cycle's day shows the cycle warning (the
+//       occurrence is in the future, so it is recorded from Upcoming, with the
+//       installment's auto-post off)
 //   (d) a viewer sees Limited rows and an overdue Limited row on the dashboard,
 //       no buttons, and no buttons in the section either
 //   (e) a pending card transaction has no Mark paid, and a future one is not in
@@ -302,6 +304,10 @@ async function installmentDate(browser) {
     name: 'Phone', amount: 5000, next_occurrence: wire(occurrence), account_id: visa.id,
     end_mode: 'after_occurrences', max_occurrences: 12,
   })
+  // A new installment auto-posts on its day and Upcoming offers no button for it; with
+  // auto-post off its first month is recorded by hand.
+  const off = await api(u.token, 'POST', `/budget-entries/${phone.id}/auto-post`, { enabled: false })
+  check('(c) auto-post is turned off (200)', off.status, 200)
 
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, u)
@@ -310,17 +316,18 @@ async function installmentDate(browser) {
   check('(c) the installment is listed on the card', [await row.count(), await row.locator('[data-testid="card-charge-kind"]').textContent()], [1, 'Installment'])
   check('(c) with no Mark paid on the dashboard', await row.locator('[data-testid="card-charge-mark-paid"], button').count(), 0)
   await openTransactions(page)
-  const listedPhone = await rowsOf(page, 'Phone')
-  check('(c) the section lists the installment with Charged and Posted', [listedPhone.length, listedPhone[0]?.buttons.filter((b) => b === 'due-charged').length, listedPhone[0]?.buttons.filter((b) => b === 'due-posted').length], [1, 1, 1])
-  const dueRow = await showRow(page, dueRows(page, 'Phone'))
+  // The occurrence is in the future, so it is in Upcoming, not in the section.
+  const dueRow = page.locator(`[data-testid="upcoming-occurrence"][data-source="budget_entry:${phone.id}"][data-day="${occurrence}"]`)
+  check('(c) Upcoming lists the installment with Charged and Posted, and the section does not',
+    [await dueRow.count(), await dueRow.locator('[data-testid="upcoming-charged"]').count(), await dueRow.locator('[data-testid="upcoming-posted"]').count(), (await rowsOf(page, 'Phone')).length], [1, 1, 1, 0])
   await waitQuiet(page)
-  await dueRow.locator('[data-testid="due-charged"]').click()
+  await dueRow.locator('[data-testid="upcoming-charged"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   check('(c) opened on Charged, the date is labelled "Charged on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Charged on')
   await dialog(page).getByRole('button', { name: 'Cancel', exact: true }).click()
   await dialog(page).waitFor({ state: 'detached' })
   await waitQuiet(page)
-  await dueRow.locator('[data-testid="due-posted"]').click()
+  await dueRow.locator('[data-testid="upcoming-posted"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   await settle(page) // the occurrence list refetches once more after opening; a date typed before it lands is reset
   const date = dialog(page).locator('[data-testid="mark-paid-date"]')

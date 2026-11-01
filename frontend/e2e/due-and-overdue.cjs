@@ -213,14 +213,15 @@ async function seed() {
   const checking = await account(u, 'Main Checking')
   const savings = await account(u, 'Main Savings', 'savings', 5000)
   const visa = await card(u, checking, 'Main Visa')
-  const rent = await entry(u, { name: 'Rent', amount: 15000, account_id: checking.id, next_occurrence: wire(addDays(today, 3)) })
-  const netflix = await entry(u, { name: 'Netflix', amount: 549, account_id: visa.id, next_occurrence: wire(addDays(today, 2)) })
+  // The rows the steps record are due today: the section lists today and earlier, never a later day.
+  const rent = await entry(u, { name: 'Rent', amount: 15000, account_id: checking.id, next_occurrence: wire(today) })
+  const netflix = await entry(u, { name: 'Netflix', amount: 549, account_id: visa.id, next_occurrence: wire(today) })
   const spotify = await entry(u, { name: 'Spotify', amount: 279, account_id: visa.id, next_occurrence: wire(stale(2)), anchor_day: anchor })
-  const salary = await entry(u, { name: 'Salary', entry_type: 'income', amount: 30000, account_id: checking.id, next_occurrence: wire(addDays(today, 5)) })
+  const salary = await entry(u, { name: 'Salary', entry_type: 'income', amount: 30000, account_id: checking.id, next_occurrence: wire(today) })
   const coffee = await unposted(u, visa, addDays(today, -3), 180, 'Coffee')
   const oldRent = await entry(u, { name: 'Old Rent', amount: 12000, account_id: checking.id, next_occurrence: wire(stale(2)), anchor_day: anchor })
   const oldSalary = await entry(u, { name: 'Old Salary', entry_type: 'income', amount: 25000, account_id: checking.id, next_occurrence: wire(stale(1)), anchor_day: anchor })
-  const save = await entry(u, { name: 'Save', amount: 2000, account_id: checking.id, transfer_to_account_id: savings.id, next_occurrence: wire(addDays(today, 4)) })
+  const save = await entry(u, { name: 'Save', amount: 2000, account_id: checking.id, transfer_to_account_id: savings.id, next_occurrence: wire(today) })
   const oldSave = await entry(u, { name: 'Old Save', amount: 1000, account_id: checking.id, transfer_to_account_id: savings.id, next_occurrence: wire(stale(1)), anchor_day: anchor })
   const todayBill = await entry(u, { name: 'Today Bill', amount: 700, account_id: checking.id, next_occurrence: wire(today) })
   const gym = await entry(u, { name: 'Gym', amount: 800, account_id: checking.id, next_occurrence: wire(stale(2)), anchor_day: anchor, is_active: false })
@@ -252,9 +253,11 @@ async function dashboardReadOnly(browser) {
   check('(a) the missed count is plain text, with its oldest month', [await missedText.count() > 0, (await missedText.first().textContent())?.includes(`since ${fmt(missed.oldest)}`)], [true, true])
 
   const payableRows = page.locator('[data-testid="payable-row"]')
-  const rentOpen = payableRows.filter({ has: page.getByText('Rent', { exact: true }) }).locator('[data-testid="payable-open"]')
+  // Rent is due today, so its next month can be listed too (within 30 days); open the first.
+  const rentOpens = payableRows.filter({ has: page.getByText('Rent', { exact: true }) }).locator('[data-testid="payable-open"]')
+  const rentOpen = rentOpens.first()
   const pendingOpen = payableRows.filter({ has: page.getByText('Pending Bill', { exact: true }) }).locator('[data-testid="payable-open"]')
-  check('(a) Rent and the pending transaction are openable payables', [await rentOpen.count(), await pendingOpen.count()], [1, 1])
+  check('(a) Rent and the pending transaction are openable payables', [(await rentOpens.count()) >= 1, await pendingOpen.count()], [true, 1])
   for (const [label, opener] of [['Rent', rentOpen], ['the pending transaction', pendingOpen]]) {
     await opener.click()
     const detail = page.locator('[data-testid="payable-dialog"]')
@@ -648,11 +651,11 @@ async function pagination(browser) {
   await cash('Zulu Old', stale(3), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 3 })
   await cash('Mid Fee', stale(1), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 1 })
   await unposted(u, bank, addDays(today, -20), 180, 'Coffee')
-  // Not overdue: due today and in the next 9 days. Zeta Bill is the last row, on page 3.
+  // Not overdue: due today (the section lists no later day), so by name. Zeta Bill is the last row, on page 3.
   await cash('Today Bill', today)
-  await cash('Rent', addDays(today, 3))
-  await entry(u, { name: 'Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(addDays(today, 5)) })
-  await cash('Zeta Bill', addDays(today, 9))
+  await cash('Rent', today)
+  await entry(u, { name: 'Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(today) })
+  await cash('Zeta Bill', today)
 
   const { ctx, page } = await openDue(browser, u)
   const names = async () => (await page.locator('[data-testid="due-row"]').evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent.trim())))
@@ -667,11 +670,11 @@ async function pagination(browser) {
   check('(n) all 3 rows on page 1 are overdue', first.slice(0, 3).map((r) => r.kind === 'missed' || r.overdue), [true, true, true])
   check('(n) the overdue pending row is ahead of every non-overdue recurring row',
     first.findIndex((r) => r.name === 'Coffee') < first.findIndex((r) => r.name === 'Today Bill'), true)
-  check('(n) the order over all pages', first.map((r) => r.name), ['Zulu Old', 'Mid Fee', 'Coffee', 'Today Bill', 'Rent', 'Salary', 'Zeta Bill'])
+  check('(n) the order over all pages', first.map((r) => r.name), ['Zulu Old', 'Mid Fee', 'Coffee', 'Rent', 'Salary', 'Today Bill', 'Zeta Bill'])
 
   await nextButton(page).click()
   await page.locator('[data-testid="due-pager"] button[aria-current="page"]').filter({ hasText: /^2$/ }).waitFor()
-  check('(n) Next goes to page 2: 4–6 of 7, the badge unchanged', [await pagerLabel(page), await names(), await badge()], ['4–6 of 7', ['Today Bill', 'Rent', 'Salary'], '7'])
+  check('(n) Next goes to page 2: 4–6 of 7, the badge unchanged', [await pagerLabel(page), await names(), await badge()], ['4–6 of 7', ['Rent', 'Salary', 'Today Bill'], '7'])
   await previousButton(page).click()
   await page.locator('[data-testid="due-pager"] button[aria-current="page"]').filter({ hasText: /^1$/ }).waitFor()
   check('(n) Previous goes back to page 1', [await pagerLabel(page), await names()], ['1–3 of 7', ['Zulu Old', 'Mid Fee', 'Coffee']])
@@ -692,11 +695,11 @@ async function pagination(browser) {
   await page.locator('[data-testid="due-count"]').filter({ hasText: /^6$/ }).waitFor({ timeout: 15000 }).catch(() => {})
   await settle(page)
   check('(n) the view lands on the new last page, not an empty one', [await badge(), await currentPage(page), await pagerLabel(page), await names()],
-    ['6', 2, '4–6 of 6', ['Today Bill', 'Rent', 'Salary']])
+    ['6', 2, '4–6 of 6', ['Rent', 'Salary', 'Today Bill']])
 
   // The clamp sticks: when the list grows back to 7 rows, page 2 stays page 2.
-  await cash('Eta Bill', addDays(today, 10))
-  await cash('Theta Bill', addDays(today, 11))
+  await cash('Eta Bill', today)
+  await cash('Theta Bill', today)
   await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Salary$/ }) }).locator('[data-testid="due-mark-received"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -704,7 +707,7 @@ async function pagination(browser) {
   await page.locator('[data-testid="due-count"]').filter({ hasText: /^7$/ }).waitFor({ timeout: 15000 }).catch(() => {})
   await settle(page)
   check('(n) after the list grows back to 7 the view stays on page 2', [await badge(), await currentPage(page), await pagerLabel(page), await names()],
-    ['7', 2, '4–6 of 7', ['Today Bill', 'Rent', 'Eta Bill']])
+    ['7', 2, '4–6 of 7', ['Eta Bill', 'Rent', 'Theta Bill']])
   await ctx.close()
 }
 
