@@ -94,6 +94,8 @@ export type {
   InstallmentAutoPostToggleInput,
   InstallmentReviewInput,
   InstallmentReviewResult,
+  ReviewInstallmentsInput,
+  ReviewInstallmentsResult,
   PostDueInstallmentsResult,
   BalanceHistoryEntry,
   LimitedEvent,
@@ -142,6 +144,8 @@ import type {
   InstallmentAutoPostToggleInput,
   InstallmentReviewInput,
   InstallmentReviewResult,
+  ReviewInstallmentsInput,
+  ReviewInstallmentsResult,
   PostDueInstallmentsResult,
   AccountShares,
   AccountShare,
@@ -384,6 +388,11 @@ export const accountingApi = createApi({
     // Link the chosen duplicates, turn auto-post on and record every due month, in one commit.
     reviewInstallment: builder.mutation<InstallmentReviewResult, { id: number; data: InstallmentReviewInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post-review`, method: 'POST', body: data }),
+      invalidatesTags: [...INSTALLMENTS_POSTED],
+    }),
+    // Turn auto-post on for several clean installments at once; each entry commits on its own.
+    reviewInstallments: builder.mutation<ReviewInstallmentsResult, ReviewInstallmentsInput>({
+      query: (data) => ({ url: 'budget-entries/review-installments', method: 'POST', body: data }),
       invalidatesTags: [...INSTALLMENTS_POSTED],
     }),
     // Turn a reviewed installment's auto-post off; it stays reviewed.
@@ -733,6 +742,7 @@ export const {
   useLazyGetUpcomingOccurrencesQuery,
   useGetInstallmentReviewQuery,
   useReviewInstallmentMutation,
+  useReviewInstallmentsMutation,
   useSetInstallmentAutoPostMutation,
   usePostDueInstallmentsMutation,
   usePostDueInstallmentsOnOpenMutation,

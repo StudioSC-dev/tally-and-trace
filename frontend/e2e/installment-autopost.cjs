@@ -451,7 +451,7 @@ async function roles(browser) {
   check('(e) editor: the missed row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
   await testId(page, 'due-review-notice-toggle').click()
   const listed = page.locator(`[data-testid="due-review-notice-entry"][data-source="budget_entry:${entry.id}"]`)
-  check('(e) editor: the notice lists the entry', await text(listed.locator('span').first()), 'Sofa · Visa E · 3 missed')
+  check('(e) editor: the notice lists the entry', await text(listed.locator('span').first()), 'Sofa · Visa E · 3 missed months to record · review it on its own')
   await openReview(page, listed.locator('[data-testid="due-review-notice-review"]'))
   check('(e) editor: the button counts the months', await text(testId(page, 'installment-review-submit')), 'Record 3 months and turn on auto-post')
   check('(e) editor: the dialog closed after recording', await submitReview(page), 0)
