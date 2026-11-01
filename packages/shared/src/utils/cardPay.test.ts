@@ -9,6 +9,7 @@ import {
   NOTHING_DUE_NOTE,
   payChoices,
   payDisabledReason,
+  postingDay,
   unpostedCounts,
   unpostedNote,
 } from './cardPay'
@@ -150,6 +151,28 @@ describe('manilaToday', () => {
     expect(manilaToday(new Date('2027-03-23T23:59:59Z'))).toBe('2027-03-24')
     expect(manilaToday(new Date('2027-03-31T16:00:00Z'))).toBe('2027-04-01')
     expect(manilaToday(new Date('2027-12-31T16:00:00Z'))).toBe('2028-01-01')
+  })
+})
+
+describe('postingDay', () => {
+  it('keeps the day of a UTC-midnight posting date', () => {
+    expect(postingDay('2026-10-20T00:00:00Z')).toBe('2026-10-20')
+  })
+
+  it('is the next day from 16:00 UTC', () => {
+    expect(postingDay('2026-10-20T15:59:59Z')).toBe('2026-10-20')
+    expect(postingDay('2026-10-20T17:00:00Z')).toBe('2026-10-21')
+  })
+
+  it('reads an offset string as the instant it names', () => {
+    expect(postingDay('2026-10-20T23:30:00+08:00')).toBe('2026-10-20')
+    expect(postingDay('2026-10-20T01:00:00+08:00')).toBe('2026-10-20')
+    expect(postingDay('2026-10-20T23:30:00-05:00')).toBe('2026-10-21')
+  })
+
+  it('is null for garbage', () => {
+    expect(postingDay('not a date')).toBeNull()
+    expect(postingDay('')).toBeNull()
   })
 })
 

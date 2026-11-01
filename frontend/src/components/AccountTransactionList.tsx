@@ -1,6 +1,7 @@
 import {
   accountLeg,
   formatEntryDate,
+  postingDay,
   relativeEntryDay,
   transactionCategoryName,
   transactionDate,
@@ -47,6 +48,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
     leg.counterpartName ?? (leg.counterpartId !== null ? accountNames.get(leg.counterpartId) : undefined) ?? 'Other account'
   const category = transactionCategoryName(row, categoryNames)
   const postingDate = row.view !== 'limited' ? row.posting_date : undefined
+  const postedDay = postingDate ? postingDay(postingDate) : null
 
   // Unknown effect: a transfer in shows what was sent; anything else shows its face (or a
   // Limited row's recorded amount) as "≈", an estimate.
@@ -119,7 +121,7 @@ export function AccountTransactionRow({ row, accountId, accountCurrency, account
               Original {formatCurrency(row.original_amount, row.original_currency)}
             </p>
           )}
-          {postingDate && <p className="text-xs text-muted">Posted {formatEntryDate(postingDate)}</p>}
+          {postedDay && <p className="text-xs text-muted">Posted {formatEntryDate(postedDay)}</p>}
           <div className="flex flex-wrap gap-2 md:justify-end">
             <span className="inline-flex rounded-full px-2 py-1 text-xs font-semibold text-ink">
               {TYPE_LABELS[row.transaction_type]}
