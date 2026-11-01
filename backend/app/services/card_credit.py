@@ -85,7 +85,7 @@ from app.services import forecast as fc
 from app.services.fx import FxRates, convert
 from app.services.installment_duplicates import held_occurrences
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
-from app.services.statements import iter_cycles_from, statement_history
+from app.services.statements import _card_rows, iter_cycles_from, statement_history
 
 CARD_FX_BUFFER = Decimal("0.03")
 WINDOW_DAYS = 30
@@ -508,16 +508,24 @@ def open_cycle(card: Account, today: date) -> Optional[dict]:
             "due_date": cycle["due"].date().isoformat()}
 
 
-def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates]) -> List[dict]:
+def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
+                      viewable_ids: Optional[Iterable[int]] = None,
+                      card_rows=None) -> List[dict]:
     """The card's closed statements, oldest first: ``statement_history`` on
     Manila's midnight over the caller's viewable accounts, kept while the close
     is before Manila's today (a statement closing today can still take
     charges). Recorded rows only, in the card's currency. The one selection
     behind the Pay dialog (``routers/cards.py: card_statements``) and the owed
-    statements in the snapshot (``statements_due``)."""
+    statements in the snapshot (``statements_due``).
+
+    ``viewable_ids`` and ``card_rows`` (a ``statements._card_rows`` result
+    covering the card) let a caller walking many cards look both up once; by
+    default each is read for this card."""
     today = manila_today()
-    history = statement_history(db, card, manila_midnight(), viewable_account_ids(db, user),
-                                fx=fx)
+    if viewable_ids is None:
+        viewable_ids = viewable_account_ids(db, user)
+    history = statement_history(db, card, manila_midnight(), viewable_ids, fx=fx,
+                                card_rows=card_rows)
     return [s for s in history if s["close"].date() < today]
 
 
@@ -620,9 +628,13 @@ def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
     end = today + timedelta(days=WINDOW_DAYS + 1)
     cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
         Account.account_type == AccountType.CREDIT).all()
+    # The viewable accounts and every card's rows are read once, not per card.
+    viewable_ids = viewable_account_ids(db, user)
+    card_rows = _card_rows(db, [c.id for c in cards], viewable_ids) if cards else None
     items = []
     for card in sorted(cards, key=lambda a: (a.name, a.id)):
-        closed = closed_statements(db, user, card, fx)
+        closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
+                                   card_rows=card_rows)
         months = unposted_months(db, card, user)
         latest_clear = closed[-1]["clear_through"] if closed else _ZERO
         owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
