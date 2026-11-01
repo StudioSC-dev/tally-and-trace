@@ -312,7 +312,8 @@ function urgent(row: DueRecurringRow): boolean {
 /**
  * Group A. Full rows from the card charges, payables (budget entries) and upcoming
  * income and transfers, merged on `entryId:occurrenceDate` (card beats payable beats
- * upcoming). A row is dropped when it is not today's, is before today or overdue, and
+ * upcoming). Today and earlier only: a later occurrence is listed in Upcoming. A row is
+ * dropped when it is not today's, is before today or overdue, and
  * the entry has a missed row (`count > 0`) whose `oldest` is on or before it. Missed
  * rows are listed only while `unlinked_count > 0`. Limited rows follow `limited`.
  * Missed and overdue rows sort first, then by day.
@@ -351,6 +352,8 @@ export function dueRecurringRows(
   const rows: DueRecurringRow[] = []
   for (const [key, c] of merged) {
     const occ = c.occurrenceDate
+    // After today it is in Upcoming, recorded or not.
+    if (occ > today) continue
     const past = occ !== today && (occ < today || c.overdue)
     const oldest = coveredFrom.get(c.entryId)
     if (past && oldest !== undefined && oldest <= occ) continue
@@ -437,8 +440,9 @@ export function pendingPostLabel(txn: Pick<Transaction, 'id'>, snapshot: Dashboa
 
 /**
  * Group B. The window and linked queries merged by id; posted and Limited rows
- * dropped. A row is listed when it is dated before today, a missed row links it, or
- * it is a recurring card charge in the snapshot. Sorted by day, then id.
+ * dropped, and so is any row dated after today (it is in Upcoming). A row is listed when
+ * it is dated before today, a missed row links it, or it is a recurring card charge in
+ * the snapshot. Sorted by day, then id.
  */
 export function duePendingRows(
   windowTxns: readonly Transaction[],
@@ -456,6 +460,8 @@ export function duePendingRows(
   const rows: DuePendingRow[] = []
   for (const txn of byId.values()) {
     const date = wallDay(txn.transaction_date)
+    // After today it is in Upcoming.
+    if (date > today) continue
     const overdue = date < today
     if (!overdue && !linked.has(txn.id) && !recurring.has(txn.id)) continue
     rows.push({
