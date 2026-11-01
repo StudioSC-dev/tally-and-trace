@@ -77,7 +77,10 @@ def test_snapshot_lists_installments_awaiting_review_for_editors(world):
         {"entry_id": tablet, "name": "Tablet", "account_name": "Card C", "missed_count": 4},
     ]
     for who in ("o", "a", "e"):
-        assert _snap(w, w[who])["installment_review"] == expected, who
+        rows = _snap(w, w[who])["installment_review"]
+        # ``clean_review`` (STU-474) is covered in test_installment_review_batch_integration.
+        assert [(row.pop("clean_review") is None) for row in rows] == [False, True], who
+        assert rows == expected, who
     for who in ("v", "t"):
         assert _snap(w, w[who])["installment_review"] == [], who
 

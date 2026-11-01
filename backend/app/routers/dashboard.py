@@ -57,7 +57,9 @@ def get_snapshot(
     - Missed recurring entries outside the cards' lists (``missed``,
       services/missed.py), a card installment's row carrying ``auto_post``,
       ``block_reason`` and ``can_review``
-    - Card installments to review (``installment_review``) and those with
+    - Card installments to review (``installment_review``, each row's
+      ``clean_review`` the binding a batch review sends back when the review
+      asks nothing, else null; services/missed.py) and those with
       months due (``installment_auto_post``, with the caller's ``postable_count``
       and ``due_today_count``), and whether the morning job is configured
       (``auto_post_scheduled``)

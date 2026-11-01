@@ -190,6 +190,45 @@ def test_review_links_then_enables_and_posts_the_rest(world):
     assert _balance(w) == -20_000
 
 
+# --- the response's representation (STU-474 commit 1) -----------------------------------------
+
+def _advancing_review(w):
+    """The review of ``test_review_links_then_enables_and_posts_the_rest``: Tablet,
+    Aug 7 and Sep 4 linked, four outcomes. Returns the payload and the response."""
+    tablet = _installment(w)
+    aug7 = _txn(w, "2026-08-07")
+    sep4 = _txn(w, "2026-09-04", is_posted=False)
+    review = _get(w, w["o"], tablet)
+    links = [(aug7, date(2026, 8, 5)), (sep4, date(2026, 9, 5))]
+    r = _post(w, w["o"], tablet, review, links)
+    assert r.status_code == 200, r.text
+    return tablet, review, links, r.json()
+
+
+def test_review_response_reads_the_committed_entry(world):
+    """The response is built from the entry read back after the commit: the
+    walk's advance assigns a naive ``next_occurrence``, and only the refresh
+    gives back the column's aware value (``Z`` on the wire)."""
+    w = world
+    _, _, _, body = _advancing_review(w)
+    assert body["next_occurrence"] == "2026-11-05T00:00:00Z"
+    assert body["max_occurrences"] == 20
+    assert _outcomes(body) == [
+        (MONTHS[0], "created"), (MONTHS[1], "already_posted"),
+        (MONTHS[2], "posted_pending"), (MONTHS[3], "created")]
+
+
+def test_review_replay_response_is_unchanged(world):
+    w = world
+    tablet, review, links, first = _advancing_review(w)
+    again = _post(w, w["o"], tablet, review, links)
+    assert again.status_code == 200, again.text
+    assert again.json() == {
+        "replayed": True, "reviewed": True, "auto_post_enabled": True,
+        "next_occurrence": first["next_occurrence"], "max_occurrences": 20, "outcomes": []}
+    assert first["next_occurrence"] == "2026-11-05T00:00:00Z"
+
+
 # --- r3 row 1 (flush) and r3.1 row 1 (walk) -----------------------------------------------------
 
 def test_review_linking_the_oldest_due_month_adds_no_second_row(world):

@@ -399,6 +399,49 @@ class AutoPostReviewResult(BaseModel):
     outcomes: List[ReviewOutcome]
 
 
+BATCH_LIMIT = 50  # the most installments one batch review takes (STU-474)
+
+
+class ReviewInstallmentsItem(BaseModel):
+    """One installment of a batch review: the snapshot's ``clean_review``
+    binding, unchanged. ``entry_version`` (null for an entry never updated)
+    and ``review_token`` are both required."""
+    entry_id: int
+    entry_version: Optional[datetime]
+    review_token: str
+
+
+class ReviewInstallmentsRequest(BaseModel):
+    """POST /budget-entries/review-installments: 1 to ``BATCH_LIMIT`` items, each
+    entry once."""
+    items: List[ReviewInstallmentsItem] = Field(min_length=1, max_length=BATCH_LIMIT)
+
+    @field_validator("items")
+    @classmethod
+    def _distinct_entries(cls, items: List[ReviewInstallmentsItem]):
+        if len({item.entry_id for item in items}) != len(items):
+            raise ValueError("Each installment can be listed once")
+        return items
+
+
+ReviewInstallmentsOutcome = Literal[
+    "reviewed", "replayed", "changed", "needs_choices", "blocked", "not_found", "failed"]
+
+
+class ReviewInstallmentsEntryResult(BaseModel):
+    """One installment's outcome; ``detail`` is the reason it was not reviewed."""
+    entry_id: int
+    outcome: ReviewInstallmentsOutcome
+    detail: Optional[str] = None
+
+
+class ReviewInstallmentsResult(BaseModel):
+    """The batch review's result: ``results`` in ascending ``entry_id`` (the
+    order processed); ``reviewed`` counts ``reviewed`` and ``replayed``."""
+    results: List[ReviewInstallmentsEntryResult]
+    reviewed: int
+
+
 InstallmentAutoPostState = Literal["unreviewed", "on", "held", "off", "blocked"]
 InstallmentBlockReason = Literal["foreign_currency", "no_statement_cycle", "ambiguous",
                                  "creator_no_access"]
