@@ -16,15 +16,20 @@
 - ``installment_snapshot``: the snapshot's ``installment_review`` and
   ``installment_auto_post`` keys (STU-343 Plan B), and each card installment's
   ``installment_state``, which ``recurring_missed`` repeats on its rows.
+- ``upcoming_occurrences``: ``GET /budget-entries/upcoming-occurrences``
+  (STU-465), the occurrences after Manila's today that no row stands for yet,
+  posted or pending, from the same entries as ``recurring_missed`` (card
+  subscriptions, bills and wallet spending included), for the Transactions
+  page's Upcoming list.
 """
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.access import (
@@ -34,11 +39,11 @@ from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.tags import effective_tag_criterion
 from app.core.time import manila_today
 from app.models.account import AccountType
-from app.models.budget_entry import BudgetEntry
-from app.models.transaction import Transaction
+from app.models.budget_entry import BudgetEntry, BudgetEntryType
+from app.models.transaction import Transaction, TransactionType
 from app.services import forecast as fc
 from app.services.installment_duplicates import held_occurrences
-from app.services.posting import PostPlan, post_plan
+from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
 from app.services.recurring_kinds import (
     BILLING_KINDS, auto_post_block, entry_kind, is_capped, is_card_installment, is_kind_eligible,
 )
@@ -223,6 +228,33 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
     return {"installment_review": review, "installment_auto_post": posting}
 
 
+def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int],
+                    criteria: Sequence = ()) -> List[BudgetEntry]:
+    """The recurring entries a list of the caller's may show, in id order: the
+    payables' disclosure (``collect_events``' ``disclosed()`` in
+    services/forecast.py, without a household view; keep the two in step),
+    active, with an account, readable and not Limited. A Limited view hides
+    ``is_active``, so listing only active entries would reveal it. With
+    ``tag_id`` only entries carrying it effectively are kept, and ``criteria``
+    narrow the query further."""
+    user_id = user.id
+    access = redactor.access
+    scope_account_ids = {a.id for a in fc.get_account_balances(db, user_id)}
+    direct_ids = viewable_account_ids(db, user_id)
+    grants = list(access.grants.values())
+    query = db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user_id, direct_ids, grants),
+        or_(BudgetEntry.user_id == user_id, touches_accounts(BudgetEntry, scope_account_ids)),
+        BudgetEntry.is_active.is_(True),
+        BudgetEntry.account_id.isnot(None),
+        *criteria,
+    )
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
+    return [e for e in query.order_by(BudgetEntry.id).all()
+            if access.readable(e) and redactor.view(e) != LIMITED]
+
+
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
                      infos: Optional[Dict[int, InstallmentInfo]] = None) -> List[dict]:
     """The snapshot's ``missed`` key (see the module docstring), sorted by
@@ -240,28 +272,13 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
     """
     user_id = user.id
     access = redactor.access
-    accounts = fc.get_account_balances(db, user_id)
-    scope_account_ids = {a.id for a in accounts}
-    direct_ids = viewable_account_ids(db, user_id)
-    grants = list(access.grants.values())
-
-    # The payables' disclosure: ``collect_events``' ``disclosed()`` (services/
-    # forecast.py), without a household view. Keep the two in step.
-    query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, direct_ids, grants),
-        or_(BudgetEntry.user_id == user_id, touches_accounts(BudgetEntry, scope_account_ids)),
-        BudgetEntry.is_active.is_(True),
-        BudgetEntry.account_id.isnot(None),
-    )
-    if tag_id is not None:
-        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
-    entries = [e for e in query.order_by(BudgetEntry.id).all()
-               if access.readable(e) and redactor.view(e) != LIMITED]
+    entries = _listed_entries(db, user, redactor, tag_id)
     if not entries:
         return []
 
     # Wallets as the projection judges them (``collect_events``): the scoped
     # ones plus any viewable account an entry is funded from.
+    accounts = fc.get_account_balances(db, user_id)
     viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
     wallet_ids = {a.id for a in accounts if fc.is_spending_wallet(a)} | fc.wallet_ids_of(
         db, (e.account_id for e in entries if e.account_id in viewable_ids))
@@ -302,6 +319,140 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
         })
     out.sort(key=lambda row: (row["oldest"], row["name"]))
     return out
+
+
+@dataclass(frozen=True)
+class UpcomingFilters:
+    """The Transactions page's filters, as ``GET /transactions`` names them,
+    read for recurring entries (``upcoming_occurrences``). ``account_ids`` are
+    already cut to the accounts the caller can view; ``transaction_types`` are
+    parsed; ``tag_id`` is ``filter_tag_id``'s."""
+    account_ids: Optional[FrozenSet[int]] = None
+    transaction_types: Optional[FrozenSet[TransactionType]] = None
+    category_names: Optional[FrozenSet[str]] = None
+    uncategorized: bool = False
+    entered_by_me: bool = False
+    search: Optional[str] = None
+    tag_id: Optional[int] = None
+
+
+def _type_criterion(types: FrozenSet[TransactionType]):
+    """What each transaction type means for an entry: ``debit`` an expense that
+    is not a transfer, ``credit`` income, ``transfer`` a transfer."""
+    matches = []
+    if TransactionType.DEBIT in types:
+        matches.append(and_(BudgetEntry.entry_type == BudgetEntryType.EXPENSE,
+                            BudgetEntry.transfer_to_account_id.is_(None)))
+    if TransactionType.CREDIT in types:
+        matches.append(BudgetEntry.entry_type == BudgetEntryType.INCOME)
+    if TransactionType.TRANSFER in types:
+        matches.append(BudgetEntry.transfer_to_account_id.isnot(None))
+    return or_(*matches)
+
+
+def upcoming_window(start: Optional[date], end: Optional[date]) -> tuple:
+    """``(first day, last day)`` of an upcoming list: from Manila's tomorrow at
+    the earliest (today and earlier are Due and overdue's) through Manila's
+    today plus ``OCCURRENCE_HORIZON`` at the latest; an open end is that
+    horizon. The first day may be after the last: an empty list."""
+    today = manila_today()
+    first = today + timedelta(days=1)
+    last = today + OCCURRENCE_HORIZON
+    return (max(start, first) if start is not None else first,
+            min(end, last) if end is not None else last)
+
+
+def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Optional[date],
+                         end: Optional[date], filters: UpcomingFilters, limit: int) -> dict:
+    """``{"items", "total"}``: every occurrence from ``start`` through ``end``
+    (inclusive, clamped by ``upcoming_window``) of the entries
+    ``_listed_entries`` gives, narrowed by ``filters``, that no linked row
+    stands for, posted or pending (``unrecorded_occurrences`` with
+    ``pending_records``): such a row is listed itself. Card subscriptions and
+    bills and wallet spending are kept, as the Transactions page lists their
+    rows. Sorted by day, name and entry id; ``total`` counts before ``limit``.
+
+    The walk runs from each entry's ``next_occurrence``, not from ``start``: a
+    capped entry's cap and the matching of linked rows both count from there,
+    so a long-stale entry walks its unrecorded history first (as the missed
+    list does on every snapshot).
+
+    ``recordable`` is whether Mark paid can record the occurrence now: the
+    caller's ``can_post``, the schedule's first occurrence on a capped entry
+    (``posting.resolve_occurrence`` refuses any later month), and not a card
+    installment whose auto-post is ``on`` (it records itself on its day). It is
+    the only place that gate lives: the page derives its buttons from it."""
+    first, last = upcoming_window(start, end)
+    if first > last:
+        return {"items": [], "total": 0}
+    criteria = []
+    if filters.account_ids is not None:
+        criteria.append(touches_accounts(BudgetEntry, filters.account_ids))
+    if filters.transaction_types:
+        criteria.append(_type_criterion(filters.transaction_types))
+    if filters.entered_by_me:
+        criteria.append(BudgetEntry.user_id == user.id)
+    if filters.search:
+        criteria.append(BudgetEntry.name.ilike(f"%{filters.search}%"))
+    entries = _listed_entries(db, user, redactor, filters.tag_id, criteria)
+    if filters.category_names or filters.uncategorized:
+        # As the transaction list matches them: the category its creator owns
+        # and keeps active (``Redactor.category_name``), ORed with having none
+        # on an entry that is not a transfer.
+        names = filters.category_names or frozenset()
+        entries = [e for e in entries if redactor.category_name(e) in names
+                   or (filters.uncategorized and e.transfer_to_account_id is None
+                       and redactor.category_name(e) is None)]
+    if not entries:
+        return {"items": [], "total": 0}
+
+    access = redactor.access
+    access.load(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id))
+    infos = installment_infos(db, user, redactor=redactor)
+    unrecorded = fc.unrecorded_occurrences(db, entries, through=last, pending_records=True)
+
+    def account_name(account_id: Optional[int]) -> Optional[str]:
+        account = access.account(account_id) if account_id is not None else None
+        return account.name if account is not None and redactor.can_view(account.id) else None
+
+    items = []
+    for entry in entries:
+        days = [occ.date() for occ in unrecorded.get(entry.id, []) if occ.date() >= first]
+        if not days:
+            continue
+        account = access.account(entry.account_id)
+        info = infos.get(entry.id)
+        capped = is_capped(entry)
+        can_mark_paid = bool(access.permissions(entry)["can_post"])
+        first_day = first_occurrence(entry).date() if capped else None
+        auto_post = info.state if info is not None else None
+        shared = {
+            "view": redactor.view(entry),
+            "entry_id": entry.id,
+            "name": entry.name,
+            "entry_type": entry.entry_type.value,
+            "is_transfer": entry.transfer_to_account_id is not None,
+            "kind": entry_kind(entry, account),
+            "amount": float(entry.amount),
+            "currency": entry.currency.value,
+            "account_name": account_name(entry.account_id),
+            "transfer_to_account_name": account_name(entry.transfer_to_account_id),
+            "capped": capped,
+            "can_mark_paid": can_mark_paid,
+            "auto_post": auto_post,
+            "block_reason": info.block_reason if info is not None else None,
+            "can_review": bool(info is not None and info.can_edit
+                               and auto_post_block(entry, account) is None),
+        }
+        for day in days:
+            items.append({
+                **shared,
+                "occurrence_date": day,
+                "recordable": (can_mark_paid and (not capped or day == first_day)
+                               and auto_post != "on"),
+            })
+    items.sort(key=lambda row: (row["occurrence_date"], row["name"], row["entry_id"]))
+    return {"items": items[:limit], "total": len(items)}
 
 
 def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> None:

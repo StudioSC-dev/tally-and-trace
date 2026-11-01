@@ -2023,13 +2023,18 @@ def capped_distinct_days(entry, start: datetime, end: datetime,
     return days if cap is None else days[:max(cap, 0)]
 
 
-def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, List[datetime]]:
+def unrecorded_occurrences(db: Session, entries, through: date, *,
+                           pending_records: bool = False) -> Dict[int, List[datetime]]:
     """``{entry id: [occurrence]}``: each entry's occurrences from its
     ``next_occurrence`` through the day ``through`` (inclusive) that no posted
     linked row stands for, each calendar day once and capped after merging
     (``capped_distinct_days``). Each
     posted row stands for one occurrence on its day
-    (``occurrence_links``); a pending one records nothing yet. The walk is
+    (``occurrence_links``); a pending one records nothing yet. With
+    ``pending_records`` a pending (or planned) linked row stands for one
+    occurrence on its day too, as ``_linked_occurrence_days`` counts them for
+    the projection: a list of occurrences not yet recorded at all, where that
+    row is listed itself. The walk is
     complete through ``through``, not capped by the projection's step guard:
     one step per day from ``next_occurrence`` (``posting.schedule_walk``'s
     bound), so a long-stale entry counts every missed occurrence."""
@@ -2037,7 +2042,7 @@ def unrecorded_occurrences(db: Session, entries, through: date) -> Dict[int, Lis
     posted = Counter((entry_id, _naive(when).date())
                      for entry_id, when, _, is_posted in _linked_rows(
                          db, [e.id for e in entries], occurrence_match=True)
-                     if is_posted)
+                     if is_posted or pending_records)
     end = datetime.combine(through + timedelta(days=1), datetime.min.time())
     out: Dict[int, List[datetime]] = {}
     for entry in entries:

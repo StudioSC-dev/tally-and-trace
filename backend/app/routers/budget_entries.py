@@ -3,12 +3,14 @@ from calendar import monthrange
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Optional
+from typing import Annotated, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from app.core import locking
+from app.core.config import settings
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.time import manila_midnight, manila_today, utc_now
@@ -32,10 +34,10 @@ from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.allocation import Allocation
-from app.models.transaction import RecurrenceFrequency, Transaction
+from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
 from app.core.redaction import (
-    full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
+    Redactor, full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
 )
 from app.schemas.budget_entry import (
     BudgetEntryCreate,
@@ -51,10 +53,12 @@ from app.schemas.budget_entry import (
     MaterializeDueResult,
     PostDueInstallmentsRequest,
     PostDueInstallmentsResult,
+    UpcomingOccurrences,
     ZERO_REMAINING_MESSAGE,
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services import missed as missed_svc
 from app.services import posting
 from app.services.forecast import (
     _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences,
@@ -455,6 +459,68 @@ def list_budget_entries(
     _attach_occurrence_counts(db, entries)
     return {"items": serialize_entries(db, current_user, entries), "total": total,
             "has_more": (offset + len(entries)) < total}
+
+
+def _wall_day(value: Optional[datetime]) -> Optional[date]:
+    """A range bound's calendar day: wall time is stored as UTC, so an aware
+    value is read in UTC (``2026-10-30T00:00:00Z`` is Oct 30)."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc)
+    return value.date()
+
+
+# Declared before ``/{entry_id}``, which would otherwise take the path.
+@router.get("/upcoming-occurrences", response_model=UpcomingOccurrences)
+def list_upcoming_occurrences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    account_ids: Optional[List[int]] = Query(None, description="Entries touching these accounts"),
+    category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
+        None, max_length=50, description="Entries in a category of the creator's with this name"),
+    uncategorized: bool = Query(
+        False, description="Also match entries with no category that are not transfers; "
+                           "ORed with category_names"),
+    entered_by: Optional[Literal["me"]] = Query(
+        None, description="'me' keeps only the caller's own entries"),
+    transaction_types: Optional[List[str]] = Query(
+        None, description="debit (expenses), credit (income) or transfer"),
+    start_date: Optional[datetime] = Query(
+        None, description="First occurrence day; Manila's tomorrow at the earliest"),
+    end_date: Optional[datetime] = Query(
+        None, description="Last occurrence day; two years after Manila's today at the latest"),
+    search: Optional[str] = Query(None, description="Search by entry name"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """The occurrences after Manila's today of the recurring entries the caller
+    sees in full or shared_full that no row stands for yet, posted or pending
+    (services/missed.py ``upcoming_occurrences``). The filters are
+    ``GET /transactions``' own, read for entries, so the Transactions page
+    sends the same parameters to both."""
+    types = None
+    if transaction_types:
+        try:
+            types = frozenset(TransactionType(item.lower()) for item in transaction_types)
+        except ValueError as exc:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid transaction type provided: {exc}") from exc
+    seen = viewable_account_ids(db, current_user, roles=VIEW_ROLES)
+    filters = missed_svc.UpcomingFilters(
+        # Only accounts the caller can view: any other id matches nothing.
+        account_ids=frozenset(i for i in account_ids if i in seen) if account_ids else None,
+        transaction_types=types,
+        category_names=frozenset(category_names) if category_names else None,
+        uncategorized=uncategorized,
+        entered_by_me=entered_by == "me",
+        search=search or None,
+        tag_id=filter_tag_id(db, current_user, tag),
+    )
+    result = missed_svc.upcoming_occurrences(
+        db, current_user, redactor=Redactor(db, current_user), start=_wall_day(start_date),
+        end=_wall_day(end_date), filters=filters, limit=limit)
+    return {**result, "auto_post_scheduled": settings.JOB_TOKEN is not None}
 
 
 @router.get("/{entry_id}", response_model=BudgetEntryOut)

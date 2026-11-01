@@ -111,3 +111,19 @@ def test_capped_walk_without_clamped_days_still_stops_at_its_cap():
     done = _entry(F.MONTHLY, datetime(2027, 1, 31), end_mode="after_occurrences",
                   max_occurrences=0)
     assert schedule_walk(done, date(2027, 12, 31)) == []
+
+
+def test_unrecorded_occurrences_count_pending_rows_only_when_asked(monkeypatch):
+    """A posted linked row stands for its day's occurrence either way; a pending
+    one only with ``pending_records`` (STU-465), each row for one occurrence."""
+    e = _entry(F.MONTHLY, datetime(2026, 11, 5))
+    e.id = 7
+    rows = [(7, datetime(2026, 11, 5), 1, True), (7, datetime(2026, 12, 5), 2, False),
+            (7, datetime(2027, 1, 5), 3, False), (7, datetime(2027, 1, 5), 4, False)]
+    monkeypatch.setattr(fc, "_linked_rows", lambda *a, **k: rows)
+    through = date(2027, 2, 5)
+
+    assert [o.date() for o in fc.unrecorded_occurrences(None, [e], through)[7]] == [
+        date(2026, 12, 5), date(2027, 1, 5), date(2027, 2, 5)]
+    assert [o.date() for o in fc.unrecorded_occurrences(
+        None, [e], through, pending_records=True)[7]] == [date(2027, 2, 5)]
