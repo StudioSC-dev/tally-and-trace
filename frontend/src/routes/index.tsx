@@ -11,13 +11,14 @@ import type { EstimateLabels } from '../utils/fx'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
 import { useToday } from '../hooks/useToday'
+import { useManilaDay } from '../hooks/useManilaDay'
 import { FxNotice } from '../components/FxNotice'
 import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
-import { payableActions, payableTarget, queryPhase } from '@tally-trace/shared'
+import { payableActions, payableTarget, periodWindow, queryPhase } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
 import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable } from '@tally-trace/shared'
@@ -138,17 +139,8 @@ export function Dashboard() {
   // Every payable, not just the first MAX_PAYABLES_SHOWN.
   const [showAllPayables, setShowAllPayables] = useState(false)
 
-  const dateRange = useMemo(() => {
-    const now = new Date()
-    const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    startDate.setHours(0, 0, 0, 0)
-    switch (selectedPeriod) {
-      case 'week': startDate.setDate(now.getDate() - 6); break
-      case 'month': startDate.setMonth(now.getMonth(), 1); break
-      case 'year': startDate.setMonth(0, 1); break
-    }
-    return { start_date: startDate.toISOString(), end_date: now.toISOString() }
-  }, [selectedPeriod])
+  const manilaDay = useManilaDay()
+  const dateRange = useMemo(() => periodWindow(selectedPeriod, manilaDay), [selectedPeriod, manilaDay])
 
   const snapshotQuery = useGetDashboardSnapshotQuery(tagParam, { skip: !isAuthenticated })
   const { data: snapshot, error: snapshotError } = snapshotQuery
