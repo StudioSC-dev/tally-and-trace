@@ -1529,6 +1529,61 @@ export interface RecurringMissed {
 }
 
 /**
+ * One future occurrence of a recurring entry that is not recorded yet, from
+ * `GET /budget-entries/upcoming-occurrences`. Face amount and currency, no FX.
+ * Limited entries are never listed.
+ */
+export interface UpcomingOccurrence {
+  view: 'full' | 'shared_full'
+  entry_id: number
+  name: string
+  /** `YYYY-MM-DD`. */
+  occurrence_date: string
+  entry_type: BudgetEntryType
+  is_transfer: boolean
+  /** The entry's derived kind (a card kind, `cash`); null for income and transfers. */
+  kind: RecurringKind | null
+  amount: number
+  currency: string
+  account_name: string | null
+  transfer_to_account_name: string | null
+  capped: boolean
+  can_mark_paid: boolean
+  /**
+   * The server's whole decision on whether this occurrence can be recorded now: the
+   * caller can post it, a capped entry's month is its first one, and a card
+   * installment's auto-post is not on.
+   */
+  recordable: boolean
+  auto_post: InstallmentAutoPostState | null
+  block_reason: InstallmentBlockReason | null
+  can_review: boolean
+}
+
+/** `GET /budget-entries/upcoming-occurrences`: sorted by `occurrence_date`, `name`, `entry_id`. */
+export interface UpcomingOccurrences {
+  items: UpcomingOccurrence[]
+  /** Every occurrence in range, before `limit`. */
+  total: number
+  auto_post_scheduled: boolean
+}
+
+/** The query of `GET /budget-entries/upcoming-occurrences`; filter names match the transaction list. */
+export interface UpcomingOccurrenceQuery {
+  start_date?: string
+  end_date?: string
+  account_ids?: number[]
+  transaction_types?: string[]
+  category_names?: string[]
+  uncategorized?: boolean
+  entered_by?: 'me'
+  tag?: number
+  search?: string
+  /** 1 to 500; the server default is 100. */
+  limit?: number
+}
+
+/**
  * One card's owed closed statement in `DashboardSnapshot.card_statements_due`: an
  * active credit card the caller owns or administers, whose latest closed statement
  * still has money owed and whose oldest owed statement is due within 30 days or

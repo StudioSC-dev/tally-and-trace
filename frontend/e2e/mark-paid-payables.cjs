@@ -7,11 +7,12 @@
 //
 // Scenarios:
 //   (a) seven payables show six rows and the dashboard has no Mark paid button;
-//       "+1 more" expands to rent; on Transactions, Mark paid on rent with
-//       yesterday's date removes its row and dates the transaction yesterday
+//       "+1 more" expands to rent; on Transactions, Mark paid on rent's future
+//       occurrence (in Upcoming) with yesterday's date removes its row and dates the
+//       transaction yesterday
 //   (b) a stale rent: the dialog shows the /occurrences response's due count and
 //       dates; "Post all N due" posts N rows on their occurrences; the current
-//       rent payable stays and Mark paid on it completes
+//       rent occurrence (future, so in Upcoming) stays and Mark paid on it completes
 //   (c) a stale capped cash installment: overdue rows, only the oldest month is
 //       offered, and no "Post all" button
 //   (d) a loan transfer payable posts as a scheduled loan payment split into
@@ -24,7 +25,9 @@
 //       then asks for the PHP charge; a failed lookup shows an error and
 //       Mark paid stays disabled
 //
-// (b) to (g) open each dialog from the section's row for the entry, by name.
+// (b) to (g) open each dialog from the section's row for the entry, by name, except
+// a future occurrence, which is in Upcoming (STU-465): (a) and the second half of (b)
+// record it from there.
 // The section shows 3 rows a page: a row can be on any page, so every count and
 // absence check reads all pages and every click first goes to the row's page
 // (./_due_pages.cjs).
@@ -157,8 +160,11 @@ const dueRows = (page, name, kind) =>
   page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"]):not([data-kind="statement"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
 const gone = (locator) => locator.first().waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
+/** An entry's occurrence row in Transactions Upcoming, on `day`. */
+const upcomingRow = (page, entryId, day) =>
+  page.locator(`[data-testid="upcoming-occurrence"][data-source="budget_entry:${entryId}"][data-day="${day}"]`)
 
-/** Clicks a section row's button (Mark paid by default); returns the `include` the dialog asked /occurrences for. */
+/** Clicks a section or Upcoming row's button (Mark paid by default); returns the `include` the dialog asked /occurrences for. */
 async function openMarkPaid(page, row, entryId, button = 'due-mark-paid') {
   const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${entryId}/occurrences`))
   await row.locator(`[data-testid="${button}"]`).click()
@@ -204,8 +210,9 @@ async function expandAndMarkPaid(browser) {
   check('(a) the dashboard has no Mark paid button', await page.locator('[data-testid="payable-mark-paid-button"]').count(), 0)
 
   await openTransactions(page)
-  check('(a) the section lists rent once', (await rowsOf(page, 'Rent')).length, 1)
-  await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent'))).first(), rent.id)
+  // Rent's occurrence is in the future, so it is in Upcoming, not in the section.
+  check('(a) Upcoming lists rent once, and the section does not', [await upcomingRow(page, rent.id, rentDay).count(), (await rowsOf(page, 'Rent')).length], [1, 0])
+  await openMarkPaid(page, upcomingRow(page, rent.id, rentDay), rent.id, 'upcoming-mark-paid')
   check('(a) a planned cash expense is dated by "Paid on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Paid on')
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   check('(a) the dialog opens on the clicked occurrence', await select.inputValue(), rentDay)
@@ -217,8 +224,8 @@ async function expandAndMarkPaid(browser) {
   const res = await done
   check('(a) Mark paid is 201 created', [res.status(), res.headers()['x-occurrence-outcome']], [201, 'created'])
   await dialog(page).waitFor({ state: 'detached' })
-  await gone(dueRows(page, 'Rent'))
-  check('(a) the rent row is gone from every page of the section', (await rowsOf(page, 'Rent')).length, 0)
+  await gone(upcomingRow(page, rent.id, rentDay))
+  check('(a) the rent row is gone from Upcoming', await upcomingRow(page, rent.id, rentDay).count(), 0)
   const txns = await entryTransactions(u, rent.id)
   check('(a) one posted rent transaction dated yesterday', txns.map((t) => [t.is_posted, t.transaction_date.slice(0, 10)]), [[true, yesterday]])
   check('(a) rent moved on a month', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(rentDay, 1))
@@ -261,9 +268,11 @@ async function staleRent(browser) {
   check('(b) the schedule is on the current occurrence', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), current)
 
   await settle(page)
-  const currentRow = dueRows(page, 'Rent').filter({ hasText: fmt(current) })
-  check('(b) the current rent row remains', (await rowsOf(page, 'Rent', undefined, fmt(current))).length, 1)
-  await openMarkPaid(page, (await showRow(page, currentRow)).first(), rent.id)
+  // The current occurrence is in the future, so it is in Upcoming, not in the section.
+  const currentRow = upcomingRow(page, rent.id, current)
+  await currentRow.waitFor({ timeout: 15000 }).catch(() => {})
+  check('(b) the current rent row remains, in Upcoming', [await currentRow.count(), (await rowsOf(page, 'Rent', undefined, fmt(current))).length], [1, 0])
+  await openMarkPaid(page, currentRow, rent.id, 'upcoming-mark-paid')
   check('(b) the dialog opens on the current occurrence', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), current)
   check('(b) nothing earlier is skipped now', await dialog(page).locator('[data-testid="mark-paid-skipped"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${rent.id}/materialize`))
@@ -271,8 +280,8 @@ async function staleRent(browser) {
   const last = await done
   check('(b) Mark paid on the current rent is 201', [last.status(), last.headers()['x-occurrence-recorded']], [201, current])
   await dialog(page).waitFor({ state: 'detached' })
-  await gone(dueRows(page, 'Rent').filter({ hasText: fmt(current) }))
-  check('(b) the current rent row is gone from every page', (await rowsOf(page, 'Rent', undefined, fmt(current))).length, 0)
+  await gone(currentRow)
+  check('(b) the current rent row is gone from Upcoming', await currentRow.count(), 0)
   check('(b) rent moved past the current occurrence', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(current, 1, anchor))
   await ctx.close()
 }
@@ -322,7 +331,8 @@ async function loanPayment(browser) {
   const u = await makeUser('d')
   const bank = await checking(u, 50000)
   const today = manilaToday()
-  const due = addDays(today, 5)
+  // Due today, so the payment is in the section (a later one is in Upcoming).
+  const due = today
   const loan = await post(u.token, '/accounts/', {
     name: 'Car loan', account_type: 'loan', loan_kind: 'auto', currency: 'PHP',
     balance: -100000, loan_annual_rate: 12, loan_term_months: 24, loan_payment_amount: 5000, loan_first_payment_date: due,
@@ -399,7 +409,8 @@ async function missingSourceAccount(browser) {
   const u = await makeUser('g')
   const bank = await checking(u, 100000)
   const today = manilaToday()
-  const sub = await expense(u, { name: 'Streaming', amount: 80, currency: 'USD', next_occurrence: wire(addDays(today, 3)), account_id: bank.id })
+  // Due today, so it is in the section (a later occurrence is in Upcoming).
+  const sub = await expense(u, { name: 'Streaming', amount: 80, currency: 'USD', next_occurrence: wire(today), account_id: bank.id })
   const accountPath = `/api/v1/accounts/${bank.id}`
 
   const { ctx, page } = await newPage(browser)
@@ -450,7 +461,7 @@ async function missingSourceAccount(browser) {
   // A failed lookup: an error, and nothing to submit.
   const second = await newPage(browser)
   const p2 = second.page
-  const sub2 = await expense(u, { name: 'Cloud', amount: 20, currency: 'USD', next_occurrence: wire(addDays(today, 4)), account_id: bank.id })
+  const sub2 = await expense(u, { name: 'Cloud', amount: 20, currency: 'USD', next_occurrence: wire(today), account_id: bank.id })
   await uiLogin(p2, u)
   await p2.route((url) => url.pathname.endsWith('/api/v1/accounts/'), async (route) => {
     const res2 = await route.fetch()

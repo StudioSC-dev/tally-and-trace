@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect } from 'vitest'
 import type { LimitedTransaction, Transaction } from '../types/api'
 import {
-  addDays, dayEndWire, dayStartWire, listBounds, localToday, pageItems, pageWindow, relativeEntryDay,
-  statusFromDate, transactionStatus, wallDay,
+  UPCOMING_LOOKAHEAD_DAYS, addDays, dayEndWire, dayStartWire, listBounds, localToday, pageItems, pageWindow,
+  relativeEntryDay, statusFromDate, transactionStatus, wallDay,
 } from './transactionList'
 
 // Transaction dates are wall time stored as UTC components. The suite runs in
@@ -172,6 +172,42 @@ describe('listBounds', () => {
     expect(listBounds('', '2026-10-31', today)).toEqual({
       main: { end: '2026-10-16T23:59:59.999999Z' },
       upcoming: { start: '2026-10-17T00:00:00Z', end: '2026-10-31T23:59:59.999999Z' },
+    })
+  })
+
+  describe('upcomingThrough', () => {
+    it('is 30 days', () => {
+      expect(UPCOMING_LOOKAHEAD_DAYS).toBe(30)
+    })
+
+    it('ends Upcoming there when later than the filter end', () => {
+      expect(listBounds('2026-10-01', '2026-10-31', today, '2026-11-15')).toEqual({
+        main: { start: '2026-10-01T00:00:00Z', end: '2026-10-16T23:59:59.999999Z' },
+        upcoming: { start: '2026-10-17T00:00:00Z', end: '2026-11-15T23:59:59.999999Z' },
+      })
+    })
+
+    it('changes nothing when equal to the filter end', () => {
+      expect(listBounds('2026-10-01', '2026-10-31', today, '2026-10-31')).toEqual(
+        listBounds('2026-10-01', '2026-10-31', today),
+      )
+    })
+
+    it('changes nothing when earlier than the filter end', () => {
+      expect(listBounds('2026-10-01', '2026-10-31', today, '2026-10-20')).toEqual(
+        listBounds('2026-10-01', '2026-10-31', today),
+      )
+    })
+
+    it('keeps an open end open', () => {
+      expect(listBounds('2026-10-01', '', today, '2026-11-15')).toEqual(listBounds('2026-10-01', '', today))
+    })
+
+    it('opens Upcoming when the month ends today', () => {
+      expect(listBounds('2026-10-01', '2026-10-16', today, '2026-11-15').upcoming).toEqual({
+        start: '2026-10-17T00:00:00Z',
+        end: '2026-11-15T23:59:59.999999Z',
+      })
     })
   })
 })

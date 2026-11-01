@@ -122,6 +122,8 @@ import type {
   MaterializeOutcome,
   MaterializeDueResult,
   HeaderReader,
+  UpcomingOccurrenceQuery,
+  UpcomingOccurrences,
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
@@ -404,6 +406,25 @@ export const accountingApi = createApi({
     // The occurrences Mark paid can record; `include` (YYYY-MM-DD) is always listed (422 when off the schedule).
     getEntryOccurrences: builder.query<EntryOccurrences, { id: number; include?: string }>({
       query: ({ id, include }) => ({ url: `budget-entries/${id}/occurrences`, params: include ? { include } : {} }),
+      providesTags: ['BudgetEntry', 'Transaction'],
+    }),
+    // Future occurrences of recurring entries with no row yet, for Transactions Upcoming.
+    // The filters are the transaction list's own names.
+    getUpcomingOccurrences: builder.query<UpcomingOccurrences, UpcomingOccurrenceQuery>({
+      query: (params) => {
+        const searchParams = new URLSearchParams()
+        params.account_ids?.forEach((id) => searchParams.append('account_ids', String(id)))
+        params.transaction_types?.forEach((v) => searchParams.append('transaction_types', v))
+        params.category_names?.forEach((name) => searchParams.append('category_names', name))
+        if (params.uncategorized) searchParams.set('uncategorized', 'true')
+        if (params.entered_by) searchParams.set('entered_by', params.entered_by)
+        if (typeof params.tag === 'number') searchParams.set('tag', String(params.tag))
+        if (params.search) searchParams.set('search', params.search)
+        if (params.start_date) searchParams.set('start_date', params.start_date)
+        if (params.end_date) searchParams.set('end_date', params.end_date)
+        if (typeof params.limit === 'number') searchParams.set('limit', String(params.limit))
+        return { url: 'budget-entries/upcoming-occurrences', params: searchParams }
+      },
       providesTags: ['BudgetEntry', 'Transaction'],
     }),
 
@@ -709,6 +730,7 @@ export const {
   useMaterializeBudgetEntryMutation,
   useMaterializeDueBudgetEntryMutation,
   useGetEntryOccurrencesQuery,
+  useLazyGetUpcomingOccurrencesQuery,
   useGetInstallmentReviewQuery,
   useReviewInstallmentMutation,
   useSetInstallmentAutoPostMutation,

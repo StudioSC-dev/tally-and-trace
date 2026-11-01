@@ -89,12 +89,23 @@ export function transactionStatus(row: Transaction, today: string): TransactionS
   return statusFromDate(transactionDate(row), row.is_posted, today)
 }
 
+/** How far past today the current month's Upcoming looks ahead: the same 30 days as Due's window and the dashboard's. */
+export const UPCOMING_LOOKAHEAD_DAYS = 30
+
 /**
  * Splits a date filter at today into the two list requests: the main list (on or
  * before today) and Upcoming (after today). Inputs are `YYYY-MM-DD` strings, or ''
  * for an open end. The min / max is done on the day strings, then converted once.
+ *
+ * `upcomingThrough` (a `YYYY-MM-DD`), when later than the filter end, is where Upcoming
+ * ends instead. An earlier or equal one changes nothing, and an open end stays open.
  */
-export function listBounds(filterStart: string, filterEnd: string, today: string): ListBounds {
+export function listBounds(
+  filterStart: string,
+  filterEnd: string,
+  today: string,
+  upcomingThrough?: string,
+): ListBounds {
   const tomorrow = addDays(today, 1)
 
   let main: ListRange | null = null
@@ -103,10 +114,13 @@ export function listBounds(filterStart: string, filterEnd: string, today: string
     main = filterStart === '' ? { end } : { start: dayStartWire(filterStart), end }
   }
 
+  const upcomingEnd =
+    filterEnd !== '' && upcomingThrough !== undefined && upcomingThrough > filterEnd ? upcomingThrough : filterEnd
+
   let upcoming: ListRange | null = null
-  if (filterEnd === '' || filterEnd >= tomorrow) {
+  if (upcomingEnd === '' || upcomingEnd >= tomorrow) {
     const start = dayStartWire(filterStart !== '' && filterStart > tomorrow ? filterStart : tomorrow)
-    upcoming = filterEnd === '' ? { start } : { start, end: dayEndWire(filterEnd) }
+    upcoming = upcomingEnd === '' ? { start } : { start, end: dayEndWire(upcomingEnd) }
   }
 
   return { main, upcoming }

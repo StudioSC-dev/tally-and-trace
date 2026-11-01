@@ -239,16 +239,16 @@ describe('LIMITED_ROWS', () => {
 describe('dueRecurringRows: sources and merge', () => {
   it.each(MODES)('lists a card entry on a card without a statement cycle once, as a card row (%s)', (mode) => {
     const s = snap({
-      payables: [payable({ name: 'Netflix', source_id: 5, kind: 'subscription', due_date: '2026-10-22', occurrence_date: '2026-10-22', account_name: 'Visa' })],
-      card_charges: [card({ statement_cycle: false, charges: [charge({ name: 'Netflix', source_id: 5, date: '2026-10-22', occurrence_date: '2026-10-22' })] })],
+      payables: [payable({ name: 'Netflix', source_id: 5, kind: 'subscription', due_date: '2026-10-20', occurrence_date: '2026-10-20', account_name: 'Visa' })],
+      card_charges: [card({ statement_cycle: false, charges: [charge({ name: 'Netflix', source_id: 5, date: '2026-10-20', occurrence_date: '2026-10-20' })] })],
     })
     const rows = entries(dueRecurringRows(s, TODAY, mode))
     expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ key: '5:2026-10-22', view: 'full', recurring_kind: 'subscription', actions: ['charged', 'posted'] })
+    expect(rows[0]).toMatchObject({ key: '5:2026-10-20', view: 'full', recurring_kind: 'subscription', actions: ['charged', 'posted'] })
   })
 
   it('lists a plain transfer from upcoming with Mark paid', () => {
-    const s = snap({ upcoming_this_month: [upcoming({ name: 'Save', source_id: 7, entry_type: 'transfer', due_date: '2026-10-24', occurrence_date: '2026-10-24' })] })
+    const s = snap({ upcoming_this_month: [upcoming({ name: 'Save', source_id: 7, entry_type: 'transfer', due_date: '2026-10-20', occurrence_date: '2026-10-20' })] })
     const rows = entries(dueRecurringRows(s, TODAY))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ name: 'Save', entry_type: 'transfer', view: null, actions: ['mark_paid'] })
@@ -256,8 +256,8 @@ describe('dueRecurringRows: sources and merge', () => {
 
   it('lists a loan-payment transfer in both payables and upcoming once', () => {
     const s = snap({
-      payables: [payable({ name: 'Loan', source_id: 8, kind: null, due_date: '2026-10-25', occurrence_date: '2026-10-25' })],
-      upcoming_this_month: [upcoming({ name: 'Loan', source_id: 8, entry_type: 'transfer', due_date: '2026-10-25', occurrence_date: '2026-10-25' })],
+      payables: [payable({ name: 'Loan', source_id: 8, kind: null, due_date: '2026-10-20', occurrence_date: '2026-10-20' })],
+      upcoming_this_month: [upcoming({ name: 'Loan', source_id: 8, entry_type: 'transfer', due_date: '2026-10-20', occurrence_date: '2026-10-20' })],
     })
     const rows = entries(dueRecurringRows(s, TODAY))
     expect(rows).toHaveLength(1)
@@ -268,7 +268,7 @@ describe('dueRecurringRows: sources and merge', () => {
   it('lists income with Mark received and leaves upcoming expenses to the payables', () => {
     const s = snap({
       upcoming_this_month: [
-        upcoming({ name: 'Salary', source_id: 3, entry_type: 'income', due_date: '2026-10-25', occurrence_date: '2026-10-25' }),
+        upcoming({ name: 'Salary', source_id: 3, entry_type: 'income', due_date: '2026-10-20', occurrence_date: '2026-10-20' }),
         upcoming({ name: 'Rent', source_id: 4, entry_type: 'expense', kind: 'cash' }),
         upcoming({ name: 'Pending', source: 'transaction', source_id: 40, entry_type: 'income' }),
       ],
@@ -355,14 +355,32 @@ describe('dueRecurringRows: missed coverage', () => {
     expect(entries(dueRecurringRows(s, TODAY))).toEqual([])
   })
 
-  it("keeps today's occurrence and future ones", () => {
+  it("keeps today's occurrence and drops future ones", () => {
     const s = withMissed({
       payables: [
         payable({ name: 'Rent', source_id: 2, occurrence_date: TODAY }),
         payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-11-05', due_date: '2026-11-05' }),
       ],
     })
-    expect(entries(dueRecurringRows(s, TODAY)).map((r) => r.occurrenceDate)).toEqual([TODAY, '2026-11-05'])
+    expect(entries(dueRecurringRows(s, TODAY)).map((r) => r.occurrenceDate)).toEqual([TODAY])
+  })
+
+  it('drops a future occurrence of every source: payable, card charge, upcoming income and transfer', () => {
+    const s = snap({
+      payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-21', due_date: '2026-10-21' })],
+      card_charges: [card({ charges: [charge({ name: 'Netflix', source_id: 5, date: '2026-10-22', occurrence_date: '2026-10-22' })] })],
+      upcoming_this_month: [
+        upcoming({ name: 'Salary', source_id: 3, entry_type: 'income', due_date: '2026-10-25', occurrence_date: '2026-10-25' }),
+        upcoming({ name: 'Save', source_id: 7, entry_type: 'transfer', due_date: '2026-10-24', occurrence_date: '2026-10-24' }),
+      ],
+    })
+    expect(entries(dueRecurringRows(s, TODAY))).toEqual([])
+  })
+
+  it('splits on the day passed in: the same row is due on its own day and gone the day before', () => {
+    const s = snap({ payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-21', due_date: '2026-10-21' })] })
+    expect(entries(dueRecurringRows(s, '2026-10-20'))).toEqual([])
+    expect(entries(dueRecurringRows(s, '2026-10-21')).map((r) => r.occurrenceDate)).toEqual(['2026-10-21'])
   })
 
   it("keeps today's occurrence even when flagged overdue", () => {
@@ -434,7 +452,8 @@ describe('dueRecurringRows: missed rows and the pending split', () => {
         payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true }),
       ],
     })
-    expect(dueRecurringRows(s, TODAY).map((r) => r.name)).toEqual(['Old Rent', 'Late', 'Today', 'Later'])
+    // 'Later' is in Upcoming, not here.
+    expect(dueRecurringRows(s, TODAY).map((r) => r.name)).toEqual(['Old Rent', 'Late', 'Today'])
   })
 })
 
@@ -461,6 +480,19 @@ describe('dueRecurringRows: Limited rows', () => {
   it('defaults to LIMITED_ROWS', () => {
     expect(dueRecurringRows(s, TODAY)).toEqual(dueRecurringRows(s, TODAY, LIMITED_ROWS))
   })
+
+  it("keeps a future-dated Limited event under 'text', on its date, while a future full row is dropped", () => {
+    // The exception: a viewer's Limited text rows keep their dates; only full and shared_full rows stop at today.
+    const future = snap({
+      payables: [
+        { ...limitedEvent('e4'), date: '2026-10-25' },
+        payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-25', due_date: '2026-10-25' }),
+      ],
+    })
+    const rows = dueRecurringRows(future, TODAY, 'text')
+    expect(limitedOf(rows).map((r) => [r.publicId, r.date])).toEqual([['e4', '2026-10-25']])
+    expect(entries(rows)).toEqual([])
+  })
 })
 
 describe('Group B: duePendingRows', () => {
@@ -475,19 +507,19 @@ describe('Group B: duePendingRows', () => {
     missed: [missed({ entry_id: 2, name: 'Rent', pending_transaction_ids: [61, 60] })],
   })
 
-  it.each(MODES)('lists yesterday, a recurring card charge and linked rows; drops future, posted and Limited rows (%s)', (mode) => {
+  it.each(MODES)('lists yesterday, a recurring card charge and linked rows; drops posted and Limited rows (%s)', (mode) => {
     // The Limited mode never adds a pending row.
     void mode
     const window = [
       txn({ id: 40, transaction_date: '2026-10-19T00:00:00Z' }),
       txn({ id: 41, transaction_date: '2026-10-25T00:00:00Z' }),
       txn({ id: 42, transaction_date: '2026-10-18T00:00:00Z', is_posted: true }),
-      txn({ id: 50, transaction_date: '2026-10-25T00:00:00Z' }),
+      txn({ id: 50, transaction_date: TODAY + 'T00:00:00Z' }),
       txn({ id: 51, transaction_date: '2026-10-25T00:00:00Z' }),
       txn({ id: 52, transaction_date: TODAY + 'T00:00:00Z' }),
     ]
     const linked = [
-      txn({ id: 60, transaction_date: '2026-12-04T00:00:00Z' }),
+      txn({ id: 60, transaction_date: TODAY + 'T00:00:00Z' }),
       txn({ id: 61, transaction_date: '2026-09-20T00:00:00Z', is_posted: true }),
     ]
     const rows = duePendingRows([...window, limitedTxn(70, '2026-10-10T00:00:00Z')], linked, s, TODAY)
@@ -496,6 +528,16 @@ describe('Group B: duePendingRows', () => {
       [50, false, 'posted'],
       [60, false, 'mark_posted'],
     ])
+  })
+
+  it('drops a row dated after today even when it is a recurring card charge or a missed row links it', () => {
+    const window = [
+      txn({ id: 41, transaction_date: '2026-10-25T00:00:00Z' }),
+      txn({ id: 50, transaction_date: '2026-10-25T00:00:00Z' }),
+    ]
+    const linked = [txn({ id: 60, transaction_date: '2026-12-04T00:00:00Z' })]
+    expect(duePendingRows(window, linked, s, TODAY)).toEqual([])
+    expect(duePendingRows(window, linked, s, '2026-12-04').map((r) => r.transaction.id)).toEqual([41, 50, 60])
   })
 
   it('lists a row in both queries once', () => {
@@ -511,7 +553,7 @@ describe('Group B: duePendingRows', () => {
 
   it('offers no action without can_post, and keeps a shared_full row', () => {
     const rows = duePendingRows(
-      [txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z', permissions: noPost }), sharedTxn({ id: 50, transaction_date: '2026-10-25T00:00:00Z' })],
+      [txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z', permissions: noPost }), sharedTxn({ id: 50, transaction_date: TODAY + 'T00:00:00Z' })],
       [],
       s,
       TODAY,
@@ -545,23 +587,22 @@ describe('orderDueRows', () => {
   const names = (rows: ReturnType<typeof orderDueRows>) => rows.map((r) => (r.kind === 'pending' ? `p${r.transaction.id}` : r.name))
 
   it('puts an overdue pending row before a non-overdue recurring row', () => {
-    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Rent', source_id: 1, occurrence_date: '2026-10-25', due_date: '2026-10-25' })] }), TODAY)
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Rent', source_id: 1, occurrence_date: TODAY, due_date: TODAY })] }), TODAY)
     expect(names(orderDueRows(rec, pend(40, '2026-10-19')))).toEqual(['p40', 'Rent'])
   })
 
-  it('puts missed and overdue rows ahead of due-today and future rows', () => {
+  it('puts missed and overdue rows ahead of due-today rows', () => {
     const rec = dueRecurringRows(
       snap({
         missed: [missed({ entry_id: 2, name: 'Old Rent', oldest_unlinked: '2026-09-01' })],
         payables: [
-          payable({ name: 'Later', source_id: 10, occurrence_date: '2026-10-25', due_date: '2026-10-25' }),
           payable({ name: 'Today', source_id: 11 }),
           payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true }),
         ],
       }),
       TODAY,
     )
-    expect(names(orderDueRows(rec, pend(40, '2026-10-19')))).toEqual(['Old Rent', 'Late', 'p40', 'Today', 'Later'])
+    expect(names(orderDueRows(rec, pend(40, '2026-10-19')))).toEqual(['Old Rent', 'Late', 'p40', 'Today'])
   })
 
   it('puts the oldest overdue row first across kinds', () => {
@@ -701,18 +742,10 @@ describe('orderDueRows with statements', () => {
     expect(names(orderDueRows(rec, pend(40, '2026-10-01'), statements))).toEqual(['s9', 'p40', 'Today'])
   })
 
-  it('sorts a non-overdue statement among the future rows by day', () => {
-    const rec = dueRecurringRows(
-      snap({
-        payables: [
-          payable({ name: 'Today', source_id: 11 }),
-          payable({ name: 'Later', source_id: 12, occurrence_date: '2026-10-28', due_date: '2026-10-28' }),
-        ],
-      }),
-      TODAY,
-    )
+  it('sorts a non-overdue statement after the rows due today, whatever its due day', () => {
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
     expect(names(orderDueRows(rec, [], stmts(statementDue({ account_id: 9, name: 'Visa', oldest_due: '2026-10-24' }))))).toEqual(
-      ['Today', 's9', 'Later'],
+      ['Today', 's9'],
     )
   })
 

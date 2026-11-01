@@ -436,7 +436,8 @@ async function twoStatements(browser) {
   const card = await makeCard(owner, 'Card H', { payer: bank, debits: [[1200, addDays(close, -30)], [2500, close]] })
   await post(owner.token, '/budget-entries/', {
     entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Water H', amount: 400,
-    account_id: bank.id, next_occurrence: wire(addDays(today, 3)),
+    // Due today: the section lists today and earlier, never a later day.
+    account_id: bank.id, next_occurrence: wire(today),
   })
   const detail = await detailOf(owner, card.id)
   const owed = detail.statements.filter((s) => s.owed > 0)
