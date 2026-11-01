@@ -1363,6 +1363,50 @@ export interface InstallmentReviewRow {
   name: string
   account_name: string
   missed_count: number
+  /** The binding a batch review must echo; null unless the review asks nothing (no month to record). */
+  clean_review: InstallmentCleanReview | null
+}
+
+/** The version and token of a clean installment review, sent back unchanged by the batch review. */
+export interface InstallmentCleanReview {
+  /** Aware UTC with a `+00:00` suffix; echoed as received, never reformatted. */
+  entry_version: string | null
+  review_token: string
+}
+
+/** One installment of a batch review. */
+export interface ReviewInstallmentsItem {
+  entry_id: number
+  entry_version: string | null
+  review_token: string
+}
+
+/** The body of the batch review: 1 to 50 distinct entries. */
+export interface ReviewInstallmentsInput {
+  items: ReviewInstallmentsItem[]
+}
+
+/** What happened to one entry of a batch review. */
+export type ReviewInstallmentsOutcome =
+  | 'reviewed'
+  | 'replayed'
+  | 'changed'
+  | 'needs_choices'
+  | 'blocked'
+  | 'not_found'
+  | 'failed'
+
+export interface ReviewInstallmentsEntryResult {
+  entry_id: number
+  outcome: ReviewInstallmentsOutcome
+  detail: string | null
+}
+
+/** The batch review's response: one result per item, in ascending entry id order. */
+export interface ReviewInstallmentsResult {
+  results: ReviewInstallmentsEntryResult[]
+  /** Count of `reviewed` and `replayed` results. */
+  reviewed: number
 }
 
 /** One entry of `DashboardSnapshot.installment_auto_post`. */

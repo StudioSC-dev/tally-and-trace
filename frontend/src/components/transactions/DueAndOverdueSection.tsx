@@ -1,8 +1,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
+  CAP_REASON,
   DUE_PAGE_SIZE,
+  atCap,
+  batchConfirmMessage,
+  batchSummary,
+  cleanIds,
   effectiveDuePage,
+  effectiveSelection,
   LIMITED_ROWS,
   RECURRING_ACTION_LABELS,
   PENDING_POST_LABELS,
@@ -19,12 +25,18 @@ import {
   postedResultText,
   postNowCount,
   postNowText,
+  reviewBatchItems,
+  reviewSelectedText,
   rowAmount,
+  selectAll,
+  selectAllState,
   shouldPostOnOpen,
   statementRowText,
+  toggleSelection,
   transactionDescription,
 } from '@tally-trace/shared'
 import type {
+  BatchFailure,
   DuePageState,
   DueEntryRow,
   DueLimitedRow,
@@ -35,12 +47,14 @@ import type {
   RecurringAction,
   Transaction,
 } from '@tally-trace/shared'
+import { useConfirm } from '../../hooks/useConfirm'
 import { useManilaDay } from '../../hooks/useManilaDay'
 import {
   accountingApi,
   useGetDashboardSnapshotQuery,
   usePostDueInstallmentsMutation,
   usePostDueInstallmentsOnOpenMutation,
+  useReviewInstallmentsMutation,
 } from '../../store/api'
 import type { AppDispatch, RootState } from '../../store'
 import { formatCurrency } from '../../utils/currency'
@@ -158,6 +172,13 @@ interface ReviewTarget {
   name: string
 }
 
+/** The last batch review's outcome: its line and one failure per entry that was not reviewed, kept for its Manila day. */
+interface BatchResultView {
+  day: string
+  text: string | null
+  failures: BatchFailure[]
+}
+
 interface RecordTarget {
   entryId: number
   name: string
@@ -179,6 +200,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   // The installment being reviewed, and whether the review notice is expanded.
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [noticeOpen, setNoticeOpen] = useState(false)
+  // Batch review: the ticked ids, whether a batch runs, and the last run's result (kept until the next run or the next day).
+  const askConfirm = useConfirm()
+  const [reviewBatch] = useReviewInstallmentsMutation()
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set())
+  const [batching, setBatching] = useState(false)
+  const [batchResult, setBatchResult] = useState<BatchResultView | null>(null)
   // Post now: its last run's count and error, kept until the next run.
   const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
   const [posted, setPosted] = useState<number | null>(null)
@@ -245,6 +272,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   )
   const statements = useMemo(() => (snapshot ? dueStatementRows(snapshot) : []), [snapshot])
   const reviewNotice = useMemo(() => (snapshot ? dueReviewNotice(snapshot) : null), [snapshot])
+  // Only ticked rows that are still clean in the current snapshot count, so a refetch drops a stale tick with no effect.
+  const effective = useMemo(() => effectiveSelection(selected, reviewNotice), [selected, reviewNotice])
+  const cleanCount = cleanIds(reviewNotice).length
+  const allState = selectAllState(selected, reviewNotice)
+  const capped = atCap(selected, reviewNotice)
+  const limitId = `${panelId}-limit`
   const todayLines = useMemo(() => (snapshot ? dueTodayLines(snapshot) : []), [snapshot])
   const postNow = snapshot ? postNowText(postNowCount(snapshot)) : null
   const openPostedText = openPosted === null ? null : postedOnOpenText(openPosted)
@@ -274,6 +307,33 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     } catch (caught) {
       setPostError(apiErrorMessage(caught) || 'Could not post the due installment months. Please try again.')
     }
+  }
+
+  const batchBusy = snapshotFetching || batching
+
+  const reviewSelected = () => {
+    if (!snapshot || reviewNotice === null) return
+    const items = reviewBatchItems(snapshot, effective)
+    if (items.length === 0) return
+    // Names are captured now, so a failure still names a row that has left the list.
+    const names = new Map(reviewNotice.entries.map((e) => [e.entryId, e.name] as const))
+    void askConfirm({
+      title: 'Turn on auto-post',
+      message: batchConfirmMessage(items.length),
+      confirmLabel: 'Turn on auto-post',
+      tone: 'default',
+      action: async () => {
+        setBatching(true)
+        try {
+          const result = await reviewBatch({ items }).unwrap()
+          setBatchResult({ day: today, ...batchSummary(result, names) })
+          setSelected(new Set())
+          onChanged()
+        } finally {
+          setBatching(false)
+        }
+      },
+    })
   }
 
   const review = (entryId: number, name: string) => setReviewTarget({ entryId, name })
@@ -509,29 +569,107 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
                 {reviewNotice.text}
               </button>
               {noticeOpen && (
-                <ul className="space-y-2" data-testid="due-review-notice-list">
-                  {reviewNotice.entries.map((entry) => (
-                    <li
-                      key={entry.entryId}
-                      className="flex items-center justify-between gap-3"
-                      data-testid="due-review-notice-entry"
-                      data-source={`budget_entry:${entry.entryId}`}
-                    >
-                      <span className="text-sm text-ink">
-                        {entry.name}
-                        <span className="text-xs text-muted">
-                          {` · ${entry.accountName}`}
-                          {entry.missedCount > 0 && ` · ${entry.missedCount} missed`}
-                        </span>
-                      </span>
+                <>
+                  {cleanCount > 0 && (
+                    <div className="flex flex-wrap items-center gap-3" data-testid="due-review-notice-header">
+                      <label className="flex items-center gap-2 text-sm text-ink">
+                        <input
+                          type="checkbox"
+                          ref={(el) => {
+                            if (el) el.indeterminate = allState === 'some'
+                          }}
+                          checked={allState === 'all'}
+                          disabled={batchBusy}
+                          onChange={() => setSelected(allState === 'all' ? new Set() : selectAll(reviewNotice))}
+                          className="border-line focus-ring"
+                          data-testid="due-review-notice-select-all"
+                        />
+                        Select all
+                      </label>
                       <button
                         type="button"
-                        onClick={() => review(entry.entryId, entry.name)}
-                        className={buttonClass}
-                        data-testid="due-review-notice-review"
+                        onClick={reviewSelected}
+                        disabled={batchBusy || effective.size === 0}
+                        className={primaryButtonClass}
+                        data-testid="due-review-selected"
                       >
-                        Review
+                        {reviewSelectedText(effective.size)}
                       </button>
+                      {capped && (
+                        <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
+                      )}
+                    </div>
+                  )}
+                  <ul className="space-y-2" data-testid="due-review-notice-list">
+                    {reviewNotice.entries.map((entry) => {
+                      const nameId = `${panelId}-name-${entry.entryId}`
+                      const reasonId = `${panelId}-reason-${entry.entryId}`
+                      const ticked = effective.has(entry.entryId)
+                      const blockedByCap = entry.clean && capped && !ticked
+                      const describedBy = !entry.clean ? reasonId : blockedByCap ? limitId : undefined
+                      return (
+                        <li
+                          key={entry.entryId}
+                          className="flex items-center justify-between gap-3"
+                          data-testid="due-review-notice-entry"
+                          data-source={`budget_entry:${entry.entryId}`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={ticked}
+                              disabled={!entry.clean || batchBusy || blockedByCap}
+                              onChange={() => setSelected((prev) => toggleSelection(prev, entry.entryId, reviewNotice))}
+                              aria-labelledby={nameId}
+                              {...(describedBy ? { 'aria-describedby': describedBy } : {})}
+                              className="border-line focus-ring"
+                              data-testid="due-review-notice-select"
+                            />
+                            <span className="text-sm text-ink">
+                              <span id={nameId}>{entry.name}</span>
+                              <span className="text-xs text-muted">
+                                {` · ${entry.accountName}`}
+                                {entry.reason !== null && (
+                                  <>
+                                    {' · '}
+                                    <span id={reasonId} data-testid="due-review-notice-reason">{entry.reason}</span>
+                                  </>
+                                )}
+                              </span>
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => review(entry.entryId, entry.name)}
+                            className={buttonClass}
+                            data-testid="due-review-notice-review"
+                          >
+                            Review
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+          {batchResult !== null && batchResult.day === today && (batchResult.text !== null || batchResult.failures.length > 0) && (
+            <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-batch">
+              {batchResult.text !== null && (
+                <p className="text-sm text-ok" role="status" data-testid="due-review-batch-result">{batchResult.text}</p>
+              )}
+              {batchResult.failures.length > 0 && (
+                <ul className="space-y-1">
+                  {batchResult.failures.map((f) => (
+                    <li
+                      key={f.entryId}
+                      className="text-sm text-danger"
+                      role="alert"
+                      data-testid="due-review-batch-failure"
+                      data-source={`budget_entry:${f.entryId}`}
+                    >
+                      {f.text}
                     </li>
                   ))}
                 </ul>

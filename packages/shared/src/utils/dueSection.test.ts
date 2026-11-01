@@ -857,22 +857,42 @@ describe('installment auto-post in the due section', () => {
 })
 
 describe('dueReviewNotice', () => {
+  const clean = { entry_version: '2026-10-17T03:04:05.123456+00:00', review_token: 'tok' }
   it('is null with nothing to review', () => {
     expect(dueReviewNotice(snap({}))).toBeNull()
   })
-  it('counts the installments and lists one entry each', () => {
-    const one = dueReviewNotice(snap({ installment_review: [{ entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 2 }] }))
+  it('counts the installments and lists one entry each, with clean and reason', () => {
+    const one = dueReviewNotice(
+      snap({ installment_review: [{ entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 2, clean_review: null }] }),
+    )
     expect(one?.text).toBe("1 card installment doesn't auto-post yet")
-    expect(one?.entries).toEqual([{ entryId: 1, name: 'Tablet', accountName: 'Visa', missedCount: 2 }])
+    expect(one?.entries).toEqual([
+      {
+        entryId: 1,
+        name: 'Tablet',
+        accountName: 'Visa',
+        missedCount: 2,
+        clean: false,
+        reason: '2 missed months to record · review it on its own',
+      },
+    ])
     const two = dueReviewNotice(
       snap({
         installment_review: [
-          { entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 2 },
-          { entry_id: 2, name: 'Phone', account_name: 'Visa', missed_count: 0 },
+          { entry_id: 1, name: 'Tablet', account_name: 'Visa', missed_count: 1, clean_review: null },
+          { entry_id: 2, name: 'Phone', account_name: 'Visa', missed_count: 0, clean_review: clean },
         ],
       }),
     )
     expect(two?.text).toBe("2 card installments don't auto-post yet")
+    expect(two?.entries[0]?.reason).toBe('1 missed month to record · review it on its own')
+    expect(two?.entries[1]).toMatchObject({ clean: true, reason: null, missedCount: 0 })
+  })
+  it('falls back when nothing is missed but there is no clean binding', () => {
+    const n = dueReviewNotice(
+      snap({ installment_review: [{ entry_id: 3, name: 'Pending', account_name: 'Visa', missed_count: 0, clean_review: null }] }),
+    )
+    expect(n?.entries[0]).toMatchObject({ clean: false, reason: 'Needs a review of its own' })
   })
 })
 
