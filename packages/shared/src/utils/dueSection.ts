@@ -581,15 +581,44 @@ export function shouldPostOnOpen(snapshot: Pick<DashboardSnapshot, 'installment_
   return postNowCount(snapshot) > 0
 }
 
+/** One row of the card-installment notice. */
+export interface DueReviewNoticeEntry {
+  entryId: number
+  name: string
+  accountName: string
+  missedCount: number
+  /** True when the review asks nothing, so the row can join a batch review. */
+  clean: boolean
+  /** Why the row cannot join a batch; null when clean. */
+  reason: string | null
+}
+
+const REVIEW_ALONE = 'review it on its own'
+
+function notCleanReason(missedCount: number): string {
+  if (missedCount <= 0) return 'Needs a review of its own'
+  return `${missedCount} missed ${missedCount === 1 ? 'month' : 'months'} to record · ${REVIEW_ALONE}`
+}
+
 /** The notice for card installments that do not auto-post yet; null when there are none. */
 export function dueReviewNotice(
   snapshot: Pick<DashboardSnapshot, 'installment_review'>,
-): { text: string; entries: Array<{ entryId: number; name: string; accountName: string; missedCount: number }> } | null {
+): { text: string; entries: DueReviewNoticeEntry[] } | null {
   const rows = snapshot.installment_review
   if (rows.length === 0) return null
   return {
     text: rows.length === 1 ? "1 card installment doesn't auto-post yet" : `${rows.length} card installments don't auto-post yet`,
-    entries: rows.map((r) => ({ entryId: r.entry_id, name: r.name, accountName: r.account_name, missedCount: r.missed_count })),
+    entries: rows.map((r) => {
+      const clean = r.clean_review !== null
+      return {
+        entryId: r.entry_id,
+        name: r.name,
+        accountName: r.account_name,
+        missedCount: r.missed_count,
+        clean,
+        reason: clean ? null : notCleanReason(r.missed_count),
+      }
+    }),
   }
 }
 
