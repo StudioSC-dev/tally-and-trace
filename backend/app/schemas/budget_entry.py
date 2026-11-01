@@ -399,6 +399,46 @@ class AutoPostReviewResult(BaseModel):
     outcomes: List[ReviewOutcome]
 
 
+InstallmentAutoPostState = Literal["unreviewed", "on", "held", "off", "blocked"]
+InstallmentBlockReason = Literal["foreign_currency", "no_statement_cycle", "ambiguous",
+                                 "creator_no_access"]
+
+
+class UpcomingOccurrence(BaseModel):
+    """One occurrence after Manila's today that no row stands for yet
+    (services/missed.py ``upcoming_occurrences``). ``amount`` and ``currency``
+    are the entry's face values, unconverted. The account names are null for
+    an account the caller cannot view. ``recordable``: Mark paid can record
+    this occurrence now. ``auto_post``, ``block_reason`` and ``can_review`` are
+    a card installment's, as on its missed row; null, null and false otherwise."""
+    view: Literal["full", "shared_full"]
+    entry_id: int
+    name: str
+    occurrence_date: date
+    entry_type: BudgetEntryType
+    is_transfer: bool
+    kind: Optional[EntryKind] = None
+    amount: float
+    currency: CurrencyType
+    account_name: Optional[str] = None
+    transfer_to_account_name: Optional[str] = None
+    capped: bool
+    can_mark_paid: bool
+    recordable: bool
+    auto_post: Optional[InstallmentAutoPostState] = None
+    block_reason: Optional[InstallmentBlockReason] = None
+    can_review: bool
+
+
+class UpcomingOccurrences(BaseModel):
+    """GET /budget-entries/upcoming-occurrences (STU-465): sorted by
+    ``occurrence_date``, then ``name``, then ``entry_id``; ``total`` counts
+    every match, before ``limit``."""
+    items: List[UpcomingOccurrence]
+    total: int
+    auto_post_scheduled: bool
+
+
 class AutoPostToggle(BaseModel):
     """POST /budget-entries/{id}/auto-post: only ``false`` (turn off) is
     accepted; turning on is the review's."""
