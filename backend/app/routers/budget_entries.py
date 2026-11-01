@@ -1,6 +1,7 @@
 import hmac
 from calendar import monthrange
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Annotated, List, Literal, Optional
@@ -1167,6 +1168,68 @@ def _refuse_invalid_links(state, links) -> None:
         months.add(day)
 
 
+@dataclass
+class ReviewApplied:
+    """What ``_apply_review`` did: ``replayed`` when the review had already been
+    applied (nothing written), else each walked day's outcome, in order."""
+    replayed: bool
+    outcomes: list[tuple[date, str]]  # (occurrence day, outcome value); [] when replayed
+
+
+def _apply_review(db: Session, entry: BudgetEntry, caller: User, today: date, *,
+                  entry_version: Optional[datetime], review_token: str,
+                  links) -> ReviewApplied:
+    """Steps 2 to 7 of ``review_auto_post`` on an entry ``_lock_entry_to_post``
+    returned, without committing, refreshing or building a response; the
+    caller commits (unless replayed) and reads the entry back. Raises the
+    route's ``HTTPException``s; the caller rolls back."""
+    from app.core.tags import copy_explicit_tags
+
+    if (entry.installment_reviewed_at is not None and entry.auto_post_enabled
+            and _links_stand(db, entry, links)
+            and not posting.schedule_walk(entry, today)):
+        return ReviewApplied(replayed=True, outcomes=[])
+    _refuse_paused_or_ended(entry)
+    block = auto_post_block(entry, db.get(Account, entry.account_id))
+    if block is not None:
+        raise HTTPException(status_code=400, detail=AUTO_POST_BLOCK_MESSAGES[block])
+
+    state = posting.review_state(db, entry, caller, today)
+    if (_as_utc(entry_version) != _as_utc(entry.updated_at)
+            or not hmac.compare_digest(review_token.encode("utf-8"),
+                                       state.token.encode("utf-8"))):
+        raise HTTPException(status_code=409, detail=posting.REVIEW_CHANGED)
+
+    walk_days = {occ.date() for occ in posting.schedule_walk(entry, today)}
+    pending = {txn_id for _, when, txn_id, is_posted in _linked_rows(
+        db, [entry.id], occurrence_match=True)
+        if not is_posted and _naive(when).date() in walk_days}
+    locked = {}
+    for txn_id in sorted(pending | {link.transaction_id for link in links}):
+        locked[txn_id] = locking.lock_transaction(db, txn_id)
+    _refuse_invalid_links(state, links)
+
+    now = utc_now()
+    entry.installment_reviewed_at = now
+    entry.auto_post_enabled = True
+    entry.updated_at = now
+    occurrences = {occ.date(): occ for occ in state.missed}
+    for link in links:
+        txn = locked[link.transaction_id]
+        txn.budget_entry_id = entry.id
+        txn.occurrence_date = occurrences[link.occurrence_date]
+        txn.is_recurring = True
+        txn.recurrence_frequency = entry.cadence
+        txn.updated_at = utc_now()
+        copy_explicit_tags(db, entry.id, txn.id)
+    # The links must be in the database before recording: ``record_occurrence``
+    # finds a month's linked rows by query, and the session does not autoflush.
+    db.flush()
+    run = posting._post_entry_due(db, entry, caller, today, hold_duplicates=False)
+    return ReviewApplied(replayed=False, outcomes=[
+        (item.occurrence.date(), item.outcome.value) for item in run.recorded])
+
+
 @router.post("/{entry_id}/auto-post-review", response_model=AutoPostReviewResult)
 def review_auto_post(
     entry_id: int,
@@ -1202,57 +1265,21 @@ def review_auto_post(
        month of the walk is recorded as the caller (a linked posted row only
        advances, a linked pending row is posted keeping its date, any other
        month gets a new row on its day).
+
+    Steps 2 to 7 are ``_apply_review``. A review that was applied is
+    committed, and the response is built from the entry read back after the
+    commit (``next_occurrence`` as stored).
     """
-    from app.core.tags import copy_explicit_tags
-
     entry = _lock_entry_to_post(db, current_user, entry_id)
-    today = manila_today()
-    if (entry.installment_reviewed_at is not None and entry.auto_post_enabled
-            and _links_stand(db, entry, payload.links)
-            and not posting.schedule_walk(entry, today)):
+    applied = _apply_review(db, entry, current_user, manila_today(),
+                            entry_version=payload.entry_version,
+                            review_token=payload.review_token, links=payload.links)
+    if applied.replayed:
         return _review_result(entry, True, [])
-    _refuse_paused_or_ended(entry)
-    block = auto_post_block(entry, db.get(Account, entry.account_id))
-    if block is not None:
-        raise HTTPException(status_code=400, detail=AUTO_POST_BLOCK_MESSAGES[block])
-
-    state = posting.review_state(db, entry, current_user, today)
-    if (_as_utc(payload.entry_version) != _as_utc(entry.updated_at)
-            or not hmac.compare_digest(payload.review_token.encode("utf-8"),
-                                    state.token.encode("utf-8"))):
-        raise HTTPException(status_code=409, detail=posting.REVIEW_CHANGED)
-
-    walk_days = {occ.date() for occ in posting.schedule_walk(entry, today)}
-    pending = {txn_id for _, when, txn_id, is_posted in _linked_rows(
-        db, [entry.id], occurrence_match=True)
-        if not is_posted and _naive(when).date() in walk_days}
-    locked = {}
-    for txn_id in sorted(pending | {link.transaction_id for link in payload.links}):
-        locked[txn_id] = locking.lock_transaction(db, txn_id)
-    _refuse_invalid_links(state, payload.links)
-
-    now = utc_now()
-    entry.installment_reviewed_at = now
-    entry.auto_post_enabled = True
-    entry.updated_at = now
-    occurrences = {occ.date(): occ for occ in state.missed}
-    for link in payload.links:
-        txn = locked[link.transaction_id]
-        txn.budget_entry_id = entry.id
-        txn.occurrence_date = occurrences[link.occurrence_date]
-        txn.is_recurring = True
-        txn.recurrence_frequency = entry.cadence
-        txn.updated_at = utc_now()
-        copy_explicit_tags(db, entry.id, txn.id)
-    # The links must be in the database before recording: ``record_occurrence``
-    # finds a month's linked rows by query, and the session does not autoflush.
-    db.flush()
-    run = posting._post_entry_due(db, entry, current_user, today, hold_duplicates=False)
     db.commit()
     db.refresh(entry)
     return _review_result(entry, False, [
-        {"occurrence_date": item.occurrence.date(), "outcome": item.outcome.value}
-        for item in run.recorded])
+        {"occurrence_date": day, "outcome": outcome} for day, outcome in applied.outcomes])
 
 
 @router.post("/{entry_id}/auto-post", response_model=BudgetEntryOut)
