@@ -223,6 +223,31 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
     return {"installment_review": review, "installment_auto_post": posting}
 
 
+def _listed_entries(db: Session, user, redactor: Redactor,
+                    tag_id: Optional[int]) -> List[BudgetEntry]:
+    """The recurring entries a list of the caller's may show, in id order: the
+    payables' disclosure (``collect_events``' ``disclosed()`` in
+    services/forecast.py, without a household view; keep the two in step),
+    active, with an account, readable and not Limited. A Limited view hides
+    ``is_active``, so listing only active entries would reveal it. With
+    ``tag_id`` only entries carrying it effectively are kept."""
+    user_id = user.id
+    access = redactor.access
+    scope_account_ids = {a.id for a in fc.get_account_balances(db, user_id)}
+    direct_ids = viewable_account_ids(db, user_id)
+    grants = list(access.grants.values())
+    query = db.query(BudgetEntry).filter(
+        readable_criterion(BudgetEntry, user_id, direct_ids, grants),
+        or_(BudgetEntry.user_id == user_id, touches_accounts(BudgetEntry, scope_account_ids)),
+        BudgetEntry.is_active.is_(True),
+        BudgetEntry.account_id.isnot(None),
+    )
+    if tag_id is not None:
+        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
+    return [e for e in query.order_by(BudgetEntry.id).all()
+            if access.readable(e) and redactor.view(e) != LIMITED]
+
+
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
                      infos: Optional[Dict[int, InstallmentInfo]] = None) -> List[dict]:
     """The snapshot's ``missed`` key (see the module docstring), sorted by
@@ -240,28 +265,13 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
     """
     user_id = user.id
     access = redactor.access
-    accounts = fc.get_account_balances(db, user_id)
-    scope_account_ids = {a.id for a in accounts}
-    direct_ids = viewable_account_ids(db, user_id)
-    grants = list(access.grants.values())
-
-    # The payables' disclosure: ``collect_events``' ``disclosed()`` (services/
-    # forecast.py), without a household view. Keep the two in step.
-    query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, direct_ids, grants),
-        or_(BudgetEntry.user_id == user_id, touches_accounts(BudgetEntry, scope_account_ids)),
-        BudgetEntry.is_active.is_(True),
-        BudgetEntry.account_id.isnot(None),
-    )
-    if tag_id is not None:
-        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
-    entries = [e for e in query.order_by(BudgetEntry.id).all()
-               if access.readable(e) and redactor.view(e) != LIMITED]
+    entries = _listed_entries(db, user, redactor, tag_id)
     if not entries:
         return []
 
     # Wallets as the projection judges them (``collect_events``): the scoped
     # ones plus any viewable account an entry is funded from.
+    accounts = fc.get_account_balances(db, user_id)
     viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
     wallet_ids = {a.id for a in accounts if fc.is_spending_wallet(a)} | fc.wallet_ids_of(
         db, (e.account_id for e in entries if e.account_id in viewable_ids))
