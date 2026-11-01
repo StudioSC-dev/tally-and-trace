@@ -15,6 +15,12 @@ export function manilaToday(now: Date = new Date()): string {
   return new Date(now.getTime() + MANILA_OFFSET_MS).toISOString().slice(0, 10)
 }
 
+/** A posting date's Manila calendar day (YYYY-MM-DD), or null if unparseable. */
+export function postingDay(wire: string): string | null {
+  const instant = new Date(wire)
+  return Number.isNaN(instant.getTime()) ? null : manilaToday(instant)
+}
+
 export interface PayChoices {
   /** L: the latest statement closed before today, the one coming due next. */
   statement: StatementDue
