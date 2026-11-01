@@ -17,6 +17,8 @@ module.exports = {
   },
   plugins: ['@typescript-eslint', 'react-refresh'],
   rules: {
+    'no-alert': 'error',
+    'no-restricted-globals': ['error', 'alert', 'confirm', 'prompt'],
     'react-refresh/only-export-components': [
       'warn',
       { allowConstantExport: true },
