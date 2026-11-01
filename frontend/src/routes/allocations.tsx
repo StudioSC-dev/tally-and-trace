@@ -473,6 +473,8 @@ export function AllocationsPage() {
   const [isFetchingMore, setIsFetchingMore] = useState(false)
   // The last reset failed: an alert with Retry shows, above any rows still on screen.
   const [loadError, setLoadError] = useState(false)
+  // The last load-more failed: the sentinel stops asking until Retry, or a reset, clears it.
+  const [loadMoreError, setLoadMoreError] = useState(false)
   // The first recurring load has settled; later reloads keep the sections on screen.
   const [recurringLoaded, setRecurringLoaded] = useState(false)
   const [recurringError, setRecurringError] = useState(false)
@@ -503,6 +505,7 @@ export function AllocationsPage() {
         } else {
           setIsFetchingMore(true)
         }
+        setLoadMoreError(false)
 
         const result = await triggerAllocations(params).unwrap()
         if (!isCurrent()) return
@@ -520,6 +523,8 @@ export function AllocationsPage() {
           // The rows already on screen stay; no load-more runs until a Retry lands.
           setHasMoreAllocations(false)
           setLoadError(true)
+        } else {
+          setLoadMoreError(true)
         }
       } finally {
         if (isCurrent()) {
@@ -592,14 +597,14 @@ export function AllocationsPage() {
       }
 
       loadMoreObserver.current = new IntersectionObserver((entries) => {
-        if (entries[0]?.isIntersecting && !isResetting && !isFetchingMore && hasLoaded && hasMoreAllocations) {
+        if (entries[0]?.isIntersecting && !isResetting && !isFetchingMore && hasLoaded && hasMoreAllocations && !loadMoreError) {
           loadAllocations(false)
         }
       })
 
       loadMoreObserver.current.observe(node)
     },
-    [hasMoreAllocations, isFetchingMore, isResetting, hasLoaded, loadAllocations]
+    [hasMoreAllocations, isFetchingMore, isResetting, hasLoaded, loadMoreError, loadAllocations]
   )
 
   const orderedAllocations = useMemo(() => {
@@ -1784,7 +1789,20 @@ export function AllocationsPage() {
       {activeTab !== 'subscriptions' && activeTab !== 'wishlist' && (
         <>
           <div ref={sentinelRef} className="h-3" />
-          {hasLoaded && (isFetchingMore || hasMoreAllocations) && (
+          {hasLoaded && loadMoreError && !isFetchingMore && (
+            <div className="flex items-center justify-center gap-3 pb-2" role="alert" data-testid="allocations-more-error">
+              <p className="text-sm text-danger">Could not load more envelopes.</p>
+              <button
+                type="button"
+                className="btn-secondary focus-ring"
+                data-testid="allocations-more-retry"
+                onClick={() => void loadAllocations(false)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {hasLoaded && !loadMoreError && (isFetchingMore || hasMoreAllocations) && (
             <p className="text-center text-xs text-muted pb-2">
               {isFetchingMore ? 'Loading more envelopes...' : 'Scroll for more envelopes'}
             </p>

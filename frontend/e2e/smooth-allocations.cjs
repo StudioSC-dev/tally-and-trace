@@ -479,6 +479,47 @@ async function scenarioG(browser) {
   }
 }
 
+// (h) A failed load-more stops at one request, shows "Could not load more" with Retry, and
+// Retry loads the next page.
+async function scenarioH(browser) {
+  console.log('\n=== (h) a failed load-more does not retry in a loop; Retry loads the next page')
+  const u = await seedUser('h')
+  await envelopes(u, 'H Env', 25)
+  const { ctx, page, native } = await openPage(browser)
+  const log = []
+  page.on('request', (r) => { if (isAllocationsList(r) && offsetOf(r.url()) === 10) log.push(Date.now()) })
+  let fail = null
+  try {
+    await h.uiLogin(page, stack, u)
+    await openBudgets(page)
+    fail = await h.failWith(page, (r) => isAllocationsList(r) && offsetOf(r.url()) === 10, 500)
+    await page.mouse.move(640, 500)
+    await page.mouse.wheel(0, 20000)
+    await h.check('h.failed', 'S', async () => (await waitFailed(fail, 1)) || `failures delivered: ${fail.failed}`)
+    await h.sleep(2000)
+    await h.check('h.no-loop', 'B', () => log.length === 1 || `offset=10 requests in 2 s: ${log.length}`)
+    await h.check('h.retry-shown', 'B', async () => {
+      try { await page.locator(tid('allocations-more-retry')).waitFor({ timeout: 3000 }) } catch { return 'no allocations-more-retry' }
+      if (!(await page.locator('[role="alert"][data-testid="allocations-more-error"]').isVisible())) return 'allocations-more-error is not a visible role=alert'
+      const cards = (await cardNames(page)).length
+      return cards === 10 || `cards ${cards}`
+    })
+    await fail.stop()
+    fail = null
+    await page.locator(tid('allocations-more-retry')).click({ timeout: 3000 }).catch(() => null)
+    await h.waitQuiet(page)
+    await h.check('h.retry-loads', 'B', async () => {
+      const cards = (await cardNames(page)).length
+      const alert = await page.locator(tid('allocations-more-error')).count()
+      return (cards >= 20 && alert === 0) || `cards ${cards} alerts ${alert}`
+    })
+  } finally {
+    await fail?.stop()
+    await d.checkNoNativeDialogs(h, 'h', native)
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
@@ -487,6 +528,7 @@ const SCENARIOS = [
   ['d', scenarioD],
   ['f', scenarioF],
   ['g', scenarioG],
+  ['h', scenarioH],
 ]
 
 ;(async () => {

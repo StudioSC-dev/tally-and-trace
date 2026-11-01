@@ -74,7 +74,7 @@ export function WishlistPanel({ onCreateAllocationFromItem }: WishlistPanelProps
     { skip: !isAuthenticated }
   )
   const items = wishlistQuery.data
-  const wishlistPhase = queryPhase(items, wishlistQuery)
+  const wishlistPhase = queryPhase(items, wishlistQuery, !isAuthenticated)
   const { data: plan } = useGetWishlistPlanQuery(undefined, { skip: !isAuthenticated })
   const [createItem] = useCreateWishlistItemMutation()
   const [updateItem] = useUpdateWishlistItemMutation()
