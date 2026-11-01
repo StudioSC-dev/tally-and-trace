@@ -1582,7 +1582,7 @@ def collect_events(
             origin=(Account, p["source_id"]),  # the card
             **extra,
         ), leg_currencies, rows, card.currency)
-        if access.role(card.id) == TAG_VIEWER:
+        if account_role(user_id, card) == TAG_VIEWER:
             # Seen through a tag share: no statement detail (as a hidden card's).
             _limit(statement, redactor, name=p["name"], currency=card.currency,
                    kind="card_payment")
@@ -1701,7 +1701,7 @@ def collect_events(
         if hidden:
             event = _limit(event, redactor, name=LOAN_PAYMENT,
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
-        elif access.role(p["source_id"]) == TAG_VIEWER:
+        elif account_role(user_id, loans_by_id[p["source_id"]]) == TAG_VIEWER:
             # Seen through a tag share: the loan's name, no schedule detail.
             event = _limit(event, redactor, name=p["name"],
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
