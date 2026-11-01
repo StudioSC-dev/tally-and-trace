@@ -542,7 +542,7 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
 
 
 def statement_history(db: Session, card: Account, today: datetime,
-                      viewable_ids: Iterable[int], fx=None) -> List[dict]:
+                      viewable_ids: Iterable[int], fx=None, card_rows=None) -> List[dict]:
     """The card's recorded statements, oldest first, through the cycle open on ``today``.
 
     Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
@@ -568,10 +568,15 @@ def statement_history(db: Session, card: Account, today: datetime,
     ``estimate``, and one with no stored rate is left out of ``balance`` and
     ``owed`` and listed in its statement's ``unconverted`` as
     ``{date, original_amount, original_currency, transaction}``.
+
+    ``card_rows`` is a ``_card_rows`` result already read for this card (and
+    possibly others), so a caller walking many cards reads them once; None
+    reads this card's own.
     """
     if resolve_cycle_fields(card) is None:
         return []
-    by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
+    by_card, unbilled_sources = (card_rows if card_rows is not None
+                                 else _card_rows(db, [card.id], viewable_ids))
     rows = by_card.get(card.id, [])
     lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
     lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
