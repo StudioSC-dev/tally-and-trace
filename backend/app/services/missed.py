@@ -42,6 +42,7 @@ from app.models.account import AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.services import forecast as fc
+from app.services import posting as posting_svc
 from app.services.installment_duplicates import held_occurrences
 from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
 from app.services.recurring_kinds import (
@@ -176,14 +177,31 @@ def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, Ins
     return out
 
 
+def _clean_review(db: Session, entry: BudgetEntry, user, today: date) -> Optional[dict]:
+    """``clean_review`` of an ``installment_review`` row (``installment_snapshot``):
+    the review's binding when it has no missed month and no candidate, else None."""
+    state = posting_svc.review_state(db, entry, user, today)
+    if state.missed or state.candidates:
+        return None
+    return {"entry_version": posting_svc._iso(entry.updated_at), "review_token": state.token}
+
+
 def installment_snapshot(db: Session, user, *, redactor: Redactor,
                          infos: Optional[Dict[int, InstallmentInfo]] = None) -> dict:
     """The snapshot's ``installment_review`` and ``installment_auto_post``.
 
     - ``installment_review``: active card installments the caller can edit that
       are not reviewed and have no ``auto_post_block``, with ``missed_count``
-      (the months due through Manila's today). Empty for a viewer or a tag
-      viewer, who cannot edit.
+      (the months due through Manila's today) and ``clean_review``. Empty for
+      a viewer or a tag viewer, who cannot edit.
+    - ``clean_review`` (STU-474): for an entry whose review asks nothing (no
+      missed month and so no candidate, by ``posting.review_state``, the
+      review's own rule), the binding a batch review sends back:
+      ``entry_version`` (``posting._iso`` of the stored ``updated_at``: aware
+      UTC with a ``+00:00`` suffix, compared by the server as a datetime, so
+      the GET's ``Z`` form is the same version) and the caller-bound
+      ``review_token``. Null for any other row. Only callers who can edit
+      the entry get a row, the callers the review accepts.
     - ``installment_auto_post``: active reviewed card installments the caller
       reads in full or shared_full with at least one month due, with the
       caller's ``postable_count``, ``due_today_count`` (the due months that
@@ -208,7 +226,9 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
             if info.can_edit and auto_post_block(entry, access.account(entry.account_id)) is None:
                 review.append({"entry_id": entry.id, "name": entry.name,
                                "account_name": account_name(entry),
-                               "missed_count": len(plan.due)})
+                               "missed_count": len(plan.due),
+                               "clean_review": _clean_review(db, entry, user, info.today)
+                               if not plan.due else None})
         elif plan.due:
             posting.append({
                 "entry_id": entry.id,
