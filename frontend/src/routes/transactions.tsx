@@ -15,6 +15,7 @@ import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../hooks/useToast'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
+import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
@@ -598,7 +599,12 @@ export function TransactionsPage() {
   // Only the caller's own entries can be linked to a transaction: a shared or limited
   // entry belongs to someone else, whose category and allocation the caller can't use.
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
+  // The viewer's local day, for display only: a row's status, "Today" / "Tomorrow" and the form's defaults.
   const today = useToday()
+  // The day every list membership is decided on: Manila's, the server's day. The main list
+  // ends on it, Upcoming starts after it, and Due and overdue keeps it and earlier, so an
+  // item is in one section whatever the viewer's time zone. A new Manila day refetches.
+  const partitionDay = useManilaDay()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
   const [upcomingTransactions, setUpcomingTransactions] = useState<Transaction[]>([])
@@ -640,8 +646,8 @@ export function TransactionsPage() {
   // A cleared search applies in the render that clears it, so a filter reset sends one fetch.
   const effectiveSearch = searchTerm.trim() === '' ? '' : debouncedSearch.trim()
   const filterKey = useMemo(
-    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag ?? null, pageSize, today]),
-    [startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, today]
+    () => JSON.stringify([startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag ?? null, pageSize, partitionDay]),
+    [startDate, endDate, selectedAccountIds, selectedCategoryNames, filterUncategorized, enteredBy, selectedTypes, effectiveSearch, selectedTag, pageSize, partitionDay]
   )
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: '', page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
@@ -661,8 +667,8 @@ export function TransactionsPage() {
     setPageSizeState(next)
   }, [])
 
-  // The filter's two requests: the main list (on or before today) and Upcoming (after).
-  const bounds = useMemo(() => listBounds(startDate, endDate, today), [startDate, endDate, today])
+  // The filter's two requests: the main list (on or before the Manila day) and Upcoming (after).
+  const bounds = useMemo(() => listBounds(startDate, endDate, partitionDay), [startDate, endDate, partitionDay])
   const filterParams = useMemo(() => {
     const params: TransactionQuery = {}
     if (selectedAccountIds.length > 0) {
@@ -2097,7 +2103,7 @@ export function TransactionsPage() {
       </div>
 
       <DueAndOverdueSection
-        today={today}
+        today={partitionDay}
         onPost={(transaction) => {
           openActionModal(transaction)
           handleInitPostingForm(transaction)
