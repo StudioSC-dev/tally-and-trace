@@ -14,6 +14,8 @@
 //   (d) Charged then Posted on a card subscription: one pending debit, then
 //       exactly one posted row
 //   (e) Mark posted on a pending card transaction
+//   (e4) a posting date reads as its Manila day in the list and the account page,
+//       in a browser in Los Angeles and in Manila
 //   (f) Mark received on an income
 //   (g) the expense category list has Gifts & Donations, the income one not
 //   (h) a view-only viewer gets no buttons; Limited rows follow the
@@ -41,7 +43,7 @@
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e4|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -385,6 +387,44 @@ async function markPostedCoffee(browser) {
   const txn = (await allTransactions(w.u)).find((t) => t.id === w.coffee.id)
   check('(e) Coffee is posted', txn?.is_posted, true)
   await ctx.close()
+}
+
+// (e4) A posting date reads as its Manila day, in every browser zone: the list and the account page.
+async function postingDateDisplay(browser) {
+  console.log('\n=== (e4) posting dates read as their Manila day, whatever the browser zone')
+  const u = await makeUser('e4')
+  const bank = await account(u, 'E4 Checking')
+  const D = '2026-10-20'
+  for (const timezoneId of ['America/Los_Angeles', 'Asia/Manila']) {
+    // Dated the browser's own day, so the list's default window (this month, up to its today) holds them.
+    const rowDay = new Date().toLocaleDateString('en-CA', { timeZone: timezoneId })
+    const names = { midnight: `E4 Midnight ${timezoneId}`, evening: `E4 Evening ${timezoneId}` }
+    for (const [name, postedAt] of [[names.midnight, `${D}T00:00:00Z`], [names.evening, `${D}T17:00:00Z`]]) {
+      const txn = await unposted(u, bank, rowDay, 50, name)
+      const put = await api(u.token, 'PUT', `/transactions/${txn.id}`, { is_posted: true, posting_date: postedAt })
+      if (put.status !== 200) throw new Error(`posting ${name}: ${put.status} ${JSON.stringify(put.json)}`)
+    }
+    const expected = { [names.midnight]: fmt(D), [names.evening]: fmt(addDays(D, 1)) }
+    const { ctx, page } = await newPage(browser, { timezoneId })
+    await uiLogin(page, u)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await page.locator('article').filter({ hasText: names.midnight }).first().waitFor()
+    await settle(page)
+    const postedOn = async (rows, description) =>
+      (await rows.filter({ hasText: description }).first().textContent())?.match(/Posted ([A-Z][a-z]{2} \d+(?:st|nd|rd|th), \d{4})/)?.[1] ?? null
+    const listRows = page.locator('article')
+    for (const [description, day] of Object.entries(expected)) {
+      check(`(e4) ${timezoneId}: the list reads ${description} as ${day}`, await postedOn(listRows, description), day)
+    }
+    await page.goto(`${stack.webUrl}/accounts/${bank.id}`)
+    await page.locator('[data-testid="account-transaction"]').filter({ hasText: names.midnight }).first().waitFor()
+    await settle(page)
+    const accountRows = page.locator('[data-testid="account-transaction"]')
+    for (const [description, day] of Object.entries(expected)) {
+      check(`(e4) ${timezoneId}: the account page reads ${description} as ${day}`, await postedOn(accountRows, description), day)
+    }
+    await ctx.close()
+  }
 }
 
 // (f) Mark received on an income.
@@ -960,7 +1000,7 @@ async function outOfOrderRefetch(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e4: postingDateDisplay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

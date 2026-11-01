@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { addDays, editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, mergeUpcoming, pageWindow, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, UPCOMING_LOOKAHEAD_DAYS, withoutError } from '@tally-trace/shared'
+import { addDays, editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, mergeUpcoming, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, UPCOMING_LOOKAHEAD_DAYS, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, RecurringAction, TransactionStatus, UpcomingRow } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -88,30 +88,6 @@ const formatDateWithOrdinal = (date: Date) => {
   const day = date.getDate()
   const year = date.getFullYear()
   return `${month} ${day}${getOrdinalSuffix(day)}, ${year}`
-}
-
-const formatRelativeDate = (dateString: string) => {
-  const date = new Date(dateString)
-  if (Number.isNaN(date.getTime())) {
-    return 'Unknown date'
-  }
-  const today = new Date()
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
-  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const diffInMs = startOfToday.getTime() - startOfDate.getTime()
-  const diffInDays = Math.round(diffInMs / (1000 * 60 * 60 * 24))
-
-  if (diffInDays === 0) {
-    return 'Today'
-  }
-  if (diffInDays === 1) {
-    return 'Yesterday'
-  }
-  if (diffInDays === -1) {
-    return 'Tomorrow'
-  }
-
-  return formatDateWithOrdinal(date)
 }
 
 // An unposted row is Pending once its day has come and Planned before; see `transactionStatus`.
@@ -1420,7 +1396,7 @@ export function TransactionsPage() {
       transaction_type: transaction.transaction_type,
       transaction_date: new Date(transaction.transaction_date).toISOString().split('T')[0],
         posting_date: transaction.posting_date
-          ? new Date(transaction.posting_date).toISOString().split('T')[0]
+          ? postingDay(transaction.posting_date) ?? undefined
           : undefined,
         is_posted: transaction.is_posted,
         transfer_from_account_id: transaction.transaction_type === 'transfer'
@@ -1861,15 +1837,19 @@ export function TransactionsPage() {
     const date = transactionDate(actionTransaction)
     // A Limited row has no posting date; its status alone says whether it is posted.
     const postingDate = isLimited(actionTransaction) ? undefined : actionTransaction.posting_date
+    // A posting date reads as its Manila day, whatever the browser's zone.
+    const postedDay = postingDate ? postingDay(postingDate) : null
     return {
       transactionDate: formatEntryDate(date),
       transactionRelative: relativeEntryDay(date, today),
       postingDate: postingDate
-        ? formatDateWithOrdinal(new Date(postingDate))
+        ? postedDay
+          ? formatEntryDate(postedDay)
+          : 'Invalid date'
         : isLimited(actionTransaction) && actionTransaction.is_posted
         ? 'Posted'
         : 'Not posted',
-      postingRelative: postingDate ? formatRelativeDate(postingDate) : null,
+      postingRelative: postedDay ? relativeEntryDay(postedDay, today) : null,
       typeLabel: TRANSACTION_TYPE_LABELS[actionTransaction.transaction_type],
     }
   }, [actionTransaction, today])
@@ -1966,9 +1946,13 @@ export function TransactionsPage() {
     const relativeDate = relativeEntryDay(rowDate, today)
     const exactDate = formatEntryDate(rowDate)
     const status = transactionStatus(transaction, today)
+    const postedDay =
+      !isLimited(transaction) && transaction.posting_date ? postingDay(transaction.posting_date) : null
     const postedDate =
       !isLimited(transaction) && transaction.posting_date
-        ? formatDateWithOrdinal(new Date(transaction.posting_date))
+        ? postedDay
+          ? formatEntryDate(postedDay)
+          : 'Invalid date'
         : null
     const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
     const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
