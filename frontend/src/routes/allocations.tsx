@@ -30,12 +30,15 @@ import {
   isOwnerFull,
   isSharedFull,
   RECURRING_ACTION_LABELS,
+  fieldErrorProps,
   recurringActionsFor,
+  withoutError,
 } from '@tally-trace/shared'
-import type { CardCredit, KindGroup, RecurringAction } from '@tally-trace/shared'
+import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
+import { useConfirm } from '../hooks/useConfirm'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -90,6 +93,34 @@ const formatRelativeDate = (isoString: string) => {
 }
 
 const formatAmount = (amount: number, currency: CurrencyCode) => formatCurrency(amount, currency)
+
+// The allocation form's inline field errors (STU-410): one message under the field in place
+// of a browser popup. A key is a control's `data-field`.
+type AllocationFieldKey =
+  | 'account_id'
+  | 'name'
+  | 'category_ids'
+  | 'savings_account_ids'
+  | 'period_frequency'
+  | 'period_start'
+  | 'period_end'
+  | 'current_amount'
+  | 'target_amount'
+  | 'monthly_target'
+  | 'target_date'
+const isAllocationFieldKey = (key: string | undefined): key is AllocationFieldKey =>
+  key !== undefined &&
+  [
+    'account_id', 'name', 'category_ids', 'savings_account_ids', 'period_frequency', 'period_start',
+    'period_end', 'current_amount', 'target_amount', 'monthly_target', 'target_date',
+  ].includes(key)
+
+/** The app's own wording for a required field left empty; a bound such as `min` uses the browser's text. */
+const ALLOCATION_REQUIRED_COPY: Partial<Record<AllocationFieldKey, string>> = {
+  name: 'Please enter a name for this allocation.',
+  account_id: 'Please choose a primary account.',
+  period_start: 'Provide a start date for this budget period.',
+}
 
 type AllocationGoalMode = 'target_balance' | 'multi_account' | 'transaction_total'
 type BudgetCadence = 'daily' | 'weekly' | 'monthly' | 'quarterly'
@@ -308,6 +339,12 @@ export function AllocationsPage() {
 
   const [selectedBudgetCategoryIds, setSelectedBudgetCategoryIds] = useState<number[]>([])
   const [selectedSavingsAccountIds, setSelectedSavingsAccountIds] = useState<number[]>([])
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors<AllocationFieldKey>>({})
+  // A refusal with no single field to fix, or a control the form does not wire.
+  const [formError, setFormError] = useState('')
+  const fieldRefs = useRef<Partial<Record<AllocationFieldKey, HTMLElement | null>>>({})
+  // The controls the browser flagged invalid in one submit attempt, in tree order.
+  const invalidTargets = useRef<HTMLElement[]>([])
 
   const [triggerAllocations] = useLazyGetAllocationsQuery()
   const [triggerBudgetEntries] = useLazyGetBudgetEntriesQuery()
@@ -338,6 +375,7 @@ export function AllocationsPage() {
   const [updateAllocation] = useUpdateAllocationMutation()
   const [deleteAllocation] = useDeleteAllocationMutation()
   const deleteRecurringEntry = useDeleteRecurringEntry()
+  const askConfirm = useConfirm()
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   // Allocations are private to their owner, so only the caller's own accounts can back one.
   const ownAccounts = useMemo(() => accounts.filter((a) => a.my_role === 'owner'), [accounts])
@@ -631,6 +669,8 @@ export function AllocationsPage() {
   }, [])
 
   const closeModal = useCallback(() => {
+    setFieldErrors({})
+    setFormError('')
     setIsCreateModalOpen(false)
     setEditingAllocation(null)
     const type = activeTab === 'budgets' ? 'budget' : 'savings'
@@ -639,13 +679,89 @@ export function AllocationsPage() {
     setSelectedSavingsAccountIds([])
   }, [activeTab, createAllocationDefaults])
 
+  const bindField = (key: AllocationFieldKey) => (el: HTMLElement | null) => {
+    fieldRefs.current[key] = el
+  }
+  const fieldErrorId = (key: AllocationFieldKey) => `allocation-${key}-error`
+  const fieldProps = (key: AllocationFieldKey) => fieldErrorProps(fieldErrors, key, fieldErrorId(key))
+  // A picker group (chips) takes the description only: aria-invalid is not valid on a group.
+  const groupProps = (key: AllocationFieldKey) => ({
+    role: 'group' as const,
+    'aria-describedby': fieldProps(key)['aria-describedby'],
+    'data-field': key,
+    ref: bindField(key),
+  })
+  const focusField = (key: AllocationFieldKey) => {
+    const el = fieldRefs.current[key]
+    if (!el) return
+    // A chip group focuses its selected chip, else its first.
+    const target =
+      el.getAttribute('role') === 'group'
+        ? el.querySelector<HTMLElement>('[data-selected="true"]') ?? el.querySelector<HTMLElement>('button')
+        : el
+    target?.focus()
+  }
+  const fail = (key: AllocationFieldKey, message: string) => {
+    setFormError('')
+    setFieldErrors({ [key]: message })
+    focusField(key)
+  }
+  const clearFieldErrors = (...keys: AllocationFieldKey[]) =>
+    setFieldErrors((prev) => keys.reduce<FieldErrors<AllocationFieldKey>>(withoutError, prev))
+  const renderFieldError = (key: AllocationFieldKey) =>
+    fieldErrors[key] ? (
+      <p
+        id={fieldErrorId(key)}
+        className="mt-1 text-xs text-danger"
+        role="alert"
+        data-testid={`field-error-${key}`}
+      >
+        {fieldErrors[key]}
+      </p>
+    ) : null
+  // Editing a field clears its message (a changed start date also clears the end's).
+  const handleFormChange = (e: React.ChangeEvent<HTMLFormElement>) => {
+    setFormError('')
+    const key = (e.target as HTMLElement).dataset.field
+    if (!isAllocationFieldKey(key)) return
+    clearFieldErrors(key, ...(key === 'period_start' ? (['period_end'] as const) : []))
+  }
+  // The browser keeps owning every required/min/step; only its popup is replaced. The
+  // `invalid` events fire in tree order during the submit's validity check, so the first one
+  // collected is the first invalid field. A timer, not a microtask: on a real click the
+  // microtask queue drains between two events, so a microtask would see one field per attempt.
+  const handleInvalid = (e: React.FormEvent<HTMLFormElement>) => {
+    const target = e.target as HTMLInputElement | HTMLSelectElement
+    // Every invalid control loses its popup, wired or not: an unwired one (no data-field) is
+    // reported in the form-level message above Save, so it fails visibly, never in a bubble.
+    e.preventDefault()
+    const targets = invalidTargets.current
+    targets.push(target)
+    if (targets.length > 1) return
+    window.setTimeout(() => {
+      const first = invalidTargets.current[0] as HTMLInputElement | undefined
+      invalidTargets.current = []
+      if (!first) return
+      const key = first.dataset.field
+      if (!isAllocationFieldKey(key)) {
+        setFieldErrors({})
+        setFormError(first.validationMessage || 'Please check this field.')
+        first.focus()
+        return
+      }
+      fail(key, (first.validity.valueMissing && ALLOCATION_REQUIRED_COPY[key]) || first.validationMessage)
+    }, 0)
+  }
+
   const toggleBudgetCategory = (categoryId: number) => {
+    clearFieldErrors('category_ids')
     setSelectedBudgetCategoryIds((prev) =>
       prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]
     )
   }
 
   const toggleSavingsAccount = (accountId: number) => {
+    clearFieldErrors('savings_account_ids')
     setSelectedSavingsAccountIds((prev) =>
       prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
     )
@@ -653,6 +769,8 @@ export function AllocationsPage() {
 
   const handleBudgetCadenceSelect = useCallback(
     (cadence: BudgetCadence) => {
+      setFieldErrors((prev) =>
+        (['period_frequency', 'period_start', 'period_end'] as const).reduce<FieldErrors<AllocationFieldKey>>(withoutError, prev))
       setAllocationForm((prev) => {
         const defaults = getDefaultBudgetPeriod(cadence)
         const baselineStart = prev.period_start ?? defaults.start
@@ -726,17 +844,19 @@ export function AllocationsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFieldErrors({})
+    setFormError('')
     try {
       if (!allocationForm.name.trim()) {
-        alert('Please enter a name for this allocation.')
+        fail('name', 'Please enter a name for this allocation.')
         return
       }
       if (!allocationForm.account_id) {
-        alert('Please choose a primary account.')
+        fail('account_id', 'Please choose a primary account.')
         return
       }
       if (allocationForm.allocation_type === 'budget' && selectedBudgetCategoryIds.length === 0) {
-        alert('Select at least one category for this budget envelope.')
+        fail('category_ids', 'Select at least one category for this budget envelope.')
         return
       }
       if (
@@ -744,7 +864,7 @@ export function AllocationsPage() {
         allocationForm.goal_mode === 'multi_account' &&
         selectedSavingsAccountIds.length === 0
       ) {
-        alert('Choose at least one account to aggregate for this savings tracker.')
+        fail('savings_account_ids', 'Choose at least one account to aggregate for this savings tracker.')
         return
       }
       if (
@@ -752,28 +872,28 @@ export function AllocationsPage() {
         allocationForm.goal_mode === 'transaction_total' &&
         !savingsCategory
       ) {
-        alert('Create a "Savings" category first so we can total those transactions.')
+        setFormError('Create a "Savings" category first so we can total those transactions.')
         return
       }
 
       if (allocationForm.allocation_type === 'budget') {
         if (!allocationForm.period_frequency) {
-          alert('Select how often this budget resets (daily, weekly, monthly, or quarterly).')
+          fail('period_frequency', 'Select how often this budget resets (daily, weekly, monthly, or quarterly).')
           return
         }
         if (!allocationForm.period_start) {
-          alert('Provide a start date for this budget period.')
+          fail('period_start', 'Provide a start date for this budget period.')
           return
         }
         if (allocationForm.period_start && allocationForm.period_end) {
           const startDate = new Date(allocationForm.period_start)
           const endDate = new Date(allocationForm.period_end)
           if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-            alert('Budget period dates must be valid calendar dates.')
+            fail('period_start', 'Budget period dates must be valid calendar dates.')
             return
           }
           if (endDate <= startDate) {
-            alert('Budget end date must be after the start date.')
+            fail('period_end', 'Budget end date must be after the start date.')
             return
           }
         }
@@ -908,17 +1028,19 @@ export function AllocationsPage() {
   }
 
   const handleDelete = async (allocationId: number) => {
-    if (confirm('Are you sure you want to delete this allocation?')) {
-      try {
-        await deleteAllocation(allocationId).unwrap()
-        if (actionAllocation?.id === allocationId) {
-          closeActionModal()
-        }
-        await loadAllocations(true)
-      } catch (error) {
-        console.error('Error deleting allocation:', error)
-      }
+    // The delete runs from the dialog, so a refusal stays there with the server's reason.
+    const deleted = await askConfirm({
+      title: 'Delete allocation?',
+      message: 'Are you sure you want to delete this allocation?',
+      confirmLabel: 'Delete allocation',
+      action: () => deleteAllocation(allocationId).unwrap(),
+      errorFallback: 'Could not delete the allocation. Please try again.',
+    })
+    if (!deleted) return
+    if (actionAllocation?.id === allocationId) {
+      closeActionModal()
     }
+    await loadAllocations(true)
   }
 
   const openActionModal = (allocation: Allocation) => {
@@ -1878,7 +2000,7 @@ export function AllocationsPage() {
               </button>
                 </div>
                 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} onChange={handleFormChange} onInvalidCapture={handleInvalid} className="space-y-5">
               <>
               <div>
                 <label className="block text-sm font-medium text-body">Account</label>
@@ -1892,6 +2014,9 @@ export function AllocationsPage() {
                       }
                   className="mt-1 block w-full border border-line px-3 py-2"
                   required
+                  ref={bindField('account_id')}
+                  data-field="account_id"
+                  {...fieldProps('account_id')}
                 >
                       <option value={0}>Select account</option>
                       {ownAccounts.map((account) => (
@@ -1900,6 +2025,7 @@ export function AllocationsPage() {
                     </option>
                   ))}
                 </select>
+                {renderFieldError('account_id')}
               </div>
               
               <div>
@@ -1915,7 +2041,11 @@ export function AllocationsPage() {
                       }
                   className="mt-1 block w-full border border-line px-3 py-2"
                   required
+                  ref={bindField('name')}
+                  data-field="name"
+                  {...fieldProps('name')}
                 />
+                {renderFieldError('name')}
               </div>
               
               <div>
@@ -1935,14 +2065,16 @@ export function AllocationsPage() {
 
                   {allocationForm.allocation_type === 'budget' && (
                     <div>
-                      <label className="block text-sm font-medium text-body">Tracked Categories</label>
-                      <div className="mt-1 flex flex-wrap gap-2">
+                      <label className="block text-sm font-medium text-body" id="allocation-categories-label">Tracked Categories</label>
+                      <div className="mt-1 flex flex-wrap gap-2" aria-labelledby="allocation-categories-label" {...groupProps('category_ids')}>
                         {categories.map((category) => {
                           const isSelected = selectedBudgetCategoryIds.includes(category.id)
                           return (
                             <button
                               type="button"
                               key={category.id}
+                              data-selected={isSelected ? 'true' : undefined}
+                              aria-describedby={fieldProps('category_ids')['aria-describedby']}
                               onClick={() => toggleBudgetCategory(category.id)}
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                             >
@@ -1951,18 +2083,21 @@ export function AllocationsPage() {
                           )
                         })}
               </div>
+                    {renderFieldError('category_ids')}
                     <p className="mt-2 text-xs text-muted">
                       Transactions in these categories will roll into this envelope when they post.
                     </p>
                     <div className="mt-4 space-y-2">
-                      <label className="block text-sm font-medium text-body">Budget cadence</label>
-                      <div className="flex flex-wrap gap-2">
+                      <label className="block text-sm font-medium text-body" id="allocation-cadence-label">Budget cadence</label>
+                      <div className="flex flex-wrap gap-2" aria-labelledby="allocation-cadence-label" {...groupProps('period_frequency')}>
                         {budgetCadenceOptions.map((cadence) => {
                           const isSelected = allocationForm.period_frequency === cadence
                           return (
                             <button
                               type="button"
                               key={cadence}
+                              data-selected={isSelected ? 'true' : undefined}
+                              aria-describedby={fieldProps('period_frequency')['aria-describedby']}
                               onClick={() => handleBudgetCadenceSelect(cadence)}
                               className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                             >
@@ -1971,6 +2106,7 @@ export function AllocationsPage() {
                           )
                         })}
                       </div>
+                      {renderFieldError('period_frequency')}
                       <p className="text-xs text-muted">
                         Choose how often this envelope resets so we can bucket transactions correctly.
                       </p>
@@ -1984,7 +2120,11 @@ export function AllocationsPage() {
                           onChange={(e) => handleBudgetPeriodStartChange(e.target.value)}
                   className="mt-1 block w-full border border-line px-3 py-2"
                   required
+                          ref={bindField('period_start')}
+                          data-field="period_start"
+                          {...fieldProps('period_start')}
                         />
+                        {renderFieldError('period_start')}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-body">Period end (optional)</label>
@@ -1998,7 +2138,11 @@ export function AllocationsPage() {
                             }))
                           }
                           className="mt-1 block w-full border border-line px-3 py-2"
+                          ref={bindField('period_end')}
+                          data-field="period_end"
+                          {...fieldProps('period_end')}
                         />
+                        {renderFieldError('period_end')}
                       </div>
                     </div>
                     </div>
@@ -2031,12 +2175,13 @@ export function AllocationsPage() {
                               <button
                                 type="button"
                                 key={option.value}
-                                onClick={() =>
+                                onClick={() => {
+                                  setFormError('')
                                   setAllocationForm((prev) => ({
                                     ...prev,
                                     goal_mode: option.value,
                                   }))
-                                }
+                                }}
                                 className={`border px-3 py-2 text-left text-sm transition ${ isSelected ? 'border-ink text-ink' : 'border-line bg-surface hover:border-line-strong' }`}
                               >
                                 <span className="block font-semibold">{option.label}</span>
@@ -2049,16 +2194,18 @@ export function AllocationsPage() {
               
                       {allocationForm.goal_mode === 'multi_account' && (
               <div>
-                          <label className="block text-sm font-medium text-body">
+                          <label className="block text-sm font-medium text-body" id="allocation-savings-accounts-label">
                             Accounts to aggregate
                           </label>
-                          <div className="mt-1 flex flex-wrap gap-2">
+                          <div className="mt-1 flex flex-wrap gap-2" aria-labelledby="allocation-savings-accounts-label" {...groupProps('savings_account_ids')}>
                             {ownAccounts.map((account) => {
                               const isSelected = selectedSavingsAccountIds.includes(account.id)
                               return (
                                 <button
                                   type="button"
                                   key={account.id}
+                                  data-selected={isSelected ? 'true' : undefined}
+                                  aria-describedby={fieldProps('savings_account_ids')['aria-describedby']}
                                   onClick={() => toggleSavingsAccount(account.id)}
                                   className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                                 >
@@ -2067,6 +2214,7 @@ export function AllocationsPage() {
                               )
                             })}
                           </div>
+                          {renderFieldError('savings_account_ids')}
                         </div>
                       )}
                       {allocationForm.goal_mode === 'transaction_total' && (
@@ -2097,7 +2245,11 @@ export function AllocationsPage() {
                         }
                   className="mt-1 block w-full border border-line px-3 py-2"
                   required
+                  ref={bindField('current_amount')}
+                  data-field="current_amount"
+                  {...fieldProps('current_amount')}
                 />
+                {renderFieldError('current_amount')}
                       {allocationForm.allocation_type === 'budget' && (
                         <p className="mt-1 text-xs text-muted">
                           Track how much of the envelope has already been used this period.
@@ -2123,7 +2275,11 @@ export function AllocationsPage() {
                         }
                   className="mt-1 block w-full border border-line px-3 py-2"
                         required={allocationForm.allocation_type === 'budget'}
+                        ref={bindField('target_amount')}
+                        data-field="target_amount"
+                        {...fieldProps('target_amount')}
                       />
+                      {renderFieldError('target_amount')}
                       {allocationForm.allocation_type === 'budget' ? (
                         <p className="mt-1 text-xs text-muted">
                           The maximum amount available for this envelope before it resets.
@@ -2154,7 +2310,11 @@ export function AllocationsPage() {
                             }))
                           }
                   className="mt-1 block w-full border border-line px-3 py-2"
+                  ref={bindField('monthly_target')}
+                  data-field="monthly_target"
+                  {...fieldProps('monthly_target')}
                 />
+                {renderFieldError('monthly_target')}
               </div>
               <div>
                         <label className="block text-sm font-medium text-body">
@@ -2170,7 +2330,11 @@ export function AllocationsPage() {
                             }))
                           }
                   className="mt-1 block w-full border border-line px-3 py-2"
+                  ref={bindField('target_date')}
+                  data-field="target_date"
+                  {...fieldProps('target_date')}
                 />
+                {renderFieldError('target_date')}
               </div>
                     </div>
                   )}
@@ -2203,6 +2367,12 @@ export function AllocationsPage() {
                     </button>
                   </div>
                 </>
+
+              {formError && (
+                <p className="text-sm text-danger" role="alert" data-testid="allocation-form-error">
+                  {formError}
+                </p>
+              )}
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <button

@@ -12,6 +12,7 @@
 // Usage: node frontend/e2e/smooth-allocations.cjs [scenario]
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
+const d = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -85,8 +86,9 @@ const waitResponse = (page, pred, timeout = 10000) => page.waitForResponse(pred,
 async function openPage(browser) {
   const { ctx, page } = await h.newPage(browser)
   page.setDefaultTimeout(10000)
-  page.on('dialog', (d) => { console.log(`  NOTE dialog: ${d.message()}`); d.dismiss().catch(() => {}) })
-  return { ctx, page }
+  // No browser alert, confirm or prompt may fire (STU-410); the tracker dismisses and counts them.
+  const native = d.trackNativeDialogs(page)
+  return { ctx, page, native }
 }
 
 /** The names on the envelope cards, in screen order. */
@@ -137,7 +139,7 @@ async function scenarioA(browser) {
   console.log('\n=== (a) a create keeps the envelope cards on screen while the list reloads')
   const u = await seedUser('a')
   await envelopes(u, 'A Env', 3)
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let g = null
   try {
     await h.uiLogin(page, stack, u)
@@ -161,6 +163,7 @@ async function scenarioA(browser) {
     await h.check('a.equals-api', 'B', () => namesMatchApi(page, u))
   } finally {
     g?.release({ disarm: true })
+    await d.checkNoNativeDialogs(h, 'a', native)
     await ctx.close()
   }
 }
@@ -170,7 +173,7 @@ async function scenarioB(browser) {
   console.log('\n=== (b) a stale load-more page is dropped when a reset lands first')
   const u = await seedUser('b')
   await envelopes(u, 'B Env', 25)
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   const log = []
   page.on('request', (r) => { if (isAllocationsList(r)) log.push({ offset: offsetOf(r.url()), at: Date.now() }) })
   let post = null, stale = null
@@ -244,6 +247,7 @@ async function scenarioB(browser) {
   } finally {
     post?.release({ disarm: true })
     stale?.release({ disarm: true })
+    await d.checkNoNativeDialogs(h, 'b', native)
     await ctx.close()
   }
 }
@@ -254,7 +258,7 @@ async function scenarioE(browser) {
   const u = await seedUser('e')
   await envelopes(u, 'E Env', 1)
   await entry(u, { name: 'E Streaming' })
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let g = null
   try {
     await h.uiLogin(page, stack, u)
@@ -277,6 +281,7 @@ async function scenarioE(browser) {
     })
   } finally {
     g?.release({ disarm: true })
+    await d.checkNoNativeDialogs(h, 'e', native)
     await ctx.close()
   }
 }
@@ -288,7 +293,7 @@ async function scenarioC(browser) {
   const tag = await client.post(u.token, '/tags/', { name: 'C Household' })
   await entry(u, { name: 'C Tagged', tag_ids: [tag.id] })
   await entry(u, { name: 'C Untagged' })
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let g = null
   try {
     await h.uiLogin(page, stack, u)
@@ -317,6 +322,7 @@ async function scenarioC(browser) {
     })
   } finally {
     g?.release({ disarm: true })
+    await d.checkNoNativeDialogs(h, 'c', native)
     await ctx.close()
   }
 }
@@ -337,7 +343,7 @@ async function scenarioD(browser) {
   const u = await seedUser('d')
   await envelopes(u, 'D Env', 1)
   await entry(u, { name: 'D Streaming' })
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let allocFail = null, entriesFail = null
   try {
     await h.uiLogin(page, stack, u)
@@ -369,6 +375,7 @@ async function scenarioD(browser) {
   } finally {
     await allocFail?.stop()
     await entriesFail?.stop()
+    await d.checkNoNativeDialogs(h, 'd', native)
     await ctx.close()
   }
 }
@@ -378,7 +385,7 @@ async function scenarioF(browser) {
   console.log('\n=== (f) a failed reload keeps the cards with an alert and Retry above')
   const u = await seedUser('f')
   await envelopes(u, 'F Env', 2)
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let fail = null
   try {
     await h.uiLogin(page, stack, u)
@@ -419,6 +426,7 @@ async function scenarioF(browser) {
     })
   } finally {
     await fail?.stop()
+    await d.checkNoNativeDialogs(h, 'f', native)
     await ctx.close()
   }
 }
@@ -430,7 +438,7 @@ async function scenarioG(browser) {
   console.log('\n=== (g) a failed wishlist load shows an error with Retry, not an empty wishlist')
   const u = await seedUser('g')
   const item = await client.post(u.token, '/wishlist/', { name: 'G Standing Desk', estimated_cost: 12000, currency: 'PHP', priority: 'high' })
-  const { ctx, page } = await openPage(browser)
+  const { ctx, page, native } = await openPage(browser)
   let fail = null
   try {
     // Keeps, from the first document, whether the empty text ever appeared in the body
@@ -466,6 +474,7 @@ async function scenarioG(browser) {
     })
   } finally {
     await fail?.stop()
+    await d.checkNoNativeDialogs(h, 'g', native)
     await ctx.close()
   }
 }
