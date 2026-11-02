@@ -10,19 +10,25 @@
 export interface QueryEntryLike {
   status: string
   endpointName?: string
+  /** The id of the request that last started this entry (from `executeQuery/pending`). */
+  requestId?: string
 }
 
 /** One API's `queries` state: cache key to entry (entries can be `undefined`). */
 export type QuerySliceLike = Readonly<Record<string, QueryEntryLike | undefined>>
 
+const emptySet: ReadonlySet<string> = new Set()
+
 /**
- * True when any query entry is `pending` and its endpoint is not exempt.
+ * True when any query entry is `pending`, its endpoint is not exempt and its request
+ * is not quiet (`quietIds`, see `applyQuietQueryAction`).
  * Read as a level from state, so joined requests, StrictMode, `resetApiState` and
  * cache removal can never leave it stale.
  */
 export function anyQueryPending(
   slices: ReadonlyArray<QuerySliceLike | undefined>,
   exempt: ReadonlySet<string>,
+  quietIds: ReadonlySet<string> = emptySet,
 ): boolean {
   for (const slice of slices) {
     if (!slice) continue
@@ -30,6 +36,7 @@ export function anyQueryPending(
       const entry = slice[key]
       if (!entry || entry.status !== 'pending') continue
       if (entry.endpointName !== undefined && exempt.has(entry.endpointName)) continue
+      if (entry.requestId !== undefined && quietIds.has(entry.requestId)) continue
       return true
     }
   }
@@ -89,6 +96,68 @@ export function applyRequestAction(
     if (!ids.has(id)) return ids
     const next = new Set(ids)
     next.delete(id)
+    return next
+  }
+  return ids
+}
+
+/**
+ * True only for `<path>/executeMutation/fulfilled` or `rejected` of an endpoint in
+ * `quietMutations`. The refetches such a mutation's tag invalidation starts are
+ * dispatched while that settle action runs, so the caller marks them quiet then.
+ * False for `pending`, for any other endpoint and for query actions.
+ */
+export function isQuietSettle(
+  action: RequestActionLike,
+  reducerPaths: readonly string[],
+  quietMutations: ReadonlySet<string>,
+): boolean {
+  for (const path of reducerPaths) {
+    const prefix = `${path}/`
+    if (!action.type.startsWith(prefix)) continue
+    const rest = action.type.slice(prefix.length)
+    if (rest !== 'executeMutation/fulfilled' && rest !== 'executeMutation/rejected') return false
+    const endpoint = action.meta?.arg?.endpointName
+    return endpoint !== undefined && quietMutations.has(endpoint)
+  }
+  return false
+}
+
+/**
+ * The set of quiet query request ids after `action`.
+ *
+ * - `<path>/executeQuery/pending` while `quiet` adds `meta.requestId`.
+ * - `executeQuery/fulfilled` or `rejected` (an abort is `rejected`) deletes it.
+ * - `<path>/resetApiState` clears the set.
+ * - Anything else, mutation actions included, returns `ids` itself.
+ *
+ * Returns `ids` itself when nothing changed, otherwise a new set.
+ */
+export function applyQuietQueryAction(
+  ids: ReadonlySet<string>,
+  action: RequestActionLike,
+  reducerPaths: readonly string[],
+  quiet: boolean,
+): ReadonlySet<string> {
+  for (const path of reducerPaths) {
+    const prefix = `${path}/`
+    if (!action.type.startsWith(prefix)) continue
+    const rest = action.type.slice(prefix.length)
+
+    if (rest === 'resetApiState') return ids.size === 0 ? ids : new Set()
+
+    const match = /^executeQuery\/(pending|fulfilled|rejected)$/.exec(rest)
+    if (!match) return ids
+    const requestId = action.meta?.requestId
+    if (requestId === undefined) return ids
+
+    if (match[1] === 'pending') {
+      if (!quiet || ids.has(requestId)) return ids
+      return new Set([...ids, requestId])
+    }
+    if (!ids.has(requestId)) return ids
+    const next = new Set(ids)
+    next.delete(requestId)
     return next
   }
   return ids
