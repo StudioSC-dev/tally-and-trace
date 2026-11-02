@@ -1288,6 +1288,65 @@ def test_payment_from_a_card_the_caller_cant_view_nets_the_statement(db, owners)
     assert get_payables(db, owner_b.id, days=30, reference=reference) == []
 
 
+def _unbilled_sources_seen_by(db, viewer, card):
+    from app.core.access import viewable_account_ids
+    from app.services.statements import _card_rows
+
+    _, unbilled = _card_rows(db, [card.id], viewable_account_ids(db, viewer))
+    return unbilled
+
+
+def _card_d(db, owner):
+    from app.models.account import Account
+
+    return db.query(Account).filter(Account.user_id == owner.id, Account.name == "Card D").one()
+
+
+def test_card_rows_skips_an_unbilled_source_the_viewer_cannot_see(db, owners):
+    owner_a, owner_b = owners
+    _, card = _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
+    assert _unbilled_sources_seen_by(db, owner_b, card) == frozenset()
+
+
+def test_card_rows_counts_an_unbilled_source_shared_with_the_viewer(db, owners):
+    from app.tests.conftest import sw_share
+
+    owner_a, owner_b = owners
+    _, card = _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
+    source = _card_d(db, owner_a)
+    sw_share(db, source.id, owner_b.id, "viewer", owner_a.id)
+    assert _unbilled_sources_seen_by(db, owner_b, card) == frozenset({source.id})
+
+
+def test_card_rows_never_counts_a_billed_source_as_unbilled(db, owners):
+    from app.tests.conftest import sw_share
+
+    owner_a, owner_b = owners
+    _, card = _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
+    source = _card_d(db, owner_a)
+    source.billing_cycle_start = 10
+    source.days_until_due_date = 21
+    db.commit()
+    sw_share(db, source.id, owner_b.id, "viewer", owner_a.id)
+    assert _unbilled_sources_seen_by(db, owner_b, card) == frozenset()
+
+
+def test_payment_from_an_unbilled_card_shared_with_the_caller_leaves_the_statement_payable(
+        db, owners):
+    """Same setup as the hidden-source test, plus a viewer share of Card D to B: D is now
+    a source B can see, so its cycle-less state counts and the payment does not net C's
+    statement, which is still due in cash (the D to C transfer is not a payable)."""
+    from app.services.forecast import get_payables
+    from app.tests.conftest import sw_share
+
+    owner_a, owner_b = owners
+    _billed_card_paid_from_an_unbilled_card(db, owner_b, source_owner=owner_a)
+    sw_share(db, _card_d(db, owner_a).id, owner_b.id, "viewer", owner_a.id)
+    _assert_billed_debt_is_still_paid_in_cash(db, owner_b)
+    assert [p["name"] for p in get_payables(
+        db, owner_b.id, days=30, reference=datetime(2026, 8, 1))] == ["Card C statement"]
+
+
 def test_payment_from_an_inactive_unbilled_card_does_not_net_the_statement(db, user):
     _billed_card_paid_from_an_unbilled_card(db, user, source_active=False)
     _assert_billed_debt_is_still_paid_in_cash(db, user)
