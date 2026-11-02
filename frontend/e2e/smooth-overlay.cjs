@@ -1025,12 +1025,22 @@ async function scenarioF(browser) {
       await h.resetTexts(page)
       await group.getByRole('button', { name: 'year' }).click()
       await h.check('f1.shield-at-once', 'B', async () => {
-        const phase = await h.overlayPhase(page)
-        const since = await nowOf(page)
+        // Press month as soon as the held request is in flight: that press must make no request.
+        // The log stamps `t` asynchronously, so the held request can be stamped after any
+        // `since`: count by position from a snapshot taken once it is logged instead.
+        await g.waitHits(1)
+        const n = requests.length
         await h.clickBox(page, monthBox)
+        // `data-phase` renders a few ms after the request starts: poll for it, bounded at
+        // 100 ms (well under SHOW_DELAY_MS), only to confirm the overlay is in shield.
+        const shield = await h.waitPhase(page, 'shield', 100)
+        const phase = await h.overlayPhase(page)
         await h.sleep(400)
-        const extra = requestsSince(requests, since, (r) => new URL(r.url).pathname.endsWith('/transactions/summary/period'))
-        return (phase === 'shield' && extra.length === 0 && g.hits === 1) || `phase ${phase} extra ${extra.length} hits ${g.hits}`
+        const extra = requests.slice(n).filter((r) => new URL(r.url).pathname.endsWith('/transactions/summary/period'))
+        // Month's totals are cached from the first load, so an unblocked press can switch the
+        // period without a request: the period that stays selected is the behavioural read.
+        const pressed = await group.getByRole('button', { name: 'year' }).getAttribute('aria-pressed')
+        return (pressed === 'true' && shield && extra.length === 0 && g.hits === 1) || `year pressed ${pressed} shield ${shield} phase ${phase} extra ${extra.length} hits ${g.hits}`
       })
       await h.check('f1.visible-later', 'B', async () => (await visible(page)) || 'never visible')
       g.release({ disarm: true })
