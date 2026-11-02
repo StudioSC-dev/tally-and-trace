@@ -13,6 +13,7 @@ import {
   LIMITED_ROWS,
   RECURRING_ACTION_LABELS,
   PENDING_POST_LABELS,
+  dayEndWire,
   dueRecurringRows,
   dueReviewNotice,
   duePendingRows,
@@ -292,7 +293,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   }, [snapshot, snapshotRequestId, snapshotSuccess, snapshotFetching, snapshotIsError, postOnOpen])
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(() => void refetchSnapshot())
-  const endDate = `${addDays(today, WINDOW_DAYS)}T23:59:59`
+  const endDate = dayEndWire(addDays(today, WINDOW_DAYS))
   // Every loaded batch stays subscribed, so all of them refetch together when transactions change.
   const windowBatches = useMemo(
     () => Array.from({ length: batchCount }, (_, i) => ({ is_posted: false, end_date: endDate, limit: PAGE, offset: i * PAGE })),

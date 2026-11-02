@@ -9,6 +9,7 @@ import { Pager } from '../components/Pager'
 import { TagChips } from '../components/TagChips'
 import { useAuth } from '../contexts/AuthContext'
 import { useToday } from '../hooks/useToday'
+import { useManilaDay } from '../hooks/useManilaDay'
 import {
   useGetAccountQuery,
   useGetAccountsQuery,
@@ -36,14 +37,16 @@ function AccountDetailPage() {
   const navigate = Route.useNavigate()
   const { accountId: rawId } = Route.useParams()
   const { page: rawPage } = Route.useSearch()
+  // The viewer's local day is for display only; the list ends on Manila's, the server's day.
   const today = useToday()
+  const manilaDay = useManilaDay()
   const headingRef = useRef<HTMLHeadingElement>(null)
 
   const id = parsePositiveId(rawId)
   const skip = !isAuthenticated || id === null
   const page = rawPage ?? 1
   const offset = (page - 1) * PAGE_SIZE
-  const end = listBounds('', '', today).main?.end
+  const end = listBounds('', '', manilaDay).main?.end
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) navigate({ to: '/login', search: { message: undefined } })
