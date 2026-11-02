@@ -1298,7 +1298,13 @@ export function TransactionsPage() {
 
       const selectedAccount = accounts.find((account) => account.id === formData.account_id)
       const accountCurrency = (selectedAccount?.currency as CurrencyCode) || fallbackCurrency
-      const projectedCurrency = formData.projected_currency ?? accountCurrency
+      // A new posted row keeps a foreign currency only when a positive projected amount was
+      // typed for it; the hidden select's earlier value must not ride into a bare actual.
+      const enteredProjected = formData.projected_amount ?? 0
+      const projectedCurrency =
+        formData.is_posted && !editingTransaction && !(enteredProjected > 0)
+          ? accountCurrency
+          : (formData.projected_currency ?? accountCurrency)
       const destinationAccount = accounts.find((account) => account.id === formData.transfer_to_account_id)
       const crossing =
         formData.transaction_type === 'transfer' &&

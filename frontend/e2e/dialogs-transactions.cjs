@@ -480,6 +480,157 @@ async function scenarioF(browser) {
   }
 }
 
+// Create bodies as the page sends them; read once the save has settled.
+function watchCreates(page) {
+  const bodies = []
+  page.on('request', (r) => {
+    if (!isCreate(r)) return
+    try { bodies.push(JSON.parse(r.postData() || '{}')) } catch { bodies.push(null) }
+  })
+  return bodies
+}
+
+/** The API's rows whose description is `description`. */
+async function apiRows(description) {
+  const list = await client.get(owner.token, '/transactions/?limit=200')
+  const items = Array.isArray(list) ? list : list.items
+  return items.filter((row) => row.description === description)
+}
+
+/** Checks the sent body's currency and the stored row's face for one posted save. */
+async function checkPostedSave(name, body, description, wantCurrency, wantAmount) {
+  await h.check(`${name}.body-currency`, 'B', async () =>
+    (body && body.projected_currency === wantCurrency) || `projected_currency ${body && body.projected_currency}, want ${wantCurrency}`)
+  await h.check(`${name}.stored`, 'B', async () => {
+    const rows = await apiRows(description)
+    const row = rows[0]
+    const ok = rows.length === 1 && Number(row.amount) === wantAmount && !row.original_currency && !row.original_amount
+    return ok || `rows ${rows.length}, amount ${row && row.amount}, original_currency ${row && row.original_currency}, original_amount ${row && row.original_amount}`
+  })
+}
+
+// (g) A posted Create with no projected figure posts in the account currency, even when a
+// foreign currency was picked while pending (STU-495). The ticked box hides the select.
+async function scenarioG(browser) {
+  console.log('\n=== (g) Pending USD chosen with no figure, then posted: the account currency')
+  const { ctx, page, native } = await openTransactions(browser)
+  const creates = watchCreates(page)
+  try {
+    const modal = await openAddForm(page)
+    await control(modal, 'description').fill('Dialog G tick')
+    await control(modal, 'account_id').getByRole('button', { name: /^Dlg Checking/ }).click()
+    await modal.getByRole('checkbox', { name: 'Mark as posted' }).uncheck()
+    await modal.locator('select').selectOption('USD')
+    await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
+    await control(modal, 'amount').fill('180')
+    await submit(page, modal)
+    await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
+    await h.waitQuiet(page)
+    await checkPostedSave('g.tick', creates[0], 'Dialog G tick', 'PHP', 180)
+  } finally {
+    await d.checkNoNativeDialogs(h, 'g', native)
+    await ctx.close()
+  }
+}
+
+// (h) Posted from the start on the USD account: sent and stored in USD with no foreign face.
+// A regression test: the account switch used to keep the first account's currency (PHP) on the USD account.
+async function scenarioH(browser) {
+  console.log('\n=== (h) Posted from the start on a USD account: USD, no foreign face')
+  const { ctx, page, native } = await openTransactions(browser)
+  const creates = watchCreates(page)
+  try {
+    const modal = await openAddForm(page)
+    await control(modal, 'description').fill('Dialog H switch')
+    await control(modal, 'account_id').getByRole('button', { name: /^Dlg Dollars/ }).click()
+    await control(modal, 'amount').fill('10')
+    await submit(page, modal)
+    await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
+    await h.waitQuiet(page)
+    await checkPostedSave('h.switch', creates[0], 'Dialog H switch', 'USD', 10)
+  } finally {
+    await d.checkNoNativeDialogs(h, 'h', native)
+    await ctx.close()
+  }
+}
+
+// (i) Edit keeps the foreign face: a pending USD 10 row, posted with a PHP actual, stays USD
+// and its rate is actual / face. Both checks are Edit guards: they pass at the parent and pin unchanged Edit behaviour.
+async function scenarioI(browser) {
+  console.log('\n=== (i) Editing a pending USD row to posted keeps its USD face')
+  await client.post(owner.token, '/transactions/', {
+    account_id: checking.id,
+    transaction_type: 'debit',
+    amount: 10,
+    currency: 'USD',
+    projected_amount: 10,
+    projected_currency: 'USD',
+    description: 'Dialog I edit',
+    transaction_date: new Date().toISOString(),
+    is_posted: false,
+  })
+  const { ctx, page, native } = await openTransactions(browser)
+  try {
+    const actions = await openActions(page, 'Dialog I edit')
+    await actions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
+    const modal = formModal(page, 'Edit Transaction')
+    await modal.waitFor()
+    await h.waitQuiet(page)
+    await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
+    await control(modal, 'amount').fill('560')
+    await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await page.waitForTimeout(300)
+    await h.waitQuiet(page)
+    await h.check('i.stored-usd', 'G', async () => {
+      const rows = await apiRows('Dialog I edit')
+      const row = rows[0]
+      const ok = rows.length === 1 && row.is_posted && row.original_currency === 'USD' && Math.abs(Number(row.exchange_rate) - 56) < 0.0001
+      return ok || `rows ${rows.length}, posted ${row && row.is_posted}, original_currency ${row && row.original_currency}, rate ${row && row.exchange_rate}, amount ${row && row.amount}`
+    })
+
+    // The same edit with the planned figure cleared first still sends the row's USD: only a
+    // Create falls back to the account currency.
+    await client.post(owner.token, '/transactions/', {
+      account_id: checking.id,
+      transaction_type: 'debit',
+      amount: 10,
+      currency: 'USD',
+      projected_amount: 10,
+      projected_currency: 'USD',
+      description: 'Dialog I bare',
+      transaction_date: new Date().toISOString(),
+      is_posted: false,
+    })
+    await page.reload()
+    await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+    await h.waitQuiet(page)
+    const bareActions = await openActions(page, 'Dialog I bare')
+    await bareActions.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
+    const bare = formModal(page, 'Edit Transaction')
+    await bare.waitFor()
+    await h.waitQuiet(page)
+    const sent = []
+    page.on('request', (r) => {
+      if (r.method() !== 'POST' && pathOf(r.url()).includes('/transactions/')) {
+        try { sent.push(JSON.parse(r.postData() || '{}')) } catch { sent.push(null) }
+      }
+    })
+    await control(bare, 'projected_amount').fill('')
+    await bare.getByRole('checkbox', { name: 'Mark as posted' }).check()
+    await control(bare, 'amount').fill('560')
+    await bare.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+    await page.waitForTimeout(300)
+    await h.waitQuiet(page)
+    await h.check('i.bare-edit-keeps-usd', 'G', async () => {
+      const body = sent[0]
+      return (body && body.projected_currency === 'USD') || `edit body projected_currency ${body && body.projected_currency} (${sent.length} edit requests)`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'i', native)
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'transactions')
   checking = await client.post(owner.token, '/accounts/', { name: 'Dlg Checking', account_type: 'checking', balance: 100000, currency: 'PHP' })
@@ -493,6 +644,9 @@ const SCENARIOS = [
   ['d', scenarioD],
   ['e', scenarioE],
   ['f', scenarioF],
+  ['g', scenarioG],
+  ['h', scenarioH],
+  ['i', scenarioI],
 ]
 
 ;(async () => {
