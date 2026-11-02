@@ -534,7 +534,7 @@ async function scenarioG(browser) {
 }
 
 // (h) Posted from the start on the USD account: sent and stored in USD with no foreign face.
-// A guard: the account-switch route never carried a stale currency.
+// A regression test: the account switch used to keep the first account's currency (PHP) on the USD account.
 async function scenarioH(browser) {
   console.log('\n=== (h) Posted from the start on a USD account: USD, no foreign face')
   const { ctx, page, native } = await openTransactions(browser)
