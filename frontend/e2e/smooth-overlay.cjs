@@ -485,6 +485,14 @@ async function scenarioO2(browser) {
   try {
     await h.uiLogin(page, stack, owner)
     await openTransactions(page)
+    // The stuck card is centred in the viewport and can cover PREV_MONTH (its Reload page
+    // too, as the Due card grows). Before the stuck state, make the viewport tall enough
+    // that PREV_MONTH sits well above the centre, and scroll to the top.
+    const monthBottom = await page.locator(PREV_MONTH).evaluate((el) => el.getBoundingClientRect().bottom + window.scrollY)
+    const size = page.viewportSize()
+    await page.setViewportSize({ width: size.width, height: Math.max(size.height, Math.ceil(2 * (monthBottom + 400))) })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await h.waitQuiet(page)
     const search = page.locator(SEARCH)
     await search.click()
     await pauseNow(page)
@@ -515,7 +523,23 @@ async function scenarioO2(browser) {
     await h.check('o2.typing', 'B', async () => (await search.inputValue()) === 'abc' || `value "${await search.inputValue()}"`)
     const label = await monthLabel(page)
     const before = apiRequests(requests)
-    await h.clickBox(page, await boxOf(page.locator(PREV_MONTH)))
+    // A physical press at PREV_MONTH's centre: it must land on the scrim (PREV_MONTH's
+    // container is inert, so it never appears in a hit test), never on the card or Reload.
+    const monthBox = await boxOf(page.locator(PREV_MONTH))
+    const point = { x: monthBox.x + monthBox.width / 2, y: monthBox.y + monthBox.height / 2 }
+    await h.check('o2.month-point-on-scrim', 'S', async () => {
+      const r = await page.evaluate(([sel, x, y]) => {
+        const rect = document.querySelector(sel).getBoundingClientRect()
+        const hit = document.elementFromPoint(x, y)
+        return {
+          inRect: x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom,
+          inViewport: x >= 0 && x < window.innerWidth && y >= 0 && y < window.innerHeight,
+          hit: hit?.getAttribute('data-testid') ?? hit?.tagName ?? null,
+        }
+      }, [PREV_MONTH, point.x, point.y])
+      return (r.inRect && r.inViewport && r.hit === 'busy-overlay') || JSON.stringify(r)
+    })
+    await page.mouse.click(point.x, point.y)
     await h.sleep(300)
     await h.check('o2.month-blocked', 'B', async () => {
       const after = await monthLabel(page)
