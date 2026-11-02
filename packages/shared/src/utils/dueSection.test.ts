@@ -35,6 +35,10 @@ import {
   shouldPostOnOpen,
   statementRowText,
   duePendingRows,
+  isOneOffPending,
+  loggedDays,
+  loggedText,
+  notPostedRows,
   dueRecurringRows,
   dueStatementRows,
   effectiveDuePage,
@@ -507,24 +511,23 @@ describe('Group B: duePendingRows', () => {
     missed: [missed({ entry_id: 2, name: 'Rent', pending_transaction_ids: [61, 60] })],
   })
 
-  it.each(MODES)('lists yesterday, a recurring card charge and linked rows; drops posted and Limited rows (%s)', (mode) => {
+  it.each(MODES)('lists a recurring card charge and linked rows; drops one-offs, posted and Limited rows (%s)', (mode) => {
     // The Limited mode never adds a pending row.
     void mode
     const window = [
       txn({ id: 40, transaction_date: '2026-10-19T00:00:00Z' }),
       txn({ id: 41, transaction_date: '2026-10-25T00:00:00Z' }),
       txn({ id: 42, transaction_date: '2026-10-18T00:00:00Z', is_posted: true }),
-      txn({ id: 50, transaction_date: TODAY + 'T00:00:00Z' }),
+      txn({ id: 50, transaction_date: TODAY + 'T00:00:00Z', budget_entry_id: 7, is_recurring: true }),
       txn({ id: 51, transaction_date: '2026-10-25T00:00:00Z' }),
       txn({ id: 52, transaction_date: TODAY + 'T00:00:00Z' }),
     ]
     const linked = [
-      txn({ id: 60, transaction_date: TODAY + 'T00:00:00Z' }),
+      txn({ id: 60, transaction_date: TODAY + 'T00:00:00Z', budget_entry_id: 8, is_recurring: true }),
       txn({ id: 61, transaction_date: '2026-09-20T00:00:00Z', is_posted: true }),
     ]
     const rows = duePendingRows([...window, limitedTxn(70, '2026-10-10T00:00:00Z')], linked, s, TODAY)
     expect(rows.map((r) => [r.transaction.id, r.overdue, r.action])).toEqual([
-      [40, true, 'mark_posted'],
       [50, false, 'posted'],
       [60, false, 'mark_posted'],
     ])
@@ -533,27 +536,30 @@ describe('Group B: duePendingRows', () => {
   it('drops a row dated after today even when it is a recurring card charge or a missed row links it', () => {
     const window = [
       txn({ id: 41, transaction_date: '2026-10-25T00:00:00Z' }),
-      txn({ id: 50, transaction_date: '2026-10-25T00:00:00Z' }),
+      txn({ id: 50, transaction_date: '2026-10-25T00:00:00Z', budget_entry_id: 7, is_recurring: true }),
     ]
-    const linked = [txn({ id: 60, transaction_date: '2026-12-04T00:00:00Z' })]
+    const linked = [txn({ id: 60, transaction_date: '2026-12-04T00:00:00Z', budget_entry_id: 8, is_recurring: true })]
     expect(duePendingRows(window, linked, s, TODAY)).toEqual([])
-    expect(duePendingRows(window, linked, s, '2026-12-04').map((r) => r.transaction.id)).toEqual([41, 50, 60])
+    expect(duePendingRows(window, linked, s, '2026-12-04').map((r) => r.transaction.id)).toEqual([50, 60])
   })
 
   it('lists a row in both queries once', () => {
-    const t = txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z' })
+    const t = txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z', budget_entry_id: 7, is_recurring: true })
     expect(duePendingRows([t], [t], s, TODAY)).toHaveLength(1)
   })
 
   it('reads the day from the wall-time components', () => {
     // 23:30 wall time on the 19th is still the 19th.
-    const rows = duePendingRows([txn({ id: 40, transaction_date: '2026-10-19T23:30:00' })], [], s, TODAY)
+    const rows = duePendingRows([txn({ id: 40, transaction_date: '2026-10-19T23:30:00', budget_entry_id: 7, is_recurring: true })], [], s, TODAY)
     expect(rows[0]).toMatchObject({ date: '2026-10-19', overdue: true })
   })
 
   it('offers no action without can_post, and keeps a shared_full row', () => {
     const rows = duePendingRows(
-      [txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z', permissions: noPost }), sharedTxn({ id: 50, transaction_date: TODAY + 'T00:00:00Z' })],
+      [
+        txn({ id: 40, transaction_date: '2026-10-01T00:00:00Z', permissions: noPost, budget_entry_id: 7, is_recurring: true }),
+        sharedTxn({ id: 50, transaction_date: TODAY + 'T00:00:00Z', is_recurring: true }),
+      ],
       [],
       s,
       TODAY,
@@ -583,7 +589,7 @@ describe('pendingLinkIds and pendingPostLabel', () => {
 })
 
 describe('orderDueRows', () => {
-  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z` })], [], snap({}), TODAY)
+  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z`, budget_entry_id: 900 + id, is_recurring: true })], [], snap({}), TODAY)
   const names = (rows: ReturnType<typeof orderDueRows>) => rows.map((r) => (r.kind === 'pending' ? `p${r.transaction.id}` : r.name))
 
   it('puts an overdue pending row before a non-overdue recurring row', () => {
@@ -624,7 +630,10 @@ describe('orderDueRows', () => {
 
   it('orders two pending rows on one day by numeric id', () => {
     const rows = duePendingRows(
-      [txn({ id: 10, transaction_date: '2026-10-19T00:00:00Z' }), txn({ id: 9, transaction_date: '2026-10-19T00:00:00Z' })],
+      [
+        txn({ id: 10, transaction_date: '2026-10-19T00:00:00Z', budget_entry_id: 7, is_recurring: true }),
+        txn({ id: 9, transaction_date: '2026-10-19T00:00:00Z', budget_entry_id: 7, is_recurring: true }),
+      ],
       [],
       snap({}),
       TODAY,
@@ -650,6 +659,7 @@ describe('orderDueRows', () => {
   it('leaves the inputs alone and keeps every row', () => {
     const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
     const pending = pend(40, '2026-10-19')
+    expect(pending).toHaveLength(1)
     const recCopy = [...rec]
     const pendCopy = [...pending]
     const out = orderDueRows(rec, pending)
@@ -725,7 +735,7 @@ describe('dueStatementRows', () => {
 })
 
 describe('orderDueRows with statements', () => {
-  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z` })], [], snap({}), TODAY)
+  const pend = (id: number, date: string) => duePendingRows([txn({ id, transaction_date: `${date}T00:00:00Z`, budget_entry_id: 900 + id, is_recurring: true })], [], snap({}), TODAY)
   const stmts = (...due: CardStatementDue[]) => dueStatementRows(snap({ card_statements_due: due }))
   const names = (rows: readonly DueSectionRow[]) =>
     rows.map((r) => (r.kind === 'pending' ? `p${r.transaction.id}` : r.kind === 'statement' ? `s${r.cardId}` : r.name))
@@ -775,6 +785,7 @@ describe('orderDueRows with statements', () => {
   it('leaves the inputs alone and keeps every row', () => {
     const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Today', source_id: 11 })] }), TODAY)
     const pending = pend(40, '2026-10-19')
+    expect(pending).toHaveLength(1)
     const statements = stmts(
       statementDue({ account_id: 2, name: 'Visa' }),
       statementDue({ account_id: 1, name: 'Amex', overdue: true }),
@@ -1021,5 +1032,166 @@ describe('statementRowText', () => {
     )
     expect(row?.unposted).toBe(3)
     expect(row?.unpostedPostable).toBe(1)
+  })
+})
+
+describe('isOneOffPending', () => {
+  it.each([
+    ['F1: full, linked, flag false', txn({ id: 1, transaction_date: TODAY, budget_entry_id: 7, is_recurring: false }), false],
+    ['F2: full, unlinked, flag true', txn({ id: 2, transaction_date: TODAY, is_recurring: true }), true],
+    ['S1: shared, flag true', sharedTxn({ id: 3, transaction_date: TODAY, is_recurring: true }), false],
+    ['S2: shared, flag false', sharedTxn({ id: 4, transaction_date: TODAY, is_recurring: false }), true],
+    ['F3: plain full', txn({ id: 5, transaction_date: TODAY }), true],
+  ])('%s', (_name, t, oneOff) => {
+    expect(isOneOffPending(t)).toBe(oneOff)
+  })
+})
+
+describe('Due and Not posted yet split the pending rows', () => {
+  const none = snap({})
+
+  it('keeps a tied, unlinked row dated yesterday in Due as overdue (a paused entry)', () => {
+    const rows = duePendingRows([txn({ id: 1, transaction_date: '2026-10-19T00:00:00Z', budget_entry_id: 7, is_recurring: true })], [], none, TODAY)
+    expect(rows.map((r) => [r.transaction.id, r.overdue])).toEqual([[1, true]])
+  })
+
+  it('keeps a shared recurring row dated yesterday in Due as overdue', () => {
+    const rows = duePendingRows([sharedTxn({ id: 3, transaction_date: '2026-10-19T00:00:00Z', is_recurring: true })], [], none, TODAY)
+    expect(rows.map((r) => [r.transaction.id, r.view, r.overdue])).toEqual([[3, 'shared_full', true]])
+  })
+
+  it('lists a tied, unlinked, non-recurring row dated today in neither tab', () => {
+    const t = txn({ id: 1, transaction_date: TODAY + 'T00:00:00Z', budget_entry_id: 7, is_recurring: false })
+    expect(duePendingRows([t], [], none, TODAY)).toEqual([])
+    expect(notPostedRows([t], TODAY)).toEqual([])
+  })
+
+  it('keeps a linked row dated yesterday in Due as overdue', () => {
+    const s = snap({ missed: [missed({ entry_id: 2, name: 'Rent', pending_transaction_ids: [9] })] })
+    const t = txn({ id: 9, transaction_date: '2026-10-19T00:00:00Z', budget_entry_id: 2, is_recurring: true })
+    expect(duePendingRows([], [t], s, TODAY).map((r) => [r.transaction.id, r.overdue])).toEqual([[9, true]])
+    expect(notPostedRows([t], TODAY)).toEqual([])
+  })
+
+  it('drops a one-off from Due, however old', () => {
+    expect(duePendingRows([txn({ id: 1, transaction_date: '2026-01-01T00:00:00Z' })], [], none, TODAY)).toEqual([])
+  })
+
+  it('is disjoint, and together covers every visible unposted row dated today or earlier but a tied row dated today with no link', () => {
+    const s = snap({ missed: [missed({ entry_id: 2, name: 'Rent', pending_transaction_ids: [4] })] })
+    const D = (n: number) => `2026-10-${String(n).padStart(2, '0')}T00:00:00Z`
+    const rows = [
+      txn({ id: 1, transaction_date: D(20) }),
+      txn({ id: 2, transaction_date: D(19) }),
+      txn({ id: 3, transaction_date: D(20), budget_entry_id: 7, is_recurring: true }),
+      txn({ id: 4, transaction_date: D(20), budget_entry_id: 2, is_recurring: true }),
+      txn({ id: 5, transaction_date: D(19), budget_entry_id: 7, is_recurring: true }),
+      txn({ id: 6, transaction_date: D(1), permissions: noPost }),
+      txn({ id: 7, transaction_date: D(25) }),
+      txn({ id: 8, transaction_date: D(25), budget_entry_id: 7, is_recurring: true }),
+      txn({ id: 9, transaction_date: D(10), is_posted: true }),
+      sharedTxn({ id: 10, transaction_date: D(19), is_recurring: true }),
+      sharedTxn({ id: 11, transaction_date: D(19), is_recurring: false }),
+      sharedTxn({ id: 12, transaction_date: D(20), is_recurring: true }),
+      sharedTxn({ id: 13, transaction_date: D(20), is_recurring: false }),
+      limitedTxn(14, D(5)),
+    ]
+    const due = new Set(duePendingRows(rows, [], s, TODAY).map((r) => r.transaction.id))
+    const np = new Set(notPostedRows(rows, TODAY).map((r) => r.transaction.id))
+    expect([...due].filter((id) => np.has(id))).toEqual([])
+    const visible = rows
+      .filter((t): t is FullTransaction | SharedFullTransaction => t.view !== 'limited' && !t.is_posted)
+      .filter((t) => t.transaction_date.slice(0, 10) <= TODAY)
+      .map((t) => t.id)
+    const uncovered = visible.filter((id) => !due.has(id) && !np.has(id))
+    expect(uncovered.sort((a, b) => a - b)).toEqual([3, 12])
+    expect([...due].sort((a, b) => a - b)).toEqual([4, 5, 10])
+    expect([...np].sort((a, b) => a - b)).toEqual([1, 2, 6, 11, 13])
+  })
+})
+
+describe('notPostedRows', () => {
+  const oneOff = (id: number, date: string, extra: Partial<FullTransaction> = {}) => txn({ id, transaction_date: `${date}T00:00:00Z`, ...extra })
+
+  it('lists one-offs oldest first, with how long ago each was logged', () => {
+    const rows = notPostedRows([oneOff(3, TODAY), oneOff(2, '2026-10-19'), oneOff(1, '2026-10-15')], TODAY)
+    expect(rows.map((r) => [r.transaction.id, r.date, r.daysAgo, r.logged])).toEqual([
+      [1, '2026-10-15', 5, 'logged 5 days ago'],
+      [2, '2026-10-19', 1, 'logged 1 day ago'],
+      [3, TODAY, 0, 'logged today'],
+    ])
+    expect(rows[0]).toMatchObject({ kind: 'not_posted', view: 'full', key: 'not_posted:1' })
+  })
+
+  it('orders two rows on one day by numeric id', () => {
+    expect(notPostedRows([oneOff(10, '2026-10-19'), oneOff(9, '2026-10-19')], TODAY).map((r) => r.transaction.id)).toEqual([9, 10])
+  })
+
+  it('drops posted, Limited, future, tied and linked rows', () => {
+    const rows = notPostedRows(
+      [
+        oneOff(1, '2026-10-19', { is_posted: true }),
+        limitedTxn(2, '2026-10-19T00:00:00Z'),
+        oneOff(3, '2026-10-21'),
+        oneOff(4, '2026-10-19', { budget_entry_id: 7, is_recurring: false }),
+        sharedTxn({ id: 5, transaction_date: '2026-10-19T00:00:00Z', is_recurring: true }),
+        // A full row a missed row links carries its entry id.
+        oneOff(6, '2026-10-19', { budget_entry_id: 2, is_recurring: true }),
+        oneOff(7, '2026-10-19'),
+      ],
+      TODAY,
+    )
+    expect(rows.map((r) => r.transaction.id)).toEqual([7])
+  })
+
+  it('keeps a shared one-off, with Mark posted only when the caller can post', () => {
+    const rows = notPostedRows(
+      [
+        sharedTxn({ id: 1, transaction_date: '2026-10-19T00:00:00Z', is_recurring: false }),
+        sharedTxn({ id: 2, transaction_date: '2026-10-19T00:00:00Z', is_recurring: false, permissions: noPost }),
+      ],
+      TODAY,
+    )
+    expect(rows.map((r) => [r.transaction.id, r.view, r.action])).toEqual([[1, 'shared_full', 'mark_posted'], [2, 'shared_full', null]])
+  })
+
+  it('lists a row seen in two batches once', () => {
+    const t = oneOff(1, '2026-10-19')
+    expect(notPostedRows([t, { ...t }], TODAY)).toHaveLength(1)
+  })
+
+  it('includes a row dated today and reads the wall-time day', () => {
+    const rows = notPostedRows([txn({ id: 1, transaction_date: '2026-10-19T23:30:00' })], TODAY)
+    expect(rows[0]).toMatchObject({ date: '2026-10-19', daysAgo: 1 })
+    expect(notPostedRows([oneOff(2, TODAY)], TODAY)).toHaveLength(1)
+  })
+
+  it('does not mutate its input', () => {
+    const input = [oneOff(2, '2026-10-19'), oneOff(1, '2026-10-15')]
+    const copy = structuredClone(input)
+    notPostedRows(input, TODAY)
+    expect(input).toEqual(copy)
+  })
+})
+
+describe('loggedDays and loggedText', () => {
+  it('counts whole calendar days', () => {
+    expect(loggedDays('2026-10-19T23:30:00', '2026-10-20')).toBe(1)
+    expect(loggedDays('2025-12-31', '2026-01-01')).toBe(1)
+    expect(loggedDays('2028-02-28', '2028-03-01')).toBe(2)
+    expect(loggedDays('2026-10-20', '2026-10-20')).toBe(0)
+  })
+
+  it('clamps a future day at 0 and gives null for an unreadable day', () => {
+    expect(loggedDays('2026-10-25', '2026-10-20')).toBe(0)
+    expect(loggedDays('', '2026-10-20')).toBeNull()
+    expect(loggedDays('2026-10-20', '')).toBeNull()
+  })
+
+  it('words the count', () => {
+    expect(loggedText(0)).toBe('logged today')
+    expect(loggedText(1)).toBe('logged 1 day ago')
+    expect(loggedText(2)).toBe('logged 2 days ago')
+    expect(loggedText(30)).toBe('logged 30 days ago')
   })
 })
