@@ -42,7 +42,7 @@
 //
 // Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows } = require('./_due_pages.cjs')
+const { allDueRows, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
@@ -669,6 +669,12 @@ async function partitionOnManilaDay(browser) {
     [countOf(shown.main, 'K Today Row'), countOf(shown.upcoming, 'K Today Row'), due.filter((n) => n.includes('K Today Row')).length], [1, 0, 0])
   check('(k) the Manila-tomorrow row is in Upcoming once, and nowhere else',
     [countOf(shown.upcoming, 'K Tomorrow Row'), countOf(shown.main, 'K Tomorrow Row'), due.filter((n) => n.includes('K Tomorrow Row')).length], [1, 0, 0])
+  // The Manila-today row is a one-off: Due does not list it, Not posted yet does ("logged today", by Manila's day); tomorrow's is on neither.
+  await openDueTab(page, 'not-posted')
+  const notPosted = await allDueRows(page)
+  check('(k) the Manila-today row is on Not posted yet once, "logged today"',
+    [notPosted.filter((r) => r.text.includes('K Today Row')).length, notPosted.find((r) => r.text.includes('K Today Row'))?.logged], [1, 'logged today'])
+  check('(k) the Manila-tomorrow row is on neither tab', [due.filter((n) => n.includes('K Tomorrow Row')).length, notPosted.filter((r) => r.text.includes('K Tomorrow Row')).length], [0, 0])
   const occs = await occurrences(page)
   check('(k) the occurrence due Manila today is in Due and overdue once, not in Upcoming or the main list',
     [dueOn(todayBill.id, today), occs.filter((o) => o.source === `budget_entry:${todayBill.id}` && o.day === today).length, countOf(shown.main, 'K Today Bill')], [1, 0, 0])
