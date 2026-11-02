@@ -555,7 +555,7 @@ async function scenarioH(browser) {
 }
 
 // (i) Edit keeps the foreign face: a pending USD 10 row, posted with a PHP actual, stays USD
-// and its rate is actual / face.
+// and its rate is actual / face. Both checks are Edit guards: they pass at the parent and pin unchanged Edit behaviour.
 async function scenarioI(browser) {
   console.log('\n=== (i) Editing a pending USD row to posted keeps its USD face')
   await client.post(owner.token, '/transactions/', {
@@ -581,7 +581,7 @@ async function scenarioI(browser) {
     await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
     await page.waitForTimeout(300)
     await h.waitQuiet(page)
-    await h.check('i.stored-usd', 'S', async () => {
+    await h.check('i.stored-usd', 'G', async () => {
       const rows = await apiRows('Dialog I edit')
       const row = rows[0]
       const ok = rows.length === 1 && row.is_posted && row.original_currency === 'USD' && Math.abs(Number(row.exchange_rate) - 56) < 0.0001
@@ -621,7 +621,7 @@ async function scenarioI(browser) {
     await bare.getByRole('button', { name: 'Update Transaction', exact: true }).click()
     await page.waitForTimeout(300)
     await h.waitQuiet(page)
-    await h.check('i.bare-edit-keeps-usd', 'B', async () => {
+    await h.check('i.bare-edit-keeps-usd', 'G', async () => {
       const body = sent[0]
       return (body && body.projected_currency === 'USD') || `edit body projected_currency ${body && body.projected_currency} (${sent.length} edit requests)`
     })
