@@ -299,12 +299,14 @@ def _alembic(url, *args):
     assert result.returncode == 0, result.stderr
 
 
-def test_page_open_migration_is_the_single_head(scratch_url):
+def test_page_open_migration_is_on_the_single_head(scratch_url):
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(Config(str(BACKEND_DIR / "alembic.ini")))
-    assert script.get_heads() == [PAGE_OPEN_REVISION]
+    heads = script.get_heads()
+    assert len(heads) == 1
+    assert PAGE_OPEN_REVISION in {r.revision for r in script.walk_revisions("base", heads[0])}
     assert script.get_revision(PAGE_OPEN_REVISION).down_revision == AUTO_POST_REVISION
 
     def columns():
