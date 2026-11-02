@@ -375,7 +375,55 @@ def test_editor_deletes_the_owners_entry_with_links_they_can_edit(sw, sw_client,
     linked = _debit(sw_client, a, joint, budget_entry_id=entry)["id"]
     assert _call(sw_client, sw["b"], "DELETE", f"/budget-entries/{entry}").status_code == 204
     sw_db.expire_all()
-    assert sw_db.get(Transaction, linked).budget_entry_id is None
+    row = sw_db.get(Transaction, linked)
+    assert row.budget_entry_id is None
+    assert row.is_recurring is False
+    assert row.recurrence_frequency is None
+
+
+def test_the_editor_reads_the_owners_unlinked_row_as_not_recurring(sw, sw_client):
+    # The editor sees the owner's row shared_full, without budget_entry_id: once its
+    # entry is deleted, is_recurring is the flag that says it is no longer tied.
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    entry = _entry(sw_client, a, joint)["id"]
+    linked = _debit(sw_client, a, joint, posted=False, budget_entry_id=entry)["id"]
+    before = _call(sw_client, b, "GET", f"/transactions/{linked}").json()
+    assert (before["view"], before["is_recurring"]) == ("shared_full", True)
+    assert _call(sw_client, a, "DELETE", f"/budget-entries/{entry}").status_code == 204
+    after = _call(sw_client, b, "GET", f"/transactions/{linked}")
+    assert after.status_code == 200, after.text
+    assert after.json()["view"] == "shared_full"
+    assert after.json()["is_recurring"] is False
+
+
+def test_a_refused_entry_delete_leaves_the_recurring_flag(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    a, b, joint = sw["a"], sw["b"], sw["joint"]
+    entry = _entry(sw_client, a, joint)["id"]
+    editable = _debit(sw_client, a, joint, budget_entry_id=entry)["id"]
+    private = _debit(sw_client, a, sw["a_private"], budget_entry_id=entry)["id"]
+    assert _call(sw_client, b, "DELETE", f"/budget-entries/{entry}").status_code == 409
+    sw_db.expire_all()
+    for txn_id in (editable, private):
+        row = sw_db.get(Transaction, txn_id)
+        assert row.budget_entry_id == entry
+        assert row.is_recurring is True
+        assert row.recurrence_frequency is not None
+
+
+def test_deactivating_an_entry_keeps_its_links_and_flag(sw, sw_client, sw_db):
+    from app.models.transaction import Transaction
+
+    a, joint = sw["a"], sw["joint"]
+    entry = _entry(sw_client, a, joint)["id"]
+    linked = _debit(sw_client, a, joint, posted=False, budget_entry_id=entry)["id"]
+    assert _call(sw_client, a, "PUT", f"/budget-entries/{entry}",
+                 {"is_active": False}).status_code == 200
+    sw_db.expire_all()
+    row = sw_db.get(Transaction, linked)
+    assert row.budget_entry_id == entry
+    assert row.is_recurring is True
 
 
 def test_deleting_an_entry_never_changes_a_transaction_the_caller_cannot_edit(sw, sw_client, sw_db):
@@ -614,7 +662,10 @@ def test_a_creator_with_edit_rights_still_deletes_an_entry_with_own_links(sw, sw
     posted = _debit(sw_client, b, joint, budget_entry_id=entry)["id"]
     assert _call(sw_client, b, "DELETE", f"/budget-entries/{entry}").status_code == 204
     sw_db.expire_all()
-    assert sw_db.get(Transaction, posted).budget_entry_id is None
+    row = sw_db.get(Transaction, posted)
+    assert row.budget_entry_id is None
+    assert row.is_recurring is False
+    assert row.recurrence_frequency is None
 
 
 # --- created_by_actor on every new transaction (audit round 1, L) ------------------------
