@@ -18,17 +18,18 @@
 //   (d) a viewer sees Limited rows and an overdue Limited row on the dashboard,
 //       no buttons, and no buttons in the section either
 //   (e) a pending card transaction has no Mark paid, and a future one is not in
-//       the section
+//       the section, on either tab
 //   (f) a pending foreign debit on a PHP card is listed by its face in its own
 //       currency (USD) in the Transactions list, its Details, and the section, as
-//       account detail already does (STU-462)
+//       account detail already does (STU-462); it is a one-off, so the section lists it on
+//       its Not posted yet tab, "logged 2 days ago" and not Overdue (STU-485)
 //
 // The section shows 3 rows a page: every count and absence check reads all pages and
 // every click first goes to the row's page (./_due_pages.cjs).
 //
 // Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, showRow } = require('./_due_pages.cjs')
+const { allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -385,7 +386,7 @@ async function viewerSeesLimited(browser) {
   const mode = await page.locator('[data-testid="due-section"]').getAttribute('data-limited-rows')
   console.log(`    data-limited-rows: ${mode}`)
   check('(d) the section setting is text or drop', ['text', 'drop'].includes(mode), true)
-  check('(d) the section shows the viewer no action button', await page.locator('[data-testid="due-section"] button[data-testid^="due-"]:not([data-testid="due-section-toggle"]):not([data-testid="due-load-more"])').count(), 0)
+  check('(d) the section shows the viewer no action button', await page.locator('[data-testid="due-section"] button[data-testid^="due-"]:not([data-testid="due-section-toggle"]):not([data-testid="due-load-more"]):not([role="tab"])').count(), 0)
   const shown = await allDueRows(page)
   const limitedDue = shown.filter((r) => r.view === 'limited')
   check('(d) no row on any page shows a button', shown.flatMap((r) => r.buttons), [])
@@ -417,6 +418,8 @@ async function pendingHasNoMarkPaid(browser) {
   check('(e) with no Mark paid', await row.locator('[data-testid="card-charge-mark-paid"], button').count(), 0)
   await openTransactions(page)
   check('(e) a future pending card row is not in the section, on any page', (await allDueRows(page)).filter((r) => r.text.includes('Lazada')).length, 0)
+  await openDueTab(page, 'not-posted')
+  check('(e) nor on Not posted yet, on any page', (await allDueRows(page)).filter((r) => r.text.includes('Lazada')).length, 0)
   await ctx.close()
 }
 
@@ -462,6 +465,16 @@ async function pendingForeignFace(browser) {
   await uiLogin(page, u)
   await openTransactions(page)
   await waitQuiet(page)
+  // The section's checks (STU-485) come first: the main-list checks below fail on some dates.
+  await openDueTab(page, 'not-posted')
+  const due = await rowsOf(page, 'Foreign F', 'pending')
+  check('(f) Not posted yet lists it once, not Overdue, "logged 2 days ago"', [due.length, due[0]?.overdue, due[0]?.logged], [1, false, 'logged 2 days ago'])
+  check('(f) the section row amount is $131.00', [due[0]?.text.includes('$131.00'), due[0]?.text.includes('₱131.00')], [true, false])
+
+  const dueRetained = await rowsOf(page, 'Retained F', 'pending')
+  check('(f) the section lists the retained-actual row once', dueRetained.length, 1)
+  check('(f) its section amount is the face, $80.00', [dueRetained[0]?.text.includes('$80.00'), dueRetained[0]?.text.includes('4,700')], [true, false])
+
   // Explicit range that holds the seeded rows even on the 1st or 2nd of a month, when they fall in the previous one.
   await page.getByRole('button', { name: 'Show filters' }).click()
   await page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input').fill(addDays(today, -3))
@@ -484,15 +497,6 @@ async function pendingForeignFace(browser) {
   await detailAmount.first().waitFor()
   check('(f) its Details amount is the face, $80.00', await detailAmount.first().textContent(), '$80.00')
   await closeDetails(page)
-
-  await openTransactions(page)
-  const due = await rowsOf(page, 'Foreign F', 'pending')
-  check('(f) the section lists it once, overdue', [due.length, due[0]?.overdue], [1, true])
-  check('(f) the section row amount is $131.00', [due[0]?.text.includes('$131.00'), due[0]?.text.includes('₱131.00')], [true, false])
-
-  const dueRetained = await rowsOf(page, 'Retained F', 'pending')
-  check('(f) the section lists the retained-actual row once', dueRetained.length, 1)
-  check('(f) its section amount is the face, $80.00', [dueRetained[0]?.text.includes('$80.00'), dueRetained[0]?.text.includes('4,700')], [true, false])
 
   await page.goto(`${stack.webUrl}/accounts/${visa.id}`)
   await waitQuiet(page)

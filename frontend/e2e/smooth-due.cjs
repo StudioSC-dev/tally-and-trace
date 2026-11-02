@@ -5,13 +5,15 @@
 // page's own rows. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
 //
+// (f) is STU-485's: the same for the Not posted yet badge, while the window query is held.
+//
 // Check kinds: [B] behavioural, [S] structural (a failed one makes the run invalid),
 // [G] guard. The script ends with RESULT: k/m and exits 0 only when every check passed,
 // 1 when any failed, 2 for setup.
 //
 // Usage: node frontend/e2e/smooth-due.cjs [scenario]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows } = require('./_due_pages.cjs')
+const { allDueRows, openDueTab } = require('./_due_pages.cjs')
 const h = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -27,6 +29,11 @@ const only = process.argv[2]
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+const addDays = (day, n) => {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
 const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate()
 /** `day` moved by n months, on day-of-month `anchor` (clamped to the month). */
 const addMonths = (day, n, anchor) => {
@@ -44,6 +51,12 @@ const tid = (id) => `[data-testid="${id}"]`
 const pathIs = (suffix) => (r) => new URL(r.url()).pathname.endsWith(suffix)
 /** The window query: transactions with no `ids`. */
 const isWindow = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length === 0
+/** The section's own window query: pending rows, 1000 a batch, no ids and no start date (the main list sends no is_posted). */
+const isSectionWindow = (r) => {
+  if (!isWindow(r)) return false
+  const q = new URL(r.url()).searchParams
+  return q.get('is_posted') === 'false' && q.get('limit') === '1000' && !q.has('start_date')
+}
 /** A linked batch: transactions asked for by `ids`. */
 const isLinkedBatch = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length > 0
 
@@ -105,8 +118,64 @@ async function scenarioE(browser) {
   }
 }
 
+// (f) STU-485: the window query held. Both badges (Due and Not posted yet) read "…", neither
+// tab's empty text shows, and when the batch lands the Not posted yet badge never shows a
+// figure that then changes: its history is "…" and the final value.
+async function scenarioF(browser) {
+  console.log('\n=== (f) window batch held: both badges read "…", no due-empty, then Not posted settles once')
+  const u = await h.makeUser(stack, 'due-f')
+  const today = manilaToday()
+  const bank = await client.post(u.token, '/accounts/', { name: 'Checking due-f', account_type: 'checking', balance: 100000, currency: 'PHP' })
+  for (const [days, name, amount] of [[3, 'F Coffee', 180], [1, 'F Fee', 35]]) {
+    await client.post(u.token, '/transactions/', {
+      account_id: bank.id, transaction_type: 'debit', amount, description: name,
+      transaction_date: wire(addDays(today, -days)), is_posted: false,
+    })
+  }
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  page.setDefaultTimeout(10000)
+  await h.recordTexts(page, ['due-count', 'due-not-posted-count'])
+  let g
+  try {
+    g = await h.gate(page, isSectionWindow)
+    await h.uiLogin(page, stack, u)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await h.check('f.window-held', 'S', async () => (await g.waitHits(1)) || 'window query never requested')
+    await page.locator(tid('due-section')).waitFor()
+    await page.locator(tid('due-not-posted-count')).waitFor()
+    await h.sleep(750)
+    const badge = async (id) => ((await page.locator(tid(id)).textContent()) || '').trim()
+    await h.check('f.both-badges-pending', 'B', async () => {
+      const shown = [await badge('due-count'), await badge('due-not-posted-count')]
+      return (shown[0] === '…' && shown[1] === '…') || `badges read ${JSON.stringify(shown)} while the window was held`
+    })
+    await h.check('f.no-due-empty-text-while-held', 'B', async () =>
+      (await h.expectAbsentFor(page, page.locator(tid('due-empty')), 500)) || 'due-empty shown while the window was held')
+    g.release({ disarm: true })
+    await page.locator(tid('due-not-posted-count')).filter({ hasNotText: '…' }).waitFor()
+    await h.waitQuiet(page)
+    await h.sleep(500)
+    await openDueTab(page, 'not-posted')
+    const rows = await allDueRows(page)
+    const texts = (await h.readTexts(page))['due-not-posted-count'].texts
+    await h.check('f.rows-listed', 'S', async () => rows.length === 2 || `Not posted yet lists ${rows.length} row(s), expected F Coffee and F Fee`)
+    await h.check('f.history-only-pending-and-final', 'B', async () => {
+      const allowed = new Set(['…', String(rows.length)])
+      return texts.every((t) => allowed.has(t)) || `due-not-posted-count history ${JSON.stringify(texts)}, rows ${rows.length}`
+    })
+    await h.check('f.final-equals-rows', 'B', async () => {
+      const shown = await badge('due-not-posted-count')
+      return shown === String(rows.length) || `due-not-posted-count "${shown}", ${rows.length} rows across the pager`
+    })
+  } finally {
+    g?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['e', scenarioE],
+  ['f', scenarioF],
 ]
 
 ;(async () => {

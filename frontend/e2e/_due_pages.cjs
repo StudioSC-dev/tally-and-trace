@@ -6,6 +6,9 @@
 //   - rowsOf(page, name, kind): the rows of allDueRows that match a name.
 //   - showRow(page, locator): go to the page that holds the locator and return it,
 //     for clicking a button on it.
+//   - openDueTab(page, 'due' | 'not-posted'): select a tab of the card. Only the selected
+//     tab's panel is mounted, so every helper here reads the tab on screen; one-off
+//     pending rows are on 'not-posted', everything else on 'due'.
 const { waitQuiet } = require('./_smooth.cjs')
 const ROWS = '[data-testid="due-row"]'
 
@@ -50,6 +53,9 @@ const readRows = (page) =>
       sub: paras[1]?.textContent.trim() ?? '',
       text: e.textContent.trim(),
       overdue: e.querySelector('[data-testid="due-overdue"]') !== null,
+      // A Not posted yet row only: "logged 5 days ago" and the whole-day count behind it.
+      logged: e.querySelector('[data-testid="due-logged"]')?.textContent.trim() ?? null,
+      loggedDays: e.dataset.loggedDays ?? null,
       buttons: [...e.querySelectorAll('button[data-testid^="due-"]')].map((b) => b.dataset.testid),
     }
   }))
@@ -110,4 +116,25 @@ async function showLastRow(page, locator) {
   return locator
 }
 
-module.exports = { allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
+/** The card's two tabs: test ids, and the badge each one carries. */
+const TABS = {
+  due: { tab: 'due-tab-due', badge: 'due-count' },
+  'not-posted': { tab: 'due-tab-not-posted', badge: 'due-not-posted-count' },
+}
+
+/**
+ * Selects a tab of the "Due and overdue" card: clicks it (opening the card if it is
+ * collapsed), waits for aria-selected, for its badge to be a figure and not "…", then
+ * waitQuiet. Wait for the screen loader first, since it shields clicks.
+ */
+async function openDueTab(page, which) {
+  const { tab, badge } = TABS[which] ?? {}
+  if (!tab) throw new Error(`openDueTab: unknown tab "${which}"`)
+  await waitQuiet(page)
+  await page.locator(`[data-testid="${tab}"]`).click()
+  await page.locator(`[data-testid="${tab}"][aria-selected="true"]`).waitFor({ timeout: 5000 })
+  await page.locator(`[data-testid="${badge}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 15000 })
+  await waitQuiet(page)
+}
+
+module.exports = { openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }

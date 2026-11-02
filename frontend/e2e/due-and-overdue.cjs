@@ -46,9 +46,13 @@
 // The section is paged, so a row can be on any page: every count and every
 // absence check reads all pages (./_due_pages.cjs).
 //
+// STU-485: the card has two tabs. A one-off pending row (no recurring link) is on "Not
+// posted yet", read with openDueTab(page, 'not-posted'): (b), (e), (e2), (e3), (e5), (h),
+// (p) and (q) read that tab, and (n) hand-links its pending row so it stays in Due.
+//
 // Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton } = require('./_due_pages.cjs')
+const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -317,12 +321,16 @@ async function listing(browser) {
   check('(b) Salary: Mark received', [salary.length, salary[0]?.buttons], [1, ['due-mark-received']])
   const save = await rowsOf(page, 'Save')
   check('(b) Save: Mark paid', [save.length, save[0]?.buttons], [1, ['due-mark-paid']])
-  const coffee = await rowsOf(page, 'Coffee', 'pending')
-  check('(b) Coffee: a pending row, Overdue, Mark posted', [coffee.length, coffee[0]?.overdue, coffee[0]?.buttons],
-    [1, true, ['due-mark-posted']])
+  check('(b) Coffee, a one-off, is on no Due page', (await rowsOf(page, 'Coffee', 'pending')).length, 0)
   const todayBill = all.filter((r) => r.text.includes('Today Bill'))
   check('(b) Today Bill is listed once, as a recurring row', [todayBill.length, todayBill[0]?.kind], [1, 'recurring'])
   check('(b) the paused Gym is not listed', all.filter((r) => r.text.includes('Gym')).length, 0)
+  await openDueTab(page, 'not-posted')
+  const coffee = await rowsOf(page, 'Coffee', 'pending')
+  check('(b) Coffee: on Not posted yet as one row, not Overdue, "logged 3 days ago", Mark posted',
+    [coffee.length, coffee[0]?.overdue, coffee[0]?.logged, coffee[0]?.buttons], [1, false, 'logged 3 days ago', ['due-mark-posted']])
+  check('(b) the Not posted badge is the number of rows over every page',
+    Number(await page.locator('[data-testid="due-not-posted-count"]').textContent()), (await allDueRows(page)).length)
   await ctx.close()
 }
 
@@ -393,6 +401,7 @@ async function markPostedCoffee(browser) {
   console.log('\n=== (e) Mark posted on Coffee posts it and it leaves the section')
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
+  await openDueTab(page, 'not-posted')
   const before = manilaToday()
   await (await showRow(page, pendRows(page, 'Coffee'))).locator('[data-testid="due-mark-posted"]').click()
   await postedOnInput(page).waitFor()
@@ -421,6 +430,7 @@ async function postingDateChecks(browser) {
   const row = await unposted(u, bank, addDays(today, -3), 75, 'E2 Bill')
   const { ctx, page } = await openDue(browser, u)
   const puts = putsFor(page, row.id)
+  await openDueTab(page, 'not-posted')
   await (await showRow(page, pendRows(page, 'E2 Bill'))).locator('[data-testid="due-mark-posted"]').click()
   await postedOnInput(page).waitFor()
   const error = page.locator('[data-testid="posting-form-date-error"]')
@@ -468,6 +478,7 @@ async function statusOnlyPosting(browser) {
   check('(e3) the creator loses access (204)', revoked.status, 204)
   const { ctx, page } = await openDue(browser, owner)
   const puts = putsFor(page, row.id)
+  await openDueTab(page, 'not-posted')
   await (await showRow(page, pendRows(page, 'E3 Foreign'))).locator('[data-testid="due-mark-posted"]').click()
   const saveButton = page.getByRole('button', { name: 'Save Posted Amount' })
   await saveButton.waitFor()
@@ -539,6 +550,7 @@ async function postingDefaultDay(browser) {
     await uiLogin(page, u)
     await openTransactions(page)
     check('(e5) the browser\'s day is the day before Manila\'s', await page.evaluate(() => new Date().toLocaleDateString('en-CA')), addDays(D, -1))
+    await openDueTab(page, 'not-posted')
     await (await showRow(page, pendRows(page, 'E5 Pinned'))).locator('[data-testid="due-mark-posted"]').click()
     await postedOnInput(page).waitFor()
     check('(e5) the default is the Manila day, not the Los Angeles day', await postedOnInput(page).inputValue(), D)
@@ -580,13 +592,17 @@ async function postingDefaultDay(browser) {
     }
     console.log(`    loader settled after ${settled} ms of virtual time`)
     check('(e5) the loader clears within 3 s of virtual time', [await ready(), await phase()], [true, 'hidden'])
-    const listed = async () => (await rowsOf(page, 'E5 Eve', 'pending')).length
-    check('(e5) the page still holds yesterday: the row dated yesterday is not due yet', await listed(), 0)
+    await openDueTab(page, 'not-posted')
+    // The page's day is still D-1: Eve (dated D-1) is dated today, so it is listed as logged today; Stale is 3 days back.
+    const listed = async (name) => (await rowsOf(page, name, 'pending')).map((r) => r.logged)
+    check('(e5) the page holds D-1: E5 Eve is listed "logged today" and E5 Stale "logged 3 days ago"',
+      [await listed('E5 Eve'), await listed('E5 Stale')], [['logged today'], ['logged 3 days ago']])
     await page.clock.runFor(20000 - settled)
     const virtual = (await page.evaluate(() => Date.now())) - startedAt
     check('(e5) 20 s of virtual time have passed since the page loaded', [virtual > 19000, virtual <= 20500], [true, true])
     check('(e5) the page clock reads the new Manila day', await page.evaluate(() => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)), D)
-    check('(e5) the day hook has not polled: the page still holds yesterday', await listed(), 0)
+    check('(e5) the day hook has not polled: E5 Eve still reads "logged today" and E5 Stale "logged 3 days ago"',
+      [await listed('E5 Eve'), await listed('E5 Stale')], [['logged today'], ['logged 3 days ago']])
     const puts = putsFor(page, stale.id)
     await (await showRow(page, pendRows(page, 'E5 Stale'))).locator('[data-testid="due-mark-posted"]').click()
     await postedOnInput(page).waitFor()
@@ -672,6 +688,10 @@ async function viewer(browser) {
     // 3 rows or fewer fit on one page; more get a pager.
     check(`(h) text: ${limitedIds.size <= 3 ? 'no pager' : 'a pager'} for ${limitedIds.size} Limited item(s)`, await hasPager(page), limitedIds.size > 3)
   }
+  // The viewer sees other people's rows as Limited, which are on neither tab as one-offs: Not posted yet is empty.
+  await openDueTab(page, 'not-posted')
+  check('(h) the viewer\'s Not posted badge is 0 and the tab says so',
+    [(await page.locator('[data-testid="due-not-posted-count"]').textContent())?.trim(), await page.locator('[data-testid="due-not-posted-empty"]').count()], ['0', 1])
   // The dashboard keeps showing the viewer its Limited charges as text.
   await page.goto(`${stack.webUrl}/`)
   await page.locator('[data-testid="card-charges"]').waitFor()
@@ -863,7 +883,14 @@ async function pagination(browser) {
   // transaction dated 20 days ago.
   await cash('Zulu Old', stale(3), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 3 })
   await cash('Mid Fee', stale(1), { anchor_day: anchor, end_mode: 'after_occurrences', max_occurrences: 1 })
-  await unposted(u, bank, addDays(today, -20), 180, 'Coffee')
+  // Coffee is hand-linked to a one-occurrence entry, so it is tied and stays in Due (a one-off is on Not posted yet).
+  const coffeeDay = addDays(today, -20)
+  const coffeePlan = await cash('Coffee Plan', coffeeDay, { end_mode: 'after_occurrences', max_occurrences: 1 })
+  const coffee = await post(u.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 180, description: 'Coffee',
+    transaction_date: wire(coffeeDay), is_posted: false, budget_entry_id: coffeePlan.id,
+  })
+  check('(n) the API names Coffee on the plan\'s missed row', missedFor(await snapshotOf(u), coffeePlan.id)?.pending_transaction_ids, [coffee.id])
   // Not overdue: due today (the section lists no later day), so by name. Zeta Bill is the last row, on page 3.
   await cash('Today Bill', today)
   await cash('Rent', today)
@@ -951,9 +978,10 @@ const windowResponse = (page, offset, ms = 15000) =>
   page.waitForResponse((r) => isWindowRequest(r.request(), [offset]), { timeout: ms }).catch(() => null)
 /** The section's rows on the page on screen, by their first line. */
 const dueNames = (page) => page.locator('[data-testid="due-row"]').evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent.trim()))
-const dueBadge = async (page) => (await page.locator('[data-testid="due-count"]').textContent())?.trim()
+/** The Not posted yet badge: (p) and (q) work on one-off rows, which are on that tab. */
+const dueBadge = async (page) => (await page.locator('[data-testid="due-not-posted-count"]').textContent())?.trim()
 const waitForBadge = (page, text, ms = 15000) =>
-  page.locator('[data-testid="due-count"]').filter({ hasText: new RegExp(`^${text}$`) }).waitFor({ timeout: ms }).catch(() => {})
+  page.locator('[data-testid="due-not-posted-count"]').filter({ hasText: new RegExp(`^${text}$`) }).waitFor({ timeout: ms }).catch(() => {})
 const loadMoreButton = (page) => page.locator('[data-testid="due-load-more"]')
 /** A pending row whose description is exactly `name`, on the page on screen (pendRows matches any substring, ignoring case). */
 const pendRow = (page, name) =>
@@ -985,6 +1013,7 @@ async function loadMoreLive(browser) {
   check('(p) API: batch 1 is Edge and Tail', second.items.map((t) => t.description), ['Edge', 'Tail'])
 
   const { ctx, page } = await openDue(browser, u)
+  await openDueTab(page, 'not-posted')
   check('(p) before Load more: badge 1, Early only, Load more offered',
     [await dueBadge(page), await dueNames(page), await loadMoreButton(page).isVisible()], ['1', ['Early'], true])
   await loadMoreButton(page).click()
@@ -1011,6 +1040,7 @@ async function loadMoreLive(browser) {
   await night.page.clock.install({ time: new Date(`${today}T15:58:00Z`) })
   await uiLogin(night.page, u)
   await openTransactions(night.page)
+  await openDueTab(night.page, 'not-posted')
   await loadMoreButton(night.page).click()
   await waitForBadge(night.page, '2')
   await settle(night.page)
@@ -1023,6 +1053,7 @@ async function loadMoreLive(browser) {
   check('(p) a new day restarts the window: one batch, Load more again',
     [await dueNames(night.page), await dueBadge(night.page), await loadMoreButton(night.page).isVisible()], [['Edge'], '1', true])
   check('(p) no request for the second batch after the day turned', secondBatch, 0)
+  check('(p) Not posted yet is still the selected tab after the day changed', await night.page.locator('[data-testid="due-tab-not-posted"]').getAttribute('aria-selected'), 'true')
   await night.ctx.close()
 
   // Back on the first page (real clock): post Tail, the only row of the last loaded batch.
@@ -1052,6 +1083,7 @@ async function outOfOrderRefetch(browser) {
   check('(q) API: batch 1 is E, F, G, H', second.items.map((t) => t.description), ['E', 'F', 'G', 'H'])
 
   const { ctx, page } = await openDue(browser, u)
+  await openDueTab(page, 'not-posted')
   await loadMoreButton(page).click()
   await waitForBadge(page, '8')
   await settle(page)

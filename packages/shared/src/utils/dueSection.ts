@@ -439,10 +439,30 @@ export function pendingPostLabel(txn: Pick<Transaction, 'id'>, snapshot: Dashboa
 }
 
 /**
+ * True when a pending row has no recurring link: the creator's `budget_entry_id`
+ * is unset, or, for a shared view that drops the link, `is_recurring` is false
+ * (the API keeps `is_recurring == (budget_entry_id IS NOT NULL)` on every row).
+ */
+export function isOneOffPending(txn: FullTransaction | SharedFullTransaction): boolean {
+  return txn.view === 'full' ? txn.budget_entry_id == null : !txn.is_recurring
+}
+
+/** The window and linked rows merged by id, with Limited and posted rows dropped. */
+function unpostedVisible(txns: readonly Transaction[]): Map<number, FullTransaction | SharedFullTransaction> {
+  const byId = new Map<number, FullTransaction | SharedFullTransaction>()
+  for (const txn of txns) {
+    if (txn.view === 'limited' || txn.is_posted || byId.has(txn.id)) continue
+    byId.set(txn.id, txn)
+  }
+  return byId
+}
+
+/**
  * Group B. The window and linked queries merged by id; posted and Limited rows
- * dropped, and so is any row dated after today (it is in Upcoming). A row is listed when
- * it is dated before today, a missed row links it, or it is a recurring card charge in
- * the snapshot. Sorted by day, then id.
+ * dropped, and so is any row dated after today (it is in Upcoming) and any one-off
+ * (it is in "Not posted yet"). A tied row is listed when it is dated before today,
+ * a missed row links it, or it is a recurring card charge in the snapshot. Sorted
+ * by day, then id.
  */
 export function duePendingRows(
   windowTxns: readonly Transaction[],
@@ -452,13 +472,10 @@ export function duePendingRows(
 ): DuePendingRow[] {
   const linked = new Set(pendingLinkIds(snapshot))
   const recurring = recurringChargeIds(snapshot)
-  const byId = new Map<number, FullTransaction | SharedFullTransaction>()
-  for (const txn of [...windowTxns, ...linkedTxns]) {
-    if (txn.view === 'limited' || txn.is_posted || byId.has(txn.id)) continue
-    byId.set(txn.id, txn)
-  }
+  const byId = unpostedVisible([...windowTxns, ...linkedTxns])
   const rows: DuePendingRow[] = []
   for (const txn of byId.values()) {
+    if (isOneOffPending(txn)) continue
     const date = wallDay(txn.transaction_date)
     // After today it is in Upcoming.
     if (date > today) continue
@@ -472,6 +489,72 @@ export function duePendingRows(
       date,
       overdue,
       action: txn.permissions.can_post ? (recurring.has(txn.id) ? 'posted' : 'mark_posted') : null,
+    })
+  }
+  return rows.sort((a, b) => a.date.localeCompare(b.date) || a.transaction.id - b.transaction.id)
+}
+
+/** A one-off pending row in "Not posted yet". */
+export interface NotPostedRow {
+  kind: 'not_posted'
+  view: 'full' | 'shared_full'
+  key: string
+  transaction: FullTransaction | SharedFullTransaction
+  date: string
+  /** Whole days from the transaction's day to today; null when the day is unreadable. */
+  daysAgo: number | null
+  /** "logged today", "logged 1 day ago" or "logged N days ago". */
+  logged: string
+  action: 'mark_posted' | null
+}
+
+const DAY_MS = 86_400_000
+
+function utcDay(day: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(day)
+  if (!m) return null
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+/**
+ * Whole calendar days from `day` to `today` (both `YYYY-MM-DD`), counted on UTC
+ * components so a DST change never shifts it. Clamped at 0; null for an
+ * unreadable day.
+ */
+export function loggedDays(day: string, today: string): number | null {
+  const from = utcDay(day)
+  const to = utcDay(today)
+  if (from === null || to === null) return null
+  return Math.max(0, Math.round((to - from) / DAY_MS))
+}
+
+/** "logged today", "logged 1 day ago" or "logged N days ago". */
+export function loggedText(n: number): string {
+  if (n === 0) return 'logged today'
+  return n === 1 ? 'logged 1 day ago' : `logged ${n} days ago`
+}
+
+/**
+ * "Not posted yet": the window query's one-off pending rows (no recurring link)
+ * dated today or earlier, merged by id, oldest first, then id. `today` is the
+ * Manila day.
+ */
+export function notPostedRows(windowTxns: readonly Transaction[], today: string): NotPostedRow[] {
+  const rows: NotPostedRow[] = []
+  for (const txn of unpostedVisible(windowTxns).values()) {
+    if (!isOneOffPending(txn)) continue
+    const date = wallDay(txn.transaction_date)
+    if (date > today) continue
+    const daysAgo = loggedDays(date, today)
+    rows.push({
+      kind: 'not_posted',
+      view: txn.view,
+      key: `not_posted:${txn.id}`,
+      transaction: txn,
+      date,
+      daysAgo,
+      logged: daysAgo === null ? 'Pending' : loggedText(daysAgo),
+      action: txn.permissions.can_post ? 'mark_posted' : null,
     })
   }
   return rows.sort((a, b) => a.date.localeCompare(b.date) || a.transaction.id - b.transaction.id)
