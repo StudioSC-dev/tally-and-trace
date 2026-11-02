@@ -5,9 +5,11 @@ import {
   SHOW_DELAY_MS,
   STUCK_MS,
   anyQueryPending,
+  applyQuietQueryAction,
   applyRequestAction,
   idleLevel,
   initialOverlayTiming,
+  isQuietSettle,
   overlayStep,
   publishGate,
   type BusyLevel,
@@ -68,6 +70,109 @@ describe('anyQueryPending', () => {
         EXEMPT,
       ),
     ).toBe(false)
+  })
+
+  it('ignores a pending entry whose request id is quiet', () => {
+    const slice = { q: { status: 'pending', endpointName: 'getTransactions', requestId: 'r1' } }
+    expect(anyQueryPending([slice], EXEMPT, new Set(['r1']))).toBe(false)
+  })
+
+  it('counts an unrelated pending entry in the same slice as a quiet one', () => {
+    const slice = {
+      quiet: { status: 'pending', endpointName: 'getTransactions', requestId: 'r1' },
+      other: { status: 'pending', endpointName: 'getAccounts', requestId: 'r2' },
+    }
+    expect(anyQueryPending([slice], EXEMPT, new Set(['r1']))).toBe(true)
+  })
+
+  it('is unchanged when quietIds is omitted', () => {
+    const slice = { q: { status: 'pending', endpointName: 'getTransactions', requestId: 'r1' } }
+    expect(anyQueryPending([slice], EXEMPT)).toBe(true)
+  })
+})
+
+describe('isQuietSettle', () => {
+  const QUIET = new Set(['createTransactionQuiet'])
+  const mutation = (
+    phase: 'pending' | 'fulfilled' | 'rejected',
+    endpointName: string,
+    path = 'accountingApi',
+  ): RequestActionLike => ({
+    type: `${path}/executeMutation/${phase}`,
+    meta: { requestId: 'm1', arg: { endpointName } },
+  })
+  const settle = (action: RequestActionLike) => isQuietSettle(action, PATHS, QUIET)
+
+  it('is true for fulfilled and rejected of a listed endpoint, on either path', () => {
+    for (const path of PATHS) {
+      expect(settle(mutation('fulfilled', 'createTransactionQuiet', path))).toBe(true)
+      expect(settle(mutation('rejected', 'createTransactionQuiet', path))).toBe(true)
+    }
+  })
+
+  it('is false for createTransaction fulfilled and rejected (the primary save stays loud)', () => {
+    expect(settle(mutation('fulfilled', 'createTransaction'))).toBe(false)
+    expect(settle(mutation('rejected', 'createTransaction'))).toBe(false)
+  })
+
+  it('is false for pending, for other endpoints and for query actions', () => {
+    expect(settle(mutation('pending', 'createTransactionQuiet'))).toBe(false)
+    expect(settle(mutation('fulfilled', 'updateTransaction'))).toBe(false)
+    expect(
+      settle({
+        type: 'accountingApi/executeQuery/fulfilled',
+        meta: { requestId: 'q1', arg: { endpointName: 'createTransactionQuiet' } },
+      }),
+    ).toBe(false)
+    expect(
+      settle({ type: 'other/executeMutation/fulfilled', meta: { arg: { endpointName: 'createTransactionQuiet' } } }),
+    ).toBe(false)
+    expect(settle({ type: 'accountingApi/executeMutation/fulfilled' })).toBe(false)
+  })
+})
+
+describe('applyQuietQueryAction', () => {
+  const query = (phase: 'pending' | 'fulfilled' | 'rejected', requestId: string): RequestActionLike => ({
+    type: `accountingApi/executeQuery/${phase}`,
+    meta: { requestId, arg: { endpointName: 'getTransactions' } },
+  })
+  const apply = (ids: ReadonlySet<string>, action: RequestActionLike, quiet: boolean) =>
+    applyQuietQueryAction(ids, action, PATHS, quiet)
+  const none: ReadonlySet<string> = new Set()
+
+  it('adds on executeQuery/pending only while quiet', () => {
+    expect([...apply(none, query('pending', 'q1'), true)]).toEqual(['q1'])
+    expect(apply(none, query('pending', 'q1'), false)).toBe(none)
+  })
+
+  it('deletes on fulfilled and on rejected, whatever the quiet flag', () => {
+    const open = new Set(['q1', 'q2'])
+    expect([...apply(open, query('fulfilled', 'q1'), false)]).toEqual(['q2'])
+    expect([...apply(open, query('rejected', 'q2'), true)]).toEqual(['q1'])
+  })
+
+  it('clears on resetApiState', () => {
+    const open = new Set(['q1'])
+    expect(apply(open, { type: 'authApi/resetApiState' }, false).size).toBe(0)
+    expect(apply(none, { type: 'accountingApi/resetApiState' }, false)).toBe(none)
+  })
+
+  it('returns the same set object when nothing changed', () => {
+    const open = new Set(['q1'])
+    expect(apply(open, query('pending', 'q1'), true)).toBe(open)
+    expect(apply(open, query('fulfilled', 'unknown'), true)).toBe(open)
+    expect(apply(open, { type: 'unrelated/action' }, true)).toBe(open)
+    expect(apply(open, { type: 'accountingApi/executeQuery/pending' }, true)).toBe(open)
+  })
+
+  it('ignores mutation actions', () => {
+    const open = new Set(['q1'])
+    const mutation: RequestActionLike = {
+      type: 'accountingApi/executeMutation/pending',
+      meta: { requestId: 'q1', arg: { endpointName: 'createTransactionQuiet' } },
+    }
+    expect(apply(open, mutation, true)).toBe(open)
+    expect(apply(none, mutation, true)).toBe(none)
   })
 })
 

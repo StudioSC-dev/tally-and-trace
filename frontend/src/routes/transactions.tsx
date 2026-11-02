@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useLazyGetUpcomingOccurrencesQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useLazyGetUpcomingOccurrencesQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -19,6 +19,7 @@ import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
+import { abandonSave, abandonedSavePending, quietPending, releaseQuiet, runQuietSync, useAbandonedSavePending, useQuietPending } from '../store/busy'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
@@ -115,6 +116,9 @@ const readStoredPageSize = (): PageSize => {
     return PAGE_SIZES[0]
   }
 }
+
+// A quiet refresh's permission to start more quiet requests after an await; a close revokes it.
+type QuietPermit = { allowed: boolean }
 
 type TransactionQuery = {
   account_ids?: number[]
@@ -359,6 +363,32 @@ export function TransactionsPage() {
   const askConfirm = useConfirm()
   const showToast = useToast()
   const [formError, setFormError] = useState<string | null>(null)
+  // A save in flight locks the form. The ref is the real guard: two clicks in one tick
+  // would both read stale state.
+  const [isSaving, setIsSaving] = useState(false)
+  const saveInFlight = useRef(false)
+  // The line confirming the last "Save and add another".
+  const [savedNotice, setSavedNotice] = useState<string | null>(null)
+  // Focus to move once the save's result has rendered (disabling the form drops it).
+  const [focusRequest, setFocusRequest] = useState<{ n: number; to: 'description' | 'submitter' } | null>(null)
+  const focusSeq = useRef(0)
+  const focusHandled = useRef(0)
+  // A quiet list refresh is still in flight: a save now would join its stale requests, so
+  // the submit buttons wait for it. The fields and Cancel stay usable.
+  const refreshPending = useQuietPending()
+  // A save abandoned mid-POST (its dialog closed) is still settling: a save now would race it
+  // and its refresh, so the submit buttons wait for that too. Kept outside the dialog's state.
+  const abandonedPending = useAbandonedSavePending()
+  // Marks the save whose POST is in flight abandoned; set only while that POST is in flight.
+  const abandonCurrentSave = useRef<(() => void) | null>(null)
+  // The quiet refreshes still allowed to start quiet requests; every close revokes them.
+  const quietPermits = useRef(new Set<QuietPermit>())
+  // The submit button the current attempt was made with.
+  const submitterRef = useRef<HTMLElement | null>(null)
+  // A save's late result applies only while its dialog and its attempt are still current:
+  // every close resets the form, which starts a new generation.
+  const dialogGen = useRef(0)
+  const attemptSeq = useRef(0)
   const transactionForm = useRef<HTMLFormElement>(null)
   // The controls the browser flagged in one submit attempt, in tree order.
   const invalidControls = useRef<Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>>([])
@@ -557,6 +587,7 @@ export function TransactionsPage() {
   } = useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
   
   const [createTransaction] = useCreateTransactionMutation()
+  const [createTransactionQuiet] = useCreateTransactionQuietMutation()
   const [updateTransaction] = useUpdateTransactionMutation()
   const [deleteTransaction] = useDeleteTransactionMutation()
 
@@ -750,8 +781,10 @@ export function TransactionsPage() {
   // rows are the last of the range: fetch the head to learn the total, and the tail too
   // only when there are more than one request holds. Occurrences come soonest first.
   // Either request failing keeps the rows on screen with the error alert.
+  // `quiet` keeps the tail request, sent after an await, off the screen loader as well,
+  // unless its permission was revoked (the dialog closed) by the time the tail starts.
   const loadUpcoming = useCallback(
-    async () => {
+    async ({ quiet }: { quiet?: QuietPermit } = {}) => {
       if (!isAuthenticated) {
         return
       }
@@ -772,7 +805,9 @@ export function TransactionsPage() {
           if (!isCurrent()) return null
           let items = head.items
           if (head.total > UPCOMING_LIMIT) {
-            const tail = await triggerTransactions({ ...query, offset: head.total - UPCOMING_LIMIT }).unwrap()
+            const loadTail = () => triggerTransactions({ ...query, offset: head.total - UPCOMING_LIMIT })
+            // Read now, not when the refresh started: a close meanwhile makes the tail loud.
+            const tail = await (quiet?.allowed === true ? runQuietSync(loadTail) : loadTail()).unwrap()
             if (!isCurrent()) return null
             items = tail.items
           }
@@ -800,9 +835,10 @@ export function TransactionsPage() {
   )
 
   // After any create, edit, delete, post or un-post a row can move between the lists,
-  // so both are fetched again under the filters and page now on screen.
-  const refreshLists = useCallback(async () => {
-    await Promise.all([loadTransactions(), loadUpcoming()])
+  // so both are fetched again under the filters and page now on screen. `quiet` is for a
+  // caller inside `runQuietSync`: every request but the upcoming tail starts synchronously.
+  const refreshLists = useCallback(async ({ quiet }: { quiet?: QuietPermit } = {}) => {
+    await Promise.all([loadTransactions(), loadUpcoming({ quiet })])
   }, [loadTransactions, loadUpcoming])
   const refreshListsRef = useLatestRef(refreshLists)
 
@@ -1120,7 +1156,37 @@ export function TransactionsPage() {
     setDateErrors({})
     setFieldErrors({})
     setFormError(null)
+    setSavedNotice(null)
+    // A save still in flight no longer owns the form and never locks the next dialog's
+    // fields; it is abandoned, and the next dialog's submit buttons wait for it to settle.
+    abandonCurrentSave.current?.()
+    abandonCurrentSave.current = null
+    dialogGen.current += 1
+    saveInFlight.current = false
+    setIsSaving(false)
+    setFocusRequest(null)
+    // Quiet requests still in flight show the screen loader until they settle, and a
+    // refresh still running starts no more quiet ones (the upcoming tail).
+    for (const permit of quietPermits.current) permit.allowed = false
+    quietPermits.current.clear()
+    releaseQuiet()
   }
+
+  // Each request is applied once. The used button stays disabled while the refresh a refused
+  // save started is in flight, so its focus waits for that, and is dropped if the user has
+  // put focus somewhere meanwhile.
+  useEffect(() => {
+    if (!focusRequest || focusRequest.n === focusHandled.current) return
+    if (focusRequest.to === 'description') {
+      focusHandled.current = focusRequest.n
+      transactionForm.current?.querySelector<HTMLElement>('[data-field="description"]')?.focus()
+      return
+    }
+    if (refreshPending) return
+    focusHandled.current = focusRequest.n
+    const active = document.activeElement
+    if (active === null || active === document.body) submitterRef.current?.focus()
+  }, [focusRequest, refreshPending])
 
   // One inline error per attempt, on the first invalid field, which takes focus. A chip
   // group focuses its selected chip, else its first.
@@ -1168,6 +1234,7 @@ export function TransactionsPage() {
       const key = first.dataset.field
       const message = (first.validity.valueMissing ? valueMissingCopy(key) : undefined) || first.validationMessage
       setFormError(null)
+      setSavedNotice(null)
       if (key === 'transaction_date' || key === 'posting_date') {
         setFieldErrors({})
         setDateErrors({ [key]: message })
@@ -1185,8 +1252,21 @@ export function TransactionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // Enter and requestSubmit reach here even while the buttons are disabled.
+    if (saveInFlight.current || quietPending() || abandonedSavePending()) return
     setFormError(null)
     setFieldErrors({})
+    setSavedNotice(null)
+    // The button pressed picks the path, so the browser's own checks run the same for both.
+    const submitter = (e.nativeEvent as SubmitEvent).submitter
+    submitterRef.current = submitter
+    const addAnother = !editingTransaction && submitter?.dataset.testid === 'save-and-add-another'
+    const gen = dialogGen.current
+    const attempt = ++attemptSeq.current
+    const owns = () => dialogGen.current === gen && attemptSeq.current === attempt
+    // Set if this save is abandoned: called once its POST has failed or its refresh has settled.
+    const abandoned: { release: (() => void) | null } = { release: null }
+    let refreshHandedOff = false
     if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
       setFormError('Still checking this transfer\'s destination account. Try again in a moment.')
       return
@@ -1348,19 +1428,104 @@ export function TransactionsPage() {
         delete payload.exchange_rate
       }
 
-      if (editingTransaction) {
-        await updateTransaction({ id: editingTransaction.id, data: payload }).unwrap()
-        setEditingTransaction(null)
-      } else {
-        await createTransaction(payload).unwrap()
+      // The form stays locked for the whole request, so what is kept after an add-another
+      // save is exactly what was sent.
+      saveInFlight.current = true
+      setIsSaving(true)
+      try {
+        const save = editingTransaction
+          ? updateTransaction({ id: editingTransaction.id, data: payload })
+          : addAnother
+            ? createTransactionQuiet(payload)
+            : createTransaction(payload)
+        // A close while the POST is in flight abandons this save (see resetForm).
+        const abandon = () => {
+          abandoned.release = abandonSave(save.requestId)
+        }
+        abandonCurrentSave.current = abandon
+        try {
+          await save.unwrap()
+        } finally {
+          if (abandonCurrentSave.current === abandon) abandonCurrentSave.current = null
+        }
+        if (editingTransaction) {
+          if (owns()) {
+            setEditingTransaction(null)
+            resetForm()
+            setIsCreateModalOpen(false)
+          }
+        } else if (addAnother) {
+          if (owns()) {
+            // The entered figure, not the server's principal (a loan payment's differs).
+            const figure = formData.is_posted
+              ? formatCurrency(formData.amount ?? 0, accountCurrency)
+              : formatCurrency(projectedAmount ?? 0, projectedCurrency)
+            const fresh = createInitialFormState()
+            // Per-entry fields clear to the fresh dialog's values; the account, type,
+            // category, date, posted mode and transfer accounts are kept. The form was
+            // locked, so `prev` is the state that was saved.
+            setFormData((prev) => ({
+              ...prev,
+              description: fresh.description,
+              amount: fresh.amount,
+              projected_amount: fresh.projected_amount,
+              received_amount: fresh.received_amount,
+              transfer_fee: fresh.transfer_fee,
+              tag_ids: fresh.tag_ids,
+              budget_entry_id: fresh.budget_entry_id,
+              allocation_id: fresh.allocation_id,
+              posting_date: fresh.posting_date,
+              exchange_rate: fresh.exchange_rate,
+              original_amount: fresh.original_amount,
+              original_currency: fresh.original_currency,
+              // Its select is hidden once posted: a foreign currency must not ride along
+              // unseen into the next posted entry. A pending run keeps its visible choice.
+              projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
+            }))
+            setSavedNotice(`Saved "${formData.description} ${figure}"`)
+            setDateErrors({})
+            setFieldErrors({})
+            setFormError(null)
+            setFocusRequest({ n: ++focusSeq.current, to: 'description' })
+          }
+        } else {
+          if (owns()) {
+            resetForm()
+            setIsCreateModalOpen(false)
+          }
+        }
+      } finally {
+        if (owns()) {
+          saveInFlight.current = false
+          setIsSaving(false)
+        }
       }
-      resetForm()
-      setIsCreateModalOpen(false)
+      if (addAnother) {
+        // The lists are page-level, so they refresh even for a dialog since closed. Quietly,
+        // and outside the save: a failed refresh shows the lists' own alert, never
+        // "Could not save".
+        const permit: QuietPermit = { allowed: true }
+        quietPermits.current.add(permit)
+        refreshHandedOff = true
+        void runQuietSync(() => refreshListsRef.current({ quiet: permit }))
+          .catch((error: unknown) => {
+            console.error('Error refreshing transactions:', error)
+          })
+          .finally(() => {
+            quietPermits.current.delete(permit)
+            abandoned.release?.()
+          })
+        return
+      }
       await refreshListsRef.current()
     } catch (error) {
       console.error('Error saving transaction:', error)
+      if (!owns()) return
       // Show the API's reason (e.g. a loan payment rule) in the form, which stays open.
       setFormError(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
+      setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+    } finally {
+      if (!refreshHandedOff) abandoned.release?.()
     }
   }
 
@@ -3003,7 +3168,9 @@ export function TransactionsPage() {
               </button>
             </div>
 
-            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5">
+            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5" aria-busy={isSaving}>
+              {/* Locked while a save is in flight; Cancel and the header close stay outside. */}
+              <fieldset disabled={isSaving} className="space-y-5 min-w-0">
               <div>
                 <label className="label">Description</label>
                 <input
@@ -3487,15 +3654,32 @@ export function TransactionsPage() {
                 </div>
               )}
               
+              {/* Always mounted in create mode, so a screen reader knows the live region before it fills. */}
+              {!editingTransaction && (
+                <p role="status" data-testid="transaction-saved-notice" className="text-sm text-ok break-words">
+                  {savedNotice}
+                </p>
+              )}
               {formError && (
                 <p className="text-sm text-danger" role="alert" data-testid="transaction-form-error">
                   {formError}
                 </p>
               )}
-              <div className="flex space-x-3 pt-2">
-                <button type="submit" className="flex-1 btn-primary focus-ring">
+              </fieldset>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button type="submit" className="flex-1 btn-primary focus-ring" disabled={isSaving || refreshPending || abandonedPending}>
                   {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
                 </button>
+                {!editingTransaction && (
+                  <button
+                    type="submit"
+                    className="flex-1 btn-secondary focus-ring"
+                    disabled={isSaving || refreshPending || abandonedPending}
+                    data-testid="save-and-add-another"
+                  >
+                    Save and add another
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
