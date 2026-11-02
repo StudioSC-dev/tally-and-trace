@@ -10,7 +10,6 @@ import { estimateText, estimateTitle } from '../utils/fx'
 import type { EstimateLabels } from '../utils/fx'
 import { CurrencyControl } from '../components/CurrencyControl'
 import { useSelectedCurrency } from '../hooks/useSelectedCurrency'
-import { useToday } from '../hooks/useToday'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { FxNotice } from '../components/FxNotice'
 import { Link } from '@tanstack/react-router'
@@ -20,7 +19,7 @@ import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
 import { payableActions, payableTarget, periodWindow, queryPhase } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
-import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
+import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable } from '@tally-trace/shared'
 
 const MAX_PAYABLES_SHOWN = 6
@@ -30,7 +29,6 @@ export const Route = createFileRoute('/')({
   component: Dashboard,
 })
 
-const MS_PER_DAY = 1000 * 60 * 60 * 24
 
 const getOrdinalSuffix = (day: number) => {
   if (day % 100 >= 11 && day % 100 <= 13) return 'th'
@@ -57,12 +55,8 @@ const parseCalendarDay = (iso: string): Date => {
   return new Date(year, month - 1, day)
 }
 
-/** Whole days from today to a calendar day, never below 0. */
-const daysUntil = (day: Date): number => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return Math.max(0, Math.round((day.getTime() - today.getTime()) / MS_PER_DAY))
-}
+/** Whole calendar days from `today` (the Manila day) to a calendar day, never below 0. */
+const daysUntil = (day: Date, today: string): number => loggedDays(today, localToday(day)) ?? 0
 
 type PayableRow = {
   key: string
@@ -187,9 +181,8 @@ export function Dashboard() {
   const closings = snapshot?.account_closings[0]?.by_currency.find((r) => r.currency === currency)
   const balanceRow = snapshot?.balances.by_currency.find((r) => r.currency === currency)
   const summaryRow = periodSummary?.by_currency.find((r) => r.currency === currency)
-  // The day that decides Pending or Planned; it moves at midnight and on refocus.
-  const today = useToday()
-  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, today)), [snapshot, defaultCurrency, today])
+  // The Manila day decides Pending or Planned and the days remaining, as the server does; it moves at midnight and on refocus.
+  const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, manilaDay)), [snapshot, defaultCurrency, manilaDay])
 
   const cardCharges = useMemo(() => snapshot?.card_charges ?? [], [snapshot])
   const otherUpcoming = useMemo(
@@ -237,7 +230,7 @@ export function Dashboard() {
   const payableStatusOf = (row: PayableRow): PayableStatus =>
     row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
   const dueLabelOf = (row: PayableRow) => {
-    const remaining = daysUntil(row.day)
+    const remaining = daysUntil(row.day, manilaDay)
     return row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`
   }
 
