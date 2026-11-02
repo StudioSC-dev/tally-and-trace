@@ -813,14 +813,18 @@ def delete_budget_entry(
 
     Under the write rule, the account owner exemption, by its creator, or by
     an owner of any account it touches (an entry moves no balance). Deleting
-    it clears ``budget_entry_id`` on the transactions linked to it, so it is
+    it unlinks the transactions linked to it, so it is
     refused (409) while any of them is not one the caller may edit: a delete
     never changes a transaction the caller could not change directly, whoever
     created it (a creator demoted or revoked on the account their own linked
     transaction sits on included). Deactivating the entry is the way to stop
     it then. Locks follow the ledger's global order (``app.core.locking``): the
     owner's budget lock, then the entry ``FOR UPDATE``, before its linked rows
-    are nullified and it is deleted.
+    are unlinked and it is deleted. Unlinking mirrors the transaction update's
+    unlink: ``is_recurring`` and ``recurrence_frequency`` are cleared here, and
+    the ORM nulls ``budget_entry_id`` (the foreign key has no ``ondelete``), so
+    ``is_recurring == (budget_entry_id IS NOT NULL)`` holds on every row.
+    ``occurrence_date`` is kept.
     """
     entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
     locking.lock_owner_budgets(db, entry.user_id)
@@ -836,6 +840,9 @@ def delete_budget_entry(
             status_code=409,
             detail="This recurring entry has transactions you can't edit linked to it; "
                    "deactivate it instead")
+    for txn in linked:
+        txn.is_recurring = False
+        txn.recurrence_frequency = None
     db.delete(entry)
     db.commit()
 
