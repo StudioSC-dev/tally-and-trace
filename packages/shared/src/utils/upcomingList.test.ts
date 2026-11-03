@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Transaction, UpcomingOccurrence } from '../types/api'
-import { UPCOMING_LIMIT, mergeUpcoming, upcomingOccurrenceRow, upcomingShownText } from './upcomingList'
+import { UPCOMING_LIMIT, mergeUpcoming, occurrenceTab, upcomingOccurrenceRow, upcomingShownText } from './upcomingList'
 
 // Transactions arrive as the window request returns them (order=asc): date ascending, then id.
 function txn(id: number, day: string): Transaction {
@@ -118,6 +118,22 @@ describe('mergeUpcoming as the Upcoming tab uses it', () => {
     // Five transactions a day reach T+20 at 100; the T+21 occurrence is cut.
     expect(rows.filter((r) => r.kind === 'occurrence')).toHaveLength(3)
     expect(rows[rows.length - 1]?.key).toBe('txn:97')
+  })
+})
+
+describe('occurrenceTab', () => {
+  it('lists a subscription in Subscriptions', () => {
+    expect(occurrenceTab(occ('Netflix', '2026-11-05', { kind: 'subscription', plan_kind: 'subscription' }))).toBe('subscriptions')
+  })
+
+  it('drops an installment: its plan row stands for it', () => {
+    expect(occurrenceTab(occ('Phone', '2026-11-05', { kind: 'installment', plan_kind: 'installment' }))).toBeNull()
+  })
+
+  it('lists everything else in Upcoming, a missing plan_kind included', () => {
+    expect(occurrenceTab(occ('Rent', '2026-11-05', { plan_kind: null }))).toBe('upcoming')
+    expect(occurrenceTab(occ('Rent', '2026-11-05'))).toBe('upcoming')
+    expect(occurrenceTab({})).toBe('upcoming')
   })
 })
 

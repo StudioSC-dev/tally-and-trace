@@ -377,6 +377,12 @@ export type BillingKind = 'subscription' | 'bill'
  * the open-ended card expenses. Income and transfers have none (null).
  */
 export type RecurringKind = 'installment' | 'subscription' | 'bill' | 'cash'
+/**
+ * Which Transactions card tab lists a recurring entry's occurrences, decided by the server:
+ * `installment` (a capped card expense that is not a bill) or `subscription` (an open-ended
+ * card subscription, or an open-ended bank expense the user marked). Null: Due and Upcoming.
+ */
+export type PlanKind = 'subscription' | 'installment'
 /** A month-family entry's day rule: the last Monday-Friday of each month. */
 export type DayRule = 'last_weekday'
 
@@ -1025,6 +1031,8 @@ export interface UpcomingItem extends Partial<Estimate> {
   overdue?: boolean
   /** Snapshot budget-entry items only: the entry's derived kind (null for income and transfers). */
   kind?: RecurringKind | null
+  /** Snapshot budget-entry items only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
+  plan_kind?: PlanKind | null
   /** Snapshot budget-entry items only: the caller can record this occurrence. */
   can_mark_paid?: boolean
 }
@@ -1057,6 +1065,8 @@ export interface Payable extends Partial<Estimate> {
   overdue?: boolean
   /** Snapshot budget-entry rows only: the entry's derived kind (null for income and transfers). */
   kind?: RecurringKind | null
+  /** Snapshot budget-entry rows only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
+  plan_kind?: PlanKind | null
   /** Snapshot budget-entry rows only: the caller can record this occurrence. */
   can_mark_paid?: boolean
   /** Statement rows: the statement's close day (`YYYY-MM-DD`). */
@@ -1321,6 +1331,8 @@ export interface FullCharge extends Partial<Estimate> {
   occurrence_date: string | null
   name: string
   kind: 'installment' | 'subscription' | 'bill' | 'pending' | 'advance'
+  /** The Transactions card tab that lists the entry; null for Due and Upcoming. Entry-sourced charges only; null on a transaction-sourced one. */
+  plan_kind?: PlanKind | null
   source: 'budget_entry' | 'transaction'
   source_id: number
   /** Null only when unconverted. */
@@ -1524,6 +1536,8 @@ export interface MissedCharge {
   entry_id: number
   name: string
   kind: 'subscription' | 'bill'
+  /** The Transactions card tab that lists the entry; null for Due and Upcoming. */
+  plan_kind?: PlanKind | null
   /** Occurrences before today. */
   count: number
   /** Occurrences through today. */
@@ -1551,6 +1565,8 @@ export interface RecurringMissed {
   entry_type: BudgetEntryType
   /** Null for income and transfers. */
   kind: RecurringKind | null
+  /** The Transactions card tab that lists the entry; null for Due and Upcoming. */
+  plan_kind?: PlanKind | null
   is_transfer: boolean
   capped: boolean
   account_name: string | null
@@ -1587,6 +1603,8 @@ export interface UpcomingOccurrence {
   is_transfer: boolean
   /** The entry's derived kind (a card kind, `cash`); null for income and transfers. */
   kind: RecurringKind | null
+  /** The Transactions card tab that lists the entry; null for Due and Upcoming. */
+  plan_kind?: PlanKind | null
   amount: number
   currency: string
   account_name: string | null
@@ -1625,6 +1643,46 @@ export interface UpcomingOccurrenceQuery {
   search?: string
   /** 1 to 500; the server default is 100. */
   limit?: number
+  /** Only entries of one card tab, applied before `limit`: `none` is `plan_kind` null. Absent: every kind. */
+  plan?: OccurrencePlanFilter
+}
+
+/** `GET /budget-entries/upcoming-occurrences?plan=`: Subscriptions, or Due and Upcoming. Installments are in neither. */
+export type OccurrencePlanFilter = 'subscription' | 'none'
+
+/** `GET /transactions?order=`: by date then id, newest first (`desc`, the default) or soonest first. */
+export type TransactionListOrder = 'desc' | 'asc'
+
+/** One active card installment plan, from `GET /budget-entries/installment-plans`. Limited entries are never listed. */
+export interface InstallmentPlan {
+  view: 'full' | 'shared_full'
+  entry_id: number
+  name: string
+  account_name: string | null
+  amount: number
+  currency: string
+  /** The oldest scheduled month with no recorded row (`YYYY-MM-DD`); null once every remaining month has one. */
+  next_charge: string | null
+  /** Unrecorded scheduled months before today (Manila). */
+  missed: number
+  /** Payments remaining: the entry's `max_occurrences`. */
+  payments_left: number
+  /** `occurrences_paid + max_occurrences`, the same total Allocations reads. */
+  payments_total: number
+  can_mark_paid: boolean
+  auto_post: InstallmentAutoPostState | null
+  block_reason: InstallmentBlockReason | null
+  can_review: boolean
+  /** `next_charge` can be recorded now: the caller can post it, it is the first scheduled month, and auto-post is not on. */
+  recordable: boolean
+}
+
+/** `GET /budget-entries/installment-plans`: overdue plans first, then by next charge, name and id. */
+export interface InstallmentPlans {
+  items: InstallmentPlan[]
+  auto_post_scheduled: boolean
+  /** The Manila day the response was computed for (`YYYY-MM-DD`). */
+  today: string
 }
 
 /**
@@ -1941,4 +1999,6 @@ export interface DashboardSnapshot {
   auto_post_scheduled: boolean
   currencies: CurrencyCode[]
   fx: FxMeta
+  /** The Manila day the snapshot was computed for (`YYYY-MM-DD`); absent from an older API. */
+  today?: string
 }

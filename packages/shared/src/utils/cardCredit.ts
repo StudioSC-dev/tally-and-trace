@@ -10,6 +10,25 @@ export function creditCheckKey(check: Pick<CreditCheck, 'source' | 'source_id' |
   return `${check.source}:${check.source_id}:${check.occurrence_date ?? check.date}`
 }
 
+/**
+ * The credit check for one budget entry's occurrence on `day` (its occurrence date), across
+ * every card the snapshot lists; undefined when no card has one (no `credit` for the caller,
+ * or no check for that day). Matched on `creditCheckKey`, so a check whose `date` differs
+ * from its `occurrence_date` is found by the occurrence date only.
+ */
+export function occurrenceCreditCheck(
+  cards: readonly { credit?: Pick<CardCredit, 'checks'> | undefined }[],
+  entryId: number,
+  day: string,
+): CreditCheck | undefined {
+  const key = `budget_entry:${entryId}:${day}`
+  for (const card of cards) {
+    const check = card.credit?.checks.find((c) => creditCheckKey(c) === key)
+    if (check !== undefined) return check
+  }
+  return undefined
+}
+
 /** The warning or reassurance a check shows, e.g. "OK with planned payment by Apr 1st, 2027". */
 export function creditStatusText(check: Pick<CreditCheck, 'status' | 'relies_on_planned'>): string {
   const status: CreditStatus = check.status

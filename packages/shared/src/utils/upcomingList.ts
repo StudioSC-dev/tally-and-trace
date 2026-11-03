@@ -61,6 +61,22 @@ export function mergeUpcoming(
   return rows
 }
 
+/**
+ * Which Due card tab lists an occurrence: Subscriptions for `plan_kind` `subscription`, none
+ * for an installment (its plan row in Installments stands for it), Upcoming otherwise. A
+ * missing `plan_kind` reads as null.
+ */
+export function occurrenceTab(occ: Pick<UpcomingOccurrence, 'plan_kind'>): 'upcoming' | 'subscriptions' | null {
+  switch (occ.plan_kind ?? null) {
+    case 'subscription':
+      return 'subscriptions'
+    case 'installment':
+      return null
+    case null:
+      return 'upcoming'
+  }
+}
+
 export interface UpcomingOccurrenceView {
   /** The record buttons, primary first. */
   actions: RecurringAction[]

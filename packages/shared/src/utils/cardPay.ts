@@ -131,7 +131,7 @@ export function unpostedNote(count: number, postable: number): { text: string; r
     text: `Full leaves out ${monthsOf(count)} not yet posted`,
     review:
       needReview > 0
-        ? `${needReview} of them ${needReview === 1 ? 'needs' : 'need'} Review or Mark paid in Due and overdue`
+        ? `${needReview} of them ${needReview === 1 ? 'needs' : 'need'} Review or Mark paid in Installments`
         : null,
   }
 }
@@ -166,6 +166,6 @@ export function payDisabledReason(input: {
   if (!input.isActive) return 'This card is inactive'
   if (input.choices !== null) return null
   if (input.unposted.postable > 0) return 'Post the installment months first'
-  if (input.unposted.count > 0) return 'Review or Mark paid the installment months in Due and overdue first'
+  if (input.unposted.count > 0) return 'Review or Mark paid the installment months in Installments first'
   return 'No closed statement yet'
 }

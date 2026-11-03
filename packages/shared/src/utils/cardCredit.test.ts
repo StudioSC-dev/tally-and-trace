@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CardCredit, CreditCheck, CreditStatus } from '../types/api'
-import { availableCreditText, creditCheckKey, creditStatusText, entryCreditWarning, entryCreditWarnings, plannedChargesText } from './cardCredit'
+import { availableCreditText, creditCheckKey, occurrenceCreditCheck, creditStatusText, entryCreditWarning, entryCreditWarnings, plannedChargesText } from './cardCredit'
 
 function check(over: Partial<CreditCheck> = {}): CreditCheck {
   return {
@@ -34,6 +34,40 @@ describe('creditCheckKey', () => {
   it('uses the date for a transaction', () => {
     expect(creditCheckKey(check({ source: 'transaction', source_id: 9, date: '2027-03-22', occurrence_date: null })))
       .toBe('transaction:9:2027-03-22')
+  })
+})
+
+describe('occurrenceCreditCheck', () => {
+  const visa = { credit: { checks: [check({ source_id: 7, date: '2026-11-08', occurrence_date: '2026-11-08', status: 'at_risk' })] } }
+  const amex = {
+    credit: {
+      checks: [
+        check({ source_id: 8, date: '2026-11-10', occurrence_date: '2026-11-10', status: 'ok_with_planned' }),
+        check({ source: 'transaction', source_id: 7, date: '2026-11-12', occurrence_date: null, status: 'at_risk' }),
+      ],
+    },
+  }
+  const noCredit = {}
+
+  it('finds an entry occurrence on whichever card lists it', () => {
+    expect(occurrenceCreditCheck([noCredit, visa, amex], 8, '2026-11-10')?.status).toBe('ok_with_planned')
+    expect(occurrenceCreditCheck([noCredit, visa, amex], 7, '2026-11-08')?.status).toBe('at_risk')
+  })
+
+  it('is undefined on another day, for a transaction check, or with no credit', () => {
+    expect(occurrenceCreditCheck([visa, amex], 7, '2026-11-09')).toBeUndefined()
+    // A transaction check with the same id and day is not an entry's.
+    expect(occurrenceCreditCheck([visa, amex], 7, '2026-11-12')).toBeUndefined()
+    expect(occurrenceCreditCheck([noCredit], 7, '2026-11-08')).toBeUndefined()
+    expect(occurrenceCreditCheck([], 7, '2026-11-08')).toBeUndefined()
+  })
+
+  it('matches the occurrence date, not the date, when the two differ', () => {
+    // date T+2, occurrence_date T+5 (T = 2026-11-03). The walk sets both alike today, so
+    // only this fixture tells a lookup by `date` apart.
+    const card = { credit: { checks: [check({ source_id: 7, date: '2026-11-05', occurrence_date: '2026-11-08', status: 'at_risk' })] } }
+    expect(occurrenceCreditCheck([card], 7, '2026-11-08')?.status).toBe('at_risk')
+    expect(occurrenceCreditCheck([card], 7, '2026-11-05')).toBeUndefined()
   })
 })
 
