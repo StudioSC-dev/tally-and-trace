@@ -406,3 +406,21 @@ def test_the_snapshot_carries_its_manila_day(me, monkeypatch):
     assert _snapshot(client, who)["today"] == "2026-10-18"
     pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 1))  # 00:01 on Oct 19
     assert _snapshot(client, who)["today"] == "2026-10-19"
+
+
+def test_the_snapshot_day_is_stamped_before_its_lists(me, monkeypatch):
+    """A request that crosses Manila midnight while it computes its lists
+    reports the day it started on, never the new day over yesterday's rows."""
+    from app.services import card_charges
+
+    client, who = me.client, me.who
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 15, 59))  # 23:59 in Manila
+    real = card_charges.card_charges_by_card
+
+    def crossing(*args, **kwargs):
+        pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 1))  # 00:01 on Oct 19
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(card_charges, "card_charges_by_card", crossing)
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    assert _snapshot(client, who)["today"] == "2026-10-19"  # the next request
