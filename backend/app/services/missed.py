@@ -21,6 +21,9 @@
   posted or pending, from the same entries as ``recurring_missed`` (card
   subscriptions, bills and wallet spending included), for the Transactions
   page's Upcoming list.
+- ``installment_plans``: ``GET /budget-entries/installment-plans`` (STU-511),
+  one row per active card installment with its next unrecorded charge, for the
+  Transactions card's Installments tab.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.access import (
     VIEW_ROLES, readable_criterion, touches_accounts, viewable_account_ids,
 )
@@ -476,6 +480,71 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
             })
     items.sort(key=lambda row: (row["occurrence_date"], row["name"], row["entry_id"]))
     return {"items": items[:limit], "total": len(items)}
+
+
+def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
+    """``{"items", "auto_post_scheduled", "today"}``: one item per active entry
+    ``_listed_entries`` gives whose ``plan_kind`` is ``installment``, with
+    ``today`` the Manila day the items were computed for.
+
+    ``next_charge`` is the first occurrence no linked row stands for, posted or
+    pending (``unrecorded_occurrences`` with ``pending_records``), over the
+    whole remaining schedule (``capped_schedule_end``), so a charge years out is
+    still found; null only when every remaining month has a row. ``missed``
+    counts those occurrences before today. ``payments_left`` is
+    ``max_occurrences`` and ``payments_total`` adds the paid count
+    (``forecast.occurrences_paid``), as Allocations reads "n of m".
+    ``can_mark_paid``, ``auto_post``, ``block_reason`` and ``can_review`` are
+    ``upcoming_occurrences``'; ``recordable`` is its gate for ``next_charge``:
+    the schedule's first occurrence only, never with auto-post on.
+
+    Sorted with an overdue ``next_charge`` first, then by ``next_charge``,
+    ``name`` and ``entry_id``; a null ``next_charge`` goes last."""
+    today = manila_today()
+    access = redactor.access
+    entries = _listed_entries(db, user, redactor, None,
+                              (BudgetEntry.end_mode == "after_occurrences",))
+    access.load(e.account_id for e in entries)
+    entries = [e for e in entries if plan_kind(e, access.account(e.account_id)) == "installment"]
+    infos = installment_infos(db, user, redactor=redactor) if entries else {}
+    paid = fc.occurrences_paid(db, entries)
+    items = []
+    for entry in entries:
+        account = access.account(entry.account_id)
+        info = infos.get(entry.id)
+        days = fc.unrecorded_occurrences(
+            db, [entry], through=fc.capped_schedule_end(entry),
+            pending_records=True).get(entry.id, [])
+        next_charge = days[0].date() if days else None
+        can_mark_paid = bool(access.permissions(entry)["can_post"])
+        auto_post = info.state if info is not None else None
+        items.append({
+            "view": redactor.view(entry),
+            "entry_id": entry.id,
+            "name": entry.name,
+            "account_name": account.name if account is not None
+            and redactor.can_view(account.id) else None,
+            "amount": float(entry.amount),
+            "currency": entry.currency.value,
+            "next_charge": next_charge,
+            "missed": sum(1 for occ in days if occ.date() < today),
+            "payments_left": entry.max_occurrences,
+            "payments_total": paid[entry.id] + entry.max_occurrences,
+            "can_mark_paid": can_mark_paid,
+            "auto_post": auto_post,
+            "block_reason": info.block_reason if info is not None else None,
+            "can_review": bool(info is not None and info.can_edit
+                               and auto_post_block(entry, account) is None),
+            "recordable": (can_mark_paid and next_charge is not None
+                           and next_charge == first_occurrence(entry).date()
+                           and auto_post != "on"),
+        })
+    items.sort(key=lambda row: (row["next_charge"] is None,
+                                not (row["next_charge"] is not None
+                                     and row["next_charge"] < today),
+                                row["next_charge"] or today, row["name"], row["entry_id"]))
+    return {"items": items, "auto_post_scheduled": settings.JOB_TOKEN is not None,
+            "today": today}
 
 
 def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> None:
