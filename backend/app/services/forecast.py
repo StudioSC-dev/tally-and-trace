@@ -2032,12 +2032,24 @@ def capped_distinct_days(entry, start: datetime, end: datetime,
     once (``distinct_days``), then capped at ``max_occurrences`` on an
     ``after_occurrences`` entry: the cap counts recorded occurrences, so a
     semi-monthly day clamped onto another (days 30/31 on Feb 28) uses one, not
-    two. ``start`` is ``next_occurrence``, where the cap's count begins."""
-    days = distinct_days(iter_occurrences(entry, start, end, max_steps=max_steps,
-                                          apply_cap=False))
+    two. ``start`` is ``next_occurrence``, where the cap's count begins. The
+    walk stops at the cap's last day rather than running on to ``end``."""
+    occurrences = iter_occurrences(entry, start, end, max_steps=max_steps, apply_cap=False)
     cap = (entry.max_occurrences
            if getattr(entry, "end_mode", None) == "after_occurrences" else None)
-    return days if cap is None else days[:max(cap, 0)]
+    if cap is None:
+        return distinct_days(occurrences)
+    seen: set = set()
+    days: List[datetime] = []
+    if cap <= 0:
+        return days
+    for occ in occurrences:
+        if occ.date() not in seen:
+            seen.add(occ.date())
+            days.append(occ)
+            if len(days) >= cap:
+                break
+    return days
 
 
 def capped_schedule_end(entry) -> date:

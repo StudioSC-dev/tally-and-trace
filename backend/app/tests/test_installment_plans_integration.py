@@ -339,3 +339,42 @@ def test_a_plan_ending_on_the_last_representable_day(w):
     assert [d.date() for d in days] == [date(9999, 11, 30), date.max]
     plan = _plan(client, o, edge)
     assert (plan["next_charge"], plan["missed"], plan["payments_left"]) == ("9999-11-30", 0, 2)
+
+
+def test_a_capped_walk_stops_at_its_last_payment(w):
+    """The batched walk runs every plan through the latest schedule end; each
+    plan's walk still stops at its own last payment (``capped_distinct_days``),
+    so a 10-payment weekly plan beside a 360-year annual one walks 10 days, not
+    every week to the year 2386."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services import forecast as fc
+
+    client, o, db = w["client"], w["o"], w["db"]
+    weekly = _installment(w, name="Weekly", next_day=_day(3), remaining=10, cadence="weekly")
+    annual = _installment(w, name="Annual", next_day=_day(3), remaining=360, cadence="annual")
+    for entry_id in (weekly, annual):
+        _flags(db, entry_id, reviewed=True, on=False)
+    db.rollback()
+    entries = db.query(BudgetEntry).filter(BudgetEntry.id.in_([weekly, annual])).all()
+
+    yielded: dict = {}
+    real = fc.iter_occurrences
+
+    def counting(entry, *args, **kwargs):
+        for occ in real(entry, *args, **kwargs):
+            yielded[entry.id] = yielded.get(entry.id, 0) + 1
+            yield occ
+
+    w["monkeypatch"].setattr(fc, "iter_occurrences", counting)
+    through = max(fc.capped_schedule_end(e) for e in entries)
+    yielded.clear()
+    days = fc.unrecorded_occurrences(db, entries, through=through, pending_records=True)
+    assert (len(days[weekly]), len(days[annual])) == (10, 360)
+    assert yielded == {weekly: 10, annual: 360}
+
+    yielded.clear()
+    plans = {i["entry_id"]: i["next_charge"] for i in _plans(client, o)["items"]}
+    assert plans == {weekly: _day(3), annual: _day(3)}
+    # Its schedule end, its walk, its first occurrence and the auto-post plan:
+    # a few times its 10 payments, never every week to the annual plan's end.
+    assert yielded.get(weekly, 0) <= 30
