@@ -489,6 +489,10 @@ async function retryRun(browser, name, failsAgain) {
     const marked = () => page.evaluate(() => window.__stu335Marker === 1)
     const before = { snapshot: count(asSnapshot), allocations: count(asAllocations), total: requests.length }
     const hitsBefore = snapFail.hits
+    // Armed before the click, so the retried snapshot's 500 cannot be missed.
+    const failedAgain = failsAgain
+      ? page.waitForResponse((r) => isSnapshot(r.request()) && r.status() === 500, { timeout: 5000 }).then(() => true, () => false)
+      : null
     await retry.click()
     if (!failsAgain) {
       await page.locator(tid('net-worth')).waitFor({ timeout: 8000 }).catch(() => {})
@@ -517,10 +521,13 @@ async function retryRun(browser, name, failsAgain) {
       const until = Date.now() + 5000
       while (snapFail.hits <= hitsBefore && Date.now() < until) await h.sleep(50)
       await h.check(`${name}.retry-refetches`, 'B', async () => snapFail.hits > hitsBefore || 'the first Retry sent no snapshot request')
-      await retry.waitFor({ timeout: 5000 }).catch(() => {})
+      // The old Retry button stays mounted until the refetch starts: wait for the retried
+      // snapshot's 500 and for the page to settle, then for the returned screen's button.
+      await failedAgain
+      await h.waitQuiet(page)
+      await retry.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
       await h.check(`${name}.screen-returns`, 'B', async () => (await retry.count()) === 1 || 'error screen did not return after the first Retry')
       await h.check(`${name}.marker-survives-first`, 'B', async () => (await marked()) || 'the page reloaded on the first Retry')
-      await h.waitQuiet(page)
       await h.check(`${name}.screen-visible-after-settle`, 'B', async () => (await retry.isVisible()) || 'error screen not visible once requests settled')
       await snapFail.stop()
       await retry.click()

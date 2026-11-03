@@ -477,8 +477,13 @@ async function pendingForeignFace(browser) {
 
   // Explicit range that holds the seeded rows even on the 1st or 2nd of a month, when they fall in the previous one.
   await page.getByRole('button', { name: 'Show filters' }).click()
-  await page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input').fill(addDays(today, -3))
+  const startInput = page.locator('xpath=//label[normalize-space()="Custom start date"]/following-sibling::input')
+  // The screen loader blocks input while a request is in flight: wait for it before the fill.
   await waitQuiet(page)
+  await startInput.fill(addDays(today, -3))
+  await settle(page)
+  await waitQuiet(page)
+  check('(f) the custom start date holds the wanted day', await startInput.inputValue(), addDays(today, -3))
   const item = page.locator('article').filter({ has: page.getByText('Foreign F', { exact: true }) })
   check('(f) the Transactions list has the row once', await item.count(), 1)
   check('(f) its amount is $131.00, not ₱131.00', await item.locator('p.text-lg.font-bold').textContent(), '$131.00')

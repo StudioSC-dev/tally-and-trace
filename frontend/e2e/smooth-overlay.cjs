@@ -485,6 +485,14 @@ async function scenarioO2(browser) {
   try {
     await h.uiLogin(page, stack, owner)
     await openTransactions(page)
+    // The stuck card is centred in the viewport and can cover PREV_MONTH (its Reload page
+    // too, as the Due card grows). Before the stuck state, make the viewport tall enough
+    // that PREV_MONTH sits well above the centre, and scroll to the top.
+    const monthBottom = await page.locator(PREV_MONTH).evaluate((el) => el.getBoundingClientRect().bottom + window.scrollY)
+    const size = page.viewportSize()
+    await page.setViewportSize({ width: size.width, height: Math.max(size.height, Math.ceil(2 * (monthBottom + 400))) })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await h.waitQuiet(page)
     const search = page.locator(SEARCH)
     await search.click()
     await pauseNow(page)
@@ -515,7 +523,23 @@ async function scenarioO2(browser) {
     await h.check('o2.typing', 'B', async () => (await search.inputValue()) === 'abc' || `value "${await search.inputValue()}"`)
     const label = await monthLabel(page)
     const before = apiRequests(requests)
-    await h.clickBox(page, await boxOf(page.locator(PREV_MONTH)))
+    // A physical press at PREV_MONTH's centre: it must land on the scrim (PREV_MONTH's
+    // container is inert, so it never appears in a hit test), never on the card or Reload.
+    const monthBox = await boxOf(page.locator(PREV_MONTH))
+    const point = { x: monthBox.x + monthBox.width / 2, y: monthBox.y + monthBox.height / 2 }
+    await h.check('o2.month-point-on-scrim', 'S', async () => {
+      const r = await page.evaluate(([sel, x, y]) => {
+        const rect = document.querySelector(sel).getBoundingClientRect()
+        const hit = document.elementFromPoint(x, y)
+        return {
+          inRect: x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom,
+          inViewport: x >= 0 && x < window.innerWidth && y >= 0 && y < window.innerHeight,
+          hit: hit?.getAttribute('data-testid') ?? hit?.tagName ?? null,
+        }
+      }, [PREV_MONTH, point.x, point.y])
+      return (r.inRect && r.inViewport && r.hit === 'busy-overlay') || JSON.stringify(r)
+    })
+    await page.mouse.click(point.x, point.y)
     await h.sleep(300)
     await h.check('o2.month-blocked', 'B', async () => {
       const after = await monthLabel(page)
@@ -1001,12 +1025,22 @@ async function scenarioF(browser) {
       await h.resetTexts(page)
       await group.getByRole('button', { name: 'year' }).click()
       await h.check('f1.shield-at-once', 'B', async () => {
-        const phase = await h.overlayPhase(page)
-        const since = await nowOf(page)
+        // Press month as soon as the held request is in flight: that press must make no request.
+        // The log stamps `t` asynchronously, so the held request can be stamped after any
+        // `since`: count by position from a snapshot taken once it is logged instead.
+        await g.waitHits(1)
+        const n = requests.length
         await h.clickBox(page, monthBox)
+        // `data-phase` renders a few ms after the request starts: poll for it, bounded at
+        // 100 ms (well under SHOW_DELAY_MS), only to confirm the overlay is in shield.
+        const shield = await h.waitPhase(page, 'shield', 100)
+        const phase = await h.overlayPhase(page)
         await h.sleep(400)
-        const extra = requestsSince(requests, since, (r) => new URL(r.url).pathname.endsWith('/transactions/summary/period'))
-        return (phase === 'shield' && extra.length === 0 && g.hits === 1) || `phase ${phase} extra ${extra.length} hits ${g.hits}`
+        const extra = requests.slice(n).filter((r) => new URL(r.url).pathname.endsWith('/transactions/summary/period'))
+        // Month's totals are cached from the first load, so an unblocked press can switch the
+        // period without a request: the period that stays selected is the behavioural read.
+        const pressed = await group.getByRole('button', { name: 'year' }).getAttribute('aria-pressed')
+        return (pressed === 'true' && shield && extra.length === 0 && g.hits === 1) || `year pressed ${pressed} shield ${shield} phase ${phase} extra ${extra.length} hits ${g.hits}`
       })
       await h.check('f1.visible-later', 'B', async () => (await visible(page)) || 'never visible')
       g.release({ disarm: true })
