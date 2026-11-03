@@ -519,13 +519,17 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
     entries = [e for e in entries if plan_kind(e, access.account(e.account_id)) == "installment"]
     infos = installment_infos(db, user, redactor=redactor) if entries else {}
     paid = fc.occurrences_paid(db, entries)
+    # One pass for every plan's linked rows: each walk is still capped at its
+    # own ``max_occurrences`` (``capped_distinct_days``), so walking through the
+    # latest schedule end lists the same days as walking through its own.
+    unrecorded = fc.unrecorded_occurrences(
+        db, entries, through=max(fc.capped_schedule_end(e) for e in entries),
+        pending_records=True) if entries else {}
     items = []
     for entry in entries:
         account = access.account(entry.account_id)
         info = infos.get(entry.id)
-        days = fc.unrecorded_occurrences(
-            db, [entry], through=fc.capped_schedule_end(entry),
-            pending_records=True).get(entry.id, [])
+        days = unrecorded.get(entry.id, [])
         next_charge = days[0].date() if days else None
         can_mark_paid = bool(access.permissions(entry)["can_post"])
         auto_post = info.state if info is not None else None

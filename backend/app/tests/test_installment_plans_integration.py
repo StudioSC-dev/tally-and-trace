@@ -249,3 +249,74 @@ def test_the_route_is_declared_before_the_entry_route(w):
     r = client.get(f"{API}/budget-entries/installment-plans")
     assert r.status_code == 401
     assert _plans(client, o)["items"] == []
+
+
+def _counted(w, fn):
+    """``(result, queries outside installment_infos, queries inside it)`` while ``fn`` runs."""
+    from sqlalchemy import event
+
+    from app.core.database import engine
+    from app.services import missed
+
+    counts = {"all": 0, "infos": 0}
+    inside = []
+    real = missed.installment_infos
+
+    def infos(*args, **kwargs):
+        inside.append(True)
+        try:
+            return real(*args, **kwargs)
+        finally:
+            inside.pop()
+
+    def count(*_):
+        counts["infos" if inside else "all"] += 1
+
+    w["monkeypatch"].setattr(missed, "installment_infos", infos)
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+    return result, counts["all"], counts["infos"]
+
+
+def test_plan_rows_load_in_one_pass(w):
+    """The plans route's own queries do not grow with the number of plans
+    (``installment_infos``, the snapshot's shared per-plan ``post_plan``, is
+    counted apart), and the one batched walk lists each plan's days exactly as
+    a walk of that plan alone does."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services import forecast as fc
+
+    client, o, db = w["client"], w["o"], w["db"]
+
+    def seed(n):
+        ids = []
+        for i in range(n):
+            cadence = ("weekly", "monthly", "quarterly", "semi_monthly")[i % 4]
+            entry_id = _installment(w, name=f"Plan {len(ids)}", next_day=_day(-10 + 5 * i),
+                                    remaining=2 + i, cadence=cadence)
+            _linked(db, o, w["card"], entry_id, _day(-10 + 5 * i), occurrence=_day(-10 + 5 * i))
+            ids.append(entry_id)
+        return ids
+
+    seed(2)
+    two, two_own, _ = _counted(w, lambda: _plans(client, o))
+    seed(4)
+    six, six_own, six_infos = _counted(w, lambda: _plans(client, o))
+    assert (len(two["items"]), len(six["items"])) == (2, 6)
+    assert six_own == two_own, (two_own, six_own, six_infos)
+
+    db.rollback()
+    entries = db.query(BudgetEntry).filter(
+        BudgetEntry.id.in_([i["entry_id"] for i in six["items"]])).all()
+    batch = fc.unrecorded_occurrences(
+        db, entries, through=max(fc.capped_schedule_end(e) for e in entries),
+        pending_records=True)
+    for entry in entries:
+        alone = fc.unrecorded_occurrences(db, [entry], through=fc.capped_schedule_end(entry),
+                                          pending_records=True)
+        assert batch[entry.id] == alone[entry.id], entry.name
+    assert {i["entry_id"]: i["next_charge"] for i in six["items"]} == {
+        e.id: (batch[e.id][0].date().isoformat() if batch[e.id] else None) for e in entries}
