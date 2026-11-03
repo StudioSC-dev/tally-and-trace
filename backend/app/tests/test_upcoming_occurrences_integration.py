@@ -596,3 +596,40 @@ def test_plan_partitions_filter_before_the_limit(me):
     r = client.get(f"{API}/budget-entries/upcoming-occurrences", headers=who["headers"],
                    params={"plan": "installment"})
     assert r.status_code == 422
+
+
+def test_partitions_skip_installment_states(me):
+    """Neither partition lists an installment, so neither computes the
+    installments' auto-post states: adding plans adds no query to either."""
+    from sqlalchemy import event
+
+    from app.core.database import engine
+
+    client, who = me.client, me.who
+    card = _card(client, who, me.checking)
+    _entry(client, who, card, (TODAY + timedelta(days=20)).isoformat(), "Netflix")
+    _entry(client, who, me.checking, (TODAY + timedelta(days=25)).isoformat(), "Rent")
+    window = {"start_date": _start(TODAY + timedelta(days=1)),
+              "end_date": _end(TODAY + timedelta(days=30)), "limit": 500}
+
+    def queries(plan):
+        count = [0]
+
+        def tick(*_):
+            count[0] += 1
+
+        event.listen(engine, "before_cursor_execute", tick)
+        try:
+            body = _upcoming(client, who, plan=plan, **window)
+        finally:
+            event.remove(engine, "before_cursor_execute", tick)
+        return count[0], body["total"]
+
+    before = {plan: queries(plan) for plan in ("subscription", "none")}
+    for i in range(4):
+        _entry(client, who, card, (TODAY + timedelta(days=3 + i)).isoformat(), f"Plan {i}",
+               end_mode="after_occurrences", max_occurrences=6)
+    every = _upcoming(client, who, **window)
+    assert {i["plan_kind"] for i in every["items"]} >= {"installment"}  # they are listed
+    after = {plan: queries(plan) for plan in ("subscription", "none")}
+    assert after == before

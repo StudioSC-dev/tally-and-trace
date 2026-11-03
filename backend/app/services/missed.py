@@ -445,7 +445,11 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
         entries = [e for e in entries if plan_kind(e, access.account(e.account_id)) == wanted]
         if not entries:
             return {"items": [], "total": 0}
-    infos = installment_infos(db, user, redactor=redactor)
+    # Only card installments have an auto-post state: a list without one (a
+    # ``plan`` partition never has one) skips the per-installment plans.
+    infos = (installment_infos(db, user, redactor=redactor)
+             if any(is_card_installment(e, access.account(e.account_id)) for e in entries)
+             else {})
     unrecorded = fc.unrecorded_occurrences(db, entries, through=last, pending_records=True)
 
     def account_name(account_id: Optional[int]) -> Optional[str]:
