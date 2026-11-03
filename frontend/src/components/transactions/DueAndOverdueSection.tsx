@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
   CAP_REASON,
@@ -110,9 +110,18 @@ const ACTION_TEST_IDS: Record<RecurringAction, string> = {
 
 type DueTab = 'due' | 'not_posted'
 
-const TABS: readonly { id: DueTab; label: string; slug: string }[] = [
-  { id: 'due', label: 'Due and overdue', slug: 'due' },
-  { id: 'not_posted', label: 'Not posted yet', slug: 'not-posted' },
+/** One tab of the card: its label, its test-id slug, its badge's test id, and whether it lists the window batches (so "Load more" applies). */
+interface TabSpec {
+  id: DueTab
+  label: string
+  slug: string
+  badgeTestId: string
+  usesWindow: boolean
+}
+
+const TABS: readonly TabSpec[] = [
+  { id: 'due', label: 'Due and overdue', slug: 'due', badgeTestId: 'due-count', usesWindow: true },
+  { id: 'not_posted', label: 'Not posted yet', slug: 'not-posted', badgeTestId: 'due-not-posted-count', usesWindow: true },
 ]
 
 const addDays = (day: string, n: number): string => {
@@ -181,16 +190,17 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
  */
 function useClampedPage(
   count: number,
+  tab: DueTab,
   state: DuePageState,
-  setState: (state: DuePageState) => void,
+  setState: (tab: DueTab, state: DuePageState) => void,
   today: string,
   settled: boolean,
 ): ReturnType<typeof pageWindow> {
   const page = effectiveDuePage(state, today)
   const view = pageWindow(count, page, DUE_PAGE_SIZE)
   useEffect(() => {
-    if (settled && view.page !== page) setState({ page: view.page, day: today })
-  }, [settled, view.page, page, today, setState])
+    if (settled && view.page !== page) setState(tab, { page: view.page, day: today })
+  }, [settled, view.page, page, today, tab, setState])
   return view
 }
 
@@ -258,8 +268,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [loaded, setLoaded] = useState({ count: 1, day: today })
   const batchCount = loaded.day === today ? loaded.count : 1
   // Each tab's page the reader chose and the day they chose it on: a new day is page 1, whatever else is loading.
-  const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
-  const [notPostedPageState, setNotPostedPageState] = useState<DuePageState>({ page: 1, day: today })
+  const [pageStates, setPageStates] = useState<Record<DueTab, DuePageState>>(() => ({
+    due: { page: 1, day: today },
+    not_posted: { page: 1, day: today },
+  }))
+  const setPageState = useCallback(
+    (id: DueTab, state: DuePageState) => setPageStates((prev) => ({ ...prev, [id]: state })),
+    [],
+  )
 
   const {
     data: snapshot,
@@ -328,13 +344,26 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const loading = snapshotLoading || windowResult.loading
   // First-load flags only: a refetch is not gated, it runs under the screen loader. A linked batch that lands adds rows, so the count waits for it.
   const countPending = loading || linkedLoading
-  const view = useClampedPage(count, pageState, setPageState, today, !countPending && !windowResult.fetching)
+  const view = useClampedPage(count, 'due', pageStates.due, setPageState, today, !countPending && !windowResult.fetching)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
   // Not posted yet: the window's one-off rows only, so its count never waits for the linked batches.
   const notPosted = useMemo(() => notPostedRows(windowTxns, today), [windowTxns, today])
   const notPostedCount = notPosted.length
-  const notPostedView = useClampedPage(notPostedCount, notPostedPageState, setNotPostedPageState, today, !loading && !windowResult.fetching)
+  const notPostedView = useClampedPage(
+    notPostedCount,
+    'not_posted',
+    pageStates.not_posted,
+    setPageState,
+    today,
+    !loading && !windowResult.fetching,
+  )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
+  // Each tab's badge: "…" while its count is not settled.
+  const badges: Record<DueTab, { pending: boolean; count: number }> = {
+    due: { pending: countPending, count },
+    not_posted: { pending: loading, count: notPostedCount },
+  }
+  const selectedUsesWindow = TABS.find((spec) => spec.id === tab)?.usesWindow === true
 
   const titleId = `${panelId}-title`
   const tabId = (id: DueTab) => `${panelId}-tab-${id}`
@@ -623,6 +652,230 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     return entryRow(row)
   }
 
+  // Each tab's content, mounted only in its own panel while the card is open and the tab selected.
+  const panels: Record<DueTab, () => ReactNode> = {
+    due: () => (
+      <>
+        {reviewNotice && (
+          <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-notice">
+            <button
+              type="button"
+              onClick={() => setNoticeOpen((prev) => !prev)}
+              aria-expanded={noticeOpen}
+              className="text-sm font-medium text-warn underline underline-offset-2 focus-ring"
+              data-testid="due-review-notice-toggle"
+            >
+              {reviewNotice.text}
+            </button>
+            {noticeOpen && (
+              <>
+                {cleanCount > 0 && (
+                  <div className="flex flex-wrap items-center gap-3" data-testid="due-review-notice-header">
+                    <label className="flex items-center gap-2 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        ref={(el) => {
+                          if (el) el.indeterminate = allState === 'some'
+                        }}
+                        checked={allState === 'all'}
+                        disabled={batchBusy}
+                        onChange={() => setSelected(allState === 'all' ? new Set() : selectAll(reviewNotice))}
+                        className="border-line focus-ring"
+                        data-testid="due-review-notice-select-all"
+                      />
+                      Select all
+                    </label>
+                    <button
+                      type="button"
+                      onClick={reviewSelected}
+                      disabled={batchBusy || effective.size === 0}
+                      className={primaryButtonClass}
+                      data-testid="due-review-selected"
+                    >
+                      {reviewSelectedText(effective.size)}
+                    </button>
+                    {capped && (
+                      <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
+                    )}
+                  </div>
+                )}
+                <ul className="space-y-2" data-testid="due-review-notice-list">
+                  {reviewNotice.entries.map((entry) => {
+                    const nameId = `${panelId}-name-${entry.entryId}`
+                    const reasonId = `${panelId}-reason-${entry.entryId}`
+                    const ticked = effective.has(entry.entryId)
+                    const blockedByCap = entry.clean && capped && !ticked
+                    const describedBy = !entry.clean ? reasonId : blockedByCap ? limitId : undefined
+                    return (
+                      <li
+                        key={entry.entryId}
+                        className="flex items-center justify-between gap-3"
+                        data-testid="due-review-notice-entry"
+                        data-source={`budget_entry:${entry.entryId}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={ticked}
+                            disabled={!entry.clean || batchBusy || blockedByCap}
+                            onChange={() => setSelected((prev) => toggleSelection(prev, entry.entryId, reviewNotice))}
+                            aria-labelledby={nameId}
+                            {...(describedBy ? { 'aria-describedby': describedBy } : {})}
+                            className="border-line focus-ring"
+                            data-testid="due-review-notice-select"
+                          />
+                          <span className="text-sm text-ink">
+                            <span id={nameId}>{entry.name}</span>
+                            <span className="text-xs text-muted">
+                              {` · ${entry.accountName}`}
+                              {entry.reason !== null && (
+                                <>
+                                  {' · '}
+                                  <span id={reasonId} data-testid="due-review-notice-reason">{entry.reason}</span>
+                                </>
+                              )}
+                            </span>
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => review(entry.entryId, entry.name)}
+                          className={buttonClass}
+                          data-testid="due-review-notice-review"
+                        >
+                          Review
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+        {batchResult !== null && batchResult.day === today && (batchResult.text !== null || batchResult.failures.length > 0) && (
+          <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-batch">
+            {batchResult.text !== null && (
+              <p className="text-sm text-ok" role="status" data-testid="due-review-batch-result">{batchResult.text}</p>
+            )}
+            {batchResult.failures.length > 0 && (
+              <ul className="space-y-1">
+                {batchResult.failures.map((f) => (
+                  <li
+                    key={f.entryId}
+                    className="text-sm text-danger"
+                    role="alert"
+                    data-testid="due-review-batch-failure"
+                    data-source={`budget_entry:${f.entryId}`}
+                  >
+                    {f.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {todayLines.length > 0 && (
+          <ul className="divide-y divide-line border-b border-line" data-testid="due-today-lines">
+            {todayLines.map((line) => (
+              <li
+                key={line.key}
+                className="flex items-center justify-between gap-3 px-4 py-2"
+                data-testid="due-today-line"
+                data-source={`budget_entry:${line.entryId}`}
+                data-state={line.state}
+              >
+                <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
+                {line.canReview && (
+                  <button
+                    type="button"
+                    onClick={() => review(line.entryId, line.name)}
+                    className={buttonClass}
+                    data-testid="due-today-review"
+                  >
+                    Review
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {openPostedText !== null && (
+          <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
+        )}
+        {(postNow !== null || posted !== null || postError !== null) && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+            {postNow !== null && (
+              <button
+                type="button"
+                onClick={() => void postDueNow()}
+                disabled={posting}
+                className={primaryButtonClass}
+                data-testid="due-post-now"
+              >
+                {posting ? 'Posting…' : postNow}
+              </button>
+            )}
+            {posted !== null && (
+              <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
+            )}
+            {postError !== null && (
+              <p className="text-sm text-danger" role="alert" data-testid="due-post-now-error">{postError}</p>
+            )}
+          </div>
+        )}
+        {!countPending && !snapshotError && count === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
+        )}
+        {count > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {visible.map((row) =>
+              row.kind === 'pending' ? pendingRow(row) : row.kind === 'statement' ? statementRow(row) : recurringRow(row),
+            )}
+          </ul>
+        )}
+        {count > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={count}
+              page={view.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('due', { page: next, day: today })}
+              label="Due and overdue pages"
+              testId="due-pager"
+              disabled={loading}
+            />
+          </div>
+        )}
+      </>
+    ),
+    not_posted: () => (
+      <>
+        {!loading && !snapshotError && notPostedCount === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-not-posted-empty">Nothing waiting to post.</p>
+        )}
+        {notPostedCount > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {notPostedVisible.map((row) => notPostedRow(row))}
+          </ul>
+        )}
+        {notPostedCount > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={notPostedCount}
+              page={notPostedView.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('not_posted', { page: next, day: today })}
+              label="Not posted yet pages"
+              testId="due-pager"
+              disabled={loading}
+            />
+          </div>
+        )}
+      </>
+    ),
+  }
+
   return (
     <section className="card" data-testid="due-section" data-limited-rows={LIMITED_ROWS} aria-labelledby={titleId}>
       <h2 id={titleId} className="sr-only">Due and overdue</h2>
@@ -631,15 +884,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
           type="button"
           onClick={() => setOpen((prev) => !prev)}
           aria-expanded={open}
-          aria-controls={`${tabPanelId('due')} ${tabPanelId('not_posted')}`}
+          aria-controls={TABS.map(({ id }) => tabPanelId(id)).join(' ')}
           className={buttonClass}
           data-testid="due-section-toggle"
         >
           {open ? 'Hide' : 'Show'}
         </button>
-        <div role="tablist" aria-labelledby={titleId} className="flex flex-1 gap-1 bg-sunken p-1">
-          {TABS.map(({ id, label, slug }, index) => {
+        <div role="tablist" aria-labelledby={titleId} className="flex min-w-0 flex-1 flex-wrap gap-1 bg-sunken p-1">
+          {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
+            const badge = badges[id]
             return (
               <button
                 key={id}
@@ -654,17 +908,13 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className={`flex flex-1 items-center justify-between gap-2 px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
+                className={`flex flex-auto items-center justify-between gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
                   selectedTab ? 'bg-surface text-ink' : 'text-body hover:text-ink'
                 }`}
                 data-testid={`due-tab-${slug}`}
               >
                 <span>{label}</span>
-                {id === 'due' ? (
-                  <span className="badge" data-testid="due-count">{countPending ? '…' : count}</span>
-                ) : (
-                  <span className="badge" data-testid="due-not-posted-count">{loading ? '…' : notPostedCount}</span>
-                )}
+                <span className="badge" data-testid={badgeTestId}>{badge.pending ? '…' : badge.count}</span>
               </button>
             )
           })}
@@ -678,247 +928,21 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
           Could not load some pending transactions.
         </p>
       )}
-      <div
-        role="tabpanel"
-        id={tabPanelId('due')}
-        aria-labelledby={tabId('due')}
-        tabIndex={0}
-        hidden={!open || tab !== 'due'}
-        className="border-t border-line focus-ring"
-        data-testid="due-panel-due"
-      >
-        {open && tab === 'due' && (
-          <>
-            {reviewNotice && (
-              <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-notice">
-                <button
-                  type="button"
-                  onClick={() => setNoticeOpen((prev) => !prev)}
-                  aria-expanded={noticeOpen}
-                  className="text-sm font-medium text-warn underline underline-offset-2 focus-ring"
-                  data-testid="due-review-notice-toggle"
-                >
-                  {reviewNotice.text}
-                </button>
-                {noticeOpen && (
-                  <>
-                    {cleanCount > 0 && (
-                      <div className="flex flex-wrap items-center gap-3" data-testid="due-review-notice-header">
-                        <label className="flex items-center gap-2 text-sm text-ink">
-                          <input
-                            type="checkbox"
-                            ref={(el) => {
-                              if (el) el.indeterminate = allState === 'some'
-                            }}
-                            checked={allState === 'all'}
-                            disabled={batchBusy}
-                            onChange={() => setSelected(allState === 'all' ? new Set() : selectAll(reviewNotice))}
-                            className="border-line focus-ring"
-                            data-testid="due-review-notice-select-all"
-                          />
-                          Select all
-                        </label>
-                        <button
-                          type="button"
-                          onClick={reviewSelected}
-                          disabled={batchBusy || effective.size === 0}
-                          className={primaryButtonClass}
-                          data-testid="due-review-selected"
-                        >
-                          {reviewSelectedText(effective.size)}
-                        </button>
-                        {capped && (
-                          <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
-                        )}
-                      </div>
-                    )}
-                    <ul className="space-y-2" data-testid="due-review-notice-list">
-                      {reviewNotice.entries.map((entry) => {
-                        const nameId = `${panelId}-name-${entry.entryId}`
-                        const reasonId = `${panelId}-reason-${entry.entryId}`
-                        const ticked = effective.has(entry.entryId)
-                        const blockedByCap = entry.clean && capped && !ticked
-                        const describedBy = !entry.clean ? reasonId : blockedByCap ? limitId : undefined
-                        return (
-                          <li
-                            key={entry.entryId}
-                            className="flex items-center justify-between gap-3"
-                            data-testid="due-review-notice-entry"
-                            data-source={`budget_entry:${entry.entryId}`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={ticked}
-                                disabled={!entry.clean || batchBusy || blockedByCap}
-                                onChange={() => setSelected((prev) => toggleSelection(prev, entry.entryId, reviewNotice))}
-                                aria-labelledby={nameId}
-                                {...(describedBy ? { 'aria-describedby': describedBy } : {})}
-                                className="border-line focus-ring"
-                                data-testid="due-review-notice-select"
-                              />
-                              <span className="text-sm text-ink">
-                                <span id={nameId}>{entry.name}</span>
-                                <span className="text-xs text-muted">
-                                  {` · ${entry.accountName}`}
-                                  {entry.reason !== null && (
-                                    <>
-                                      {' · '}
-                                      <span id={reasonId} data-testid="due-review-notice-reason">{entry.reason}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => review(entry.entryId, entry.name)}
-                              className={buttonClass}
-                              data-testid="due-review-notice-review"
-                            >
-                              Review
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </>
-                )}
-              </div>
-            )}
-            {batchResult !== null && batchResult.day === today && (batchResult.text !== null || batchResult.failures.length > 0) && (
-              <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-batch">
-                {batchResult.text !== null && (
-                  <p className="text-sm text-ok" role="status" data-testid="due-review-batch-result">{batchResult.text}</p>
-                )}
-                {batchResult.failures.length > 0 && (
-                  <ul className="space-y-1">
-                    {batchResult.failures.map((f) => (
-                      <li
-                        key={f.entryId}
-                        className="text-sm text-danger"
-                        role="alert"
-                        data-testid="due-review-batch-failure"
-                        data-source={`budget_entry:${f.entryId}`}
-                      >
-                        {f.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            {todayLines.length > 0 && (
-              <ul className="divide-y divide-line border-b border-line" data-testid="due-today-lines">
-                {todayLines.map((line) => (
-                  <li
-                    key={line.key}
-                    className="flex items-center justify-between gap-3 px-4 py-2"
-                    data-testid="due-today-line"
-                    data-source={`budget_entry:${line.entryId}`}
-                    data-state={line.state}
-                  >
-                    <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
-                    {line.canReview && (
-                      <button
-                        type="button"
-                        onClick={() => review(line.entryId, line.name)}
-                        className={buttonClass}
-                        data-testid="due-today-review"
-                      >
-                        Review
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {openPostedText !== null && (
-              <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
-            )}
-            {(postNow !== null || posted !== null || postError !== null) && (
-              <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
-                {postNow !== null && (
-                  <button
-                    type="button"
-                    onClick={() => void postDueNow()}
-                    disabled={posting}
-                    className={primaryButtonClass}
-                    data-testid="due-post-now"
-                  >
-                    {posting ? 'Posting…' : postNow}
-                  </button>
-                )}
-                {posted !== null && (
-                  <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
-                )}
-                {postError !== null && (
-                  <p className="text-sm text-danger" role="alert" data-testid="due-post-now-error">{postError}</p>
-                )}
-              </div>
-            )}
-            {!countPending && !snapshotError && count === 0 && (
-              <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
-            )}
-            {count > 0 && (
-              <ul className="divide-y divide-line" data-testid="due-list">
-                {visible.map((row) =>
-                  row.kind === 'pending' ? pendingRow(row) : row.kind === 'statement' ? statementRow(row) : recurringRow(row),
-                )}
-              </ul>
-            )}
-            {count > DUE_PAGE_SIZE && (
-              <div className="px-4 py-3">
-                <Pager
-                  total={count}
-                  page={view.page}
-                  pageSize={DUE_PAGE_SIZE}
-                  onPage={(next) => setPageState({ page: next, day: today })}
-                  label="Due and overdue pages"
-                  testId="due-pager"
-                  disabled={loading}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      <div
-        role="tabpanel"
-        id={tabPanelId('not_posted')}
-        aria-labelledby={tabId('not_posted')}
-        tabIndex={0}
-        hidden={!open || tab !== 'not_posted'}
-        className="border-t border-line focus-ring"
-        data-testid="due-panel-not-posted"
-      >
-        {open && tab === 'not_posted' && (
-          <>
-            {!loading && !snapshotError && notPostedCount === 0 && (
-              <p className="px-4 py-3 text-sm text-muted" data-testid="due-not-posted-empty">Nothing waiting to post.</p>
-            )}
-            {notPostedCount > 0 && (
-              <ul className="divide-y divide-line" data-testid="due-list">
-                {notPostedVisible.map((row) => notPostedRow(row))}
-              </ul>
-            )}
-            {notPostedCount > DUE_PAGE_SIZE && (
-              <div className="px-4 py-3">
-                <Pager
-                  total={notPostedCount}
-                  page={notPostedView.page}
-                  pageSize={DUE_PAGE_SIZE}
-                  onPage={(next) => setNotPostedPageState({ page: next, day: today })}
-                  label="Not posted yet pages"
-                  testId="due-pager"
-                  disabled={loading}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      {open && hasMore && (
+      {TABS.map(({ id, slug }) => (
+        <div
+          key={id}
+          role="tabpanel"
+          id={tabPanelId(id)}
+          aria-labelledby={tabId(id)}
+          tabIndex={0}
+          hidden={!open || tab !== id}
+          className="border-t border-line focus-ring"
+          data-testid={`due-panel-${slug}`}
+        >
+          {open && tab === id && panels[id]()}
+        </div>
+      ))}
+      {open && hasMore && selectedUsesWindow && (
         <div className="border-t border-line px-4 py-3">
           <button type="button" onClick={loadMore} className={buttonClass} data-testid="due-load-more">
             Load more

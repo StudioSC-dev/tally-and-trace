@@ -6,9 +6,10 @@
 //   - rowsOf(page, name, kind): the rows of allDueRows that match a name.
 //   - showRow(page, locator): go to the page that holds the locator and return it,
 //     for clicking a button on it.
-//   - openDueTab(page, 'due' | 'not-posted'): select a tab of the card. Only the selected
-//     tab's panel is mounted, so every helper here reads the tab on screen; one-off
-//     pending rows are on 'not-posted', everything else on 'due'.
+//   - openDueTab(page, slug): select a tab of the card by its slug in DUE_TABS ('due' or
+//     'not-posted'). Only the selected tab's panel is mounted, so every helper here reads
+//     the tab on screen; one-off pending rows are on 'not-posted', everything else on 'due'.
+//   - DUE_TABS: the card's tabs in order, each { slug, tab, badge, panel } (test ids).
 const { waitQuiet } = require('./_smooth.cjs')
 const ROWS = '[data-testid="due-row"]'
 
@@ -116,11 +117,11 @@ async function showLastRow(page, locator) {
   return locator
 }
 
-/** The card's two tabs: test ids, and the badge each one carries. */
-const TABS = {
-  due: { tab: 'due-tab-due', badge: 'due-count' },
-  'not-posted': { tab: 'due-tab-not-posted', badge: 'due-not-posted-count' },
-}
+/** The card's tabs in order: each one's slug and the test ids of its tab, its badge and its panel. */
+const DUE_TABS = [
+  { slug: 'due', tab: 'due-tab-due', badge: 'due-count', panel: 'due-panel-due' },
+  { slug: 'not-posted', tab: 'due-tab-not-posted', badge: 'due-not-posted-count', panel: 'due-panel-not-posted' },
+]
 
 /**
  * Selects a tab of the "Due and overdue" card: clicks it (opening the card if it is
@@ -128,7 +129,7 @@ const TABS = {
  * waitQuiet. Wait for the screen loader first, since it shields clicks.
  */
 async function openDueTab(page, which) {
-  const { tab, badge } = TABS[which] ?? {}
+  const { tab, badge } = DUE_TABS.find((t) => t.slug === which) ?? {}
   if (!tab) throw new Error(`openDueTab: unknown tab "${which}"`)
   await waitQuiet(page)
   await page.locator(`[data-testid="${tab}"]`).click()
@@ -137,4 +138,4 @@ async function openDueTab(page, which) {
   await waitQuiet(page)
 }
 
-module.exports = { openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
+module.exports = { DUE_TABS, openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
