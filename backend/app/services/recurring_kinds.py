@@ -43,6 +43,21 @@ def entry_kind(e, account: Optional[Account]) -> Optional[str]:
     return e.billing_kind or "subscription"
 
 
+def plan_kind(e, account: Optional[Account]) -> Optional[str]:
+    """Which Transactions card tab lists the entry's occurrences (STU-511):
+    ``installment`` (a card installment), ``subscription`` (an open-ended card
+    subscription, or an open-ended bank expense the user marked
+    ``billing_kind`` subscription), or None (Due and Upcoming)."""
+    if is_card_installment(e, account):
+        return "installment"
+    kind = entry_kind(e, account)
+    if e.end_mode == "indefinite" and (
+            kind == "subscription"
+            or (kind == "cash" and e.billing_kind == "subscription")):  # a bank entry the user marked
+        return "subscription"
+    return None
+
+
 def default_billing_kind(db: Session, e, account: Optional[Account]) -> Optional[str]:
     """The server default for an open-ended card expense, else None.
 

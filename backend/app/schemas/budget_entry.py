@@ -16,6 +16,9 @@ from app.schemas.tag import (
 DayRule = Literal["last_weekday"]
 BillingKind = Literal["subscription", "bill"]
 EntryKind = Literal["subscription", "installment", "bill", "cash"]
+# The Transactions card tab that lists an entry's occurrences
+# (services/recurring_kinds.py ``plan_kind``); null is Due and Upcoming.
+PlanKind = Literal["subscription", "installment"]
 
 
 class BudgetEntryBase(BaseModel):
@@ -461,6 +464,7 @@ class UpcomingOccurrence(BaseModel):
     entry_type: BudgetEntryType
     is_transfer: bool
     kind: Optional[EntryKind] = None
+    plan_kind: Optional[PlanKind] = None
     amount: float
     currency: CurrencyType
     account_name: Optional[str] = None

@@ -51,7 +51,7 @@ from app.models.transaction import Transaction, TransactionType, pending_face
 from app.services import forecast as fc
 from app.services.fx import FxRates
 from app.services.missed import split_pending_links
-from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible
+from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible, plan_kind
 from app.services.statements import resolve_cycle_fields
 
 WINDOW_DAYS = 30
@@ -218,7 +218,7 @@ def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
 def _full(e_view: str, *, when: datetime, original: Optional[datetime],
           occurrence: Optional[date], name: str, kind: str, source: str, source_id: int,
           row: dict, key: tuple, collector: fc.FxCollector, can_mark_paid: bool,
-          recurring: bool) -> dict:
+          recurring: bool, plan_kind: Optional[str] = None) -> dict:
     return {
         "view": e_view,
         "date": _day(when),
@@ -227,6 +227,7 @@ def _full(e_view: str, *, when: datetime, original: Optional[datetime],
         "occurrence_date": occurrence.isoformat() if occurrence is not None else None,
         "name": name,
         "kind": kind,
+        "plan_kind": plan_kind,
         "source": source,
         "source_id": source_id,
         "recurring": recurring,
@@ -258,7 +259,7 @@ def _entry_charge(e: dict, entry: BudgetEntry, card: Account, collector: fc.FxCo
                  kind=entry_kind(entry, card), source="budget_entry", source_id=entry.id,
                  row=row, key=fc._row_key(e, row["currency"]), collector=collector,
                  can_mark_paid=bool(redactor.access.permissions(entry)["can_post"]),
-                 recurring=False)
+                 recurring=False, plan_kind=plan_kind(entry, card))
 
 
 def _debit_charge(e: dict, txn: Transaction, card: Account, collector: fc.FxCollector,
@@ -335,6 +336,7 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             "entry_id": entry.id,
             "name": entry.name,
             "kind": entry_kind(entry, cards[entry.account_id]),
+            "plan_kind": plan_kind(entry, cards[entry.account_id]),
             "count": count,
             "due_count": len(due),
             "oldest": due[0].date().isoformat(),

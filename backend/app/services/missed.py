@@ -10,7 +10,7 @@
 - ``split_pending_links``: of each entry's missed occurrences, the ones a
   pending linked row already stands for, so a list can show each such
   occurrence once, as its pending row. Used by both missed lists.
-- ``entry_row_fields``: ``kind`` and ``can_mark_paid`` on the snapshot's full
+- ``entry_row_fields``: ``kind``, ``plan_kind`` and ``can_mark_paid`` on the snapshot's full
   budget-entry rows (``payables`` and ``upcoming_this_month``), so a list can
   offer an entry's actions without loading the entries itself.
 - ``installment_snapshot``: the snapshot's ``installment_review`` and
@@ -47,6 +47,7 @@ from app.services.installment_duplicates import held_occurrences
 from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
 from app.services.recurring_kinds import (
     BILLING_KINDS, auto_post_block, entry_kind, is_capped, is_card_installment, is_kind_eligible,
+    plan_kind,
 )
 
 
@@ -325,6 +326,7 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
             "name": entry.name,
             "entry_type": entry.entry_type.value,
             "kind": entry_kind(entry, account),
+            "plan_kind": plan_kind(entry, account),
             "is_transfer": entry.transfer_to_account_id is not None,
             "capped": is_capped(entry),
             "account_name": account.name if account is not None
@@ -453,6 +455,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
             "entry_type": entry.entry_type.value,
             "is_transfer": entry.transfer_to_account_id is not None,
             "kind": entry_kind(entry, account),
+            "plan_kind": plan_kind(entry, account),
             "amount": float(entry.amount),
             "currency": entry.currency.value,
             "account_name": account_name(entry.account_id),
@@ -476,7 +479,8 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
 
 
 def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> None:
-    """Add ``kind`` (``entry_kind``) and ``can_mark_paid`` (the entry's
+    """Add ``kind`` (``entry_kind``), ``plan_kind`` (``plan_kind``, the
+    Transactions card tab) and ``can_mark_paid`` (the entry's
     ``can_post``, with an account to post to) to each full budget-entry row,
     in place. Limited rows and other sources are left as they are. One query
     for the entries, one for their accounts."""
@@ -493,8 +497,10 @@ def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> N
     for row in rows:
         entry = entries.get(row["source_id"])
         if entry is None:
-            row["kind"], row["can_mark_paid"] = None, False
+            row["kind"], row["plan_kind"], row["can_mark_paid"] = None, None, False
             continue
-        row["kind"] = entry_kind(entry, access.account(entry.account_id))
+        account = access.account(entry.account_id)
+        row["kind"] = entry_kind(entry, account)
+        row["plan_kind"] = plan_kind(entry, account)
         row["can_mark_paid"] = bool(access.permissions(entry)["can_post"]
                                     and entry.account_id is not None)

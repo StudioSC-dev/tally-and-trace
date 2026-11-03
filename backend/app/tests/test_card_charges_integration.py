@@ -25,10 +25,10 @@ REF = datetime(2026, 10, 18, 2, 0)
 LIMITED_KEYS = {"view", "public_id", "date", "original_date", "overdue", "display_name"}
 CARD_KEYS = {"account_id", "account_name", "currency", "statement_cycle", "missed", "charges"}
 FULL_KEYS = {"view", "date", "original_date", "overdue", "occurrence_date", "name", "kind",
-             "source", "source_id", "recurring", "amount", "currency", "can_mark_paid"}
+             "plan_kind", "source", "source_id", "recurring", "amount", "currency", "can_mark_paid"}
 LABEL_KEYS = {"estimated", "unconverted", "original_amount", "original_currency", "rate",
               "rate_as_of", "rate_stale"}
-MISSED_KEYS = {"entry_id", "name", "kind", "count", "due_count", "oldest", "unlinked_count",
+MISSED_KEYS = {"entry_id", "name", "kind", "plan_kind", "count", "due_count", "oldest", "unlinked_count",
                "oldest_unlinked", "pending_transaction_ids", "can_mark_paid"}
 CREDIT_WORDS = ("credit", "limit", "available", "hold", "utiliz", "buffer", "total")
 
@@ -239,11 +239,12 @@ def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_
     section = _card_of(_snapshot(client, me), card)
     _assert_shapes([section])
     assert section["missed"] == [
-        {"entry_id": netflix, "name": "Netflix", "kind": "subscription", "count": 3,
+        {"entry_id": netflix, "name": "Netflix", "kind": "subscription",
+         "plan_kind": "subscription", "count": 3,
          "due_count": 3, "oldest": "2026-08-10", "unlinked_count": 3,
          "oldest_unlinked": "2026-08-10", "pending_transaction_ids": [],
          "can_mark_paid": True},
-        {"entry_id": meralco, "name": "Meralco", "kind": "bill", "count": 1,
+        {"entry_id": meralco, "name": "Meralco", "kind": "bill", "plan_kind": None, "count": 1,
          "due_count": 2, "oldest": "2026-09-18", "unlinked_count": 1,
          "oldest_unlinked": "2026-09-18", "pending_transaction_ids": [],
          "can_mark_paid": True},
@@ -465,7 +466,8 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
         ("2026-11-18", None, False, "Spotify"),
     ]
     assert _card_of(body, card)["missed"] == [
-        {"entry_id": spotify, "name": "Spotify", "kind": "subscription", "count": 1,
+        {"entry_id": spotify, "name": "Spotify", "kind": "subscription",
+         "plan_kind": "subscription", "count": 1,
          "due_count": 1, "oldest": "2026-10-18", "unlinked_count": 1,
          "oldest_unlinked": "2026-10-18", "pending_transaction_ids": [],
          "can_mark_paid": True}]
