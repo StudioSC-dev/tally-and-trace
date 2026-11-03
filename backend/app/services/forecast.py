@@ -2081,7 +2081,9 @@ def unrecorded_occurrences(db: Session, entries, through: date, *,
                      for entry_id, when, _, is_posted in _linked_rows(
                          db, [e.id for e in entries], occurrence_match=True)
                      if is_posted or pending_records)
-    end = datetime.combine(through + timedelta(days=1), datetime.min.time())
+    # A schedule ending on the last representable day has no next day.
+    end = (datetime.max if through >= date.max
+           else datetime.combine(through + timedelta(days=1), datetime.min.time()))
     out: Dict[int, List[datetime]] = {}
     for entry in entries:
         out[entry.id] = []

@@ -320,3 +320,22 @@ def test_plan_rows_load_in_one_pass(w):
         assert batch[entry.id] == alone[entry.id], entry.name
     assert {i["entry_id"]: i["next_charge"] for i in six["items"]} == {
         e.id: (batch[e.id][0].date().isoformat() if batch[e.id] else None) for e in entries}
+
+
+def test_a_plan_ending_on_the_last_representable_day(w):
+    """Monthly on the 31st from 9999-11-30 with 2 left ends on 9999-12-31
+    (``date.max``): the walk through it has no next day to stop before."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services import forecast as fc
+
+    client, o, db = w["client"], w["o"], w["db"]
+    edge = _installment(w, name="Edge", next_day=_day(3), remaining=2)
+    _flags(db, edge, reviewed=True, on=False)
+    _set(db, edge, next_occurrence=datetime(9999, 11, 30), anchor_day=31)
+    db.rollback()
+    entry = db.get(BudgetEntry, edge)
+    assert fc.capped_schedule_end(entry) == date.max
+    days = fc.unrecorded_occurrences(db, [entry], through=date.max)[edge]
+    assert [d.date() for d in days] == [date(9999, 11, 30), date.max]
+    plan = _plan(client, o, edge)
+    assert (plan["next_charge"], plan["missed"], plan["payments_left"]) == ("9999-11-30", 0, 2)
