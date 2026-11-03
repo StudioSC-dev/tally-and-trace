@@ -396,3 +396,13 @@ def test_a_resumed_entry_has_no_missed_row(me):
     assert gym not in _missed(_snapshot(client, who))
     _put(client, who, gym, {"is_active": True})
     assert gym not in _missed(_snapshot(client, who))
+
+
+def test_the_snapshot_carries_its_manila_day(me, monkeypatch):
+    """``today`` (STU-511): the Manila day the snapshot was computed for."""
+    client, who = me.client, me.who
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 15, 59))  # 23:59 in Manila
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 1))  # 00:01 on Oct 19
+    assert _snapshot(client, who)["today"] == "2026-10-19"

@@ -540,3 +540,59 @@ def test_the_route_is_declared_before_the_entry_route(me):
     assert r.json()["id"] == rent
     r = client.get(f"{API}/budget-entries/upcoming-occurrences")
     assert r.status_code == 401
+
+
+# --- plan partitions (STU-511) -----------------------------------------------------------------
+
+def _seed_installments(db, who, card, count) -> list:
+    """``count`` weekly card installments of 10 payments, next T+1, T+2 or T+3,
+    written directly for speed (unreviewed, as a backdated create leaves them)."""
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency
+
+    rows = [BudgetEntry(user_id=who["id"], name=f"Plan {i:03d}", entry_type=BudgetEntryType.EXPENSE,
+                        amount=100, cadence=RecurrenceFrequency.WEEKLY,
+                        next_occurrence=datetime.combine(TODAY + timedelta(days=1 + i % 3),
+                                                         datetime.min.time()),
+                        end_mode="after_occurrences", max_occurrences=10, account_id=card)
+            for i in range(count)]
+    db.add_all(rows)
+    db.commit()
+    return [r.id for r in rows]
+
+
+def test_plan_partitions_filter_before_the_limit(me):
+    """Weekly installments fill the first 500 occurrences before T+20, so an
+    unpartitioned ``limit=500`` request cuts off a card subscription first due
+    T+20. ``plan=subscription`` lists it with an exact total; ``plan=none`` holds
+    the cash bill only; installments are in neither."""
+    client, db, who = me.client, me.db, me.who
+    card = _card(client, who, me.checking)
+    plans = set(_seed_installments(db, who, card, 180))  # 540 occurrences on T+1..T+17
+    netflix = _entry(client, who, card, (TODAY + timedelta(days=20)).isoformat(), "Netflix")
+    rent = _entry(client, who, me.checking, (TODAY + timedelta(days=25)).isoformat(), "Rent")
+    window = {"start_date": _start(TODAY + timedelta(days=1)),
+              "end_date": _end(TODAY + timedelta(days=30)), "limit": 500}
+
+    every = _upcoming(client, who, **window)
+    # Precondition: the cut falls before T+20.
+    assert every["total"] > 500 and len(every["items"]) == 500
+    assert every["items"][-1]["occurrence_date"] < (TODAY + timedelta(days=20)).isoformat()
+    # Guard (passes at the parent): unpartitioned, the subscription is cut off.
+    assert netflix not in {i["entry_id"] for i in every["items"]}
+
+    subs = _upcoming(client, who, plan="subscription", **window)
+    assert _pairs(subs) == [((TODAY + timedelta(days=20)).isoformat(), netflix)]
+    assert subs["total"] == 1
+    assert {i["plan_kind"] for i in subs["items"]} == {"subscription"}
+
+    none = _upcoming(client, who, plan="none", **window)
+    assert _pairs(none) == [((TODAY + timedelta(days=25)).isoformat(), rent)]
+    assert none["total"] == 1
+    assert {i["plan_kind"] for i in none["items"]} == {None}
+
+    for body in (subs, none):
+        assert not plans & {i["entry_id"] for i in body["items"]}
+    r = client.get(f"{API}/budget-entries/upcoming-occurrences", headers=who["headers"],
+                   params={"plan": "installment"})
+    assert r.status_code == 422

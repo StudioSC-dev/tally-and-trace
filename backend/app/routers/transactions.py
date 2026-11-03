@@ -897,6 +897,9 @@ def get_transactions(
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(10, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    order: Literal["desc", "asc"] = Query(
+        "desc", description="By transaction date, then id: 'desc' (newest first) or 'asc' "
+                            "(soonest first)"),
 ):
     """Get all transactions with optional filtering"""
     # Every transaction the caller may read: their own, any touching an
@@ -995,7 +998,9 @@ def get_transactions(
 
     total = query.count()
     transactions = (
-        query.order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+        query.order_by(*((Transaction.transaction_date.asc(), Transaction.id.asc())
+                         if order == "asc" else
+                         (Transaction.transaction_date.desc(), Transaction.id.desc())))
         .offset(offset)
         .limit(limit)
         .all()

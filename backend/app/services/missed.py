@@ -389,7 +389,8 @@ def upcoming_window(start: Optional[date], end: Optional[date]) -> tuple:
 
 
 def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Optional[date],
-                         end: Optional[date], filters: UpcomingFilters, limit: int) -> dict:
+                         end: Optional[date], filters: UpcomingFilters, limit: int,
+                         plan: Optional[str] = None) -> dict:
     """``{"items", "total"}``: every occurrence from ``start`` through ``end``
     (inclusive, clamped by ``upcoming_window``) of the entries
     ``_listed_entries`` gives, narrowed by ``filters``, that no linked row
@@ -407,7 +408,12 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
     caller's ``can_post``, the schedule's first occurrence on a capped entry
     (``posting.resolve_occurrence`` refuses any later month), and not a card
     installment whose auto-post is ``on`` (it records itself on its day). It is
-    the only place that gate lives: the page derives its buttons from it."""
+    the only place that gate lives: the page derives its buttons from it.
+
+    ``plan`` (STU-511) keeps only the entries whose ``plan_kind`` matches
+    (``subscription``, or ``none`` for null) before the sort and ``limit``, so
+    ``items`` and ``total`` are exact for one Transactions card tab; installments
+    match neither. None keeps every entry."""
     first, last = upcoming_window(start, end)
     if first > last:
         return {"items": [], "total": 0}
@@ -434,6 +440,11 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
 
     access = redactor.access
     access.load(acc for e in entries for acc in (e.account_id, e.transfer_to_account_id))
+    if plan is not None:
+        wanted = None if plan == "none" else plan
+        entries = [e for e in entries if plan_kind(e, access.account(e.account_id)) == wanted]
+        if not entries:
+            return {"items": [], "total": 0}
     infos = installment_infos(db, user, redactor=redactor)
     unrecorded = fc.unrecorded_occurrences(db, entries, through=last, pending_records=True)
 

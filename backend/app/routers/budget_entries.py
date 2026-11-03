@@ -485,6 +485,10 @@ def list_upcoming_occurrences(
     search: Optional[str] = Query(None, description="Search by entry name"),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(100, ge=1, le=500),
+    plan: Optional[Literal["subscription", "none"]] = Query(
+        None, description="Only entries the Transactions card lists on this tab: "
+                          "'subscription', or 'none' (Due and Upcoming); installments match "
+                          "neither. Applied before limit"),
 ):
     """The occurrences after Manila's today of the recurring entries the caller
     sees in full or shared_full that no row stands for yet, posted or pending
@@ -511,7 +515,7 @@ def list_upcoming_occurrences(
     )
     result = missed_svc.upcoming_occurrences(
         db, current_user, redactor=Redactor(db, current_user), start=_wall_day(start_date),
-        end=_wall_day(end_date), filters=filters, limit=limit)
+        end=_wall_day(end_date), filters=filters, limit=limit, plan=plan)
     return {**result, "auto_post_scheduled": settings.JOB_TOKEN is not None}
 
 

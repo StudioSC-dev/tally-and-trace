@@ -125,3 +125,37 @@ def test_ids_is_capped_at_five_hundred(sw_client, sw_people):
     r = sw_client.get(f"{API}/transactions/", params={"ids": list(range(1, 502))},
                       headers=a["headers"])
     assert r.status_code == 422, r.text
+
+
+def test_order_asc_lists_the_soonest_rows_first_with_the_exact_total(sw_client, sw_db, sw_people):
+    """``order=asc`` (STU-511): one request returns the soonest rows of a window
+    and its exact total; ties by id ascending. No ``order`` keeps newest first."""
+    client = sw_client
+    a = sw_people("Alice", "Owner")
+    acct = _account(client, a)
+    start, end = TODAY + timedelta(days=1), TODAY + timedelta(days=30)
+    # 1005 rows in the window: 5 on its last day first, then 1000 spread over
+    # the earlier days (so a newest-first cut misses the soonest), plus rows
+    # just outside it on both sides.
+    late = _bulk(sw_db, a, acct, [end] * 5)
+    spread = _bulk(sw_db, a, acct, [start + timedelta(days=28 - i % 29) for i in range(1000)])
+    _bulk(sw_db, a, acct, [TODAY, end + timedelta(days=1)])
+    params = {"start_date": start.isoformat(),
+              "end_date": end.replace(hour=23, minute=59, second=59).isoformat(), "limit": 100}
+
+    asc = _list(client, a, order="asc", **params)
+    assert asc["total"] == 1005 and asc["has_more"] is True
+    keys = [(t["transaction_date"], t["id"]) for t in asc["items"]]
+    assert keys == sorted(keys)
+    soonest = sorted(i for i, d in zip(spread, [28 - i % 29 for i in range(1000)]) if d == 0)
+    assert [t["id"] for t in asc["items"][:len(soonest)]] == soonest
+    assert asc["items"][0]["transaction_date"].startswith(start.date().isoformat())
+
+    desc = _list(client, a, **params)
+    assert desc["total"] == 1005
+    assert [t["id"] for t in desc["items"][:5]] == sorted(late, reverse=True)
+    keys = [(t["transaction_date"], t["id"]) for t in desc["items"]]
+    assert keys == sorted(keys, reverse=True)
+    assert _list(client, a, order="desc", **params)["items"] == desc["items"]
+    r = client.get(f"{API}/transactions/", params={"order": "up"}, headers=a["headers"])
+    assert r.status_code == 422
