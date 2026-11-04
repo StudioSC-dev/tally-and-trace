@@ -190,3 +190,8 @@ script that waits on a tab's badge before opening it) records an assertion that
 the tab exists before it waits on it, and a page step that does not land records
 a failed assertion, so a build without the tab or its paging fails an assertion
 instead of a timeout.
+
+In the same way, a script waits for a dialog, modal or form it opens with
+`dialogOpened(locator, what)`: a bounded wait that records `what` as an
+assertion and returns whether it opened, so a button that opens nothing fails
+that assertion and the scenario ends instead of timing out.

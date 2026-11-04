@@ -30,7 +30,7 @@
 //
 // Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { useDueCheck, allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -257,10 +257,10 @@ async function missedPostAll(browser) {
   const dueMissed = dueRows(page, 'Spotify', 'missed')
   check('(b) Subscriptions lists the missed row', (await rowsOf(page, 'Spotify', 'missed')).length, 1)
   await showRow(page, dueMissed)
-  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${spotify.id}/occurrences`))
+  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${spotify.id}/occurrences`), { timeout: 10000 }).catch(() => null)
   await dueMissed.locator('[data-testid="due-posted"]').click()
-  const include = new URL((await asked).url()).searchParams.get('include')
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(b) Posted opened the Mark paid dialog'))) return ctx.close()
+  const include = new URL((await asked)?.url() ?? 'http://none/').searchParams.get('include')
   check('(b) the dialog asked for the oldest unrecorded missed month', include, missed.oldest_unlinked)
   const listing = await get(u.token, `/budget-entries/${spotify.id}/occurrences?include=${include}`)
   const due = listing.occurrences.filter((o) => o.due && o.linked !== 'posted').map((o) => o.occurrence_date)
@@ -331,13 +331,13 @@ async function installmentDate(browser) {
     [await dueRow.count(), await dueRow.getAttribute('data-day'), await dueRow.locator('[data-testid="due-charged"]').count(), await dueRow.locator('[data-testid="due-posted"]').count()], [1, occurrence, 1, 1])
   await waitQuiet(page)
   await dueRow.locator('[data-testid="due-charged"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(c) Charged opened the Mark paid dialog'))) return ctx.close()
   check('(c) opened on Charged, the date is labelled "Charged on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Charged on')
   await dialog(page).getByRole('button', { name: 'Cancel', exact: true }).click()
   await dialog(page).waitFor({ state: 'detached' })
   await waitQuiet(page)
   await dueRow.locator('[data-testid="due-posted"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(c) Posted opened the Mark paid dialog'))) return ctx.close()
   await settle(page) // the occurrence list refetches once more after opening; a date typed before it lands is reset
   const date = dialog(page).locator('[data-testid="mark-paid-date"]')
   check('(c) the occurrence is the installment\'s month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), occurrence)

@@ -14,6 +14,7 @@
 //   - useDueCheck(check): every script that opens a tab registers its check(what, actual, expected) first.
 //     expectDueTab(page, slug) records that the card has the tab before a script waits on its badge,
 //     and a page step that does not land records a failed assertion before it throws.
+//   - dialogOpened(locator, what): a bounded wait for a dialog or modal, recorded as an assertion; returns a boolean.
 //   - DUE_TABS: the card's tabs in order, each { slug, tab, badge, panel } (test ids).
 const { waitQuiet } = require('./_smooth.cjs')
 const ROWS = '[data-testid="due-row"]'
@@ -157,6 +158,18 @@ const DUE_TABS = [
 ]
 
 /**
+ * Waits up to `ms` for a dialog, modal or form (`locator`) and records `what` as an assertion
+ * (actual true or false) through the registered check. Returns whether it showed, so the caller
+ * skips what needs it: a missing dialog is a failed assertion, never a timeout.
+ */
+async function dialogOpened(locator, what, ms = 10000) {
+  if (dueCheck === null) throw new Error('dialogOpened: call useDueCheck(check) first')
+  const shown = await locator.waitFor({ timeout: ms }).then(() => true, () => false)
+  await dueCheck(what, shown, true)
+  return shown
+}
+
+/**
  * Records that the card has the tab `which` (once per page while it does; every time it does not,
  * and then throws), so a build without the tab fails an assertion instead of a timeout.
  */
@@ -201,4 +214,4 @@ async function readTab(page, slug) {
   return allDueRows(page)
 }
 
-module.exports = { DUE_TABS, useDueCheck, expectDueTab, readTab, openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
+module.exports = { DUE_TABS, useDueCheck, dialogOpened, expectDueTab, readTab, openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }

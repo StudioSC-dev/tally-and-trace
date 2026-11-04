@@ -70,7 +70,7 @@
 // Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|f|g|h|i|j|k]
 const util = require('node:util')
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { useDueCheck, allDueRows, showRow, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, allDueRows, showRow, openDueTab } = require('./_due_pages.cjs')
 const { gate, logRequests, overlayPhase, readTexts, recordTexts, resetTexts, sleep, waitPhase, waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -258,11 +258,12 @@ async function waitCount(page, locator, n, ms = 15000) {
   }
 }
 
+/** Clicks `button` and records whether the review dialog opened (bounded); returns that, so the caller can stop. */
 async function openReview(page, button) {
   await button.click()
-  await reviewDialog(page).waitFor()
-  await testId(page, 'installment-review-submit').waitFor()
+  if (!(await dialogOpened(testId(page, 'installment-review-submit'), 'Review opened the installment review dialog'))) return false
   await waitQuiet(page)
+  return true
 }
 async function submitReview(page) {
   await testId(page, 'installment-review-submit').click()
@@ -292,7 +293,7 @@ async function reviewWithDuplicate(browser) {
   check('(a) the plan row flags the three missed months and reads Overdue', [await text(row.locator('[data-testid="due-installment-missed"]')), await row.locator('[data-testid="due-overdue"]').count()], ['· 3 missed', 1])
   check('(a) the plan row reads "Review to auto-post"', await text(row.locator('[data-testid="due-auto-post"]')), 'Review to auto-post')
   check('(a) the plan row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
-  await openReview(page, row.locator('[data-testid="due-review"]'))
+  if (!(await openReview(page, row.locator('[data-testid="due-review"]')))) return ctx.close()
   const dialog = reviewDialog(page)
   check('(a) the dialog names the entry and the card', await text(testId(page, 'installment-review-title')), 'Turn on auto-post for Laptop (Visa A)')
   check('(a) the dialog lists the API\'s missed months',
@@ -307,11 +308,11 @@ async function reviewWithDuplicate(browser) {
   // "Move the next date instead" opens the entry's edit form; Cancel comes back to the review.
   await testId(page, 'installment-review-move-date').click()
   const update = page.getByRole('button', { name: 'Update Recurring Entry' })
-  await update.waitFor()
+  if (!(await dialogOpened(update, '(a) "Move the next date instead" opened the edit form'))) return ctx.close()
   await waitQuiet(page)
   check('(a) the edit form replaced the review', await reviewDialog(page).count(), 0)
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await testId(page, 'installment-review-submit').waitFor()
+  if (!(await dialogOpened(testId(page, 'installment-review-submit'), '(a) Cancel returned to the review dialog'))) return ctx.close()
   await waitQuiet(page)
   check('(a) Cancel came back to the review', [await update.count(), await reviewDialog(page).count()], [0, 1])
 
@@ -342,7 +343,7 @@ async function newFromTomorrow(browser) {
   await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
   await waitQuiet(page)
   await page.getByRole('button', { name: 'Add Recurring Entry' }).click()
-  await page.getByLabel('Close allocation modal').waitFor()
+  if (!(await dialogOpened(page.getByLabel('Close allocation modal'), 'Add Recurring Entry opened the form'))) return ctx.close()
   await waitQuiet(page)
   const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Save Recurring Entry' }) })
   await form.locator('input[type="text"]').first().fill('Camera')
@@ -419,7 +420,7 @@ async function heldMonth(browser) {
   await openTransactions(page)
   check('(d) the due-today line', await text(dueToday(page, entry.id).locator('[data-testid="due-today-text"]')), 'Fridge · 1 due today · Possible duplicate · Review')
   check('(d) no Post now', await testId(page, 'due-post-now').count(), 0)
-  await openReview(page, dueToday(page, entry.id).locator('[data-testid="due-today-review"]'))
+  if (!(await openReview(page, dueToday(page, entry.id).locator('[data-testid="due-today-review"]')))) return ctx.close()
   check('(d) the dialog offers the typed charge',
     await reviewDialog(page).locator('[data-testid="installment-review-candidate"]').evaluateAll((els) => els.map((e) => Number(e.dataset.transactionId))), [typed.id])
   check('(d) the button records the month', await text(testId(page, 'installment-review-submit')), 'Record 1 month and turn on auto-post')
@@ -471,7 +472,7 @@ async function roles(browser) {
   await testId(page, 'due-review-notice-toggle').click()
   const listed = page.locator(`[data-testid="due-review-notice-entry"][data-source="budget_entry:${entry.id}"]`)
   check('(e) editor: the notice lists the entry', await text(listed.locator('span').first()), 'Sofa · Visa E · 3 missed months to record · review it on its own')
-  await openReview(page, listed.locator('[data-testid="due-review-notice-review"]'))
+  if (!(await openReview(page, listed.locator('[data-testid="due-review-notice-review"]')))) return ctx.close()
   check('(e) editor: the button counts the months', await text(testId(page, 'installment-review-submit')), 'Record 3 months and turn on auto-post')
   check('(e) editor: the dialog closed after recording', await submitReview(page), 0)
   check('(e) editor: the notice is gone', await waitCount(page, testId(page, 'due-review-notice'), 0), 0)
@@ -532,7 +533,7 @@ async function allocationsAutoPost(browser) {
   check('(f) editor: the card reads "Auto-post off"', await waitText(stateText(page), 'Auto-post off'), 'Auto-post off')
   check('(f) editor: Turn off did not open the edit form', await editForm.count(), 0)
   check('(f) editor: Review replaces Turn off', [await state(page).locator('[data-testid="installment-turn-off"]').count(), await state(page).locator('[data-testid="installment-review"]').count()], [0, 1])
-  await openReview(page, state(page).locator('[data-testid="installment-review"]'))
+  if (!(await openReview(page, state(page).locator('[data-testid="installment-review"]')))) return ctx.close()
   await reviewDialog(page).getByRole('button', { name: 'Close' }).click()
   check('(f) editor: Review opened its dialog, and closing it leaves the edit form shut',
     [await waitCount(page, reviewDialog(page), 0), await editForm.count()], [0, 0])
@@ -597,7 +598,7 @@ async function unpostedPanel(browser) {
 
   await testId(page, 'card-pay-open').click()
   const dialog = testId(page, 'card-pay-dialog')
-  await dialog.locator('[data-testid="card-pay-amount"]').waitFor()
+  if (!(await dialogOpened(dialog.locator('[data-testid="card-pay-amount"]'), '(g) Pay opened the card pay dialog'))) return ctx.close()
   await waitQuiet(page)
   const latest = after.statements[after.statements.length - 1]
   check('(g) Full is the API\'s clear_through', Number(await dialog.locator('[data-testid="card-pay-amount"]').inputValue()), latest.clear_through)
@@ -640,7 +641,7 @@ async function unpostedPanel(browser) {
   check('(g3) Pay is enabled', [await testId(g3.page, 'card-pay-open').isDisabled(), await testId(g3.page, 'card-pay-disabled-reason').count()], [false, 0])
   await testId(g3.page, 'card-pay-open').click()
   const g3Dialog = testId(g3.page, 'card-pay-dialog')
-  await g3Dialog.locator('[data-testid="card-pay-amount"]').waitFor()
+  if (!(await dialogOpened(g3Dialog.locator('[data-testid="card-pay-amount"]'), '(g3) Pay opened the card pay dialog'))) return g3.ctx.close()
   await waitQuiet(g3.page)
   const g3Note = g3Dialog.locator('[data-testid="card-pay-unposted-note"]')
   const g3NoteCount = await waitCount(g3.page, g3Note, 1, 5000)
@@ -874,7 +875,7 @@ async function staleReview(browser) {
   await uiLogin(page, me)
   await openTransactions(page)
   const row = await showPlanRow(page, entry.id)
-  await openReview(page, row.locator('[data-testid="due-review"]'))
+  if (!(await openReview(page, row.locator('[data-testid="due-review"]')))) return ctx.close()
   check('(k) the dialog names the entry', await text(testId(page, 'installment-review-title')), 'Turn on auto-post for Camera (Visa K)')
 
   // The review token binds the entry's version, so renaming it makes the open dialog stale.

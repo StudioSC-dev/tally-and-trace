@@ -50,7 +50,7 @@
 //
 // Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { useDueCheck, expectDueTab, DUE_TABS, allDueRows, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, allDueRows, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
@@ -451,11 +451,12 @@ async function installments(browser) {
   const unrow = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${unreviewed.id}"]`))
   await unrow.locator('[data-testid="due-review"]').click()
   const review = page.locator('[data-testid="installment-review-dialog"]')
-  await review.waitFor()
-  check('(d) Review opens the installment review for that entry', (await page.locator('[data-testid="installment-review-title"]').textContent())?.includes('D Unreviewed'), true)
-  await waitQuiet(page)
-  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await review.waitFor({ state: 'detached' })
+  if (await dialogOpened(review, '(d) Review opened the installment review dialog')) {
+    check('(d) Review opens the installment review for that entry', (await page.locator('[data-testid="installment-review-title"]').textContent())?.includes('D Unreviewed'), true)
+    await waitQuiet(page)
+    await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await review.waitFor({ state: 'detached' })
+  }
   checkNoNative('d', native)
   await ctx.close()
 }
@@ -919,12 +920,13 @@ async function upcomingTabPlacement(browser) {
         await modal.getByRole('button', { name: 'Mark as Posted', exact: true }).count()], [1, 1, 1])
     await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).click()
     const confirm = page.locator('[data-testid="confirm-dialog"]')
-    await confirm.waitFor()
-    await confirm.locator('[data-testid="confirm-dialog-confirm"]').click()
-    await confirm.waitFor({ state: 'detached' })
-    await modal.waitFor({ state: 'detached' })
-    await settle(page)
-    check('(m) Delete drops the badge by one and the row leaves', [await badge(), (await readTab(page, 'upcoming')).filter((r) => r.text.includes('M Row 1')).length], [4, 0])
+    if (await dialogOpened(confirm, '(m) Delete opened the in-app Confirm')) {
+      await confirm.locator('[data-testid="confirm-dialog-confirm"]').click()
+      await confirm.waitFor({ state: 'detached' })
+      await modal.waitFor({ state: 'detached' })
+      await settle(page)
+      check('(m) Delete drops the badge by one and the row leaves', [await badge(), (await readTab(page, 'upcoming')).filter((r) => r.text.includes('M Row 1')).length], [4, 0])
+    }
   }
   checkNoNative('m', native)
   await ctx.close()

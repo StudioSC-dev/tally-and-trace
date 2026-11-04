@@ -52,7 +52,7 @@
 //
 // Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { useDueCheck, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -345,7 +345,7 @@ async function markPaidRent(browser) {
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
   await (await showRow(page, recRows(page, 'Rent'))).locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(c) Mark paid opened the dialog'))) return ctx.close()
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.rent.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   const res = await done
@@ -367,7 +367,7 @@ async function chargedThenPosted(browser) {
   // Netflix is an open-ended card subscription: its row is on Subscriptions (STU-511).
   await openDueTab(page, 'subscriptions')
   await (await showRow(page, recRows(page, 'Netflix'))).locator('[data-testid="due-charged"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(d) Charged opened the Mark paid dialog'))) return ctx.close()
   check('(d) the dialog is titled "Record Netflix"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Record Netflix')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.netflix.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-charged"]').click()
@@ -631,7 +631,7 @@ async function markReceivedSalary(browser) {
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
   await (await showRow(page, recRows(page, 'Salary'))).locator('[data-testid="due-mark-received"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(f) Mark received opened the dialog'))) return ctx.close()
   check('(f) the dialog is titled "Mark Salary as received"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Mark Salary as received')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -649,7 +649,7 @@ async function gifts(browser) {
   const { ctx, page } = await openDue(browser, w.u)
   await page.getByRole('button', { name: 'Add Transaction' }).first().click()
   const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction' }) })
-  await modal.waitFor()
+  if (!(await dialogOpened(modal, '(g) Add Transaction opened the Create Transaction dialog'))) return ctx.close()
   const gifts = modal.getByRole('button', { name: 'Gifts & Donations', exact: true })
   await modal.getByRole('button', { name: 'Expense', exact: true }).click()
   check('(g) the expense categories have Gifts & Donations', await gifts.count(), 1)
@@ -761,7 +761,7 @@ async function missedKinds(browser) {
   const row = await showRow(page, recRows(page, 'Old Rent', 'missed'))
   const n = missedFor(snapshot, w.oldRent.id).unlinked_count
   await row.locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(j) Mark paid on Old Rent opened the dialog'))) return ctx.close()
   // Post all counts every due occurrence, today's included, so N is the API's due_unposted, not the missed count.
   const listed = await get(w.u.token, `/budget-entries/${w.oldRent.id}/occurrences?include=${missedFor(snapshot, w.oldRent.id).oldest_unlinked}`)
   const due = listed.due_unposted
@@ -790,7 +790,7 @@ async function chargedMissed(browser) {
   await openDueTab(page, 'subscriptions')
   const row = await showRow(page, recRows(page, 'Spotify', 'missed'))
   await row.locator('[data-testid="due-charged"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(k) Charged opened the Mark paid dialog'))) return ctx.close()
   check('(k) the dialog opens on the oldest missed month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), before.oldest_unlinked)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.spotify.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-charged"]').click()
@@ -941,7 +941,7 @@ async function pagination(browser) {
   // The last page empties: the view lands on the new last page, not an empty one.
   await goToPage(page, 3)
   await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Zeta Bill$/ }) }).locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(n) Mark paid on Zeta Bill opened the dialog'))) return ctx.close()
   const done = page.waitForResponse((r) => r.url().endsWith('/materialize'))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   check('(n) Mark paid on the only row of page 3 is created (201)', (await done).status(), 201)
@@ -955,7 +955,7 @@ async function pagination(browser) {
   await cash('Eta Bill', today)
   await cash('Theta Bill', today)
   await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Salary$/ }) }).locator('[data-testid="due-mark-received"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(n) Mark received on Salary opened the dialog'))) return ctx.close()
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   await dialog(page).waitFor({ state: 'detached' })
   await page.locator('[data-testid="due-count"]').filter({ hasText: /^7$/ }).waitFor({ timeout: 15000 }).catch(() => {})

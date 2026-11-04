@@ -45,7 +45,7 @@
 //
 // Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j|k]
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { useDueCheck, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet, recordTexts, readTexts, resetTexts, sleep } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
@@ -365,11 +365,12 @@ async function installmentPlans(browser) {
   const unrevLive = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="${sourceOf(unreviewed)}"]`))
   await unrevLive.locator('[data-testid="due-review"]').click()
   const review = page.locator('[data-testid="installment-review-dialog"]')
-  await review.waitFor()
-  check('(c) Review opens the installment review for that plan', (await page.locator('[data-testid="installment-review-title"]').textContent())?.includes('Unrev Plan'), true)
-  await waitQuiet(page)
-  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await review.waitFor({ state: 'detached' })
+  if (await dialogOpened(review, '(c) Review opened the installment review dialog')) {
+    check('(c) Review opens the installment review for that plan', (await page.locator('[data-testid="installment-review-title"]').textContent())?.includes('Unrev Plan'), true)
+    await waitQuiet(page)
+    await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await review.waitFor({ state: 'detached' })
+  }
   check('(c) the paused plan was never listed', [paused.is_active, (await readTab(page, 'installments')).filter((r) => r.name === 'Paused Plan').length], [false, 0])
   checkNoNative('c', native)
   await ctx.close()
@@ -601,7 +602,8 @@ async function bankSubscription(browser) {
     await settle(page)
     await page.locator(`[data-testid="kind-section-${section}"] article`).filter({ has: page.getByText(name, { exact: true }) }).click()
     const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
-    await form.waitFor()
+    // A form that does not open is a failed assertion; the caller ends the scenario on null.
+    if (!(await dialogOpened(form, `(h) ${name} opened its edit form`))) return null
     await waitQuiet(page)
     return form
   }
@@ -615,6 +617,7 @@ async function bankSubscription(browser) {
   const notShown = []
   for (const [name, section] of [['H Netflix', 'subscription'], ['H Salary', 'other'], ['H Gadget', 'cash'], ['H Phone', 'installment']]) {
     const f = await openEdit(name, section)
+    if (f === null) return ctx.close()
     notShown.push([name, await f.getByTestId('recurring-bank-kind').count()])
     await page.getByLabel('Close allocation modal').first().click()
     await f.waitFor({ state: 'detached' })
@@ -622,13 +625,17 @@ async function bankSubscription(browser) {
   check('(h) the select is absent on a card entry, on income and on a capped entry (bank and card)', notShown, [['H Netflix', 0], ['H Salary', 0], ['H Gadget', 0], ['H Phone', 0]])
   const cardBefore = (await get(u.token, `/budget-entries/${netflix.id}`)).billing_kind
   const cardForm = await openEdit('H Netflix', 'subscription')
+  if (cardForm === null) return ctx.close()
   await save(cardForm)
   check('(h) saving a card entry leaves its billing kind as it was', (await get(u.token, `/budget-entries/${netflix.id}`)).billing_kind, cardBefore)
   check('(h) saving a card entry sends no billing_kind key', sentKind(netflix), 'absent')
-  await save(await openEdit('H Gadget', 'cash'))
+  const gadgetForm = await openEdit('H Gadget', 'cash')
+  if (gadgetForm === null) return ctx.close()
+  await save(gadgetForm)
   check('(h) saving a capped bank entry (no select) sends no billing_kind key', sentKind(gadget), 'absent')
 
   const form = await openEdit('Spotify', 'cash')
+  if (form === null) return ctx.close()
   const select = form.getByTestId('recurring-bank-kind')
   const selectShown = await select.count()
   check('(h) the open-ended bank expense has the select', selectShown, 1)
@@ -648,11 +655,13 @@ async function bankSubscription(browser) {
   check('(h) no Spotify row has a credit badge (it is not a card)', (await readTab(page, 'subscriptions')).filter((r) => r.source === sourceOf(spotify)).map((r) => r.credit), [null, null, null, null, null])
 
   const untouched = await openEdit('Spotify', 'cash')
+  if (untouched === null) return ctx.close()
   check('(h) the edit form loads the stored choice', await untouched.getByTestId('recurring-bank-kind').inputValue(), 'subscription')
   await save(untouched)
   check('(h) an edit that leaves the pick sends no billing_kind key, and the API keeps subscription',
     [sentKind(spotify), (await get(u.token, `/budget-entries/${spotify.id}`)).billing_kind], ['absent', 'subscription'])
   const again = await openEdit('Spotify', 'cash')
+  if (again === null) return ctx.close()
   const selectAgain = again.getByTestId('recurring-bank-kind')
   await selectAgain.selectOption('other')
   await save(again)
