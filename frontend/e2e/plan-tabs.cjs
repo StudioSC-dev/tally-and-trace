@@ -1,5 +1,6 @@
-// Browser check for STU-511 commit 7: the Transactions page's "Due and overdue" card
-// has Subscriptions and Installments tabs. Starts its own API and web app against a throwaway
+// Browser check for STU-511 commits 7 and 7b: the Transactions page's "Due and overdue" card
+// has Subscriptions and Installments tabs, and a bank-paid recurring expense can be marked a
+// subscription in the recurring-entry form. Starts its own API and web app against a throwaway
 // database (./_local_stack.cjs). Not wired into CI and not part of `pnpm build`. Run steps:
 // see ./README.md.
 //
@@ -22,6 +23,11 @@
 //       before T+20, a card subscription at T+20 is still on Subscriptions
 //   (g) the Manila day in a Los Angeles browser: a card subscription due Manila today is a
 //       Subscriptions row of today, one due Manila tomorrow a future row, neither in Due
+//   (h) commit 7b: Spotify (bank, open-ended) marked Subscription in the recurring form moves
+//       its months to Subscriptions and out of Due and Upcoming, Rent does not move; the
+//       select is absent on a card, income and capped entry; set back to Other it returns. The
+//       update bodies are read off the wire: billing_kind is sent only when the pick moved, never
+//       for a card entry or a capped entry
 //   (i) a held Manila day rollover, staged in the browser (the backend clock is real): the
 //       Subscriptions and Installments badges read "..." while the day's requests are held,
 //       never the old day's counts, show the new counts after release, and a later response
@@ -34,7 +40,7 @@
 // Every scenario checks that no browser dialog fired. Check kinds: a failed setup
 // precondition aborts the run with exit 2; an assertion failure exits 1.
 //
-// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|i|j]
+// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j]
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet, recordTexts, readTexts, resetTexts, sleep } = require('./_smooth.cjs')
@@ -546,6 +552,115 @@ async function manilaDay(browser) {
   await ctx.close()
 }
 
+// (h) A bank-paid subscription (commit 7b).
+async function bankSubscription(browser) {
+  console.log('\n=== (h) a bank-paid recurring expense marked Subscription moves to Subscriptions; the select is absent where it does not apply')
+  const today = manilaToday()
+  const u = await makeOpener('h')
+  const bank = await account(u, 'H Checking')
+  const visa = await card(u, bank, 'H Visa')
+  // Weekly from today: today's month is in Due, the next four are in Upcoming, until it is marked.
+  const spotify = await entry(u, { name: 'Spotify', amount: 279, cadence: 'weekly', account_id: bank.id, next_occurrence: wire(today) })
+  const rent = await entry(u, { name: 'Rent', amount: 15000, cadence: 'quarterly', account_id: bank.id, next_occurrence: wire(today) })
+  const netflix = await entry(u, { name: 'H Netflix', amount: 549, account_id: visa.id, next_occurrence: wire(addDays(today, 5)), cadence: 'quarterly' })
+  const gadget = await entry(u, { name: 'H Gadget', amount: 2000, account_id: bank.id, next_occurrence: wire(addDays(today, 3)), end_mode: 'after_occurrences', max_occurrences: 6 })
+  const salary = await entry(u, { name: 'H Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(addDays(today, 9)), cadence: 'quarterly' })
+  const phone = await installment(u, visa, 'H Phone', addDays(today, 4), 6)
+
+  const { ctx, page, native } = await newPage(browser)
+  // Every entry update the page sends, as { id, body }: what the form put on the wire, key by key.
+  const puts = []
+  page.on('request', (r) => {
+    const m = new URL(r.url()).pathname.match(/\/budget-entries\/(\d+)$/)
+    if (m && r.method() === 'PUT') puts.push({ id: Number(m[1]), body: JSON.parse(r.postData() || '{}') })
+  })
+  /** The billing_kind of the last update sent for `e`: 'absent' when the key is not in the body, 'no update' when none was sent. */
+  const sentKind = (e) => {
+    const last = puts.filter((p) => p.id === e.id).at(-1)
+    if (last === undefined) return 'no update'
+    return 'billing_kind' in last.body ? last.body.billing_kind : 'absent'
+  }
+  await uiLogin(page, u)
+  const where = async () => {
+    await openTransactions(page)
+    const out = {}
+    for (const slug of ['due', 'upcoming', 'subscriptions']) out[slug] = (await readTab(page, slug)).filter((r) => r.source === sourceOf(spotify)).length
+    out.rentDue = rowsFor(await readTab(page, 'due'), rent).length
+    return out
+  }
+  const before = await where()
+  check('(h) unmarked, Spotify has a month in Due and four in Upcoming, none in Subscriptions; Rent is in Due',
+    [before.due, before.upcoming, before.subscriptions, before.rentDue], [1, 4, 0, 1])
+
+  const openEdit = async (name, section) => {
+    await page.goto(`${stack.webUrl}/allocations`)
+    await page.locator('[data-testid^="kind-section-"]').first().waitFor()
+    await settle(page)
+    await page.locator(`[data-testid="kind-section-${section}"] article`).filter({ has: page.getByText(name, { exact: true }) }).click()
+    const form = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+    await form.waitFor()
+    await waitQuiet(page)
+    return form
+  }
+  const save = async (form) => {
+    await form.getByRole('button', { name: 'Update Recurring Entry' }).click()
+    await form.waitFor({ state: 'detached' })
+    await settle(page)
+  }
+
+  // The select shows only for an open-ended bank expense.
+  const notShown = []
+  for (const [name, section] of [['H Netflix', 'subscription'], ['H Salary', 'other'], ['H Gadget', 'cash'], ['H Phone', 'installment']]) {
+    const f = await openEdit(name, section)
+    notShown.push([name, await f.getByTestId('recurring-bank-kind').count()])
+    await page.getByLabel('Close allocation modal').first().click()
+    await f.waitFor({ state: 'detached' })
+  }
+  check('(h) the select is absent on a card entry, on income and on a capped entry (bank and card)', notShown, [['H Netflix', 0], ['H Salary', 0], ['H Gadget', 0], ['H Phone', 0]])
+  const cardBefore = (await get(u.token, `/budget-entries/${netflix.id}`)).billing_kind
+  const cardForm = await openEdit('H Netflix', 'subscription')
+  await save(cardForm)
+  check('(h) saving a card entry leaves its billing kind as it was', (await get(u.token, `/budget-entries/${netflix.id}`)).billing_kind, cardBefore)
+  check('(h) saving a card entry sends no billing_kind key', sentKind(netflix), 'absent')
+  await save(await openEdit('H Gadget', 'cash'))
+  check('(h) saving a capped bank entry (no select) sends no billing_kind key', sentKind(gadget), 'absent')
+
+  const form = await openEdit('Spotify', 'cash')
+  const select = form.getByTestId('recurring-bank-kind')
+  const selectShown = await select.count()
+  check('(h) the open-ended bank expense has the select', selectShown, 1)
+  if (selectShown !== 1) {
+    // Without the select nothing below can be driven: the scenario ends on the failed assertion.
+    await ctx.close()
+    return
+  }
+  check('(h) the select is on Other, with Subscription and Other', [await select.inputValue(), await select.locator('option').allInnerTexts()], ['other', ['Subscription', 'Other']])
+  await select.selectOption('subscription')
+  await save(form)
+  check('(h) changing the pick to Subscription sends billing_kind "subscription"', sentKind(spotify), 'subscription')
+  check('(h) the API stores billing_kind subscription', (await get(u.token, `/budget-entries/${spotify.id}`)).billing_kind, 'subscription')
+  const marked = await where()
+  check('(h) marked, Spotify is on Subscriptions (today and the next four) and no longer in Due or Upcoming; Rent is unchanged',
+    [marked.due, marked.upcoming, marked.subscriptions, marked.rentDue], [0, 0, 5, 1])
+  check('(h) no Spotify row has a credit badge (it is not a card)', (await readTab(page, 'subscriptions')).filter((r) => r.source === sourceOf(spotify)).map((r) => r.credit), [null, null, null, null, null])
+
+  const untouched = await openEdit('Spotify', 'cash')
+  check('(h) the edit form loads the stored choice', await untouched.getByTestId('recurring-bank-kind').inputValue(), 'subscription')
+  await save(untouched)
+  check('(h) an edit that leaves the pick sends no billing_kind key, and the API keeps subscription',
+    [sentKind(spotify), (await get(u.token, `/budget-entries/${spotify.id}`)).billing_kind], ['absent', 'subscription'])
+  const again = await openEdit('Spotify', 'cash')
+  const selectAgain = again.getByTestId('recurring-bank-kind')
+  await selectAgain.selectOption('other')
+  await save(again)
+  check('(h) changing the pick to Other sends billing_kind null', sentKind(spotify), null)
+  check('(h) set back to Other, the API clears billing_kind', (await get(u.token, `/budget-entries/${spotify.id}`)).billing_kind ?? null, null)
+  const back = await where()
+  check('(h) Spotify is back in Due and Upcoming, none in Subscriptions', [back.due, back.upcoming, back.subscriptions, back.rentDue], [1, 4, 0, 1])
+  checkNoNative('h', native)
+  await ctx.close()
+}
+
 // (i) A held day rollover, staged in the browser.
 async function heldRollover(browser) {
   console.log('\n=== (i) a held Manila day change: the badges read "..." until fresh data arrives, and stale data keeps them there')
@@ -732,7 +847,7 @@ async function oneSourceFails(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, i: heldRollover, j: oneSourceFails }
+  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

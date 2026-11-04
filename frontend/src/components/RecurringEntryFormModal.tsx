@@ -23,7 +23,7 @@ import {
   withLoadedVersion,
   withoutError,
 } from '@tally-trace/shared'
-import type { BillingKindChoice, DaySetting, FieldErrors } from '@tally-trace/shared'
+import type { BillingKind, BillingKindChoice, DaySetting, FieldErrors } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -64,11 +64,18 @@ type SubscriptionFormState = {
   max_occurrences?: number
   /** Card expenses: the pick in the kind select (what `billingKindChoices` offers). */
   kind_choice: BillingKindChoice['id']
+  /** Open-ended bank (non-card) expenses: Subscription stores `billing_kind: 'subscription'`; Other stores null. */
+  bank_kind: BankKind
   /** Month-family cadences: the Day control (an edit sends it only when it changed). */
   day: DaySetting
   // The tags picked in the form; an edit sends them only when they changed.
   tag_ids: number[]
 }
+
+type BankKind = 'subscription' | 'other'
+
+/** The bank-kind pick a stored `billing_kind` reads as: only `subscription` is a subscription. */
+const bankKindOf = (billingKind: BillingKind | null | undefined): BankKind => (billingKind === 'subscription' ? 'subscription' : 'other')
 
 const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormState => ({
   name: '',
@@ -89,6 +96,7 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   end_date: undefined,
   max_occurrences: undefined,
   kind_choice: 'automatic',
+  bank_kind: 'other',
   day: { kind: 'same_as_date' },
   tag_ids: [],
 })
@@ -231,6 +239,7 @@ export function RecurringEntryFormModal({
       end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
       max_occurrences: entry.max_occurrences ?? undefined,
       kind_choice: kindChoiceFor(isCappedEnd(entry.end_mode, entry.max_occurrences), entry.billing_kind),
+      bank_kind: bankKindOf(entry.billing_kind),
       day: daySettingOf(entry),
       tag_ids: tagIdsOf(entry.tags),
     }
@@ -241,6 +250,18 @@ export function RecurringEntryFormModal({
     !subscriptionForm.transfer_to_account_id &&
     accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'
   const kindCapped = isCappedEnd(subscriptionForm.end_mode, subscriptionForm.max_occurrences)
+  // An open-ended expense on a bank (non-card) account: the user marks whether it is a subscription,
+  // which lists it under Transactions' Subscriptions tab. Hidden for cards (their Kind select), income,
+  // transfers, and entries that end on a date or after a number of payments.
+  const selectedAccountType = accountsById.get(subscriptionForm.account_id)?.account_type
+  const showBankKindSelect =
+    subscriptionForm.entry_type === 'expense' &&
+    !subscriptionForm.transfer_to_account_id &&
+    selectedAccountType !== undefined &&
+    selectedAccountType !== 'credit' &&
+    subscriptionForm.end_mode === 'indefinite'
+  // The pick the form opened on: an edit sends the bank kind only when the pick moved off it.
+  const openingBankKind = editingBudgetEntry ? bankKindOf(editingBudgetEntry.billing_kind) : null
   // The pick the form opened on: an edit sends the field only when the pick moved off it.
   const openingKindChoice = editingBudgetEntry
     ? kindChoiceFor(isCappedEnd(editingBudgetEntry.end_mode, editingBudgetEntry.max_occurrences), editingBudgetEntry.billing_kind)
@@ -436,6 +457,13 @@ export function RecurringEntryFormModal({
           ? kindChoices.find((choice) => choice.id === kindValue)?.billingKind
           : undefined
 
+      const pickedBankKind: BillingKind | null | undefined =
+        showBankKindSelect && subscriptionForm.bank_kind !== openingBankKind
+          ? subscriptionForm.bank_kind === 'subscription'
+            ? 'subscription'
+            : null
+          : undefined
+
       const subscriptionPayload = {
         name: subscriptionForm.name.trim(),
         description: subscriptionForm.description?.trim() || undefined,
@@ -464,6 +492,8 @@ export function RecurringEntryFormModal({
         // Card expenses only. "Automatic" sends nothing; Installment sends null, which clears an override.
         // An edit sends the kind only when the pick moved.
         ...(pickedBillingKind === undefined ? {} : { billing_kind: pickedBillingKind }),
+        // Open-ended bank expenses only: Subscription or Other (null). An edit sends it only when the pick moved.
+        ...(pickedBankKind === undefined ? {} : { billing_kind: pickedBankKind }),
         // An edit sends the tags only when they changed; omitting them keeps them.
         ...(editingBudgetEntry
           ? tagIdsIfChanged(subscriptionForm.tag_ids, tagIdsOf(editingBudgetEntry.tags))
@@ -988,6 +1018,30 @@ export function RecurringEntryFormModal({
                     {kindCapped
                       ? 'An installment has a fixed amount; a bill varies, and you enter the amount charged each time.'
                       : 'A subscription posts a fixed amount; a bill varies, and you enter the amount charged each time.'}
+                  </p>
+                </div>
+              )}
+
+              {showBankKindSelect && (
+                <div>
+                  <label className="block text-sm font-medium text-body" htmlFor="recurring-bank-kind">Kind</label>
+                  <select
+                    id="recurring-bank-kind"
+                    value={subscriptionForm.bank_kind}
+                    onChange={(e) =>
+                      setSubscriptionForm((prev) => ({
+                        ...prev,
+                        bank_kind: e.target.value === 'subscription' ? 'subscription' : 'other',
+                      }))
+                    }
+                    className="mt-1 block w-full border border-line px-3 py-2"
+                    data-testid="recurring-bank-kind"
+                  >
+                    <option value="subscription">Subscription</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted">
+                    A subscription is listed under Subscriptions on Transactions; anything else, such as rent, stays in Due and overdue.
                   </p>
                 </div>
               )}
