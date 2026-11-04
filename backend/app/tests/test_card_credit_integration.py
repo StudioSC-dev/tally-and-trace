@@ -22,7 +22,8 @@ from app.tests.conftest import (
 )
 from app.tests.test_card_charges_integration import pin_clock
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 REF = datetime(2027, 3, 18, 2, 0)
 

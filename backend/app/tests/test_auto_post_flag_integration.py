@@ -15,7 +15,8 @@ import pytest
 
 from app.tests.conftest import API, sw_db_reachable, sw_post, sw_share
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 AUTO_POST_REVISION = "b3d7f1a9c5e2"
 PARENT_REVISION = "20604a414c22"

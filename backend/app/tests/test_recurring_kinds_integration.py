@@ -10,7 +10,8 @@ import pytest
 
 from app.tests.conftest import API, sw_db_reachable, sw_post
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="no database available"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 
 @pytest.fixture

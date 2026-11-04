@@ -267,6 +267,25 @@ def sw_leaks(body, private_ids=(), numbers=(), path="$"):
     return found
 
 
+# --- Card installments stored before PR3 -----------------------------------------------------
+
+@pytest.fixture
+def legacy_card_installments(monkeypatch):
+    """Card installments created through the API are stored as they were before
+    new ones were charged on the statement close: on the submitted day, with the
+    request's own day fields (``budget_entries._installment_on_close`` bypassed).
+
+    For test modules written against that schedule (posting, review, auto-post,
+    the forecast, card credit). Such a row is a legacy row: it behaves exactly as
+    it did before, which is what these modules pin. The create path's own rules
+    are tested in ``test_installment_close_integration.py``.
+    """
+    from app.routers import budget_entries
+
+    monkeypatch.setattr(budget_entries, "_installment_on_close",
+                        lambda db, entry_in, sent: (entry_in.next_occurrence, sent))
+
+
 # --- Household tag shares (STU-233) ---------------------------------------------------------
 
 def hh_household(db, who) -> int:

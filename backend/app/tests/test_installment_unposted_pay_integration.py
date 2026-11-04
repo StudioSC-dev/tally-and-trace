@@ -22,7 +22,8 @@ from sqlalchemy import text
 
 from app.tests.conftest import API, sw_db_reachable, sw_leaks, sw_post, sw_share
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 REF = datetime(2026, 10, 18, 2, 0)  # Sunday, 10:00 in Manila
 

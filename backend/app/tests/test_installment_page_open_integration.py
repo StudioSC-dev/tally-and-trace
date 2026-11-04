@@ -29,7 +29,8 @@ from app.tests.test_installment_autopost_integration import (
     MONTHS, TOKEN, _installment, _job_ok, _reviewed, _rows, _state, make_world,
 )
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 AUTO_POST_REVISION = "b3d7f1a9c5e2"

@@ -25,7 +25,8 @@ from app.tests.test_installment_autopost_integration import (
 )
 from app.tests.test_installment_review_integration import _get
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 SEEDED_VERSION = "2026-10-17 03:04:05.123456+00"
 

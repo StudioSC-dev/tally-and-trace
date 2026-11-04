@@ -18,7 +18,8 @@ from app.tests.test_installment_autopost_integration import (
     _flags, _installment, make_world, pin_clock,
 )
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 T = date(2026, 10, 18)
 KEYS = {"view", "entry_id", "name", "account_name", "amount", "currency", "next_charge",

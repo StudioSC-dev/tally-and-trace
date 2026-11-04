@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntryType
 from app.models.category import Category
+from app.models.transaction import RecurrenceFrequency
 from app.services.statements import resolve_cycle_fields
 
 BILLING_KINDS = ("subscription", "bill")
@@ -31,6 +32,31 @@ def _is_card(account: Optional[Account]) -> bool:
 def is_card_installment(e, account: Optional[Account]) -> bool:
     return (is_kind_eligible(e) and is_capped(e) and _is_card(account)
             and e.billing_kind != "bill")
+
+
+def installment_close_day(e, account: Optional[Account]) -> Optional[int]:
+    """The close day a card installment is charged on, or None.
+
+    A card installment (``is_card_installment``) on a card with a statement
+    cycle is charged monthly on the statement close (the resolved close day,
+    ``statements.resolve_cycle_fields``). None for anything else, including a
+    card installment on a card without a cycle.
+    """
+    if not is_card_installment(e, account):
+        return None
+    fields = resolve_cycle_fields(account)
+    return fields[0] if fields is not None else None
+
+
+def is_normalised_installment(e, account: Optional[Account]) -> bool:
+    """Whether ``e`` is a card installment already charged on the statement close:
+    monthly, anchored on the card's close day, with no day rule. Its
+    ``iter_occurrences`` then yields exactly the statement closes. Any other
+    card installment is legacy until the re-date script converts it
+    (``services/installment_redate.py``)."""
+    close_day = installment_close_day(e, account)
+    return (close_day is not None and e.cadence == RecurrenceFrequency.MONTHLY
+            and e.anchor_day == close_day and getattr(e, "day_rule", None) is None)
 
 
 def entry_kind(e, account: Optional[Account]) -> Optional[str]:
