@@ -423,13 +423,18 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     !loading && !windowResult.fetching,
   )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
-  // D7, after a failure: each window tab's last complete total for the Manila day, a total taken when
-  // every source it needs had landed, was not refetching and had not failed. While any source's latest
-  // fetch has failed the badge shows it (or 0), never a sum of a fresh source and a failed one's cache.
+  // D7: each window tab's last complete total for the Manila day, a total taken when every source it
+  // needs had landed, was not refetching and had not failed. The badge shows the sum only while it is
+  // complete. While a source has nothing for today yet it is pending ("…"); otherwise (a failure, a
+  // refetch, a Retry in flight) it is the kept total, never a sum of a fresh source and another's stale
+  // cache. With none kept it is 0 after a failure and pending ("…") before.
   const lastComplete = useRef<Partial<Record<'upcoming' | 'subscriptions', { day: string; total: number }>>>({})
-  const keptTotal = (id: 'upcoming' | 'subscriptions') => {
+  const tabFigure = (id: 'upcoming' | 'subscriptions', complete: boolean, pending: boolean, sum: number, failed: boolean) => {
+    if (complete) return { pending: false, total: sum }
+    if (pending) return { pending: true, total: 0 }
     const kept = lastComplete.current[id]
-    return kept !== undefined && kept.day === today ? kept.total : 0
+    if (kept !== undefined && kept.day === today) return { pending: false, total: kept.total }
+    return { pending: !failed, total: 0 }
   }
   // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
   const upcomingTxns = upcomingTxnResult.currentData
@@ -448,8 +453,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   useEffect(() => {
     if (upcomingComplete) lastComplete.current.upcoming = { day: today, total: upcomingSum }
   }, [upcomingComplete, upcomingSum, today])
-  const upcomingTotal = upcomingFailed ? keptTotal('upcoming') : upcomingSum
-  const upcomingShown = upcomingShownText(upcomingTotal)
+  const upcomingFigure = tabFigure('upcoming', upcomingComplete, upcomingPending, upcomingSum, upcomingFailed)
+  const upcomingShown = upcomingFigure.pending ? null : upcomingShownText(upcomingFigure.total)
   const upcomingCount = upcomingRows.length
   const upcomingView = useClampedPage(
     upcomingCount,
@@ -487,7 +492,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   useEffect(() => {
     if (subscriptionComplete) lastComplete.current.subscriptions = { day: today, total: subscriptionSum }
   }, [subscriptionComplete, subscriptionSum, today])
-  const subscriptionTotal = subscriptionSourceFailed ? keptTotal('subscriptions') : subscriptionSum
+  const subscriptionFigure = tabFigure('subscriptions', subscriptionComplete, subscriptionPending, subscriptionSum, subscriptionSourceFailed)
   const subscriptionCount = subscriptionRows.length
   const subscriptionView = useClampedPage(
     subscriptionCount,
@@ -522,8 +527,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const badges: Record<DueTab, { pending: boolean; count: number }> = {
     due: { pending: countPending, count },
     not_posted: { pending: loading, count: notPostedCount },
-    upcoming: { pending: upcomingPending, count: upcomingTotal },
-    subscriptions: { pending: subscriptionPending, count: subscriptionTotal },
+    upcoming: { pending: upcomingFigure.pending, count: upcomingFigure.total },
+    subscriptions: { pending: subscriptionFigure.pending, count: subscriptionFigure.total },
     installments: { pending: plansPending, count: planCount },
   }
   const selectedUsesWindow = TABS.find((spec) => spec.id === tab)?.usesWindow === true

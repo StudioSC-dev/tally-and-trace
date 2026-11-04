@@ -872,8 +872,23 @@ async function staleSourceAfterMove(browser) {
   const sub = await entry(u, { name: 'K Sub', amount: 369, account_id: visa.id, next_occurrence: wire(addDays(today, 5)), cadence: 'quarterly' })
   const { ctx, page, native } = await newPage(browser)
   const failing = { on: false, hits: { none: 0, subscription: 0 }, snapshots: 0 }
+  // During Retry each occurrences request is held on its own gate until the test releases it.
+  const gates = {}
+  const hold = (plan) => {
+    let open
+    const gate = { hits: 0, released: new Promise((resolve) => { open = resolve }) }
+    gate.release = open
+    gates[plan] = gate
+    return gate
+  }
   await page.route((url) => url.pathname.endsWith('/budget-entries/upcoming-occurrences') || url.pathname.endsWith('/dashboard/snapshot'), async (route) => {
     const url = new URL(route.request().url())
+    const gate = gates[url.searchParams.get('plan')]
+    if (!failing.on && gate !== undefined && url.pathname.endsWith('/upcoming-occurrences')) {
+      gate.hits++
+      await gate.released
+      return route.fallback()
+    }
     if (!failing.on) return route.fallback()
     if (url.pathname.endsWith('/dashboard/snapshot')) { failing.snapshots++; return route.fallback() }
     const plan = url.searchParams.get('plan')
@@ -926,13 +941,42 @@ async function staleSourceAfterMove(browser) {
     await badgeOf(page, 'subscriptions'), '1')
   check('(k) Subscriptions shows the error with Retry', await windowError('subscriptions'), [1, 1])
 
-  // Retry with the occurrences answering: each badge is its true total again.
+  // Retry with the occurrences answering, each held on its own gate. RTK clears the error as the
+  // refetch starts but keeps the failed source's cache, so while it runs the badge must keep the last
+  // complete total (or read "…"), never the mixed sum 2. Every badge text is recorded across Retry.
+  await page.evaluate((ids) => {
+    window.__badgeHistory = {}
+    for (const [slug, id] of Object.entries(ids)) {
+      const el = document.querySelector(`[data-testid="${id}"]`)
+      const seen = (window.__badgeHistory[slug] = [el?.textContent?.trim() ?? null])
+      const note = () => {
+        const now = document.querySelector(`[data-testid="${id}"]`)?.textContent?.trim() ?? null
+        if (seen[seen.length - 1] !== now) seen.push(now)
+      }
+      new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true })
+    }
+  }, { upcoming: badgeId('upcoming'), subscriptions: badgeId('subscriptions') })
   failing.on = false
-  await page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-window-retry"]').click()
+  const retryHeld = async (slug, plan) => {
+    const gate = hold(plan)
+    await page.locator(`[data-testid="due-panel-${slug}"] [data-testid="due-window-retry"]`).click()
+    const until = Date.now() + 10000
+    while (Date.now() < until && gate.hits < 1) await sleep(100)
+    precondition(`(k) the ${slug} Retry sent the held occurrences request`, gate.hits >= 1, gate.hits)
+    await sleep(800)
+    gate.release()
+    await page.locator(`[data-testid="due-panel-${slug}"] [data-testid="due-window-error"]`).waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
+    await settle(page)
+  }
+  await retryHeld('subscriptions', 'subscription')
   await openDueTab(page, 'upcoming')
-  await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-retry"]').click()
-  await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-error"]').waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
-  await settle(page)
+  await retryHeld('upcoming', 'none')
+  const history = await page.evaluate(() => window.__badgeHistory)
+  for (const [slug, name] of [['upcoming', 'Upcoming'], ['subscriptions', 'Subscriptions']]) {
+    const seen = history[slug] ?? []
+    check(`(k) ${name}: across Retry the badge reads only 1 or "…", never the mixed 2, and ends at 1 (seen ${JSON.stringify(seen)})`,
+      seen.length > 0 && seen.every((t) => t === '1' || t === '…') && seen[seen.length - 1] === '1', true)
+  }
   const up = await readTab(page, 'upcoming')
   const subs = await readTab(page, 'subscriptions')
   check('(k) after Retry: Upcoming lists K Bill once, as a transaction row, and Subscriptions K Sub today; both badges read 1',
