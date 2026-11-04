@@ -59,6 +59,15 @@ function closeDayOfMonth(card: StatementCycleSettings): number | null {
 }
 
 /**
+ * The card's statement close day of month (`billing_cycle_start`, else the legacy
+ * due day less the days until due), or null when the card has no cycle settings.
+ * A card installment is charged monthly on it.
+ */
+export function statementCloseDay(card: StatementCycleSettings): number | null {
+  return closeDayOfMonth(card)
+}
+
+/**
  * The close day of the statement a day falls in: this month's close when the day
  * is on or before it, else next month's. A close day past a short month's end
  * lands on its last day. null when the card has no cycle settings.
