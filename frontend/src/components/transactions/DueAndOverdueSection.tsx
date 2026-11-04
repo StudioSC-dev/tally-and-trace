@@ -423,9 +423,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     !loading && !windowResult.fetching,
   )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
+  // D7, after a failure: each window tab's last complete total for the Manila day, a total taken when
+  // every source it needs had landed, was not refetching and had not failed. While any source's latest
+  // fetch has failed the badge shows it (or 0), never a sum of a fresh source and a failed one's cache.
+  const lastComplete = useRef<Partial<Record<'upcoming' | 'subscriptions', { day: string; total: number }>>>({})
+  const keptTotal = (id: 'upcoming' | 'subscriptions') => {
+    const kept = lastComplete.current[id]
+    return kept !== undefined && kept.day === today ? kept.total : 0
+  }
   // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
-  // A failed request keeps the last good data for the same day (its cache entry); a source that failed
-  // with none makes the total 0, never the other source's part of it (D7).
   const upcomingTxns = upcomingTxnResult.currentData
   const upcomingOccs = upcomingOccResult.currentData
   const upcomingFailed = upcomingTxnResult.isError || upcomingOccResult.isError
@@ -435,9 +441,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     () => mergeUpcoming(upcomingTxns?.items ?? [], upcomingOccs?.items ?? [], UPCOMING_LIMIT),
     [upcomingTxns, upcomingOccs],
   )
-  const upcomingLost =
-    (upcomingTxns === undefined && upcomingTxnResult.isError) || (upcomingOccs === undefined && upcomingOccResult.isError)
-  const upcomingTotal = upcomingLost ? 0 : (upcomingTxns?.total ?? 0) + (upcomingOccs?.total ?? 0)
+  const upcomingSum = (upcomingTxns?.total ?? 0) + (upcomingOccs?.total ?? 0)
+  const upcomingComplete =
+    upcomingTxns !== undefined && upcomingOccs !== undefined && !upcomingFailed &&
+    !upcomingTxnResult.isFetching && !upcomingOccResult.isFetching
+  useEffect(() => {
+    if (upcomingComplete) lastComplete.current.upcoming = { day: today, total: upcomingSum }
+  }, [upcomingComplete, upcomingSum, today])
+  const upcomingTotal = upcomingFailed ? keptTotal('upcoming') : upcomingSum
   const upcomingShown = upcomingShownText(upcomingTotal)
   const upcomingCount = upcomingRows.length
   const upcomingView = useClampedPage(
@@ -454,8 +465,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     void upcomingOccResult.refetch()
   }
   // Subscriptions: the snapshot's rows dated today or earlier, only while the snapshot is for
-  // today, and the window's occurrences. A failure keeps the same day's last good data; a source that
-  // failed with none for today makes the total 0 (D7).
+  // today, and the window's occurrences. While either has failed the badge is the last complete total (D7).
   const snapshotFresh = snapshot !== undefined && freshFor(snapshot.today, today)
   const subscriptionPast = useMemo(
     () => (snapshot !== undefined && snapshotFresh ? subscriptionPastRows(snapshot, today) : []),
@@ -469,9 +479,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     () => orderSubscriptionRows(subscriptionPast, subscriptionOccs?.items ?? []),
     [subscriptionPast, subscriptionOccs],
   )
-  const subscriptionLost =
-    (!snapshotFresh && snapshotIsError) || (subscriptionOccs === undefined && subscriptionOccResult.isError)
-  const subscriptionTotal = subscriptionLost ? 0 : subscriptionPast.length + (subscriptionOccs?.total ?? 0)
+  const subscriptionSum = subscriptionPast.length + (subscriptionOccs?.total ?? 0)
+  const subscriptionSourceFailed = snapshotIsError || subscriptionOccResult.isError
+  const subscriptionComplete =
+    snapshotFresh && subscriptionOccs !== undefined && !subscriptionSourceFailed &&
+    !snapshotFetching && !subscriptionOccResult.isFetching
+  useEffect(() => {
+    if (subscriptionComplete) lastComplete.current.subscriptions = { day: today, total: subscriptionSum }
+  }, [subscriptionComplete, subscriptionSum, today])
+  const subscriptionTotal = subscriptionSourceFailed ? keptTotal('subscriptions') : subscriptionSum
   const subscriptionCount = subscriptionRows.length
   const subscriptionView = useClampedPage(
     subscriptionCount,

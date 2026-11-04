@@ -36,11 +36,14 @@
 //   (j) one source of a tab fails and the other loads (Upcoming: the transactions or the
 //       occurrences; Subscriptions: the snapshot or the subscription occurrences): the badge
 //       reads 0, not the other source's part, the error shows, and Retry recovers
+//   (k) a row moves between a tab's sources and the next refresh of one source fails: the
+//       badge keeps the tab's last complete total, not the fresh source plus the failed one's
+//       cache (Upcoming: a recorded occurrence; Subscriptions: an entry moved to today)
 //
 // Every scenario checks that no browser dialog fired. Check kinds: a failed setup
 // precondition aborts the run with exit 2; an assertion failure exits 1.
 //
-// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j]
+// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j|k]
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet, recordTexts, readTexts, resetTexts, sleep } = require('./_smooth.cjs')
@@ -842,12 +845,101 @@ async function oneSourceFails(browser) {
   }
 }
 
+// (k) A row moves between a tab's sources and then the refresh of one source fails. The failed
+// source keeps its earlier data in the cache, so adding it to the fresh source would count the
+// moved row twice; the badge shows the tab's last complete total for the day instead (D7).
+// Upcoming: K Bill's occurrence on T+3 is recorded on T+3, so it moves from the occurrences to
+// the transactions, and the occurrences refresh fails. Subscriptions: K Sub moves from T+5 to
+// today through the API (an occurrence to a snapshot row), and the same refresh (the record
+// invalidates every source) brings the snapshot but fails the subscription occurrences.
+async function staleSourceAfterMove(browser) {
+  console.log('\n=== (k) a row moves between sources and one refresh fails: each badge keeps its last complete total, not a sum that counts the row twice')
+  const today = manilaToday()
+  const billDay = addDays(today, 3)
+  const u = await makeUser('k')
+  const bank = await account(u, 'K Checking')
+  const visa = await card(u, bank, 'K Visa')
+  const bill = await entry(u, { name: 'K Bill', amount: 800, account_id: bank.id, next_occurrence: wire(billDay) })
+  const sub = await entry(u, { name: 'K Sub', amount: 369, account_id: visa.id, next_occurrence: wire(addDays(today, 5)), cadence: 'quarterly' })
+  const { ctx, page, native } = await newPage(browser)
+  const failing = { on: false, hits: { none: 0, subscription: 0 }, snapshots: 0 }
+  await page.route((url) => url.pathname.endsWith('/budget-entries/upcoming-occurrences') || url.pathname.endsWith('/dashboard/snapshot'), async (route) => {
+    const url = new URL(route.request().url())
+    if (!failing.on) return route.fallback()
+    if (url.pathname.endsWith('/dashboard/snapshot')) { failing.snapshots++; return route.fallback() }
+    const plan = url.searchParams.get('plan')
+    if (plan !== 'none' && plan !== 'subscription') return route.fallback()
+    failing.hits[plan]++
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'failed on purpose (plan-tabs k)' }) })
+  })
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await openDueTab(page, 'upcoming')
+  check('(k) loaded: Upcoming counts K Bill\'s occurrence and Subscriptions K Sub\'s, 1 and 1', [await badgeOf(page, 'upcoming'), await badgeOf(page, 'subscriptions')], ['1', '1'])
+
+  // K Sub moves to today on the server; the page has not refetched yet.
+  const moved = await api(u.token, 'PUT', `/budget-entries/${sub.id}`, { next_occurrence: wire(today) })
+  precondition('the API moved K Sub to today', moved.status === 200, moved.status)
+  // Record K Bill's T+3 occurrence on T+3 with both occurrence refreshes failing.
+  failing.on = true
+  const row = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="occurrence"][data-source="${sourceOf(bill)}"][data-day="${billDay}"]`))
+  await row.locator('[data-testid="upcoming-mark-paid"]').click()
+  const shown = await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor({ timeout: 10000 }).then(() => true, () => false)
+  check('upcoming-mark-paid opened the Mark paid dialog', shown, true)
+  if (!shown) {
+    await ctx.close()
+    return
+  }
+  await waitQuiet(page)
+  await dialog(page).locator('input[type="date"][id$="-day"]').fill(billDay)
+  const done = page.waitForResponse((r) => r.request().method() === 'POST' && /\/materialize$/.test(new URL(r.url()).pathname))
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  precondition('the record was created', (await done).status() === 201)
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  const until = Date.now() + 10000
+  while (Date.now() < until && !(failing.hits.none >= 1 && failing.hits.subscription >= 1 && failing.snapshots >= 1)) await sleep(200)
+  precondition('the record refetched the snapshot and failed both occurrence refreshes', failing.hits.none >= 1 && failing.hits.subscription >= 1 && failing.snapshots >= 1, failing)
+  const recorded = (await get(u.token, `/transactions/?limit=100`)).items.filter((t) => t.budget_entry_id === bill.id).map((t) => t.transaction_date.slice(0, 10))
+  precondition('K Bill was recorded on T+3, inside the Upcoming window', JSON.stringify(recorded) === JSON.stringify([billDay]), recorded)
+  await sleep(600)
+
+  const windowError = async (slug) => {
+    const panel = page.locator(`[data-testid="${DUE_TABS.find((t) => t.slug === slug).panel}"]`)
+    return [await panel.locator('[data-testid="due-window-error"]').count(), await panel.locator('[data-testid="due-window-retry"]').count()]
+  }
+  check('(k) Upcoming: the occurrences refresh failed after K Bill moved to the transactions: the badge keeps the last complete total 1, not 2',
+    await badgeOf(page, 'upcoming'), '1')
+  check('(k) Upcoming shows the error with Retry', await windowError('upcoming'), [1, 1])
+  await page.locator(`[data-testid="${DUE_TABS.find((t) => t.slug === 'subscriptions').tab}"]`).click()
+  await waitQuiet(page)
+  check('(k) Subscriptions: the occurrences refresh failed after K Sub moved to the snapshot: the badge keeps the last complete total 1, not 2',
+    await badgeOf(page, 'subscriptions'), '1')
+  check('(k) Subscriptions shows the error with Retry', await windowError('subscriptions'), [1, 1])
+
+  // Retry with the occurrences answering: each badge is its true total again.
+  failing.on = false
+  await page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-window-retry"]').click()
+  await openDueTab(page, 'upcoming')
+  await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-retry"]').click()
+  await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-error"]').waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
+  await settle(page)
+  const up = await readTab(page, 'upcoming')
+  const subs = await readTab(page, 'subscriptions')
+  check('(k) after Retry: Upcoming lists K Bill once, as a transaction row, and Subscriptions K Sub today; both badges read 1',
+    [rowsFor(up, bill).length + up.filter((r) => r.kind === 'upcoming' && r.text.includes('K Bill')).length, rowsFor(subs, sub).map((r) => r.kind), await badgeOf(page, 'upcoming'), await badgeOf(page, 'subscriptions')],
+    [1, ['recurring'], '1', '1'])
+  checkNoNative('k', native)
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails }
+  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails, k: staleSourceAfterMove }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
