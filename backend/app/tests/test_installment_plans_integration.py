@@ -378,3 +378,31 @@ def test_a_capped_walk_stops_at_its_last_payment(w):
     # Its schedule end, its walk, its first occurrence and the auto-post plan:
     # a few times its 10 payments, never every week to the annual plan's end.
     assert yielded.get(weekly, 0) <= 30
+
+
+def test_plans_on_distinct_cards_load_their_accounts_in_one_pass(w):
+    """One plan per card, each request on a fresh session: the route's own
+    queries (``installment_infos`` counted apart) are the same for 2 cards as
+    for 6, so listing the entries loads their accounts in one query."""
+    from app.tests.test_installment_autopost_integration import _card
+
+    client, o = w["client"], w["o"]
+
+    def add_cards(n):
+        for _ in range(n):
+            card = _card(client, o, w["checking"], name=f"Card {_}")
+            entry_id = _installment(w, name=f"Plan on {card}", next_day=_day(3), remaining=4,
+                                    card=card)
+            _flags(w["db"], entry_id, reviewed=True, on=False)
+
+    def fresh_count():
+        # Each request opens its own session; nothing is cached across them.
+        w["db"].expire_all()
+        return _counted(w, lambda: _plans(client, o))
+
+    add_cards(2)
+    two, two_own, _ = fresh_count()
+    add_cards(4)
+    six, six_own, six_infos = fresh_count()
+    assert (len(two["items"]), len(six["items"])) == (2, 6)
+    assert six_own == two_own, (two_own, six_own, six_infos)

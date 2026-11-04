@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.access import (
-    VIEW_ROLES, readable_criterion, touches_accounts, viewable_account_ids,
+    VIEW_ROLES, readable_criterion, record_account_ids, touches_accounts, viewable_account_ids,
 )
 from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.tags import effective_tag_criterion
@@ -276,8 +276,10 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     )
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
-    return [e for e in query.order_by(BudgetEntry.id).all()
-            if access.readable(e) and redactor.view(e) != LIMITED]
+    entries = query.order_by(BudgetEntry.id).all()
+    # Every account the filter below reads, in one query rather than per entry.
+    access.load(i for e in entries for i in record_account_ids(e))
+    return [e for e in entries if access.readable(e) and redactor.view(e) != LIMITED]
 
 
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
