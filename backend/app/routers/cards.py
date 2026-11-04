@@ -282,6 +282,8 @@ def _locked_due_statement(db: Session, user: User, account_id: int,
     neighbouring statements cannot both pass the order check."""
     card = _managed_card(db, user, account_id)
     card = locking.lock_accounts(db, [card.id])[card.id]
+    if card.account_type != AccountType.CREDIT:  # converted while this waited for the lock
+        raise HTTPException(status_code=400, detail="Only a credit card has available credit")
     return card, _due_statement(card, close_date)
 
 

@@ -19,6 +19,7 @@ import pytest
 
 from app.tests.conftest import API, hh_tag_share, sw_db_reachable, sw_post, sw_share
 from app.tests.test_card_charges_integration import pin_clock
+from app.tests.test_balance_locking_integration import engine, holder  # noqa: F401
 from app.tests.test_minimum_due_rule_integration import _alembic, scratch_url  # noqa: F401
 from app.tests.test_statement_minimum_integration import BDO
 
@@ -365,7 +366,7 @@ def test_upgrade_adds_the_due_override_table_and_downgrade_drops_it(scratch_url)
 
     _alembic(scratch_url, "upgrade", DUE_REVISION)
     assert "card_statement_due_overrides" in tables()
-    engine = create_engine(scratch_url)
+    engine = create_engine(scratch_url)  # noqa: F811
     try:
         with engine.begin() as c:
             user = c.execute(text(
@@ -467,3 +468,26 @@ def test_close_day_change_without_overrides_is_ok(world):
     _set_due(client, me, other, "2026-11-04", "2026-12-02")
     assert _update(client, me, card, {"billing_cycle_start": 2})["billing_cycle_start"] == 2
     assert "2026-11-02" in _statements(client, me, card)
+
+
+def test_a_due_edit_queued_behind_a_conversion_to_checking_is_400(world, engine, holder):  # noqa: F811
+    """A card converted to checking while an edit waits on its lock gets the non-card
+    400 and no override row: the type is re-read on the locked row."""
+    from app.models.account import Account, AccountType
+    from app.models.card_statement_due_override import CardStatementDueOverride
+    from app.tests.test_balance_locking_integration import _race
+
+    client, me, card = world["client"], world["me"], world["card"]
+    held = holder.query(Account).filter(Account.id == card).with_for_update().one()
+    held.account_type = AccountType.CHECKING
+    holder.flush()
+
+    path = f"{API}/cards/{card}/statements/2026-12-04/due-date"
+    r = _race(engine, holder, lambda: client.put(
+        path, json={"due_date": "2026-12-30"}, headers=me["headers"]))
+
+    assert r.status_code == 400, r.text
+    assert "credit card" in r.json()["detail"]
+    world["db"].expire_all()
+    assert world["db"].query(CardStatementDueOverride).filter(
+        CardStatementDueOverride.account_id == card).count() == 0
