@@ -34,7 +34,7 @@
 //
 // Usage: node frontend/e2e/mark-paid-payables.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, showRow, showLastRow } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, allDueRows, rowsOf, showRow, showLastRow, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -54,6 +54,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -160,19 +161,29 @@ const dueRows = (page, name, kind) =>
   page.locator(`[data-testid="due-row"]${kind ? `[data-kind="${kind}"]` : ':not([data-kind="pending"]):not([data-kind="statement"])'}`)
     .filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
 const gone = (locator) => locator.first().waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
-/** An entry's occurrence row in Transactions Upcoming, on `day`. */
+/** An entry's occurrence row in the card's Upcoming tab, on `day` (the tab must be selected; reach it with showRow). */
 const upcomingRow = (page, entryId, day) =>
-  page.locator(`[data-testid="upcoming-occurrence"][data-source="budget_entry:${entryId}"][data-day="${day}"]`)
+  page.locator(`[data-testid="due-row"][data-kind="occurrence"][data-source="budget_entry:${entryId}"][data-day="${day}"]`)
+/** How many Upcoming rows an entry has on `day`, over every page (selects the Upcoming tab). */
+const upcomingCount = async (page, entryId, day) =>
+  (await readTab(page, 'upcoming')).filter((r) => r.source === `budget_entry:${entryId}` && r.day === day).length
+/** [S] Every occurrence row on the Upcoming tab is inside the card's window, T+1 to T+30. */
+const upcomingInWindow = async (page) => {
+  const days = (await readTab(page, 'upcoming')).map((r) => r.day).filter((d) => d !== null)
+  return days.every((d) => d > manilaToday() && d <= addDays(manilaToday(), 30))
+}
 
-/** Clicks a section or Upcoming row's button (Mark paid by default); returns the `include` the dialog asked /occurrences for. */
+/**
+ * Clicks a section or Upcoming row's button (Mark paid by default); returns the `include` the dialog asked
+ * /occurrences for. Records whether the dialog opened (bounded); when it did not, returns undefined.
+ */
 async function openMarkPaid(page, row, entryId, button = 'due-mark-paid') {
-  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${entryId}/occurrences`))
+  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${entryId}/occurrences`), { timeout: 10000 }).catch(() => null)
   await row.locator(`[data-testid="${button}"]`).click()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), `${button} opened the Mark paid dialog`))) return undefined
   const request = await asked
-  await dialog(page).waitFor()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   await waitQuiet(page)
-  return new URL(request.url()).searchParams.get('include')
+  return request === null ? null : new URL(request.url()).searchParams.get('include')
 }
 
 /** Anchor day for a stale monthly schedule: Manila's today + 7, its day of month clamped into 5-25. */
@@ -210,9 +221,11 @@ async function expandAndMarkPaid(browser) {
   check('(a) the dashboard has no Mark paid button', await page.locator('[data-testid="payable-mark-paid-button"]').count(), 0)
 
   await openTransactions(page)
-  // Rent's occurrence is in the future, so it is in Upcoming, not in the section.
-  check('(a) Upcoming lists rent once, and the section does not', [await upcomingRow(page, rent.id, rentDay).count(), (await rowsOf(page, 'Rent')).length], [1, 0])
-  await openMarkPaid(page, upcomingRow(page, rent.id, rentDay), rent.id, 'upcoming-mark-paid')
+  // Rent's occurrence is in the future, so it is in the Upcoming tab, not in Due.
+  const dueRent = (await rowsOf(page, 'Rent')).length
+  check('(a) Upcoming lists rent once, and Due does not', [await upcomingCount(page, rent.id, rentDay), dueRent], [1, 0])
+  check('(a) [S] every Upcoming day is within T+1..T+30', await upcomingInWindow(page), true)
+  if ((await openMarkPaid(page, await showRow(page, upcomingRow(page, rent.id, rentDay)), rent.id, 'upcoming-mark-paid')) === undefined) return ctx.close()
   check('(a) a planned cash expense is dated by "Paid on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Paid on')
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   check('(a) the dialog opens on the clicked occurrence', await select.inputValue(), rentDay)
@@ -225,7 +238,7 @@ async function expandAndMarkPaid(browser) {
   check('(a) Mark paid is 201 created', [res.status(), res.headers()['x-occurrence-outcome']], [201, 'created'])
   await dialog(page).waitFor({ state: 'detached' })
   await gone(upcomingRow(page, rent.id, rentDay))
-  check('(a) the rent row is gone from Upcoming', await upcomingRow(page, rent.id, rentDay).count(), 0)
+  check('(a) the rent row is gone from Upcoming', await upcomingCount(page, rent.id, rentDay), 0)
   const txns = await entryTransactions(u, rent.id)
   check('(a) one posted rent transaction dated yesterday', txns.map((t) => [t.is_posted, t.transaction_date.slice(0, 10)]), [[true, yesterday]])
   check('(a) rent moved on a month', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(rentDay, 1))
@@ -246,6 +259,7 @@ async function staleRent(browser) {
   await openTransactions(page)
   check('(b) rent is listed in the section as a missed row', (await rowsOf(page, 'Rent', 'missed')).length, 1)
   const include = await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent', 'missed'))).first(), rent.id)
+  if (include === undefined) return ctx.close()
   check('(b) the dialog asked for the missed row\'s oldest occurrence', typeof include === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(include), true)
   const listing = await get(u.token, `/budget-entries/${rent.id}/occurrences${include ? `?include=${include}` : ''}`)
   const n = listing.due_unposted
@@ -268,11 +282,16 @@ async function staleRent(browser) {
   check('(b) the schedule is on the current occurrence', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), current)
 
   await settle(page)
-  // The current occurrence is in the future, so it is in Upcoming, not in the section.
+  // The current occurrence is in the future, so it is in the Upcoming tab, not in Due.
+  await openDueTab(page, 'due')
+  const dueCurrent = (await rowsOf(page, 'Rent', undefined, fmt(current))).length
+  await openDueTab(page, 'upcoming')
   const currentRow = upcomingRow(page, rent.id, current)
+  await showRow(page, currentRow)
   await currentRow.waitFor({ timeout: 15000 }).catch(() => {})
-  check('(b) the current rent row remains, in Upcoming', [await currentRow.count(), (await rowsOf(page, 'Rent', undefined, fmt(current))).length], [1, 0])
-  await openMarkPaid(page, currentRow, rent.id, 'upcoming-mark-paid')
+  check('(b) the current rent row remains, in Upcoming', [await upcomingCount(page, rent.id, current), dueCurrent], [1, 0])
+  check('(b) [S] every Upcoming day is within T+1..T+30', await upcomingInWindow(page), true)
+  if ((await openMarkPaid(page, await showRow(page, currentRow), rent.id, 'upcoming-mark-paid')) === undefined) return ctx.close()
   check('(b) the dialog opens on the current occurrence', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), current)
   check('(b) nothing earlier is skipped now', await dialog(page).locator('[data-testid="mark-paid-skipped"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${rent.id}/materialize`))
@@ -281,7 +300,7 @@ async function staleRent(browser) {
   check('(b) Mark paid on the current rent is 201', [last.status(), last.headers()['x-occurrence-recorded']], [201, current])
   await dialog(page).waitFor({ state: 'detached' })
   await gone(currentRow)
-  check('(b) the current rent row is gone from Upcoming', await currentRow.count(), 0)
+  check('(b) the current rent row is gone from Upcoming', await upcomingCount(page, rent.id, current), 0)
   check('(b) rent moved past the current occurrence', (await get(u.token, `/budget-entries/${rent.id}`)).next_occurrence.slice(0, 10), addMonths(current, 1, anchor))
   await ctx.close()
 }
@@ -312,7 +331,7 @@ async function staleInstallment(browser) {
   const listedGadget = await rowsOf(page, 'Gadget')
   console.log(`    the section has ${listedGadget.length} Gadget row(s): ${listedGadget.map((r) => r.kind).join(', ')}`)
   // The last listed row (on the last page that holds one), so the dialog is asked for a later month than the oldest.
-  await openMarkPaid(page, (await showLastRow(page, gadgetRows)).last(), gadget.id)
+  if ((await openMarkPaid(page, (await showLastRow(page, gadgetRows)).last(), gadget.id)) === undefined) return ctx.close()
   const options = await dialog(page).locator('[data-testid="mark-paid-occurrence"] option').evaluateAll((els) => els.map((e) => e.value))
   check('(c) only the oldest month is offered', options, [start])
   check('(c) no "Post all" button', await dialog(page).locator('[data-testid="mark-paid-post-all"]').count(), 0)
@@ -344,7 +363,7 @@ async function loanPayment(browser) {
   await openTransactions(page)
   const row = dueRows(page, 'Car loan payment').filter({ has: page.locator('[data-testid="due-mark-paid"]') })
   check('(d) the loan transfer is a section row with Mark paid', (await rowsOf(page, 'Car loan payment')).filter((r) => r.buttons.includes('due-mark-paid')).length, 1)
-  await openMarkPaid(page, (await showRow(page, row)).first(), entry.id)
+  if ((await openMarkPaid(page, (await showRow(page, row)).first(), entry.id)) === undefined) return ctx.close()
   check('(d) no amount fields for a same-currency transfer', await dialog(page).locator('[data-testid="mark-paid-amount"], [data-testid="mark-paid-received"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${entry.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -382,8 +401,7 @@ async function switchOccurrenceClearsAmount(browser) {
   await uiLogin(page, u)
   await openTransactions(page)
   // The bill is on a card, so its missed row offers Charged and Posted; Posted is the Mark paid of this check.
-  await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent', 'missed'))).first(), rent.id, 'due-posted')
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if ((await openMarkPaid(page, (await showRow(page, dueRows(page, 'Rent', 'missed'))).first(), rent.id, 'due-posted')) === undefined) return ctx.close()
   const select = dialog(page).locator('[data-testid="mark-paid-occurrence"]')
   const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
   await select.selectOption(start)
@@ -435,7 +453,7 @@ async function missingSourceAccount(browser) {
 
   const looked = page.waitForRequest((r) => new URL(r.url()).pathname === accountPath)
   await row.locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).waitFor()
+  if (!(await dialogOpened(dialog(page), '(g) Mark paid opened the dialog'))) { release(); return ctx.close() }
   await looked
   check('(g) the account is looked up by id', true, true)
   check('(g) Mark paid is disabled until the account is known', await dialog(page).locator('[data-testid="mark-paid-submit"]').isDisabled(), true)

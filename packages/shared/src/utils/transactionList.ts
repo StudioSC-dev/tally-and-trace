@@ -92,6 +92,25 @@ export function transactionStatus(row: Transaction, today: string): TransactionS
 /** How far past today the current month's Upcoming looks ahead: the same 30 days as Due's window and the dashboard's. */
 export const UPCOMING_LOOKAHEAD_DAYS = 30
 
+/** The Due card's Upcoming and Subscriptions window: wire bounds of T+1 to T+30, and its last day. */
+export interface UpcomingWindow {
+  start: string
+  end: string
+  /** The window's last calendar day (`YYYY-MM-DD`). */
+  through: string
+}
+
+/**
+ * The fixed window of the Due card's Upcoming and Subscriptions tabs: the day after
+ * `today` (the Manila day) through `today` + 30, whatever month, search or filters the
+ * page shows. Calendar arithmetic on UTC components, so the viewer's zone never moves
+ * it. Throws a `RangeError` for a value that is not a `YYYY-MM-DD` day.
+ */
+export function upcomingWindow(today: string): UpcomingWindow {
+  const through = addDays(today, UPCOMING_LOOKAHEAD_DAYS)
+  return { start: dayStartWire(addDays(today, 1)), end: dayEndWire(through), through }
+}
+
 /**
  * Splits a date filter at today into the two list requests: the main list (on or
  * before today) and Upcoming (after today). Inputs are `YYYY-MM-DD` strings, or ''

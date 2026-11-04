@@ -6,6 +6,7 @@ import type {
   DashboardSnapshot,
   FullCharge,
   FullTransaction,
+  InstallmentPlan,
   LimitedCharge,
   LimitedEvent,
   LimitedTransaction,
@@ -15,6 +16,7 @@ import type {
   RecurringMissed,
   SharedFullTransaction,
   UpcomingItem,
+  UpcomingOccurrence,
 } from '../index'
 import {
   LIMITED_ROWS,
@@ -46,6 +48,10 @@ import {
   orderDueRows,
   pendingLinkIds,
   pendingPostLabel,
+  freshFor,
+  installmentPlanView,
+  orderSubscriptionRows,
+  subscriptionPastRows,
 } from './dueSection'
 import { pageWindow } from './transactionList'
 
@@ -112,6 +118,8 @@ const charge = (c: Partial<FullCharge> & Pick<FullCharge, 'name' | 'source_id'>)
   overdue: false,
   occurrence_date: TODAY,
   kind: 'subscription',
+  // Null keeps these fixtures in Due, their meaning before STU-511; Subscriptions tests set it.
+  plan_kind: null,
   source: 'budget_entry',
   amount: 500,
   currency: 'PHP',
@@ -132,6 +140,7 @@ const card = (c: Partial<CardCharges>): CardCharges => ({
 
 const cardMissed = (m: Partial<MissedCharge> & Pick<MissedCharge, 'entry_id' | 'name'>): MissedCharge => ({
   kind: 'subscription',
+  plan_kind: null,
   count: 2,
   due_count: 2,
   oldest: '2026-08-20',
@@ -243,7 +252,7 @@ describe('LIMITED_ROWS', () => {
 describe('dueRecurringRows: sources and merge', () => {
   it.each(MODES)('lists a card entry on a card without a statement cycle once, as a card row (%s)', (mode) => {
     const s = snap({
-      payables: [payable({ name: 'Netflix', source_id: 5, kind: 'subscription', due_date: '2026-10-20', occurrence_date: '2026-10-20', account_name: 'Visa' })],
+      payables: [payable({ name: 'Netflix', source_id: 5, kind: 'subscription', plan_kind: null, due_date: '2026-10-20', occurrence_date: '2026-10-20', account_name: 'Visa' })],
       card_charges: [card({ statement_cycle: false, charges: [charge({ name: 'Netflix', source_id: 5, date: '2026-10-20', occurrence_date: '2026-10-20' })] })],
     })
     const rows = entries(dueRecurringRows(s, TODAY, mode))
@@ -302,7 +311,7 @@ describe('dueRecurringRows: sources and merge', () => {
 
   it('keeps an unconverted row\'s original figure, from the winning card row', () => {
     const s = snap({
-      payables: [payable({ name: 'Cloud', source_id: 13, kind: 'subscription', account_name: 'Visa' })],
+      payables: [payable({ name: 'Cloud', source_id: 13, kind: 'subscription', plan_kind: null, account_name: 'Visa' })],
       card_charges: [card({ charges: [charge({
         name: 'Cloud', source_id: 13, amount: null, unconverted: true, original_amount: 20, original_currency: 'USD',
         rate_as_of: '2026-10-19', rate_stale: false,
@@ -431,7 +440,7 @@ describe('dueRecurringRows: missed rows and the pending split', () => {
         missed({ entry_id: 2, name: 'Old Rent', kind: 'cash' }),
         missed({ entry_id: 3, name: 'Old Salary', entry_type: 'income', kind: null }),
         missed({ entry_id: 4, name: 'Old Save', entry_type: 'expense', kind: null, is_transfer: true }),
-        missed({ entry_id: 5, name: 'Phone', kind: 'installment', capped: true }),
+        missed({ entry_id: 5, name: 'Phone', kind: 'installment', plan_kind: null, capped: true }),
         missed({ entry_id: 6, name: 'Viewer rent', can_mark_paid: false }),
       ],
       card_charges: [card({ missed: [cardMissed({ entry_id: 7, name: 'Spotify' })] })],
@@ -831,7 +840,7 @@ describe('installment auto-post in the due section', () => {
   it('a missed installment row carries its state, reason and label', () => {
     const s = snap({
       auto_post_scheduled: true,
-      missed: [missed({ entry_id: 5, name: 'Tablet', capped: true, auto_post: 'on', can_review: true })],
+      missed: [missed({ entry_id: 5, name: 'Tablet', capped: true, plan_kind: null, auto_post: 'on', can_review: true })],
     })
     const [row] = missedRows(dueRecurringRows(s, TODAY))
     expect(row?.autoPost).toBe('on')
@@ -841,7 +850,7 @@ describe('installment auto-post in the due section', () => {
 
   it('shows Review on an unreviewed or held row only with can_review', () => {
     const rowFor = (auto_post: 'unreviewed' | 'held', can_review: boolean) =>
-      missedRows(dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'Tablet', auto_post, can_review })] }), TODAY))[0]
+      missedRows(dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'Tablet', plan_kind: null, auto_post, can_review })] }), TODAY))[0]
     expect(rowFor('unreviewed', true)?.review).toBe(true)
     expect(rowFor('held', true)?.review).toBe(true)
     expect(rowFor('unreviewed', false)?.review).toBe(false)
@@ -851,7 +860,7 @@ describe('installment auto-post in the due section', () => {
 
   it('carries a blocked reason into the label, and no state for a plain missed row', () => {
     const blocked = missedRows(
-      dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'T', auto_post: 'blocked', block_reason: 'foreign_currency' })] }), TODAY),
+      dueRecurringRows(snap({ missed: [missed({ entry_id: 5, name: 'T', plan_kind: null, auto_post: 'blocked', block_reason: 'foreign_currency' })] }), TODAY),
     )[0]
     expect(blocked?.blockReason).toBe('foreign_currency')
     expect(blocked?.autoPostLabel).toContain('another currency')
@@ -998,11 +1007,11 @@ describe('dueTodayLines', () => {
 })
 
 describe('statementRowText', () => {
-  it('reads an unposted-only row with Review or Mark paid below and no Pay', () => {
+  it('reads an unposted-only row with Review or Mark paid in Installments and no Pay', () => {
     const out = statementRowText({ amount: 0, unposted: 3, unpostedPostable: 0 })
     expect(out.unpostedOnly).toBe(true)
     expect(out.text).toBe('3 installment months not yet posted')
-    expect(out.guidance).toBe('Review or Mark paid below')
+    expect(out.guidance).toBe('Review or Mark paid in Installments')
     expect(out.pay).toBe(false)
     expect(out.post).toBe(false)
   })
@@ -1018,7 +1027,7 @@ describe('statementRowText', () => {
     expect(out.pay).toBe(true)
     expect(out.text).toBeNull()
     expect(out.note).toBe(
-      'Full leaves out 3 installment months not yet posted. 2 of them need Review or Mark paid in Due and overdue',
+      'Full leaves out 3 installment months not yet posted. 2 of them need Review or Mark paid in Installments',
     )
   })
   it('is a plain Plan C row with no unposted months', () => {
@@ -1193,5 +1202,248 @@ describe('loggedDays and loggedText', () => {
     expect(loggedText(1)).toBe('logged 1 day ago')
     expect(loggedText(2)).toBe('logged 2 days ago')
     expect(loggedText(30)).toBe('logged 30 days ago')
+  })
+})
+
+describe('STU-511: Due loses subscription and installment rows', () => {
+  // One snapshot holding every kind of row: which tab lists each is `plan_kind`'s call.
+  const mixed = () =>
+    snap({
+      card_charges: [
+        card({
+          charges: [
+            charge({ name: 'Netflix', source_id: 1, plan_kind: 'subscription' }),
+            charge({ name: 'Phone', source_id: 2, kind: 'installment', plan_kind: 'installment' }),
+            charge({ name: 'Meralco', source_id: 3, kind: 'bill', plan_kind: null }),
+          ],
+          missed: [cardMissed({ entry_id: 4, name: 'Spotify', plan_kind: 'subscription', oldest: '2026-09-20', oldest_unlinked: '2026-09-20', count: 1, unlinked_count: 1 })],
+        }),
+      ],
+      payables: [
+        payable({ name: 'Gym', source_id: 5, kind: 'cash', plan_kind: 'subscription', account_name: 'Checking' }),
+        payable({ name: 'Rent', source_id: 6, kind: 'cash', plan_kind: null }),
+        limitedEvent('p-1'),
+      ],
+      upcoming_this_month: [upcoming({ name: 'Salary', source_id: 7, entry_type: 'income', plan_kind: null })],
+      missed: [
+        missed({ entry_id: 8, name: 'Tablet', kind: 'installment', plan_kind: 'installment', capped: true, auto_post: 'unreviewed', can_review: true }),
+        missed({ entry_id: 9, name: 'Water', kind: 'cash', plan_kind: null }),
+      ],
+    })
+
+  const names = (rows: readonly { name: string }[]) => rows.map((r) => r.name).sort()
+
+  describe('dueRecurringRows', () => {
+    it('keeps rent, bills, the missed cash entry, income and Limited rows only', () => {
+      const rows = dueRecurringRows(mixed(), TODAY)
+      expect(names(rows)).toEqual(['Expense', 'Meralco', 'Rent', 'Salary', 'Water'])
+      expect(missedRows(rows).map((r) => r.name)).toEqual(['Water'])
+      expect(limitedOf(rows)).toHaveLength(1)
+    })
+
+    it('reads a missing plan_kind as null: an older API keeps every row in Due', () => {
+      const s = mixed()
+      const strip = <T extends object>(row: T): T => {
+        const { plan_kind: _drop, ...rest } = row as T & { plan_kind?: unknown }
+        return rest as T
+      }
+      const old: DashboardSnapshot = {
+        ...s,
+        card_charges: s.card_charges.map((c) => ({
+          ...c,
+          charges: c.charges.map((ch) => (ch.view === 'limited' ? ch : strip(ch))),
+          missed: c.missed.map(strip),
+        })),
+        payables: s.payables.map((p) => (p.view === 'limited' ? p : strip(p))),
+        upcoming_this_month: s.upcoming_this_month.map((u) => (u.view === 'limited' ? u : strip(u))),
+        missed: s.missed.map(strip),
+      }
+      expect(JSON.stringify(old)).not.toContain('plan_kind')
+      const rows = dueRecurringRows(old, TODAY)
+      expect(names(rows)).toEqual(['Expense', 'Gym', 'Meralco', 'Netflix', 'Phone', 'Rent', 'Salary', 'Spotify', 'Tablet', 'Water'])
+      expect(missedRows(rows).map((r) => r.name).sort()).toEqual(['Spotify', 'Tablet', 'Water'])
+    })
+  })
+
+  describe('subscriptionPastRows', () => {
+    it("holds the missed subscription as a missed row and today's as entry rows, nothing else", () => {
+      const rows = subscriptionPastRows(mixed(), TODAY)
+      expect(rows.map((r) => r.key)).toEqual(['missed:4', '5:2026-10-20', '1:2026-10-20'])
+      const [spotify, gym, netflix] = rows
+      expect(spotify).toMatchObject({ kind: 'missed', name: 'Spotify', text: '1 missed since Sep 20th, 2026', actions: ['charged', 'posted'] })
+      expect(gym).toMatchObject({ kind: 'recurring', name: 'Gym', overdue: false, actions: ['mark_paid'] })
+      expect(netflix).toMatchObject({ kind: 'recurring', name: 'Netflix', overdue: false, actions: ['charged', 'posted'] })
+    })
+
+    it('leaves installments to Installments: neither Due nor Subscriptions lists them', () => {
+      const s = mixed()
+      const all = [...dueRecurringRows(s, TODAY), ...subscriptionPastRows(s, TODAY)].map((r) => r.name)
+      expect(all).not.toContain('Phone')
+      expect(all).not.toContain('Tablet')
+    })
+
+    it('drops a past occurrence its missed row covers, keeps today and flags an uncovered one overdue', () => {
+      const s = snap({
+        card_charges: [
+          card({
+            charges: [
+              // Covered: Spotify's missed row starts on 2026-09-20.
+              charge({ name: 'Spotify', source_id: 4, plan_kind: 'subscription', date: '2026-10-15', occurrence_date: '2026-10-15', overdue: true }),
+              charge({ name: 'Spotify', source_id: 4, plan_kind: 'subscription' }),
+              // No missed row: listed, overdue.
+              charge({ name: 'Cloud', source_id: 11, plan_kind: 'subscription', date: '2026-10-18', occurrence_date: '2026-10-18', overdue: true }),
+            ],
+            missed: [cardMissed({ entry_id: 4, name: 'Spotify', plan_kind: 'subscription', oldest: '2026-09-20', oldest_unlinked: '2026-09-20', count: 1, unlinked_count: 1 })],
+          }),
+        ],
+      })
+      const rows = subscriptionPastRows(s, TODAY)
+      expect(rows.map((r) => r.key)).toEqual(['missed:4', '11:2026-10-18', '4:2026-10-20'])
+      expect(rows[1]).toMatchObject({ kind: 'recurring', overdue: true })
+      expect(dueRecurringRows(s, TODAY)).toEqual([])
+    })
+  })
+
+  describe('orderSubscriptionRows', () => {
+    const future = (name: string, entry_id: number, day: string): UpcomingOccurrence => ({
+      view: 'full',
+      entry_id,
+      name,
+      occurrence_date: day,
+      entry_type: 'expense',
+      is_transfer: false,
+      kind: 'subscription',
+      plan_kind: 'subscription',
+      amount: 500,
+      currency: 'PHP',
+      account_name: 'Visa',
+      transfer_to_account_name: null,
+      capped: false,
+      can_mark_paid: true,
+      recordable: true,
+      auto_post: null,
+      block_reason: null,
+      can_review: false,
+    })
+
+    it('lists missed, then overdue, then today, then the future by day', () => {
+      const s = snap({
+        card_charges: [
+          card({
+            charges: [
+              charge({ name: 'Cloud', source_id: 11, plan_kind: 'subscription', date: '2026-10-18', occurrence_date: '2026-10-18', overdue: true }),
+              charge({ name: 'Netflix', source_id: 1, plan_kind: 'subscription' }),
+            ],
+            missed: [cardMissed({ entry_id: 4, name: 'Spotify', plan_kind: 'subscription', oldest: '2026-09-20', oldest_unlinked: '2026-09-20', count: 1, unlinked_count: 1 })],
+          }),
+        ],
+      })
+      const past = subscriptionPastRows(s, TODAY)
+      const later = [future('Disney', 12, '2026-10-25'), future('Apple', 13, '2026-10-22'), future('Adobe', 14, '2026-10-25')]
+      const before = later.map((o) => o.name)
+      const rows = orderSubscriptionRows(past, later)
+      expect(rows.map((r) => r.key)).toEqual([
+        'missed:4',
+        '11:2026-10-18',
+        '1:2026-10-20',
+        'occ:13:2026-10-22',
+        'occ:14:2026-10-25',
+        'occ:12:2026-10-25',
+      ])
+      expect(rows[3]).toMatchObject({ kind: 'occurrence', day: '2026-10-22' })
+      expect(later.map((o) => o.name)).toEqual(before)
+    })
+
+    it('puts a missed row first even when its day is later than an overdue row', () => {
+      const missedLate = cardMissed({ entry_id: 4, name: 'Spotify', plan_kind: 'subscription', oldest: '2026-10-19', oldest_unlinked: '2026-10-19', count: 1, unlinked_count: 1 })
+      const today = charge({ name: 'Netflix', source_id: 1, plan_kind: 'subscription' })
+      const rows = orderSubscriptionRows(subscriptionPastRows(snap({ card_charges: [card({ charges: [today], missed: [missedLate] })] }), TODAY), [
+        future('Apple', 13, '2026-10-21'),
+      ])
+      expect(rows.map((r) => r.key)).toEqual(['missed:4', '1:2026-10-20', 'occ:13:2026-10-21'])
+    })
+  })
+
+  describe('installmentPlanView', () => {
+    const plan = (over: Partial<InstallmentPlan> = {}): InstallmentPlan => ({
+      view: 'full',
+      entry_id: 21,
+      name: 'BDO balance convert',
+      account_name: 'Visa',
+      amount: 2500,
+      currency: 'PHP',
+      next_charge: '2026-10-27',
+      missed: 0,
+      payments_left: 10,
+      payments_total: 12,
+      can_mark_paid: true,
+      auto_post: 'off',
+      block_reason: null,
+      can_review: true,
+      recordable: true,
+      ...over,
+    })
+
+    it('reads "10 of 12 left" and the next charge, with Charged and Posted', () => {
+      expect(installmentPlanView(plan(), TODAY, true)).toEqual({
+        overdue: false,
+        leftText: '10 of 12 left',
+        nextText: 'Next charge Oct 27th, 2026',
+        missedText: null,
+        autoPostLabel: 'Auto-post off · Mark paid',
+        actions: ['charged', 'posted'],
+        review: false,
+      })
+    })
+
+    it('is overdue when the next charge is before today, not on it', () => {
+      expect(installmentPlanView(plan({ next_charge: '2026-10-19' }), TODAY, true).overdue).toBe(true)
+      expect(installmentPlanView(plan({ next_charge: TODAY }), TODAY, true).overdue).toBe(false)
+    })
+
+    it('says how many months are missed', () => {
+      expect(installmentPlanView(plan({ next_charge: '2026-09-10', missed: 2 }), TODAY, true).missedText).toBe('2 missed')
+      expect(installmentPlanView(plan({ missed: 1 }), TODAY, true).missedText).toBe('1 missed')
+    })
+
+    it('offers no button when auto-post is on, and labels it', () => {
+      const view = installmentPlanView(plan({ auto_post: 'on', recordable: false }), TODAY, true)
+      expect(view.actions).toEqual([])
+      expect(view.review).toBe(false)
+      expect(view.autoPostLabel).toBe('Auto-posts each morning')
+      expect(installmentPlanView(plan({ auto_post: 'on', recordable: false }), TODAY, false).autoPostLabel).toBe(
+        'Auto-posts when you open Transactions',
+      )
+    })
+
+    it('offers Review on an unreviewed or held plan the caller can review', () => {
+      expect(installmentPlanView(plan({ auto_post: 'unreviewed' }), TODAY, true).review).toBe(true)
+      expect(installmentPlanView(plan({ auto_post: 'held' }), TODAY, true).review).toBe(true)
+      expect(installmentPlanView(plan({ auto_post: 'unreviewed', can_review: false }), TODAY, true).review).toBe(false)
+    })
+
+    it('offers no button when the server says the next charge is not recordable', () => {
+      expect(installmentPlanView(plan({ recordable: false }), TODAY, true).actions).toEqual([])
+    })
+
+    it('reads "All charges recorded" with no next charge, and offers nothing', () => {
+      const view = installmentPlanView(plan({ next_charge: null, auto_post: 'unreviewed', payments_left: 0 }), TODAY, true)
+      expect(view.nextText).toBe('All charges recorded')
+      expect(view.overdue).toBe(false)
+      expect(view.actions).toEqual([])
+      expect(view.review).toBe(false)
+      expect(view.leftText).toBe('0 of 12 left')
+    })
+  })
+
+  describe('freshFor', () => {
+    it('is fresh for the same day, or with no day (an older API)', () => {
+      expect(freshFor(undefined, TODAY)).toBe(true)
+      expect(freshFor(TODAY, TODAY)).toBe(true)
+    })
+
+    it('is stale for the previous day', () => {
+      expect(freshFor('2026-10-19', TODAY)).toBe(false)
+    })
   })
 })

@@ -220,7 +220,7 @@ describe('unpostedNote', () => {
   it('says what Full leaves out and how many need Review', () => {
     expect(unpostedNote(3, 1)).toEqual({
       text: 'Full leaves out 3 installment months not yet posted',
-      review: '2 of them need Review or Mark paid in Due and overdue',
+      review: '2 of them need Review or Mark paid in Installments',
     })
   })
   it('has no review line when every month is postable', () => {
@@ -229,7 +229,7 @@ describe('unpostedNote', () => {
   it('is singular for one month', () => {
     expect(unpostedNote(1, 0)).toEqual({
       text: 'Full leaves out 1 installment month not yet posted',
-      review: '1 of them needs Review or Mark paid in Due and overdue',
+      review: '1 of them needs Review or Mark paid in Installments',
     })
   })
   it('is null with nothing unposted', () => {
@@ -249,9 +249,9 @@ describe('payDisabledReason', () => {
       'Post the installment months first',
     )
   })
-  it('points to Due and overdue when none are postable', () => {
+  it('points to the Installments tab when none are postable', () => {
     expect(payDisabledReason({ isActive: true, choices: null, unposted: { count: 2, postable: 0 } })).toBe(
-      'Review or Mark paid the installment months in Due and overdue first',
+      'Review or Mark paid the installment months in Installments first',
     )
   })
   it('keeps "No closed statement yet" with nothing unposted', () => {

@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import {
   CAP_REASON,
@@ -20,6 +20,13 @@ import {
   dueStatementRows,
   dueTodayLines,
   formatEntryDate,
+  dueTabBadge,
+  freshFor,
+  installmentPlanView,
+  mergeUpcoming,
+  occurrenceCreditCheck,
+  orderSubscriptionRows,
+  subscriptionPastRows,
   notPostedRows,
   orderDueRows,
   pageWindow,
@@ -38,9 +45,16 @@ import {
   tabKeyTarget,
   toggleSelection,
   transactionDescription,
+  transactionStatus,
+  UPCOMING_LIMIT,
+  upcomingShownText,
+  upcomingWindow,
+  wallDay,
+  transactionDate,
 } from '@tally-trace/shared'
 import type {
   BatchFailure,
+  DueBadge,
   DuePageState,
   DueEntryRow,
   DueLimitedRow,
@@ -51,12 +65,22 @@ import type {
   NotPostedRow,
   RecurringAction,
   Transaction,
+  CreditCheck,
+  InstallmentPlan,
+  SubscriptionRow,
+  TransactionStatus,
+  UpcomingOccurrence,
+  UpcomingRow,
 } from '@tally-trace/shared'
 import { useConfirm } from '../../hooks/useConfirm'
 import { useManilaDay } from '../../hooks/useManilaDay'
+import { useToday } from '../../hooks/useToday'
 import {
   accountingApi,
   useGetDashboardSnapshotQuery,
+  useGetInstallmentPlansQuery,
+  useGetTransactionsQuery,
+  useGetUpcomingOccurrencesQuery,
   usePostDueInstallmentsMutation,
   usePostDueInstallmentsOnOpenMutation,
   useReviewInstallmentsMutation,
@@ -67,9 +91,11 @@ import type { CurrencyCode } from '../../utils/currency'
 import { apiErrorMessage } from '../../utils/apiError'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
+import { CreditCheckBadge } from '../CreditSummary'
 import { InstallmentReviewDialog } from '../InstallmentReviewDialog'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 import { Pager } from '../Pager'
+import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -89,17 +115,28 @@ import { Pager } from '../Pager'
  * month the snapshot counts as postable (`postNowCount`); and a card's statement row
  * counts its installment months not posted yet, listing a card for those alone.
  *
- * Two ARIA tabs share the card (STU-485): "Due and overdue" (the default) holds what is owed,
- * with the review notice, today lines, the page-open status and Post now; "Not posted yet"
- * holds the one-off pending rows (no recurring link) dated today or earlier, each with
- * "logged N days ago" on the Manila day. Both panel shells stay mounted; only the selected
- * panel of an open card has content. The tab and each tab's page are component state only.
+ * ARIA tabs share the card, built from `TABS` (STU-485, STU-511): "Due and overdue" (the
+ * default) holds what is owed, with the review notice, today lines, the page-open status and
+ * Post now; "Not posted yet" holds the one-off pending rows (no recurring link) dated today or
+ * earlier, each with "logged N days ago" on the Manila day; "Upcoming" holds the fixed window
+ * from the Manila day (T+1 to T+30, whatever the page's month and filters): transactions in
+ * every state, soonest first, and the occurrences of entries no other tab lists (`plan=none`),
+ * as compact rows; "Subscriptions" holds the open-ended subscriptions (`plan_kind`
+ * `subscription`): missed, today's and overdue rows from the snapshot and the same window's
+ * occurrences, card rows with the owner's credit check; "Installments" holds one row per
+ * active installment plan with its next charge and "N of M left". A transaction row opens the
+ * page's action modal; every recurring action opens this card's dialogs. Each windowed tab
+ * reads `currentData` for arguments built from `today`, and the snapshot and the plans must be
+ * for that day (`freshFor`), so a new Manila day reads "…" until its data lands. Every panel shell stays mounted; only the selected panel of an
+ * open card has content. The tab and each tab's page are component state only.
  */
 
 const WINDOW_DAYS = 30
 const PAGE = 1000
 /** The most ids one transactions request may name (the API's `ids` limit). */
 const IDS_PER_REQUEST = 500
+/** The most occurrences one window request lists (the API's `limit` maximum); its `total` stays exact. */
+const OCCURRENCE_LIMIT = 500
 
 const ACTION_TEST_IDS: Record<RecurringAction, string> = {
   mark_paid: 'due-mark-paid',
@@ -108,12 +145,28 @@ const ACTION_TEST_IDS: Record<RecurringAction, string> = {
   posted: 'due-posted',
 }
 
-type DueTab = 'due' | 'not_posted'
+type DueTab = 'due' | 'not_posted' | 'upcoming' | 'subscriptions' | 'installments'
+/** The tabs whose badge `dueTabBadge` decides from their sources. */
+type WindowBadgeTab = 'upcoming' | 'subscriptions' | 'installments'
 
-const TABS: readonly { id: DueTab; label: string; slug: string }[] = [
-  { id: 'due', label: 'Due and overdue', slug: 'due' },
-  { id: 'not_posted', label: 'Not posted yet', slug: 'not-posted' },
+/** One tab of the card: its label, its test-id slug, its badge's test id, and whether it lists the window batches (so "Load more" applies). */
+interface TabSpec {
+  id: DueTab
+  label: string
+  slug: string
+  badgeTestId: string
+  usesWindow: boolean
+}
+
+const TABS: readonly TabSpec[] = [
+  { id: 'due', label: 'Due and overdue', slug: 'due', badgeTestId: 'due-count', usesWindow: true },
+  { id: 'not_posted', label: 'Not posted yet', slug: 'not-posted', badgeTestId: 'due-not-posted-count', usesWindow: true },
+  { id: 'upcoming', label: 'Upcoming', slug: 'upcoming', badgeTestId: 'due-upcoming-count', usesWindow: false },
+  { id: 'subscriptions', label: 'Subscriptions', slug: 'subscriptions', badgeTestId: 'due-subscriptions-count', usesWindow: false },
+  { id: 'installments', label: 'Installments', slug: 'installments', badgeTestId: 'due-installments-count', usesWindow: false },
 ]
+
+const STATUS_LABELS: Record<TransactionStatus, string> = { planned: 'Planned', pending: 'Pending', posted: 'Posted' }
 
 const addDays = (day: string, n: number): string => {
   const d = new Date(`${day}T00:00:00Z`)
@@ -181,16 +234,17 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
  */
 function useClampedPage(
   count: number,
+  tab: DueTab,
   state: DuePageState,
-  setState: (state: DuePageState) => void,
+  setState: (tab: DueTab, state: DuePageState) => void,
   today: string,
   settled: boolean,
 ): ReturnType<typeof pageWindow> {
   const page = effectiveDuePage(state, today)
   const view = pageWindow(count, page, DUE_PAGE_SIZE)
   useEffect(() => {
-    if (settled && view.page !== page) setState({ page: view.page, day: today })
-  }, [settled, view.page, page, today, setState])
+    if (settled && view.page !== page) setState(tab, { page: view.page, day: today })
+  }, [settled, view.page, page, today, tab, setState])
   return view
 }
 
@@ -201,6 +255,8 @@ interface Props {
   onPost: (transaction: Transaction) => void
   /** After a recurring occurrence is recorded: refresh the page's lists. */
   onChanged: () => void
+  /** Open an Upcoming transaction in the page's action modal (Edit, Delete, Post). */
+  onOpenTransaction: (transaction: Transaction) => void
   /** Each account's currency by id, so a pending foreign row shows its face in its own currency; a row whose account is missing keeps its stored figure. */
   accountCurrencies?: ReadonlyMap<number, CurrencyCode>
 }
@@ -229,7 +285,7 @@ const buttonClass =
 const primaryButtonClass =
   'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
 
-export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrencies }: Props) {
+export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, accountCurrencies }: Props) {
   const panelId = useId()
   const [open, setOpen] = useState(true)
   // The selected tab: Due and overdue on every mount, never stored.
@@ -258,8 +314,17 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const [loaded, setLoaded] = useState({ count: 1, day: today })
   const batchCount = loaded.day === today ? loaded.count : 1
   // Each tab's page the reader chose and the day they chose it on: a new day is page 1, whatever else is loading.
-  const [pageState, setPageState] = useState<DuePageState>({ page: 1, day: today })
-  const [notPostedPageState, setNotPostedPageState] = useState<DuePageState>({ page: 1, day: today })
+  const [pageStates, setPageStates] = useState<Record<DueTab, DuePageState>>(() => ({
+    due: { page: 1, day: today },
+    not_posted: { page: 1, day: today },
+    upcoming: { page: 1, day: today },
+    subscriptions: { page: 1, day: today },
+    installments: { page: 1, day: today },
+  }))
+  const setPageState = useCallback(
+    (id: DueTab, state: DuePageState) => setPageStates((prev) => ({ ...prev, [id]: state })),
+    [],
+  )
 
   const {
     data: snapshot,
@@ -302,6 +367,26 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const windowResult = useTransactionQueries(windowBatches)
   const linkIds = useMemo(() => (snapshot ? pendingLinkIds(snapshot) : []), [snapshot])
   const { items: linkedTxns, failed: linkedFailed, loading: linkedLoading } = usePendingTransactionsByIds(linkIds)
+  // Upcoming: the fixed window from the Manila day. Its arguments come from `today`, so a new
+  // day is a new cache entry, and `currentData` reads it as not loaded until it lands.
+  const upcomingRange = useMemo(() => upcomingWindow(today), [today])
+  const upcomingTxnResult = useGetTransactionsQuery(
+    { start_date: upcomingRange.start, end_date: upcomingRange.end, order: 'asc', limit: UPCOMING_LIMIT, offset: 0 },
+    { refetchOnMountOrArgChange: true },
+  )
+  const upcomingOccResult = useGetUpcomingOccurrencesQuery(
+    { start_date: upcomingRange.start, end_date: upcomingRange.end, plan: 'none', limit: OCCURRENCE_LIMIT },
+    { refetchOnMountOrArgChange: true },
+  )
+  // Subscriptions: the same window's occurrences of `plan_kind` `subscription` entries.
+  const subscriptionOccResult = useGetUpcomingOccurrencesQuery(
+    { start_date: upcomingRange.start, end_date: upcomingRange.end, plan: 'subscription', limit: OCCURRENCE_LIMIT },
+    { refetchOnMountOrArgChange: true },
+  )
+  // Installments: one row per active plan. `day` is only the cache key, so a new day is a new request.
+  const plansResult = useGetInstallmentPlansQuery({ day: today }, { refetchOnMountOrArgChange: true })
+  // The viewer's local day: an Upcoming transaction's Planned / Pending / Posted label only.
+  const localDay = useToday()
 
   const windowTxns = windowResult.items
   const hasMore = windowResult.last?.data?.has_more === true
@@ -328,13 +413,132 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
   const loading = snapshotLoading || windowResult.loading
   // First-load flags only: a refetch is not gated, it runs under the screen loader. A linked batch that lands adds rows, so the count waits for it.
   const countPending = loading || linkedLoading
-  const view = useClampedPage(count, pageState, setPageState, today, !countPending && !windowResult.fetching)
+  const view = useClampedPage(count, 'due', pageStates.due, setPageState, today, !countPending && !windowResult.fetching)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
   // Not posted yet: the window's one-off rows only, so its count never waits for the linked batches.
   const notPosted = useMemo(() => notPostedRows(windowTxns, today), [windowTxns, today])
   const notPostedCount = notPosted.length
-  const notPostedView = useClampedPage(notPostedCount, notPostedPageState, setNotPostedPageState, today, !loading && !windowResult.fetching)
+  const notPostedView = useClampedPage(
+    notPostedCount,
+    'not_posted',
+    pageStates.not_posted,
+    setPageState,
+    today,
+    !loading && !windowResult.fetching,
+  )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
+  // The Upcoming, Subscriptions and Installments badges are decided by `dueTabBadge` from each source's
+  // state and the tab's last complete total for the Manila day, kept here when the rule marks a figure complete.
+  const lastComplete = useRef<Partial<Record<WindowBadgeTab, { day: string; total: number }>>>({})
+  const keptFor = (id: WindowBadgeTab) => {
+    const kept = lastComplete.current[id]
+    return kept !== undefined && kept.day === today ? kept.total : undefined
+  }
+  // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
+  const upcomingTxns = upcomingTxnResult.currentData
+  const upcomingOccs = upcomingOccResult.currentData
+  const upcomingFailed = upcomingTxnResult.isError || upcomingOccResult.isError
+  const upcomingPending =
+    (upcomingTxns === undefined && !upcomingTxnResult.isError) || (upcomingOccs === undefined && !upcomingOccResult.isError)
+  const upcomingRows = useMemo(
+    () => mergeUpcoming(upcomingTxns?.items ?? [], upcomingOccs?.items ?? [], UPCOMING_LIMIT),
+    [upcomingTxns, upcomingOccs],
+  )
+  const upcomingBadge = dueTabBadge(
+    [
+      { hasData: upcomingTxns !== undefined, fresh: true, fetching: upcomingTxnResult.isFetching, failed: upcomingTxnResult.isError, count: upcomingTxns?.total ?? 0 },
+      { hasData: upcomingOccs !== undefined, fresh: true, fetching: upcomingOccResult.isFetching, failed: upcomingOccResult.isError, count: upcomingOccs?.total ?? 0 },
+    ],
+    keptFor('upcoming'),
+  )
+  const upcomingShown = upcomingBadge.figure === 'pending' ? null : upcomingShownText(upcomingBadge.figure)
+  const upcomingCount = upcomingRows.length
+  const upcomingView = useClampedPage(
+    upcomingCount,
+    'upcoming',
+    pageStates.upcoming,
+    setPageState,
+    today,
+    !upcomingPending && !upcomingTxnResult.isFetching && !upcomingOccResult.isFetching,
+  )
+  const upcomingVisible = upcomingCount > 0 ? upcomingRows.slice(upcomingView.from - 1, upcomingView.to) : []
+  const retryUpcoming = () => {
+    void upcomingTxnResult.refetch()
+    void upcomingOccResult.refetch()
+  }
+  // Subscriptions: the snapshot's rows dated today or earlier, only while the snapshot is for
+  // today, and the window's occurrences. While either has failed the badge is the last complete total (D7).
+  const snapshotFresh = snapshot !== undefined && freshFor(snapshot.today, today)
+  const subscriptionPast = useMemo(
+    () => (snapshot !== undefined && snapshotFresh ? subscriptionPastRows(snapshot, today) : []),
+    [snapshot, snapshotFresh, today],
+  )
+  const subscriptionOccs = subscriptionOccResult.currentData
+  const subscriptionFailed = subscriptionOccResult.isError
+  const subscriptionPending =
+    (!snapshotFresh && !snapshotIsError) || (subscriptionOccs === undefined && !subscriptionOccResult.isError)
+  const subscriptionRows = useMemo(
+    () => orderSubscriptionRows(subscriptionPast, subscriptionOccs?.items ?? []),
+    [subscriptionPast, subscriptionOccs],
+  )
+  const subscriptionBadge = dueTabBadge(
+    [
+      { hasData: snapshot !== undefined, fresh: snapshotFresh, fetching: snapshotFetching, failed: snapshotIsError, count: subscriptionPast.length },
+      { hasData: subscriptionOccs !== undefined, fresh: true, fetching: subscriptionOccResult.isFetching, failed: subscriptionOccResult.isError, count: subscriptionOccs?.total ?? 0 },
+    ],
+    keptFor('subscriptions'),
+  )
+  const subscriptionCount = subscriptionRows.length
+  const subscriptionView = useClampedPage(
+    subscriptionCount,
+    'subscriptions',
+    pageStates.subscriptions,
+    setPageState,
+    today,
+    !subscriptionPending && !snapshotFetching && !subscriptionOccResult.isFetching,
+  )
+  const subscriptionVisible =
+    subscriptionCount > 0 ? subscriptionRows.slice(subscriptionView.from - 1, subscriptionView.to) : []
+  // The card credit check of an entry's occurrence on `day` (owner or admin only), from a snapshot for today.
+  const creditFor = (entryId: number, day: string): CreditCheck | undefined =>
+    snapshot !== undefined && snapshotFresh ? occurrenceCreditCheck(snapshot.card_charges, entryId, day) : undefined
+  // Installments: the plans, only while they are for today; its badge follows the shared rule (D7).
+  const plans = plansResult.currentData
+  const plansFresh = plans !== undefined && freshFor(plans.today, today)
+  const planItems = useMemo(() => (plans !== undefined && plansFresh ? plans.items : []), [plans, plansFresh])
+  const plansFailed = plansResult.isError
+  const plansPending = !plansFresh && !plansFailed
+  const planCount = planItems.length
+  const planBadge = dueTabBadge(
+    [{ hasData: plans !== undefined, fresh: plansFresh, fetching: plansResult.isFetching, failed: plansFailed, count: planCount }],
+    keptFor('installments'),
+  )
+  // Keep each window tab's total for the day when its rule marks it complete.
+  useEffect(() => {
+    const complete: [WindowBadgeTab, DueBadge][] = [['upcoming', upcomingBadge], ['subscriptions', subscriptionBadge], ['installments', planBadge]]
+    for (const [id, badge] of complete) {
+      if (badge.complete && typeof badge.figure === 'number') lastComplete.current[id] = { day: today, total: badge.figure }
+    }
+  })
+  const planView = useClampedPage(
+    planCount,
+    'installments',
+    pageStates.installments,
+    setPageState,
+    today,
+    !plansPending && !plansResult.isFetching,
+  )
+  const planVisible = planCount > 0 ? planItems.slice(planView.from - 1, planView.to) : []
+  // Each tab's badge: "…" while its count is not settled.
+  const figure = (badge: DueBadge) => ({ pending: badge.figure === 'pending', count: badge.figure === 'pending' ? 0 : badge.figure })
+  const badges: Record<DueTab, { pending: boolean; count: number }> = {
+    due: { pending: countPending, count },
+    not_posted: { pending: loading, count: notPostedCount },
+    upcoming: figure(upcomingBadge),
+    subscriptions: figure(subscriptionBadge),
+    installments: figure(planBadge),
+  }
+  const selectedUsesWindow = TABS.find((spec) => spec.id === tab)?.usesWindow === true
 
   const titleId = `${panelId}-title`
   const tabId = (id: DueTab) => `${panelId}-tab-${id}`
@@ -503,7 +707,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     </li>
   )
 
-  const missedRow = (row: DueMissedRow) => (
+  // `plan` marks a row of the Subscriptions tab (`data-plan`).
+  const missedRow = (row: DueMissedRow, plan?: string) => (
     <li
       key={row.key}
       className="flex items-start justify-between gap-3 px-4 py-3"
@@ -511,6 +716,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
       data-kind="missed"
       data-view={row.view ?? 'full'}
       data-source={`budget_entry:${row.entryId}`}
+      data-plan={plan}
     >
       <div>
         <p className="text-sm font-medium text-ink">{row.name}</p>
@@ -532,7 +738,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     </li>
   )
 
-  const entryRow = (row: DueEntryRow) => (
+  // `plan` marks a row of the Subscriptions tab (`data-plan`); `credit` is its card credit check.
+  const entryRow = (row: DueEntryRow, plan?: string, credit?: CreditCheck) => (
     <li
       key={row.key}
       className="flex items-start justify-between gap-3 px-4 py-3"
@@ -540,6 +747,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
       data-kind="recurring"
       data-view={row.view ?? 'full'}
       data-source={`budget_entry:${row.entryId}`}
+      data-plan={plan}
     >
       <div>
         <p className="text-sm font-medium text-ink">{row.name}</p>
@@ -548,6 +756,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
           {row.accountName && ` · ${row.accountName}`}
           {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
         </p>
+        {credit && <CreditCheckBadge check={credit} />}
       </div>
       <div className="flex-shrink-0 space-y-1 text-right">
         {row.currency !== null && (row.amount !== null || row.estimate.unconverted) && (
@@ -617,10 +826,471 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
     )
   }
 
+  // An Upcoming transaction: one button that opens it in the page's action modal.
+  const upcomingTransactionRow = (txn: Transaction) => {
+    // A Limited row has no account id, so it keeps its stored figure.
+    const accountCurrency = txn.view === 'limited' ? undefined : accountCurrencies?.get(txn.account_id)
+    const shown = accountCurrency ? rowAmount(txn, accountCurrency) : { amount: txn.amount, currency: txn.currency }
+    const day = wallDay(transactionDate(txn))
+    return (
+      <li
+        key={`txn:${txn.id}`}
+        data-testid="due-row"
+        data-kind="upcoming"
+        data-view={txn.view}
+        data-source={`transaction:${txn.id}`}
+        data-day={day}
+      >
+        <button
+          type="button"
+          onClick={() => onOpenTransaction(txn)}
+          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-sunken transition-colors focus-ring"
+          data-testid="upcoming-transaction"
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Transaction'}</p>
+            <p className="text-xs text-muted">
+              {formatEntryDate(day)} · {STATUS_LABELS[transactionStatus(txn, localDay)]}
+            </p>
+          </div>
+          <div className="flex-shrink-0 text-right">
+            <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
+          </div>
+        </button>
+      </li>
+    )
+  }
+
+  const upcomingRow = (row: UpcomingRow) =>
+    row.kind === 'transaction'
+      ? upcomingTransactionRow(row.transaction)
+      : occurrenceRow(row.occurrence, row.key, upcomingOccs?.auto_post_scheduled ?? false)
+
+  // A future occurrence as a compact row, in Upcoming or Subscriptions; its actions open this card's dialogs.
+  const occurrenceRow = (occurrence: UpcomingOccurrence, key: string, scheduled: boolean, credit?: CreditCheck) => (
+    <UpcomingOccurrenceRow
+      key={key}
+      occurrence={occurrence}
+      scheduled={scheduled}
+      credit={credit}
+      onRecord={(action) =>
+        setTarget({ entryId: occurrence.entry_id, name: occurrence.name, occurrenceDate: occurrence.occurrence_date, action })
+      }
+      onReview={() => review(occurrence.entry_id, occurrence.name)}
+    />
+  )
+
+  const subscriptionRow = (row: SubscriptionRow) => {
+    if (row.kind === 'occurrence') {
+      const occ = row.occurrence
+      return occurrenceRow(occ, row.key, subscriptionOccs?.auto_post_scheduled ?? false, creditFor(occ.entry_id, occ.occurrence_date))
+    }
+    if (row.kind === 'missed') return missedRow(row, 'subscription')
+    return entryRow(row, 'subscription', creditFor(row.entryId, row.occurrenceDate))
+  }
+
+  // One installment plan: its next charge, "N of M left", and the actions on that charge.
+  const planRow = (plan: InstallmentPlan) => {
+    const shown = installmentPlanView(plan, today, plans?.auto_post_scheduled ?? false)
+    const next = plan.next_charge
+    return (
+      <li
+        key={plan.entry_id}
+        className="flex items-start justify-between gap-3 px-4 py-3"
+        data-testid="due-row"
+        data-kind="installment"
+        data-view={plan.view}
+        data-source={`budget_entry:${plan.entry_id}`}
+        data-day={next ?? undefined}
+        data-plan="installment"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-ink">{plan.name}</p>
+          <p className="text-sm font-semibold text-ink" data-testid="due-payments-left">{shown.leftText}</p>
+          <p className="text-xs text-muted">
+            {shown.nextText}
+            {shown.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
+            {shown.missedText !== null && (
+              <span className="text-warn" data-testid="due-installment-missed">{` · ${shown.missedText}`}</span>
+            )}
+            {plan.account_name && ` · ${plan.account_name}`}
+          </p>
+          {shown.autoPostLabel && (
+            <p className="text-xs text-muted" data-testid="due-auto-post" data-state={plan.auto_post ?? undefined}>
+              {shown.autoPostLabel}
+            </p>
+          )}
+        </div>
+        <div className="flex-shrink-0 space-y-1 text-right">
+          <p className="text-sm font-semibold text-ink" data-testid="due-amount">
+            {formatCurrency(plan.amount, plan.currency as CurrencyCode)}
+          </p>
+          {next !== null && (shown.review || shown.actions.length > 0) && (
+            <div className="flex flex-wrap justify-end gap-2">
+              {shown.review && (
+                <button type="button" onClick={() => review(plan.entry_id, plan.name)} className={buttonClass} data-testid="due-review">
+                  Review
+                </button>
+              )}
+              {shown.actions.map((action, index) => (
+                <button
+                  key={action}
+                  type="button"
+                  onClick={() => setTarget({ entryId: plan.entry_id, name: plan.name, occurrenceDate: next, action })}
+                  className={index === 0 ? primaryButtonClass : buttonClass}
+                  data-testid={ACTION_TEST_IDS[action]}
+                >
+                  {RECURRING_ACTION_LABELS[action]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </li>
+    )
+  }
+
+  // The window's through line, and its note when one tab's occurrences pass the request limit.
+  const throughLine = (extra: ReactNode) => (
+    <p className="px-4 pt-3 text-xs text-muted" data-testid="due-through">
+      Through {formatEntryDate(upcomingRange.through)}
+      {extra}
+    </p>
+  )
+  const cappedNote = (result: { items: unknown[]; total: number } | undefined) =>
+    result !== undefined && result.total > result.items.length ? (
+      <p className="px-4 pt-2 text-xs text-warn" data-testid="due-occurrences-capped">
+        {`Only the first ${result.items.length} of ${result.total} recurring charges in this window are listed.`}
+      </p>
+    ) : null
+  const windowError = (retry: () => void) => (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="due-window-error">
+      <p className="text-sm text-danger" role="alert">Could not load what is coming up.</p>
+      <button type="button" onClick={retry} className={buttonClass} data-testid="due-window-retry">
+        Retry
+      </button>
+    </div>
+  )
+
   const recurringRow = (row: DueRecurringRow) => {
     if (row.view === 'limited') return limitedRow(row)
     if (row.kind === 'missed') return missedRow(row)
     return entryRow(row)
+  }
+
+  // Each tab's content, mounted only in its own panel while the card is open and the tab selected.
+  const panels: Record<DueTab, () => ReactNode> = {
+    due: () => (
+      <>
+        {reviewNotice && (
+          <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-notice">
+            <button
+              type="button"
+              onClick={() => setNoticeOpen((prev) => !prev)}
+              aria-expanded={noticeOpen}
+              className="text-sm font-medium text-warn underline underline-offset-2 focus-ring"
+              data-testid="due-review-notice-toggle"
+            >
+              {reviewNotice.text}
+            </button>
+            {noticeOpen && (
+              <>
+                {cleanCount > 0 && (
+                  <div className="flex flex-wrap items-center gap-3" data-testid="due-review-notice-header">
+                    <label className="flex items-center gap-2 text-sm text-ink">
+                      <input
+                        type="checkbox"
+                        ref={(el) => {
+                          if (el) el.indeterminate = allState === 'some'
+                        }}
+                        checked={allState === 'all'}
+                        disabled={batchBusy}
+                        onChange={() => setSelected(allState === 'all' ? new Set() : selectAll(reviewNotice))}
+                        className="border-line focus-ring"
+                        data-testid="due-review-notice-select-all"
+                      />
+                      Select all
+                    </label>
+                    <button
+                      type="button"
+                      onClick={reviewSelected}
+                      disabled={batchBusy || effective.size === 0}
+                      className={primaryButtonClass}
+                      data-testid="due-review-selected"
+                    >
+                      {reviewSelectedText(effective.size)}
+                    </button>
+                    {capped && (
+                      <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
+                    )}
+                  </div>
+                )}
+                <ul className="space-y-2" data-testid="due-review-notice-list">
+                  {reviewNotice.entries.map((entry) => {
+                    const nameId = `${panelId}-name-${entry.entryId}`
+                    const reasonId = `${panelId}-reason-${entry.entryId}`
+                    const ticked = effective.has(entry.entryId)
+                    const blockedByCap = entry.clean && capped && !ticked
+                    const describedBy = !entry.clean ? reasonId : blockedByCap ? limitId : undefined
+                    return (
+                      <li
+                        key={entry.entryId}
+                        className="flex items-center justify-between gap-3"
+                        data-testid="due-review-notice-entry"
+                        data-source={`budget_entry:${entry.entryId}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={ticked}
+                            disabled={!entry.clean || batchBusy || blockedByCap}
+                            onChange={() => setSelected((prev) => toggleSelection(prev, entry.entryId, reviewNotice))}
+                            aria-labelledby={nameId}
+                            {...(describedBy ? { 'aria-describedby': describedBy } : {})}
+                            className="border-line focus-ring"
+                            data-testid="due-review-notice-select"
+                          />
+                          <span className="text-sm text-ink">
+                            <span id={nameId}>{entry.name}</span>
+                            <span className="text-xs text-muted">
+                              {` · ${entry.accountName}`}
+                              {entry.reason !== null && (
+                                <>
+                                  {' · '}
+                                  <span id={reasonId} data-testid="due-review-notice-reason">{entry.reason}</span>
+                                </>
+                              )}
+                            </span>
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => review(entry.entryId, entry.name)}
+                          className={buttonClass}
+                          data-testid="due-review-notice-review"
+                        >
+                          Review
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
+        {batchResult !== null && batchResult.day === today && (batchResult.text !== null || batchResult.failures.length > 0) && (
+          <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-batch">
+            {batchResult.text !== null && (
+              <p className="text-sm text-ok" role="status" data-testid="due-review-batch-result">{batchResult.text}</p>
+            )}
+            {batchResult.failures.length > 0 && (
+              <ul className="space-y-1">
+                {batchResult.failures.map((f) => (
+                  <li
+                    key={f.entryId}
+                    className="text-sm text-danger"
+                    role="alert"
+                    data-testid="due-review-batch-failure"
+                    data-source={`budget_entry:${f.entryId}`}
+                  >
+                    {f.text}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {todayLines.length > 0 && (
+          <ul className="divide-y divide-line border-b border-line" data-testid="due-today-lines">
+            {todayLines.map((line) => (
+              <li
+                key={line.key}
+                className="flex items-center justify-between gap-3 px-4 py-2"
+                data-testid="due-today-line"
+                data-source={`budget_entry:${line.entryId}`}
+                data-state={line.state}
+              >
+                <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
+                {line.canReview && (
+                  <button
+                    type="button"
+                    onClick={() => review(line.entryId, line.name)}
+                    className={buttonClass}
+                    data-testid="due-today-review"
+                  >
+                    Review
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {openPostedText !== null && (
+          <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
+        )}
+        {(postNow !== null || posted !== null || postError !== null) && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+            {postNow !== null && (
+              <button
+                type="button"
+                onClick={() => void postDueNow()}
+                disabled={posting}
+                className={primaryButtonClass}
+                data-testid="due-post-now"
+              >
+                {posting ? 'Posting…' : postNow}
+              </button>
+            )}
+            {posted !== null && (
+              <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
+            )}
+            {postError !== null && (
+              <p className="text-sm text-danger" role="alert" data-testid="due-post-now-error">{postError}</p>
+            )}
+          </div>
+        )}
+        {!countPending && !snapshotError && count === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
+        )}
+        {count > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {visible.map((row) =>
+              row.kind === 'pending' ? pendingRow(row) : row.kind === 'statement' ? statementRow(row) : recurringRow(row),
+            )}
+          </ul>
+        )}
+        {count > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={count}
+              page={view.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('due', { page: next, day: today })}
+              label="Due and overdue pages"
+              testId="due-pager"
+              disabled={loading}
+            />
+          </div>
+        )}
+      </>
+    ),
+    not_posted: () => (
+      <>
+        {!loading && !snapshotError && notPostedCount === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-not-posted-empty">Nothing waiting to post.</p>
+        )}
+        {notPostedCount > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {notPostedVisible.map((row) => notPostedRow(row))}
+          </ul>
+        )}
+        {notPostedCount > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={notPostedCount}
+              page={notPostedView.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('not_posted', { page: next, day: today })}
+              label="Not posted yet pages"
+              testId="due-pager"
+              disabled={loading}
+            />
+          </div>
+        )}
+      </>
+    ),
+    upcoming: () => (
+      <>
+        {throughLine(upcomingShown !== null && <span data-testid="upcoming-shown">{` · ${upcomingShown}`}</span>)}
+        {cappedNote(upcomingOccs)}
+        {upcomingFailed && windowError(retryUpcoming)}
+        {!upcomingPending && !upcomingFailed && upcomingCount === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-upcoming-empty">Nothing coming up in the next 30 days.</p>
+        )}
+        {upcomingCount > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {upcomingVisible.map((row) => upcomingRow(row))}
+          </ul>
+        )}
+        {upcomingCount > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={upcomingCount}
+              page={upcomingView.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('upcoming', { page: next, day: today })}
+              label="Upcoming pages"
+              testId="due-pager"
+              disabled={upcomingPending}
+            />
+          </div>
+        )}
+      </>
+    ),
+    subscriptions: () => (
+      <>
+        {throughLine(null)}
+        {cappedNote(subscriptionOccs)}
+        {subscriptionFailed && windowError(() => void subscriptionOccResult.refetch())}
+        {!subscriptionPending && !subscriptionFailed && !snapshotError && subscriptionCount === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-subscriptions-empty">
+            No subscription charges due or in the next 30 days.
+          </p>
+        )}
+        {subscriptionCount > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {subscriptionVisible.map((row) => subscriptionRow(row))}
+          </ul>
+        )}
+        {subscriptionCount > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={subscriptionCount}
+              page={subscriptionView.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('subscriptions', { page: next, day: today })}
+              label="Subscriptions pages"
+              testId="due-pager"
+              disabled={subscriptionPending}
+            />
+          </div>
+        )}
+      </>
+    ),
+    installments: () => (
+      <>
+        {plansFailed && (
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3" data-testid="due-plans-error">
+            <p className="text-sm text-danger" role="alert">Could not load the installment plans.</p>
+            <button type="button" onClick={() => void plansResult.refetch()} className={buttonClass} data-testid="due-plans-retry">
+              Retry
+            </button>
+          </div>
+        )}
+        {!plansPending && !plansFailed && planCount === 0 && (
+          <p className="px-4 py-3 text-sm text-muted" data-testid="due-installments-empty">No active installment plans.</p>
+        )}
+        {planCount > 0 && (
+          <ul className="divide-y divide-line" data-testid="due-list">
+            {planVisible.map((plan) => planRow(plan))}
+          </ul>
+        )}
+        {planCount > DUE_PAGE_SIZE && (
+          <div className="px-4 py-3">
+            <Pager
+              total={planCount}
+              page={planView.page}
+              pageSize={DUE_PAGE_SIZE}
+              onPage={(next) => setPageState('installments', { page: next, day: today })}
+              label="Installments pages"
+              testId="due-pager"
+              disabled={plansPending}
+            />
+          </div>
+        )}
+      </>
+    ),
   }
 
   return (
@@ -631,15 +1301,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
           type="button"
           onClick={() => setOpen((prev) => !prev)}
           aria-expanded={open}
-          aria-controls={`${tabPanelId('due')} ${tabPanelId('not_posted')}`}
+          aria-controls={TABS.map(({ id }) => tabPanelId(id)).join(' ')}
           className={buttonClass}
           data-testid="due-section-toggle"
         >
           {open ? 'Hide' : 'Show'}
         </button>
-        <div role="tablist" aria-labelledby={titleId} className="flex flex-1 gap-1 bg-sunken p-1">
-          {TABS.map(({ id, label, slug }, index) => {
+        <div role="tablist" aria-labelledby={titleId} className="flex min-w-0 flex-1 flex-wrap gap-1 bg-sunken p-1">
+          {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
+            const badge = badges[id]
             return (
               <button
                 key={id}
@@ -654,17 +1325,13 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className={`flex flex-1 items-center justify-between gap-2 px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
+                className={`flex flex-auto items-center justify-between gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
                   selectedTab ? 'bg-surface text-ink' : 'text-body hover:text-ink'
                 }`}
                 data-testid={`due-tab-${slug}`}
               >
                 <span>{label}</span>
-                {id === 'due' ? (
-                  <span className="badge" data-testid="due-count">{countPending ? '…' : count}</span>
-                ) : (
-                  <span className="badge" data-testid="due-not-posted-count">{loading ? '…' : notPostedCount}</span>
-                )}
+                <span className="badge" data-testid={badgeTestId}>{badge.pending ? '…' : badge.count}</span>
               </button>
             )
           })}
@@ -678,247 +1345,21 @@ export function DueAndOverdueSection({ today, onPost, onChanged, accountCurrenci
           Could not load some pending transactions.
         </p>
       )}
-      <div
-        role="tabpanel"
-        id={tabPanelId('due')}
-        aria-labelledby={tabId('due')}
-        tabIndex={0}
-        hidden={!open || tab !== 'due'}
-        className="border-t border-line focus-ring"
-        data-testid="due-panel-due"
-      >
-        {open && tab === 'due' && (
-          <>
-            {reviewNotice && (
-              <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-notice">
-                <button
-                  type="button"
-                  onClick={() => setNoticeOpen((prev) => !prev)}
-                  aria-expanded={noticeOpen}
-                  className="text-sm font-medium text-warn underline underline-offset-2 focus-ring"
-                  data-testid="due-review-notice-toggle"
-                >
-                  {reviewNotice.text}
-                </button>
-                {noticeOpen && (
-                  <>
-                    {cleanCount > 0 && (
-                      <div className="flex flex-wrap items-center gap-3" data-testid="due-review-notice-header">
-                        <label className="flex items-center gap-2 text-sm text-ink">
-                          <input
-                            type="checkbox"
-                            ref={(el) => {
-                              if (el) el.indeterminate = allState === 'some'
-                            }}
-                            checked={allState === 'all'}
-                            disabled={batchBusy}
-                            onChange={() => setSelected(allState === 'all' ? new Set() : selectAll(reviewNotice))}
-                            className="border-line focus-ring"
-                            data-testid="due-review-notice-select-all"
-                          />
-                          Select all
-                        </label>
-                        <button
-                          type="button"
-                          onClick={reviewSelected}
-                          disabled={batchBusy || effective.size === 0}
-                          className={primaryButtonClass}
-                          data-testid="due-review-selected"
-                        >
-                          {reviewSelectedText(effective.size)}
-                        </button>
-                        {capped && (
-                          <p id={limitId} className="text-xs text-muted" data-testid="due-review-notice-limit">{CAP_REASON}</p>
-                        )}
-                      </div>
-                    )}
-                    <ul className="space-y-2" data-testid="due-review-notice-list">
-                      {reviewNotice.entries.map((entry) => {
-                        const nameId = `${panelId}-name-${entry.entryId}`
-                        const reasonId = `${panelId}-reason-${entry.entryId}`
-                        const ticked = effective.has(entry.entryId)
-                        const blockedByCap = entry.clean && capped && !ticked
-                        const describedBy = !entry.clean ? reasonId : blockedByCap ? limitId : undefined
-                        return (
-                          <li
-                            key={entry.entryId}
-                            className="flex items-center justify-between gap-3"
-                            data-testid="due-review-notice-entry"
-                            data-source={`budget_entry:${entry.entryId}`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={ticked}
-                                disabled={!entry.clean || batchBusy || blockedByCap}
-                                onChange={() => setSelected((prev) => toggleSelection(prev, entry.entryId, reviewNotice))}
-                                aria-labelledby={nameId}
-                                {...(describedBy ? { 'aria-describedby': describedBy } : {})}
-                                className="border-line focus-ring"
-                                data-testid="due-review-notice-select"
-                              />
-                              <span className="text-sm text-ink">
-                                <span id={nameId}>{entry.name}</span>
-                                <span className="text-xs text-muted">
-                                  {` · ${entry.accountName}`}
-                                  {entry.reason !== null && (
-                                    <>
-                                      {' · '}
-                                      <span id={reasonId} data-testid="due-review-notice-reason">{entry.reason}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => review(entry.entryId, entry.name)}
-                              className={buttonClass}
-                              data-testid="due-review-notice-review"
-                            >
-                              Review
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </>
-                )}
-              </div>
-            )}
-            {batchResult !== null && batchResult.day === today && (batchResult.text !== null || batchResult.failures.length > 0) && (
-              <div className="border-b border-line px-4 py-3 space-y-2" data-testid="due-review-batch">
-                {batchResult.text !== null && (
-                  <p className="text-sm text-ok" role="status" data-testid="due-review-batch-result">{batchResult.text}</p>
-                )}
-                {batchResult.failures.length > 0 && (
-                  <ul className="space-y-1">
-                    {batchResult.failures.map((f) => (
-                      <li
-                        key={f.entryId}
-                        className="text-sm text-danger"
-                        role="alert"
-                        data-testid="due-review-batch-failure"
-                        data-source={`budget_entry:${f.entryId}`}
-                      >
-                        {f.text}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-            {todayLines.length > 0 && (
-              <ul className="divide-y divide-line border-b border-line" data-testid="due-today-lines">
-                {todayLines.map((line) => (
-                  <li
-                    key={line.key}
-                    className="flex items-center justify-between gap-3 px-4 py-2"
-                    data-testid="due-today-line"
-                    data-source={`budget_entry:${line.entryId}`}
-                    data-state={line.state}
-                  >
-                    <span className="text-sm text-ink" data-testid="due-today-text">{line.text}</span>
-                    {line.canReview && (
-                      <button
-                        type="button"
-                        onClick={() => review(line.entryId, line.name)}
-                        className={buttonClass}
-                        data-testid="due-today-review"
-                      >
-                        Review
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {openPostedText !== null && (
-              <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
-            )}
-            {(postNow !== null || posted !== null || postError !== null) && (
-              <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
-                {postNow !== null && (
-                  <button
-                    type="button"
-                    onClick={() => void postDueNow()}
-                    disabled={posting}
-                    className={primaryButtonClass}
-                    data-testid="due-post-now"
-                  >
-                    {posting ? 'Posting…' : postNow}
-                  </button>
-                )}
-                {posted !== null && (
-                  <p className="text-sm text-ok" role="status" data-testid="due-post-now-result">{postedResultText(posted)}</p>
-                )}
-                {postError !== null && (
-                  <p className="text-sm text-danger" role="alert" data-testid="due-post-now-error">{postError}</p>
-                )}
-              </div>
-            )}
-            {!countPending && !snapshotError && count === 0 && (
-              <p className="px-4 py-3 text-sm text-muted" data-testid="due-empty">Nothing due or overdue in the next 30 days.</p>
-            )}
-            {count > 0 && (
-              <ul className="divide-y divide-line" data-testid="due-list">
-                {visible.map((row) =>
-                  row.kind === 'pending' ? pendingRow(row) : row.kind === 'statement' ? statementRow(row) : recurringRow(row),
-                )}
-              </ul>
-            )}
-            {count > DUE_PAGE_SIZE && (
-              <div className="px-4 py-3">
-                <Pager
-                  total={count}
-                  page={view.page}
-                  pageSize={DUE_PAGE_SIZE}
-                  onPage={(next) => setPageState({ page: next, day: today })}
-                  label="Due and overdue pages"
-                  testId="due-pager"
-                  disabled={loading}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      <div
-        role="tabpanel"
-        id={tabPanelId('not_posted')}
-        aria-labelledby={tabId('not_posted')}
-        tabIndex={0}
-        hidden={!open || tab !== 'not_posted'}
-        className="border-t border-line focus-ring"
-        data-testid="due-panel-not-posted"
-      >
-        {open && tab === 'not_posted' && (
-          <>
-            {!loading && !snapshotError && notPostedCount === 0 && (
-              <p className="px-4 py-3 text-sm text-muted" data-testid="due-not-posted-empty">Nothing waiting to post.</p>
-            )}
-            {notPostedCount > 0 && (
-              <ul className="divide-y divide-line" data-testid="due-list">
-                {notPostedVisible.map((row) => notPostedRow(row))}
-              </ul>
-            )}
-            {notPostedCount > DUE_PAGE_SIZE && (
-              <div className="px-4 py-3">
-                <Pager
-                  total={notPostedCount}
-                  page={notPostedView.page}
-                  pageSize={DUE_PAGE_SIZE}
-                  onPage={(next) => setNotPostedPageState({ page: next, day: today })}
-                  label="Not posted yet pages"
-                  testId="due-pager"
-                  disabled={loading}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      {open && hasMore && (
+      {TABS.map(({ id, slug }) => (
+        <div
+          key={id}
+          role="tabpanel"
+          id={tabPanelId(id)}
+          aria-labelledby={tabId(id)}
+          tabIndex={0}
+          hidden={!open || tab !== id}
+          className="border-t border-line focus-ring"
+          data-testid={`due-panel-${slug}`}
+        >
+          {open && tab === id && panels[id]()}
+        </div>
+      ))}
+      {open && hasMore && selectedUsesWindow && (
         <div className="border-t border-line px-4 py-3">
           <button type="button" onClick={loadMore} className={buttonClass} data-testid="due-load-more">
             Load more

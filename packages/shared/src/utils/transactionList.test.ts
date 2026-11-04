@@ -2,7 +2,7 @@ import { afterEach, describe, it, expect } from 'vitest'
 import type { LimitedTransaction, Transaction } from '../types/api'
 import {
   UPCOMING_LOOKAHEAD_DAYS, addDays, dayEndWire, dayStartWire, listBounds, localToday, pageItems, pageWindow,
-  relativeEntryDay, statusFromDate, transactionStatus, wallDay,
+  relativeEntryDay, statusFromDate, transactionStatus, upcomingWindow, wallDay,
 } from './transactionList'
 
 // Transaction dates are wall time stored as UTC components. The suite runs in
@@ -290,5 +290,35 @@ describe('pageItems', () => {
 
   it('shows nothing without pages', () => {
     expect(pageItems(0, 1)).toEqual([])
+  })
+})
+
+describe('upcomingWindow', () => {
+  it('runs from the day after today through today + 30, as wire bounds', () => {
+    expect(upcomingWindow('2026-11-03')).toEqual({
+      start: '2026-11-04T00:00:00Z',
+      end: '2026-12-03T23:59:59.999999Z',
+      through: '2026-12-03',
+    })
+  })
+
+  it('crosses the year end', () => {
+    expect(upcomingWindow('2026-12-15')).toEqual({
+      start: '2026-12-16T00:00:00Z',
+      end: '2027-01-14T23:59:59.999999Z',
+      through: '2027-01-14',
+    })
+    expect(upcomingWindow('2026-12-31').start).toBe('2027-01-01T00:00:00Z')
+  })
+
+  it('counts the 29th of February in a leap year, and not in another', () => {
+    expect(upcomingWindow('2028-02-10').through).toBe('2028-03-11')
+    expect(upcomingWindow('2027-02-10').through).toBe('2027-03-12')
+    expect(upcomingWindow('2028-02-28').start).toBe('2028-02-29T00:00:00Z')
+  })
+
+  it('throws a RangeError for a value that is not a day', () => {
+    expect(() => upcomingWindow('2026-11-3')).toThrow(RangeError)
+    expect(() => upcomingWindow('')).toThrow(RangeError)
   })
 })

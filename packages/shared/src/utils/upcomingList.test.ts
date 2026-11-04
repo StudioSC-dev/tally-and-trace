@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { Transaction, UpcomingOccurrence } from '../types/api'
-import { mergeUpcoming, upcomingOccurrenceRow } from './upcomingList'
+import { UPCOMING_LIMIT, mergeUpcoming, occurrenceTab, upcomingOccurrenceRow, upcomingShownText } from './upcomingList'
 
-// Transactions arrive as loadUpcoming produces them: date ascending, then id.
+// Transactions arrive as the window request returns them (order=asc): date ascending, then id.
 function txn(id: number, day: string): Transaction {
   return { id, view: 'limited', date: `${day}T00:00:00Z` } as unknown as Transaction
 }
@@ -88,6 +88,68 @@ describe('mergeUpcoming', () => {
       const cut = mergeUpcoming(transactions.slice(0, LIMIT), occurrences.slice(0, LIMIT), LIMIT)
       expect(keys(cut)).toEqual(keys(full).slice(0, LIMIT))
     })
+  })
+})
+
+describe('mergeUpcoming as the Upcoming tab uses it', () => {
+  it('lists 100 rows', () => {
+    expect(UPCOMING_LIMIT).toBe(100)
+  })
+
+  it('takes both ascending lists as they come and keeps the soonest 100', () => {
+    // 150 rows a day apart from T+1, ids ascending on a tie, as `order=asc` returns them;
+    // occurrences on T+1, T+11 and T+16, and a fourth on T+21, past the cut.
+    const transactions: Transaction[] = []
+    for (let i = 0; i < 150; i += 1) {
+      const d = new Date(Date.UTC(2026, 10, 4 + Math.floor(i / 5)))
+      transactions.push(txn(i + 1, d.toISOString().slice(0, 10)))
+    }
+    const occurrences: UpcomingOccurrence[] = []
+    for (const [i, offset] of [0, 10, 15, 20].entries()) {
+      const d = new Date(Date.UTC(2026, 10, 4 + offset))
+      occurrences.push(occ(`o${i}`, d.toISOString().slice(0, 10), { entry_id: 100 + i }))
+    }
+    const rows = mergeUpcoming(transactions.slice(0, UPCOMING_LIMIT), occurrences, UPCOMING_LIMIT)
+    expect(rows).toHaveLength(100)
+    expect(rows[0]?.key).toBe('txn:1')
+    // Days never go backwards, and on a day every transaction precedes every occurrence.
+    expect(rows.map((r) => r.day)).toEqual([...rows.map((r) => r.day)].sort())
+    expect(keys(rows).slice(0, 6)).toEqual(['txn:1', 'txn:2', 'txn:3', 'txn:4', 'txn:5', 'occ:100:2026-11-04'])
+    // Five transactions a day reach T+20 at 100; the T+21 occurrence is cut.
+    expect(rows.filter((r) => r.kind === 'occurrence')).toHaveLength(3)
+    expect(rows[rows.length - 1]?.key).toBe('txn:97')
+  })
+})
+
+describe('occurrenceTab', () => {
+  it('lists a subscription in Subscriptions', () => {
+    expect(occurrenceTab(occ('Netflix', '2026-11-05', { kind: 'subscription', plan_kind: 'subscription' }))).toBe('subscriptions')
+  })
+
+  it('drops an installment: its plan row stands for it', () => {
+    expect(occurrenceTab(occ('Phone', '2026-11-05', { kind: 'installment', plan_kind: 'installment' }))).toBeNull()
+  })
+
+  it('lists everything else in Upcoming, a missing plan_kind included', () => {
+    expect(occurrenceTab(occ('Rent', '2026-11-05', { plan_kind: null }))).toBe('upcoming')
+    expect(occurrenceTab(occ('Rent', '2026-11-05'))).toBe('upcoming')
+    expect(occurrenceTab({})).toBe('upcoming')
+  })
+})
+
+describe('upcomingShownText', () => {
+  it('says how many of the total are shown once the list is cut', () => {
+    expect(upcomingShownText(151)).toBe('showing the next 100 of 151')
+    expect(upcomingShownText(101)).toBe('showing the next 100 of 101')
+  })
+
+  it('is null while every row is listed', () => {
+    expect(upcomingShownText(100)).toBeNull()
+    expect(upcomingShownText(0)).toBeNull()
+  })
+
+  it('takes another limit', () => {
+    expect(upcomingShownText(8, 5)).toBe('showing the next 5 of 8')
   })
 })
 

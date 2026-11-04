@@ -16,7 +16,8 @@
 //   (a) the split: tablist, tab and tabpanel roles with their aria-controls and
 //       aria-labelledby; Due holds the hand-linked Water bill, a Charged Netflix row and
 //       Rent; Not posted yet holds Coffee, Fee and Lunch, oldest first, with "logged ..."
-//       text, Mark posted and no Overdue; Later (tomorrow+) is in neither
+//       text, Mark posted and no Overdue; Later (3 days ahead) is on neither of them but is in
+//       Upcoming once, and the Charged Netflix row is not in Upcoming
 //   (b) keyboard and focus order: toggle, selected tab, selected panel; roving tabindex;
 //       arrow keys wrap, Home and End; collapsed, Tab leaves the card
 //   (c) Mark posted on Not posted yet: one PUT, the row leaves, the badge drops, the tab stays
@@ -30,11 +31,16 @@
 //   (h) collapsed: both panel shells stay, hidden and empty, with their relationships;
 //       the tab is remembered while the page is open, never across a reload
 //   (i) each tab pages on its own
+//   (j) at 360 x 740: no sideways scroll; every tab is in the viewport, not clipped and at
+//       least 24 px tall; End brings the last tab into view; every badge is visible
 //
-// Usage: node frontend/e2e/not-posted-yet.cjs [a|b|c|d|e|f|g|h|i]
+// The tab-structure expectations in (a), (b) and (h) are built from DUE_TABS
+// (./_due_pages.cjs), so a new tab is one entry there.
+//
+// Usage: node frontend/e2e/not-posted-yet.cjs [a|b|c|d|e|f|g|h|i|j]
 // Exit 0 when every check passed, 1 when one failed, 2 when the stack did not start.
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, showRow, goToPage, currentPage, pagerLabel, hasPager, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, DUE_TABS, allDueRows, rowsOf, showRow, goToPage, currentPage, pagerLabel, hasPager, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const dialogs = require('./_dialogs.cjs')
 
@@ -55,6 +61,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -168,6 +175,11 @@ const checkNoNative = (scenario, natives) =>
   check(`(${scenario}) no browser dialog fired`, natives.reduce((n, t) => n + t.count, 0), 0)
 
 const tid = (id) => `[data-testid="${id}"]`
+// The card's tabs, in order (./_due_pages.cjs): N of them, the first selected on load.
+const N = DUE_TABS.length
+const FIRST = DUE_TABS[0]
+const LAST = DUE_TABS[N - 1]
+const NOT_POSTED = DUE_TABS.find((t) => t.slug === 'not-posted')
 const text = async (locator) => (await locator.textContent())?.replace(/\s+/g, ' ').trim()
 const dueBadge = async (page) => text(page.locator(tid('due-count')))
 const npBadge = async (page) => text(page.locator(tid('due-not-posted-count')))
@@ -248,11 +260,12 @@ async function theSplit(browser) {
 
   const { ctx, page } = await openCard(browser, natives, u)
   const s = await structure(page)
-  check('(a) one tablist, two tabs, two tabpanels', [s.tablists, s.tabs.length, s.panels], [1, 2, 2])
-  check('(a) Due is selected, Not posted yet is not', s.tabs.map((t) => [t.tab, t.selected]), [['due-tab-due', 'true'], ['due-tab-not-posted', 'false']])
+  check(`(a) one tablist, ${N} tabs, ${N} tabpanels`, [s.tablists, s.tabs.length, s.panels], [1, N, N])
+  check('(a) Due is selected, no other tab is', s.tabs.map((t) => [t.tab, t.selected]), DUE_TABS.map((t) => [t.tab, t === FIRST ? 'true' : 'false']))
   check('(a) each tab controls a tabpanel that is labelled by it back',
-    s.tabs.map((t) => [t.panel, t.panelRole, t.labelledBack]), [['due-panel-due', 'tabpanel', true], ['due-panel-not-posted', 'tabpanel', true]])
-  check('(a) the inactive panel is hidden and has no children', s.tabs.map((t) => [t.hidden, t.children === 0]), [[false, false], [true, true]])
+    s.tabs.map((t) => [t.panel, t.panelRole, t.labelledBack]), DUE_TABS.map((t) => [t.panel, 'tabpanel', true]))
+  check('(a) every inactive panel is hidden and has no children', s.tabs.map((t) => [t.hidden, t.children === 0]),
+    DUE_TABS.map((t) => (t === FIRST ? [false, false] : [true, true])))
 
   const due = await allDueRows(page)
   check('(a) Due holds exactly Water bill, Netflix and Rent', [due.length, ['Water bill', 'Netflix', 'Rent'].map((n) => due.filter((r) => r.text.includes(n)).length)], [3, [1, 1, 1]])
@@ -267,8 +280,13 @@ async function theSplit(browser) {
   check('(a) the badge reads 3', await npBadge(page), '3')
   check('(a) Later, Water bill and Netflix are not on it', ['Later', 'Water bill', 'Netflix'].map((n) => np.filter((r) => r.text.includes(n)).length), [0, 0, 0])
   const s2 = await structure(page)
-  check('(a) now Not posted yet is selected and the Due shell is empty and hidden',
-    s2.tabs.map((t) => [t.tab, t.selected, t.hidden, t.children === 0]), [['due-tab-due', 'false', true, true], ['due-tab-not-posted', 'true', false, false]])
+  check('(a) now Not posted yet is selected and every other shell is empty and hidden',
+    s2.tabs.map((t) => [t.tab, t.selected, t.hidden, t.children === 0]),
+    DUE_TABS.map((t) => (t === NOT_POSTED ? [t.tab, 'true', false, false] : [t.tab, 'false', true, true])))
+  await openDueTab(page, 'upcoming')
+  const up = await allDueRows(page)
+  check('(a) Upcoming lists Later once, as a transaction row', up.filter((r) => r.source?.startsWith('transaction:') && r.text.includes('Later')).length, 1)
+  check('(a) Netflix (Charged, a pending row) and the one-offs are not in Upcoming', ['Netflix', 'Lunch', 'Coffee', 'Fee'].map((n) => up.filter((r) => r.text.includes(n)).length), [0, 0, 0, 0])
   checkNoNative('a', natives)
   await ctx.close()
 }
@@ -300,22 +318,27 @@ async function keyboard(browser) {
   await waitQuiet(page)
   await page.locator(tid('due-section-toggle')).focus()
   check('(b) the toggle has focus', await active(), 'due-section-toggle')
-  check('(b) Tab: the selected tab', await press('Tab', 'due-tab-due'), 'due-tab-due')
-  check('(b) roving tabindex: 0 on the selected tab, -1 on the other', (await structure(page)).tabs.map((t) => t.tabindex), ['0', '-1'])
-  check('(b) Tab: the selected panel', await press('Tab', 'due-panel-due'), 'due-panel-due')
-  check('(b) Shift+Tab: back to the selected tab', await press('Shift+Tab', 'due-tab-due'), 'due-tab-due')
-  check('(b) Shift+Tab: back to the toggle, skipping the other tab', await press('Shift+Tab', 'due-section-toggle'), 'due-section-toggle')
+  check('(b) Tab: the selected tab', await press('Tab', FIRST.tab), FIRST.tab)
+  check('(b) roving tabindex: 0 on the selected tab, -1 on every other', (await structure(page)).tabs.map((t) => t.tabindex),
+    DUE_TABS.map((t) => (t === FIRST ? '0' : '-1')))
+  check('(b) Tab: the selected panel', await press('Tab', FIRST.panel), FIRST.panel)
+  check('(b) Shift+Tab: back to the selected tab', await press('Shift+Tab', FIRST.tab), FIRST.tab)
+  check('(b) Shift+Tab: back to the toggle, skipping the other tabs', await press('Shift+Tab', 'due-section-toggle'), 'due-section-toggle')
 
-  await press('Tab', 'due-tab-due')
-  check('(b) ArrowRight: focus and selection move to Not posted yet', [await press('ArrowRight', 'due-tab-not-posted'), await selected()], ['due-tab-not-posted', ['due-tab-not-posted']])
-  check('(b) the panel switched with the tab', (await structure(page)).tabs.map((t) => t.hidden), [true, false])
-  check('(b) Tab from it: the Not posted yet panel', await press('Tab', 'due-panel-not-posted'), 'due-panel-not-posted')
-  check('(b) Shift+Tab: back to its tab', await press('Shift+Tab', 'due-tab-not-posted'), 'due-tab-not-posted')
-  check('(b) ArrowRight on the last tab wraps to the first', [await press('ArrowRight', 'due-tab-due'), await selected()], ['due-tab-due', ['due-tab-due']])
-  check('(b) ArrowLeft on the first tab wraps to the last', [await press('ArrowLeft', 'due-tab-not-posted'), await selected()], ['due-tab-not-posted', ['due-tab-not-posted']])
-  check('(b) ArrowLeft moves to the previous tab', [await press('ArrowLeft', 'due-tab-due'), await selected()], ['due-tab-due', ['due-tab-due']])
-  check('(b) End: the last tab', [await press('End', 'due-tab-not-posted'), await selected()], ['due-tab-not-posted', ['due-tab-not-posted']])
-  check('(b) Home: the first tab', [await press('Home', 'due-tab-due'), await selected()], ['due-tab-due', ['due-tab-due']])
+  await press('Tab', FIRST.tab)
+  // ArrowRight walks every tab in DUE_TABS order; Tab and Shift+Tab move between each tab and its panel.
+  for (const t of DUE_TABS.slice(1)) {
+    check(`(b) ArrowRight: focus and selection move to ${t.tab}`, [await press('ArrowRight', t.tab), await selected()], [t.tab, [t.tab]])
+    check(`(b) the panel switched with the tab (${t.panel})`, (await structure(page)).tabs.map((x) => x.hidden), DUE_TABS.map((x) => x !== t))
+    check(`(b) Tab from it: ${t.panel}`, await press('Tab', t.panel), t.panel)
+    check(`(b) Shift+Tab: back to ${t.tab}`, await press('Shift+Tab', t.tab), t.tab)
+  }
+  const before = DUE_TABS[N - 2]
+  check('(b) ArrowRight on the last tab wraps to the first', [await press('ArrowRight', FIRST.tab), await selected()], [FIRST.tab, [FIRST.tab]])
+  check('(b) ArrowLeft on the first tab wraps to the last', [await press('ArrowLeft', LAST.tab), await selected()], [LAST.tab, [LAST.tab]])
+  check('(b) ArrowLeft moves to the previous tab', [await press('ArrowLeft', before.tab), await selected()], [before.tab, [before.tab]])
+  check('(b) End: the last tab', [await press('End', LAST.tab), await selected()], [LAST.tab, [LAST.tab]])
+  check('(b) Home: the first tab', [await press('Home', FIRST.tab), await selected()], [FIRST.tab, [FIRST.tab]])
   await waitQuiet(page)
 
   // Collapsed: both panels are hidden, so Tab from the selected tab leaves the card.
@@ -575,13 +598,14 @@ async function collapsed(browser) {
   await toggle.click()
   await expandedAfter('false')
   const s = await structure(page)
-  check('(h) collapsed: both tabpanel shells exist', [s.panels, s.tabs.map((t) => t.panel)], [2, ['due-panel-due', 'due-panel-not-posted']])
-  check('(h) collapsed: both shells are hidden and have no children', s.tabs.map((t) => [t.hidden, t.children]), [[true, 0], [true, 0]])
+  check(`(h) collapsed: all ${N} tabpanel shells exist`, [s.panels, s.tabs.map((t) => t.panel)], [N, DUE_TABS.map((t) => t.panel)])
+  check('(h) collapsed: every shell is hidden and has no children', s.tabs.map((t) => [t.hidden, t.children]), DUE_TABS.map(() => [true, 0]))
   check('(h) collapsed: no row and no list', [await page.locator(tid('due-row')).count(), await page.locator(tid('due-list')).count()], [0, 0])
-  check('(h) each tab controls its shell and is labelled back', s.tabs.map((t) => [t.panelRole, t.labelledBack]), [['tabpanel', true], ['tabpanel', true]])
-  check('(h) the toggle controls both existing shells', s.toggleControls, ['due-panel-due', 'due-panel-not-posted'])
-  check('(h) the tabs and their badges stay visible',
-    [await page.locator(tid('due-tab-due')).isVisible(), await page.locator(tid('due-tab-not-posted')).isVisible(), await page.locator(tid('due-count')).isVisible(), await page.locator(tid('due-not-posted-count')).isVisible()], [true, true, true, true])
+  check('(h) each tab controls its shell and is labelled back', s.tabs.map((t) => [t.panelRole, t.labelledBack]), DUE_TABS.map(() => ['tabpanel', true]))
+  check(`(h) the toggle controls all ${N} existing shells`, s.toggleControls, DUE_TABS.map((t) => t.panel))
+  const shown = []
+  for (const t of DUE_TABS) shown.push([t.slug, await page.locator(tid(t.tab)).isVisible(), await page.locator(tid(t.badge)).isVisible()])
+  check('(h) every tab and its badge stay visible', shown, DUE_TABS.map((t) => [t.slug, true, true]))
 
   await toggle.click()
   await expandedAfter('true')
@@ -626,6 +650,70 @@ async function pagers(browser) {
   await ctx.close()
 }
 
+// (j) The tablist on a phone.
+async function narrow(browser) {
+  console.log('\n=== (j) at 360 x 740 every tab and badge is on screen, with no sideways scroll')
+  const natives = []
+  const u = await makeUser('j')
+  const today = manilaToday()
+  const bank = await account(u, 'J Checking')
+  const visa = await card(u, bank, 'J Visa')
+  await oneOffs(u, bank, visa, today)
+  await entry(u, { name: 'Rent', amount: 15000, account_id: bank.id, next_occurrence: wire(today) })
+  const { ctx, page } = await openCard(browser, natives, u, { viewport: { width: 360, height: 740 } })
+  await waitForNpBadge(page, '3')
+  await page.locator('[role="tablist"]').first().scrollIntoViewIfNeeded()
+  await waitQuiet(page)
+
+  /** Each tab's box: in the viewport, not clipped by an ancestor or by its own content, and its badge inside it. */
+  const boxes = () => page.evaluate((tabs) => {
+    const vw = window.innerWidth, vh = window.innerHeight, e = 0.5
+    const inside = (r, o) => r.left >= o.left - e && r.right <= o.right + e && r.top >= o.top - e && r.bottom <= o.bottom + e
+    const view = { left: 0, top: 0, right: vw, bottom: vh }
+    const clippedBy = (el) => {
+      const r = el.getBoundingClientRect()
+      for (let a = el.parentElement; a; a = a.parentElement) {
+        const cs = getComputedStyle(a)
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+          if (!inside(r, a.getBoundingClientRect())) return a.tagName.toLowerCase()
+        }
+      }
+      return null
+    }
+    return tabs.map((t) => {
+      const tab = document.querySelector(`[data-testid="${t.tab}"]`)
+      const badge = document.querySelector(`[data-testid="${t.badge}"]`)
+      const r = tab.getBoundingClientRect()
+      return {
+        slug: t.slug,
+        inView: inside(r, view),
+        clippedBy: clippedBy(tab),
+        overflows: tab.scrollWidth > tab.clientWidth,
+        tall: r.height >= 24,
+        badgeInTab: badge ? inside(badge.getBoundingClientRect(), r) : false,
+      }
+    })
+  }, DUE_TABS)
+
+  const width = await page.evaluate(() => document.documentElement.scrollWidth)
+  check(`(j) no sideways scroll at 360 px (scrollWidth ${width})`, width <= 360, true)
+  check('(j) every tab is in the viewport, not clipped, at least 24 px tall, with its badge inside it', await boxes(),
+    DUE_TABS.map((t) => ({ slug: t.slug, inView: true, clippedBy: null, overflows: false, tall: true, badgeInTab: true })))
+  const badges = []
+  for (const t of DUE_TABS) badges.push([t.badge, await page.locator(tid(t.badge)).isVisible()])
+  check('(j) every badge is visible', badges, DUE_TABS.map((t) => [t.badge, true]))
+
+  await page.locator(tid(FIRST.tab)).focus()
+  await page.keyboard.press('End')
+  await page.locator(`${tid(LAST.tab)}[aria-selected="true"]`).waitFor({ timeout: 5000 })
+  await waitQuiet(page)
+  const last = (await boxes()).find((b) => b.slug === LAST.slug)
+  check('(j) after End the last tab is selected, focused and in view, not clipped',
+    [await selectedTab(page), await dialogs.activeTestId(page), last.inView, last.clippedBy], [LAST.tab, LAST.tab, true, null])
+  checkNoNative('j', natives)
+  await ctx.close()
+}
+
 ;(async () => {
   try {
     stack = await startLocalStack()
@@ -635,7 +723,7 @@ async function pagers(browser) {
   }
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
-  const steps = { a: theSplit, b: keyboard, c: markPosted, d: reviewOnDueOnly, e: emptyTabs, f: manilaDay, g: roles, h: collapsed, i: pagers }
+  const steps = { a: theSplit, b: keyboard, c: markPosted, d: reviewOnDueOnly, e: emptyTabs, f: manilaDay, g: roles, h: collapsed, i: pagers, j: narrow }
   for (const [k, fn] of Object.entries(steps)) {
     if (only && only !== k) continue
     try {

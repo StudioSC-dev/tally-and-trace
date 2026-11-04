@@ -4,8 +4,11 @@ import type {
   FullTransaction,
   InstallmentAutoPostState,
   InstallmentBlockReason,
+  InstallmentPlan,
+  PlanKind,
   SharedFullTransaction,
   Transaction,
+  UpcomingOccurrence,
 } from '../types/api'
 import { isLimitedEvent } from '../types/api'
 import type { CurrencyCode } from './currency'
@@ -14,6 +17,7 @@ import { unpostedNote } from './cardPay'
 import { autoPostLabel } from './installmentReview'
 import { type RecurringAction, recurringActionsFor } from './recurringActions'
 import { wallDay } from './transactionList'
+import type { UpcomingRow } from './upcomingList'
 
 /**
  * The Transactions page's "Due and overdue" section, built from the dashboard
@@ -140,6 +144,8 @@ interface Candidate {
   estimate: Partial<Estimate>
   accountName: string | null
   can_mark_paid: boolean
+  /** The card tab that lists the entry; null (or a missing field) is Due. */
+  planKind: PlanKind | null
 }
 
 /** Only the estimate labels a row carries, so they travel with its amount. */
@@ -176,6 +182,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
         estimate: estimateOf(charge),
         accountName: card.account_name,
         can_mark_paid: charge.can_mark_paid,
+        planKind: charge.plan_kind ?? null,
       })
     }
   }
@@ -195,6 +202,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       estimate: estimateOf(payable),
       accountName: payable.account_name,
       can_mark_paid: payable.can_mark_paid === true,
+      planKind: payable.plan_kind ?? null,
     })
   }
   for (const item of snapshot.upcoming_this_month) {
@@ -214,6 +222,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       estimate: estimateOf(item),
       accountName: null,
       can_mark_paid: item.can_mark_paid === true,
+      planKind: item.plan_kind ?? null,
     })
   }
   return out
@@ -235,6 +244,7 @@ interface MissedSource {
   auto_post: InstallmentAutoPostState | null
   block_reason: InstallmentBlockReason | null
   can_review: boolean
+  plan_kind: PlanKind | null
 }
 
 function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
@@ -255,6 +265,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
       auto_post: null,
       block_reason: null,
       can_review: false,
+      plan_kind: m.plan_kind ?? null,
     })),
   )
   const other: MissedSource[] = snapshot.missed.map((m) => ({
@@ -273,6 +284,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
     auto_post: m.auto_post,
     block_reason: m.block_reason,
     can_review: m.can_review,
+    plan_kind: m.plan_kind ?? null,
   }))
   return [...card, ...other]
 }
@@ -310,19 +322,15 @@ function urgent(row: DueRecurringRow): boolean {
 }
 
 /**
- * Group A. Full rows from the card charges, payables (budget entries) and upcoming
- * income and transfers, merged on `entryId:occurrenceDate` (card beats payable beats
- * upcoming). Today and earlier only: a later occurrence is listed in Upcoming. A row is
- * dropped when it is not today's, is before today or overdue, and
- * the entry has a missed row (`count > 0`) whose `oldest` is on or before it. Missed
- * rows are listed only while `unlinked_count > 0`. Limited rows follow `limited`.
- * Missed and overdue rows sort first, then by day.
+ * The recurring rows of one card tab (`plan`: null for Due), today and earlier only: a
+ * later occurrence is listed in Upcoming or Subscriptions. Full rows from the card charges,
+ * payables (budget entries) and upcoming income and transfers, merged on
+ * `entryId:occurrenceDate` (card beats payable beats upcoming). A row is dropped when it is
+ * not today's, is before today or overdue, and the entry has a missed row (`count > 0`)
+ * whose `oldest` is on or before it. Missed rows are listed only while `unlinked_count > 0`.
+ * A missing `plan_kind` reads as null. Unsorted; no Limited rows.
  */
-export function dueRecurringRows(
-  snapshot: DashboardSnapshot,
-  today: string,
-  limited: LimitedRowsMode = LIMITED_ROWS,
-): DueRecurringRow[] {
+function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKind | null): Array<DueEntryRow | DueMissedRow> {
   const missed = missedSources(snapshot)
   const coveredFrom = new Map<number, string>()
   for (const m of missed) {
@@ -346,11 +354,13 @@ export function dueRecurringRows(
       entry_type: win.entry_type ?? lose.entry_type,
       recurring_kind: win.recurring_kind ?? lose.recurring_kind,
       accountName: win.accountName ?? lose.accountName,
+      planKind: win.planKind ?? lose.planKind,
     })
   }
 
-  const rows: DueRecurringRow[] = []
+  const rows: Array<DueEntryRow | DueMissedRow> = []
   for (const [key, c] of merged) {
+    if (c.planKind !== plan) continue
     const occ = c.occurrenceDate
     // After today it is in Upcoming, recorded or not.
     if (occ > today) continue
@@ -378,6 +388,7 @@ export function dueRecurringRows(
   }
 
   for (const m of missed) {
+    if (m.plan_kind !== plan) continue
     if (m.unlinked_count <= 0 || m.oldest_unlinked === null) continue
     const oldest = day(m.oldest_unlinked)
     rows.push({
@@ -403,8 +414,11 @@ export function dueRecurringRows(
     })
   }
 
-  if (limited === 'text') rows.push(...limitedRows(snapshot))
+  return rows
+}
 
+/** Missed and overdue rows first, then by day, name and key. */
+function byUrgencyThenDay<T extends DueRecurringRow>(rows: T[]): T[] {
   return rows.sort((a, b) => {
     const rank = Number(!urgent(a)) - Number(!urgent(b))
     if (rank !== 0) return rank
@@ -412,6 +426,157 @@ export function dueRecurringRows(
     if (byDay !== 0) return byDay
     return a.name.localeCompare(b.name) || a.key.localeCompare(b.key)
   })
+}
+
+/**
+ * Group A: the recurring rows of entries no other card tab lists (`plan_kind` null or
+ * missing), today and earlier, as `recurringRows` builds them. Subscription and installment
+ * rows are left out: Subscriptions and Installments list them. Limited rows, which carry no
+ * kind, follow `limited`. Missed and overdue rows sort first, then by day.
+ */
+export function dueRecurringRows(
+  snapshot: DashboardSnapshot,
+  today: string,
+  limited: LimitedRowsMode = LIMITED_ROWS,
+): DueRecurringRow[] {
+  const rows: DueRecurringRow[] = recurringRows(snapshot, today, null)
+  if (limited === 'text') rows.push(...limitedRows(snapshot))
+  return byUrgencyThenDay(rows)
+}
+
+/**
+ * The Subscriptions tab's rows dated today or earlier: missed, overdue and today's rows of
+ * `plan_kind` `subscription` entries, with the same rules as Due (`recurringRows`). Missed
+ * and overdue rows sort first, then by day.
+ */
+export function subscriptionPastRows(snapshot: DashboardSnapshot, today: string): Array<DueEntryRow | DueMissedRow> {
+  return byUrgencyThenDay(recurringRows(snapshot, today, 'subscription'))
+}
+
+/** A future occurrence in Subscriptions, keyed as Upcoming keys it. */
+export type SubscriptionOccurrenceRow = Extract<UpcomingRow, { kind: 'occurrence' }>
+
+export type SubscriptionRow = DueEntryRow | DueMissedRow | SubscriptionOccurrenceRow
+
+function subscriptionDay(row: SubscriptionRow): string {
+  return row.kind === 'occurrence' ? row.day : sortDay(row)
+}
+
+function subscriptionName(row: SubscriptionRow): string {
+  return row.kind === 'occurrence' ? row.occurrence.name : row.name
+}
+
+/**
+ * The Subscriptions tab: `past` (`subscriptionPastRows`) and the future occurrences of the
+ * `plan=subscription` query as one list. Missed and overdue rows first, then by day, name
+ * and key. Returns a new array and leaves both inputs alone.
+ */
+export function orderSubscriptionRows(
+  past: readonly (DueEntryRow | DueMissedRow)[],
+  future: readonly UpcomingOccurrence[],
+): SubscriptionRow[] {
+  const rows: SubscriptionRow[] = [
+    ...past,
+    ...future.map((occurrence): SubscriptionOccurrenceRow => ({
+      kind: 'occurrence',
+      key: `occ:${occurrence.entry_id}:${occurrence.occurrence_date}`,
+      day: occurrence.occurrence_date,
+      occurrence,
+    })),
+  ]
+  return rows.sort((a, b) => {
+    const rank = Number(!(a.kind !== 'occurrence' && urgent(a))) - Number(!(b.kind !== 'occurrence' && urgent(b)))
+    if (rank !== 0) return rank
+    const byDay = subscriptionDay(a).localeCompare(subscriptionDay(b))
+    if (byDay !== 0) return byDay
+    return subscriptionName(a).localeCompare(subscriptionName(b)) || a.key.localeCompare(b.key)
+  })
+}
+
+/** How one Installments plan row reads and what it offers. */
+export interface InstallmentPlanView {
+  /** The next charge is before today. */
+  overdue: boolean
+  /** "{payments_left} of {payments_total} left". */
+  leftText: string
+  /** "Next charge {date}", or "All charges recorded" when there is none. */
+  nextText: string
+  /** "{missed} missed"; null with none. */
+  missedText: string | null
+  /** The auto-post state's label; null with no state. */
+  autoPostLabel: string | null
+  /** The record buttons for the next charge, primary first. */
+  actions: RecurringAction[]
+  /** Offer Review: the caller can review it, and it is unreviewed or held. */
+  review: boolean
+}
+
+/**
+ * One installment plan row. "N of M left" is `payments_left` of `payments_total`, as
+ * Allocations reads it. Buttons come from `recurringActionsFor` with the server's
+ * `recordable` as the permission and nothing else (the auto-post and first-month gates
+ * live on the server). A plan with no next charge offers nothing.
+ */
+export function installmentPlanView(plan: InstallmentPlan, today: string, scheduled: boolean): InstallmentPlanView {
+  const next = plan.next_charge
+  return {
+    overdue: next !== null && next < today,
+    leftText: `${plan.payments_left} of ${plan.payments_total} left`,
+    nextText: next === null ? 'All charges recorded' : `Next charge ${formatEntryDate(next)}`,
+    missedText: plan.missed > 0 ? `${plan.missed} missed` : null,
+    autoPostLabel: autoPostLabel(plan.auto_post, scheduled, plan.block_reason),
+    actions:
+      next === null ? [] : recurringActionsFor({ kind: 'installment', entry_type: 'expense', can_mark_paid: plan.recordable }),
+    review: next !== null && plan.can_review && (plan.auto_post === 'unreviewed' || plan.auto_post === 'held'),
+  }
+}
+
+/**
+ * Whether a response is for the card's day: its `today` is `today`, or it has none (an older
+ * API, read as fresh).
+ */
+export function freshFor(dataDay: string | undefined, today: string): boolean {
+  return dataDay === undefined || dataDay === today
+}
+
+/** One source of a due card tab's badge, as its query reports it now. */
+export interface DueBadgeSource {
+  /** It holds data for the current request (RTK's `currentData`, which survives a failed refetch). */
+  hasData: boolean
+  /** That data is for the card's day: `freshFor(response.today, today)` for a dated response (the snapshot, the plans), else true. */
+  fresh: boolean
+  /** A request for it is in flight (a first load, a refetch or a Retry). */
+  fetching: boolean
+  /** Its latest fetch failed (RTK clears this when a refetch starts). */
+  failed: boolean
+  /** What it adds to the tab's total; read only when every source is complete. */
+  count: number
+}
+
+/** A badge's figure: a number, or `'pending'` (shown as "…"); `complete` when it is the sum of complete sources. */
+export interface DueBadge {
+  figure: number | 'pending'
+  complete: boolean
+}
+
+/**
+ * The badge of a due card tab built from one or more sources (STU-511 D6, D7). `kept` is the
+ * tab's last complete total for the Manila day, or undefined when it has none for today. The
+ * first rule that holds decides:
+ *
+ * (a) a source's latest fetch failed: the kept total, else 0 (D7, after a failure);
+ * (b) a source has nothing for today (no data, or a response dated another day): "…",
+ *     even with a kept total, so a response still dated the old day never shows a count
+ *     (plan-tabs (i): the new day reads "…" until its own data arrives);
+ * (c) a source is fetching (a refetch or a Retry over data for today): the kept total,
+ *     else "…", never a sum of one fresh source and another's stale cache;
+ * (d) every source is complete: the sum, marked complete, which the caller keeps for the day.
+ */
+export function dueTabBadge(sources: readonly DueBadgeSource[], kept: number | undefined): DueBadge {
+  if (sources.some((s) => s.failed)) return { figure: kept ?? 0, complete: false }
+  if (sources.some((s) => !s.hasData || !s.fresh)) return { figure: 'pending', complete: false }
+  if (sources.some((s) => s.fetching)) return { figure: kept ?? 'pending', complete: false }
+  return { figure: sources.reduce((sum, s) => sum + s.count, 0), complete: true }
 }
 
 /** Every pending row id any missed row links, ascending and once each: the linked query's `ids`. */
@@ -612,7 +777,7 @@ export function dueStatementRows(snapshot: DashboardSnapshot): DueStatementRow[]
 /**
  * How a statement row reads. `unpostedOnly`: nothing recorded is owed (`amount` 0) but
  * installment months are not posted yet; `text` says so, there is no Pay, and `guidance`
- * points to Review or Mark paid when Post now can record none of them. Otherwise it is a
+ * points to Review or Mark paid in Installments when Post now can record none of them. Otherwise it is a
  * Plan C row (`pay` true), and `note` repeats the Pay dialog's warning about unposted months.
  */
 export function statementRowText(
@@ -633,7 +798,7 @@ export function statementRowText(
     note: note === null ? null : note.review === null ? note.text : `${note.text}. ${note.review}`,
     pay: row.amount > 0,
     post: row.unpostedPostable > 0,
-    guidance: unpostedOnly && row.unpostedPostable === 0 ? 'Review or Mark paid below' : null,
+    guidance: unpostedOnly && row.unpostedPostable === 0 ? 'Review or Mark paid in Installments' : null,
   }
 }
 

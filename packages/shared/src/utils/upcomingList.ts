@@ -14,11 +14,19 @@ export type UpcomingRow =
   | { kind: 'transaction'; key: string; day: string; transaction: Transaction }
   | { kind: 'occurrence'; key: string; day: string; occurrence: UpcomingOccurrence }
 
+/** How many rows the Upcoming tab lists: one `limit` for the window request, the occurrences and the merge. */
+export const UPCOMING_LIMIT = 100
+
+/** The note when Upcoming is cut: "showing the next 100 of 151"; null when every row is listed. */
+export function upcomingShownText(total: number, limit: number = UPCOMING_LIMIT): string | null {
+  return total > limit ? `showing the next ${limit} of ${total}` : null
+}
+
 /**
  * A stable two-way merge on the day alone, cut to `limit`.
  *
- * `transactions` is in the order `loadUpcoming` produces (`transaction_date` ascending,
- * then id) and `occurrences` in the server's order (`occurrence_date`, `name`,
+ * `transactions` is in the window request's order (`order=asc`: `transaction_date`
+ * ascending, then id) and `occurrences` in the server's order (`occurrence_date`, `name`,
  * `entry_id`). Neither is re-sorted. At each step the head with the earlier day is taken,
  * and on the same day every transaction comes before every occurrence. The merged order is
  * therefore each source's own order interleaved by day, so the first `limit` rows of each
@@ -51,6 +59,22 @@ export function mergeUpcoming(
     }
   }
   return rows
+}
+
+/**
+ * Which Due card tab lists an occurrence: Subscriptions for `plan_kind` `subscription`, none
+ * for an installment (its plan row in Installments stands for it), Upcoming otherwise. A
+ * missing `plan_kind` reads as null.
+ */
+export function occurrenceTab(occ: Pick<UpcomingOccurrence, 'plan_kind'>): 'upcoming' | 'subscriptions' | null {
+  switch (occ.plan_kind ?? null) {
+    case 'subscription':
+      return 'subscriptions'
+    case 'installment':
+      return null
+    case null:
+      return 'upcoming'
+  }
 }
 
 export interface UpcomingOccurrenceView {

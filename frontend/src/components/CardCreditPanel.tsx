@@ -47,7 +47,7 @@ const ASSUMPTION_TEXT: Record<Exclude<MinimumDueAssumption, 'fees_not_itemised'>
  *
  * Installment months on closed cycles that are not posted yet (STU-343 Plan B) get their
  * own block, even when the card has no recorded statement: Post now when some of them can
- * be posted, else a pointer to Due and overdue. Its "Posted N" outlives the refetch that
+ * be posted, else a pointer to the Installments tab. Its "Posted N" outlives the refetch that
  * removes the block, until the card changes or the next post starts.
  */
 export function CardCreditPanel({ account }: { account: Account }) {
@@ -165,7 +165,7 @@ export function CardCreditPanel({ account }: { account: Account }) {
           ) : (
             <p className="text-xs text-muted" data-testid="card-unposted-review">
               <Link to="/transactions" className="underline underline-offset-2 text-body hover:text-ink focus-ring">
-                Review or Mark paid them in Due and overdue
+                Review or Mark paid them in Installments
               </Link>
             </p>
           )}

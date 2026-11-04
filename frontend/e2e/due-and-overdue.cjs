@@ -52,7 +52,7 @@
 //
 // Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -72,6 +72,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -309,14 +310,18 @@ async function listing(browser) {
 
   const rent = await rowsOf(page, 'Rent')
   check('(b) Rent: Mark paid', [rent.length, rent[0]?.buttons], [1, ['due-mark-paid']])
-  const netflix = await rowsOf(page, 'Netflix')
-  check('(b) Netflix: Charged, Posted', [netflix.length, netflix[0]?.buttons], [1, ['due-charged', 'due-posted']])
+  // Netflix and Spotify are open-ended card subscriptions (STU-511): their rows are on Subscriptions, not Due.
+  check('(b) Netflix and Spotify (card subscriptions) are not Due rows', all.filter((r) => r.kind !== 'pending' && ['Netflix', 'Spotify'].includes(r.name)).length, 0)
+  await openDueTab(page, 'subscriptions')
+  const netflix = await rowsOf(page, 'Netflix', 'recurring')
+  check('(b) Netflix: Charged, Posted (Subscriptions)', [netflix.length, netflix[0]?.buttons], [1, ['due-charged', 'due-posted']])
   const spotify = await rowsOf(page, 'Spotify', 'missed')
   const snapshot = await snapshotOf(w.u)
   const missed = missedFor(snapshot, w.spotify.id)
   check('(b) Spotify: a missed row with the API\'s count', [spotify.length, spotify[0]?.sub],
     [1, `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`])
   check('(b) Spotify missed: Charged, Posted', spotify[0]?.buttons, ['due-charged', 'due-posted'])
+  await openDueTab(page, 'due')
   const salary = await rowsOf(page, 'Salary')
   check('(b) Salary: Mark received', [salary.length, salary[0]?.buttons], [1, ['due-mark-received']])
   const save = await rowsOf(page, 'Save')
@@ -340,7 +345,7 @@ async function markPaidRent(browser) {
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
   await (await showRow(page, recRows(page, 'Rent'))).locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(c) Mark paid opened the dialog'))) return ctx.close()
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.rent.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   const res = await done
@@ -359,8 +364,10 @@ async function chargedThenPosted(browser) {
   const w = await seed()
   const before = await accountBalance(w.u, w.visa.id)
   const { ctx, page } = await openDue(browser, w.u)
+  // Netflix is an open-ended card subscription: its row is on Subscriptions (STU-511).
+  await openDueTab(page, 'subscriptions')
   await (await showRow(page, recRows(page, 'Netflix'))).locator('[data-testid="due-charged"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(d) Charged opened the Mark paid dialog'))) return ctx.close()
   check('(d) the dialog is titled "Record Netflix"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Record Netflix')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.netflix.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-charged"]').click()
@@ -372,6 +379,8 @@ async function chargedThenPosted(browser) {
   const pending = (await allTransactions(w.u)).filter((t) => t.budget_entry_id === w.netflix.id)
   check('(d) one pending row linked to Netflix', pending.map((t) => t.is_posted), [false])
 
+  // The recorded month is a pending row: it stays in Due, not Subscriptions.
+  await openDueTab(page, 'due')
   await waitForRow(page, 'Netflix', 'pending')
   const listed = await rowsOf(page, 'Netflix', 'pending')
   check('(d) the charge is listed once as a pending row with Posted', [listed.length, listed[0]?.buttons], [1, ['due-posted']])
@@ -622,7 +631,7 @@ async function markReceivedSalary(browser) {
   const w = await seed()
   const { ctx, page } = await openDue(browser, w.u)
   await (await showRow(page, recRows(page, 'Salary'))).locator('[data-testid="due-mark-received"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(f) Mark received opened the dialog'))) return ctx.close()
   check('(f) the dialog is titled "Mark Salary as received"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Mark Salary as received')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -640,7 +649,7 @@ async function gifts(browser) {
   const { ctx, page } = await openDue(browser, w.u)
   await page.getByRole('button', { name: 'Add Transaction' }).first().click()
   const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction' }) })
-  await modal.waitFor()
+  if (!(await dialogOpened(modal, '(g) Add Transaction opened the Create Transaction dialog'))) return ctx.close()
   const gifts = modal.getByRole('button', { name: 'Gifts & Donations', exact: true })
   await modal.getByRole('button', { name: 'Expense', exact: true }).click()
   check('(g) the expense categories have Gifts & Donations', await gifts.count(), 1)
@@ -752,7 +761,7 @@ async function missedKinds(browser) {
   const row = await showRow(page, recRows(page, 'Old Rent', 'missed'))
   const n = missedFor(snapshot, w.oldRent.id).unlinked_count
   await row.locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(j) Mark paid on Old Rent opened the dialog'))) return ctx.close()
   // Post all counts every due occurrence, today's included, so N is the API's due_unposted, not the missed count.
   const listed = await get(w.u.token, `/budget-entries/${w.oldRent.id}/occurrences?include=${missedFor(snapshot, w.oldRent.id).oldest_unlinked}`)
   const due = listed.due_unposted
@@ -777,9 +786,11 @@ async function chargedMissed(browser) {
   const before = missedFor(await snapshotOf(w.u), w.spotify.id)
   console.log(`    unlinked_count ${before.unlinked_count}; oldest_unlinked ${before.oldest_unlinked}`)
   const { ctx, page } = await openDue(browser, w.u)
+  // Spotify is an open-ended card subscription: its missed row is on Subscriptions (STU-511).
+  await openDueTab(page, 'subscriptions')
   const row = await showRow(page, recRows(page, 'Spotify', 'missed'))
   await row.locator('[data-testid="due-charged"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(k) Charged opened the Mark paid dialog'))) return ctx.close()
   check('(k) the dialog opens on the oldest missed month', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), before.oldest_unlinked)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.spotify.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-charged"]').click()
@@ -796,6 +807,8 @@ async function chargedMissed(browser) {
   await settle(page)
   const text = left > 0 ? (await rowsOf(page, 'Spotify', 'missed'))[0]?.sub : null
   check('(k) the missed row shows one fewer', text, left > 0 ? `${left} missed since ${fmt(after.oldest_unlinked)}` : null)
+  // The recorded month is a pending row: it is listed in Due, not Subscriptions.
+  await openDueTab(page, 'due')
   const pending = await rowsOf(page, 'Spotify', 'pending')
   check('(k) the charged month is listed once as a pending row with Posted', [pending.length, pending[0]?.buttons], [1, ['due-posted']])
   await ctx.close()
@@ -815,6 +828,7 @@ async function endedInstallment(browser) {
   check('(l) the entry has ended', ended.is_active, false)
   const { ctx, page } = await openDue(browser, w.u)
   check('(l) the ended installment is not listed on any page', (await allDueRows(page)).filter((r) => r.text.includes('Gadget')).length, 0)
+  check('(l) nor is it a plan row on Installments', (await readTab(page, 'installments')).filter((r) => r.text.includes('Gadget')).length, 0)
   const again = await api(w.u.token, 'POST', `/budget-entries/${gadget.id}/materialize`, {})
   check('(l) recording it again is refused: 409 "This entry has ended"', [again.status, again.json?.detail], [409, 'This entry has ended'])
   await ctx.close()
@@ -927,7 +941,7 @@ async function pagination(browser) {
   // The last page empties: the view lands on the new last page, not an empty one.
   await goToPage(page, 3)
   await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Zeta Bill$/ }) }).locator('[data-testid="due-mark-paid"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(n) Mark paid on Zeta Bill opened the dialog'))) return ctx.close()
   const done = page.waitForResponse((r) => r.url().endsWith('/materialize'))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   check('(n) Mark paid on the only row of page 3 is created (201)', (await done).status(), 201)
@@ -941,7 +955,7 @@ async function pagination(browser) {
   await cash('Eta Bill', today)
   await cash('Theta Bill', today)
   await page.locator('[data-testid="due-row"]').filter({ has: page.locator('p', { hasText: /^Salary$/ }) }).locator('[data-testid="due-mark-received"]').click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(n) Mark received on Salary opened the dialog'))) return ctx.close()
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
   await dialog(page).waitFor({ state: 'detached' })
   await page.locator('[data-testid="due-count"]').filter({ hasText: /^7$/ }).waitFor({ timeout: 15000 }).catch(() => {})

@@ -56,7 +56,7 @@ interface Props {
  *
  * Installment months on closed cycles that are not posted yet are not in Full (STU-343
  * Plan B): the dialog says how many, offers Post now for those it can post (the refetch
- * then moves Full), and says how many need Review or Mark paid in Due and overdue.
+ * then moves Full), and says how many need Review or Mark paid in Installments.
  *
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.

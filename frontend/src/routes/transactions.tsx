@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useLazyGetUpcomingOccurrencesQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -9,8 +9,8 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { addDays, editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, mergeUpcoming, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, UPCOMING_LOOKAHEAD_DAYS, withoutError } from '@tally-trace/shared'
-import type { FieldErrors, ListRange, RecurringAction, TransactionStatus, UpcomingRow } from '@tally-trace/shared'
+import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../hooks/useToast'
@@ -26,9 +26,6 @@ import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
-import { UpcomingOccurrenceRow } from '../components/transactions/UpcomingOccurrenceRow'
-import { InstallmentReviewDialog } from '../components/InstallmentReviewDialog'
-import { MarkPaidDialog } from '../components/MarkPaidDialog'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
 
@@ -104,9 +101,6 @@ const PAGE_SIZES = [25, 50, 100] as const
 type PageSize = (typeof PAGE_SIZES)[number]
 const PAGE_SIZE_STORAGE_KEY = 'transactions.pageSize'
 const SEARCH_DEBOUNCE_MS = 450
-// One request's worth of Upcoming rows from each source (transactions, occurrences); the
-// merged list shows at most this many.
-const UPCOMING_LIMIT = 100
 
 const readStoredPageSize = (): PageSize => {
   try {
@@ -116,9 +110,6 @@ const readStoredPageSize = (): PageSize => {
     return PAGE_SIZES[0]
   }
 }
-
-// A quiet refresh's permission to start more quiet requests after an await; a close revokes it.
-type QuietPermit = { allowed: boolean }
 
 type TransactionQuery = {
   account_ids?: number[]
@@ -381,8 +372,6 @@ export function TransactionsPage() {
   const abandonedPending = useAbandonedSavePending()
   // Marks the save whose POST is in flight abandoned; set only while that POST is in flight.
   const abandonCurrentSave = useRef<(() => void) | null>(null)
-  // The quiet refreshes still allowed to start quiet requests; every close revokes them.
-  const quietPermits = useRef(new Set<QuietPermit>())
   // The submit button the current attempt was made with.
   const submitterRef = useRef<HTMLElement | null>(null)
   // A save's late result applies only while its dialog and its attempt are still current:
@@ -570,9 +559,7 @@ export function TransactionsPage() {
   }, [currentMonth, isCustomRange])
 
   const [triggerTransactions] = useLazyGetTransactionsQuery()
-  const [triggerUpcomingOccurrences] = useLazyGetUpcomingOccurrencesQuery()
   const beginTransactionsRequest = useRequestGeneration()
-  const beginUpcomingRequest = useRequestGeneration()
   const { data: accountsData, isLoading: isAccountsLoading } = useGetAccountsQuery(
     { is_active: true, limit: 100 },
     { skip: !isAuthenticated }
@@ -619,35 +606,22 @@ export function TransactionsPage() {
   // The viewer's local day, for display only: a row's status, "Today" / "Tomorrow" and the form's defaults.
   const today = useToday()
   // The day every list membership is decided on: Manila's, the server's day. The main list
-  // ends on it, Upcoming starts after it, and Due and overdue keeps it and earlier, so an
+  // ends on it, the Due card keeps it and earlier and its Upcoming tab starts after it, so an
   // item is in one section whatever the viewer's time zone. A new Manila day refetches.
   const partitionDay = useManilaDay()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
-  // Upcoming: transaction rows and recurring occurrences not recorded yet, merged by day.
-  const [upcomingRows, setUpcomingRows] = useState<UpcomingRow[]>([])
-  const [upcomingTotal, setUpcomingTotal] = useState(0)
-  const [autoPostScheduled, setAutoPostScheduled] = useState(false)
-  // The Upcoming occurrence being recorded or reviewed.
-  const [recordTarget, setRecordTarget] = useState<{ entryId: number; name: string; occurrenceDate: string; action: RecurringAction } | null>(null)
-  const [reviewTarget, setReviewTarget] = useState<{ entryId: number; name: string } | null>(null)
-  const [isUpcomingOpen, setIsUpcomingOpen] = useState(true)
   // The full-page spinner is for the first load only; later loads keep the rows on screen.
-  // It ends once both lists have settled, so the empty state never shows before Upcoming is known.
   const [mainSettled, setMainSettled] = useState(false)
-  const [upcomingSettled, setUpcomingSettled] = useState(false)
-  // Whether each list reflects its latest request, and whether that request failed. A
+  // Whether the list reflects its latest request, and whether that request failed. A
   // failure keeps the rows already on screen and never turns them into an empty list.
   const [mainCurrent, setMainCurrent] = useState(false)
-  const [upcomingCurrent, setUpcomingCurrent] = useState(false)
   const [mainError, setMainError] = useState(false)
-  const [upcomingError, setUpcomingError] = useState(false)
-  const listError = mainError || upcomingError
-  const listsCurrent = mainCurrent && upcomingCurrent
+  const listError = mainError
+  const listsCurrent = mainCurrent
   const [isMainLoading, setIsMainLoading] = useState(false)
-  const [isUpcomingLoading, setIsUpcomingLoading] = useState(false)
-  const isInitialLoading = !(mainSettled && upcomingSettled)
-  const isRefreshing = isMainLoading || isUpcomingLoading
+  const isInitialLoading = !mainSettled
+  const isRefreshing = isMainLoading
 
   const [pageSize, setPageSizeState] = useState<PageSize>(readStoredPageSize)
   // The search term enters the filter key 450ms after the last keystroke.
@@ -689,21 +663,10 @@ export function TransactionsPage() {
     setPageSizeState(next)
   }, [])
 
-  // The current month's Upcoming looks ahead past the month end, to the Manila day plus
-  // the look-ahead; any other month, or a custom range, is exact.
-  const upcomingThrough = useMemo(
-    () =>
-      !isCustomRange && startDate !== '' && endDate !== '' && startDate <= partitionDay && partitionDay <= endDate
-        ? addDays(partitionDay, UPCOMING_LOOKAHEAD_DAYS)
-        : undefined,
-    [isCustomRange, startDate, endDate, partitionDay]
-  )
-  // The day Upcoming runs through when the look-ahead extends it, for its header.
-  const upcomingExtendedThrough = upcomingThrough !== undefined && upcomingThrough > endDate ? upcomingThrough : null
-  // The filter's two ranges: the main list (on or before the Manila day) and Upcoming (after).
+  // The main list's range: the filter, on or before the Manila day. Upcoming is the Due card's tab.
   const bounds = useMemo(
-    () => listBounds(startDate, endDate, partitionDay, upcomingThrough),
-    [startDate, endDate, partitionDay, upcomingThrough]
+    () => listBounds(startDate, endDate, partitionDay),
+    [startDate, endDate, partitionDay]
   )
   const filterParams = useMemo(() => {
     const params: TransactionQuery = {}
@@ -775,71 +738,12 @@ export function TransactionsPage() {
     [beginTransactionsRequest, bounds.main, filterParams, goToPage, isAuthenticated, page, pageSize, triggerTransactions]
   )
 
-  // Upcoming shows the nearest items after the Manila day, soonest first, from two
-  // requests sent together under one generation: transaction rows and recurring
-  // occurrences not recorded yet. The transaction list is newest first, so the nearest
-  // rows are the last of the range: fetch the head to learn the total, and the tail too
-  // only when there are more than one request holds. Occurrences come soonest first.
-  // Either request failing keeps the rows on screen with the error alert.
-  // `quiet` keeps the tail request, sent after an await, off the screen loader as well,
-  // unless its permission was revoked (the dialog closed) by the time the tail starts.
-  const loadUpcoming = useCallback(
-    async ({ quiet }: { quiet?: QuietPermit } = {}) => {
-      if (!isAuthenticated) {
-        return
-      }
-      const isCurrent = beginUpcomingRequest(true)
-      try {
-        setIsUpcomingLoading(true)
-        setUpcomingCurrent(false)
-        if (bounds.upcoming === null) {
-          setUpcomingRows([])
-          setUpcomingTotal(0)
-          setUpcomingError(false)
-          setUpcomingCurrent(true)
-          return
-        }
-        const query = { ...filterParams, ...rangeParams(bounds.upcoming), limit: UPCOMING_LIMIT }
-        const loadRows = async (): Promise<{ items: Transaction[]; total: number } | null> => {
-          const head = await triggerTransactions({ ...query, offset: 0 }).unwrap()
-          if (!isCurrent()) return null
-          let items = head.items
-          if (head.total > UPCOMING_LIMIT) {
-            const loadTail = () => triggerTransactions({ ...query, offset: head.total - UPCOMING_LIMIT })
-            // Read now, not when the refresh started: a close meanwhile makes the tail loud.
-            const tail = await (quiet?.allowed === true ? runQuietSync(loadTail) : loadTail()).unwrap()
-            if (!isCurrent()) return null
-            items = tail.items
-          }
-          return { items: head.total === 0 ? [] : [...items].reverse(), total: head.total }
-        }
-        const [rows, occurrences] = await Promise.all([loadRows(), triggerUpcomingOccurrences(query).unwrap()])
-        if (!isCurrent() || rows === null) return
-        setUpcomingRows(mergeUpcoming(rows.items, occurrences.items, UPCOMING_LIMIT))
-        setUpcomingTotal(rows.total + occurrences.total)
-        setAutoPostScheduled(occurrences.auto_post_scheduled)
-        setUpcomingError(false)
-        setUpcomingCurrent(true)
-      } catch (error) {
-        if (!isCurrent()) return
-        console.error('Error loading upcoming transactions:', error)
-        setUpcomingError(true)
-      } finally {
-        if (isCurrent()) {
-          setIsUpcomingLoading(false)
-          setUpcomingSettled(true)
-        }
-      }
-    },
-    [beginUpcomingRequest, bounds.upcoming, filterParams, isAuthenticated, triggerTransactions, triggerUpcomingOccurrences]
-  )
-
-  // After any create, edit, delete, post or un-post a row can move between the lists,
-  // so both are fetched again under the filters and page now on screen. `quiet` is for a
-  // caller inside `runQuietSync`: every request but the upcoming tail starts synchronously.
-  const refreshLists = useCallback(async ({ quiet }: { quiet?: QuietPermit } = {}) => {
-    await Promise.all([loadTransactions(), loadUpcoming({ quiet })])
-  }, [loadTransactions, loadUpcoming])
+  // After every create, edit, delete, post or un-post the main list is fetched again under the
+  // filters and page now on screen; the Due card's queries refetch on their own (the
+  // `Transaction` tag). Its one request starts synchronously, so `runQuietSync` keeps it quiet.
+  const refreshLists = useCallback(async () => {
+    await loadTransactions()
+  }, [loadTransactions])
   const refreshListsRef = useLatestRef(refreshLists)
 
   useEffect(() => {
@@ -848,13 +752,6 @@ export function TransactionsPage() {
     }
     void loadTransactions()
   }, [authLoading, isAuthenticated, loadTransactions])
-
-  useEffect(() => {
-    if (authLoading || !isAuthenticated) {
-      return
-    }
-    void loadUpcoming()
-  }, [authLoading, isAuthenticated, loadUpcoming])
 
   useEffect(() => {
     if (!isActionModalOpen) {
@@ -1165,10 +1062,7 @@ export function TransactionsPage() {
     saveInFlight.current = false
     setIsSaving(false)
     setFocusRequest(null)
-    // Quiet requests still in flight show the screen loader until they settle, and a
-    // refresh still running starts no more quiet ones (the upcoming tail).
-    for (const permit of quietPermits.current) permit.allowed = false
-    quietPermits.current.clear()
+    // Quiet requests still in flight show the screen loader until they settle.
     releaseQuiet()
   }
 
@@ -1510,15 +1404,12 @@ export function TransactionsPage() {
         // The lists are page-level, so they refresh even for a dialog since closed. Quietly,
         // and outside the save: a failed refresh shows the lists' own alert, never
         // "Could not save".
-        const permit: QuietPermit = { allowed: true }
-        quietPermits.current.add(permit)
         refreshHandedOff = true
-        void runQuietSync(() => refreshListsRef.current({ quiet: permit }))
+        void runQuietSync(() => refreshListsRef.current())
           .catch((error: unknown) => {
             console.error('Error refreshing transactions:', error)
           })
           .finally(() => {
-            quietPermits.current.delete(permit)
             abandoned.release?.()
           })
         return
@@ -2314,6 +2205,7 @@ export function TransactionsPage() {
           handleInitPostingForm(transaction)
         }}
         onChanged={() => void refreshListsRef.current()}
+        onOpenTransaction={openActionModal}
         accountCurrencies={accountCurrencies}
       />
 
@@ -2608,69 +2500,15 @@ export function TransactionsPage() {
           </>
         )}
       </p>
-      {transactions.length === 0 && upcomingRows.length === 0 ? (
+      {transactions.length === 0 ? (
         // Not before the first load settles; after that the previous state stays up while refreshing.
         isInitialLoading ? null : listError ? loadErrorAlert : emptyState
       ) : (
         <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
           {listError && !listsCurrent && loadErrorAlert}
-          {upcomingRows.length > 0 && (
-            <section className="space-y-3" data-testid="upcoming-transactions">
-              <button
-                type="button"
-                onClick={() => setIsUpcomingOpen((open) => !open)}
-                aria-expanded={isUpcomingOpen}
-                className="flex w-full items-center justify-between gap-3 text-left focus-ring"
-              >
-                <span className="text-sm font-semibold text-body">
-                  Upcoming ({upcomingTotal})
-                  {upcomingExtendedThrough !== null && (
-                    <span data-testid="upcoming-through"> · through {formatEntryDate(upcomingExtendedThrough)}</span>
-                  )}
-                  {upcomingTotal > upcomingRows.length && (
-                    <span className="ml-2 text-xs font-normal text-muted">
-                      showing the next {upcomingRows.length} of {upcomingTotal}, narrow the dates for more
-                    </span>
-                  )}
-                </span>
-                <svg className={`h-4 w-4 text-muted transition-transform ${isUpcomingOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {isUpcomingOpen && (
-                <div className="grid grid-cols-1 gap-3">
-                  {upcomingRows.map((row) =>
-                    row.kind === 'transaction' ? (
-                      renderTransactionRow(row.transaction)
-                    ) : (
-                      <UpcomingOccurrenceRow
-                        key={row.key}
-                        occurrence={row.occurrence}
-                        scheduled={autoPostScheduled}
-                        today={today}
-                        onRecord={(action) =>
-                          setRecordTarget({
-                            entryId: row.occurrence.entry_id,
-                            name: row.occurrence.name,
-                            occurrenceDate: row.occurrence.occurrence_date,
-                            action,
-                          })
-                        }
-                        onReview={() => setReviewTarget({ entryId: row.occurrence.entry_id, name: row.occurrence.name })}
-                      />
-                    )
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-          {transactions.length === 0 ? (
-            mainError ? null : <p className="text-sm text-muted">Nothing on or before today in this range.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3">
-              {transactions.map(renderTransactionRow)}
-            </div>
-          )}
+          <div className="grid grid-cols-1 gap-3">
+            {transactions.map(renderTransactionRow)}
+          </div>
           {totalTransactions > 0 && (
             <nav className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between" aria-label="Transactions pages" data-testid="transactions-pager">
               <p className="text-xs text-muted">
@@ -2724,26 +2562,6 @@ export function TransactionsPage() {
             </nav>
           )}
         </div>
-      )}
-
-      {recordTarget && (
-        <MarkPaidDialog
-          entryId={recordTarget.entryId}
-          name={recordTarget.name}
-          occurrenceDate={recordTarget.occurrenceDate}
-          action={recordTarget.action}
-          onClose={() => setRecordTarget(null)}
-          onPaid={() => void refreshListsRef.current()}
-        />
-      )}
-      {reviewTarget && (
-        <InstallmentReviewDialog
-          key={reviewTarget.entryId}
-          entryId={reviewTarget.entryId}
-          name={reviewTarget.name}
-          onClose={() => setReviewTarget(null)}
-          onReviewed={() => void refreshListsRef.current()}
-        />
       )}
 
       {isBreakdownOpen && (
