@@ -913,7 +913,7 @@ def test_card_installment_is_paid_exactly_once_inside_the_right_statement(db, us
     assert _cash_events(r) == [
         ("2026-09-14", "Card C statement", Decimal("-2000.00")),
         ("2026-10-15", "Card C statement", Decimal("-2000.00")),
-        ("2026-11-14", "Card C statement", Decimal("-2000.00")),
+        ("2026-11-16", "Card C statement", Decimal("-2000.00")),
     ]
     # Funded from the card's payment account: no shortfall on the card itself.
     assert r["account_shortfalls"] == []
@@ -1460,8 +1460,8 @@ def test_upcoming_items_come_from_collect_events(db, user):
             for i in items] == [
         ("2026-08-03", "Last weekly installment", 250.0, "expense", "budget_entry"),
         ("2026-08-12", "Card charge", 90.0, "debit", "transaction"),
-        # 1 Aug close (charges 2 Jul..1 Aug) due 21 Aug.
-        ("2026-08-21", "Card C statement", 700.0, "expense", "statement"),
+        # 1 Aug close (charges 2 Jul..1 Aug) due 21 Aug, Ninoy Aquino Day: paid Monday 24 Aug.
+        ("2026-08-24", "Card C statement", 700.0, "expense", "statement"),
         ("2026-08-31", "Cutoff-day bill", 40.0, "debit", "transaction"),
     ]
 

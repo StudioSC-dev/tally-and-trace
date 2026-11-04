@@ -267,6 +267,36 @@ def test_overdue_waits_for_the_due_date(world, monkeypatch):
     assert (minimum["inputs"]["overdue"], minimum["amount"]) == (0.0, 850.0)
 
 
+def test_overdue_carry_uses_rolled_due(world):
+    """Card A (closes 4th, +25d): the 4 Nov 2026 statement's computed due, Sunday
+    29 Nov, rolls past Bonifacio Day to Tuesday 1 Dec. Paying on 1 Dec is on time,
+    so the 4 Dec statement carries nothing overdue."""
+    w = world
+    client, me = w["client"], w["me"]
+    card = _account(client, me, "Card A", "credit", 0, billing_cycle_start=4,
+                    days_until_due_date=25, credit_limit=200_000, minimum_due_rule=BDO)
+    _debit(client, me, card, "2026-10-20", 20_000)
+    assert _statements(client, me, card)["2026-11-04"]["due_date"] == "2026-12-01"
+    assert _minimum(client, me, card, "2026-12-04")["inputs"]["overdue"] == 850.0
+    _pay(client, me, w["savings"], card, "2026-12-01", 850)
+    assert _minimum(client, me, card, "2026-12-04")["inputs"]["overdue"] == 0.0
+
+
+def test_overdue_carry_waits_for_a_due_rolled_past_the_next_close(world):
+    """Closes 2nd, +30d: 2 Oct 2026's computed due is All Saints' Day (Sunday
+    1 Nov), before the 2 Nov close; it rolls past All Souls' Day to 3 Nov, after
+    it, so the 2 Nov statement carries nothing overdue yet."""
+    w = world
+    client, me = w["client"], w["me"]
+    card = _account(client, me, "Card C30", "credit", 0, billing_cycle_start=2,
+                    days_until_due_date=30, credit_limit=200_000, minimum_due_rule=BDO)
+    _debit(client, me, card, "2026-09-20", 20_000)
+    statements = _statements(client, me, card)
+    assert statements["2026-10-02"]["due_date"] == "2026-11-03"
+    assert statements["2026-11-02"]["minimum_due"]["inputs"]["overdue"] == 0.0
+    assert statements["2026-12-02"]["minimum_due"]["inputs"]["overdue"] == 850.0
+
+
 def test_late_payment_before_the_next_close_reduces_overdue(world):
     w = world
     client, me = w["client"], w["me"]
@@ -379,7 +409,7 @@ def test_minimum_unavailable_without_rule_and_open_cycle_excluded(world):
     body = _detail(client, me, card)
     assert body["rule"] is None
     assert [s["close_date"] for s in body["statements"]] == ["2027-02-03", "2027-03-03"]
-    assert body["open_cycle"] == {"close_date": "2027-04-03", "due_date": "2027-04-24"}
+    assert body["open_cycle"] == {"close_date": "2027-04-03", "due_date": "2027-04-26"}
     assert body["statements"][1]["minimum_due"] == {
         "amount": None, "remaining": None, "source": "unavailable", "reason": "no_rule",
         "complete": False, "assumptions": [], "inputs": None}

@@ -117,7 +117,7 @@ def test_timeline(demo):
         ("2026-11-02", "Projected September electric bill", 0.0),
         ("2026-11-15", "Brokerage Auto-Deposit", -500.0),
         ("2026-11-20", "Electric Bill", -1_200.0),
-        ("2026-11-22", "Credit Card statement", -60.0),
+        ("2026-11-23", "Credit Card statement", -60.0),
         ("2026-12-01", "Rent", -2_500.0),
         ("2026-12-02", "Gym Membership", -45.0),
         ("2026-12-15", "Brokerage Auto-Deposit", -500.0),
@@ -146,7 +146,7 @@ def test_snapshot(demo):
          v4("overdue card statement payable from the Joint Account"), "Joint Account", "PHP"),
         ("2026-11-15", "Brokerage Auto-Deposit", 500.0, "Main Checking Account", "PHP"),
         ("2026-11-20", "Electric Bill", 1_200.0, "Main Checking Account", "PHP"),
-        ("2026-11-22", "Credit Card statement", 60.0, "Joint Account", "PHP"),
+        ("2026-11-23", "Credit Card statement", 60.0, "Joint Account", "PHP"),
         ("2026-12-01", "Rent", 2_500.0, "Joint Account", "PHP"),
         ("2026-12-02", "Gym Membership", 45.0, "Main Checking Account", "PHP")]
     assert _estimated(body["payables"][0], 14.99)

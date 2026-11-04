@@ -413,7 +413,7 @@ def _statements(db, user_id) -> dict:
 
 @pytest.mark.parametrize("paid_on, expected", [
     ("2026-11-05", {"2026-12-15": 5000.0}),
-    ("2026-10-18", {"2026-11-14": 5000.0}),
+    ("2026-10-18", {"2026-11-16": 5000.0}),
 ])
 def test_installment_marked_paid_on_its_date_keeps_statement_payables(
         sw_client, sw_db, sw_people, monkeypatch, paid_on, expected):

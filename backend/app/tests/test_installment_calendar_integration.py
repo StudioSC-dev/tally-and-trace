@@ -101,7 +101,7 @@ MISSED = [
     ("2026-10-18", "2026-07-24", FIVE),
     ("2026-10-18", "2026-08-24", FIVE),
     ("2026-10-18", "2026-09-24", FIVE),
-    ("2026-11-14", "2026-10-24", FIVE),
+    ("2026-11-16", "2026-10-24", FIVE),
     ("2026-12-15", "2026-11-24", FIVE),
 ]
 
@@ -158,7 +158,7 @@ def test_mixed_ledger_payables_do_not_move_when_installments_post(world):
     expected = [
         ("2026-10-18", "2026-08-24", FIVE),
         ("2026-10-18", "2026-09-24", FIVE),
-        ("2026-11-14", "2026-10-24", Decimal("10000")),
+        ("2026-11-16", "2026-10-24", Decimal("10000")),
         ("2026-12-15", "2026-11-24", FIVE),
     ]
 
@@ -185,7 +185,7 @@ def test_window_length_does_not_change_payables_inside_it(world):
         ("2026-10-18", "2026-07-24", Decimal("1000")),
         ("2026-10-18", "2026-08-24", FIVE),
         ("2026-10-18", "2026-09-24", FIVE),
-        ("2026-11-14", "2026-10-24", FIVE),
+        ("2026-11-16", "2026-10-24", FIVE),
     ]
     assert [row for row in long if row[0] < "2026-11-18"] == short
 
@@ -229,7 +229,7 @@ def test_household_card_settlement_matches(world, monkeypatch):
               for c, amount in zip(cycles, owed) if amount > 0 and c["due"] < end}
     assert by_due == {f"{due}/{close}": amount for due, close, amount in _statements(db, o)}
     assert by_due == {"2026-10-18/2026-08-24": FIVE, "2026-10-18/2026-09-24": FIVE,
-                      "2026-11-14/2026-10-24": Decimal("10000"),
+                      "2026-11-16/2026-10-24": Decimal("10000"),
                       "2026-12-15/2026-11-24": FIVE}
     listed = [occ.date for occ in occurrences if occ.record.id == world["tablet"]]
     assert listed == [datetime(2026, 11, 5), datetime(2026, 12, 5)]
@@ -273,6 +273,6 @@ def test_unreviewed_installment_due_month_stays_projected_on_a_mixed_ledger(worl
          transfer_from_account_id=checking, transfer_to_account_id=card)
 
     assert _statements(db, o) == [
-        ("2026-11-14", "2026-10-24", FIVE),     # Tablet's Oct 5 charge, still owing
+        ("2026-11-16", "2026-10-24", FIVE),     # Tablet's Oct 5 charge, still owing
         ("2026-12-15", "2026-11-24", FIVE),     # Tablet's Nov 5 charge; Nov 1 is paid
     ]

@@ -120,7 +120,7 @@ def test_lists_the_latest_closed_statement(world):
     assert due[m2] == {
         "account_id": m2, "name": "Card M2", "currency": "PHP", "close_date": "2027-03-03",
         "due_date": "2027-03-24", "clear_through": m2_latest["clear_through"],
-        "statement_count": 2, "oldest_due": "2027-01-24", "overdue": True,
+        "statement_count": 2, "oldest_due": "2027-01-25", "overdue": True,
         "incomplete": False, "unposted_installments": 0, "unposted_postable": 0}
     assert m2_latest["clear_through"] == 21_000.0
 

@@ -225,18 +225,18 @@ def test_timeline_projects_each_currency_on_its_own(sw_client, cx, frozen):
     assert _events(usd) == [
         ("2026-11-09", 100.0, True), ("2026-11-10", -1_500.0, False),
         ("2026-11-16", -500.0, False), ("2026-11-20", -50.0, False),
-        ("2026-11-30", -300.0, False)]
+        ("2026-12-01", -300.0, False)]  # 30 Nov + 0: Bonifacio Day rolls the due
     assert [e["running_balance"] for e in usd["events"]] == [
         1_100.0, -400.0, -900.0, -950.0, -1_250.0]
     assert usd["closing_balance"] == -1_250.0
     assert [(s["date"], s["balance_after"], s["currency"]) for s in usd["shortfalls"]] == [
         ("2026-11-10", -400.0, "USD"), ("2026-11-16", -900.0, "USD"),
-        ("2026-11-20", -950.0, "USD"), ("2026-11-30", -1_250.0, "USD")]
+        ("2026-11-20", -950.0, "USD"), ("2026-12-01", -1_250.0, "USD")]
     assert [(s["date"], s["account_id"], s["short_amount"], s["overflow_used"], s["currency"])
             for s in usd["account_shortfalls"]] == [
         ("2026-11-10", cx["usd"], 400.0, 0.0, "USD"),
         ("2026-11-16", cx["usd"], 900.0, 0.0, "USD"),
-        ("2026-11-30", cx["usd"], 1_200.0, 0.0, "USD")]
+        ("2026-12-01", cx["usd"], 1_200.0, 0.0, "USD")]
     assert usd["overflow_moves"] == []
     assert _closings(usd, names) == {"USD Savings": -1_200.0}
     assert usd["unassigned_closing"] == -50.0
@@ -265,8 +265,9 @@ def test_cashflow_rows_per_currency(sw_client, cx, frozen):
         "loan_payables": 0.0, "net": 31_820.0, "closing_balance": 91_820.0}
     assert {k: usd[k] for k in fields} == {
         "income": 0.0, "expenses": 1_550.0, "unposted_expenses": 0.0,
-        "statement_payables": 300.0, "moved_in": 100.0, "moved_out": 500.0,
-        "loan_payables": 0.0, "net": -2_250.0, "closing_balance": -1_250.0}
+        # The USD Card's 30 Nov due (Bonifacio Day) rolls into December.
+        "statement_payables": 0.0, "moved_in": 100.0, "moved_out": 500.0,
+        "loan_payables": 0.0, "net": -1_950.0, "closing_balance": -950.0}
     assert usd["unassigned_closing"] == -50.0
     for key in ("opening_balance", "income", "expenses", "unposted_expenses",
                 "statement_payables", "net", "closing_balance", "by_account",
@@ -314,7 +315,8 @@ def test_snapshot_totals_and_closings_per_currency(sw_client, cx, frozen):
     closings = {c["period_start"][:7]: c for c in body["account_closings"]}
     assert set(closings) == {"2026-11", "2026-12", "2027-01"}
     nov = {r["currency"]: r for r in closings["2026-11"]["by_currency"]}
-    assert _closings(nov["USD"], names) == {"USD Savings": -1_200.0}
+    # The USD Card's statement, due 30 Nov, rolls to 1 Dec past Bonifacio Day.
+    assert _closings(nov["USD"], names) == {"USD Savings": -900.0}
     assert nov["USD"]["unassigned_closing"] == -50.0
     jan = {r["currency"]: r for r in closings["2027-01"]["by_currency"]}
     assert _closings(jan["USD"], names) == {"USD Savings": -5_200.0}
@@ -417,7 +419,7 @@ def test_payables_carry_currency_and_estimates(sw_client, cx, frozen):
         ("2026-11-12", "Subscription", 1_160.0, "PHP", True),
         ("2026-11-20", "Accountless", 50.0, "USD", False),
         ("2026-11-25", "PHP Card statement", 580.0, "PHP", True),
-        ("2026-11-30", "USD Card statement", 300.0, "USD", False)]
+        ("2026-12-01", "USD Card statement", 300.0, "USD", False)]  # past Bonifacio Day
 
 
 def test_a_statement_estimated_from_several_currencies_names_no_original(sw_client, sw_db, cx,
@@ -678,7 +680,7 @@ def test_a_legacy_usd_card_paid_from_php_is_estimated_in_php(sw_client, sw_db, c
     payables = _get(sw_client, cx["a"], "/dashboard/snapshot")["payables"]
     (row,) = [p for p in payables if p["name"] == "Legacy card statement"]
     assert (row["due_date"], row["amount"], row["currency"], row["account_id"]) == (
-        "2026-11-30", 2_900.0, "PHP", cx["php"])
+        "2026-12-01", 2_900.0, "PHP", cx["php"])  # 30 Nov is Bonifacio Day
     assert (row["estimated"], row["original_amount"], row["original_currency"], row["rate"]) == (
         True, 50.0, "USD", RATE_TO_PHP)
 

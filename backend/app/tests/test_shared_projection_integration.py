@@ -148,7 +148,7 @@ def test_overdue_statements_and_dues_are_distinct_events(sw, sw_client, sw_db):
         events = _events(sw_db, sw[who])
         statements = sorted((e["original_date"], e["amount"]) for e in events
                             if e["source"] == "statement" and e.get("overdue"))
-        assert statements == [(datetime(2026, 8, 30), Decimal("-70.00")),
+        assert statements == [(datetime(2026, 9, 1), Decimal("-70.00")),
                               (datetime(2026, 9, 30), Decimal("-90.00"))]
         dues = sorted((e["original_date"], e["amount"]) for e in events
                       if e["source"] == "loan" and e.get("overdue"))

@@ -217,7 +217,7 @@ def test_recorded_overdue_keeps_the_statement_status(world):
         "clear_through": 3_000, "statement_count": 1, "oldest_due": "2026-07-15",
         "overdue": True, "unposted_installments": 0, "unposted_postable": 0}
 
-    # Card L: a 2,000 charge on Sep 10 (statement Sep 17, due Nov 1) and an
+    # Card L: a 2,000 charge on Sep 10 (statement Sep 17, due Nov 3) and an
     # installment whose only month, Sep 10, is unposted on that same cycle.
     card_l = _account(w["client"], w["o"], "Card L", "credit", billing_cycle_start=17,
                       days_until_due_date=45, payment_account_id=w["checking"])
@@ -228,7 +228,7 @@ def test_recorded_overdue_keeps_the_statement_status(world):
     assert statuses["2026-09-17"] != "overdue"
     row = _due_rows(w)[card_l]
     assert (row["clear_through"], row["statement_count"], row["oldest_due"], row["overdue"],
-            row["unposted_installments"]) == (2_000, 1, "2026-11-01", False, 1)
+            row["unposted_installments"]) == (2_000, 1, "2026-11-03", False, 1)
 
 
 def test_unposted_count_skips_held_and_pending_linked_months(world):
