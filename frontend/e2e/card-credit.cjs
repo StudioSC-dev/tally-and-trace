@@ -20,8 +20,11 @@
 //   (g) charges dated later in the next 30 days come off on their date, are not in the
 //       headline, and show on their own line apart from the installment hold; a charge
 //       beyond the window counts nowhere
+//   (h) a closed statement's and the open cycle's printed due date: entered from the
+//       panel, it shows "(from your statement)" with the computed due in its title, an
+//       out-of-order date shows the server's reason, and Clear brings the computed due back
 //
-// Usage: node frontend/e2e/card-credit.cjs [a|b|c|d|e|f|g]
+// Usage: node frontend/e2e/card-credit.cjs [a|b|c|d|e|f|g|h]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -383,6 +386,77 @@ async function plannedCharges(browser) {
   await ctx.close()
 }
 
+// (h) A statement's printed due date, entered and cleared from the card panel.
+async function printedDue(browser) {
+  console.log('\n=== (h) a statement\'s printed due date is entered and cleared from the panel')
+  const today = manilaToday()
+  const cardE = await card(owner, bank, 'Card E', 50000)
+  // Forty days back is on a statement that has closed.
+  await post(owner.token, '/transactions/', {
+    account_id: cardE.id, transaction_type: 'debit', amount: 900, description: 'Old purchase',
+    transaction_date: wire(addDays(today, -40)), is_posted: true,
+  })
+  const detailOf = () => get(owner.token, `/cards/${cardE.id}/credit`)
+  const before = await detailOf()
+  const statement = before.statements[before.statements.length - 1]
+  const close = statement.close_date
+  check('(h) the API starts on the computed due', [statement.due_overridden, statement.due_date], [false, statement.computed_due_date])
+  const printed = addDays(statement.computed_due_date, 1)
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, owner)
+  await page.goto(`${stack.webUrl}/accounts/${cardE.id}`)
+  await page.locator('[data-testid="card-credit-panel"]').waitFor()
+  await settle(page)
+  const row = page.locator(`[data-testid="card-statement"][data-close="${close}"]`)
+  const dueText = async (scope) => (await scope.locator('[data-testid="card-due"]').textContent())?.trim()
+  check('(h) the row reads the computed due', await dueText(row), `due ${fmt(statement.computed_due_date)}`)
+  check('(h) with no Clear', await row.locator('[data-testid="card-due-clear"]').count(), 0)
+
+  // On the close itself: the server's reason, inline.
+  await row.locator('[data-testid="card-due-edit"]').click()
+  check('(h) the input starts on the shown due', await row.locator('[data-testid="card-due-input"]').inputValue(), statement.due_date)
+  await row.locator('[data-testid="card-due-input"]').fill(close)
+  let saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().includes(`/cards/${cardE.id}/statements/${close}/due-date`))
+  await row.locator('[data-testid="card-due-save"]').click()
+  check('(h) a due on the close is 422', (await saved).status(), 422)
+  check('(h) the reason shows on the row', (await row.locator('[data-testid="card-due-error"]').textContent())?.trim(), 'The due date must be after the close')
+
+  // The screen loader takes no input until the refused save has settled.
+  await settle(page)
+  await row.locator('[data-testid="card-due-input"]').fill(printed)
+  check('(h) typing clears the reason', await row.locator('[data-testid="card-due-error"]').count(), 0)
+  saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().includes(`/cards/${cardE.id}/statements/${close}/due-date`))
+  await row.locator('[data-testid="card-due-save"]').click()
+  check('(h) the save is 200', (await saved).status(), 200)
+  await row.locator('[data-testid="card-due-clear"]').waitFor()
+  const after = (await detailOf()).statements.find((s) => s.close_date === close)
+  check('(h) the API takes the printed due', [after.due_overridden, after.due_date, after.computed_due_date], [true, printed, statement.computed_due_date])
+  check('(h) the row reads it "from your statement"', await dueText(row), `due ${fmt(printed)} (from your statement)`)
+  check('(h) the computed due is in its title', await row.locator('[data-testid="card-due-source"]').getAttribute('title'), `Computed due ${fmt(statement.computed_due_date)}`)
+
+  const removed = page.waitForResponse((r) => r.request().method() === 'DELETE' && r.url().includes(`/cards/${cardE.id}/statements/${close}/due-date`))
+  await row.locator('[data-testid="card-due-clear"]').click()
+  check('(h) the clear is 204', (await removed).status(), 204)
+  await row.locator('[data-testid="card-due-clear"]').waitFor({ state: 'detached' })
+  check('(h) the row reads the computed due again', await dueText(row), `due ${fmt(statement.computed_due_date)}`)
+  await settle(page)
+
+  // The open cycle takes one the same way.
+  const open = before.open_cycle
+  const cycle = page.locator('[data-testid="card-open-cycle"]')
+  check('(h) the open cycle reads its computed due', await dueText(cycle), `due ${fmt(open.computed_due_date)}`)
+  await cycle.locator('[data-testid="card-due-edit"]').click()
+  await cycle.locator('[data-testid="card-due-input"]').fill(addDays(open.computed_due_date, 2))
+  saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().includes(`/cards/${cardE.id}/statements/${open.close_date}/due-date`))
+  await cycle.locator('[data-testid="card-due-save"]').click()
+  check('(h) the open cycle\'s save is 200', (await saved).status(), 200)
+  await cycle.locator('[data-testid="card-due-clear"]').waitFor()
+  check('(h) the open cycle reads it "from your statement"', await dueText(cycle), `due ${fmt(addDays(open.computed_due_date, 2))} (from your statement)`)
+  check('(h) the API agrees', (await detailOf()).open_cycle.due_overridden, true)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -396,6 +470,7 @@ async function plannedCharges(browser) {
   if (run('e')) await ruleForm(browser)
   if (run('f')) await othersSeeNoCredit(browser)
   if (run('g')) await plannedCharges(browser)
+  if (run('h')) await printedDue(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

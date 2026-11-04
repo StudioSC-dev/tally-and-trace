@@ -10,9 +10,11 @@ import {
 } from '@tally-trace/shared'
 import type { Account, MinimumDueAssumption, StatementDue } from '@tally-trace/shared'
 import {
+  useClearStatementDueMutation,
   useClearStatementMinimumMutation,
   useGetCardCreditQuery,
   usePostDueInstallmentsMutation,
+  useSetStatementDueMutation,
   useSetStatementMinimumMutation,
 } from '../store/api'
 import { useManilaDay } from '../hooks/useManilaDay'
@@ -44,6 +46,10 @@ const ASSUMPTION_TEXT: Record<Exclude<MinimumDueAssumption, 'fees_not_itemised'>
  * (entered from the statement, or estimated from the card's rule), the open cycle, and
  * Pay. Closed means closed before Manila's today; the panel refetches when that day
  * turns. Anyone else gets a 404 from the API and the panel renders nothing.
+ *
+ * Each closed statement and the open cycle take the due date printed on the statement,
+ * which replaces the rolled due everywhere; it shows "(from your statement)", with the
+ * computed due in its title, and Clear brings the computed one back.
  *
  * Installment months on closed cycles that are not posted yet (STU-343 Plan B) get their
  * own block, even when the card has no recorded statement: Post now when some of them can
@@ -189,9 +195,13 @@ export function CardCreditPanel({ account }: { account: Account }) {
       )}
 
       {detail.open_cycle && (
-        <p className="text-sm text-body" data-testid="card-open-cycle">
-          Current cycle closes {formatEntryDate(detail.open_cycle.close_date)} · due {formatEntryDate(detail.open_cycle.due_date)}
-        </p>
+        <div className="text-sm text-body space-y-1" data-testid="card-open-cycle" data-close={detail.open_cycle.close_date}>
+          <p>
+            Current cycle closes {formatEntryDate(detail.open_cycle.close_date)} ·{' '}
+            <DueText dueDate={detail.open_cycle.due_date} overridden={detail.open_cycle.due_overridden} computedDue={detail.open_cycle.computed_due_date} />
+          </p>
+          <DueDateControls cardId={account.id} closeDate={detail.open_cycle.close_date} dueDate={detail.open_cycle.due_date} overridden={detail.open_cycle.due_overridden} />
+        </div>
       )}
 
       {paying && <CardPayDialog cardId={account.id} onClose={() => setPaying(false)} />}
@@ -240,7 +250,8 @@ function StatementRow({ cardId, statement, currency }: { cardId: number; stateme
     <li className="border border-line p-3 space-y-1 text-sm" data-testid="card-statement" data-close={statement.close_date}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-ink">
-          Closed {formatEntryDate(statement.close_date)} · due {formatEntryDate(statement.due_date)}
+          Closed {formatEntryDate(statement.close_date)} ·{' '}
+          <DueText dueDate={statement.due_date} overridden={statement.due_overridden} computedDue={statement.computed_due_date} />
         </span>
         <span className="flex items-center gap-2">
           <span
@@ -329,6 +340,8 @@ function StatementRow({ cardId, statement, currency }: { cardId: number; stateme
         </div>
       )}
 
+      <DueDateControls cardId={cardId} closeDate={statement.close_date} dueDate={statement.due_date} overridden={statement.due_overridden} />
+
       {minimum.source === 'estimate' && minimum.assumptions.includes('fees_not_itemised') && (
         <p className="text-xs text-muted" data-testid="card-statement-fee-hint">{FEE_HINT}</p>
       )}
@@ -341,5 +354,114 @@ function StatementRow({ cardId, statement, currency }: { cardId: number; stateme
       )}
       {error && <p className="text-xs text-danger" role="alert" data-testid="card-minimum-error">{error}</p>}
     </li>
+  )
+}
+
+/** "due <date>", marked "(from your statement)" when the due was entered, the computed due in its title. */
+function DueText({ dueDate, overridden, computedDue }: { dueDate: string; overridden: boolean; computedDue: string }) {
+  return (
+    <span data-testid="card-due">
+      due {formatEntryDate(dueDate)}
+      {overridden && (
+        <>
+          {' '}
+          <span className="text-muted" title={`Computed due ${formatEntryDate(computedDue)}`} data-testid="card-due-source">
+            (from your statement)
+          </span>
+        </>
+      )}
+    </span>
+  )
+}
+
+/** Enter or clear the due date printed on one statement (closed, or the open cycle). */
+function DueDateControls({ cardId, closeDate, dueDate, overridden }: { cardId: number; closeDate: string; dueDate: string; overridden: boolean }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [setDue, { isLoading: saving }] = useSetStatementDueMutation()
+  const [clearDue, { isLoading: clearing }] = useClearStatementDueMutation()
+  const busy = saving || clearing
+
+  const save = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      setError("Enter the due date shown on this statement")
+      return
+    }
+    setError(null)
+    try {
+      await setDue({ accountId: cardId, closeDate, data: { due_date: value } }).unwrap()
+      setEditing(false)
+      setValue('')
+    } catch (caught) {
+      setError(apiErrorMessage(caught) || 'Could not save the due date. Please try again.')
+    }
+  }
+
+  const clear = async () => {
+    setError(null)
+    try {
+      await clearDue({ accountId: cardId, closeDate }).unwrap()
+    } catch (caught) {
+      setError(apiErrorMessage(caught) || 'Could not clear the due date. Please try again.')
+    }
+  }
+
+  return (
+    <div className="space-y-1 text-xs">
+      {editing ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="sr-only" htmlFor={`due-${cardId}-${closeDate}`}>
+            Due date on this statement
+          </label>
+          <input
+            id={`due-${cardId}-${closeDate}`}
+            type="date"
+            min={closeDate}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value)
+              setError(null)
+            }}
+            className="input-field focus-ring w-44"
+            data-testid="card-due-input"
+          />
+          <button type="button" onClick={() => void save()} disabled={busy} className="btn-primary focus-ring disabled:opacity-50" data-testid="card-due-save">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button type="button" onClick={() => setEditing(false)} disabled={busy} className="btn-secondary focus-ring">
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <span className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(true)
+              setValue(dueDate)
+              setError(null)
+            }}
+            disabled={busy}
+            className="text-xs underline underline-offset-2 text-body hover:text-ink focus-ring disabled:opacity-50"
+            data-testid="card-due-edit"
+          >
+            Enter this statement&apos;s due date
+          </button>
+          {overridden && (
+            <button
+              type="button"
+              onClick={() => void clear()}
+              disabled={busy}
+              className="text-xs underline underline-offset-2 text-body hover:text-ink focus-ring disabled:opacity-50"
+              data-testid="card-due-clear"
+            >
+              {clearing ? 'Clearing…' : 'Clear'}
+            </button>
+          )}
+        </span>
+      )}
+      {error && <p className="text-xs text-danger" role="alert" data-testid="card-due-error">{error}</p>}
+    </div>
   )
 }
