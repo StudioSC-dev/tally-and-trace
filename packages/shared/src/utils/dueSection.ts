@@ -539,6 +539,46 @@ export function freshFor(dataDay: string | undefined, today: string): boolean {
   return dataDay === undefined || dataDay === today
 }
 
+/** One source of a due card tab's badge, as its query reports it now. */
+export interface DueBadgeSource {
+  /** It holds data for the current request (RTK's `currentData`, which survives a failed refetch). */
+  hasData: boolean
+  /** That data is for the card's day: `freshFor(response.today, today)` for a dated response (the snapshot, the plans), else true. */
+  fresh: boolean
+  /** A request for it is in flight (a first load, a refetch or a Retry). */
+  fetching: boolean
+  /** Its latest fetch failed (RTK clears this when a refetch starts). */
+  failed: boolean
+  /** What it adds to the tab's total; read only when every source is complete. */
+  count: number
+}
+
+/** A badge's figure: a number, or `'pending'` (shown as "…"); `complete` when it is the sum of complete sources. */
+export interface DueBadge {
+  figure: number | 'pending'
+  complete: boolean
+}
+
+/**
+ * The badge of a due card tab built from one or more sources (STU-511 D6, D7). `kept` is the
+ * tab's last complete total for the Manila day, or undefined when it has none for today. The
+ * first rule that holds decides:
+ *
+ * (a) a source's latest fetch failed: the kept total, else 0 (D7, after a failure);
+ * (b) a source has nothing for today (no data, or a response dated another day): "…",
+ *     even with a kept total, so a response still dated the old day never shows a count
+ *     (plan-tabs (i): the new day reads "…" until its own data arrives);
+ * (c) a source is fetching (a refetch or a Retry over data for today): the kept total,
+ *     else "…", never a sum of one fresh source and another's stale cache;
+ * (d) every source is complete: the sum, marked complete, which the caller keeps for the day.
+ */
+export function dueTabBadge(sources: readonly DueBadgeSource[], kept: number | undefined): DueBadge {
+  if (sources.some((s) => s.failed)) return { figure: kept ?? 0, complete: false }
+  if (sources.some((s) => !s.hasData || !s.fresh)) return { figure: 'pending', complete: false }
+  if (sources.some((s) => s.fetching)) return { figure: kept ?? 'pending', complete: false }
+  return { figure: sources.reduce((sum, s) => sum + s.count, 0), complete: true }
+}
+
 /** Every pending row id any missed row links, ascending and once each: the linked query's `ids`. */
 export function pendingLinkIds(snapshot: DashboardSnapshot): number[] {
   const ids = new Set<number>()

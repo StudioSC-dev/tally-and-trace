@@ -12,7 +12,7 @@
     "build": "tsc --noEmit",
     "test": "pnpm run test:manila && pnpm run test:la",
     "test:manila": "TZ=Asia/Manila vitest run --exclude '**/*.la.test.ts'",
-    "test:la": "TZ=America/Los_Angeles vitest run src/utils/loggedDays.la.test.ts src/utils/upcomingWindow.la.test.ts"
+    "test:la": "TZ=America/Los_Angeles vitest run src/utils/loggedDays.la.test.ts src/utils/upcomingWindow.la.test.ts src/utils/dueBadge.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.2.2",
