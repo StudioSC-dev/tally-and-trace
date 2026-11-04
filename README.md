@@ -89,7 +89,7 @@ tally-and-trace/
 
 ### Prerequisites
 
-- **Python 3.10+** (recommended: 3.12)
+- **Python 3.11+** (recommended: 3.12)
 - **Node.js 18+** and **pnpm**
 - **PostgreSQL** (local or Supabase)
 

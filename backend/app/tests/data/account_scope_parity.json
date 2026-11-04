@@ -757,28 +757,6 @@
     "type": "expense"
    },
    {
-    "amount": "-1200.00",
-    "counts_as_cash": true,
-    "date": "2026-11-14T00:00:00",
-    "face_amount": "1200.00",
-    "funding_account_id": "Bank",
-    "legs": [
-     {
-      "account_id": "Bank",
-      "amount": "-1200.00",
-      "cash": true,
-      "overflow_account_id": null
-     }
-    ],
-    "name": "Card statement",
-    "overflow_account_id": null,
-    "source": "statement",
-    "source_id": "account:Card",
-    "statement_balance": "1200.00",
-    "statement_close": "2026-10-24T00:00:00",
-    "type": "expense"
-   },
-   {
     "amount": "30000.00",
     "counts_as_cash": true,
     "date": "2026-11-15T00:00:00",
@@ -797,6 +775,28 @@
     "source": "budget_entry",
     "source_id": "entry:Salary",
     "type": "income"
+   },
+   {
+    "amount": "-1200.00",
+    "counts_as_cash": true,
+    "date": "2026-11-16T00:00:00",
+    "face_amount": "1200.00",
+    "funding_account_id": "Bank",
+    "legs": [
+     {
+      "account_id": "Bank",
+      "amount": "-1200.00",
+      "cash": true,
+      "overflow_account_id": null
+     }
+    ],
+    "name": "Card statement",
+    "overflow_account_id": null,
+    "source": "statement",
+    "source_id": "account:Card",
+    "statement_balance": "1200.00",
+    "statement_close": "2026-10-24T00:00:00",
+    "type": "expense"
    },
    {
     "amount": "2500.00",
@@ -983,7 +983,7 @@
     "account_id": "Bank",
     "account_name": "Bank",
     "amount": 1200.0,
-    "due_date": "2026-11-14",
+    "due_date": "2026-11-16",
     "name": "Card statement",
     "overflow_account_id": null,
     "overflow_account_name": null,
@@ -1188,22 +1188,22 @@
      "type": "expense"
     },
     {
-     "amount": -1200.0,
-     "date": "2026-11-14",
-     "name": "Card statement",
-     "running_balance": 16885.0,
-     "source": "statement",
-     "source_id": "account:Card",
-     "type": "expense"
-    },
-    {
      "amount": 30000.0,
      "date": "2026-11-15",
      "name": "Salary",
-     "running_balance": 46885.0,
+     "running_balance": 48085.0,
      "source": "budget_entry",
      "source_id": "entry:Salary",
      "type": "income"
+    },
+    {
+     "amount": -1200.0,
+     "date": "2026-11-16",
+     "name": "Card statement",
+     "running_balance": 46885.0,
+     "source": "statement",
+     "source_id": "account:Card",
+     "type": "expense"
     },
     {
      "amount": 2500.0,
@@ -1417,20 +1417,20 @@
     "source_id": "entry:Gym"
    },
    {
-    "amount": "1200.00",
-    "due_date": "2026-11-14",
-    "entry_type": "expense",
-    "name": "Card statement",
-    "source": "statement",
-    "source_id": "account:Card"
-   },
-   {
     "amount": "30000.00",
     "due_date": "2026-11-15",
     "entry_type": "income",
     "name": "Salary",
     "source": "budget_entry",
     "source_id": "entry:Salary"
+   },
+   {
+    "amount": "1200.00",
+    "due_date": "2026-11-16",
+    "entry_type": "expense",
+    "name": "Card statement",
+    "source": "statement",
+    "source_id": "account:Card"
    },
    {
     "amount": "2500.00",

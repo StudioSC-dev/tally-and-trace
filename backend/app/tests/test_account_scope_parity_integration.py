@@ -5,7 +5,9 @@ entity. For a single owner, every view must come out exactly as it did before
 the re-key. ``data/account_scope_parity.json`` was captured by running
 ``build`` and ``views`` below against the pre-change code (origin/main
 1eb87dc, unscoped calls) on the same fixtures; the test replays them on the
-current code. Ids are replaced by names so the snapshot is stable.
+current code. Ids are replaced by names so the snapshot is stable. It was
+re-captured once for the banking-day due roll, whose only change is the Card's
+statement due moving from Saturday 14 Nov 2026 to Monday 16 Nov.
 
 It also pins the caller's own accountless entries (no ``account_id``), income
 and expense, to the unassigned-cash behaviour, including for a user with no

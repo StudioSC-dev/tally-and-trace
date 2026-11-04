@@ -4,7 +4,8 @@ The headline case is the owner's real shape: a card closing on the 24th with a
 21-day grace period, whose SOA line items sum to the statement balance, paid from
 the biweekly payroll account with the main checking account as overflow.
 """
-from datetime import date, datetime
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from app.services.statements import (
     iter_cycles_from,
     resolve_cycle_fields,
     statement_balance,
+    statement_history,
 )
 
 
@@ -129,6 +131,78 @@ def test_close_day_clamps_to_short_months():
     card = _card(billing_cycle_start=31, days_until_due_date=21)
     cycles = list(iter_cycles_from(card, date(2027, 2, 1), datetime(2027, 3, 31)))
     assert cycles[0]["close"] == datetime(2027, 2, 28)
+
+
+# ---------------------------------------------------------------------------
+# Banking-day roll: a due on a weekend or PH holiday moves to the next banking
+# day; the close and the window never move.
+# ---------------------------------------------------------------------------
+
+def _card_a():
+    """Closes on the 4th, due 25 days later."""
+    return _card(name="Card A", billing_cycle_start=4, days_until_due_date=25,
+                 currency="PHP")
+
+
+def _cycle_closing(card, close):
+    return next(c for c in iter_cycles_from(card, close, datetime.min, through=close)
+                if c["close"].date() == close)
+
+
+def test_card_a_nov_2026_due_rolls_past_bonifacio_day():
+    """4 Nov + 25d is Sunday 29 Nov; Monday 30 Nov is Bonifacio Day."""
+    cycle = _cycle_closing(_card_a(), date(2026, 11, 4))
+    assert cycle == {
+        "window_start": datetime(2026, 10, 4),
+        "close": datetime(2026, 11, 4),
+        "due": datetime(2026, 12, 1),
+    }
+
+
+def test_card_c_nov_2026_due_unchanged():
+    """2 Nov + 21d is Monday 23 Nov, a banking day. The close stays on All
+    Souls' Day, itself a PH special non-working day."""
+    card = _card(name="Card C", billing_cycle_start=2, days_until_due_date=21)
+    cycle = _cycle_closing(card, date(2026, 11, 2))
+    assert cycle["close"] == datetime(2026, 11, 2)
+    assert cycle["due"] == datetime(2026, 11, 23)
+
+
+def test_roll_never_moves_close_or_window():
+    for close_day, days in ((4, 25), (2, 21), (24, 21), (31, 21), (5, 20)):
+        card = _card(billing_cycle_start=close_day, days_until_due_date=days)
+        cycles = list(iter_cycles_from(card, date(2026, 1, 1), datetime(2028, 3, 1)))
+        assert len(cycles) >= 24
+        for cycle in cycles:
+            close, start = cycle["close"], cycle["window_start"]
+            assert close.day == min(close_day, monthrange(close.year, close.month)[1])
+            assert start.day == min(close_day, monthrange(start.year, start.month)[1])
+            assert (close.year * 12 + close.month) - (start.year * 12 + start.month) == 1
+            unrolled = close + timedelta(days=days)
+            assert unrolled <= cycle["due"] <= unrolled + timedelta(days=6)
+        dues = [c["due"] for c in cycles]
+        assert dues == sorted(set(dues))
+
+
+def test_payable_dated_on_rolled_due():
+    card = _card_a()
+    txns = {1: [_txn(20, "1000.00", month=10)]}  # 20 Oct, in the 4 Nov statement
+    events = build_statement_payables([card], txns, datetime(2026, 11, 5), datetime(2026, 12, 2))
+    assert [(e["date"], e["amount"]) for e in events] == [
+        (datetime(2026, 12, 1), Decimal("-1000.00"))]
+    assert build_statement_payables([card], txns, datetime(2026, 11, 5),
+                                    datetime(2026, 12, 1)) == []
+
+
+def test_history_status_open_on_computed_due_weekend():
+    """On Bonifacio Day the 4 Nov statement (computed due Sunday 29 Nov) is not late."""
+    card = _card_a()
+    row = _txn(20, "1000.00", month=10)
+    history = statement_history(None, card, datetime(2026, 11, 30), [card.id],
+                                card_rows=({card.id: [row]}, frozenset()))
+    nov = next(s for s in history if s["close"] == datetime(2026, 11, 4))
+    assert nov["due"] == datetime(2026, 12, 1)
+    assert nov["status"] == "open"
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +632,7 @@ def test_payables_inside_a_window_do_not_depend_on_its_length():
     # statement is settled and 850 of the 24 Aug one is left, due 14 Sep.
     assert by_end[datetime(2026, 12, 1)] == [
         (datetime(2026, 9, 14), Decimal("-850.00"), False),
-        (datetime(2026, 11, 14), Decimal("-400.00"), False),
+        (datetime(2026, 11, 16), Decimal("-400.00"), False),  # 14 Nov is a Saturday
     ]
 
 
@@ -571,7 +645,7 @@ def test_window_independence_holds_with_projected_occurrences():
     # 24 Oct; the 30 leaves 20 there.
     assert by_end[datetime(2026, 12, 1)] == [
         (datetime(2026, 9, 14), Decimal("-1250.00"), False),
-        (datetime(2026, 11, 14), Decimal("-20.00"), False),
+        (datetime(2026, 11, 16), Decimal("-20.00"), False),  # 14 Nov is a Saturday
     ]
 
 

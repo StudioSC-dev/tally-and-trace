@@ -11,7 +11,10 @@ The cycle contract (see HANDOVER Session 14 for why):
 
     close  = <billing_cycle_start> of month M      e.g. Jul 24
     window = (previous close, close], whole days   e.g. Jun 25 .. Jul 24
-    due    = close + days_until_due_date           e.g. Aug 14
+    due    = close + days_until_due_date,          e.g. Aug 14
+             rolled to the next PH banking day
+             (a weekend or PH holiday moves it to the day the bank opens;
+             the close itself never moves; see app/services/banking_days.py)
 
 Legacy fallback: a card with only ``due_date`` (day-of-month) set is read as
 closing ``days_until_due_date`` days *before* that due day, which collapses to the
@@ -47,7 +50,7 @@ transaction_date column (see app/core/time.py for the naive/aware split).
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Iterable, Iterator, List, Optional, Tuple
@@ -57,6 +60,7 @@ from sqlalchemy.orm import Session
 
 
 from app.models.account import Account, AccountType
+from app.services.banking_days import next_banking_day
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 
 DEFAULT_DAYS_UNTIL_DUE = 21
@@ -116,7 +120,8 @@ def iter_cycles_from(card: Account, first: date, end: datetime,
         y, m = _month_step(y, m, 1)
     while True:
         close = datetime(y, m, _clamp_day(y, m, close_day))
-        due = close + timedelta(days=days_until_due)
+        due = datetime.combine(
+            next_banking_day((close + timedelta(days=days_until_due)).date()), time())
         py, pm = _month_step(y, m, -1)
         window_start = datetime(py, pm, _clamp_day(py, pm, close_day))
         if due >= end and (through is None or window_start.date() >= through):
