@@ -14,6 +14,10 @@ from app.cutover_check import bootstrap, schema
 
 DATA = os.path.join(os.path.dirname(__file__), "data", "cutover_check")
 
+# The world below stands for data the cutover loaded before card installments
+# were charged on the statement close: its installments are legacy rows.
+pytestmark = pytest.mark.usefixtures("legacy_card_installments")
+
 
 def frozen_base() -> dict:
     with open(os.path.join(DATA, "frozen_base.json"), encoding="utf-8") as handle:

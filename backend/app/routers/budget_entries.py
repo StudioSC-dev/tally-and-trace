@@ -67,10 +67,12 @@ from app.services.forecast import (
     _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences, occurrences_paid,
 )
 from app.services.recurring_kinds import (
-    auto_post_block, default_billing_kind, entry_kind, is_capped)
+    auto_post_block, default_billing_kind, entry_kind, installment_close_day, is_capped,
+    is_card_installment, is_normalised_installment)
 from app.services.recurrence import (
     DAY_FIELDS, MONTH_FAMILY, DayRuleError, canon, resolve_day_fields,
 )
+from app.services.statements import statement_close
 
 router = APIRouter()
 
@@ -294,12 +296,86 @@ def _day_fields(cadence, next_occurrence, sent: dict, stored=None) -> dict:
     ``cadence`` and ``next_occurrence`` are the row as it will be; ``sent`` holds
     the day fields the request named (null included); ``stored`` is the row
     before an update, None on create.
+
+    A card installment on a card with a cycle is charged on the statement close
+    (``recurring_kinds.is_normalised_installment``). A create stores it so
+    (``_installment_on_close``) before this runs. An update never converts a
+    row: a legacy installment keeps its stored schedule, and a row that
+    becomes a card installment through an update (account changed to a card,
+    cap set, ``billing_kind`` moved off "bill", or a normalised entry moved to
+    a card with another close day) stays legacy until the re-date script
+    converts it (docs/installment-redate.md). An update is refused only when it
+    would take a normalised entry off the close (``_refuse_leaving_close``).
     """
     try:
         return resolve_day_fields(cadence=cadence, next_occurrence=next_occurrence,
                                   sent=sent, stored=stored)
     except DayRuleError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+INSTALLMENT_MONTHLY_MESSAGE = "A card installment is charged monthly on the statement close"
+INSTALLMENT_CLOSE_MESSAGE = "This installment is charged on the statement close"
+
+
+def _installment_on_close(db: Session, entry_in: BudgetEntryCreate, sent: dict):
+    """A new card installment's ``(next_occurrence, sent day fields)``, normalised
+    onto the statement close; the request's own values for any other entry.
+
+    A card installment (``recurring_kinds.is_card_installment``, read on the
+    request as it will be stored) on a card with a statement cycle is charged
+    monthly on each statement close. The card is locked first and its cycle
+    settings read from the locked row, so a create and a close-day change on
+    the card (``accounts.update_account`` locks it too) take turns: the change
+    either sees this entry and is refused, or commits first and this reads the
+    new close day. Create takes no other lock, so the order holds.
+
+    422 when the cadence is not monthly, a ``day_rule`` is sent, or an
+    ``anchor_day`` other than the close day is sent. An explicit null for
+    either is read as not sent. ``next_occurrence`` moves to the close of the
+    statement whose cycle holds its day (``statements.statement_close``),
+    keeping its time of day; its day is read as the day rules read it (UTC
+    components, ``recurrence.canon``). ``max_occurrences`` and
+    ``occurrences_paid_offset`` are stored as sent. A card without a cycle
+    leaves the entry as sent (it is blocked from auto-posting).
+    """
+    request = SimpleNamespace(
+        entry_type=entry_in.entry_type, transfer_to_account_id=entry_in.transfer_to_account_id,
+        end_mode=(entry_in.end_mode or "indefinite").lower(),
+        max_occurrences=entry_in.max_occurrences, billing_kind=entry_in.billing_kind)
+    if not entry_in.account_id or not is_card_installment(
+            request, db.get(Account, entry_in.account_id)):
+        return entry_in.next_occurrence, sent
+    card = locking.lock_accounts(db, [entry_in.account_id]).get(entry_in.account_id)
+    close_day = installment_close_day(request, card)
+    if close_day is None:
+        return entry_in.next_occurrence, sent
+    if entry_in.cadence != RecurrenceFrequency.MONTHLY:
+        raise HTTPException(status_code=422, detail=INSTALLMENT_MONTHLY_MESSAGE)
+    if sent.get("day_rule") is not None or sent.get("anchor_day") not in (None, close_day):
+        raise HTTPException(status_code=422, detail=INSTALLMENT_CLOSE_MESSAGE)
+    on = canon(entry_in.next_occurrence)
+    close = statement_close(card, on.date())
+    return on.replace(year=close.year, month=close.month, day=close.day), {
+        "anchor_day": close_day}
+
+
+def _refuse_leaving_close(db: Session, entry: BudgetEntry, prospective_data: dict) -> None:
+    """422 when an update would take a normalised card installment off the close.
+
+    Compared by value on the request merged over the stored row, after its day
+    fields are resolved: the cadence, ``anchor_day`` or ``day_rule`` differing
+    from the stored ones is refused. A ``next_occurrence`` moved off the close
+    re-anchors to its own day (``resolve_day_fields`` rule 6), so it is caught
+    too. A form that re-sends the stored values unchanged passes, so a rename
+    always saves. A legacy row is never refused or converted here.
+    """
+    if not is_normalised_installment(
+            entry, db.get(Account, entry.account_id) if entry.account_id else None):
+        return
+    if any(prospective_data.get(f, getattr(entry, f)) != getattr(entry, f)
+           for f in ("cadence", "anchor_day", "day_rule")):
+        raise HTTPException(status_code=422, detail=INSTALLMENT_CLOSE_MESSAGE)
 
 
 MAX_PAYMENTS = 360  # the schema's maximum for max_occurrences and occurrences_paid_offset
@@ -565,14 +641,16 @@ def create_budget_entry(
         entry_in.entry_type, entry_in.currency,
     )
 
-    day_fields = _day_fields(
-        entry_in.cadence, entry_in.next_occurrence,
+    next_occurrence, sent_days = _installment_on_close(
+        db, entry_in,
         {f: getattr(entry_in, f) for f in DAY_FIELDS if f in entry_in.model_fields_set})
+    day_fields = _day_fields(entry_in.cadence, next_occurrence, sent_days)
 
     entry_data = entry_in.dict()
     entry_data.pop("tag_ids", None)
     entry_data["user_id"] = current_user.id
     entry_data["end_mode"] = entry_data.get("end_mode", "indefinite").lower()
+    entry_data["next_occurrence"] = next_occurrence
     entry_data.update(day_fields)
     entry = BudgetEntry(**entry_data)
     if "billing_kind" not in entry_in.model_fields_set:
@@ -760,6 +838,7 @@ def update_budget_entry(
         prospective_data.get("next_occurrence") or entry.next_occurrence,
         {f: prospective_data[f] for f in DAY_FIELDS if f in prospective_data},
         stored=entry))
+    _refuse_leaving_close(db, entry, prospective_data)
     # The final-month rule, only on an entry stored as active: any edit to a
     # paused entry, resuming it or leaving it paused, keeps the pause behaviour
     # (paused months are not counted, the count and the offset stay, the last

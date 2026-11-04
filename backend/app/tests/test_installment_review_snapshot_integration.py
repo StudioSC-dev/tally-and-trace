@@ -26,7 +26,8 @@ from app.tests.test_installment_autopost_integration import (
 )
 from app.tests.test_installment_review_integration import NOT_FOUND, _get, _review
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 AUTO_POST_KEYS = ("installment_auto_post", "installment_review", "missed")
 FLAG_KEYS = ("installment_reviewed", "auto_post_enabled")

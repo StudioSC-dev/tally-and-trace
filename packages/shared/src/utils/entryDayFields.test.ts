@@ -30,6 +30,28 @@ describe('buildEntryDayFields', () => {
     })
   })
 
+  describe('create of a card installment: sends neither, so the API snaps to the close', () => {
+    it('whatever the Day control holds', () => {
+      for (const day of [{ kind: 'same_as_date' }, { kind: 'day', day: 25 }, { kind: 'last_weekday' }] as const) {
+        expect(buildEntryDayFields({ cadence: 'monthly', day, nextOccurrence: '2026-11-25T00:00:00Z', cardInstallment: true }))
+          .toEqual({})
+      }
+    })
+
+    it('an off-close date resolves without an error', () => {
+      const sent = buildEntryDayFields({ cadence: 'monthly', day: { kind: 'same_as_date' }, nextOccurrence: '2026-11-25T00:00:00Z', cardInstallment: true })
+      expect(resolveEntryDayFields({ cadence: 'monthly', nextOccurrence: '2026-11-25T00:00:00Z', sent }).ok).toBe(true)
+    })
+
+    it('an edit keeps the usual rules', () => {
+      const normalised: StoredDayRow = { cadence: 'monthly', next_occurrence: '2026-12-02T00:00:00Z', anchor_day: 2, day_rule: null }
+      expect(buildEntryDayFields({ cadence: 'monthly', day: daySettingOf(normalised), nextOccurrence: '2026-12-02T00:00:00Z', stored: normalised, cardInstallment: true }))
+        .toEqual({})
+      expect(buildEntryDayFields({ cadence: 'monthly', day: { kind: 'day', day: 3 }, nextOccurrence: '2026-12-03T00:00:00Z', stored: normalised, cardInstallment: true }))
+        .toEqual({ anchor_day: 3, day_rule: null })
+    })
+  })
+
   it('create outside the month family sends neither', () => {
     expect(buildEntryDayFields({ cadence: 'weekly', day: { kind: 'same_as_date' }, nextOccurrence: '2026-10-30T00:00:00Z' }))
       .toEqual({})

@@ -246,32 +246,61 @@ def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
 CYCLE_FIELDS = ("billing_cycle_start", "due_date", "days_until_due_date")
 
 
+def _has_open_installments(db: Session, account: Account) -> bool:
+    """Whether any card installment on ``account`` still has payments left
+    (``max_occurrences > 0``), active or paused, whoever created it."""
+    from app.models.budget_entry import BudgetEntry
+    from app.services.recurring_kinds import is_card_installment
+
+    entries = db.query(BudgetEntry).filter(
+        BudgetEntry.account_id == account.id, BudgetEntry.max_occurrences > 0).all()
+    return any(is_card_installment(e, account) for e in entries)
+
+
 def _refuse_cycle_identity_change(db: Session, data: dict, account: Account) -> None:
-    """Keep a card's printed statement due dates attached to their statements.
+    """Keep a card's statement-keyed records attached to their statements.
 
     A printed due (``card_statement_due_overrides``) is keyed by its
     statement's close and was checked against the dues of the statements
-    either side of it. With the fields merged as ``_validate_card_loan_payments``
-    merges them, an update is refused (409) while the card has one when:
+    either side of it; a card installment is charged on the statement close
+    (``recurring_kinds.is_normalised_installment``). With the fields merged as
+    ``_validate_card_loan_payments`` merges them, an update is refused (409):
 
-    - the resolved close day changes, or the card stops having a cycle (no
-      close or due day, or no longer a credit card): the overrides would no
-      longer name a statement. A ``days_until_due_date`` change on a legacy
-      card (only ``due_date`` set) moves its close, so it counts here;
-    - a ``days_until_due_date`` change leaves a printed due out of order
-      against the recomputed dues of its neighbours
+    - while the card has a card installment with payments left
+      (``max_occurrences > 0``, active or paused, any creator's), when the
+      resolved close day changes or the card stops having a cycle: an
+      installment on the old close would stop being on a close, and a paused
+      one would resume on the old day. A card gaining its first cycle is not
+      a change (no installment can be on a close yet); a completed
+      installment does not block;
+    - while the card has a printed due, when the resolved close day changes,
+      or the card stops having a cycle (no close or due day, or no longer a
+      credit card): the overrides would no longer name a statement. A
+      ``days_until_due_date`` change on a legacy card (only ``due_date`` set)
+      moves its close, so it counts here;
+    - while the card has a printed due, when a ``days_until_due_date`` change
+      leaves one out of order against the recomputed dues of its neighbours
       (``statements.due_override_conflicts``).
+
+    The card is locked by ``update_account`` before this runs, and a create
+    of a card installment locks it too, so the two take turns.
     """
     if not any(f in data for f in ("account_type", *CYCLE_FIELDS)):
-        return
-    overrides = load_due_overrides(db, [account.id])[account.id]
-    if not overrides:
         return
     merged = SimpleNamespace(**{f: data.get(f, getattr(account, f)) for f in CYCLE_FIELDS})
     before = resolve_cycle_fields(account)
     after = (resolve_cycle_fields(merged)
              if data.get("account_type", account.account_type) == AccountType.CREDIT else None)
-    if after is None or before is None or after[0] != before[0]:
+    close_moved = after is None or before is None or after[0] != before[0]
+    if before is not None and close_moved and _has_open_installments(db, account):
+        raise HTTPException(
+            status_code=409,
+            detail="This card has installments charged on its statement close with payments "
+                   "left; its closing day can't change until they are paid off")
+    overrides = load_due_overrides(db, [account.id])[account.id]
+    if not overrides:
+        return
+    if close_moved:
         raise HTTPException(
             status_code=409,
             detail="This card has statement due dates entered from its statements; clear them "

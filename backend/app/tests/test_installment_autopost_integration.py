@@ -25,7 +25,8 @@ from app.tests.conftest import (
     API, PRIVATE, hh_household, hh_tag_share, sw_db_reachable, sw_post, sw_share,
 )
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 REF = datetime(2026, 10, 18, 2, 0)  # Sunday, 10:00 in Manila
 TODAY = date(2026, 10, 18)

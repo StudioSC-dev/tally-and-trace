@@ -17,7 +17,8 @@ from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_post, sw_share
 from app.tests.test_card_charges_integration import pin_clock
 from app.tests.test_minimum_due_rule_integration import _alembic, scratch_url  # noqa: F401
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REF = datetime(2027, 3, 18, 2, 0)

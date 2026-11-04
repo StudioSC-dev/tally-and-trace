@@ -12,6 +12,7 @@ import {
   sameStatementCycle,
   skippedBefore,
   skippedNotice,
+  statementCloseDay,
   statementCycleClose,
 } from './markPaid'
 
@@ -47,6 +48,14 @@ describe('markPaidWireDate', () => {
 
   it('rejects a non-day', () => {
     expect(() => markPaidWireDate('Oct 17')).toThrow(RangeError)
+  })
+})
+
+describe('statementCloseDay', () => {
+  it('reads billing_cycle_start, else the legacy due day less the days until due', () => {
+    expect(statementCloseDay({ billing_cycle_start: 2 })).toBe(2)
+    expect(statementCloseDay({ due_date: 23, days_until_due_date: 21 })).toBe(2)
+    expect(statementCloseDay({})).toBeNull()
   })
 })
 

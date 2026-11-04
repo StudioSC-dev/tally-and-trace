@@ -26,7 +26,8 @@ from app.tests.test_installment_autopost_integration import (
     make_world, pin_clock,
 )
 
-pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
+              pytest.mark.usefixtures("legacy_card_installments")]
 
 CHANGED = "This installment changed since you opened the review; reopen it"
 NOT_FOUND = "Budget entry not found"

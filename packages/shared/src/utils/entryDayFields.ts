@@ -48,6 +48,10 @@ function sameSetting(a: DaySetting, b: DaySetting): boolean {
  * - update with the Day control changed: the new field, the other null;
  * - cadence leaving the month family: both null;
  * - otherwise neither.
+ * - create of a card installment on a card with a statement cycle
+ *   (`cardInstallment`): neither, whatever the Day control holds. The API
+ *   anchors it on the card's close day and moves the date onto the close of
+ *   its statement; a day field it did not ask for would be refused.
  * `nextOccurrence` is the wire value (UTC components).
  */
 export function buildEntryDayFields(args: {
@@ -55,8 +59,10 @@ export function buildEntryDayFields(args: {
   day: DaySetting
   nextOccurrence: string
   stored?: StoredDayRow | null
+  cardInstallment?: boolean
 }): EntryDayFields {
-  const { cadence, day, nextOccurrence, stored } = args
+  const { cadence, day, nextOccurrence, stored, cardInstallment } = args
+  if (cardInstallment && !stored) return {}
   if (!isMonthFamily(cadence)) {
     return stored && isMonthFamily(stored.cadence) ? { anchor_day: null, day_rule: null } : {}
   }
