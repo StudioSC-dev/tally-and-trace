@@ -65,6 +65,9 @@ const isUpcomingOccurrences = (r) => {
   if (r.method() !== 'GET' || !pathIs('/budget-entries/upcoming-occurrences')(r)) return false
   return new URL(r.url()).searchParams.get('plan') === 'none'
 }
+/** The Upcoming card's transactions request: the window, ascending. */
+const isUpcomingTransactions = (r) =>
+  r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.get('order') === 'asc'
 /** A linked batch: transactions asked for by `ids`. */
 const isLinkedBatch = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length > 0
 
@@ -185,6 +188,8 @@ async function scenarioF(browser) {
 // the Manila day then turns on the browser clock, which changes the window's arguments and sends
 // a new occurrences request, and that one is held. The badge reads "…", the panel stays mounted
 // with no empty text, and when the request lands the badge's history is only "…" and its final value.
+// The transactions request is held on its own gate too: while each source's new-day request is held,
+// the panel shows none of the previous window's rows from it (each is read for the current day only).
 // (A held request keeps the screen loader up and its capture guard swallows input, so the tab is
 // selected before the hold and nothing is clicked while it lasts.)
 async function scenarioG(browser) {
@@ -206,6 +211,7 @@ async function scenarioG(browser) {
   await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })
   await h.recordTexts(page, ['due-upcoming-count'])
   let g
+  let gt
   try {
     await h.uiLogin(page, stack, u)
     await page.goto(`${stack.webUrl}/transactions`)
@@ -217,10 +223,21 @@ async function scenarioG(browser) {
     await h.sleep(500)
     await h.resetTexts(page)
     g = await h.gate(page, isUpcomingOccurrences)
+    gt = await h.gate(page, isUpcomingTransactions)
     // Playwright reads '03:00' as mm:ss: three minutes, past Manila midnight.
     await page.clock.fastForward('03:00')
     await h.check('g.occurrences-held', 'S', async () => (await g.waitHits(1)) || 'the new day sent no occurrences request')
+    await h.check('g.transactions-held', 'S', async () => (await gt.waitHits(1)) || 'the new day sent no transactions request')
     await h.sleep(750)
+    const panelRows = async (kind) => page.locator(`${tid('due-panel-upcoming')} [data-testid="due-row"][data-kind="${kind}"]`).count()
+    await h.check('g.no-old-occurrence-rows-while-held', 'B', async () => {
+      const n = await panelRows('occurrence')
+      return n === 0 || `${n} occurrence row(s) from the previous window shown while the new day's occurrences request was held`
+    })
+    await h.check('g.no-old-transaction-rows-while-held', 'B', async () => {
+      const n = await panelRows('upcoming')
+      return n === 0 || `${n} transaction row(s) from the previous window shown while the new day's transactions request was held`
+    })
     const badge = async () => ((await page.locator(tid('due-upcoming-count')).textContent()) || '').trim()
     await h.check('g.badge-pending', 'B', async () => {
       const shown = await badge()
@@ -233,7 +250,18 @@ async function scenarioG(browser) {
     })
     await h.check('g.no-empty-text-while-held', 'B', async () =>
       (await h.expectAbsentFor(page, page.locator(tid('due-upcoming-empty')), 500)) || 'due-upcoming-empty shown while the occurrences request was held')
+    // The occurrences land, the transactions are still held: still none of the previous window's transaction rows.
     g.release({ disarm: true })
+    await h.sleep(750)
+    await h.check('g.no-old-transaction-rows-with-occurrences-in', 'B', async () => {
+      const n = await panelRows('upcoming')
+      return n === 0 || `${n} transaction row(s) from the previous window shown while only the new day's transactions request was held`
+    })
+    await h.check('g.badge-pending-with-transactions-held', 'B', async () => {
+      const shown = await badge()
+      return shown === '…' || `due-upcoming-count read "${shown}" while the transactions request was held`
+    })
+    gt.release({ disarm: true })
     await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor()
     await h.waitQuiet(page)
     await h.sleep(500)
@@ -250,6 +278,7 @@ async function scenarioG(browser) {
     })
   } finally {
     g?.release({ disarm: true })
+    gt?.release({ disarm: true })
     await ctx.close()
   }
 }

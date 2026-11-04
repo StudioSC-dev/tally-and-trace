@@ -743,6 +743,9 @@ async function heldRollover(browser) {
   await sleep(600)
   check('(i) while held: both badges read "..."', [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '…'])
   check('(i) while held: no empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"], [data-testid="due-installments-empty"]').count(), 0)
+  // Each source is read for the current day only: none of the previous window's subscription rows stay on screen.
+  const oldSubRows = () => page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-row"][data-kind="occurrence"]').count()
+  check('(i) while held: Subscriptions shows none of the previous window\'s occurrence rows', await oldSubRows(), 0)
 
   // The snapshot and the plans land first, with the subscription occurrences still held:
   // Subscriptions waits for both of its sources, so it stays at "...".
@@ -752,6 +755,7 @@ async function heldRollover(browser) {
   check('(i) the snapshot and plans in, the subscription occurrences held: Subscriptions reads "...", Installments the new count',
     [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '1'])
   check('(i) and no Subscriptions empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"]').count(), 0)
+  check('(i) the snapshot in, the subscription occurrences held: none of the previous window\'s occurrence rows', await oldSubRows(), 0)
   stage.gates.subs.open()
   for (const id of BADGES) await page.locator(`[data-testid="${id}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 15000 })
   await settle(page)
