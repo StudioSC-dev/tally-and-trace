@@ -31,6 +31,8 @@ function statement(over: Partial<StatementDue> = {}): StatementDue {
   return {
     close_date: '2027-03-03',
     due_date: '2027-03-24',
+    due_overridden: false,
+    computed_due_date: '2027-03-24',
     status: 'open',
     owed: 20000,
     clear_through: 21000,
