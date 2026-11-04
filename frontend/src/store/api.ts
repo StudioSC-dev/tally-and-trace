@@ -90,6 +90,7 @@ export type {
   MinimumDueRule,
   MinimumDuePreset,
   StatementDue,
+  StatementDueInput,
   StatementMinimumInput,
   InstallmentAutoPostToggleInput,
   InstallmentReviewInput,
@@ -141,6 +142,7 @@ import type {
   CardCreditDetail,
   CardPaymentInput,
   MinimumDuePreset,
+  StatementDueInput,
   StatementMinimumInput,
   InstallmentReview,
   InstallmentAutoPostToggleInput,
@@ -288,6 +290,26 @@ export const accountingApi = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['Account', 'Transaction', 'BudgetEntry'],
+    }),
+    // Enter the due date a statement shows, replacing its rolled due everywhere: the
+    // forecast, the dashboard and the statements read these tags, and Household too.
+    setStatementDue: builder.mutation<
+      { close_date: string; due_date: string; computed_due: string },
+      { accountId: number; closeDate: string; data: StatementDueInput }
+    >({
+      query: ({ accountId, closeDate, data }) => ({
+        url: `cards/${accountId}/statements/${closeDate}/due-date`,
+        method: 'PUT',
+        body: data,
+      }),
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household'],
+    }),
+    clearStatementDue: builder.mutation<void, { accountId: number; closeDate: string }>({
+      query: ({ accountId, closeDate }) => ({
+        url: `cards/${accountId}/statements/${closeDate}/due-date`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household'],
     }),
 
     // ── Categories ────────────────────────────────────────────────────────────
@@ -729,6 +751,8 @@ export const {
   usePayCardMutation,
   useSetStatementMinimumMutation,
   useClearStatementMinimumMutation,
+  useSetStatementDueMutation,
+  useClearStatementDueMutation,
   useRecordLoanPaymentMutation,
   useRecordLoanPrepaymentMutation,
 

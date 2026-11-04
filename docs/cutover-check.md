@@ -9,6 +9,12 @@ and its report is what `cutover_load.py --sign-off` accepts. It never writes.
 - It imports nothing from `app.cutover_load`; a test enforces this.
 - Tests: `backend/app/tests/test_cutover_check_integration.py`.
 
+> **Historical.** The cutover is done and will not be re-run. Its frozen statement
+> dues predate the banking-day roll (a due on a weekend or PH holiday moves to the
+> next banking day) and per-statement due overrides (the due printed on a
+> statement, `card_statement_due_overrides`). The check now walks cycles with both,
+> so a frozen due can differ from what it computes today.
+
 ## Who runs it
 
 The owner runs every production command, in their own shell, with the production

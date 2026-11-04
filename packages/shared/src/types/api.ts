@@ -1895,7 +1895,12 @@ export interface MinimumDue {
 /** One closed statement of a card. */
 export interface StatementDue {
   close_date: string
+  /** The due printed on the statement when one was entered (`due_overridden`), else `computed_due_date`. */
   due_date: string
+  /** True when `due_date` was entered from the statement. */
+  due_overridden: boolean
+  /** The close plus the card's days until due, rolled to the next banking day. */
+  computed_due_date: string
   status: 'open' | 'overdue' | 'paid'
   owed: number
   /** What clears this statement and every one before it. */
@@ -1930,7 +1935,13 @@ export interface CardCreditDetail {
   rule: MinimumDueRule | null
   /** The six most recent closed statements plus any older one still owed, oldest first. */
   statements: StatementDue[]
-  open_cycle: { close_date: string; due_date: string } | null
+  /** The cycle open today; `due_date` and the override fields as on `StatementDue`. */
+  open_cycle: {
+    close_date: string
+    due_date: string
+    due_overridden: boolean
+    computed_due_date: string
+  } | null
   /** Present even when `statements` is empty; null when no installment month is unposted. */
   unposted: CardUnposted | null
 }
@@ -1947,6 +1958,15 @@ export interface CardPaymentInput {
 /** PUT /cards/{id}/statements/{close_date}/minimum-due. */
 export interface StatementMinimumInput {
   amount: number
+}
+
+/**
+ * PUT /cards/{id}/statements/{close_date}/due-date: the due printed on a closed
+ * statement or one of the next two. `YYYY-MM-DD`, after the close and strictly
+ * between the neighbouring statements' due dates.
+ */
+export interface StatementDueInput {
+  due_date: string
 }
 
 /** GET /dashboard/snapshot, exactly as the backend returns it. */

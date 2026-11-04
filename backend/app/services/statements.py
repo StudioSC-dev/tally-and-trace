@@ -16,6 +16,12 @@ The cycle contract (see HANDOVER Session 14 for why):
              (a weekend or PH holiday moves it to the day the bank opens;
              the close itself never moves; see app/services/banking_days.py)
 
+A statement is identified by its close. When the owner enters the due date the
+bank printed on a statement (``card_statement_due_overrides``), that date
+replaces the rolled due for that statement and is used as it is, never rolled.
+The close and the window never move. Every cycle walk takes the card's
+overrides (``load_due_overrides``) explicitly.
+
 Legacy fallback: a card with only ``due_date`` (day-of-month) set is read as
 closing ``days_until_due_date`` days *before* that due day, which collapses to the
 same (close, due) pair without a second code path. A card with neither field can't
@@ -53,13 +59,14 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 
 from app.models.account import Account, AccountType
+from app.models.card_statement_due_override import CardStatementDueOverride
 from app.services.banking_days import next_banking_day
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 
@@ -98,13 +105,61 @@ def resolve_cycle_fields(card: Account) -> Optional[Tuple[int, int]]:
     return None
 
 
+def statement_close(card: Account, day: date) -> Optional[date]:
+    """Close of the card's statement whose cycle contains calendar day ``day``.
+
+    ``None`` for a card without cycle settings. No due override moves a close,
+    so none is needed here.
+    """
+    fields = resolve_cycle_fields(card)
+    if fields is None:
+        return None
+    close_day = fields[0]
+    y, m = day.year, day.month
+    if day.day > _clamp_day(y, m, close_day):
+        y, m = _month_step(y, m, 1)
+    return date(y, m, _clamp_day(y, m, close_day))
+
+
+def load_due_overrides(db: Session, card_ids: Iterable[int]) -> Dict[int, Dict[date, date]]:
+    """``{card id: {statement close: printed due}}`` for ``card_ids``, in one query.
+
+    Every id asked for is a key, with ``{}`` when the card has no override.
+    """
+    ids = list(dict.fromkeys(card_ids))
+    out: Dict[int, Dict[date, date]] = {cid: {} for cid in ids}
+    if not ids:
+        return out
+    rows = db.query(CardStatementDueOverride.account_id, CardStatementDueOverride.statement_close,
+                    CardStatementDueOverride.due_date).filter(
+        CardStatementDueOverride.account_id.in_(ids))
+    for account_id, close, due in rows:
+        out[account_id][close] = due
+    return out
+
+
+def computed_due(close: date, days_until_due: int) -> date:
+    """A statement's due without an override: ``close + days``, rolled to the
+    next PH banking day."""
+    return next_banking_day(close + timedelta(days=days_until_due))
+
+
 def iter_cycles_from(card: Account, first: date, end: datetime,
-                     through: Optional[date] = None) -> Iterator[dict]:
+                     through: Optional[date] = None, *,
+                     due_overrides: Mapping[date, date]) -> Iterator[dict]:
     """Yield every cycle from the one containing day ``first`` up to those due before ``end``.
 
-    Each cycle is ``{window_start, close, due}``. Walking from the card's first
-    line item, not from the window start, reaches back through its history, which
-    is what allocating payments oldest-statement-first needs.
+    Each cycle is ``{window_start, close, due, computed_due, due_overridden}``.
+    Walking from the card's first line item, not from the window start, reaches
+    back through its history, which is what allocating payments
+    oldest-statement-first needs.
+
+    ``due_overrides`` is the card's ``{close: printed due}`` (a
+    ``load_due_overrides`` entry). It is required, so a caller cannot forget
+    it and show a wrong due. ``due`` is the override when there is one, else
+    ``computed_due``; ``due_overridden`` says which. Overrides keep dues
+    strictly increasing (they are validated against their neighbours), so the
+    stop below still holds.
 
     With ``through``, the walk also continues past ``end`` until it has yielded
     the cycle containing day ``through``, so a line item dated after the window
@@ -120,8 +175,9 @@ def iter_cycles_from(card: Account, first: date, end: datetime,
         y, m = _month_step(y, m, 1)
     while True:
         close = datetime(y, m, _clamp_day(y, m, close_day))
-        due = datetime.combine(
-            next_banking_day((close + timedelta(days=days_until_due)).date()), time())
+        computed = datetime.combine(computed_due(close.date(), days_until_due), time())
+        override = due_overrides.get(close.date())
+        due = datetime.combine(override, time()) if override is not None else computed
         py, pm = _month_step(y, m, -1)
         window_start = datetime(py, pm, _clamp_day(py, pm, close_day))
         if due >= end and (through is None or window_start.date() >= through):
@@ -130,18 +186,54 @@ def iter_cycles_from(card: Account, first: date, end: datetime,
             "window_start": window_start,
             "close": close,
             "due": due,
+            "computed_due": computed,
+            "due_overridden": override is not None,
         }
         y, m = _month_step(y, m, 1)
 
 
-def statement_due_date(card: Account, day: date) -> Optional[datetime]:
+def statement_due_date(card: Account, day: date, *,
+                       due_overrides: Mapping[date, date]) -> Optional[datetime]:
     """Due date of the card's statement whose cycle contains calendar day ``day``.
 
-    ``None`` for a card without cycle settings.
+    ``None`` for a card without cycle settings. ``due_overrides`` as for
+    ``iter_cycles_from``.
     """
     # end=datetime.min stops the walk right after the cycle containing ``day``.
-    cycle = next(iter_cycles_from(card, day, datetime.min, through=day), None)
+    cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+                                  due_overrides=due_overrides), None)
     return cycle["due"] if cycle else None
+
+
+def due_in_order(card: Account, close: date, due_overrides: Mapping[date, date]) -> bool:
+    """Whether the due of the statement closing on ``close`` keeps the order.
+
+    Under ``due_overrides`` its due (the override, else the computed one) is
+    after its close and strictly between the dues of the statements before
+    and after it (each the override, else the computed due). Strictly
+    increasing dues keep the walk's stop, ``settle_projected``'s
+    first-cycle-due-on-or-after rule and the overdue carry correct. False when
+    ``close`` is not a close of the card.
+    """
+    if statement_close(card, close) != close:
+        return False
+    # The previous close is this cycle's window start (a close of the card).
+    previous = next(iter_cycles_from(card, close, datetime.min, through=close,
+                                     due_overrides={}))["window_start"].date()
+    following = statement_close(card, close + timedelta(days=1))
+    cycles = list(iter_cycles_from(card, previous, datetime.min, through=following,
+                                   due_overrides=due_overrides))
+    by_close = {c["close"].date(): c["due"].date() for c in cycles}
+    due = by_close[close]
+    return close < due and by_close[previous] < due < by_close[following]
+
+
+def due_override_conflicts(card: Account, due_overrides: Mapping[date, date]) -> List[date]:
+    """The closes in ``due_overrides`` whose due is out of order (``due_in_order``)
+    under ``card``'s cycle settings, oldest first. Every pair of neighbouring
+    statements with an override between them is checked."""
+    return [close for close in sorted(due_overrides)
+            if not due_in_order(card, close, due_overrides)]
 
 
 def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[Decimal]:
@@ -384,8 +476,12 @@ def build_statement_payables(
     unbilled_sources: frozenset = frozenset(),
     projected_by_card: Optional[dict] = None,
     normalise=None,
+    due_overrides_by_card: Optional[Mapping[int, Mapping[date, date]]] = None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
+
+    ``due_overrides_by_card`` is ``load_due_overrides``'s result: each
+    statement with a printed due is payable on it (none by default).
 
     ``normalise(card, lines)`` (``normalise_lines``) puts each card's line
     items in the card's currency; by default every stored amount is used as
@@ -454,7 +550,9 @@ def build_statement_payables(
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
         days = [row.transaction_date.date() for row in [*lines, *projected]]
-        cycles = list(iter_cycles_from(card, min(days), end, through=max(days)))
+        cycles = list(iter_cycles_from(
+            card, min(days), end, through=max(days),
+            due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
         recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of)
                     for c in cycles]
         paid_in = [amount for _, amount in payments]
@@ -547,7 +645,8 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
 
 
 def statement_history(db: Session, card: Account, today: datetime,
-                      viewable_ids: Iterable[int], fx=None, card_rows=None) -> List[dict]:
+                      viewable_ids: Iterable[int], fx=None, card_rows=None,
+                      due_overrides: Optional[Mapping[date, date]] = None) -> List[dict]:
     """The card's recorded statements, oldest first, through the cycle open on ``today``.
 
     Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
@@ -576,7 +675,10 @@ def statement_history(db: Session, card: Account, today: datetime,
 
     ``card_rows`` is a ``_card_rows`` result already read for this card (and
     possibly others), so a caller walking many cards reads them once; None
-    reads this card's own.
+    reads this card's own. ``due_overrides`` is the card's
+    ``load_due_overrides`` entry, read for this card when None; each
+    statement's ``due`` is its printed due when it has one, and it also
+    carries ``computed_due`` and ``due_overridden`` (``iter_cycles_from``).
     """
     if resolve_cycle_fields(card) is None:
         return []
@@ -589,7 +691,10 @@ def statement_history(db: Session, card: Account, today: datetime,
         return []
     days = [row.transaction_date.date() for row in [*lines, *(u[0] for u in unconverted)]]
     last = max(max(days), today.date())
-    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last))
+    if due_overrides is None:
+        due_overrides = load_due_overrides(db, [card.id])[card.id]
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
+                                   due_overrides=due_overrides))
     balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
                 for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
@@ -624,6 +729,8 @@ def statement_history(db: Session, card: Account, today: datetime,
         history.append({
             "close": cycle["close"],
             "due": cycle["due"],
+            "computed_due": cycle["computed_due"],
+            "due_overridden": cycle["due_overridden"],
             "balance": balance,
             "owed": left,
             "status": status,
@@ -681,7 +788,8 @@ def get_statement_payables(
     cycle containing its date, after the recorded rows are settled (see
     ``build_statement_payables``). ``viewable_ids`` are the caller's viewable
     accounts (see ``_card_rows``). Lines are normalised into each card's
-    currency at the stored rates of ``fx`` (``normalise_lines``).
+    currency at the stored rates of ``fx`` (``normalise_lines``). Each card's
+    printed dues (``load_due_overrides``) date its payables.
     """
     cards = [c for c in cards if c.account_type == AccountType.CREDIT]
     if not cards:
@@ -699,4 +807,6 @@ def get_statement_payables(
     return build_statement_payables(cards, by_card, start, end, unbilled_sources,
                                     projected_by_card=projected_charges,
                                     normalise=lambda card, lines: normalise_lines(
-                                        db, card, lines, fx))
+                                        db, card, lines, fx),
+                                    due_overrides_by_card=load_due_overrides(
+                                        db, [c.id for c in cards]))

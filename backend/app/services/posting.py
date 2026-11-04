@@ -844,7 +844,7 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
     from app.services.forecast import unrecorded_occurrences
     from app.services.installment_duplicates import duplicate_candidates
     from app.services.recurring_kinds import auto_post_block
-    from app.services.statements import iter_cycles_from
+    from app.services.statements import statement_close
 
     card = db.get(Account, entry.account_id) if entry.account_id else None
     block = auto_post_block(entry, card)
@@ -875,9 +875,8 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
     past_cycles = False
     if card is not None:
         for occ in missed:
-            cycle = next(iter_cycles_from(card, occ.date(), datetime.min, through=occ.date()),
-                         None)
-            if cycle is not None and cycle["close"].date() < today:
+            close = statement_close(card, occ.date())
+            if close is not None and close < today:
                 past_cycles = True
                 break
 

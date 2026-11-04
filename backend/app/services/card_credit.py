@@ -85,7 +85,9 @@ from app.services import forecast as fc
 from app.services.fx import FxRates, convert
 from app.services.installment_duplicates import held_occurrences
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
-from app.services.statements import _card_rows, iter_cycles_from, statement_history
+from app.services.statements import (
+    _card_rows, iter_cycles_from, load_due_overrides, statement_history,
+)
 
 CARD_FX_BUFFER = Decimal("0.03")
 WINDOW_DAYS = 30
@@ -498,19 +500,25 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
     }
 
 
-def open_cycle(card: Account, today: date) -> Optional[dict]:
-    """``{close_date, due_date}`` of the cycle open on ``today`` (its close is
-    today or later), or None for a card without cycle settings."""
-    cycle = next(iter_cycles_from(card, today, datetime.min, through=today), None)
+def open_cycle(card: Account, today: date, *, due_overrides) -> Optional[dict]:
+    """``{close_date, due_date, due_overridden, computed_due_date}`` of the
+    cycle open on ``today`` (its close is today or later), or None for a card
+    without cycle settings. ``due_overrides`` is the card's
+    ``statements.load_due_overrides`` entry: ``due_date`` is the printed due
+    when one was entered, ``computed_due_date`` the rolled one."""
+    cycle = next(iter_cycles_from(card, today, datetime.min, through=today,
+                                  due_overrides=due_overrides), None)
     if cycle is None:
         return None
     return {"close_date": cycle["close"].date().isoformat(),
-            "due_date": cycle["due"].date().isoformat()}
+            "due_date": cycle["due"].date().isoformat(),
+            "due_overridden": cycle["due_overridden"],
+            "computed_due_date": cycle["computed_due"].date().isoformat()}
 
 
 def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
                       viewable_ids: Optional[Iterable[int]] = None,
-                      card_rows=None) -> List[dict]:
+                      card_rows=None, due_overrides=None) -> List[dict]:
     """The card's closed statements, oldest first: ``statement_history`` on
     Manila's midnight over the caller's viewable accounts, kept while the close
     is before Manila's today (a statement closing today can still take
@@ -519,13 +527,14 @@ def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
     statements in the snapshot (``statements_due``).
 
     ``viewable_ids`` and ``card_rows`` (a ``statements._card_rows`` result
-    covering the card) let a caller walking many cards look both up once; by
-    default each is read for this card."""
+    covering the card) and ``due_overrides`` (the card's
+    ``statements.load_due_overrides`` entry) let a caller walking many cards
+    look them up once; by default each is read for this card."""
     today = manila_today()
     if viewable_ids is None:
         viewable_ids = viewable_account_ids(db, user)
     history = statement_history(db, card, manila_midnight(), viewable_ids, fx=fx,
-                                card_rows=card_rows)
+                                card_rows=card_rows, due_overrides=due_overrides)
     return [s for s in history if s["close"].date() < today]
 
 
@@ -539,7 +548,8 @@ class UnpostedMonth:
     postable: bool
 
 
-def unposted_months(db: Session, card: Account, caller) -> List[UnpostedMonth]:
+def unposted_months(db: Session, card: Account, caller,
+                    due_overrides=None) -> List[UnpostedMonth]:
     """The months the card's statements leave out because no recorder has run.
 
     Over the card's active, reviewed card installments (any creator, as
@@ -554,6 +564,8 @@ def unposted_months(db: Session, card: Account, caller) -> List[UnpostedMonth]:
     statements, so it is defined on a card with no recorded statement.
     Ordered by close, day, then entry id. Counts only, never amounts; the
     callers are the managers' surfaces (``statements_due``, the credit detail).
+    ``due`` is the cycle's printed due when one was entered; ``due_overrides``
+    is the card's ``statements.load_due_overrides`` entry, read when None.
     """
     from app.core.access import RecordAccess
     from app.services.posting import post_plan
@@ -566,6 +578,8 @@ def unposted_months(db: Session, card: Account, caller) -> List[UnpostedMonth]:
     ).order_by(BudgetEntry.id).all() if is_card_installment(e, card)]
     if not entries:
         return []
+    if due_overrides is None:
+        due_overrides = load_due_overrides(db, [card.id])[card.id]
     held = held_occurrences(db, entries, today)
     pending = {(entry_id, fc._naive(when).date())
                for entry_id, when, _, is_posted in fc._linked_rows(
@@ -580,7 +594,8 @@ def unposted_months(db: Session, card: Account, caller) -> List[UnpostedMonth]:
             day = occ.date()
             if (entry.id, day) in pending or held[(entry.id, day)]:
                 continue
-            cycle = next(iter_cycles_from(card, day, datetime.min, through=day), None)
+            cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+                                          due_overrides=due_overrides), None)
             if cycle is None or cycle["close"].date() >= today:
                 continue
             out.append(UnpostedMonth(entry_id=entry.id, day=day, close=cycle["close"].date(),
@@ -631,11 +646,12 @@ def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
     # The viewable accounts and every card's rows are read once, not per card.
     viewable_ids = viewable_account_ids(db, user)
     card_rows = _card_rows(db, [c.id for c in cards], viewable_ids) if cards else None
+    overrides = load_due_overrides(db, [c.id for c in cards])
     items = []
     for card in sorted(cards, key=lambda a: (a.name, a.id)):
         closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
-                                   card_rows=card_rows)
-        months = unposted_months(db, card, user)
+                                   card_rows=card_rows, due_overrides=overrides[card.id])
+        months = unposted_months(db, card, user, due_overrides=overrides[card.id])
         latest_clear = closed[-1]["clear_through"] if closed else _ZERO
         owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
         if not owed and not months:

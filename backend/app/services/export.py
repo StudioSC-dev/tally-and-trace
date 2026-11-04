@@ -24,6 +24,8 @@ Version 2 (STU-232, shared accounts):
 
 ``card_statement_minimums`` (STU-343 Plan C): the minimum amounts due
 entered from the statements of the cards the caller owns.
+``card_statement_due_overrides``: the due dates entered from the statements
+of the cards the caller owns, the same way.
 
 Tags (STU-231): the caller's own tags, and the links from those tags to the
 caller's own accounts and the records in ``transactions`` and
@@ -54,6 +56,7 @@ from app.core.time import utc_now
 from app.models.account import Account
 from app.models.allocation import Allocation
 from app.models.budget_entry import BudgetEntry
+from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.category import Category
 from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tags
@@ -112,6 +115,10 @@ CARD_STATEMENT_MINIMUM_FIELDS = (
     "id", "account_id", "statement_close", "amount", "created_at", "updated_at",
 )
 
+CARD_STATEMENT_DUE_OVERRIDE_FIELDS = (
+    "id", "account_id", "statement_close", "due_date", "created_at", "updated_at",
+)
+
 TAG_FIELDS = ("id", "name", "color", "is_system", "created_at")
 
 ACCOUNT_TAG_FIELDS = ("tag_id", "account_id")
@@ -137,6 +144,7 @@ TABLES = (
     "accounts", "shared_accounts", "transactions", "budget_entries", "categories", "allocations",
     "wishlist_items", "others_transactions", "others_budget_entries", "tags",
     "account_tags", "transaction_tags", "budget_entry_tags", "card_statement_minimums",
+    "card_statement_due_overrides",
 )
 
 
@@ -202,6 +210,11 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
                 .filter(CardStatementMinimum.account_id.in_(owned_ids))
                 .order_by(CardStatementMinimum.account_id, CardStatementMinimum.statement_close)
                 .all()) if owned_ids else []
+    due_overrides = (db.query(CardStatementDueOverride)
+                     .filter(CardStatementDueOverride.account_id.in_(owned_ids))
+                     .order_by(CardStatementDueOverride.account_id,
+                               CardStatementDueOverride.statement_close)
+                     .all()) if owned_ids else []
 
     return {
         "export_version": EXPORT_VERSION,
@@ -231,6 +244,8 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
         "budget_entry_tags": _own_links(
             db, user, budget_entry_tags, BUDGET_ENTRY_TAG_FIELDS, [e.id for e in entries]),
         "card_statement_minimums": [_row(m, CARD_STATEMENT_MINIMUM_FIELDS) for m in minimums],
+        "card_statement_due_overrides": [
+            _row(o, CARD_STATEMENT_DUE_OVERRIDE_FIELDS) for o in due_overrides],
     }
 
 
@@ -249,4 +264,5 @@ TABLE_FIELDS: Dict[str, tuple] = {
     "transaction_tags": TRANSACTION_TAG_FIELDS,
     "budget_entry_tags": BUDGET_ENTRY_TAG_FIELDS,
     "card_statement_minimums": CARD_STATEMENT_MINIMUM_FIELDS,
+    "card_statement_due_overrides": CARD_STATEMENT_DUE_OVERRIDE_FIELDS,
 }

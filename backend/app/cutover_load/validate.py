@@ -151,7 +151,7 @@ def row_namespace(row: TransactionIn) -> SimpleNamespace:
 
 
 def card_cycles(card, card_id, rows: Iterable, unbilled: frozenset,
-                boundary: datetime) -> List[dict]:
+                boundary: datetime, due_overrides) -> List[dict]:
     """The card's compared set as of ``boundary`` (plan section 2.5, check 2).
 
     Only posted rows dated before ``boundary`` count. A card with no line item
@@ -159,7 +159,9 @@ def card_cycles(card, card_id, rows: Iterable, unbilled: frozenset,
     holding the first line through the one holding the day before
     ``boundary`` is balanced and the payments allocated oldest first; the set
     is each cycle that still owes something plus that last cycle, even at 0.
-    Each is ``{close, due, balance, owed}`` with dates.
+    Each is ``{close, due, balance, owed}`` with dates. ``due_overrides`` is
+    the card's printed dues by close (``statements.load_due_overrides``):
+    ``{}`` for an input file, the stored ones for a loaded card.
     """
     kept = [r for r in rows if r.is_posted and naive(r.transaction_date) < boundary]
     lines, payments = _split_card_rows(card_id, kept, unbilled)
@@ -167,7 +169,8 @@ def card_cycles(card, card_id, rows: Iterable, unbilled: frozenset,
         return []
     days = [line.transaction_date.date() for line in lines]
     through = (boundary - timedelta(days=1)).date()
-    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=through))
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=through,
+                                   due_overrides=due_overrides))
     balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     compared = []
@@ -383,7 +386,9 @@ class _Checker:
                     continue
                 rows = [row_namespace(t) for t in pre
                         if a.key in (t.account_key, t.to_account_key)]
-                computed = card_cycles(card_namespace(a.card), a.key, rows, frozenset(), boundary)
+                # An input file has no printed dues: they are entered after the load.
+                computed = card_cycles(card_namespace(a.card), a.key, rows, frozenset(), boundary,
+                                       due_overrides={})
                 card_sets[a.key] = computed
                 self._compare_statements(a, computed)
             elif is_loan(a):

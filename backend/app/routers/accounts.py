@@ -35,7 +35,9 @@ from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
 from app.services.minimum_due import PRESETS as MINIMUM_DUE_PRESETS
 from app.services.fx import FxRates, get_fx
-from app.services.statements import resolve_cycle_fields
+from app.services.statements import (
+    due_override_conflicts, load_due_overrides, resolve_cycle_fields,
+)
 from app.core.time import manila_midnight, naive_utc_now, utc_now
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -239,6 +241,47 @@ def _validate_card_loan_payments(db: Session, current_user: User, data: dict,
                   "settings; keep a statement close or due day until that payment is posted "
                   "or removed")
     raise HTTPException(status_code=400, detail=detail)
+
+
+CYCLE_FIELDS = ("billing_cycle_start", "due_date", "days_until_due_date")
+
+
+def _refuse_cycle_identity_change(db: Session, data: dict, account: Account) -> None:
+    """Keep a card's printed statement due dates attached to their statements.
+
+    A printed due (``card_statement_due_overrides``) is keyed by its
+    statement's close and was checked against the dues of the statements
+    either side of it. With the fields merged as ``_validate_card_loan_payments``
+    merges them, an update is refused (409) while the card has one when:
+
+    - the resolved close day changes, or the card stops having a cycle (no
+      close or due day, or no longer a credit card): the overrides would no
+      longer name a statement. A ``days_until_due_date`` change on a legacy
+      card (only ``due_date`` set) moves its close, so it counts here;
+    - a ``days_until_due_date`` change leaves a printed due out of order
+      against the recomputed dues of its neighbours
+      (``statements.due_override_conflicts``).
+    """
+    if not any(f in data for f in ("account_type", *CYCLE_FIELDS)):
+        return
+    overrides = load_due_overrides(db, [account.id])[account.id]
+    if not overrides:
+        return
+    merged = SimpleNamespace(**{f: data.get(f, getattr(account, f)) for f in CYCLE_FIELDS})
+    before = resolve_cycle_fields(account)
+    after = (resolve_cycle_fields(merged)
+             if data.get("account_type", account.account_type) == AccountType.CREDIT else None)
+    if after is None or before is None or after[0] != before[0]:
+        raise HTTPException(
+            status_code=409,
+            detail="This card has statement due dates entered from its statements; clear them "
+                   "before changing its closing day")
+    if due_override_conflicts(merged, overrides):
+        raise HTTPException(
+            status_code=409,
+            detail="With these days until due, a statement due date entered from a statement "
+                   "would fall on or past a neighbouring statement's due date; change or clear "
+                   "it first")
 
 
 def _validate_loan_payer(db: Session, current_user: User, data: dict, account: Account) -> None:
@@ -604,6 +647,7 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_deactivation(db, current_user, update_data, db_account)
     _validate_card_loan_payments(db, current_user, update_data, db_account)
+    _refuse_cycle_identity_change(db, update_data, db_account)
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
     _validate_minimum_due_rule(update_data, account_update.minimum_due_rule, db_account)

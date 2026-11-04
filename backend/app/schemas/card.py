@@ -18,6 +18,14 @@ class StatementMinimumSet(BaseModel):
     amount: Money
 
 
+class StatementDueSet(BaseModel):
+    """``PUT /cards/{account_id}/statements/{close_date}/due-date``: the due
+    date printed on that statement."""
+    model_config = ConfigDict(extra="forbid")
+
+    due_date: date
+
+
 class CardPaymentCreate(BaseModel):
     """``POST /cards/{account_id}/payments``: one transfer into the card.
 

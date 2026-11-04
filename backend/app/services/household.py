@@ -99,7 +99,7 @@ from app.core.access import (
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType, pending_face
-from app.services.statements import iter_cycles_from, resolve_cycle_fields
+from app.services.statements import iter_cycles_from, load_due_overrides, resolve_cycle_fields
 
 ZERO = Decimal("0")
 
@@ -436,7 +436,8 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
     if not keys:
         return {}
     days = [line.transaction_date.date() for line in [*lines, *projected]]
-    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days)))
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days),
+                                   due_overrides=load_due_overrides(db, [card.id])[card.id]))
     paying = [(when, amount, src in paying_ids and readable(row))
               for when, amount, src, row in payments]
     owed, in_scope = _settle_with_sources(cycles, lines, paying, projected, recurring,
