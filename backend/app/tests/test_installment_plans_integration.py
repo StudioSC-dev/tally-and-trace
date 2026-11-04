@@ -380,29 +380,42 @@ def test_a_capped_walk_stops_at_its_last_payment(w):
     assert yielded.get(weekly, 0) <= 30
 
 
-def test_plans_on_distinct_cards_load_their_accounts_in_one_pass(w):
+# Each role sees every plan's card as make_world's Card C: O owns it, A, E and
+# V hold admin, editor and viewer shares, T reads it through O's Household tag.
+ROLES = {"o": ("full", True), "a": ("shared_full", True), "e": ("shared_full", True),
+         "v": (None, False), "t": (None, False)}
+
+
+@pytest.mark.parametrize("role", sorted(ROLES))
+def test_plans_on_distinct_cards_load_their_accounts_in_one_pass(w, role):
     """One plan per card, each request on a fresh session: the route's own
     queries (``installment_infos`` counted apart) are the same for 2 cards as
-    for 6, so listing the entries loads their accounts in one query."""
+    for 6 for every role, so listing the entries loads their accounts and
+    Household tag links in one query each, whatever the caller then sees."""
+    from app.tests.conftest import hh_household, sw_share
     from app.tests.test_installment_autopost_integration import _card
 
-    client, o = w["client"], w["o"]
+    client, db, o, who = w["client"], w["db"], w["o"], w[role]
+    view, listed = ROLES[role]
 
     def add_cards(n):
-        for _ in range(n):
-            card = _card(client, o, w["checking"], name=f"Card {_}")
+        for i in range(n):
+            card = _card(client, o, w["checking"], name=f"Card {i}",
+                         tag_ids=[hh_household(db, o)])
+            for holder, share in (("a", "admin"), ("e", "editor"), ("v", "viewer")):
+                sw_share(db, card, w[holder]["id"], share, o["id"])
             entry_id = _installment(w, name=f"Plan on {card}", next_day=_day(3), remaining=4,
                                     card=card)
-            _flags(w["db"], entry_id, reviewed=True, on=False)
+            _flags(db, entry_id, reviewed=True, on=False)
 
     def fresh_count():
-        # Each request opens its own session; nothing is cached across them.
-        w["db"].expire_all()
-        return _counted(w, lambda: _plans(client, o))
+        db.expire_all()  # each request opens its own session; nothing carries over
+        return _counted(w, lambda: _plans(client, who))
 
     add_cards(2)
     two, two_own, _ = fresh_count()
     add_cards(4)
     six, six_own, six_infos = fresh_count()
-    assert (len(two["items"]), len(six["items"])) == (2, 6)
-    assert six_own == two_own, (two_own, six_own, six_infos)
+    assert (len(two["items"]), len(six["items"])) == ((2, 6) if listed else (0, 0))
+    assert {i["view"] for i in six["items"]} == ({view} if listed else set())
+    assert six_own == two_own, (role, two_own, six_own, six_infos)

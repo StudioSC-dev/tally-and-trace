@@ -277,8 +277,11 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
     entries = query.order_by(BudgetEntry.id).all()
-    # Every account the filter below reads, in one query rather than per entry.
+    # Everything the filter below reads, in bulk rather than per entry: the
+    # accounts (with their shares and tags) and, for a Household tag share,
+    # which entries carry the sharer's tag explicitly.
     access.load(i for e in entries for i in record_account_ids(e))
+    access.load_explicit(entries)
     return [e for e in entries if access.readable(e) and redactor.view(e) != LIMITED]
 
 
