@@ -31,7 +31,7 @@ from app.core.time import manila_today, manila_wall_now
 from app.core.time import naive_utc_now  # noqa: F401
 from app.services.loans import COVER_HORIZON, build_loan_payables, normalise_cover
 from app.services.statements import (
-    get_statement_payables, resolve_cycle_fields, statement_due_date,
+    get_statement_payables, load_due_overrides, resolve_cycle_fields, statement_due_date,
 )
 from app.models.account import Account, AccountType
 from app.models.account_share import AccountShare
@@ -2251,6 +2251,7 @@ def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: dat
     months are billed on their own cycles."""
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     held = _held_card_months(db, entries, cards, start)
+    due_overrides = load_due_overrides(db, list(cards))
     for entry in entries:
         card = cards[entry.account_id]
         keep_lapsed = reviewed_card_installment(entry, card)
@@ -2263,7 +2264,8 @@ def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: dat
                 held[key] -= 1
                 continue  # counted once, as the possible duplicate already on the card
             if (not keep_lapsed and occ < start
-                    and statement_due_date(card, occ.date()) < start):
+                    and statement_due_date(card, occ.date(),
+                                           due_overrides=due_overrides[card.id]) < start):
                 continue  # lapsed: its statement fell due before the window
             yield entry, occ
 

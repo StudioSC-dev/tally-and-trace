@@ -853,7 +853,8 @@ def test_card_without_limit_has_no_credit(sw_client, sw_people, monkeypatch):
     assert _listed(sw_client, me)["items"] == []
     body = _detail(sw_client, me, card)
     assert (body["credit"], body["rule"], body["statements"]) == (None, None, [])
-    assert body["open_cycle"] == {"close_date": "2027-03-24", "due_date": "2027-04-14"}
+    assert body["open_cycle"] == {"close_date": "2027-03-24", "due_date": "2027-04-14",
+                                  "due_overridden": False, "computed_due_date": "2027-04-14"}
 
 
 def test_card_credit_detail_refuses_a_non_card(sw_client, sw_people, monkeypatch):

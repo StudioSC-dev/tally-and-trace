@@ -17,6 +17,8 @@ from app.services.statements import (
     iter_cycles_from,
     resolve_cycle_fields,
     statement_balance,
+    statement_close,
+    statement_due_date,
     statement_history,
 )
 
@@ -88,7 +90,7 @@ def test_card_with_no_cycle_fields_is_unmodellable():
 
 def test_unmodellable_card_yields_no_cycles():
     card = _card(billing_cycle_start=None, due_date=None)
-    assert list(iter_cycles_from(card, date(2026, 7, 1), datetime(2026, 10, 1))) == []
+    assert list(iter_cycles_from(card, date(2026, 7, 1), datetime(2026, 10, 1), due_overrides={})) == []
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +99,8 @@ def test_unmodellable_card_yields_no_cycles():
 
 def test_cycle_window_and_due_date_for_the_worked_example():
     """Close 24 Jul -> due 14 Aug, covering charges from 25 Jun to 24 Jul."""
-    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 31)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 31),
+                                   due_overrides={}))
     assert len(cycles) == 1
     cycle = cycles[0]
     assert cycle["close"] == datetime(2026, 7, 24)
@@ -107,18 +110,21 @@ def test_cycle_window_and_due_date_for_the_worked_example():
 
 def test_walk_starts_at_the_cycle_containing_the_first_day():
     """A first line item after the close day belongs to the next month's cycle."""
-    cycles = list(iter_cycles_from(_card(), date(2026, 7, 25), datetime(2026, 10, 1)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 25), datetime(2026, 10, 1),
+                                   due_overrides={}))
     assert [c["close"] for c in cycles] == [datetime(2026, 8, 24)]
 
 
 def test_due_date_on_the_window_end_is_excluded():
     """Window is half-open [start, end), consistent with the rest of the engine."""
-    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 14)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 8, 14),
+                                   due_overrides={}))
     assert cycles == []
 
 
 def test_multiple_cycles_across_a_longer_window():
-    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 11, 1)))
+    cycles = list(iter_cycles_from(_card(), date(2026, 7, 1), datetime(2026, 11, 1),
+                                   due_overrides={}))
     assert [c["due"] for c in cycles] == [
         datetime(2026, 8, 14),
         datetime(2026, 9, 14),
@@ -129,7 +135,8 @@ def test_multiple_cycles_across_a_longer_window():
 def test_close_day_clamps_to_short_months():
     """Day 31 must not explode on February."""
     card = _card(billing_cycle_start=31, days_until_due_date=21)
-    cycles = list(iter_cycles_from(card, date(2027, 2, 1), datetime(2027, 3, 31)))
+    cycles = list(iter_cycles_from(card, date(2027, 2, 1), datetime(2027, 3, 31),
+                                   due_overrides={}))
     assert cycles[0]["close"] == datetime(2027, 2, 28)
 
 
@@ -144,8 +151,9 @@ def _card_a():
                  currency="PHP")
 
 
-def _cycle_closing(card, close):
-    return next(c for c in iter_cycles_from(card, close, datetime.min, through=close)
+def _cycle_closing(card, close, due_overrides=None):
+    return next(c for c in iter_cycles_from(card, close, datetime.min, through=close,
+                                            due_overrides=due_overrides or {})
                 if c["close"].date() == close)
 
 
@@ -156,6 +164,8 @@ def test_card_a_nov_2026_due_rolls_past_bonifacio_day():
         "window_start": datetime(2026, 10, 4),
         "close": datetime(2026, 11, 4),
         "due": datetime(2026, 12, 1),
+        "computed_due": datetime(2026, 12, 1),
+        "due_overridden": False,
     }
 
 
@@ -171,7 +181,8 @@ def test_card_c_nov_2026_due_unchanged():
 def test_roll_never_moves_close_or_window():
     for close_day, days in ((4, 25), (2, 21), (24, 21), (31, 21), (5, 20)):
         card = _card(billing_cycle_start=close_day, days_until_due_date=days)
-        cycles = list(iter_cycles_from(card, date(2026, 1, 1), datetime(2028, 3, 1)))
+        cycles = list(iter_cycles_from(card, date(2026, 1, 1), datetime(2028, 3, 1),
+                                       due_overrides={}))
         assert len(cycles) >= 24
         for cycle in cycles:
             close, start = cycle["close"], cycle["window_start"]
@@ -199,10 +210,102 @@ def test_history_status_open_on_computed_due_weekend():
     card = _card_a()
     row = _txn(20, "1000.00", month=10)
     history = statement_history(None, card, datetime(2026, 11, 30), [card.id],
-                                card_rows=({card.id: [row]}, frozenset()))
+                                card_rows=({card.id: [row]}, frozenset()), due_overrides={})
     nov = next(s for s in history if s["close"] == datetime(2026, 11, 4))
     assert nov["due"] == datetime(2026, 12, 1)
     assert nov["status"] == "open"
+
+
+# ---------------------------------------------------------------------------
+# Due overrides: the due the bank printed on one statement replaces its rolled
+# due; the close and the window never move.
+# ---------------------------------------------------------------------------
+
+NOV_4 = date(2026, 11, 4)
+
+
+def test_due_override_replaces_rolled_due():
+    cycle = _cycle_closing(_card_a(), NOV_4, {NOV_4: date(2026, 12, 2)})
+    assert cycle["due"] == datetime(2026, 12, 2)
+    assert cycle["computed_due"] == datetime(2026, 12, 1)
+    assert cycle["due_overridden"] is True
+    # Only that statement: the next one keeps its rolled due.
+    following = _cycle_closing(_card_a(), date(2026, 12, 4), {NOV_4: date(2026, 12, 2)})
+    assert following["due"] == following["computed_due"]
+    assert following["due_overridden"] is False
+
+
+def test_due_override_is_not_rolled():
+    """Saturday 5 Dec 2026 is kept as printed, not moved to Monday."""
+    saturday = date(2026, 12, 5)
+    assert saturday.weekday() == 5
+    cycle = _cycle_closing(_card_a(), NOV_4, {NOV_4: saturday})
+    assert cycle["due"] == datetime(2026, 12, 5)
+    assert statement_due_date(_card_a(), date(2026, 10, 20),
+                              due_overrides={NOV_4: saturday}) == datetime(2026, 12, 5)
+
+
+def test_due_override_leaves_close_and_window_unchanged():
+    card = _card_a()
+    plain = list(iter_cycles_from(card, date(2026, 9, 1), datetime.min, through=date(2027, 2, 1),
+                                  due_overrides={}))
+    overridden = list(iter_cycles_from(card, date(2026, 9, 1), datetime.min,
+                                       through=date(2027, 2, 1),
+                                       due_overrides={NOV_4: date(2026, 12, 3)}))
+    assert [(c["window_start"], c["close"], c["computed_due"]) for c in plain] == [
+        (c["window_start"], c["close"], c["computed_due"]) for c in overridden]
+    assert [c["due"] for c in overridden if c["due_overridden"]] == [datetime(2026, 12, 3)]
+
+
+def test_payables_dated_on_due_override():
+    card = _card_a()
+    txns = {1: [_txn(20, "1000.00", month=10)]}  # 20 Oct, in the 4 Nov statement
+    overrides = {1: {NOV_4: date(2026, 12, 3)}}
+    events = build_statement_payables([card], txns, datetime(2026, 11, 5), datetime(2026, 12, 4),
+                                      due_overrides_by_card=overrides)
+    assert [(e["date"], e["amount"], e["statement_close"]) for e in events] == [
+        (datetime(2026, 12, 3), Decimal("-1000.00"), datetime(2026, 11, 4))]
+    # Due on the window end: outside it, though the rolled due (1 Dec) is inside.
+    assert build_statement_payables([card], txns, datetime(2026, 11, 5), datetime(2026, 12, 3),
+                                    due_overrides_by_card=overrides) == []
+    # Overdue: emitted on the start, its printed due as the original date.
+    (late,) = build_statement_payables([card], txns, datetime(2026, 12, 4), datetime(2026, 12, 20),
+                                       due_overrides_by_card=overrides)
+    assert (late["date"], late["original_date"]) == (datetime(2026, 12, 4), datetime(2026, 12, 3))
+
+
+def test_due_overrides_keyword_is_required():
+    import pytest
+
+    with pytest.raises(TypeError):
+        list(iter_cycles_from(_card_a(), NOV_4, datetime.min, through=NOV_4))
+    with pytest.raises(TypeError):
+        list(iter_cycles_from(_card_a(), NOV_4, datetime.min, NOV_4, {}))
+    with pytest.raises(TypeError):
+        statement_due_date(_card_a(), NOV_4)
+
+
+def test_statement_close_helper():
+    card = _card_a()
+    assert statement_close(card, date(2026, 11, 4)) == date(2026, 11, 4)
+    assert statement_close(card, date(2026, 10, 5)) == date(2026, 11, 4)
+    assert statement_close(card, date(2026, 11, 5)) == date(2026, 12, 4)
+    # Clamped to short months, as the walk clamps it.
+    end_of_month = _card(billing_cycle_start=31)
+    assert statement_close(end_of_month, date(2027, 2, 1)) == date(2027, 2, 28)
+    assert statement_close(end_of_month, date(2027, 2, 28)) == date(2027, 2, 28)
+    assert statement_close(end_of_month, date(2027, 3, 1)) == date(2027, 3, 31)
+    assert statement_close(end_of_month, date(2028, 2, 29)) == date(2028, 2, 29)
+    # A legacy card (due day 14, 21 days) closes on the 24th.
+    legacy = _card(billing_cycle_start=None, due_date=14, days_until_due_date=21)
+    assert statement_close(legacy, date(2026, 7, 24)) == date(2026, 7, 24)
+    assert statement_close(legacy, date(2026, 7, 25)) == date(2026, 8, 24)
+    assert statement_close(_card(billing_cycle_start=None, due_date=None), NOV_4) is None
+    # The walk agrees on every day of two years.
+    for day in (date(2026, 1, 1) + timedelta(days=n) for n in range(731)):
+        for c in (card, end_of_month, legacy):
+            walked = next(iter_cycles_from(c, day, datetime.min, through=day, due_overrides={}))
+            assert statement_close(c, day) == walked["close"].date()
 
 
 # ---------------------------------------------------------------------------

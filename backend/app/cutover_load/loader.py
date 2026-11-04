@@ -298,10 +298,11 @@ def ledger_balance(db: Session, account: Account, boundary: datetime) -> Decimal
 
 def stored_card_cycles(db: Session, owner: User, card: Account, boundary: datetime) -> List[dict]:
     """The card's compared set at ``boundary`` from the stored rows (as the check reads it)."""
-    from app.services.statements import _card_rows
+    from app.services.statements import _card_rows, load_due_overrides
 
     by_card, unbilled = _card_rows(db, [card.id], viewable_account_ids(db, owner))
-    return card_cycles(card, card.id, by_card.get(card.id, []), unbilled, boundary)
+    return card_cycles(card, card.id, by_card.get(card.id, []), unbilled, boundary,
+                       due_overrides=load_due_overrides(db, [card.id])[card.id])
 
 
 # --- Writing -------------------------------------------------------------------------------

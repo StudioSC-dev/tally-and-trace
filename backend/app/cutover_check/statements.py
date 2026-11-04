@@ -3,7 +3,8 @@
 ``statement_history`` is not an as-of function: it loads every row touching the
 card, pending and future ones included. This runs the same body on the rows that
 were posted before ``T`` only, with the rows and unbilled-source set computed
-exactly as the app computes them (``_card_rows``).
+exactly as the app computes them (``_card_rows``). Dues come from the same walk,
+so a printed due entered on a statement (``load_due_overrides``) is used.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.core.access import viewable_account_ids
 from app.services.statements import (
-    _card_rows, _split_card_rows, allocate_payments, iter_cycles_from, resolve_cycle_fields,
-    statement_balance,
+    _card_rows, _split_card_rows, allocate_payments, iter_cycles_from, load_due_overrides,
+    resolve_cycle_fields, statement_balance,
 )
 
 
@@ -45,7 +46,8 @@ def computed_cycles(db: Session, card, owner_id: int, T: datetime) -> List[dict]
         return []
     days = [row.transaction_date.date() for row in lines]
     cycles = list(iter_cycles_from(card, min(days), datetime.min,
-                                   through=(T - timedelta(days=1)).date()))
+                                   through=(T - timedelta(days=1)).date(),
+                                   due_overrides=load_due_overrides(db, [card.id])[card.id]))
     balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     return [{"close": c["close"].date(), "due": c["due"].date(), "balance": b, "owed": o}

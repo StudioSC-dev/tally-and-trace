@@ -31,7 +31,7 @@ from app.services import card_credit
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
-from app.services.statements import iter_cycles_from, resolve_cycle_fields
+from app.services.statements import load_due_overrides, resolve_cycle_fields, statement_close
 
 router = APIRouter()
 
@@ -107,6 +107,8 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
         out.append({
             "close_date": statement["close"].date().isoformat(),
             "due_date": statement["due"].date().isoformat(),
+            "due_overridden": statement["due_overridden"],
+            "computed_due_date": statement["computed_due"].date().isoformat(),
             "status": statement["status"],
             "owed": _amount(statement["owed"]),
             "clear_through": _amount(statement["clear_through"]),
@@ -165,7 +167,8 @@ def get_card_credit(
         "credit": credit.get(card.id),
         "rule": rule.model_dump(mode="json") if rule is not None else None,
         "statements": card_statements(db, current_user, card, fx, redactor, unposted),
-        "open_cycle": card_credit.open_cycle(card, manila_today()),
+        "open_cycle": card_credit.open_cycle(
+            card, manila_today(), due_overrides=load_due_overrides(db, [card.id])[card.id]),
         "unposted": card_credit.unposted_summary(unposted),
     }
 
@@ -181,10 +184,7 @@ def _closed_statement(card: Account, close_date: str) -> date:
         day = date.fromisoformat(close_date)
     except ValueError:
         day = None
-    cycle = None
-    if day is not None:
-        cycle = next(iter_cycles_from(card, day, datetime.min, through=day), None)
-    if cycle is None or cycle["close"].date() != day or day >= manila_today():
+    if day is None or statement_close(card, day) != day or day >= manila_today():
         raise HTTPException(status_code=422, detail="Not a closed statement of this card")
     return day
 

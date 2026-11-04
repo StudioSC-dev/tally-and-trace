@@ -30,8 +30,9 @@ BDO = {"version": 1, "preset": "bdo", "base_percent": "3",
        "added_terms": ["installments", "overdue", "overlimit"], "annual_fee": None,
        "rounding": "down"}
 
-STATEMENT_KEYS = {"close_date", "due_date", "status", "owed", "clear_through", "outstanding",
-                  "incomplete", "minimum_due", "unposted_installments", "unposted_postable"}
+STATEMENT_KEYS = {"close_date", "due_date", "due_overridden", "computed_due_date", "status",
+                  "owed", "clear_through", "outstanding", "incomplete", "minimum_due",
+                  "unposted_installments", "unposted_postable"}
 MINIMUM_KEYS = {"amount", "remaining", "source", "reason", "complete", "assumptions", "inputs"}
 
 
@@ -409,7 +410,8 @@ def test_minimum_unavailable_without_rule_and_open_cycle_excluded(world):
     body = _detail(client, me, card)
     assert body["rule"] is None
     assert [s["close_date"] for s in body["statements"]] == ["2027-02-03", "2027-03-03"]
-    assert body["open_cycle"] == {"close_date": "2027-04-03", "due_date": "2027-04-26"}
+    assert body["open_cycle"] == {"close_date": "2027-04-03", "due_date": "2027-04-26",
+                                  "due_overridden": False, "computed_due_date": "2027-04-26"}
     assert body["statements"][1]["minimum_due"] == {
         "amount": None, "remaining": None, "source": "unavailable", "reason": "no_rule",
         "complete": False, "assumptions": [], "inputs": None}
