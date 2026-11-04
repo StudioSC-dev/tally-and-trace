@@ -18,4 +18,5 @@ aiofiles>=23.2.1
 Pillow>=10.1.0
 resend>=2.19.0
 sentry-sdk[fastapi]>=2.20.0
+holidays==0.108
 
