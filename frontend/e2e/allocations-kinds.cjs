@@ -12,8 +12,15 @@
 //   (c) a Utilities entry added on "Automatic" lands under bills
 //   (d) a capped Bill moves to bills; switching it back to Installment returns it
 //   (e) a viewer sees no Mark paid, Mark received, Charged or Posted
+//   (f) a card installment added from the form shows "Charged monthly on each
+//       statement close" instead of the cadence and day pickers, previews the
+//       closes, and an off-close date is saved on its statement's close
 //
-// Usage: node frontend/e2e/allocations-kinds.cjs [a|b|c|d|e]
+// The seeded card closes on yesterday's day of the month, so the seeded
+// installment dated yesterday is already on its close (a card installment is
+// stored on the statement close).
+//
+// Usage: node frontend/e2e/allocations-kinds.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -58,6 +65,11 @@ const fmt = (day) => {
   return `${month} ${d.getUTCDate()}${suffix(d.getUTCDate())}, ${d.getUTCFullYear()}`
 }
 const wire = (day) => `${day}T00:00:00`
+/** The close of the statement holding `day` on a card closing on `closeDay`. */
+const closeOf = (day, closeDay) => {
+  const same = addMonths(day, 0, closeDay)
+  return day <= same ? same : addMonths(day, 1, closeDay)
+}
 
 let stack, API
 async function api(token, method, url, body) {
@@ -94,10 +106,10 @@ async function makeUser(tag) {
 }
 const checking = (u, name = `${u.tag} Checking`) =>
   post(u.token, '/accounts/', { name, account_type: 'checking', balance: 100000, currency: 'PHP' })
-const card = (u, payFrom, name = `${u.tag} Card`) =>
+const card = (u, payFrom, name = `${u.tag} Card`, closeDay = Number(addDays(manilaToday(), -1).slice(8, 10))) =>
   post(u.token, '/accounts/', {
     name, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 500000,
-    billing_cycle_start: 1, days_until_due_date: 20, payment_account_id: payFrom.id,
+    billing_cycle_start: closeDay, days_until_due_date: 20, payment_account_id: payFrom.id,
   })
 const entry = (u, fields) =>
   post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
@@ -290,6 +302,51 @@ async function cappedBill(browser) {
   await ctx.close()
 }
 
+async function chargedOnClose(browser) {
+  console.log('(f) a card installment is charged on the statement close')
+  const me = await makeUser('f')
+  const world = await seed(me)
+  const day = addDays(manilaToday(), 3)
+  // A close day that is not the typed date's own day.
+  const closeDay = Number(day.slice(8, 10)) === 2 ? 3 : 2
+  const cc = await card(me, world.bank, `${me.tag} Close card`, closeDay)
+  const expected = closeOf(day, closeDay)
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, me)
+  await openAllocations(page)
+  const form = await fillForm(page, { name: 'Tablet plan', amount: 900, cardName: cc.name })
+  check('(f) open-ended: the cadence picker shows', await form.locator('select[data-field="cadence"]').count(), 1)
+  await form.getByRole('button', { name: 'After runs', exact: true }).click()
+  await form.locator('input[data-field="next_occurrence"]').fill(`${day}T00:00`)
+  const sfx = suffix(closeDay)
+  check('(f) the note replaces the cadence picker', await form.getByTestId('installment-close-note').innerText(),
+    `Charged monthly on each statement close (the ${closeDay}${sfx})`)
+  check('(f) no cadence picker', await form.locator('select[data-field="cadence"]').count(), 0)
+  check('(f) no day picker', await form.locator('select[data-field="day"]').count(), 0)
+  const preview = await form.getByTestId('schedule-preview').innerText()
+  check('(f) the preview starts on the close', preview.includes(`Next: ${fmt(expected)}, ${fmt(addMonths(expected, 1, closeDay))}`), true)
+  await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+  await editForm(page).waitFor({ state: 'detached' })
+  await settle(page)
+  const list = await get(me.token, '/budget-entries/?limit=200')
+  const saved = (list.items ?? list).find((e) => e.name === 'Tablet plan')
+  check('(f) saved on the close', saved && [saved.next_occurrence.slice(0, 10), saved.anchor_day, saved.day_rule, saved.cadence],
+    [expected, closeDay, null, 'monthly'])
+  check('(f) the card reads Next on the close', await nextOf(cardNamed(page, 'installment', 'Tablet plan')), fmt(expected))
+
+  // Reopened, the saved installment shows the same note, and a rename saves.
+  await cardNamed(page, 'installment', 'Tablet plan').click()
+  await editForm(page).waitFor()
+  const edit = page.locator('form').filter({ has: page.getByRole('button', { name: 'Update Recurring Entry' }) })
+  check('(f) the edit shows the note', await edit.getByTestId('installment-close-note').count(), 1)
+  await edit.locator('input[type="text"]').first().fill('Tablet plan renamed')
+  await edit.getByRole('button', { name: 'Update Recurring Entry' }).click()
+  await editForm(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(f) the rename saved', await cardNamed(page, 'installment', 'Tablet plan renamed').count(), 1)
+  await ctx.close()
+}
+
 async function viewer(browser) {
   console.log('(e) a viewer sees no Mark paid')
   const owner = await makeUser('e-owner')
@@ -329,6 +386,7 @@ async function viewer(browser) {
   if (run('c')) await automaticUtilities(browser)
   if (run('d')) await cappedBill(browser)
   if (run('e')) await viewer(browser)
+  if (run('f')) await chargedOnClose(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

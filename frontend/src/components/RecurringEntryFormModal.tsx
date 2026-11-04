@@ -17,6 +17,8 @@ import {
   parseEntryDate,
   resolveEntryDayFields,
   settleKindChoice,
+  statementCloseDay,
+  statementCycleClose,
   finalMonthHelp,
   toWireWallTime,
   fieldErrorProps,
@@ -29,7 +31,7 @@ import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, Share
 import { useCurrency } from '../hooks/useCurrency'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
-import { formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
+import { chargedOnCloseLabel, formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
@@ -281,27 +283,59 @@ export function RecurringEntryFormModal({
   // What the select shows and a save sends: always one of the offered choices.
   const kindValue = settleKindChoice(kindCapped, subscriptionForm.kind_choice, offerAutomatic)
 
+  // A card installment on a card with a statement cycle is charged monthly on the
+  // statement close. On create the server anchors it there and moves the date onto
+  // its statement's close, so the form sends no day fields and forces monthly. An
+  // installment already on the close shows the same note in place of the pickers
+  // (its usual payload still saves). A legacy row looks as it always has.
+  const selectedCard = accountsById.get(subscriptionForm.account_id)
+  const cardCloseDay = selectedCard?.account_type === 'credit' ? statementCloseDay(selectedCard) : null
+  const cardInstallmentCreate =
+    !editingBudgetEntry &&
+    cardCloseDay !== null &&
+    subscriptionForm.entry_type === 'expense' &&
+    !subscriptionForm.transfer_to_account_id &&
+    kindCapped &&
+    kindValue !== 'bill'
+  const onCloseEdit =
+    editingBudgetEntry != null &&
+    cardCloseDay !== null &&
+    editingBudgetEntry.kind === 'installment' &&
+    editingBudgetEntry.account_id === subscriptionForm.account_id &&
+    editingBudgetEntry.cadence === 'monthly' &&
+    editingBudgetEntry.anchor_day === cardCloseDay &&
+    !editingBudgetEntry.day_rule
+  const chargedOnClose = cardInstallmentCreate || onCloseEdit
+  const cadence: BudgetEntry['cadence'] = cardInstallmentCreate ? 'monthly' : subscriptionForm.cadence
+
   // The schedule a save would store: the day fields the API resolves the write to
   // (or the detail it would refuse it with), and the next three dates.
   const schedulePreview = useMemo(() => {
-    if (!isMonthFamily(subscriptionForm.cadence)) return null
+    if (!isMonthFamily(cadence)) return null
     let nextOccurrence: string
     try {
       nextOccurrence = toWireWallTime(subscriptionForm.next_occurrence)
     } catch {
       return null
     }
-    const resolved = resolveEntryDayFields({
-      cadence: subscriptionForm.cadence,
-      nextOccurrence,
-      sent: buildEntryDayFields({
-        cadence: subscriptionForm.cadence,
-        day: subscriptionForm.day,
-        nextOccurrence,
-        stored: editingBudgetEntry,
-      }),
-      stored: editingBudgetEntry,
-    })
+    if (cardInstallmentCreate && selectedCard) {
+      // What the server stores: the close of the statement the date is on.
+      const close = statementCycleClose(selectedCard, nextOccurrence)
+      if (close !== null) nextOccurrence = `${close}${nextOccurrence.slice(10)}`
+    }
+    const resolved = cardInstallmentCreate && cardCloseDay !== null
+      ? ({ ok: true, anchor_day: cardCloseDay, day_rule: null } as const)
+      : resolveEntryDayFields({
+          cadence,
+          nextOccurrence,
+          sent: buildEntryDayFields({
+            cadence,
+            day: subscriptionForm.day,
+            nextOccurrence,
+            stored: editingBudgetEntry,
+          }),
+          stored: editingBudgetEntry,
+        })
     if (!resolved.ok) return { error: resolved.error }
     let endDate: string | null = null
     if (subscriptionForm.end_mode === 'on_date' && subscriptionForm.end_date) {
@@ -313,7 +347,7 @@ export function RecurringEntryFormModal({
     }
     const dates = generateOccurrences(
       {
-        cadence: subscriptionForm.cadence,
+        cadence,
         next_occurrence: nextOccurrence,
         anchor_day: resolved.anchor_day,
         day_rule: resolved.day_rule,
@@ -326,12 +360,15 @@ export function RecurringEntryFormModal({
       3
     )
     return {
-      label: formatScheduleLabel(subscriptionForm.cadence, resolved),
+      label: formatScheduleLabel(cadence, resolved),
       dates: dates.map((date) => formatEntryDate(date)),
     }
   }, [
     editingBudgetEntry,
-    subscriptionForm.cadence,
+    cadence,
+    cardInstallmentCreate,
+    cardCloseDay,
+    selectedCard,
     subscriptionForm.day,
     subscriptionForm.next_occurrence,
     subscriptionForm.end_mode,
@@ -436,19 +473,20 @@ export function RecurringEntryFormModal({
       }
 
       const dayFields = buildEntryDayFields({
-        cadence: subscriptionForm.cadence,
+        cadence,
         day: subscriptionForm.day,
         nextOccurrence: nextOccurrenceWire,
         stored: editingBudgetEntry,
+        cardInstallment: cardInstallmentCreate,
       })
       const resolvedDay = resolveEntryDayFields({
-        cadence: subscriptionForm.cadence,
+        cadence,
         nextOccurrence: nextOccurrenceWire,
         sent: dayFields,
         stored: editingBudgetEntry,
       })
       if (!resolvedDay.ok) {
-        fail(isMonthFamily(subscriptionForm.cadence) ? 'day' : 'next_occurrence', resolvedDay.error)
+        fail(isMonthFamily(cadence) && !chargedOnClose ? 'day' : 'next_occurrence', resolvedDay.error)
         return
       }
 
@@ -479,7 +517,7 @@ export function RecurringEntryFormModal({
           (editingBudgetEntry ? null : undefined),
         category_id: subscriptionForm.category_id || undefined,
         allocation_id: subscriptionForm.allocation_id ?? undefined,
-        cadence: subscriptionForm.cadence,
+        cadence,
         // Omitted on a resume with the date untouched, so the server skips the paused months.
         ...(resuming ? {} : { next_occurrence: nextOccurrenceWire }),
         ...dayFields,
@@ -748,6 +786,14 @@ export function RecurringEntryFormModal({
               </div>
           
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {chargedOnClose && cardCloseDay !== null ? (
+          <div>
+                  <label className="block text-sm font-medium text-body">Cadence</label>
+                  <p className="mt-1 py-2 text-sm text-body" data-testid="installment-close-note">
+                    {chargedOnCloseLabel(cardCloseDay)}
+                  </p>
+          </div>
+          ) : (
           <div>
                   <label className="block text-sm font-medium text-body">Cadence</label>
             <select
@@ -770,6 +816,7 @@ export function RecurringEntryFormModal({
                     )}
                   </select>
           </div>
+          )}
                 <div>
                   <label className="block text-sm font-medium text-body">Next Occurrence</label>
                   <input
@@ -791,7 +838,13 @@ export function RecurringEntryFormModal({
         </div>
               </div>
 
-              {isMonthFamily(subscriptionForm.cadence) && (
+              {chargedOnClose && schedulePreview && !('error' in schedulePreview) && (
+                <div className="text-xs text-muted" data-testid="schedule-preview">
+                  <p className="font-medium text-body">{schedulePreview.label}</p>
+                  {schedulePreview.dates.length > 0 && <p>Next: {schedulePreview.dates.join(', ')}</p>}
+                </div>
+              )}
+              {isMonthFamily(cadence) && !chargedOnClose && (
                 <div className="space-y-2">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
