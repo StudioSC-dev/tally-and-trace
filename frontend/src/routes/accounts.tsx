@@ -459,7 +459,7 @@ export function AccountsPage() {
         n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'
       return `${n}${suffix}`
     }
-    return `Closes the ${ordinal(close)}, due around the ${ordinal(due.getUTCDate())} of the following month.`
+    return `Closes the ${ordinal(close)}, due around the ${ordinal(due.getUTCDate())} of the following month (moved to the next banking day when it falls on a weekend or PH holiday).`
   })()
 
   const loadAccounts = useCallback(
