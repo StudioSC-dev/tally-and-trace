@@ -394,3 +394,76 @@ def test_upgrade_adds_the_due_override_table_and_downgrade_drops_it(scratch_url)
         engine.dispose()
     _alembic(scratch_url, "downgrade", PREVIOUS)
     assert "card_statement_due_overrides" not in tables()
+
+
+# --- the cycle-identity guard -----------------------------------------------------------------
+
+def _update(client, who, card, body, expect=200):
+    r = client.put(f"{API}/accounts/{card}", json=body, headers=who["headers"])
+    assert r.status_code == expect, r.text
+    return r.json()
+
+
+def test_close_day_change_with_due_override_is_409(world):
+    client, me, card = world["client"], world["me"], world["card"]
+    _set_due(client, me, card, "2026-11-04", "2026-12-02")
+    for body in ({"billing_cycle_start": 5}, {"billing_cycle_start": None},
+                 {"billing_cycle_start": 5, "days_until_due_date": 24}):
+        _update(client, me, card, body, expect=409)
+    # Unchanged values and other fields still save.
+    _update(client, me, card, {"billing_cycle_start": 4, "name": "Card A renamed"})
+    _set_due(client, me, card, "2026-11-04", expect=204)
+    _update(client, me, card, {"billing_cycle_start": 5})
+
+
+def test_legacy_card_days_change_moving_close_with_override_is_409(world):
+    """Due day 29 with 25 days closes on the 4th; 24 days would close on the 5th."""
+    client, me = world["client"], world["me"]
+    card = _account(client, me, "Legacy card", "credit", 0, due_date=29,
+                    days_until_due_date=25, credit_limit=50_000)
+    _debit(client, me, card, "2026-10-20", 1_000)
+    nov = _statements(client, me, card)["2026-11-04"]
+    assert nov["due_date"] == "2026-12-01"
+    _set_due(client, me, card, "2026-11-04", "2026-12-02")
+    _update(client, me, card, {"days_until_due_date": 24}, expect=409)
+    _update(client, me, card, {"due_date": 30}, expect=409)
+    _update(client, me, card, {"due_date": None}, expect=409)
+    # Setting the close day it already resolves to keeps every statement.
+    _update(client, me, card, {"billing_cycle_start": 4})
+    assert _statements(client, me, card)["2026-11-04"]["due_date"] == "2026-12-02"
+
+
+def test_days_change_breaking_due_override_order_is_409(world):
+    client, me, card = world["client"], world["me"], world["card"]
+    # 28 Dec is before 4 Dec's due (29 Dec); with 20 days that due is 24 Dec or
+    # the next banking day, before it.
+    _set_due(client, me, card, "2026-11-04", "2026-12-28")
+    _update(client, me, card, {"days_until_due_date": 20}, expect=409)
+    # 5 Nov is after 4 Oct's due (29 Oct); with 35 days that due is 8 Nov.
+    _set_due(client, me, card, "2026-11-04", "2026-11-05")
+    _update(client, me, card, {"days_until_due_date": 35}, expect=409)
+    assert _statements(client, me, card)["2026-11-04"]["due_date"] == "2026-11-05"
+
+
+def test_days_change_respecting_due_override_is_ok(world):
+    client, me, card = world["client"], world["me"], world["card"]
+    _set_due(client, me, card, "2026-11-04", "2026-12-02")
+    assert _update(client, me, card, {"days_until_due_date": 21})["days_until_due_date"] == 21
+    statements = _statements(client, me, card)
+    assert (statements["2026-11-04"]["due_date"],
+            statements["2026-11-04"]["computed_due_date"]) == ("2026-12-02", "2026-11-25")
+    # The next statement is recomputed with 21 days: 25 Dec, rolled.
+    from datetime import date
+
+    from app.services.banking_days import next_banking_day
+
+    assert _detail(client, me, card)["open_cycle"]["due_date"] == (
+        next_banking_day(date(2026, 12, 25)).isoformat())
+
+
+def test_close_day_change_without_overrides_is_ok(world):
+    client, me, card = world["client"], world["me"], world["card"]
+    other = _card_a(client, me, "Card A other")
+    _set_due(client, me, other, "2026-11-04", "2026-12-02")
+    assert _update(client, me, card, {"billing_cycle_start": 2})["billing_cycle_start"] == 2
+    assert "2026-11-02" in _statements(client, me, card)
