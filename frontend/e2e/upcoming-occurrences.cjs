@@ -1,48 +1,56 @@
-// Browser check for STU-465: the Transactions page splits its lists on Manila's day,
-// and Upcoming lists recurring occurrences that are not recorded yet. Starts its own
-// API and web app against a throwaway database (./_local_stack.cjs). Not wired into
+// Browser check for STU-465 and STU-511: the Transactions page splits its lists on Manila's
+// day, and the "Due and overdue" card's Upcoming tab lists the next 30 days (T+1 to T+30):
+// the planned transactions and the recurring occurrences not recorded yet. The window is
+// fixed from the Manila day and ignores the month, the search and the filters. Starts its
+// own API and web app against a throwaway database (./_local_stack.cjs). Not wired into
 // CI and not part of `pnpm build`. Run steps: see ./README.md.
 //
 // Scenarios (each seeds its own user, so each can run alone):
-//   (a) the ticket's three salaries: each expected month is listed once, "Not
-//       recorded" with Mark received; a month with a linked planned row is that row
+//   (a) the ticket's three salaries: each month in the window is listed once on the
+//       Upcoming tab, "Not recorded" with Mark received; a month with a linked planned
+//       row is that row; the salaries stay in Upcoming (no plan)
 //   (b) Mark received on a future occurrence: one materialise POST; the occurrence
 //       leaves Upcoming and the recorded row is listed where its date puts it
-//   (c) Mark paid on a cash expense; Charged on a card subscription's month, then
-//       Posted on its next month
-//   (d) card installments: auto-post on has no buttons and the auto-post label;
-//       unreviewed has Review (and Charged, Posted on its first month only); off has
-//       Charged and Posted on its first month and none on later ones
+//   (c) Mark paid on a weekly cash expense (Upcoming); Charged on a card subscription's
+//       day, then Posted on its next day (both read from Subscriptions)
+//   (d) card installments are one plan row each on the Installments tab ("3 of 3 left";
+//       auto-post on has no buttons and the label, unreviewed has Review, Charged and
+//       Posted, off has Charged and Posted), none in Upcoming; the later months are
+//       not recordable, read from the API
 //   (e) a paused entry is not listed; after resuming, it is
 //   (f) an editor's shared rows have buttons per the API's can_mark_paid; a viewer
 //       sees none of the sharer's occurrences
-//   (g) the page's filters apply to occurrences: Income only, an account, search, a tag
-//   (h) look-ahead: the current month runs through the later of its end and Manila
-//       today + 30 days ("through <date>"); the previous month has no Upcoming, and a
-//       custom range (the next month's own days, or a few days) is exact
-//   (i) over 100 items: "showing the next 100 of N"
-//   (j) Due and overdue holds Manila today and earlier only: with rows due today, in
-//       a few days (cash, card, income, transfer) and a missed month, no Due row is
-//       dated after today, none of the later entries is in Due, each entry's day is
-//       listed once across Due and Upcoming, and a future linked pending row is in
-//       Upcoming only
+//   (g) the page's filters do not apply to the card: with Income only, an account, search
+//       or a tag every tab is unchanged and no window request is sent
+//   (h) the window is fixed: T+1 to T+30 from the Manila day ("Through <date>"), T+30
+//       listed and T+31 not; the previous month and a custom range change nothing
+//   (i) over 100 items: the badge is the total, "showing the next 100 of N", the pager reads
+//       1-3 of 100, and one ascending window request (order=asc, limit=100) is sent
+//   (j) Due and overdue holds Manila today and earlier only: with rows due today, in a few
+//       days (cash, card, income, transfer) and a missed month, no Due row is dated after
+//       today, none of the later entries is in Due, a card subscription due today is in
+//       Subscriptions and a card installment in Installments, each entry's day is listed
+//       once across the tabs, and a future linked pending row is in Upcoming only
 //   (k) the partition is on the Manila day, with the real clock: in a browser zone
 //       whose local day differs from Manila's, a planned row dated Manila today is in
-//       the main list and one dated Manila tomorrow is in Upcoming, each once; an
+//       the main list and one dated Manila tomorrow is in Upcoming, each once; a cash
 //       occurrence due Manila today is in Due and overdue and one due Manila tomorrow
-//       is in Upcoming, not in Due and overdue
+//       is in Upcoming, not in Due and overdue; a card subscription due Manila today is in
+//       Subscriptions, not in Due
 //   (l) the rollover trigger, on the browser clock only: crossing Manila's midnight
-//       with no reload sends exactly one new request each for the main list, the
-//       Upcoming transactions, the Upcoming occurrences and the dashboard snapshot,
-//       and the Upcoming header's "through <date>" moves by one day; on a custom
-//       range (no look-ahead, no "through") the main list, the Upcoming transactions and
-//       the Upcoming occurrences still refetch once
+//       with no reload sends exactly one new request each for the main list, the Upcoming
+//       transactions (order=asc, from the day after the new day to its + 30), the snapshot,
+//       and one occurrences request per partition (plan=none, plan=subscription); the
+//       panel's "Through <date>" moves by one day; on a custom range the same counts hold
+//   (m) Upcoming is a tab: no upcoming-transactions section, the tab order is DUE_TABS,
+//       compact rows with no article, tapping a row opens the action modal, Delete drops
+//       the badge, page 2 survives a tab visit, and no Load more on Upcoming
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
+// Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, expectDueTab, DUE_TABS, allDueRows, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
@@ -63,6 +71,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -177,6 +186,8 @@ async function openTransactions(page) {
   await page.goto(`${stack.webUrl}/transactions`)
   await page.locator('[data-testid="due-section"]').waitFor()
   await page.locator('[data-testid="due-count"]').filter({ hasNotText: '…' }).waitFor()
+  await expectDueTab(page, 'upcoming')
+  await page.locator('[data-testid="due-upcoming-count"]').filter({ hasNotText: '…' }).waitFor()
   await settle(page)
 }
 /** Sets a custom range through the page's date inputs (the end first, so the range is never inverted). */
@@ -194,40 +205,68 @@ async function setRange(page, start, end) {
   return [await startInput.inputValue(), await endInput.inputValue()]
 }
 /**
- * The names in each list on screen: `main` (transaction rows outside Upcoming and Due),
- * `upcoming` (Upcoming's rows, transactions and occurrences alike, in order).
+ * The names in each list on screen: `main` (the main list's transaction rows: articles
+ * outside the card), `upcoming` (the Upcoming tab's rows over every page, transactions
+ * and occurrences alike, in order). Reading `upcoming` selects the Upcoming tab.
  */
-const lists = (page) => page.evaluate(() => {
-  const up = document.querySelector('[data-testid="upcoming-transactions"]')
-  const nameOf = (a) => (a.querySelector('[data-testid="upcoming-occurrence-name"]') ?? a.querySelector('p.text-base'))?.textContent.trim() ?? ''
-  const all = [...document.querySelectorAll('article')]
-  return {
-    main: all.filter((a) => !up?.contains(a) && !a.closest('[data-testid="due-section"]')).map(nameOf),
-    upcoming: up ? [...up.querySelectorAll('article')].map(nameOf) : [],
-  }
-})
+const lists = async (page) => {
+  const main = await page.evaluate(() => {
+    const nameOf = (a) => a.querySelector('p.text-base')?.textContent.trim() ?? ''
+    return [...document.querySelectorAll('article')].filter((a) => !a.closest('[data-testid="due-section"]')).map(nameOf)
+  })
+  return { main, upcoming: (await readTab(page, 'upcoming')).map((r) => r.name) }
+}
 const countOf = (names, name) => names.filter((n) => n === name).length
-/** Upcoming's occurrence rows on screen. */
-const occurrences = (page) => page.locator('[data-testid="upcoming-occurrence"]').evaluateAll((els) => els.map((e) => ({
-  name: e.querySelector('[data-testid="upcoming-occurrence-name"]')?.textContent.trim() ?? '',
-  day: e.dataset.day,
-  source: e.dataset.source,
-  note: e.querySelector('[data-testid="upcoming-occurrence-note"]')?.textContent.trim() ?? '',
-  notRecorded: e.querySelector('[data-testid="upcoming-not-recorded"]')?.textContent.trim() === 'Not recorded',
-  buttons: [...e.querySelectorAll('button[data-testid^="upcoming-"]')].map((b) => b.dataset.testid),
-})))
+/** The occurrence rows (data-kind="occurrence") of a tab, over every page, with the fields the checks read. Selects the tab. */
+const occurrences = async (page, slug = 'upcoming') => (await readTab(page, slug))
+  .filter((r) => r.kind === 'occurrence')
+  .map((r) => ({ name: r.name, day: r.day, source: r.source, note: r.note ?? '', notRecorded: r.notRecorded, buttons: r.upcomingButtons, autoPost: r.autoPost }))
 /** One entry's occurrence rows, by entry id. */
-const occurrencesOf = async (page, entryId) => (await occurrences(page)).filter((o) => o.source === `budget_entry:${entryId}`)
-const occRow = (page, entryId, day) =>
-  page.locator(`[data-testid="upcoming-occurrence"][data-source="budget_entry:${entryId}"][data-day="${day}"]`)
+const occurrencesOf = async (page, entryId, slug = 'upcoming') => (await occurrences(page, slug)).filter((o) => o.source === `budget_entry:${entryId}`)
+/** An occurrence row's locator, on the page of the tab that holds it (selects the tab first). */
+async function occRow(page, entryId, day, slug = 'upcoming') {
+  await openDueTab(page, slug)
+  return showRow(page, page.locator(`[data-testid="due-row"][data-kind="occurrence"][data-source="budget_entry:${entryId}"][data-day="${day}"]`))
+}
+/** The badge and the "showing the next 100 of M" span of the Upcoming tab. */
 const upcomingHeader = async (page) => {
-  const header = page.locator('[data-testid="upcoming-transactions"] > button')
-  return (await header.count()) ? (await header.textContent())?.replace(/\s+/g, ' ').trim() : null
+  await openDueTab(page, 'upcoming')
+  const shown = page.locator('[data-testid="due-panel-upcoming"] [data-testid="upcoming-shown"]')
+  return {
+    count: (await page.locator('[data-testid="due-upcoming-count"]').textContent())?.trim() ?? null,
+    shown: (await shown.count()) ? (await shown.textContent())?.replace(/\s+/g, ' ').replace(/^\s*·\s*/, '').trim() : null,
+  }
 }
+/** The Upcoming panel's "Through <date>" line (without the showing-the-next span), or null. */
 const throughText = async (page) => {
-  const through = page.locator('[data-testid="upcoming-through"]')
-  return (await through.count()) ? (await through.textContent())?.replace(/^\s*·\s*/, '').trim() : null
+  await openDueTab(page, 'upcoming')
+  const through = page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-through"]')
+  if (!(await through.count())) return null
+  return through.evaluate((el) => {
+    const clone = el.cloneNode(true)
+    clone.querySelector('[data-testid="upcoming-shown"]')?.remove()
+    return clone.textContent.replace(/\s+/g, ' ').trim()
+  })
 }
+/** Every window request the page sends (the Upcoming transactions with order=asc, or any occurrences), as { kind, params }. */
+function recordWindowRequests(page) {
+  const out = []
+  page.on('request', (r) => {
+    if (r.method() !== 'GET') return
+    const url = new URL(r.url())
+    if (url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.get('order') === 'asc') out.push({ kind: 'transactions', params: url.searchParams })
+    if (url.pathname.endsWith('/api/v1/budget-entries/upcoming-occurrences')) out.push({ kind: 'occurrences', params: url.searchParams })
+  })
+  return out
+}
+/** The tab's rows, as [source, day, name], for every tab in DUE_TABS. */
+async function tabsSnapshot(page) {
+  const out = {}
+  for (const t of DUE_TABS) out[t.slug] = (await readTab(page, t.slug)).map((r) => [r.source, r.day, r.name])
+  return out
+}
+/** The API's window for Upcoming: T+1 start of day through T+30 end of day. */
+const apiWindow = (today) => `start_date=${addDays(today, 1)}T00:00:00Z&end_date=${addDays(today, 30)}T23:59:59.999999Z`
 const dialog = (page) => page.locator('[data-testid="mark-paid-dialog"]')
 /** Every materialise POST the page sends, as { entryId, status, body }. */
 function recordMaterialize(page) {
@@ -238,10 +277,15 @@ function recordMaterialize(page) {
   })
   return out
 }
-/** Clicks `button` on an occurrence row, submits the dialog with `submit`, and waits for it to close. */
+/**
+ * Clicks `button` on an occurrence row, submits the dialog with `submit`, and waits for it to close. Returns the POST's
+ * status. Asserts that the click opened the dialog (within 10 s); when it did not, returns null and records nothing else.
+ */
 async function record(page, row, button, submit = 'mark-paid-submit', occurrenceDate) {
   await row.locator(`[data-testid="${button}"]`).click()
-  await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  const shown = await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor({ timeout: 10000 }).then(() => true, () => false)
+  check(`${button} opened the Mark paid dialog`, shown, true)
+  if (!shown) return null
   await waitQuiet(page)
   const opened = await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue()
   if (occurrenceDate !== undefined) check(`the dialog opens on the row's day ${occurrenceDate}`, opened, occurrenceDate)
@@ -262,6 +306,8 @@ async function threeSalaries(browser) {
   const first = addDays(today, 1)
   const later = addDays(today, 5)
   const through = addMonths(first, 1)
+  // The window is fixed, T+1 to T+30: a month ahead of T+1 is in it only when it falls on or before T+30.
+  const inWindow = (days) => days.filter((d) => d <= addDays(today, 30))
   const u = await makeUser('a')
   const bank = await account(u, 'A Checking')
   const salary = (name, next) => entry(u, { name, entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(next) })
@@ -275,8 +321,7 @@ async function threeSalaries(browser) {
   const { ctx, page, native } = await newPage(browser)
   await uiLogin(page, u)
   await openTransactions(page)
-  check('(a) the custom range is set', await setRange(page, first, through), [first, through])
-  const expected = [[linked, [through]], [due, [first, through]], [third, [later]]]
+  const expected = [[linked, inWindow([through])], [due, inWindow([first, through])], [third, [later]]]
   for (const [e, days] of expected) {
     const rows = await occurrencesOf(page, e.id)
     check(`(a) ${e.name}: each expected month once`, rows.map((r) => r.day), days)
@@ -285,6 +330,7 @@ async function threeSalaries(browser) {
   }
   const shown = await lists(page)
   check('(a) the linked planned row shows once in Upcoming, as a transaction row', countOf(shown.upcoming, 'A Linked Salary planned'), 1)
+  check('(a) the salaries stay in Upcoming: every occurrence row is a plain income row, none in a plan', (await readTab(page, 'upcoming')).filter((r) => r.kind === 'occurrence').map((r) => r.plan), [...Array(inWindow([through, first, through, later]).length)].map(() => null))
   check('(a) and it is the only item on its day for its entry', (await occurrencesOf(page, linked.id)).filter((r) => r.day === first).length, 0)
   check('(a) Upcoming is in day order', (await occurrences(page)).map((o) => o.day), [...(await occurrences(page)).map((o) => o.day)].sort())
   checkNoNative('a', native)
@@ -304,7 +350,7 @@ async function markReceived(browser) {
   await uiLogin(page, u)
   await openTransactions(page)
   check('(b) the occurrence is listed with Mark received', (await occurrencesOf(page, salary.id)).map((r) => [r.day, r.buttons]), [[day, ['upcoming-mark-received']]])
-  const status = await record(page, occRow(page, salary.id, day), 'upcoming-mark-received', 'mark-paid-submit', day)
+  const status = await record(page, await occRow(page, salary.id, day), 'upcoming-mark-received', 'mark-paid-submit', day)
   check('(b) exactly one materialise POST, created (201)', posts.map((p) => [p.entryId, p.status]), [[salary.id, 201]])
   check('(b) the POST answered 201', status, 201)
   check('(b) the occurrence left Upcoming', (await occurrencesOf(page, salary.id)).filter((r) => r.day === day).length, 0)
@@ -322,44 +368,47 @@ async function markReceived(browser) {
 
 // (c) Mark paid on a cash expense; Charged, then Posted, on a card subscription.
 async function markPaidAndCard(browser) {
-  console.log('\n=== (c) Mark paid on a cash expense; Charged then Posted on a card subscription')
+  console.log('\n=== (c) Mark paid on a cash expense (Upcoming); Charged then Posted on a card subscription (Subscriptions)')
   const today = manilaToday()
   const day = addDays(today, 2)
-  const nextMonth = addMonths(day, 1)
+  // Weekly, so the second occurrence is always inside the fixed 30-day window.
+  const second = addDays(day, 7)
+  const last = addDays(today, 30)
   const u = await makeUser('c')
   const bank = await account(u, 'C Checking')
   const visa = await card(u, bank, 'C Visa')
-  const rent = await entry(u, { name: 'C Rent', amount: 15000, account_id: bank.id, next_occurrence: wire(day) })
-  const netflix = await entry(u, { name: 'C Netflix', amount: 549, account_id: visa.id, next_occurrence: wire(day) })
+  const rent = await entry(u, { name: 'C Rent', cadence: 'weekly', amount: 15000, account_id: bank.id, next_occurrence: wire(day) })
+  const netflix = await entry(u, { name: 'C Netflix', cadence: 'weekly', amount: 549, account_id: visa.id, next_occurrence: wire(day) })
   const { ctx, page, native } = await newPage(browser)
   const posts = recordMaterialize(page)
   await uiLogin(page, u)
   await openTransactions(page)
-  check('(c) the custom range is set', await setRange(page, addDays(today, 1), nextMonth), [addDays(today, 1), nextMonth])
-  check('(c) Rent offers Mark paid on both months',
-    (await occurrencesOf(page, rent.id)).map((r) => [r.day, r.buttons]), [[day, ['upcoming-mark-paid']], [nextMonth, ['upcoming-mark-paid']]])
-  check('(c) Netflix offers Charged and Posted on both months',
-    (await occurrencesOf(page, netflix.id)).map((r) => [r.day, r.buttons]), [[day, ['upcoming-charged', 'upcoming-posted']], [nextMonth, ['upcoming-charged', 'upcoming-posted']]])
+  check('(c) Rent offers Mark paid on every weekly day, in Upcoming',
+    (await occurrencesOf(page, rent.id)).map((r) => [r.day, r.buttons]), everyDays(day, last, 7).map((d) => [d, ['upcoming-mark-paid']]))
+  check('(c) Netflix is not in Upcoming: a card subscription is on the Subscriptions tab',
+    (await occurrencesOf(page, netflix.id)).length, 0)
+  check('(c) Netflix offers Charged and Posted on every weekly day, in Subscriptions',
+    (await occurrencesOf(page, netflix.id, 'subscriptions')).map((r) => [r.day, r.buttons]), everyDays(day, last, 7).map((d) => [d, ['upcoming-charged', 'upcoming-posted']]))
 
-  check('(c) Mark paid on Rent is created (201)', await record(page, occRow(page, rent.id, day), 'upcoming-mark-paid', 'mark-paid-submit', day), 201)
-  check('(c) Rent\'s first month left Upcoming and the API has one posted row',
-    [(await occurrencesOf(page, rent.id)).map((r) => r.day), (await linkedRows(u, rent.id)).map((t) => t.is_posted)], [[nextMonth], [true]])
+  check('(c) Mark paid on Rent is created (201)', await record(page, await occRow(page, rent.id, day), 'upcoming-mark-paid', 'mark-paid-submit', day), 201)
+  check('(c) Rent\'s first day left Upcoming and the API has one posted row',
+    [(await occurrencesOf(page, rent.id)).map((r) => r.day), (await linkedRows(u, rent.id)).map((t) => t.is_posted)], [everyDays(second, last, 7), [true]])
 
-  check('(c) Charged on Netflix is created (201)', await record(page, occRow(page, netflix.id, day), 'upcoming-charged', 'mark-paid-charged', day), 201)
-  check('(c) Netflix\'s first month left Upcoming; the API has one pending row',
-    [(await occurrencesOf(page, netflix.id)).map((r) => r.day), (await linkedRows(u, netflix.id)).map((t) => t.is_posted)], [[nextMonth], [false]])
-  check('(c) Posted on Netflix\'s next month is created (201)', await record(page, occRow(page, netflix.id, nextMonth), 'upcoming-posted', 'mark-paid-submit', nextMonth), 201)
-  check('(c) Netflix has no occurrence left; the API has one pending and one posted row',
-    [(await occurrencesOf(page, netflix.id)).length, (await linkedRows(u, netflix.id)).map((t) => t.is_posted).sort()], [0, [false, true]])
+  check('(c) Charged on Netflix is created (201)', await record(page, await occRow(page, netflix.id, day, 'subscriptions'), 'upcoming-charged', 'mark-paid-charged', day), 201)
+  check('(c) Netflix\'s first day left Subscriptions; the API has one pending row',
+    [(await occurrencesOf(page, netflix.id, 'subscriptions')).map((r) => r.day), (await linkedRows(u, netflix.id)).map((t) => t.is_posted)], [everyDays(second, last, 7), [false]])
+  check('(c) Posted on Netflix\'s next day is created (201)', await record(page, await occRow(page, netflix.id, second, 'subscriptions'), 'upcoming-posted', 'mark-paid-submit', second), 201)
+  check('(c) Netflix\'s first two days left Subscriptions; the API has one pending and one posted row',
+    [(await occurrencesOf(page, netflix.id, 'subscriptions')).map((r) => r.day), (await linkedRows(u, netflix.id)).map((t) => t.is_posted).sort()], [everyDays(addDays(second, 7), last, 7), [false, true]])
   check('(c) three POSTs, one per click, with Charged sending is_posted false',
     posts.map((p) => [p.entryId, p.status, p.body.is_posted === false]), [[rent.id, 201, false], [netflix.id, 201, true], [netflix.id, 201, false]])
   checkNoNative('c', native)
   await ctx.close()
 }
 
-// (d) Card installments.
+// (d) Card installments: one plan row each on the Installments tab, none in Upcoming.
 async function installments(browser) {
-  console.log('\n=== (d) card installments: on, unreviewed and off')
+  console.log('\n=== (d) card installments: on, unreviewed and off are one plan row each in Installments')
   const today = manilaToday()
   const u = await makeUser('d')
   const bank = await account(u, 'D Checking')
@@ -374,21 +423,33 @@ async function installments(browser) {
   const { ctx, page, native } = await newPage(browser)
   await uiLogin(page, u)
   await openTransactions(page)
-  check('(d) the custom range is set', await setRange(page, addDays(today, 1), addDays(today, 100)), [addDays(today, 1), addDays(today, 100)])
 
-  const onRows = await occurrencesOf(page, on.id)
-  check('(d) auto-post on: every month listed, with no buttons and the auto-post label',
-    onRows.map((r) => [r.day, r.buttons, r.note]), months(addDays(today, 3)).map((d) => [d, [], 'Not recorded · Auto-posts each morning']))
-  const unRows = await occurrencesOf(page, unreviewed.id)
-  check('(d) unreviewed: Review on every month, Charged and Posted on the first only',
-    unRows.map((r) => [r.day, r.buttons, r.note]), months(addDays(today, 4)).map((d, i) =>
-      [d, i === 0 ? ['upcoming-review', 'upcoming-charged', 'upcoming-posted'] : ['upcoming-review'], 'Not recorded · Review to auto-post']))
-  const offRows = await occurrencesOf(page, off.id)
-  check('(d) off: Charged and Posted on the first month, none on the later ones',
-    offRows.map((r) => [r.day, r.buttons, r.note]), months(addDays(today, 5)).map((d, i) =>
-      [d, i === 0 ? ['upcoming-charged', 'upcoming-posted'] : [], 'Not recorded · Auto-post off · Mark paid']))
+  const plans = await readTab(page, 'installments')
+  const planOf = (e) => plans.filter((r) => r.kind === 'installment' && r.source === `budget_entry:${e.id}`)
+  const view = (e, next) => planOf(e).map((r) => [r.name, r.left, r.text.includes(`Next charge ${fmt(next)}`), [...r.buttons].sort(), r.autoPost])
+  const first = (e) => addDays(today, e === on ? 3 : e === unreviewed ? 4 : 5)
+  check('(d) auto-post on: one plan row, "3 of 3 left", no buttons and the auto-post label',
+    view(on, first(on)).map(([n, l, nx, b, a]) => [n, l, nx, b, a?.includes('Auto-posts each morning')]), [['D On', '3 of 3 left', true, [], true]])
+  check('(d) unreviewed: one plan row with Review, Charged and Posted',
+    view(unreviewed, first(unreviewed)).map(([n, l, nx, b, a]) => [n, l, nx, b, a?.includes('Review to auto-post')]),
+    [['D Unreviewed', '3 of 3 left', true, ['due-charged', 'due-posted', 'due-review'], true]])
+  check('(d) off: one plan row with Charged and Posted',
+    view(off, first(off)).map(([n, l, nx, b, a]) => [n, l, nx, b, a === null || a.includes('Auto-post off')]), [['D Off', '3 of 3 left', true, ['due-charged', 'due-posted'], true]])
+  check('(d) the installments have no row in Upcoming: the plan rows stand for them',
+    [await occurrencesOf(page, on.id), await occurrencesOf(page, unreviewed.id), await occurrencesOf(page, off.id)].map((r) => r.length), [0, 0, 0])
+  check('(d) no installment row in Due', (await readTab(page, 'due')).filter((r) => r.source?.startsWith('budget_entry:') && [on, unreviewed, off].some((e) => r.source === `budget_entry:${e.id}`)).length, 0)
 
-  await occRow(page, unreviewed.id, addDays(today, 4)).locator('[data-testid="upcoming-review"]').click()
+  // Later months are not offered buttons: the API says which occurrence can be recorded (the plan row stands for the first).
+  const listing = (await get(u.token, `/budget-entries/upcoming-occurrences?start_date=${addDays(today, 1)}T00:00:00Z&end_date=${addDays(today, 90)}T23:59:59Z&limit=500`)).items
+  const apiRows = (e) => listing.filter((o) => o.entry_id === e.id).map((o) => [o.occurrence_date.slice(0, 10), o.recordable])
+  check('(d) API, auto-post on: every month listed, none recordable', apiRows(on), months(first(on)).map((d) => [d, false]))
+  check('(d) API, unreviewed: Charged and Posted on the first month only', apiRows(unreviewed), months(first(unreviewed)).map((d, i) => [d, i === 0]))
+  check('(d) API, off: Charged and Posted on the first month only', apiRows(off), months(first(off)).map((d, i) => [d, i === 0]))
+
+  // The two checks above read the Upcoming and Due tabs (readTab selects what it reads), so select Installments again.
+  await openDueTab(page, 'installments')
+  const unrow = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${unreviewed.id}"]`))
+  await unrow.locator('[data-testid="due-review"]').click()
   const review = page.locator('[data-testid="installment-review-dialog"]')
   await review.waitFor()
   check('(d) Review opens the installment review for that entry', (await page.locator('[data-testid="installment-review-title"]').textContent())?.includes('D Unreviewed'), true)
@@ -432,9 +493,8 @@ async function sharedRows(browser) {
   await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
   const rent = await entry(owner, { name: 'F Rent', amount: 15000, account_id: bank.id, next_occurrence: wire(addDays(today, 2)) })
 
-  // The page's default range: the current month, looking ahead to Manila today + 30.
-  const end = [monthEnd(today), addDays(today, 30)].sort()[1]
-  const range = `?start_date=${addDays(today, 1)}T00:00:00Z&end_date=${end}T23:59:59Z`
+    // The card's fixed window and its Upcoming partition: T+1 to T+30, plan=none.
+  const range = `?${apiWindow(today)}&plan=none&limit=500`
   const editorApi = (await get(editor.token, `/budget-entries/upcoming-occurrences${range}`)).items.filter((o) => o.entry_id === rent.id)
   console.log(`    the editor's API rows: ${JSON.stringify(editorApi.map((o) => [o.view, o.can_mark_paid, o.recordable]))}`)
   check('(f) the API gives the editor shared_full rows', [editorApi.length > 0, editorApi.every((o) => o.view === 'shared_full')], [true, true])
@@ -457,9 +517,9 @@ async function sharedRows(browser) {
   await v.ctx.close()
 }
 
-// (g) Filters.
+// (g) Filters leave every tab alone.
 async function filters(browser) {
-  console.log('\n=== (g) Income only, an account, search and a tag filter occurrences')
+  console.log('\n=== (g) Income only, an account, search and a tag change no tab and send no window request')
   const today = manilaToday()
   const u = await makeUser('g')
   const bankA = await account(u, 'G Bank A')
@@ -468,107 +528,116 @@ async function filters(browser) {
   await entry(u, { name: 'G Salary', entry_type: 'income', amount: 30000, account_id: bankA.id, next_occurrence: wire(addDays(today, 2)) })
   await entry(u, { name: 'G Rent', amount: 15000, account_id: bankA.id, next_occurrence: wire(addDays(today, 3)) })
   await entry(u, { name: 'G Gym', amount: 800, account_id: bankB.id, next_occurrence: wire(addDays(today, 4)), tag_ids: [tag.id] })
+  await planned(u, bankB, addDays(today, 5), 50, 'G Planned')
   const { ctx, page, native } = await newPage(browser)
+  const windowRequests = recordWindowRequests(page)
   await uiLogin(page, u)
   await openTransactions(page)
   const names = async () => [...new Set((await occurrences(page)).map((o) => o.name))].sort()
-  check('(g) unfiltered: all three', await names(), ['G Gym', 'G Rent', 'G Salary'])
+  check('(g) unfiltered: all three occurrences', await names(), ['G Gym', 'G Rent', 'G Salary'])
+  const base = await tabsSnapshot(page)
+  check('(g) the planned row is in Upcoming', base.upcoming.filter((r) => r[2] === 'G Planned').length, 1)
   await page.getByRole('button', { name: 'Show filters' }).click()
   await waitQuiet(page)
   const reset = async () => {
     await page.getByRole('button', { name: 'Reset filters' }).click()
     await settle(page)
   }
+  const apply = async (what, act) => {
+    const before = windowRequests.length
+    await act()
+    await settle(page)
+    check(`(g) ${what}: every tab is unchanged`, JSON.stringify(await tabsSnapshot(page)) === JSON.stringify(base), true)
+    check(`(g) ${what}: no window request was sent`, windowRequests.length - before, 0)
+  }
 
-  await page.getByRole('button', { name: 'Income', exact: true }).click()
-  await settle(page)
-  check('(g) Income only', await names(), ['G Salary'])
+  await apply('Income only', () => page.getByRole('button', { name: 'Income', exact: true }).click())
   await reset()
-  await page.getByRole('button', { name: 'G Bank B', exact: true }).click()
-  await settle(page)
-  check('(g) one account', await names(), ['G Gym'])
+  await apply('one account', () => page.getByRole('button', { name: 'G Bank B', exact: true }).click())
   await reset()
-  await page.locator('[data-testid="transactions-search"]').fill('Rent')
-  await page.waitForTimeout(700)
-  await settle(page)
-  check('(g) search', await names(), ['G Rent'])
+  await apply('search', async () => { await page.locator('[data-testid="transactions-search"]').fill('Rent'); await page.waitForTimeout(700) })
   await reset()
-  await page.locator('[data-testid="tag-filter"]').selectOption(String(tag.id))
-  await settle(page)
-  check('(g) a tag', await names(), ['G Gym'])
+  await apply('a tag', () => page.locator('[data-testid="tag-filter"]').selectOption(String(tag.id)))
   checkNoNative('g', native)
   await ctx.close()
 }
 
-// (h) The look-ahead.
+// (h) The fixed window.
 async function lookAhead(browser) {
-  console.log('\n=== (h) the current month looks ahead; other months and custom ranges are exact')
+  console.log('\n=== (h) Upcoming is the next 30 days from the Manila day, whatever the month or range')
   const today = manilaToday()
   const start = addDays(today, 1)
+  const last = addDays(today, 30)
   const u = await makeUser('h')
   const bank = await account(u, 'H Checking')
   const weekly = await entry(u, { name: 'H Weekly', cadence: 'weekly', amount: 100, account_id: bank.id, next_occurrence: wire(start) })
-  const all = everyDays(start, addDays(today, 120), 7)
-  const within = (from, to) => all.filter((d) => d >= from && d <= to)
-  const end = monthEnd(today)
-  const through = addDays(today, 30)
-  const extended = through > end
+  const edge = await entry(u, { name: 'H Edge', amount: 100, account_id: bank.id, next_occurrence: wire(last) })
+  const beyond = await entry(u, { name: 'H Beyond', amount: 100, account_id: bank.id, next_occurrence: wire(addDays(last, 1)) })
+  const weeklyDays = everyDays(start, last, 7)
   const { ctx, page, native } = await newPage(browser)
   await uiLogin(page, u)
   await openTransactions(page)
-  console.log(`    month end ${end}; Manila today + 30 ${through}`)
-  check('(h) the current month lists through the later of its end and today + 30',
-    (await occurrencesOf(page, weekly.id)).map((r) => r.day), within(start, extended ? through : end))
-  check('(h) its header says through when it is extended', await throughText(page), extended ? `through ${fmt(through)}` : null)
-  const header = await upcomingHeader(page)
-  check('(h) the header reads "Upcoming (N) · through <date>"', header?.startsWith(`Upcoming (${within(start, extended ? through : end).length})${extended ? ` · through ${fmt(through)}` : ''}`), true)
+  const days = async (e) => (await occurrencesOf(page, e.id)).map((r) => r.day)
+  const unchanged = async (what) => {
+    check(`(h) ${what}: the same days, the same through`,
+      [await days(weekly), await days(edge), await days(beyond), await throughText(page)], [weeklyDays, [last], [], `Through ${fmt(last)}`])
+  }
+  check('(h) "Through T+30" is in the panel', await throughText(page), `Through ${fmt(last)}`)
+  check('(h) T+30 is listed and T+31 is not', [await days(edge), await days(beyond)], [[last], []])
+  check('(h) the weekly entry is listed on every day through T+30', await days(weekly), weeklyDays)
+  check('(h) the badge is the number of rows', (await upcomingHeader(page)).count, String(weeklyDays.length + 1))
 
   await page.getByRole('button', { name: 'View previous month' }).click()
   await settle(page)
-  check('(h) the previous month: no occurrence and no through', [(await occurrencesOf(page, weekly.id)).length, await throughText(page)], [0, null])
+  await unchanged('the previous month')
 
   await page.getByRole('button', { name: 'Reset filters' }).click()
   await settle(page)
-  const nextStart = addDays(end, 1)
+  const nextStart = addDays(monthEnd(today), 1)
   const nextEnd = monthEnd(nextStart)
   check('(h) a custom range over the next month', await setRange(page, nextStart, nextEnd), [nextStart, nextEnd])
-  check('(h) the next month shows only its own days, with no through',
-    [(await occurrencesOf(page, weekly.id)).map((r) => r.day), await throughText(page)], [within(nextStart, nextEnd), null])
+  await unchanged('the next month as a custom range')
   check('(h) a short custom range', await setRange(page, start, addDays(today, 10)), [start, addDays(today, 10)])
-  check('(h) a custom range is exact, with no through',
-    [(await occurrencesOf(page, weekly.id)).map((r) => r.day), await throughText(page)], [within(start, addDays(today, 10)), null])
+  await unchanged('a short custom range')
   checkNoNative('h', native)
   await ctx.close()
 }
 
 // (i) Over 100 items.
 async function overHundred(browser) {
-  console.log('\n=== (i) over 100 items: showing the next 100 of N')
+  console.log('\n=== (i) over 100 items: showing the next 100 of N, from one ascending request')
   const today = manilaToday()
   const start = addDays(today, 1)
-  const last = addDays(today, 210)
   const u = await makeUser('i')
   const bank = await account(u, 'I Checking')
-  // Five weekly entries on five different weekdays: 30 occurrences each over the range.
-  const weeklies = []
-  for (let k = 1; k <= 5; k++) {
-    weeklies.push(await entry(u, { name: `I Weekly ${k}`, cadence: 'weekly', amount: 10, account_id: bank.id, next_occurrence: wire(addDays(today, k)) }))
+  // A weekly cash entry: occurrences on T+1, T+8, T+15, T+22 and T+29.
+  const weekly = await entry(u, { name: 'I Weekly', cadence: 'weekly', amount: 10, account_id: bank.id, next_occurrence: wire(start) })
+  const occDays = everyDays(start, addDays(today, 30), 7)
+  // 150 planned rows, five a day over T+1..T+30.
+  for (let from = 0; from < 150; from += 10) {
+    await Promise.all(Array.from({ length: 10 }, (_, k) => from + k).map((n) => planned(u, bank, addDays(start, n % 30), 50, `I Planned ${n}`)))
   }
-  const days = weeklies.flatMap((_, i) => everyDays(addDays(today, i + 1), last, 7)).sort()
-  await planned(u, bank, addDays(today, 2), 50, 'I Planned')
+  const total = 150 + occDays.length
   const { ctx, page, native } = await newPage(browser)
+  const windowRequests = recordWindowRequests(page)
   await uiLogin(page, u)
   await openTransactions(page)
-  check('(i) the custom range is set', await setRange(page, start, last), [start, last])
   const header = await upcomingHeader(page)
-  console.log(`    header: ${header}`)
-  check('(i) the header counts 151 and shows the next 100',
-    [header?.startsWith('Upcoming (151)'), header?.includes('showing the next 100 of 151, narrow the dates for more')], [true, true])
-  const shown = await lists(page)
-  check('(i) 100 rows: the planned row and 99 occurrences, soonest first',
-    [shown.upcoming.length, countOf(shown.upcoming, 'I Planned'), (await occurrences(page)).map((o) => o.day)],
-    [100, 1, days.slice(0, 99)])
-  check('(i) the planned row is second: on its day the transaction comes before the occurrence', shown.upcoming.slice(0, 3), ['I Weekly 1', 'I Planned', 'I Weekly 2'])
+  console.log(`    badge ${header.count}; shown: ${header.shown}`)
+  check('(i) the badge counts every row: 150 planned and the weekly occurrences', header.count, String(total))
+  check('(i) the panel says it shows the next 100 of N', header.shown?.startsWith(`showing the next 100 of ${total}`), true)
+  check('(i) the pager reads 1-3 of 100', await pagerLabel(page), '1–3 of 100')
+  check('(i) no Load more on Upcoming', await page.locator('[data-testid="due-load-more"]').count(), 0)
+  const rows = await readTab(page, 'upcoming')
+  const occ = rows.filter((r) => r.kind === 'occurrence')
+  check('(i) 100 rows, soonest first', [rows.length, JSON.stringify(rows.map((r) => r.day)) === JSON.stringify([...rows.map((r) => r.day)].sort())], [100, true])
+  check('(i) the weekly occurrences before the cut are listed, the later ones are not', occ.map((r) => r.day), occDays.slice(0, 3))
+  check('(i) the first row is the soonest day', rows[0]?.day, start)
+  const tx = windowRequests.filter((r) => r.kind === 'transactions')
+  check('(i) exactly one window transactions request, order=asc, limit=100',
+    [tx.length, tx[0]?.params.get('order'), tx[0]?.params.get('limit')], [1, 'asc', '100'])
+  check('(i) no window transactions request with an offset above 0', tx.filter((r) => Number(r.params.get('offset') ?? '0') > 0).length, 0)
+  check('(i) the weekly entry exists in the API', typeof weekly.id, 'number')
   checkNoNative('i', native)
   await ctx.close()
 }
@@ -583,7 +652,7 @@ function dueRowDay(sub) {
 
 // (j) Due and overdue holds Manila today and earlier only.
 async function dueIsTodayAndEarlier(browser) {
-  console.log('\n=== (j) Due and overdue lists today and earlier only; each later occurrence is in Upcoming once')
+  console.log('\n=== (j) Due lists today and earlier only; card subscriptions and installments are on their own tabs; each day is listed once across the tabs')
   const today = manilaToday()
   const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
   const u = await makeUser('j')
@@ -596,6 +665,8 @@ async function dueIsTodayAndEarlier(browser) {
   const salary = await entry(u, { name: 'J Salary', entry_type: 'income', amount: 30000, account_id: bank.id, next_occurrence: wire(addDays(today, 4)) })
   const save = await entry(u, { name: 'J Save', amount: 2000, account_id: bank.id, transfer_to_account_id: savings.id, next_occurrence: wire(addDays(today, 5)) })
   const old = await entry(u, { name: 'J Old Bill', amount: 900, account_id: bank.id, next_occurrence: wire(addMonths(today, -2).slice(0, 8) + String(anchor).padStart(2, '0')), anchor_day: anchor })
+  const sub = await entry(u, { name: 'J Sub Today', amount: 300, account_id: visa.id, next_occurrence: wire(today) })
+  const plan = await installment(u, visa, 'J Plan', addDays(today, 6), 3)
   // Netflix's first month is Charged ahead of its day: a pending row linked to it, dated today+3.
   const charged = await api(u.token, 'POST', `/budget-entries/${netflix.id}/materialize`, { is_posted: false })
   const linked = await linkedRows(u, netflix.id)
@@ -605,14 +676,15 @@ async function dueIsTodayAndEarlier(browser) {
   const { ctx, page, native } = await newPage(browser)
   await uiLogin(page, u)
   await openTransactions(page)
-  const dueRows = await allDueRows(page)
-  const occs = await occurrences(page)
-  const upcomingRows = await page.evaluate(() => {
-    const up = document.querySelector('[data-testid="upcoming-transactions"]')
-    return up ? [...up.querySelectorAll('article:not([data-testid="upcoming-occurrence"])')].map((a) => a.querySelector('p.text-base')?.textContent.trim() ?? '') : []
-  })
+  const dueRows = await readTab(page, 'due')
+  const upRows = await readTab(page, 'upcoming')
+  const subRows = await readTab(page, 'subscriptions')
+  const planRows = await readTab(page, 'installments')
+  const occs = upRows.filter((r) => r.kind === 'occurrence')
+  const upcomingRows = upRows.filter((r) => r.source?.startsWith('transaction:')).map((r) => r.name)
   console.log(`    due ${JSON.stringify(dueRows.map((r) => `${r.kind}:${r.name}:${dueRowDay(r.sub)}`))}`)
   console.log(`    upcoming occurrences ${JSON.stringify(occs.map((o) => `${o.name}:${o.day}`))}; upcoming rows ${JSON.stringify(upcomingRows)}`)
+  console.log(`    subscriptions ${JSON.stringify(subRows.map((r) => `${r.kind}:${r.name}:${r.day ?? dueRowDay(r.sub)}`))}; plans ${JSON.stringify(planRows.map((r) => r.name))}`)
 
   check('(j) no Due row is dated after today',
     dueRows.filter((r) => r.kind !== 'missed' && (dueRowDay(r.sub) === null || dueRowDay(r.sub) > today)).map((r) => r.name), [])
@@ -623,15 +695,21 @@ async function dueIsTodayAndEarlier(browser) {
     [dueRows.filter((r) => r.source === `budget_entry:${todayBill.id}` && dueRowDay(r.sub) === today).length,
       occs.filter((o) => o.source === `budget_entry:${todayBill.id}` && o.day === today).length], [1, 0])
   check('(j) the missed month is in Due once', dueRows.filter((r) => r.kind === 'missed' && r.source === `budget_entry:${old.id}`).length, 1)
+  check('(j) the card subscription due today and the installment plan are not in Due',
+    [sub, plan].map((e) => dueRows.filter((r) => r.source === `budget_entry:${e.id}`).length), [0, 0])
+  check('(j) the card subscription due today is in Subscriptions once on today (its next month may also be in the window), the plan in Installments once, and neither in Upcoming',
+    [subRows.filter((r) => r.source === `budget_entry:${sub.id}` && (r.day ?? dueRowDay(r.sub)) === today).length, planRows.filter((r) => r.source === `budget_entry:${plan.id}`).length,
+      occs.filter((o) => o.source === `budget_entry:${sub.id}` || o.source === `budget_entry:${plan.id}`).length], [1, 1, 0])
   check('(j) each later entry\'s first day is in Upcoming once, "Not recorded"',
     [[soon, 2], [salary, 4], [save, 5]].map(([e, n]) => occs.filter((o) => o.source === `budget_entry:${e.id}` && o.day === addDays(today, n) && o.notRecorded).length), [1, 1, 1])
-  check('(j) the linked pending row is in Upcoming once, and its month is not an occurrence there',
-    [countOf(upcomingRows, 'J Netflix'), occs.filter((o) => o.source === `budget_entry:${netflix.id}` && o.day === addDays(today, 3)).length], [1, 0])
+  check('(j) the linked pending row is in Upcoming once, and its month is not an occurrence on any tab',
+    [countOf(upcomingRows, 'J Netflix'), [...occs, ...subRows].filter((o) => o.source === `budget_entry:${netflix.id}` && o.day === addDays(today, 3)).length], [1, 0])
   const pairs = [
     ...dueRows.filter((r) => r.kind === 'recurring').map((r) => `${r.source}@${dueRowDay(r.sub)}`),
     ...occs.map((o) => `${o.source}@${o.day}`),
+    ...subRows.filter((r) => r.kind !== 'missed' && r.source?.startsWith('budget_entry:')).map((r) => `${r.source}@${r.day ?? dueRowDay(r.sub)}`),
   ]
-  check('(j) each entry\'s day is listed once across Due and Upcoming', pairs.filter((p, i) => pairs.indexOf(p) !== i), [])
+  check('(j) each entry\'s day is listed once across Due, Upcoming and Subscriptions', pairs.filter((p, i) => pairs.indexOf(p) !== i), [])
   checkNoNative('j', native)
   await ctx.close()
 }
@@ -645,10 +723,13 @@ async function partitionOnManilaDay(browser) {
   const zone = manilaHour() < 20 ? 'Etc/GMT+12' : 'Pacific/Kiritimati'
   const u = await makeUser('k')
   const bank = await account(u, 'K Checking')
+  const visa = await card(u, bank, 'K Visa')
   await planned(u, bank, today, 100, 'K Today Row')
   await planned(u, bank, tomorrow, 100, 'K Tomorrow Row')
   const todayBill = await entry(u, { name: 'K Today Bill', amount: 700, account_id: bank.id, next_occurrence: wire(today) })
   const tomorrowBill = await entry(u, { name: 'K Tomorrow Bill', amount: 800, account_id: bank.id, next_occurrence: wire(tomorrow) })
+  // A card subscription due Manila today: it is a Subscriptions row, not a Due row.
+  const todaySub = await entry(u, { name: 'K Today Sub', amount: 549, account_id: visa.id, next_occurrence: wire(today) })
 
   const { ctx, page, native } = await newPage(browser, { timezoneId: zone })
   const local = await page.evaluate(() => new Date().toLocaleDateString('en-CA'))
@@ -659,8 +740,9 @@ async function partitionOnManilaDay(browser) {
   await openTransactions(page)
   check('(k) the custom range reads Manila today to Manila tomorrow', await setRange(page, today, tomorrow), [today, tomorrow])
 
-  const shown = await lists(page)
+  // Read Due first (it is the selected tab); `lists` then selects Upcoming.
   const dueRows = await allDueRows(page)
+  const shown = await lists(page)
   const due = dueRows.map((r) => r.name)
   /** Due's rows for an entry's occurrence on `day` (a recurring row's second line starts with its day). */
   const dueOn = (entryId, day) => dueRows.filter((r) => r.source === `budget_entry:${entryId}` && r.sub.startsWith(fmt(day))).length
@@ -676,6 +758,10 @@ async function partitionOnManilaDay(browser) {
     [notPosted.filter((r) => r.text.includes('K Today Row')).length, notPosted.find((r) => r.text.includes('K Today Row'))?.logged], [1, 'logged today'])
   check('(k) the Manila-tomorrow row is on neither tab', [due.filter((n) => n.includes('K Tomorrow Row')).length, notPosted.filter((r) => r.text.includes('K Tomorrow Row')).length], [0, 0])
   const occs = await occurrences(page)
+  const subRows = await readTab(page, 'subscriptions')
+  check('(k) the card subscription due Manila today is in Subscriptions once, and not in Due or Upcoming',
+    [subRows.filter((r) => r.source === `budget_entry:${todaySub.id}` && (r.day ?? dueRowDay(r.sub)) === today).length, dueRows.filter((r) => r.source === `budget_entry:${todaySub.id}`).length,
+      occs.filter((o) => o.source === `budget_entry:${todaySub.id}`).length], [1, 0, 0])
   check('(k) the occurrence due Manila today is in Due and overdue once, not in Upcoming or the main list',
     [dueOn(todayBill.id, today), occs.filter((o) => o.source === `budget_entry:${todayBill.id}` && o.day === today).length, countOf(shown.main, 'K Today Bill')], [1, 0, 0])
   check('(k) the occurrence due Manila tomorrow is in Upcoming once, on that day, and not in the main list or Due and overdue',
@@ -687,6 +773,20 @@ async function partitionOnManilaDay(browser) {
 /** A GET of the transaction list, not the section's pending queries (no is_posted, no ids). */
 const listRequest = (url) =>
   url.pathname.endsWith('/api/v1/transactions/') && !url.searchParams.has('is_posted') && url.searchParams.getAll('ids').length === 0
+/**
+ * The occurrence requests for the window that starts on `from`, counted per partition.
+ * Commit 6 sends `plan=none` only; the Subscriptions tab adds `plan=subscription` (commit 7).
+ */
+const PARTITIONS = ['none', 'subscription']
+const newOccurrenceCounts = () => Object.fromEntries(PARTITIONS.map((p) => [p, 0]))
+function countOccurrenceRequest(url, from, counts) {
+  if (!url.pathname.endsWith('/api/v1/budget-entries/upcoming-occurrences')) return
+  if (!(url.searchParams.get('start_date') ?? '').startsWith(from)) return
+  const plan = url.searchParams.get('plan')
+  if (plan !== null && plan in counts) counts[plan]++
+}
+/** One request per partition the card queries: `none` always, `subscription` once the Subscriptions tab exists. */
+const expectedOccurrenceCounts = () => PARTITIONS.map((p) => (p === 'subscription' && !DUE_TABS.some((t) => t.slug === 'subscriptions') ? 0 : 1))
 
 // (l) The rollover trigger, on the browser clock only.
 async function rolloverTrigger(browser) {
@@ -707,19 +807,19 @@ async function rolloverTrigger(browser) {
   await openTransactions(page)
   const before = await lists(page)
   check('(l) before midnight the later planned row is in Upcoming', countOf(before.upcoming, 'L Later Row'), 1)
-  check('(l) before midnight Upcoming runs through the day + 30', await throughText(page), `through ${fmt(addDays(day, 30))}`)
+  check('(l) before midnight Upcoming runs through the day + 30', await throughText(page), `Through ${fmt(addDays(day, 30))}`)
 
-  const seen = { main: 0, upcoming: 0, otherList: 0, occurrences: 0, snapshot: 0, documents: 0 }
+  const seen = { main: 0, upcoming: 0, otherList: 0, occurrences: newOccurrenceCounts(), snapshot: 0, documents: 0 }
   page.on('request', (r) => {
     if (r.resourceType() === 'document') seen.documents++
     if (r.method() !== 'GET') return
     const url = new URL(r.url())
     if (url.pathname.endsWith('/api/v1/dashboard/snapshot')) seen.snapshot++
-    if (url.pathname.endsWith('/api/v1/budget-entries/upcoming-occurrences') && (url.searchParams.get('start_date') ?? '').startsWith(addDays(next, 1))) seen.occurrences++
+    countOccurrenceRequest(url, addDays(next, 1), seen.occurrences)
     if (!listRequest(url)) return
     const start = url.searchParams.get('start_date') ?? ''
     const end = url.searchParams.get('end_date') ?? ''
-    if (start.startsWith(addDays(next, 1))) seen.upcoming++
+    if (url.searchParams.get('order') === 'asc' && start.startsWith(addDays(next, 1)) && end.startsWith(addDays(next, 30))) seen.upcoming++
     else if (end.startsWith(next)) seen.main++
     else seen.otherList++
   })
@@ -729,9 +829,11 @@ async function rolloverTrigger(browser) {
   const manila = await page.evaluate(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10))
   check('(l) the page\'s Manila day turned', manila, next)
   check('(l) no reload', seen.documents, 0)
-  check('(l) exactly one new request each: main list, Upcoming transactions, Upcoming occurrences, snapshot (and no other list request)',
-    [seen.main, seen.upcoming, seen.occurrences, seen.snapshot, seen.otherList], [1, 1, 1, 1, 0])
-  check('(l) the Upcoming header\'s "through" moved by one day', await throughText(page), `through ${fmt(addDays(next, 30))}`)
+  check('(l) exactly one new request each: main list, Upcoming transactions, snapshot (and no other list request)',
+    [seen.main, seen.upcoming, seen.snapshot, seen.otherList], [1, 1, 1, 0])
+  check('(l) exactly one new occurrences request per partition (plan=none, plan=subscription)',
+    PARTITIONS.map((p) => seen.occurrences[p]), expectedOccurrenceCounts())
+  check('(l) the Upcoming panel\'s "Through" moved by one day', await throughText(page), `Through ${fmt(addDays(next, 30))}`)
   checkNoNative('l', native)
   await ctx.close()
   await rolloverCustomRange(browser, u, day, next)
@@ -750,28 +852,98 @@ async function rolloverCustomRange(browser, u, day, next) {
   await openTransactions(page)
   check('(l) custom range: the range reads the day - 5 to the day + 20', await setRange(page, start, end), [start, end])
   check('(l) custom range: before midnight the later planned row is in Upcoming', countOf((await lists(page)).upcoming, 'L Later Row'), 1)
-  check('(l) custom range: no look-ahead, so no "through"', await throughText(page), null)
+  check('(l) custom range: the window is fixed, so "Through" is still the day + 30', await throughText(page), `Through ${fmt(addDays(day, 30))}`)
 
-  const seen = { main: 0, upcoming: 0, otherList: 0, occurrences: 0, documents: 0 }
+  const seen = { main: 0, upcoming: 0, otherList: 0, occurrences: newOccurrenceCounts(), documents: 0 }
   page.on('request', (r) => {
     if (r.resourceType() === 'document') seen.documents++
     if (r.method() !== 'GET') return
     const url = new URL(r.url())
-    if (url.pathname.endsWith('/api/v1/budget-entries/upcoming-occurrences') && (url.searchParams.get('start_date') ?? '').startsWith(addDays(next, 1))) seen.occurrences++
+    countOccurrenceRequest(url, addDays(next, 1), seen.occurrences)
     if (!listRequest(url)) return
     const from = url.searchParams.get('start_date') ?? ''
     const to = url.searchParams.get('end_date') ?? ''
-    if (from.startsWith(addDays(next, 1)) && to.startsWith(end)) seen.upcoming++
+    if (from.startsWith(addDays(next, 1)) && to.startsWith(addDays(next, 30))) seen.upcoming++
     else if (from.startsWith(start) && to.startsWith(next)) seen.main++
     else seen.otherList++
   })
   await page.clock.fastForward('02:00')
   await settle(page)
   check('(l) custom range: no reload', seen.documents, 0)
-  check('(l) custom range: exactly one new request each: main list through the new day, Upcoming transactions and occurrences from the day after it (and no other list request)',
-    [seen.main, seen.upcoming, seen.occurrences, seen.otherList], [1, 1, 1, 0])
+  check('(l) custom range: exactly one new request each: main list through the new day and Upcoming transactions, the window from the day after it (and no other list request)',
+    [seen.main, seen.upcoming, seen.otherList], [1, 1, 0])
+  check('(l) custom range: exactly one new occurrences request per partition (plan=none, plan=subscription)',
+    PARTITIONS.map((p) => seen.occurrences[p]), expectedOccurrenceCounts())
+  check('(l) custom range: the "Through" moved by one day', await throughText(page), `Through ${fmt(addDays(next, 30))}`)
   checkNoNative('l', native)
   await ctx.close()
+}
+
+// (m) Where Upcoming lives now: a tab of the card, with compact rows.
+async function upcomingTabPlacement(browser) {
+  console.log('\n=== (m) Upcoming is a tab: no page section, no articles, the modal on tap, paging kept, no Load more')
+  const today = manilaToday()
+  const u = await makeUser('m')
+  const bank = await account(u, 'M Checking')
+  for (let n = 1; n <= 5; n++) await planned(u, bank, addDays(today, n + 1), 10 * n, `M Row ${n}`)
+  const { ctx, page, native } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  const badge = async () => Number((await page.locator('[data-testid="due-upcoming-count"]').textContent())?.trim())
+
+  check('(m) the page has no upcoming-transactions section', await page.locator('[data-testid="upcoming-transactions"]').count(), 0)
+  check('(m) the tabs are in the DUE_TABS order',
+    await page.locator('[data-testid="due-section"] [role="tab"]').evaluateAll((els) => els.map((e) => e.dataset.testid)), DUE_TABS.map((t) => t.tab))
+  const rows = await readTab(page, 'upcoming')
+  check('(m) the badge counts the five planned rows, and each is a compact transaction row',
+    [await badge(), rows.map((r) => [r.kind, r.name])], [5, [1, 2, 3, 4, 5].map((n) => ['upcoming', `M Row ${n}`])])
+  check('(m) Upcoming rows contain no article', await page.locator('[data-testid="due-panel-upcoming"] article').count(), 0)
+
+  // Paging is read, not awaited: a step that does not land (5 s) leaves the page where it is and the check reads it.
+  await goToPage(page, 2).catch(() => {})
+  check('(m) page 2 of Upcoming', [await currentPage(page), await pagerLabel(page)], [2, '4–5 of 5'])
+  await openDueTab(page, 'not-posted')
+  await openDueTab(page, 'upcoming')
+  check('(m) page 2 survives a visit to another tab', [await currentPage(page), await pagerLabel(page)], [2, '4–5 of 5'])
+  await goToPage(page, 1)
+
+  const target = await showRow(page, page.locator('[data-testid="due-row"][data-kind="upcoming"]').filter({ hasText: 'M Row 1' }))
+  await target.locator('[data-testid="upcoming-transaction"]').click()
+  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Transaction Actions', exact: true }) })
+  const modalShown = await modal.waitFor({ timeout: 10000 }).then(() => true, () => false)
+  check('(m) tapping a row opens the action modal', modalShown, true)
+  if (modalShown) {
+    await waitQuiet(page)
+    check('(m) tapping a row opens the action modal with Edit, Delete and Post',
+      [await modal.getByRole('button', { name: 'Edit Transaction', exact: true }).count(), await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).count(),
+        await modal.getByRole('button', { name: 'Mark as Posted', exact: true }).count()], [1, 1, 1])
+    await modal.getByRole('button', { name: 'Delete Transaction', exact: true }).click()
+    const confirm = page.locator('[data-testid="confirm-dialog"]')
+    await confirm.waitFor()
+    await confirm.locator('[data-testid="confirm-dialog-confirm"]').click()
+    await confirm.waitFor({ state: 'detached' })
+    await modal.waitFor({ state: 'detached' })
+    await settle(page)
+    check('(m) Delete drops the badge by one and the row leaves', [await badge(), (await readTab(page, 'upcoming')).filter((r) => r.text.includes('M Row 1')).length], [4, 0])
+  }
+  checkNoNative('m', native)
+  await ctx.close()
+
+  // A forced has_more: no Load more on Upcoming; the same force shows it on Due (the control).
+  const forced = await newPage(browser)
+  await forced.page.route((url) => url.pathname.endsWith('/api/v1/transactions/') && (url.searchParams.get('order') === 'asc' || url.searchParams.get('is_posted') === 'false'), async (route) => {
+    const res = await route.fetch()
+    const json = await res.json()
+    await route.fulfill({ response: res, json: { ...json, has_more: true } })
+  })
+  await uiLogin(forced.page, u)
+  await openTransactions(forced.page)
+  await openDueTab(forced.page, 'due')
+  check('(m) control: with has_more forced, Due shows Load more', await forced.page.locator('[data-testid="due-load-more"]').count(), 1)
+  await openDueTab(forced.page, 'upcoming')
+  check('(m) with has_more forced, Upcoming shows no Load more', await forced.page.locator('[data-testid="due-load-more"]').count(), 0)
+  checkNoNative('m', forced.native)
+  await forced.ctx.close()
 }
 
 ;(async () => {
@@ -779,7 +951,7 @@ async function rolloverCustomRange(browser, u, day, next) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: threeSalaries, b: markReceived, c: markPaidAndCard, d: installments, e: pausedEntry, f: sharedRows, g: filters, h: lookAhead, i: overHundred, j: dueIsTodayAndEarlier, k: partitionOnManilaDay, l: rolloverTrigger }
+  const steps = { a: threeSalaries, b: markReceived, c: markPaidAndCard, d: installments, e: pausedEntry, f: sharedRows, g: filters, h: lookAhead, i: overHundred, j: dueIsTodayAndEarlier, k: partitionOnManilaDay, l: rolloverTrigger, m: upcomingTabPlacement }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

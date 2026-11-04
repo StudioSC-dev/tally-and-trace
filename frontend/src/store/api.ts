@@ -125,7 +125,9 @@ import type {
   MaterializeDueResult,
   HeaderReader,
   UpcomingOccurrenceQuery,
+  TransactionListOrder,
   UpcomingOccurrences,
+  InstallmentPlans,
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
@@ -432,8 +434,16 @@ export const accountingApi = createApi({
         if (params.start_date) searchParams.set('start_date', params.start_date)
         if (params.end_date) searchParams.set('end_date', params.end_date)
         if (typeof params.limit === 'number') searchParams.set('limit', String(params.limit))
+        if (params.plan) searchParams.set('plan', params.plan)
         return { url: 'budget-entries/upcoming-occurrences', params: searchParams }
       },
+      providesTags: ['BudgetEntry', 'Transaction'],
+    }),
+
+    // Every active card installment plan the caller sees, with its next unrecorded charge.
+    // `day` (the Manila day) is only the cache key: a new day is a new request.
+    getInstallmentPlans: builder.query<InstallmentPlans, { day: string }>({
+      query: () => 'budget-entries/installment-plans',
       providesTags: ['BudgetEntry', 'Transaction'],
     }),
 
@@ -457,6 +467,8 @@ export const accountingApi = createApi({
       search?: string
       limit?: number
       offset?: number
+      /** By date then id: `desc` (the server default) or `asc`, soonest first. */
+      order?: TransactionListOrder
     }>({
       query: (params) => {
         const searchParams = new URLSearchParams()
@@ -476,6 +488,7 @@ export const accountingApi = createApi({
         if (params?.search) searchParams.set('search', params.search)
         if (typeof params?.limit === 'number') searchParams.set('limit', String(params.limit))
         if (typeof params?.offset === 'number') searchParams.set('offset', String(params.offset))
+        if (params?.order) searchParams.set('order', params.order)
         return { url: 'transactions/', params: searchParams }
       },
       providesTags: ['Transaction'],
@@ -746,7 +759,8 @@ export const {
   useMaterializeBudgetEntryMutation,
   useMaterializeDueBudgetEntryMutation,
   useGetEntryOccurrencesQuery,
-  useLazyGetUpcomingOccurrencesQuery,
+  useGetUpcomingOccurrencesQuery,
+  useGetInstallmentPlansQuery,
   useGetInstallmentReviewQuery,
   useReviewInstallmentMutation,
   useReviewInstallmentsMutation,

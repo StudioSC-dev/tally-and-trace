@@ -9,8 +9,9 @@
 // Manila's today.
 //
 // Scenarios:
-//   (a) a backdated installment with a hand-typed duplicate: its missed row reads
-//       "Review to auto-post" with Review, and the review notice lists it. The dialog
+//   (a) a backdated installment with a hand-typed duplicate: its plan row on the Installments
+//       tab (STU-511; missed months are flagged on it, not listed as rows) reads
+//       "Review to auto-post" with Review, and the review notice, which stays on Due, lists it. The dialog
 //       lists the API's missed months and the candidate; "Move the next date instead"
 //       opens the edit form and Cancel comes back. Linking the candidate, then "Record 3
 //       months and turn on auto-post": the missed row is gone and the API shows one
@@ -39,9 +40,9 @@
 //       the API's dates, Pay says "Post the installment months first"; Post now posts 2,
 //       the block goes, Pay opens on the API's statements with Full prefilled and no
 //       unposted note, and "Posted 2" stays. The same card with auto-post off points to
-//       Due and overdue instead, Pay says why, and Due and overdue lists the card for its
-//       unposted months alone (no Pay, "Review or Mark paid below"), the missed row
-//       reading "Auto-post off · Mark paid". A card with a recorded statement and two
+//       Installments instead, Pay says why, and Due and overdue lists the card for its
+//       unposted months alone (no Pay, "Review or Mark paid in Installments"), and the
+//       plan row on Installments reads "Auto-post off · Mark paid". A card with a recorded statement and two
 //       postable unposted months opens Pay with "Full leaves out 2 installment months
 //       not yet posted" and Post due installments now
 //   (h) a reviewed installment due today is posted by opening Transactions, with no click:
@@ -69,7 +70,7 @@
 // Usage: node frontend/e2e/installment-autopost.cjs [a|b|c|d|e|f|g|h|i|j|k]
 const util = require('node:util')
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { allDueRows, showRow } = require('./_due_pages.cjs')
+const { useDueCheck, allDueRows, showRow, openDueTab } = require('./_due_pages.cjs')
 const { gate, logRequests, overlayPhase, readTexts, recordTexts, resetTexts, sleep, waitPhase, waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -89,6 +90,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -228,10 +230,23 @@ const text = async (locator) => (await locator.textContent())?.replace(/\s+/g, '
 const testId = (page, id) => page.locator(`[data-testid="${id}"]`)
 const reviewDialog = (page) => testId(page, 'installment-review-dialog')
 const dueToday = (page, entryId) => page.locator(`[data-testid="due-today-line"][data-source="budget_entry:${entryId}"]`)
-const missedRow = (page, entryId) => page.locator(`[data-testid="due-row"][data-kind="missed"][data-source="budget_entry:${entryId}"]`)
-/** The entry's missed rows over every page. */
-const missedRows = async (page, entryId) =>
-  (await allDueRows(page)).filter((r) => r.kind === 'missed' && r.source === `budget_entry:${entryId}`)
+/** The entry's plan row on the Installments tab (STU-511): its missed months are flagged on it, not listed as rows. */
+const planRow = (page, entryId) => page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${entryId}"]`)
+/** Opens the Installments tab and goes to the page holding the entry's plan row; returns its locator. */
+async function showPlanRow(page, entryId) {
+  await openDueTab(page, 'installments')
+  return showRow(page, planRow(page, entryId))
+}
+/** How many plan rows the entry has on Installments, over every page. */
+async function showPlanRowCount(page, entryId) {
+  await openDueTab(page, 'installments')
+  return (await allDueRows(page)).filter((r) => r.kind === 'installment' && r.source === `budget_entry:${entryId}`).length
+}
+/** The entry's plan rows over every page of Installments that still flag missed months (a count over 0). */
+async function missedRows(page, entryId) {
+  await openDueTab(page, 'installments')
+  return (await allDueRows(page)).filter((r) => r.kind === 'installment' && r.source === `budget_entry:${entryId}` && /\d+ missed/.test(r.text))
+}
 
 /** Waits (bounded) until `locator` has `n` matches; returns the last count seen. */
 async function waitCount(page, locator, n, ms = 15000) {
@@ -273,9 +288,10 @@ async function reviewWithDuplicate(browser) {
   await uiLogin(page, me)
   await openTransactions(page)
   check('(a) the review notice counts it', await text(testId(page, 'due-review-notice-toggle')), "1 card installment doesn't auto-post yet")
-  const row = await showRow(page, missedRow(page, entry.id))
-  check('(a) the missed row reads "Review to auto-post"', await text(row.locator('[data-testid="due-auto-post"]')), 'Review to auto-post')
-  check('(a) the missed row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
+  const row = await showPlanRow(page, entry.id)
+  check('(a) the plan row flags the three missed months and reads Overdue', [await text(row.locator('[data-testid="due-installment-missed"]')), await row.locator('[data-testid="due-overdue"]').count()], ['· 3 missed', 1])
+  check('(a) the plan row reads "Review to auto-post"', await text(row.locator('[data-testid="due-auto-post"]')), 'Review to auto-post')
+  check('(a) the plan row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
   await openReview(page, row.locator('[data-testid="due-review"]'))
   const dialog = reviewDialog(page)
   check('(a) the dialog names the entry and the card', await text(testId(page, 'installment-review-title')), 'Turn on auto-post for Laptop (Visa A)')
@@ -301,7 +317,8 @@ async function reviewWithDuplicate(browser) {
 
   await group.locator('[data-testid="installment-review-link"]').check()
   check('(a) the dialog closed after recording', await submitReview(page), 0)
-  check('(a) the missed row is gone', (await missedRows(page, entry.id)).length, 0)
+  check('(a) the plan row no longer flags missed months', (await missedRows(page, entry.id)).length, 0)
+  await openDueTab(page, 'due')
   check('(a) the review notice is gone', await testId(page, 'due-review-notice').count(), 0)
   const linked = await linkedRows(me, card, entry.id)
   check('(a) one linked row per month', linked.length, 3)
@@ -437,6 +454,7 @@ async function roles(browser) {
     check('(e) viewer: no Post now', await testId(page, 'due-post-now').count(), 0)
     check('(e) viewer: no due-today line', await testId(page, 'due-today-line').count(), 0)
     check('(e) viewer: no full row for the entry', rows.filter((r) => r.source === `budget_entry:${entry.id}`).length, 0)
+    check('(e) viewer: no plan row for the entry on Installments', (await showPlanRowCount(page, entry.id)), 0)
     check('(e) viewer: no Review anywhere', rows.filter((r) => r.buttons.includes('due-review')).length, 0)
     check('(e) viewer: no auto-post label anywhere', rows.filter((r) => /auto-post|Possible duplicate/i.test(r.text)).length, 0)
     check('(e) viewer: Limited rows carry no button', rows.filter((r) => r.view === 'limited' && r.buttons.length > 0).length, 0)
@@ -447,8 +465,9 @@ async function roles(browser) {
   await uiLogin(page, editor)
   await openTransactions(page)
   check('(e) editor: the review notice', await text(testId(page, 'due-review-notice-toggle')), "1 card installment doesn't auto-post yet")
-  const row = await showRow(page, missedRow(page, entry.id))
-  check('(e) editor: the missed row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
+  const row = await showPlanRow(page, entry.id)
+  check('(e) editor: the plan row has Review', await row.locator('[data-testid="due-review"]').count(), 1)
+  await openDueTab(page, 'due')
   await testId(page, 'due-review-notice-toggle').click()
   const listed = page.locator(`[data-testid="due-review-notice-entry"][data-source="budget_entry:${entry.id}"]`)
   check('(e) editor: the notice lists the entry', await text(listed.locator('span').first()), 'Sofa · Visa E · 3 missed months to record · review it on its own')
@@ -593,10 +612,10 @@ async function unpostedPanel(browser) {
   const p2 = second.page
   await uiLogin(p2, off.me)
   await openPanel(p2, off.card.id)
-  check('(g2) the block points to Due and overdue', await text(testId(p2, 'card-unposted-review')), 'Review or Mark paid them in Due and overdue')
+  check('(g2) the block points to Installments', await text(testId(p2, 'card-unposted-review')), 'Review or Mark paid them in Installments')
   check('(g2) the link goes to Transactions', await testId(p2, 'card-unposted-review').locator('a').getAttribute('href'), '/transactions')
   check('(g2) no Post now', await testId(p2, 'card-unposted-post').count(), 0)
-  check('(g2) Pay says why', await text(testId(p2, 'card-pay-disabled-reason')), 'Review or Mark paid the installment months in Due and overdue first')
+  check('(g2) Pay says why', await text(testId(p2, 'card-pay-disabled-reason')), 'Review or Mark paid the installment months in Installments first')
 
   const due = (await get(off.me.token, '/dashboard/snapshot')).card_statements_due.find((s) => s.account_id === off.card.id)
   check('(g2) the snapshot lists the card for its unposted months', due && [due.clear_through, due.unposted_installments, due.unposted_postable], [0, 2, 0])
@@ -604,11 +623,11 @@ async function unpostedPanel(browser) {
   const statement = await showRow(p2, p2.locator(`[data-testid="due-row"][data-kind="statement"][data-source="statement:${off.card.id}"]`))
   check('(g2) the row says what is unposted', await text(statement.locator('[data-testid="due-unposted-text"]')), `${off.card.name} · 2 installment months not yet posted`)
   check('(g2) the row has no Pay and no Post now', [await statement.locator('[data-testid="due-pay"]').count(), await statement.locator('[data-testid="due-unposted-post"]').count()], [0, 0])
-  check('(g2) the row points below', await text(statement.locator('[data-testid="due-unposted-guidance"]')), 'Review or Mark paid below')
+  check('(g2) the row points to Installments', await text(statement.locator('[data-testid="due-unposted-guidance"]')), 'Review or Mark paid in Installments')
   check('(g2) the row is overdue as the API says', await statement.locator('[data-testid="due-overdue"]').count(), due?.overdue ? 1 : 0)
-  const missed = await showRow(p2, missedRow(p2, off.entry.id))
-  check('(g2) the missed row reads "Auto-post off · Mark paid"', await text(missed.locator('[data-testid="due-auto-post"]')), 'Auto-post off · Mark paid')
-  check('(g2) the missed row has no Review', await missed.locator('[data-testid="due-review"]').count(), 0)
+  const missed = await showPlanRow(p2, off.entry.id)
+  check('(g2) the plan row reads "Auto-post off · Mark paid"', await text(missed.locator('[data-testid="due-auto-post"]')), 'Auto-post off · Mark paid')
+  check('(g2) the plan row has no Review', await missed.locator('[data-testid="due-review"]').count(), 0)
   await second.ctx.close()
 
   console.log('(g3) Pay shows the unposted note when a statement is recorded')
@@ -854,7 +873,7 @@ async function staleReview(browser) {
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, me)
   await openTransactions(page)
-  const row = await showRow(page, missedRow(page, entry.id))
+  const row = await showPlanRow(page, entry.id)
   await openReview(page, row.locator('[data-testid="due-review"]'))
   check('(k) the dialog names the entry', await text(testId(page, 'installment-review-title')), 'Turn on auto-post for Camera (Visa K)')
 

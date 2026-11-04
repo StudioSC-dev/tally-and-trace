@@ -6,6 +6,7 @@
 // ./README.md.
 //
 // (f) is STU-485's: the same for the Not posted yet badge, while the window query is held.
+// (g) is STU-511's: the Upcoming badge and panel while its occurrences request is held after a day turn.
 //
 // Check kinds: [B] behavioural, [S] structural (a failed one makes the run invalid),
 // [G] guard. The script ends with RESULT: k/m and exits 0 only when every check passed,
@@ -13,8 +14,10 @@
 //
 // Usage: node frontend/e2e/smooth-due.cjs [scenario]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, expectDueTab, allDueRows, openDueTab, readTab } = require('./_due_pages.cjs')
 const h = require('./_smooth.cjs')
+// openDueTab's "the due card has the <slug> tab" assertion, as a [B] check named tab.<slug>.
+useDueCheck((what, actual, expected) => h.check(`tab.${what.split(' ').at(-2)}`, 'B', async () => actual === expected || `${what}: actual=${actual} expected=${expected}`))
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -56,6 +59,11 @@ const isSectionWindow = (r) => {
   if (!isWindow(r)) return false
   const q = new URL(r.url()).searchParams
   return q.get('is_posted') === 'false' && q.get('limit') === '1000' && !q.has('start_date')
+}
+/** The Upcoming card's occurrences request (the plan=none partition, until Subscriptions adds its own). */
+const isUpcomingOccurrences = (r) => {
+  if (r.method() !== 'GET' || !pathIs('/budget-entries/upcoming-occurrences')(r)) return false
+  return new URL(r.url()).searchParams.get('plan') === 'none'
 }
 /** A linked batch: transactions asked for by `ids`. */
 const isLinkedBatch = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length > 0
@@ -173,9 +181,83 @@ async function scenarioF(browser) {
   }
 }
 
+// (g) STU-511: the Upcoming occurrences request held. The Upcoming tab is open and settled first;
+// the Manila day then turns on the browser clock, which changes the window's arguments and sends
+// a new occurrences request, and that one is held. The badge reads "…", the panel stays mounted
+// with no empty text, and when the request lands the badge's history is only "…" and its final value.
+// (A held request keeps the screen loader up and its capture guard swallows input, so the tab is
+// selected before the hold and nothing is clicked while it lasts.)
+async function scenarioG(browser) {
+  console.log('\n=== (g) day turns with the Upcoming tab open, occurrences request held: badge "…", panel mounted, no empty text, then it settles once')
+  const u = await h.makeUser(stack, 'due-g')
+  const day = manilaToday()
+  const bank = await client.post(u.token, '/accounts/', { name: 'Checking due-g', account_type: 'checking', balance: 100000, currency: 'PHP' })
+  await client.post(u.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 50, description: 'G Planned',
+    transaction_date: wire(addDays(day, 2)), is_posted: false,
+  })
+  await client.post(u.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'G Bill', amount: 800, account_id: bank.id,
+    next_occurrence: wire(addDays(day, 3)),
+  })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  page.setDefaultTimeout(10000)
+  // A UTC browser two minutes before Manila midnight (16:00 UTC) of the real day.
+  await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })
+  await h.recordTexts(page, ['due-upcoming-count'])
+  let g
+  try {
+    await h.uiLogin(page, stack, u)
+    await page.goto(`${stack.webUrl}/transactions`)
+    await page.locator(tid('due-section')).waitFor()
+    await expectDueTab(page, 'upcoming')
+    await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor()
+    await openDueTab(page, 'upcoming')
+    await h.waitQuiet(page)
+    await h.sleep(500)
+    await h.resetTexts(page)
+    g = await h.gate(page, isUpcomingOccurrences)
+    // Playwright reads '03:00' as mm:ss: three minutes, past Manila midnight.
+    await page.clock.fastForward('03:00')
+    await h.check('g.occurrences-held', 'S', async () => (await g.waitHits(1)) || 'the new day sent no occurrences request')
+    await h.sleep(750)
+    const badge = async () => ((await page.locator(tid('due-upcoming-count')).textContent()) || '').trim()
+    await h.check('g.badge-pending', 'B', async () => {
+      const shown = await badge()
+      return shown === '…' || `due-upcoming-count read "${shown}" while the occurrences request was held`
+    })
+    await h.check('g.panel-mounted-while-held', 'S', async () => {
+      const panel = page.locator(tid('due-panel-upcoming'))
+      const got = { selected: await page.locator(`${tid('due-tab-upcoming')}[aria-selected="true"]`).count(), hidden: await panel.getAttribute('hidden'), children: await panel.evaluate((el) => el.children.length) }
+      return (got.selected === 1 && got.hidden === null && got.children > 0) || `panel ${JSON.stringify(got)}`
+    })
+    await h.check('g.no-empty-text-while-held', 'B', async () =>
+      (await h.expectAbsentFor(page, page.locator(tid('due-upcoming-empty')), 500)) || 'due-upcoming-empty shown while the occurrences request was held')
+    g.release({ disarm: true })
+    await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor()
+    await h.waitQuiet(page)
+    await h.sleep(500)
+    const rows = await readTab(page, 'upcoming')
+    const texts = (await h.readTexts(page))['due-upcoming-count'].texts
+    await h.check('g.rows-listed', 'S', async () => rows.length === 2 || `Upcoming lists ${rows.length} row(s), expected G Planned and G Bill`)
+    await h.check('g.history-only-pending-and-final', 'B', async () => {
+      const allowed = new Set(['…', String(rows.length)])
+      return texts.every((t) => allowed.has(t)) || `due-upcoming-count history ${JSON.stringify(texts)}, rows ${rows.length}`
+    })
+    await h.check('g.final-equals-rows', 'B', async () => {
+      const shown = await badge()
+      return shown === String(rows.length) || `due-upcoming-count "${shown}", ${rows.length} rows across the pager`
+    })
+  } finally {
+    g?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['e', scenarioE],
   ['f', scenarioF],
+  ['g', scenarioG],
 ]
 
 ;(async () => {

@@ -16,7 +16,8 @@
 //   (a) the split: tablist, tab and tabpanel roles with their aria-controls and
 //       aria-labelledby; Due holds the hand-linked Water bill, a Charged Netflix row and
 //       Rent; Not posted yet holds Coffee, Fee and Lunch, oldest first, with "logged ..."
-//       text, Mark posted and no Overdue; Later (tomorrow+) is in neither
+//       text, Mark posted and no Overdue; Later (3 days ahead) is on neither of them but is in
+//       Upcoming once, and the Charged Netflix row is not in Upcoming
 //   (b) keyboard and focus order: toggle, selected tab, selected panel; roving tabindex;
 //       arrow keys wrap, Home and End; collapsed, Tab leaves the card
 //   (c) Mark posted on Not posted yet: one PUT, the row leaves, the badge drops, the tab stays
@@ -39,7 +40,7 @@
 // Usage: node frontend/e2e/not-posted-yet.cjs [a|b|c|d|e|f|g|h|i|j]
 // Exit 0 when every check passed, 1 when one failed, 2 when the stack did not start.
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { DUE_TABS, allDueRows, rowsOf, showRow, goToPage, currentPage, pagerLabel, hasPager, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, DUE_TABS, allDueRows, rowsOf, showRow, goToPage, currentPage, pagerLabel, hasPager, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const dialogs = require('./_dialogs.cjs')
 
@@ -60,6 +61,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -281,6 +283,10 @@ async function theSplit(browser) {
   check('(a) now Not posted yet is selected and every other shell is empty and hidden',
     s2.tabs.map((t) => [t.tab, t.selected, t.hidden, t.children === 0]),
     DUE_TABS.map((t) => (t === NOT_POSTED ? [t.tab, 'true', false, false] : [t.tab, 'false', true, true])))
+  await openDueTab(page, 'upcoming')
+  const up = await allDueRows(page)
+  check('(a) Upcoming lists Later once, as a transaction row', up.filter((r) => r.source?.startsWith('transaction:') && r.text.includes('Later')).length, 1)
+  check('(a) Netflix (Charged, a pending row) and the one-offs are not in Upcoming', ['Netflix', 'Lunch', 'Coffee', 'Fee'].map((n) => up.filter((r) => r.text.includes(n)).length), [0, 0, 0, 0])
   checkNoNative('a', natives)
   await ctx.close()
 }

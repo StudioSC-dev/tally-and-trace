@@ -9,12 +9,13 @@
 //       or "Also coming up" (nor is a foreign one, converted or not)
 //   (b) "N missed" is plain text on the dashboard and counts only the months with no
 //       pending row (unlinked_count since oldest_unlinked); after Charged on the oldest
-//       missed month (b2) it counts one fewer; the section's Posted opens Mark paid and
-//       "Post all N due" clears the missed row (N read from the API)
+//       missed month (b2) it counts one fewer; the missed row is on the card's Subscriptions
+//       tab, not Due (STU-511), where Posted opens Mark paid and "Post all N due" clears it
+//       (N read from the API)
 //   (c) an installment's Posted defaults to its occurrence date, with Charged
 //       beside it; another statement cycle's day shows the cycle warning (the
-//       occurrence is in the future, so it is recorded from Upcoming, with the
-//       installment's auto-post off)
+//       installment is one plan row on the Installments tab, recorded from there, with
+//       the installment's auto-post off)
 //   (d) a viewer sees Limited rows and an overdue Limited row on the dashboard,
 //       no buttons, and no buttons in the section either
 //   (e) a pending card transaction has no Mark paid, and a future one is not in
@@ -29,7 +30,7 @@
 //
 // Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f]
 const { startLocalStack } = require('./_local_stack.cjs')
-const { allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
+const { useDueCheck, allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -49,6 +50,7 @@ function check(what, actual, expected) {
   if (ok) pass++
   console.log(`  [${ok ? 'PASS' : 'FAIL'}] ${what}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`)
 }
+useDueCheck(check)
 
 // ─── Days (YYYY-MM-DD, UTC arithmetic) ───────────────────────────────────────
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
@@ -249,8 +251,11 @@ async function missedPostAll(browser) {
   check('(b2) the panel counts only the unrecorded months', (await missedText.textContent())?.replace(/\s+/g, ' ').trim(), `${missed.unlinked_count} missed since ${fmt(missed.oldest_unlinked)}`)
 
   await openTransactions(page)
+  // Spotify is an open-ended card subscription (STU-511): its missed row is on Subscriptions, not Due.
+  check('(b) the missed row is not in Due', (await rowsOf(page, 'Spotify', 'missed')).length, 0)
+  await openDueTab(page, 'subscriptions')
   const dueMissed = dueRows(page, 'Spotify', 'missed')
-  check('(b) the section lists the missed row', (await rowsOf(page, 'Spotify', 'missed')).length, 1)
+  check('(b) Subscriptions lists the missed row', (await rowsOf(page, 'Spotify', 'missed')).length, 1)
   await showRow(page, dueMissed)
   const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${spotify.id}/occurrences`))
   await dueMissed.locator('[data-testid="due-posted"]').click()
@@ -278,7 +283,7 @@ async function missedPostAll(browser) {
   // The snapshot refetch can start after the network first goes idle, so wait on the row itself.
   await gone(dueMissed)
   await settle(page)
-  check('(b) the missed row is gone from every page of the section', (await rowsOf(page, 'Spotify', 'missed')).length, 0)
+  check('(b) the missed row is gone from every page of Subscriptions', (await rowsOf(page, 'Spotify', 'missed')).length, 0)
   check('(b) the API reports nothing missed', ((await snapshotCard(u, visa.id))?.missed ?? []).length, 0)
   check('(b) the schedule is on the current occurrence', (await get(u.token, `/budget-entries/${spotify.id}`)).next_occurrence.slice(0, 10), current)
   await page.goto(`${stack.webUrl}/`)
@@ -317,18 +322,21 @@ async function installmentDate(browser) {
   check('(c) the installment is listed on the card', [await row.count(), await row.locator('[data-testid="card-charge-kind"]').textContent()], [1, 'Installment'])
   check('(c) with no Mark paid on the dashboard', await row.locator('[data-testid="card-charge-mark-paid"], button').count(), 0)
   await openTransactions(page)
-  // The occurrence is in the future, so it is in Upcoming, not in the section.
-  const dueRow = page.locator(`[data-testid="upcoming-occurrence"][data-source="budget_entry:${phone.id}"][data-day="${occurrence}"]`)
-  check('(c) Upcoming lists the installment with Charged and Posted, and the section does not',
-    [await dueRow.count(), await dueRow.locator('[data-testid="upcoming-charged"]').count(), await dueRow.locator('[data-testid="upcoming-posted"]').count(), (await rowsOf(page, 'Phone')).length], [1, 1, 1, 0])
+  // An installment is one plan row on Installments (STU-511), not a Due row nor an Upcoming occurrence.
+  check('(c) the installment is not a Due row', (await rowsOf(page, 'Phone')).length, 0)
+  await openDueTab(page, 'installments')
+  const dueRow = page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${phone.id}"]`)
+  await showRow(page, dueRow)
+  check('(c) Installments lists the plan with its next charge, Charged and Posted',
+    [await dueRow.count(), await dueRow.getAttribute('data-day'), await dueRow.locator('[data-testid="due-charged"]').count(), await dueRow.locator('[data-testid="due-posted"]').count()], [1, occurrence, 1, 1])
   await waitQuiet(page)
-  await dueRow.locator('[data-testid="upcoming-charged"]').click()
+  await dueRow.locator('[data-testid="due-charged"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   check('(c) opened on Charged, the date is labelled "Charged on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Charged on')
   await dialog(page).getByRole('button', { name: 'Cancel', exact: true }).click()
   await dialog(page).waitFor({ state: 'detached' })
   await waitQuiet(page)
-  await dueRow.locator('[data-testid="upcoming-posted"]').click()
+  await dueRow.locator('[data-testid="due-posted"]').click()
   await dialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
   await settle(page) // the occurrence list refetches once more after opening; a date typed before it lands is reset
   const date = dialog(page).locator('[data-testid="mark-paid-date"]')

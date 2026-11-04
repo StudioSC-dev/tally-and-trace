@@ -3,14 +3,14 @@
 // and kept, including the recurring link, tags and posting date; (c) a transfer between
 // currencies; (d) the screen loader stays off for the save and its refresh, and the submit
 // buttons wait for that refresh; (d2) an unrelated request and a primary save still block,
-// and a save made after the refresh sends fresh requests; (d3) the upcoming tail
-// request, sent after an await, stays off the loader; (d4) a primary save's refetches
+// and a save made after the refresh sends fresh requests; (d3) with over 1000 rows in
+// the Upcoming window, one ascending window request, held after the save, stays off the
+// loader and is not followed by a second; (d4) a primary save's refetches
 // still block; (e) a refused save and the inline errors; (f) Edit has no such button;
 // (g) Cancel after a save; (h) a pending foreign currency does not ride into a posted
 // entry; (h2) the form is locked while the POST is held; (i1, i2) Cancel, reopen, then
 // the abandoned POST settles (success, failure); (j) closing the dialog mid-refresh hands
-// the refresh back to the screen loader; (j2) closing it before the upcoming tail starts
-// sends that tail loud; (k) a reopened dialog cannot save until an abandoned save and its
+// the refresh back to the screen loader; (k) a reopened dialog cannot save until an abandoned save and its
 // refresh have settled.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
@@ -20,7 +20,7 @@
 // [G] guard. The script ends with RESULT: k/m and exits 0 only when every check passed,
 // 1 when any failed, 2 for setup.
 //
-// Phase-recording scenarios (d, d2, d3, d4, e, j, j2) go through `openWithPhaseRecorder`: the
+// Phase-recording scenarios (d, d2, d3, d4, e, j) go through `openWithPhaseRecorder`: the
 // recorder is installed before login (`addInitScript` only reaches documents loaded after
 // it), the history is reset once the page has settled, and an [S] `recorder-installed`
 // check proves the instrumentation exists before any phase assertion.
@@ -60,10 +60,10 @@ const isTxGet = (r) => r.method() === 'GET' && pathOf(r.url()).endsWith('/transa
 const startDay = (r) => (param(r, 'start_date') || '').slice(0, 10)
 /** The main list: no search, a range that starts on or before Manila today. */
 const isMainList = (r) => isTxGet(r) && !param(r, 'search') && !(startDay(r) > today())
-/** Upcoming's transaction requests: no search, a range that starts after Manila today. */
+/** The card's Upcoming transaction requests: no search, a range that starts after Manila today. */
 const isUpcomingList = (r) => isTxGet(r) && !param(r, 'search') && startDay(r) > today()
-const isUpcomingHead = (r) => isUpcomingList(r) && Number(param(r, 'offset') ?? '0') === 0
-const isUpcomingTail = (r) => isUpcomingList(r) && Number(param(r, 'offset') ?? '0') > 0
+/** The card's Upcoming window request: ascending, so one request holds the soonest rows and the total. */
+const isUpcomingWindow = (r) => isUpcomingList(r) && param(r, 'order') === 'asc'
 const isSearchList = (term) => (r) => isTxGet(r) && param(r, 'search') === term
 const isAccountsList = (r) => r.method() === 'GET' && pathOf(r.url()).endsWith('/accounts')
 const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
@@ -645,50 +645,58 @@ async function scenarioD2(browser) {
   }
 }
 
-// (d3) The upcoming tail request, sent after the head response, stays off the loader.
+// (d3) Over 1000 future rows: one ascending window request, nothing after it, and it stays off the loader.
 async function scenarioD3(browser) {
-  console.log('\n=== (d3) The upcoming tail request, sent after an await, stays off the screen loader')
+  console.log('\n=== (d3) 1005 rows in the Upcoming window: one ascending request, quiet after Save and add another')
   const seed = await seedUser('d3')
   const start = addDays(today(), 1)
-  const rows = Array.from({ length: 105 }, (_, i) => i)
+  const rows = Array.from({ length: 1005 }, (_, i) => i)
+  const seedStart = Date.now()
   for (let from = 0; from < rows.length; from += 15) {
     await Promise.all(rows.slice(from, from + 15).map((i) =>
       client.post(seed.user.token, '/transactions/', {
         account_id: seed.checking.id, transaction_type: 'debit', amount: 10, description: `Planned ${i}`,
-        transaction_date: wire(addDays(start, i % 20)), is_posted: false,
+        transaction_date: wire(addDays(start, i % 30)), is_posted: false,
       })))
   }
+  console.log(`    seeded ${rows.length} rows through the API in ${((Date.now() - seedStart) / 1000).toFixed(1)} s`)
   const { ctx, page, native, log } = await openWithPhaseRecorder(browser, seed.user, 'd3')
   const gates = []
   try {
     const modal = createModal(page)
-    await h.check('d3.setup-tail-requested', 'S', async () => {
-      const tails = log.filter((e) => e.method === 'GET' && isUpcomingTail({ method: () => e.method, url: () => e.url }))
-      return tails.length >= 1 || 'the page load sent no upcoming tail request'
+    const asRequest = (e) => ({ method: () => e.method, url: () => e.url })
+    await h.check('d3.setup-one-window-request', 'S', async () => {
+      const windows = log.filter((e) => e.method === 'GET' && isUpcomingWindow(asRequest(e)))
+      const shapes = windows.map((e) => [new URL(e.url).searchParams.get('order'), new URL(e.url).searchParams.get('limit'), Number(new URL(e.url).searchParams.get('offset') ?? '0')])
+      const wrong = windows.length !== 1 || shapes[0][0] !== 'asc' || shapes[0][1] !== '100' || shapes[0][2] !== 0
+      return !wrong || `the page load sent ${windows.length} window request(s): ${JSON.stringify(shapes)}`
+    })
+    await h.check('d3.setup-no-offset-above-zero', 'S', async () => {
+      const later = log.filter((e) => e.method === 'GET' && isUpcomingList(asRequest(e)) && Number(new URL(e.url).searchParams.get('offset') ?? '0') > 0)
+      return later.length === 0 || `${later.length} upcoming request(s) with an offset above 0`
     })
     await fillEntry(modal, 'Coffee', 180)
-    const headGate = await h.gate(page, isUpcomingHead)
-    gates.push(headGate)
-    let tailResponses = 0
-    page.on('response', (res) => { if (isUpcomingTail(res.request())) tailResponses++ })
-    await clickAnother(page, modal)
-    await headGate.waitHits(1, 5000)
-    // The invalidation also refetches the tail entry; let that one finish.
-    await until(async () => tailResponses, (n) => n >= 1, 5000)
-    await h.check('d3.invalidation-tail-done', 'S', async () => tailResponses >= 1 || 'the invalidation sent no tail refetch')
-    const tailGate = await h.gate(page, isUpcomingTail)
-    gates.push(tailGate)
+    const windowGate = await h.gate(page, isUpcomingWindow)
+    gates.push(windowGate)
+    let windowRequests = 0
+    page.on('request', (r) => { if (isUpcomingList(r)) windowRequests++ })
     await h.resetTexts(page)
-    headGate.release({ disarm: true })
-    const tailHit = await tailGate.waitHits(1, 5000)
+    await clickAnother(page, modal)
+    await windowGate.waitHits(1, 5000)
+    await h.check('d3.window-refetched', 'S', async () => windowGate.hits >= 1 || 'the invalidation sent no window refetch')
     await page.waitForTimeout(700)
-    await h.check('d3.tail-started', 'S', async () => tailHit || 'no tail request after the head response')
-    await h.check('d3.tail-no-block', 'B', async () => {
+    await h.check('d3.quiet-probe', 'S', async () => {
+      const pending = await quietPendingOf(page).catch((e) => `probe failed: ${e.message}`)
+      return pending === true || `quietPending() while the window request is held ${JSON.stringify(pending)}`
+    })
+    await h.check('d3.window-no-block', 'B', async () => {
       const blocked = blockedIn(await phasesOf(page))
       return blocked.length === 0 || `phases ${JSON.stringify(await phasesOf(page))}`
     })
-    tailGate.release({ disarm: true })
+    windowGate.release({ disarm: true })
     await h.waitQuiet(page)
+    await page.waitForTimeout(700)
+    await h.check('d3.no-second-window-request', 'B', async () => windowRequests === 1 || `${windowRequests} Upcoming request(s) after the save, expected exactly 1`)
   } finally {
     for (const gate of gates) gate.release({ disarm: true })
     await d.checkNoNativeDialogs(h, 'd3', native)
@@ -1164,65 +1172,6 @@ async function scenarioJ(browser) {
   }
 }
 
-// (j2) Closing the dialog before the upcoming tail starts sends that tail loud.
-async function scenarioJ2(browser) {
-  console.log('\n=== (j2) Close before the upcoming tail: the tail shows the screen loader')
-  const seed = await seedUser('j2')
-  const start = addDays(today(), 1)
-  const rows = Array.from({ length: 105 }, (_, i) => i)
-  for (let from = 0; from < rows.length; from += 15) {
-    await Promise.all(rows.slice(from, from + 15).map((i) =>
-      client.post(seed.user.token, '/transactions/', {
-        account_id: seed.checking.id, transaction_type: 'debit', amount: 10, description: `Planned ${i}`,
-        transaction_date: wire(addDays(start, i % 20)), is_posted: false,
-      })))
-  }
-  const { ctx, page, native, log } = await openWithPhaseRecorder(browser, seed.user, 'j2')
-  const gates = []
-  try {
-    const modal = createModal(page)
-    await h.check('j2.setup-tail-requested', 'S', async () => {
-      const tails = log.filter((e) => e.method === 'GET' && isUpcomingTail({ method: () => e.method, url: () => e.url }))
-      return tails.length >= 1 || 'the page load sent no upcoming tail request'
-    })
-    await fillEntry(modal, 'Coffee', 180)
-    const headGate = await h.gate(page, isUpcomingHead)
-    gates.push(headGate)
-    let tailResponses = 0
-    page.on('response', (res) => { if (isUpcomingTail(res.request())) tailResponses++ })
-    await clickAnother(page, modal)
-    await headGate.waitHits(1, 5000)
-    await waitNotice(modal, 'Saved "Coffee ₱180.00"')
-    // The invalidation also refetches the tail entry; let that one finish.
-    await until(async () => tailResponses, (n) => n >= 1, 5000)
-    await h.check('j2.invalidation-tail-done', 'S', async () => tailResponses >= 1 || 'the invalidation sent no tail refetch')
-    // The probe reads the app's own state: the held head is quiet before the close.
-    await h.check('j2.quiet-probe', 'S', async () => {
-      const pending = await quietPendingOf(page).catch((e) => `probe failed: ${e.message}`)
-      return pending === true || `quietPending() before the close ${JSON.stringify(pending)}`
-    })
-    await cancelOf(modal).click()
-    await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    const tailGate = await h.gate(page, isUpcomingTail)
-    gates.push(tailGate)
-    headGate.release({ disarm: true })
-    const tailHit = await tailGate.waitHits(1, 5000)
-    await h.check('j2.tail-started', 'S', async () => tailHit || 'no tail request after the head response')
-    await page.waitForTimeout(700)
-    await h.check('j2.tail-loud', 'B', async () => {
-      const got = { quiet: await quietPendingOf(page).catch((e) => `probe failed: ${e.message}`), phase: await h.overlayPhase(page) }
-      return (got.quiet === false && (got.phase === 'shield' || got.phase === 'visible')) || JSON.stringify(got)
-    })
-    tailGate.release({ disarm: true })
-    const hidden = await h.waitPhase(page, 'hidden', 5000)
-    await h.check('j2.back-to-hidden', 'B', async () => hidden || 'the overlay did not return to hidden')
-  } finally {
-    for (const gate of gates) gate.release({ disarm: true })
-    await d.checkNoNativeDialogs(h, 'j2', native)
-    await ctx.close()
-  }
-}
-
 // (k) Cancel mid-POST, reopen: no save until the abandoned save and its refresh have settled.
 async function scenarioK(browser) {
   console.log('\n=== (k) Cancel, reopen: the submit buttons wait for the abandoned save and its refresh')
@@ -1316,7 +1265,6 @@ const SCENARIOS = [
   ['i1', scenarioI1],
   ['i2', scenarioI2],
   ['j', scenarioJ],
-  ['j2', scenarioJ2],
   ['k', scenarioK],
 ]
 
