@@ -205,6 +205,37 @@ def statement_due_date(card: Account, day: date, *,
     return cycle["due"] if cycle else None
 
 
+def due_in_order(card: Account, close: date, due_overrides: Mapping[date, date]) -> bool:
+    """Whether the due of the statement closing on ``close`` keeps the order.
+
+    Under ``due_overrides`` its due (the override, else the computed one) is
+    after its close and strictly between the dues of the statements before
+    and after it (each the override, else the computed due). Strictly
+    increasing dues keep the walk's stop, ``settle_projected``'s
+    first-cycle-due-on-or-after rule and the overdue carry correct. False when
+    ``close`` is not a close of the card.
+    """
+    if statement_close(card, close) != close:
+        return False
+    # The previous close is this cycle's window start (a close of the card).
+    previous = next(iter_cycles_from(card, close, datetime.min, through=close,
+                                     due_overrides={}))["window_start"].date()
+    following = statement_close(card, close + timedelta(days=1))
+    cycles = list(iter_cycles_from(card, previous, datetime.min, through=following,
+                                   due_overrides=due_overrides))
+    by_close = {c["close"].date(): c["due"].date() for c in cycles}
+    due = by_close[close]
+    return close < due and by_close[previous] < due < by_close[following]
+
+
+def due_override_conflicts(card: Account, due_overrides: Mapping[date, date]) -> List[date]:
+    """The closes in ``due_overrides`` whose due is out of order (``due_in_order``)
+    under ``card``'s cycle settings, oldest first. Every pair of neighbouring
+    statements with an override between them is checked."""
+    return [close for close in sorted(due_overrides)
+            if not due_in_order(card, close, due_overrides)]
+
+
 def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[Decimal]:
     """What each statement still owes after the payments, oldest statement first.
 

@@ -1,9 +1,10 @@
-"""Credit-card endpoints (STU-343 Plan C): available credit, statement minimums, Pay.
+"""Credit-card endpoints (STU-343 Plan C): available credit, statement minimums,
+statements' printed due dates, Pay.
 
 Owner and admin only (``card_credit.can_see_credit``); anyone else gets a 404,
 so no credit-derived figure reaches an editor, viewer or tag viewer.
 """
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional
 
@@ -21,22 +22,28 @@ from app.core.database import get_db
 from app.core.redaction import Redactor, serialize_transaction
 from app.core.time import manila_today
 from app.models.account import Account, AccountType
+from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.transaction import TransactionType
 from app.models.user import User
-from app.schemas.card import CardPaymentCreate, StatementMinimumSet
+from app.schemas.card import CardPaymentCreate, StatementDueSet, StatementMinimumSet
 from app.schemas.minimum_due import MinimumDueRule
 from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
 from app.services import forecast as fc
 from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
-from app.services.statements import load_due_overrides, resolve_cycle_fields, statement_close
+from app.services.statements import (
+    computed_due, due_in_order, load_due_overrides, resolve_cycle_fields, statement_close,
+)
 
 router = APIRouter()
 
 # StatementDue: the most recent closed statements listed, plus any older one still owed.
 RECENT_STATEMENTS = 6
+# A printed due may be entered on a closed statement or on one of this many
+# statements not yet closed (the open cycle and the one after it).
+DUE_FUTURE_CYCLES = 2
 
 
 def _amount(value: Optional[Decimal]) -> Optional[float]:
@@ -238,6 +245,114 @@ def clear_statement_minimum(
         CardStatementMinimum.account_id == card.id,
         CardStatementMinimum.statement_close == day,
     ).delete(synchronize_session=False)
+    db.commit()
+    return Response(status_code=204)
+
+
+def _due_statement(card: Account, close_date: str) -> date:
+    """``close_date`` as a date, when it is the close of one of the card's
+    statements that is closed (before Manila's today) or one of the next
+    ``DUE_FUTURE_CYCLES`` not yet closed; else 422. 400 for a card without
+    cycle settings."""
+    if resolve_cycle_fields(card) is None:
+        raise HTTPException(status_code=400,
+                            detail="This card has no statement cycle (set its closing day)")
+    try:
+        day = date.fromisoformat(close_date)
+    except ValueError:
+        day = None
+    today = manila_today()
+    if day is not None and statement_close(card, day) == day:
+        if day < today:
+            return day
+        upcoming = statement_close(card, today)
+        for _ in range(DUE_FUTURE_CYCLES):
+            if day == upcoming:
+                return day
+            upcoming = statement_close(card, upcoming + timedelta(days=1))
+    raise HTTPException(status_code=422,
+                        detail="Not a closed or upcoming statement of this card")
+
+
+def _locked_due_statement(db: Session, user: User, account_id: int,
+                          close_date: str) -> tuple:
+    """The card (404 / 400 as ``_managed_card``), locked, and the statement's
+    close (``_due_statement``, checked on the locked row). The card lock
+    serialises every printed-due edit on the card, so two edits to
+    neighbouring statements cannot both pass the order check."""
+    card = _managed_card(db, user, account_id)
+    card = locking.lock_accounts(db, [card.id])[card.id]
+    return card, _due_statement(card, close_date)
+
+
+@router.put("/{account_id}/statements/{close_date}/due-date")
+def set_statement_due(
+    account_id: int,
+    close_date: str,
+    body: StatementDueSet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Enter the due date printed on a statement.
+
+    It replaces the statement's rolled due (``close + days``, moved to the
+    next banking day) everywhere: payables, status, the overdue carry, the
+    forecast and Household. The close and the minimum are unchanged. Owner or
+    admin only (404 otherwise); 400 for a non-card or a card without cycle
+    settings; 422 unless ``close_date`` is the close of a closed statement or
+    of one of the next two, and unless the due is after the close and
+    strictly between the dues of the statements before and after it.
+    Returns ``{close_date, due_date, computed_due}``.
+    """
+    card, day = _locked_due_statement(db, current_user, account_id, close_date)
+    overrides = load_due_overrides(db, [card.id])[card.id]
+    if body.due_date <= day:
+        raise HTTPException(status_code=422, detail="The due date must be after the close")
+    if not due_in_order(card, day, {**overrides, day: body.due_date}):
+        raise HTTPException(
+            status_code=422,
+            detail="The due date must fall between the previous and the next statement's "
+                   "due dates")
+    statement = pg_insert(CardStatementDueOverride).values(
+        account_id=card.id, statement_close=day, due_date=body.due_date,
+        created_by_actor=current_user.id)
+    db.execute(statement.on_conflict_do_update(
+        constraint="uq_card_statement_due_overrides_account_close",
+        set_={"due_date": statement.excluded.due_date,
+              "created_by_actor": statement.excluded.created_by_actor,
+              "updated_at": func.now()}))
+    db.commit()
+    days_until_due = resolve_cycle_fields(card)[1]
+    return {"close_date": day.isoformat(), "due_date": body.due_date.isoformat(),
+            "computed_due": computed_due(day, days_until_due).isoformat()}
+
+
+@router.delete("/{account_id}/statements/{close_date}/due-date", status_code=204)
+def clear_statement_due(
+    account_id: int,
+    close_date: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Clear a statement's printed due, so its rolled due applies again.
+
+    The same access, statement and lock as the PUT; 204 whether or not one was
+    entered. 409 when the rolled due would not fall strictly between the dues
+    of the neighbouring statements (one of them printed).
+    """
+    card, day = _locked_due_statement(db, current_user, account_id, close_date)
+    overrides = load_due_overrides(db, [card.id])[card.id]
+    if day in overrides:
+        rest = {close: due for close, due in overrides.items() if close != day}
+        if not due_in_order(card, day, rest):
+            raise HTTPException(
+                status_code=409,
+                detail="Clearing it would put this statement's due on or past a neighbouring "
+                       "statement's printed due; change that one first")
+        db.query(CardStatementDueOverride).filter(
+            CardStatementDueOverride.account_id == card.id,
+            CardStatementDueOverride.statement_close == day,
+        ).delete(synchronize_session=False)
     db.commit()
     return Response(status_code=204)
 
