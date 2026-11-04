@@ -20,6 +20,7 @@ import {
   dueStatementRows,
   dueTodayLines,
   formatEntryDate,
+  dueTabBadge,
   freshFor,
   installmentPlanView,
   mergeUpcoming,
@@ -53,6 +54,7 @@ import {
 } from '@tally-trace/shared'
 import type {
   BatchFailure,
+  DueBadge,
   DuePageState,
   DueEntryRow,
   DueLimitedRow,
@@ -144,6 +146,8 @@ const ACTION_TEST_IDS: Record<RecurringAction, string> = {
 }
 
 type DueTab = 'due' | 'not_posted' | 'upcoming' | 'subscriptions' | 'installments'
+/** The tabs whose badge `dueTabBadge` decides from their sources. */
+type WindowBadgeTab = 'upcoming' | 'subscriptions' | 'installments'
 
 /** One tab of the card: its label, its test-id slug, its badge's test id, and whether it lists the window batches (so "Load more" applies). */
 interface TabSpec {
@@ -423,18 +427,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     !loading && !windowResult.fetching,
   )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
-  // D7: each window tab's last complete total for the Manila day, a total taken when every source it
-  // needs had landed, was not refetching and had not failed. The badge shows the sum only while it is
-  // complete. While a source has nothing for today yet it is pending ("…"); otherwise (a failure, a
-  // refetch, a Retry in flight) it is the kept total, never a sum of a fresh source and another's stale
-  // cache. With none kept it is 0 after a failure and pending ("…") before.
-  const lastComplete = useRef<Partial<Record<'upcoming' | 'subscriptions', { day: string; total: number }>>>({})
-  const tabFigure = (id: 'upcoming' | 'subscriptions', complete: boolean, pending: boolean, sum: number, failed: boolean) => {
-    if (complete) return { pending: false, total: sum }
-    if (pending) return { pending: true, total: 0 }
+  // The Upcoming, Subscriptions and Installments badges are decided by `dueTabBadge` from each source's
+  // state and the tab's last complete total for the Manila day, kept here when the rule marks a figure complete.
+  const lastComplete = useRef<Partial<Record<WindowBadgeTab, { day: string; total: number }>>>({})
+  const keptFor = (id: WindowBadgeTab) => {
     const kept = lastComplete.current[id]
-    if (kept !== undefined && kept.day === today) return { pending: false, total: kept.total }
-    return { pending: !failed, total: 0 }
+    return kept !== undefined && kept.day === today ? kept.total : undefined
   }
   // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
   const upcomingTxns = upcomingTxnResult.currentData
@@ -446,15 +444,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     () => mergeUpcoming(upcomingTxns?.items ?? [], upcomingOccs?.items ?? [], UPCOMING_LIMIT),
     [upcomingTxns, upcomingOccs],
   )
-  const upcomingSum = (upcomingTxns?.total ?? 0) + (upcomingOccs?.total ?? 0)
-  const upcomingComplete =
-    upcomingTxns !== undefined && upcomingOccs !== undefined && !upcomingFailed &&
-    !upcomingTxnResult.isFetching && !upcomingOccResult.isFetching
-  useEffect(() => {
-    if (upcomingComplete) lastComplete.current.upcoming = { day: today, total: upcomingSum }
-  }, [upcomingComplete, upcomingSum, today])
-  const upcomingFigure = tabFigure('upcoming', upcomingComplete, upcomingPending, upcomingSum, upcomingFailed)
-  const upcomingShown = upcomingFigure.pending ? null : upcomingShownText(upcomingFigure.total)
+  const upcomingBadge = dueTabBadge(
+    [
+      { hasData: upcomingTxns !== undefined, fresh: true, fetching: upcomingTxnResult.isFetching, failed: upcomingTxnResult.isError, count: upcomingTxns?.total ?? 0 },
+      { hasData: upcomingOccs !== undefined, fresh: true, fetching: upcomingOccResult.isFetching, failed: upcomingOccResult.isError, count: upcomingOccs?.total ?? 0 },
+    ],
+    keptFor('upcoming'),
+  )
+  const upcomingShown = upcomingBadge.figure === 'pending' ? null : upcomingShownText(upcomingBadge.figure)
   const upcomingCount = upcomingRows.length
   const upcomingView = useClampedPage(
     upcomingCount,
@@ -484,15 +481,13 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     () => orderSubscriptionRows(subscriptionPast, subscriptionOccs?.items ?? []),
     [subscriptionPast, subscriptionOccs],
   )
-  const subscriptionSum = subscriptionPast.length + (subscriptionOccs?.total ?? 0)
-  const subscriptionSourceFailed = snapshotIsError || subscriptionOccResult.isError
-  const subscriptionComplete =
-    snapshotFresh && subscriptionOccs !== undefined && !subscriptionSourceFailed &&
-    !snapshotFetching && !subscriptionOccResult.isFetching
-  useEffect(() => {
-    if (subscriptionComplete) lastComplete.current.subscriptions = { day: today, total: subscriptionSum }
-  }, [subscriptionComplete, subscriptionSum, today])
-  const subscriptionFigure = tabFigure('subscriptions', subscriptionComplete, subscriptionPending, subscriptionSum, subscriptionSourceFailed)
+  const subscriptionBadge = dueTabBadge(
+    [
+      { hasData: snapshot !== undefined, fresh: snapshotFresh, fetching: snapshotFetching, failed: snapshotIsError, count: subscriptionPast.length },
+      { hasData: subscriptionOccs !== undefined, fresh: true, fetching: subscriptionOccResult.isFetching, failed: subscriptionOccResult.isError, count: subscriptionOccs?.total ?? 0 },
+    ],
+    keptFor('subscriptions'),
+  )
   const subscriptionCount = subscriptionRows.length
   const subscriptionView = useClampedPage(
     subscriptionCount,
@@ -507,13 +502,24 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   // The card credit check of an entry's occurrence on `day` (owner or admin only), from a snapshot for today.
   const creditFor = (entryId: number, day: string): CreditCheck | undefined =>
     snapshot !== undefined && snapshotFresh ? occurrenceCreditCheck(snapshot.card_charges, entryId, day) : undefined
-  // Installments: the plans, only while they are for today; a failure keeps the same day's last good list, or 0.
+  // Installments: the plans, only while they are for today; its badge follows the shared rule (D7).
   const plans = plansResult.currentData
   const plansFresh = plans !== undefined && freshFor(plans.today, today)
   const planItems = useMemo(() => (plans !== undefined && plansFresh ? plans.items : []), [plans, plansFresh])
   const plansFailed = plansResult.isError
   const plansPending = !plansFresh && !plansFailed
   const planCount = planItems.length
+  const planBadge = dueTabBadge(
+    [{ hasData: plans !== undefined, fresh: plansFresh, fetching: plansResult.isFetching, failed: plansFailed, count: planCount }],
+    keptFor('installments'),
+  )
+  // Keep each window tab's total for the day when its rule marks it complete.
+  useEffect(() => {
+    const complete: [WindowBadgeTab, DueBadge][] = [['upcoming', upcomingBadge], ['subscriptions', subscriptionBadge], ['installments', planBadge]]
+    for (const [id, badge] of complete) {
+      if (badge.complete && typeof badge.figure === 'number') lastComplete.current[id] = { day: today, total: badge.figure }
+    }
+  })
   const planView = useClampedPage(
     planCount,
     'installments',
@@ -524,12 +530,13 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   )
   const planVisible = planCount > 0 ? planItems.slice(planView.from - 1, planView.to) : []
   // Each tab's badge: "…" while its count is not settled.
+  const figure = (badge: DueBadge) => ({ pending: badge.figure === 'pending', count: badge.figure === 'pending' ? 0 : badge.figure })
   const badges: Record<DueTab, { pending: boolean; count: number }> = {
     due: { pending: countPending, count },
     not_posted: { pending: loading, count: notPostedCount },
-    upcoming: { pending: upcomingFigure.pending, count: upcomingFigure.total },
-    subscriptions: { pending: subscriptionFigure.pending, count: subscriptionFigure.total },
-    installments: { pending: plansPending, count: planCount },
+    upcoming: figure(upcomingBadge),
+    subscriptions: figure(subscriptionBadge),
+    installments: figure(planBadge),
   }
   const selectedUsesWindow = TABS.find((spec) => spec.id === tab)?.usesWindow === true
 

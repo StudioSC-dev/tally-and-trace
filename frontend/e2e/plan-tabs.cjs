@@ -38,12 +38,18 @@
 //       reads 0, not the other source's part, the error shows, and Retry recovers
 //   (k) a row moves between a tab's sources and the next refresh of one source fails: the
 //       badge keeps the tab's last complete total, not the fresh source plus the failed one's
-//       cache (Upcoming: a recorded occurrence; Subscriptions: an entry moved to today)
+//       cache (Upcoming: a recorded occurrence; Subscriptions: an entry moved to today), and
+//       through Retry, with each request held, the badge never reads the mixed sum
+//   (l) the subscription occurrences fail while the snapshot comes back dated the old day,
+//       each on its own gate: Subscriptions settles on its kept total with the error, never
+//       "..." for good
+//   (m) a first load where the Upcoming occurrences fail while the transactions are still
+//       held: the badge reads 0 at once, not "...", and stays 0 with the error after release
 //
 // Every scenario checks that no browser dialog fired. Check kinds: a failed setup
 // precondition aborts the run with exit 2; an assertion failure exits 1.
 //
-// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j|k]
+// Usage: node frontend/e2e/plan-tabs.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet, recordTexts, readTexts, resetTexts, sleep } = require('./_smooth.cjs')
@@ -987,12 +993,133 @@ async function staleSourceAfterMove(browser) {
   await ctx.close()
 }
 
+/** A gate a held request waits on: `hits` counts the requests that reached it, `release()` lets them go. */
+function gateOf() {
+  const g = { hits: 0 }
+  g.released = new Promise((resolve) => { g.release = resolve })
+  return g
+}
+
+async function failWithOldDaySnapshot(browser) {
+  console.log('\n=== (l) the subscription occurrences fail while the snapshot comes back dated the old day: Subscriptions settles on its kept total, never "..." for good')
+  const today = manilaToday()
+  const billDay = addDays(today, 3)
+  const u = await makeUser('l')
+  const bank = await account(u, 'L Checking')
+  const visa = await card(u, bank, 'L Visa')
+  const bill = await entry(u, { name: 'L Bill', amount: 800, account_id: bank.id, next_occurrence: wire(billDay) })
+  await entry(u, { name: 'L Sub', amount: 369, account_id: visa.id, next_occurrence: wire(addDays(today, 5)), cadence: 'quarterly' })
+  const { ctx, page, native } = await newPage(browser)
+  // Once armed, the snapshot (rewritten to the old day) and the subscription occurrences (a 500)
+  // are each held on their own gate.
+  const stage = { armed: false, snapshot: gateOf(), subs: gateOf() }
+  await page.route((url) => url.pathname.endsWith('/dashboard/snapshot')
+    || (url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'subscription'), async (route) => {
+    if (!stage.armed) return route.fallback()
+    if (new URL(route.request().url()).pathname.endsWith('/dashboard/snapshot')) {
+      stage.snapshot.hits++
+      await stage.snapshot.released
+      const res = await route.fetch()
+      return route.fulfill({ response: res, json: { ...(await res.json()), today: addDays(today, -1) } })
+    }
+    stage.subs.hits++
+    await stage.subs.released
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'failed on purpose (plan-tabs l)' }) })
+  })
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await openDueTab(page, 'upcoming')
+  check('(l) loaded: Upcoming and Subscriptions read 1 and 1', [await badgeOf(page, 'upcoming'), await badgeOf(page, 'subscriptions')], ['1', '1'])
+
+  // Record L Bill's T+3 occurrence: the record refetches the snapshot and the subscription occurrences.
+  stage.armed = true
+  const row = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="occurrence"][data-source="${sourceOf(bill)}"][data-day="${billDay}"]`))
+  await row.locator('[data-testid="upcoming-mark-paid"]').click()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(l) upcoming-mark-paid opened the Mark paid dialog'))) {
+    stage.snapshot.release(); stage.subs.release()
+    return ctx.close()
+  }
+  await waitQuiet(page)
+  await dialog(page).locator('input[type="date"][id$="-day"]').fill(billDay)
+  const done = page.waitForResponse((r) => r.request().method() === 'POST' && /\/materialize$/.test(new URL(r.url()).pathname))
+  await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  precondition('(l) the record was created', (await done).status() === 201)
+  const until = Date.now() + 10000
+  while (Date.now() < until && !(stage.snapshot.hits >= 1 && stage.subs.hits >= 1)) await sleep(200)
+  precondition('(l) the record refetched the snapshot and the subscription occurrences, both held', stage.snapshot.hits >= 1 && stage.subs.hits >= 1, stage)
+  // The snapshot lands first, dated the old day; then the subscription occurrences fail.
+  stage.snapshot.release()
+  await sleep(600)
+  stage.subs.release()
+  await page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-window-error"]').waitFor({ state: 'attached', timeout: 10000 }).catch(() => {})
+  await sleep(1500)
+  check('(l) every request settled, the occurrences failed and the snapshot is dated the old day: Subscriptions shows its kept total 1, not "..."',
+    await badgeOf(page, 'subscriptions'), '1')
+  await page.locator(`[data-testid="${DUE_TABS.find((t) => t.slug === 'subscriptions').tab}"]`).click()
+  check('(l) Subscriptions shows the error with Retry', [
+    await page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-window-error"]').count(),
+    await page.locator('[data-testid="due-panel-subscriptions"] [data-testid="due-window-retry"]').count(),
+  ], [1, 1])
+  checkNoNative('l', native)
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await ctx.close()
+}
+
+async function failWhileSiblingHeld(browser) {
+  console.log('\n=== (m) a first load where the Upcoming occurrences fail while the transactions are held: the badge reads 0 at once, not "..."')
+  const today = manilaToday()
+  const u = await makeUser('m')
+  const bank = await account(u, 'M Checking')
+  await post(u.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 50, description: 'M Planned',
+    transaction_date: wire(addDays(today, 2)), is_posted: false,
+  })
+  await entry(u, { name: 'M Bill', amount: 800, account_id: bank.id, next_occurrence: wire(addDays(today, 3)) })
+  const { ctx, page, native } = await newPage(browser)
+  // From the first request: the Upcoming transactions are held on one gate, the occurrences fail on another.
+  const gates = { txns: gateOf(), occs: gateOf() }
+  await page.route((url) => (url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.get('order') === 'asc')
+    || (url.pathname.endsWith('/budget-entries/upcoming-occurrences') && url.searchParams.get('plan') === 'none'), async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/api/v1/transactions/')) {
+      gates.txns.hits++
+      await gates.txns.released
+      return route.fallback()
+    }
+    gates.occs.hits++
+    await gates.occs.released
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'failed on purpose (plan-tabs m)' }) })
+  })
+  await uiLogin(page, u)
+  await page.goto(`${stack.webUrl}/transactions`)
+  await page.locator('[data-testid="due-section"]').waitFor()
+  await expectDueTab(page, 'upcoming')
+  const until = Date.now() + 10000
+  while (Date.now() < until && !(gates.txns.hits >= 1 && gates.occs.hits >= 1)) await sleep(200)
+  precondition('(m) the first load sent both Upcoming requests, both held', gates.txns.hits >= 1 && gates.occs.hits >= 1, gates)
+  check('(m) while both are held the Upcoming badge reads "..."', await badgeOf(page, 'upcoming'), '…')
+  gates.occs.release()
+  await page.locator(`[data-testid="${badgeId('upcoming')}"]`).filter({ hasNotText: '…' }).waitFor({ timeout: 5000 }).catch(() => {})
+  await sleep(600)
+  check('(m) the occurrences failed with the transactions still held: the badge reads 0 at once, not "..."', await badgeOf(page, 'upcoming'), '0')
+  gates.txns.release()
+  await sleep(1500)
+  await openDueTab(page, 'upcoming')
+  check('(m) after the transactions land the badge stays 0 and the error with Retry shows', [
+    await badgeOf(page, 'upcoming'),
+    await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-error"]').count(),
+    await page.locator('[data-testid="due-panel-upcoming"] [data-testid="due-window-retry"]').count(),
+  ], ['0', 1, 1])
+  checkNoNative('m', native)
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails, k: staleSourceAfterMove }
+  const steps = { a: theSplit, b: missedSubscription, c: installmentPlans, d: creditBadge, e: overdueFlag, f: emptyPagerCap, g: manilaDay, h: bankSubscription, i: heldRollover, j: oneSourceFails, k: staleSourceAfterMove, l: failWithOldDaySnapshot, m: failWhileSiblingHeld }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
