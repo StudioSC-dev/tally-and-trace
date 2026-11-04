@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 REF = datetime(2026, 10, 18, 2, 0)
 TODAY = date(2026, 10, 18)
 KEYS = {"view", "entry_id", "name", "occurrence_date", "entry_type", "is_transfer", "kind",
-        "amount", "currency", "account_name", "transfer_to_account_name", "capped",
+        "plan_kind", "amount", "currency", "account_name", "transfer_to_account_name", "capped",
         "can_mark_paid", "recordable", "auto_post", "block_reason", "can_review"}
 
 
@@ -117,7 +117,8 @@ def test_three_salaries_list_each_unrecorded_month_once(me):
     item = body["items"][0]
     assert item == {
         "view": "full", "entry_id": due, "name": "Salary B", "occurrence_date": "2026-10-30",
-        "entry_type": "income", "is_transfer": False, "kind": None, "amount": 1000.0,
+        "entry_type": "income", "is_transfer": False, "kind": None, "plan_kind": None,
+        "amount": 1000.0,
         "currency": "PHP", "account_name": "Checking", "transfer_to_account_name": None,
         "capped": False, "can_mark_paid": True, "recordable": True, "auto_post": None,
         "block_reason": None, "can_review": False}
@@ -539,3 +540,96 @@ def test_the_route_is_declared_before_the_entry_route(me):
     assert r.json()["id"] == rent
     r = client.get(f"{API}/budget-entries/upcoming-occurrences")
     assert r.status_code == 401
+
+
+# --- plan partitions (STU-511) -----------------------------------------------------------------
+
+def _seed_installments(db, who, card, count) -> list:
+    """``count`` weekly card installments of 10 payments, next T+1, T+2 or T+3,
+    written directly for speed (unreviewed, as a backdated create leaves them)."""
+    from app.models.budget_entry import BudgetEntry, BudgetEntryType
+    from app.models.transaction import RecurrenceFrequency
+
+    rows = [BudgetEntry(user_id=who["id"], name=f"Plan {i:03d}", entry_type=BudgetEntryType.EXPENSE,
+                        amount=100, cadence=RecurrenceFrequency.WEEKLY,
+                        next_occurrence=datetime.combine(TODAY + timedelta(days=1 + i % 3),
+                                                         datetime.min.time()),
+                        end_mode="after_occurrences", max_occurrences=10, account_id=card)
+            for i in range(count)]
+    db.add_all(rows)
+    db.commit()
+    return [r.id for r in rows]
+
+
+def test_plan_partitions_filter_before_the_limit(me):
+    """Weekly installments fill the first 500 occurrences before T+20, so an
+    unpartitioned ``limit=500`` request cuts off a card subscription first due
+    T+20. ``plan=subscription`` lists it with an exact total; ``plan=none`` holds
+    the cash bill only; installments are in neither."""
+    client, db, who = me.client, me.db, me.who
+    card = _card(client, who, me.checking)
+    plans = set(_seed_installments(db, who, card, 180))  # 540 occurrences on T+1..T+17
+    netflix = _entry(client, who, card, (TODAY + timedelta(days=20)).isoformat(), "Netflix")
+    rent = _entry(client, who, me.checking, (TODAY + timedelta(days=25)).isoformat(), "Rent")
+    window = {"start_date": _start(TODAY + timedelta(days=1)),
+              "end_date": _end(TODAY + timedelta(days=30)), "limit": 500}
+
+    every = _upcoming(client, who, **window)
+    # Precondition: the cut falls before T+20.
+    assert every["total"] > 500 and len(every["items"]) == 500
+    assert every["items"][-1]["occurrence_date"] < (TODAY + timedelta(days=20)).isoformat()
+    # Guard (passes at the parent): unpartitioned, the subscription is cut off.
+    assert netflix not in {i["entry_id"] for i in every["items"]}
+
+    subs = _upcoming(client, who, plan="subscription", **window)
+    assert _pairs(subs) == [((TODAY + timedelta(days=20)).isoformat(), netflix)]
+    assert subs["total"] == 1
+    assert {i["plan_kind"] for i in subs["items"]} == {"subscription"}
+
+    none = _upcoming(client, who, plan="none", **window)
+    assert _pairs(none) == [((TODAY + timedelta(days=25)).isoformat(), rent)]
+    assert none["total"] == 1
+    assert {i["plan_kind"] for i in none["items"]} == {None}
+
+    for body in (subs, none):
+        assert not plans & {i["entry_id"] for i in body["items"]}
+    r = client.get(f"{API}/budget-entries/upcoming-occurrences", headers=who["headers"],
+                   params={"plan": "installment"})
+    assert r.status_code == 422
+
+
+def test_partitions_skip_installment_states(me):
+    """Neither partition lists an installment, so neither computes the
+    installments' auto-post states: adding plans adds no query to either."""
+    from sqlalchemy import event
+
+    from app.core.database import engine
+
+    client, who = me.client, me.who
+    card = _card(client, who, me.checking)
+    _entry(client, who, card, (TODAY + timedelta(days=20)).isoformat(), "Netflix")
+    _entry(client, who, me.checking, (TODAY + timedelta(days=25)).isoformat(), "Rent")
+    window = {"start_date": _start(TODAY + timedelta(days=1)),
+              "end_date": _end(TODAY + timedelta(days=30)), "limit": 500}
+
+    def queries(plan):
+        count = [0]
+
+        def tick(*_):
+            count[0] += 1
+
+        event.listen(engine, "before_cursor_execute", tick)
+        try:
+            body = _upcoming(client, who, plan=plan, **window)
+        finally:
+            event.remove(engine, "before_cursor_execute", tick)
+        return count[0], body["total"]
+
+    before = {plan: queries(plan) for plan in ("subscription", "none")}
+    for i in range(4):
+        _entry(client, who, card, (TODAY + timedelta(days=3 + i)).isoformat(), f"Plan {i}",
+               end_mode="after_occurrences", max_occurrences=6)
+    every = _upcoming(client, who, **window)
+    assert {i["plan_kind"] for i in every["items"]} >= {"installment"}  # they are listed
+    after = {plan: queries(plan) for plan in ("subscription", "none")}
+    assert after == before

@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 
 # Sunday 2026-10-18, 02:00 UTC: 10:00 in Manila.
 REF = datetime(2026, 10, 18, 2, 0)
-MISSED_KEYS = {"view", "entry_id", "name", "entry_type", "kind", "is_transfer", "capped",
+MISSED_KEYS = {"view", "entry_id", "name", "entry_type", "kind", "plan_kind", "is_transfer", "capped",
                "account_name", "count", "oldest", "unlinked_count", "oldest_unlinked",
                "pending_transaction_ids", "can_mark_paid"}
 # A card installment's row also carries its auto-post state (STU-343 Plan B).
@@ -103,7 +103,8 @@ def test_rule_counts_occurrences_before_today_and_splits_pending_links(me):
     assert today_bill not in missed
     assert missed[rent] == {
         "view": "full", "entry_id": rent, "name": "Rent", "entry_type": "expense",
-        "kind": "cash", "is_transfer": False, "capped": False, "account_name": "Checking",
+        "kind": "cash", "plan_kind": None, "is_transfer": False, "capped": False,
+        "account_name": "Checking",
         "count": 2, "oldest": "2026-08-18", "unlinked_count": 2,
         "oldest_unlinked": "2026-08-18", "pending_transaction_ids": [], "can_mark_paid": True}
 
@@ -395,3 +396,31 @@ def test_a_resumed_entry_has_no_missed_row(me):
     assert gym not in _missed(_snapshot(client, who))
     _put(client, who, gym, {"is_active": True})
     assert gym not in _missed(_snapshot(client, who))
+
+
+def test_the_snapshot_carries_its_manila_day(me, monkeypatch):
+    """``today`` (STU-511): the Manila day the snapshot was computed for."""
+    client, who = me.client, me.who
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 15, 59))  # 23:59 in Manila
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 1))  # 00:01 on Oct 19
+    assert _snapshot(client, who)["today"] == "2026-10-19"
+
+
+def test_the_snapshot_day_is_stamped_before_its_lists(me, monkeypatch):
+    """A request that crosses Manila midnight while it computes its lists
+    reports the day it started on, never the new day over yesterday's rows."""
+    from app.services import card_charges
+
+    client, who = me.client, me.who
+    pin_clock(monkeypatch, datetime(2026, 10, 18, 15, 59))  # 23:59 in Manila
+    real = card_charges.card_charges_by_card
+
+    def crossing(*args, **kwargs):
+        pin_clock(monkeypatch, datetime(2026, 10, 18, 16, 1))  # 00:01 on Oct 19
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(card_charges, "card_charges_by_card", crossing)
+    assert _snapshot(client, who)["today"] == "2026-10-18"
+    assert _snapshot(client, who)["today"] == "2026-10-19"  # the next request

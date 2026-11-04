@@ -1946,6 +1946,23 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
             _linked_rows(db, entry_ids, occurrence_match=occurrence_match)]
 
 
+def occurrences_paid(db: Session, entries) -> Dict[int, Optional[int]]:
+    """``{entry id: paid}``: how many of an ``after_occurrences`` entry's
+    occurrences are paid, its ``linked_transactions`` plus
+    ``occurrences_paid_offset`` (charges paid before import, with no linked
+    row); None for any other entry, where "n of m" is meaningless. The guard is
+    ``end_mode``, not ``max_occurrences`` being truthy: a fully paid installment
+    (``max_occurrences == 0``) still counts. One grouped query for all entries.
+    """
+    entries = list(entries)
+    installments = [e.id for e in entries if e.end_mode == "after_occurrences"]
+    counts = Counter(entry_id for entry_id, _ in linked_transactions(db, installments)) \
+        if installments else Counter()
+    return {e.id: counts.get(e.id, 0) + (e.occurrences_paid_offset or 0)
+            if e.end_mode == "after_occurrences" else None
+            for e in entries}
+
+
 def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List[tuple]:
     """``[(entry id, day, transaction id, is_posted)]``: ``linked_transactions``
     with each row's id and whether it is posted, under the same rule."""
@@ -2015,12 +2032,45 @@ def capped_distinct_days(entry, start: datetime, end: datetime,
     once (``distinct_days``), then capped at ``max_occurrences`` on an
     ``after_occurrences`` entry: the cap counts recorded occurrences, so a
     semi-monthly day clamped onto another (days 30/31 on Feb 28) uses one, not
-    two. ``start`` is ``next_occurrence``, where the cap's count begins."""
-    days = distinct_days(iter_occurrences(entry, start, end, max_steps=max_steps,
-                                          apply_cap=False))
+    two. ``start`` is ``next_occurrence``, where the cap's count begins. The
+    walk stops at the cap's last day rather than running on to ``end``."""
+    occurrences = iter_occurrences(entry, start, end, max_steps=max_steps, apply_cap=False)
     cap = (entry.max_occurrences
            if getattr(entry, "end_mode", None) == "after_occurrences" else None)
-    return days if cap is None else days[:max(cap, 0)]
+    if cap is None:
+        return distinct_days(occurrences)
+    seen: set = set()
+    days: List[datetime] = []
+    if cap <= 0:
+        return days
+    for occ in occurrences:
+        if occ.date() not in seen:
+            seen.add(occ.date())
+            days.append(occ)
+            if len(days) >= cap:
+                break
+    return days
+
+
+def capped_schedule_end(entry) -> date:
+    """The last of a capped entry's remaining ``max_occurrences`` distinct days
+    from ``next_occurrence``: ``capped_distinct_days``' rule, walked until the
+    cap is reached instead of up to an end date (a finite cap always ends the
+    walk; an ``end_date`` may end it sooner). ``next_occurrence``'s day when
+    nothing is left."""
+    start = _naive(entry.next_occurrence)
+    cap = entry.max_occurrences if getattr(entry, "end_mode", None) == "after_occurrences" else None
+    if cap is None:
+        raise ValueError("capped_schedule_end needs an after_occurrences entry with a cap")
+    days: set = set()
+    last = start
+    for occ in iter_occurrences(entry, start, datetime.max, apply_cap=False):
+        if len(days) >= cap:
+            break
+        if occ.date() not in days:
+            days.add(occ.date())
+            last = occ
+    return last.date()
 
 
 def unrecorded_occurrences(db: Session, entries, through: date, *,
@@ -2043,7 +2093,9 @@ def unrecorded_occurrences(db: Session, entries, through: date, *,
                      for entry_id, when, _, is_posted in _linked_rows(
                          db, [e.id for e in entries], occurrence_match=True)
                      if is_posted or pending_records)
-    end = datetime.combine(through + timedelta(days=1), datetime.min.time())
+    # A schedule ending on the last representable day has no next day.
+    end = (datetime.max if through >= date.max
+           else datetime.combine(through + timedelta(days=1), datetime.min.time()))
     out: Dict[int, List[datetime]] = {}
     for entry in entries:
         out[entry.id] = []

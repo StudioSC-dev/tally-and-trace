@@ -16,6 +16,9 @@ from app.schemas.tag import (
 DayRule = Literal["last_weekday"]
 BillingKind = Literal["subscription", "bill"]
 EntryKind = Literal["subscription", "installment", "bill", "cash"]
+# The Transactions card tab that lists an entry's occurrences
+# (services/recurring_kinds.py ``plan_kind``); null is Due and Upcoming.
+PlanKind = Literal["subscription", "installment"]
 
 
 class BudgetEntryBase(BaseModel):
@@ -461,6 +464,7 @@ class UpcomingOccurrence(BaseModel):
     entry_type: BudgetEntryType
     is_transfer: bool
     kind: Optional[EntryKind] = None
+    plan_kind: Optional[PlanKind] = None
     amount: float
     currency: CurrencyType
     account_name: Optional[str] = None
@@ -480,6 +484,39 @@ class UpcomingOccurrences(BaseModel):
     items: List[UpcomingOccurrence]
     total: int
     auto_post_scheduled: bool
+
+
+class InstallmentPlan(BaseModel):
+    """One active card installment (services/missed.py ``installment_plans``).
+    ``next_charge`` is the first scheduled month no row stands for, posted or
+    pending, null once every remaining month has one; ``missed`` counts such
+    months before Manila's today. "N of M left" is ``payments_left`` of
+    ``payments_total`` (``occurrences_paid + max_occurrences``). ``recordable``:
+    Mark paid can record ``next_charge`` now."""
+    view: Literal["full", "shared_full"]
+    entry_id: int
+    name: str
+    account_name: Optional[str] = None
+    amount: float
+    currency: CurrencyType
+    next_charge: Optional[date] = None
+    missed: int
+    payments_left: int
+    payments_total: int
+    can_mark_paid: bool
+    auto_post: Optional[InstallmentAutoPostState] = None
+    block_reason: Optional[InstallmentBlockReason] = None
+    can_review: bool
+    recordable: bool
+
+
+class InstallmentPlans(BaseModel):
+    """GET /budget-entries/installment-plans (STU-511): overdue next charges
+    first, then by ``next_charge``, ``name`` and ``entry_id``, null last.
+    ``today`` is the Manila day the items were computed for."""
+    items: List[InstallmentPlan]
+    auto_post_scheduled: bool
+    today: date
 
 
 class AutoPostToggle(BaseModel):

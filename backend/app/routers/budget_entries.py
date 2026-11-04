@@ -1,6 +1,5 @@
 import hmac
 from calendar import monthrange
-from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -51,6 +50,7 @@ from app.schemas.budget_entry import (
     AutoPostReviewResult,
     AutoPostToggle,
     EntryOccurrences,
+    InstallmentPlans,
     MaterializeDueResult,
     PostDueInstallmentsRequest,
     PostDueInstallmentsResult,
@@ -64,7 +64,7 @@ from app.schemas.transaction import TransactionOut
 from app.services import missed as missed_svc
 from app.services import posting
 from app.services.forecast import (
-    _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences,
+    _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences, occurrences_paid,
 )
 from app.services.recurring_kinds import (
     auto_post_block, default_billing_kind, entry_kind, is_capped)
@@ -102,23 +102,12 @@ def _attach_occurrence_counts(db: Session, entries: list) -> list:
 
     Counted in ONE grouped query rather than per row -- this feeds a list endpoint.
     ``occurrences_paid`` stays ``None`` for open-ended entries, where "n of m" is
-    meaningless.
+    meaningless. The count is ``forecast.occurrences_paid``, which the
+    installment plans list (``missed.installment_plans``) shares.
     """
-    installments = [e for e in entries if e.end_mode == "after_occurrences"]
-    counts: dict = {}
-    if installments:
-        from app.services.forecast import linked_transactions
-
-        counts = Counter(entry_id for entry_id, _ in linked_transactions(
-            db, [e.id for e in installments]))
-
+    paid = occurrences_paid(db, entries)
     for entry in entries:
-        is_installment = entry.end_mode == "after_occurrences"
-        entry.occurrences_paid = (
-            counts.get(entry.id, 0) + (entry.occurrences_paid_offset or 0)
-            if is_installment
-            else None
-        )
+        entry.occurrences_paid = paid[entry.id]
     return entries
 
 
@@ -496,6 +485,10 @@ def list_upcoming_occurrences(
     search: Optional[str] = Query(None, description="Search by entry name"),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
     limit: int = Query(100, ge=1, le=500),
+    plan: Optional[Literal["subscription", "none"]] = Query(
+        None, description="Only entries the Transactions card lists on this tab: "
+                          "'subscription', or 'none' (Due and Upcoming); installments match "
+                          "neither. Applied before limit"),
 ):
     """The occurrences after Manila's today of the recurring entries the caller
     sees in full or shared_full that no row stands for yet, posted or pending
@@ -522,8 +515,20 @@ def list_upcoming_occurrences(
     )
     result = missed_svc.upcoming_occurrences(
         db, current_user, redactor=Redactor(db, current_user), start=_wall_day(start_date),
-        end=_wall_day(end_date), filters=filters, limit=limit)
+        end=_wall_day(end_date), filters=filters, limit=limit, plan=plan)
     return {**result, "auto_post_scheduled": settings.JOB_TOKEN is not None}
+
+
+# Declared before ``/{entry_id}``, which would otherwise take the path.
+@router.get("/installment-plans", response_model=InstallmentPlans)
+def list_installment_plans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """One row per active card installment the caller sees in full or
+    shared_full, with its next unrecorded charge (services/missed.py
+    ``installment_plans``), for the Transactions card's Installments tab."""
+    return missed_svc.installment_plans(db, current_user, redactor=Redactor(db, current_user))
 
 
 @router.get("/{entry_id}", response_model=BudgetEntryOut)

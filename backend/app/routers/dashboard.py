@@ -23,7 +23,7 @@ from app.services import card_credit as card_credit_svc
 from app.services import forecast as forecast_svc
 from app.services import missed as missed_svc
 from app.services.fx import FxRates, get_fx
-from app.core.time import utc_now
+from app.core.time import manila_today, utc_now
 
 router = APIRouter()
 
@@ -78,6 +78,10 @@ def get_snapshot(
     rows carry their ``currency``, and ``currencies`` and ``fx`` describe the
     response.
     """
+    # Stamped before any list is computed: a request crossing Manila midnight
+    # reports the older day, so the client refetches rather than taking
+    # yesterday's rows for today's.
+    today = manila_today()
     tag_id = filter_tag_id(db, current_user, tag)
     default = forecast_svc.default_currency(db, current_user.id)
     collector = forecast_svc.FxCollector()
@@ -255,6 +259,9 @@ def get_snapshot(
         "missed": missed,
         **installments,
         "auto_post_scheduled": settings.JOB_TOKEN is not None,
+        # The Manila day this snapshot was computed for (STU-511): a client
+        # holding it across midnight can tell its rows are yesterday's.
+        "today": today.isoformat(),
         # The monthly summary's currencies too (viewable accounts and entries'
         # buckets, no placeholder); ``fx.rates`` stays the full listed rows'.
         "currencies": forecast_svc.response_currencies(
