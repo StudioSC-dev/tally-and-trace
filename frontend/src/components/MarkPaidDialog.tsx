@@ -104,7 +104,8 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
 /**
  * Records one recurring entry's occurrence: which one, on which day, for how much.
  * Every submit names the occurrence (`occurrence_date`). A cash expense or transfer
- * offers Mark paid and income Mark received. A card expense offers Charged (one
+ * offers Mark paid and income Mark received. A bill's or a same-currency income's
+ * amount is prefilled and editable; a foreign one asks for the amount charged instead. A card expense offers Charged (one
  * pending card debit, the card balance does not move) and Posted; Charged is
  * hidden once the occurrence is already linked. A capped installment offers only its oldest
  * unrecorded month. "Post all N due" posts every due occurrence at once, for a
@@ -228,12 +229,13 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const needsCharged = detailed !== undefined && source !== undefined && detailed.currency !== source.currency
   const needsReceived = destination !== undefined && destination.currency !== chargedCurrency
   const receivedCurrency: CurrencyCode = destination?.currency ?? chargedCurrency
-  // A bill varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
-  const editableBill = kind === 'bill' && !needsCharged
-  const amountShown = markPaidAmountShown({ editableBill, linked: selected?.linked, input: amountInput, usual: detailed?.amount })
-  // A pending bill starts blank and keeps its recorded amount unless a figure is typed.
-  const sendsAmount = markPaidSendsAmount({ needsCharged, editableBill, linked: selected?.linked, edited: markPaidAmountEdited({ linked: selected?.linked, input: amountInput }) })
-  const showsAmount = needsCharged || editableBill
+  // A bill or an income varies: its amount is prefilled and editable. A foreign one asks for the charge instead.
+  const isIncome = detailed?.entry_type === 'income'
+  const editableAmount = (kind === 'bill' || isIncome) && !needsCharged
+  const amountShown = markPaidAmountShown({ editableAmount, linked: selected?.linked, input: amountInput, usual: detailed?.amount })
+  // A pending bill or income starts blank and keeps its recorded amount unless a figure is typed.
+  const sendsAmount = markPaidSendsAmount({ needsCharged, editableAmount, linked: selected?.linked, edited: markPaidAmountEdited({ linked: selected?.linked, input: amountInput }) })
+  const showsAmount = needsCharged || editableAmount
 
   const defaultDay = selected && today ? defaultMarkPaidDay({ kind, occurrenceDate: selected.occurrence_date, today }) : ''
   const day = dayInput ?? defaultDay
@@ -300,7 +302,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
     if (sendsAmount) {
       const amount = parseFloat(amountShown)
       if (!(amount > 0)) {
-        setError(`Enter the amount charged in ${chargedCurrency}`)
+        setError(`Enter the amount ${isIncome ? 'received' : 'charged'} in ${chargedCurrency}`)
         return
       }
       data.amount = amount
@@ -456,7 +458,11 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
               {selected && showsAmount && (
                 <div>
                   <label className="label" htmlFor={`${titleId}-amount`}>
-                    {needsCharged ? `Amount charged (${chargedCurrency})` : `Amount (${chargedCurrency})`}
+                    {needsCharged
+                      ? `Amount charged (${chargedCurrency})`
+                      : isIncome
+                        ? `Amount received (${chargedCurrency})`
+                        : `Amount (${chargedCurrency})`}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-muted text-sm">{getCurrencySymbol(chargedCurrency)}</span>
@@ -471,11 +477,11 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
                         setError(null)
                       }}
                       className="input-field pl-7 focus-ring"
-                      placeholder={editableBill && selected.linked === 'pending' ? PENDING_AMOUNT_HINT : '0.00'}
+                      placeholder={editableAmount && selected.linked === 'pending' ? PENDING_AMOUNT_HINT : '0.00'}
                       data-testid="mark-paid-amount"
                     />
                   </div>
-                  {editableBill && (
+                  {editableAmount && (selected.linked === 'pending' || !isIncome) && (
                     <p className="mt-1 text-xs text-muted">
                       {selected.linked === 'pending' ? PENDING_AMOUNT_HINT : "Bills vary: enter this month's amount."}
                     </p>
