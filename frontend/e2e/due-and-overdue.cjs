@@ -19,7 +19,8 @@
 //       Manila day at the moment the form opens, even before the day hook has polled
 //   (e4) a posting date reads as its Manila day in the list and the account page,
 //       in a browser in Los Angeles and in Manila
-//   (f) Mark received on an income
+//   (f) Mark received on an income: STU-540, the amount is prefilled and an edited one posts
+//   (r) STU-540: a pending-linked income's amount starts blank; untouched omits it, typed is sent
 //   (g) the expense category list has Gifts & Donations, the income one not
 //   (h) a view-only viewer gets no buttons; Limited rows follow the
 //       data-limited-rows setting
@@ -50,7 +51,7 @@
 // posted yet", read with openDueTab(page, 'not-posted'): (b), (e), (e2), (e3), (e5), (h),
 // (p) and (q) read that tab, and (n) hand-links its pending row so it stays in Due.
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q|r]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -633,12 +634,67 @@ async function markReceivedSalary(browser) {
   await (await showRow(page, recRows(page, 'Salary'))).locator('[data-testid="due-mark-received"]').click()
   if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(f) Mark received opened the dialog'))) return ctx.close()
   check('(f) the dialog is titled "Mark Salary as received"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Mark Salary as received')
+  // STU-540: a same-currency income shows its amount, prefilled with the usual figure and editable.
+  const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
+  await amount.waitFor()
+  check('(f) the amount field is prefilled with the usual amount', await amount.inputValue(), String(w.salary.amount))
+  check('(f) the amount field reads "Amount received (PHP)"', ((await dialog(page).locator(`label[for="${await amount.getAttribute('id')}"]`).textContent()) ?? '').trim(), 'Amount received (PHP)')
+  const balanceBefore = await accountBalance(w.u, w.checking.id)
+  await amount.fill('31250.5')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
-  check('(f) Mark received posts the occurrence (201)', (await done).status(), 201)
+  const res = await done
+  check('(f) Mark received posts the occurrence (201)', res.status(), 201)
+  check('(f) the edited amount is what is sent', JSON.parse(res.request().postData() || '{}').amount, 31250.5)
+  check('(f) the account balance moves by the edited amount', Math.round((await accountBalance(w.u, w.checking.id) - balanceBefore) * 100), 3125050)
   await dialog(page).waitFor({ state: 'detached' })
   await gone(recRows(page, 'Salary'))
   check('(f) the Salary row is gone from every page', (await rowsOf(page, 'Salary')).length, 0)
+  await ctx.close()
+}
+
+// (r) STU-540: Mark received on an income whose missed month is linked to a pending row.
+async function pendingLinkedIncome(browser) {
+  console.log('\n=== (r) Mark received on a pending-linked income: blank field, untouched omits amount, typed is sent')
+  const u = await makeUser('r')
+  const today = manilaToday()
+  const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
+  const bank = await account(u, 'R Checking')
+  // Two missed months: the older is linked to a pending row, the newer is not, so the entry keeps a missed row
+  // (a fully linked entry is listed as its pending row instead) and the dialog can select the older month.
+  const start = addMonths(today, -2, anchor)
+  const seedOne = async (name) => {
+    const income = await entry(u, { name, entry_type: 'income', amount: 25000, account_id: bank.id, next_occurrence: wire(start), anchor_day: anchor })
+    const pending = await post(u.token, '/transactions/', {
+      account_id: bank.id, transaction_type: 'credit', amount: 27000, description: `${name} pending`,
+      transaction_date: wire(start), is_posted: false, budget_entry_id: income.id,
+    })
+    return { income, pending }
+  }
+  const keep = await seedOne('Pend Keep')
+  const typed = await seedOne('Pend Typed')
+  check('(r) the API names each pending row on its missed row', [missedFor(await snapshotOf(u), keep.income.id)?.pending_transaction_ids, missedFor(await snapshotOf(u), typed.income.id)?.pending_transaction_ids], [[keep.pending.id], [typed.pending.id]])
+
+  const { ctx, page } = await openDue(browser, u)
+  for (const [label, rec, type] of [['untouched', keep, null], ['typed', typed, '26500.25']]) {
+    const name = rec.income.name
+    await (await showRow(page, recRows(page, name, 'missed'))).locator('[data-testid="due-mark-received"]').click()
+    if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), `(r) ${name}: Mark received opened the dialog`))) return ctx.close()
+    await dialog(page).locator('[data-testid="mark-paid-occurrence"]').selectOption(start)
+    const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
+    await amount.waitFor()
+    check(`(r) ${label}: the amount field starts blank`, await amount.inputValue(), '')
+    if (type !== null) await amount.fill(type)
+    const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${rec.income.id}/materialize`))
+    await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
+    const res = await done
+    const body = JSON.parse(res.request().postData() || '{}')
+    check(`(r) ${label}: posts the pending row (200) and ${type === null ? 'omits amount' : 'sends the typed amount'}`, [res.status(), body.amount], [200, type === null ? undefined : Number(type)])
+    await dialog(page).waitFor({ state: 'detached' })
+    await settle(page)
+    const row = (await allTransactions(u)).find((t) => t.id === rec.pending.id)
+    check(`(r) ${label}: the pending row is posted with ${type === null ? 'its own amount' : 'the typed amount'}`, [row?.is_posted, row?.amount], [true, type === null ? 27000 : Number(type)])
+  }
   await ctx.close()
 }
 
@@ -1219,7 +1275,7 @@ async function outOfOrderRefetch(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, p: loadMoreLive, q: outOfOrderRefetch }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

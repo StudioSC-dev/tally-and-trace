@@ -184,38 +184,38 @@ export function postAllDueRange(
 
 /**
  * Whether Mark paid sends `amount`. A foreign entry always does (the charge is asked for).
- * A bill's amount is prefilled and editable, but when its occurrence is already linked to a
+ * A bill's or income's amount is prefilled and editable, but when its occurrence is already linked to a
  * pending row the server would overwrite that row's recorded amount with the entry's nominal
  * one, so it is sent only when the user edited the field.
  */
 export function markPaidSendsAmount(args: {
   needsCharged: boolean
-  editableBill: boolean
+  editableAmount: boolean
   linked: EntryOccurrence['linked'] | undefined
   edited: boolean
 }): boolean {
   if (args.needsCharged) return true
-  if (!args.editableBill) return false
+  if (!args.editableAmount) return false
   return args.linked === 'pending' ? args.edited : true
 }
 
-/** Hint shown on a pending-linked bill's blank amount field. */
+/** Hint shown on a pending-linked bill's or income's blank amount field. */
 export const PENDING_AMOUNT_HINT = "Leave blank to keep the pending transaction's amount"
 
 /**
- * What the Mark paid amount field shows. A bill's usual amount is prefilled, except when its
+ * What the Mark paid amount field shows. A bill's or income's usual amount is prefilled, except when its
  * occurrence is linked to a pending row: that row's own amount is posted unless the user types
  * one, so the field starts empty rather than showing a figure that is not what gets posted.
  * `input` is what the user typed (null until they touch the field).
  */
 export function markPaidAmountShown(args: {
-  editableBill: boolean
+  editableAmount: boolean
   linked: EntryOccurrence['linked'] | undefined
   input: string | null
   usual: number | undefined
 }): string {
   if (args.input !== null) return args.input
-  if (!args.editableBill || args.usual === undefined || args.linked === 'pending') return ''
+  if (!args.editableAmount || args.usual === undefined || args.linked === 'pending') return ''
   return String(args.usual)
 }
 
