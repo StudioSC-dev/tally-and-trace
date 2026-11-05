@@ -215,7 +215,7 @@ describe('postAllDueRange', () => {
 })
 
 describe('markPaidSendsAmount', () => {
-  const bill = { needsCharged: false, editableBill: true }
+  const bill = { needsCharged: false, editableAmount: true }
 
   it('does not send the nominal amount for an unedited pending bill', () => {
     expect(markPaidSendsAmount({ ...bill, linked: 'pending', edited: false })).toBe(false)
@@ -231,17 +231,24 @@ describe('markPaidSendsAmount', () => {
   })
 
   it('leaves a foreign entry unchanged: always sent', () => {
-    expect(markPaidSendsAmount({ needsCharged: true, editableBill: false, linked: 'pending', edited: false })).toBe(true)
-    expect(markPaidSendsAmount({ needsCharged: true, editableBill: false, linked: null, edited: false })).toBe(true)
+    expect(markPaidSendsAmount({ needsCharged: true, editableAmount: false, linked: 'pending', edited: false })).toBe(true)
+    expect(markPaidSendsAmount({ needsCharged: true, editableAmount: false, linked: null, edited: false })).toBe(true)
   })
 
-  it('sends nothing for a non-bill', () => {
-    expect(markPaidSendsAmount({ needsCharged: false, editableBill: false, linked: null, edited: true })).toBe(false)
+  it('sends nothing when the amount is not editable', () => {
+    expect(markPaidSendsAmount({ needsCharged: false, editableAmount: false, linked: null, edited: true })).toBe(false)
+  })
+
+  it('treats an editable income like a bill', () => {
+    const income = { needsCharged: false, editableAmount: true }
+    expect(markPaidSendsAmount({ ...income, linked: null, edited: false })).toBe(true)
+    expect(markPaidSendsAmount({ ...income, linked: 'pending', edited: false })).toBe(false)
+    expect(markPaidSendsAmount({ ...income, linked: 'pending', edited: true })).toBe(true)
   })
 })
 
 describe('markPaidAmountShown', () => {
-  const bill = { editableBill: true, usual: 250 }
+  const bill = { editableAmount: true, usual: 250 }
 
   it('starts a pending-linked bill blank', () => {
     expect(markPaidAmountShown({ ...bill, linked: 'pending', input: null })).toBe('')
@@ -258,9 +265,16 @@ describe('markPaidAmountShown', () => {
     expect(markPaidAmountShown({ ...bill, linked: null, input: '' })).toBe('')
   })
 
-  it('is blank for a non-bill or before the entry loads', () => {
-    expect(markPaidAmountShown({ editableBill: false, usual: 250, linked: null, input: null })).toBe('')
-    expect(markPaidAmountShown({ editableBill: true, usual: undefined, linked: null, input: null })).toBe('')
+  it('prefills an income with its usual amount and starts a pending one blank', () => {
+    const income = { editableAmount: true, usual: 50000 }
+    expect(markPaidAmountShown({ ...income, linked: null, input: null })).toBe('50000')
+    expect(markPaidAmountShown({ ...income, linked: 'pending', input: null })).toBe('')
+    expect(markPaidAmountShown({ ...income, linked: null, input: '48000' })).toBe('48000')
+  })
+
+  it('is blank when not editable or before the entry loads', () => {
+    expect(markPaidAmountShown({ editableAmount: false, usual: 250, linked: null, input: null })).toBe('')
+    expect(markPaidAmountShown({ editableAmount: true, usual: undefined, linked: null, input: null })).toBe('')
   })
 })
 
