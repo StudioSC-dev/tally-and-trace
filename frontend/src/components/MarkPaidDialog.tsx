@@ -302,7 +302,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
     if (sendsAmount) {
       const amount = parseFloat(amountShown)
       if (!(amount > 0)) {
-        setError(`Enter the amount ${isIncome ? 'received' : 'charged'} in ${chargedCurrency}`)
+        setError(`Enter the amount ${isIncome && !needsCharged ? 'received' : 'charged'} in ${chargedCurrency}`)
         return
       }
       data.amount = amount
