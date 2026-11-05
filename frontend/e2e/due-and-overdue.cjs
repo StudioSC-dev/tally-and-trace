@@ -19,7 +19,7 @@
 //       Manila day at the moment the form opens, even before the day hook has polled
 //   (e4) a posting date reads as its Manila day in the list and the account page,
 //       in a browser in Los Angeles and in Manila
-//   (f) Mark received on an income
+//   (f) Mark received on an income: STU-540, the amount is prefilled and an edited one posts
 //   (g) the expense category list has Gifts & Donations, the income one not
 //   (h) a view-only viewer gets no buttons; Limited rows follow the
 //       data-limited-rows setting
@@ -633,9 +633,19 @@ async function markReceivedSalary(browser) {
   await (await showRow(page, recRows(page, 'Salary'))).locator('[data-testid="due-mark-received"]').click()
   if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(f) Mark received opened the dialog'))) return ctx.close()
   check('(f) the dialog is titled "Mark Salary as received"', (await dialog(page).getByRole('heading').first().textContent())?.trim(), 'Mark Salary as received')
+  // STU-540: a same-currency income shows its amount, prefilled with the usual figure and editable.
+  const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
+  await amount.waitFor()
+  check('(f) the amount field is prefilled with the usual amount', await amount.inputValue(), String(w.salary.amount))
+  check('(f) the amount field reads "Amount received (PHP)"', ((await dialog(page).locator(`label[for="${await amount.getAttribute('id')}"]`).textContent()) ?? '').trim(), 'Amount received (PHP)')
+  const balanceBefore = await accountBalance(w.u, w.checking.id)
+  await amount.fill('31250.5')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
-  check('(f) Mark received posts the occurrence (201)', (await done).status(), 201)
+  const res = await done
+  check('(f) Mark received posts the occurrence (201)', res.status(), 201)
+  check('(f) the edited amount is what is sent', JSON.parse(res.request().postData() || '{}').amount, 31250.5)
+  check('(f) the account balance moves by the edited amount', Math.round((await accountBalance(w.u, w.checking.id) - balanceBefore) * 100), 3125050)
   await dialog(page).waitFor({ state: 'detached' })
   await gone(recRows(page, 'Salary'))
   check('(f) the Salary row is gone from every page', (await rowsOf(page, 'Salary')).length, 0)
