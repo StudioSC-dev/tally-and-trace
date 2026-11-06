@@ -17,7 +17,7 @@ import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
-import { payableActions, payableTarget, periodWindow, queryPhase } from '@tally-trace/shared'
+import { heldPaymentNotice, payableActions, payableTarget, periodWindow, queryPhase, settlementDetail } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
 import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
 import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
@@ -112,7 +112,8 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     amount: payable.amount,
     currency: payable.currency ?? fallback,
     labels: payable,
-    detail: `${label}${pays}${overflow}`,
+    // A cash entry and a loan name how they settle; every other row (a statement, a card subscription) names none.
+    detail: `${label}${settlementDetail(payable.settlement)}${pays}${overflow}`,
     movedFrom: scheduled !== undefined && scheduled !== effective ? parseCalendarDay(scheduled) : null,
     // Every row says whether its real day is before today on the Manila calendar.
     overdue: payable.overdue === true,
@@ -185,6 +186,14 @@ export function Dashboard() {
   const payableRows = useMemo(() => (snapshot?.payables ?? []).map(payableRow(defaultCurrency, manilaDay)), [snapshot, defaultCurrency, manilaDay])
 
   const cardCharges = useMemo(() => snapshot?.card_charges ?? [], [snapshot])
+  // A payment autopay could not post: it stays here until it posts.
+  const heldNotices = useMemo(
+    () => (snapshot?.autopay_due ?? []).flatMap((row) => {
+      const text = heldPaymentNotice(row)
+      return text === null ? [] : [{ key: `${row.source}-${row.source_id}`, text }]
+    }),
+    [snapshot],
+  )
   const otherUpcoming = useMemo(
     () => (snapshot?.upcoming_this_month ?? []).filter(isOtherUpcoming(fullCardChargeKeys(cardCharges))),
     [snapshot, cardCharges]
@@ -555,6 +564,13 @@ export function Dashboard() {
               )}
             </div>
           </div>
+          {heldNotices.length > 0 && (
+            <ul className="border-b border-line bg-sunken px-4 py-3 text-sm text-warn space-y-1" role="status" data-testid="autopay-notices">
+              {heldNotices.map((notice) => (
+                <li key={notice.key} data-testid="autopay-notice">{notice.text}</li>
+              ))}
+            </ul>
+          )}
           {payablesPending ? (
             <div className="p-4 sm:p-6" data-testid="payables-pending" aria-busy="true">
               <span role="status" className="sr-only">Loading upcoming payables</span>
@@ -582,7 +598,7 @@ export function Dashboard() {
                           <span className="block text-sm text-muted">
                             {formatDateWithOrdinal(row.day)}{row.movedFrom && <span data-testid="payable-moved"> (moved from {formatDateWithOrdinal(row.movedFrom)})</span>} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
                           </span>
-                          <span className="block text-xs text-muted">{row.detail}</span>
+                          <span className="block text-xs text-muted" data-testid="payable-detail">{row.detail}</span>
                         </span>
                       </button>
                     ) : (
@@ -593,7 +609,7 @@ export function Dashboard() {
                           <p className="text-sm text-muted">
                             {formatDateWithOrdinal(row.day)}{row.movedFrom && <span data-testid="payable-moved"> (moved from {formatDateWithOrdinal(row.movedFrom)})</span>} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
                           </p>
-                          <p className="text-xs text-muted">{row.detail}</p>
+                          <p className="text-xs text-muted" data-testid="payable-detail">{row.detail}</p>
                         </div>
                       </div>
                     )}
@@ -635,12 +651,14 @@ export function Dashboard() {
                 const name = isLimitedEvent(item) ? item.display_name : item.name
                 const day = parseCalendarDay(isLimitedEvent(item) ? item.date : item.due_date)
                 const household = isLimitedEvent(item) ? item.kind === 'household' : item.household_occurrence === true
-                const note = household ? 'Household bill, not paid from your cash' : direction === 'in' ? 'Money in' : ''
+                // A scheduled entry that names no settlement (a card subscription, a transfer, income) reads Scheduled.
+                const scheduled = !isLimitedEvent(item) && item.source === 'budget_entry' && !household && item.settlement == null
+                const note = household ? 'Household bill, not paid from your cash' : [direction === 'in' ? 'Money in' : '', scheduled ? 'Scheduled' : ''].filter(Boolean).join(' · ')
                 return (
                   <div key={`${name}-${index}`} className="flex items-start justify-between gap-3" data-testid="other-upcoming-row">
                     <div>
                       <p className="text-sm font-medium text-ink">{name}</p>
-                      <p className="text-xs text-muted">{formatDateWithOrdinal(day)}{note ? ` · ${note}` : ''}</p>
+                      <p className="text-xs text-muted" data-testid="other-upcoming-detail">{formatDateWithOrdinal(day)}{note ? ` · ${note}` : ''}</p>
                     </div>
                     <p className="text-sm font-semibold text-ink flex-shrink-0" data-testid="other-upcoming-amount" title={estimateTitle(itemLabels)}>{amountText}</p>
                   </div>

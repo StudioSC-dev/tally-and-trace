@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { finalMonthHelp, withLoadedVersion } from './entryEdit'
+import { finalMonthHelp, settlementControlState, settlementFollowUp, withLoadedVersion } from './entryEdit'
+import { DEFAULT_SETTLEMENT } from './settlement'
 
 describe('withLoadedVersion', () => {
   it('sends the loaded updated_at string unchanged, microseconds included', () => {
@@ -39,5 +40,48 @@ describe('finalMonthHelp', () => {
     expect(finalMonthHelp).toBe(
       'Moving the next date keeps the last payment; change this number to lengthen or shorten the plan.',
     )
+  })
+})
+
+describe('settlement control (settlement plan PR 8)', () => {
+  const bank = { account_type: 'checking', currency: 'PHP' }
+  const base = { entryType: 'expense' as const, account: bank, currency: 'PHP', isActive: true }
+
+  it('defaults a new entry to Manual', () => {
+    expect(DEFAULT_SETTLEMENT).toBe('manual')
+  })
+
+  it('shows for a cash expense, usable', () => {
+    expect(settlementControlState(base)).toEqual({ shown: true, disabledReason: null })
+  })
+
+  it('shows nothing for a card subscription, a transfer, income or no account', () => {
+    const card = { account_type: 'credit', currency: 'PHP' }
+    expect(settlementControlState({ ...base, account: card }).shown).toBe(false)
+    expect(settlementControlState({ ...base, transferToAccountId: 7 }).shown).toBe(false)
+    expect(settlementControlState({ ...base, entryType: 'income' }).shown).toBe(false)
+    expect(settlementControlState({ ...base, account: undefined }).shown).toBe(false)
+  })
+
+  it('is off with a plain reason for a wallet, another currency and a paused entry', () => {
+    const wallet = settlementControlState({ ...base, account: { ...bank, is_spending_wallet: true } })
+    const foreign = settlementControlState({ ...base, currency: 'USD' })
+    const paused = settlementControlState({ ...base, isActive: false })
+    for (const state of [wallet, foreign, paused]) {
+      expect(state.shown).toBe(true)
+      expect(state.disabledReason).toMatch(/autopay|currency/)
+    }
+    expect(wallet.disabledReason).toContain('wallet')
+    expect(foreign.disabledReason).toContain('currency')
+    expect(paused.disabledReason).toContain('paused')
+  })
+
+  it('follows up a save only when the entry did not end as picked', () => {
+    expect(settlementFollowUp('manual', 'manual')).toBeNull()
+    expect(settlementFollowUp('manual', null)).toBeNull()
+    expect(settlementFollowUp('autopay', 'autopay')).toBeNull()
+    expect(settlementFollowUp('autopay', 'manual')).toBe('turn_on')
+    expect(settlementFollowUp('autopay', undefined)).toBe('turn_on')
+    expect(settlementFollowUp('manual', 'autopay')).toBe('turn_off')
   })
 })

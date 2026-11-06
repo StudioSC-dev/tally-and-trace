@@ -209,6 +209,8 @@ export interface LoanSchedule {
   /** `next_due_date` on its forced date. Absent from an older API. */
   next_due_effective_date?: string | null
   proposed_split: LoanScheduleSplit | null
+  /** How the loan settles. Null for an editor, who cannot see the flag. */
+  settlement?: Settlement | null
   payments: LoanSchedulePayment[]
   upcoming: LoanScheduleRow[]
 }
@@ -450,7 +452,7 @@ interface RecurringEntryDetail {
    * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
    */
   installment_reviewed?: boolean
-  /** Card installments: whether the job, page-open and Post now record its due months. Read-only. */
+  /** Whether the job, page-open and Post now record its due payments by themselves: a reviewed card installment or an autopay cash entry. Read-only. */
   auto_post_enabled?: boolean
   /** The caller's tags on the entry. */
   tags: TagRef[]
@@ -1547,6 +1549,8 @@ export type PostDueInstallmentsSkipReason =
   | 'ambiguous'
   | 'pending_not_editable'
   | 'needs_amount'
+  | 'insufficient_funds'
+  | 'planned_payment'
 
 export interface PostDueInstallmentsResult {
   trigger: PostDueInstallmentsTrigger
@@ -1555,6 +1559,48 @@ export interface PostDueInstallmentsResult {
   posted: number
   skipped: Partial<Record<PostDueInstallmentsSkipReason, number>>
   entries: Array<{ entry_id: number; posted: number; skipped_reason: PostDueInstallmentsSkipReason | null }>
+  /** The autopay loans the run posted for. Present only when there is at least one. */
+  loans?: Array<{ loan_id: number; posted: number; skipped_reason: PostDueInstallmentsSkipReason | null }>
+}
+
+// ─── Settlement (autopay or manual) ──────────────────────────────────────────
+
+/** POST /budget-entries/{id}/auto-post and /accounts/{id}/auto-post. */
+export interface AutoPostToggleInput {
+  enabled: boolean
+  /** Turning on: the missed count the owner confirmed (`AutoPostPreview.due_count`). */
+  expected_due?: number
+}
+
+/** GET /budget-entries/{id}/auto-post-preview and /accounts/{id}/auto-post-preview. */
+export interface AutoPostPreview {
+  /** Why autopay cannot be turned on; null when it can. */
+  block: string | null
+  /** Missed payments that turning it on would post, each on its own day. */
+  due_count: number
+  /** The oldest of them (`YYYY-MM-DD`). */
+  oldest: string | null
+}
+
+/** Whether an `autopay_due` row is a cash entry or a loan. */
+export type AutopayDueSource = 'budget_entry' | 'loan'
+
+/** One entry of `DashboardSnapshot.autopay_due`: an autopay cash entry or loan with a payment due. */
+export interface AutopayDueRow {
+  source: AutopayDueSource
+  source_id: number
+  name: string
+  /** The account the payment comes from; null when the caller cannot view it. */
+  account_name: string | null
+  due_count: number
+  /** Of `due_count`, the payments a run would post for the caller. */
+  postable_count: number
+  /** The first due payment's effective date (`YYYY-MM-DD`). */
+  oldest: string
+  /** `held` when a due payment is held back, `blocked` when it cannot post at all, `on` when it simply waits for the next run. */
+  state: InstallmentAutoPostState
+  /** Why the payment did not post (`insufficient_funds`, `possible_duplicate`, ...); null when nothing holds it. */
+  block_reason: string | null
 }
 
 /** A recurring card expense with occurrences nobody recorded. */
@@ -2045,6 +2091,8 @@ export interface DashboardSnapshot {
   installment_review: InstallmentReviewRow[]
   /** Reviewed card installments with a due month, for callers who see them in full. Empty for viewers. */
   installment_auto_post: InstallmentAutoPostRow[]
+  /** Autopay cash entries and loans with a payment due, for what the caller can edit. A held one stays until it posts. */
+  autopay_due: AutopayDueRow[]
   /** Whether the daily job is set up; otherwise installments post when Transactions opens. */
   auto_post_scheduled: boolean
   currencies: CurrencyCode[]

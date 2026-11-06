@@ -46,7 +46,7 @@
 //       postable unposted months opens Pay with "Full leaves out 2 installment months
 //       not yet posted" and Post due installments now
 //   (h) a reviewed installment due today is posted by opening Transactions, with no click:
-//       "Posted 1 due installment month", the API has the linked row, the due-today line
+//       "Posted 1 due payment", the API has the linked row, the due-today line
 //       is gone, leaving and coming back sends no page-open request, and a viewer opening
 //       Transactions sends none
 //   (i) the screen loader stays hidden while the page-open POST is held and input works;
@@ -168,6 +168,13 @@ async function makeOpener(tag) {
   return u
 }
 
+/**
+ * The close day that leaves an installment dated `day` where it is. The API stores a new card
+ * installment on the close of the statement holding its date (768a9b9), so these scripts put the
+ * card's close on the entry's own day. A close day is at most the 28th, so on the 29th to 31st a
+ * date-of-today installment is moved to the 28th and those scenarios cannot run that day.
+ */
+const closeOn = (day) => Math.min(28, dom(day))
 /** A PHP card closing on `closeDom`, due 21 days later, paid from a checking account. */
 async function makeCard(u, name, closeDom = 28) {
   const bank = await post(u.token, '/accounts/', { name: `${name} Checking`, account_type: 'checking', balance: 100000, currency: 'PHP' })
@@ -275,7 +282,7 @@ async function submitReview(page) {
 async function reviewWithDuplicate(browser) {
   console.log('(a) a backdated installment is reviewed, its duplicate linked')
   const me = await makeOpener('a')
-  const { card } = await makeCard(me, 'Visa A')
+  const { card } = await makeCard(me, 'Visa A', closeOn(backdatedStart()))
   const start = backdatedStart()
   const entry = await installment(me, card, 'Laptop', 2500, start, 12)
   const typed = await charge(me, card, 2500, addDays(addMonths(start, 1), 1), 'Laptop typed by hand')
@@ -335,7 +342,7 @@ async function reviewWithDuplicate(browser) {
 async function newFromTomorrow(browser) {
   console.log('(b) a new installment from tomorrow is reviewed and on')
   const me = await makeOpener('b')
-  const { card } = await makeCard(me, 'Visa B')
+  const { card } = await makeCard(me, 'Visa B', closeOn(addDays(manilaToday(), 1)))
   const tomorrow = addDays(manilaToday(), 1)
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, me)
@@ -368,7 +375,7 @@ async function newFromTomorrow(browser) {
 async function postNowToday(browser) {
   console.log('(c) a reviewed installment due today is posted from Post now')
   const me = await makeOpener('c')
-  const { card } = await makeCard(me, 'Visa C')
+  const { card } = await makeCard(me, 'Visa C', closeOn(manilaToday()))
   const today = manilaToday()
   const entry = await installment(me, card, 'Phone', 1800, today, 6)
   check('(c) created reviewed and on', flags(await entryNow(me, entry.id)), { reviewed: true, on: true })
@@ -405,7 +412,7 @@ async function postNowToday(browser) {
 async function heldMonth(browser) {
   console.log('(d) a month held by a possible duplicate is reviewed')
   const me = await makeOpener('d')
-  const { card } = await makeCard(me, 'Visa D')
+  const { card } = await makeCard(me, 'Visa D', closeOn(manilaToday()))
   const today = manilaToday()
   const entry = await installment(me, card, 'Fridge', 3100, today, 6)
   const typed = await charge(me, card, 3100, addDays(today, -1), 'Fridge typed by hand')
@@ -439,7 +446,7 @@ async function roles(browser) {
   const owner = await makeOpener('e-owner')
   const editor = await makeOpener('e-editor')
   const viewer = await makeOpener('e-viewer')
-  const { bank, card } = await makeCard(owner, 'Visa E')
+  const { bank, card } = await makeCard(owner, 'Visa E', closeOn(backdatedStart()))
   await post(owner.token, `/accounts/${card.id}/shares`, { email: editor.email, role: 'editor' })
   await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
   await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
@@ -489,7 +496,7 @@ async function allocationsAutoPost(browser) {
   const owner = await makeUser('f-owner')
   const editor = await makeUser('f-editor')
   const viewer = await makeUser('f-viewer')
-  const { bank, card } = await makeCard(owner, 'Visa F')
+  const { bank, card } = await makeCard(owner, 'Visa F', closeOn(manilaToday()))
   await post(owner.token, `/accounts/${card.id}/shares`, { email: editor.email, role: 'editor' })
   await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
   await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
@@ -655,7 +662,7 @@ const isPageOpenPath = (url) => /\/budget-entries\/post-due-installments$/.test(
 const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
 const isPostDue = (r) => r.method() === 'POST' && isPageOpenPath(r.url())
 const openResult = (page) => testId(page, 'due-page-open-result')
-const POSTED_ONE = 'Posted 1 due installment month'
+const POSTED_ONE = 'Posted 1 due payment'
 
 /** A request log for counts, and the bodies of the post-due-installments POSTs (logRequests keeps no bodies). */
 function watchPostDue(page) {
@@ -699,7 +706,7 @@ async function postOnOpen(browser) {
   // No consumePageOpen: this is the page-open POST itself.
   const owner = await makeUser('h-owner')
   const viewer = await makeUser('h-viewer')
-  const { bank, card } = await makeCard(owner, 'Visa H')
+  const { bank, card } = await makeCard(owner, 'Visa H', closeOn(manilaToday()))
   await post(owner.token, `/accounts/${card.id}/shares`, { email: viewer.email, role: 'viewer' })
   await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
   const today = manilaToday()
@@ -747,7 +754,7 @@ async function pageOpenIsQuiet(browser) {
   console.log('(i) the page-open POST does not block input or gray the screen')
   // No consumePageOpen: the POST must be sent.
   const me = await makeUser('i')
-  const { card } = await makeCard(me, 'Visa I')
+  const { card } = await makeCard(me, 'Visa I', closeOn(manilaToday()))
   const today = manilaToday()
   const entry = await installment(me, card, 'Printer', 2100, today, 6)
 
@@ -805,7 +812,7 @@ const navToTransactions = async (page) => {
 /** A user with a card, logged in on the dashboard, whose snapshot is cached there. */
 async function onDashboard(browser, tag, dueToday) {
   const me = await makeUser(tag)
-  const { card } = await makeCard(me, `Visa ${tag.toUpperCase()}`)
+  const { card } = await makeCard(me, `Visa ${tag.toUpperCase()}`, closeOn(manilaToday()))
   const entry = dueToday ? await installment(me, card, 'Lamp', 1200, manilaToday(), 6) : null
   const { ctx, page } = await newPage(browser)
   const watch = watchPostDue(page)
@@ -868,7 +875,7 @@ async function freshSnapshot(browser) {
 async function staleReview(browser) {
   console.log('(k) the review goes stale while the dialog is open')
   const me = await makeOpener('k')
-  const { card } = await makeCard(me, 'Visa K')
+  const { card } = await makeCard(me, 'Visa K', closeOn(backdatedStart()))
   const start = backdatedStart()
   const entry = await installment(me, card, 'Camera', 1800, start, 12)
   const { ctx, page } = await newPage(browser)
@@ -903,16 +910,25 @@ async function staleReview(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
+  // A card closes on the 28th at the latest, and the API moves a new installment onto its statement close, so a
+  // scenario that creates one dated today (or tomorrow, for b) cannot hold when that date is the 29th to 31st.
+  const todayDay = manilaToday()
+  const tomorrowDay = addDays(todayDay, 1)
+  const dated = (k, day) => {
+    if (dom(day) <= 28) return true
+    console.log(`(${k}) SKIPPED: it needs an installment dated ${day}, and a card cannot close after the 28th`)
+    return false
+  }
   if (run('a')) await reviewWithDuplicate(browser)
-  if (run('b')) await newFromTomorrow(browser)
-  if (run('c')) await postNowToday(browser)
-  if (run('d')) await heldMonth(browser)
+  if (run('b') && dated('b', tomorrowDay)) await newFromTomorrow(browser)
+  if (run('c') && dated('c', todayDay)) await postNowToday(browser)
+  if (run('d') && dated('d', todayDay)) await heldMonth(browser)
   if (run('e')) await roles(browser)
-  if (run('f')) await allocationsAutoPost(browser)
+  if (run('f') && dated('f', todayDay)) await allocationsAutoPost(browser)
   if (run('g')) await unpostedPanel(browser)
-  if (run('h')) await postOnOpen(browser)
-  if (run('i')) await pageOpenIsQuiet(browser)
-  if (run('j')) await freshSnapshot(browser)
+  if (run('h') && dated('h', todayDay)) await postOnOpen(browser)
+  if (run('i') && dated('i', todayDay)) await pageOpenIsQuiet(browser)
+  if (run('j') && dated('j', todayDay)) await freshSnapshot(browser)
   if (run('k')) await staleReview(browser)
   await browser.close()
   stack.stop()
