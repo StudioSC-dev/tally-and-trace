@@ -1039,6 +1039,8 @@ export interface UpcomingItem extends Partial<Estimate> {
    * capped occurrence is listed on the window start, so `due_date` differs.
    */
   occurrence_date?: string
+  /** Loan items: the scheduled due date (`YYYY-MM-DD`), when the date was forced. */
+  loan_due_date?: string
   /** The item's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
   /** Any item listed overdue on the window start: its real day (`YYYY-MM-DD`); `due_date` is the listing day. */
@@ -1077,6 +1079,8 @@ export interface Payable extends Partial<Estimate> {
   currency?: CurrencyCode
   /** Budget-entry rows: the occurrence this payable stands for (`YYYY-MM-DD`). */
   occurrence_date?: string
+  /** Loan rows: the scheduled due date (`YYYY-MM-DD`), which a forced `due_date` or `original_date` leaves as the identity. */
+  loan_due_date?: string
   /** The row's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
   /** Rows listed overdue on the window start: the real day (`YYYY-MM-DD`); `due_date` is the listing day. */
