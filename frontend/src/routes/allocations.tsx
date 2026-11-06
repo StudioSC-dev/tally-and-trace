@@ -32,6 +32,7 @@ import {
   RECURRING_ACTION_LABELS,
   fieldErrorProps,
   recurringActionsFor,
+  settlementLabel,
   withoutError,
 } from '@tally-trace/shared'
 import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
@@ -1434,7 +1435,7 @@ export function AllocationsPage() {
                 <span className="text-muted">•</span>
                 <span>{cadenceLabel}</span>
                 <span className="text-muted">•</span>
-                <span>{entry.auto_post_enabled ? 'Auto-pay' : 'Manual'}</span>
+                <span>{settlementLabel(entry.settlement)}</span>
                 {!entry.is_active && (
                   <>
                     <span className="text-muted">•</span>
