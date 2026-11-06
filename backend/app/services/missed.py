@@ -110,14 +110,17 @@ def _card_missed_covers(entry: BudgetEntry, account) -> bool:
             and entry_kind(entry, account) in BILLING_KINDS)
 
 def installment_state(entry: BudgetEntry, plan: PostPlan) -> str:
-    """An auto-posted entry's state from ``post_plan``'s blocker:
-    ``unreviewed``, ``off`` (reviewed, auto-post off), ``blocked`` (reviewed and
-    on, but ``blocked:<reason>`` or ``creator_no_access``), ``held`` (a due
-    month is held by a duplicate or, on a cash entry, its funds) or ``on``.
-    ``caller_no_access`` leaves the state ``on``: it only empties the caller's
-    ``postable``.
+    """An auto-posted entry's state from ``post_plan``'s blocker (``blocker_state``)."""
+    return blocker_state(plan.blocker)
+
+
+def blocker_state(blocker: Optional[str]) -> str:
+    """A ``post_plan`` blocker as a state: ``unreviewed``, ``off`` (reviewed,
+    auto-post off), ``blocked`` (reviewed and on, but ``blocked:<reason>`` or
+    ``creator_no_access``), ``held`` (a due month is held by a duplicate or, on a
+    cash entry, its funds) or ``on``. ``caller_no_access`` leaves the state ``on``:
+    it only empties the caller's ``postable``.
     """
-    blocker = plan.blocker
     if blocker == "unreviewed":
         return "unreviewed"
     if blocker == "auto_post_off":
