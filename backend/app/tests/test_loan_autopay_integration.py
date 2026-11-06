@@ -1394,3 +1394,78 @@ def test_an_edit_to_a_paused_transfer_leaves_a_flag_set_after_the_pause(world, m
     _turn_on(w, loan, expected_due=1)
     _put_entry(w, feed, name="Renamed", transfer_to_account_id=_bank(w, "Savings", 0))
     assert _is_on(db, loan) is True
+
+
+# More owed through a transaction ---------------------------------------------------------------
+
+def _prepaid_off(w, monkeypatch) -> tuple:
+    """A reduce-term loan a prepayment paid off, so its due dates pass with nothing
+    owed and nothing posted."""
+    loan = _loan(w, loan_amortization="reduce_term", balance=-5_000)
+    _turn_on(w, loan)
+    r = w["client"].post(f"{API}/accounts/{loan}/loan-prepayment", json={
+        "amount": "5000", "transaction_date": "2026-10-20T00:00:00"},
+        headers=w["o"]["headers"])
+    assert r.status_code == 200, r.text
+    on_day(monkeypatch, "2026-11-26")
+    assert _job(w["client"])["posted"] == 0
+    return loan, r.json()["id"]
+
+
+def _on_the_loan(w, loan, kind, amount=3_000) -> int:
+    return sw_post(w["client"], w["o"], "/transactions/", {
+        "account_id": loan, "amount": amount, "transaction_type": kind,
+        "transaction_date": "2026-11-20T00:00:00", "description": "Bank adjustment"})["id"]
+
+
+def test_deleting_a_prepayment_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, txn = _prepaid_off(w, monkeypatch)
+    _delete_row(w, txn)
+    _reads_manual_and_confirms(w, loan)
+
+
+@pytest.mark.parametrize("fields", [{"is_posted": False}, {"amount": 1_000}],
+                         ids=["unposted", "reduced"])
+def test_taking_cash_off_a_prepayment_clears_the_flag(world, monkeypatch, fields):
+    w, db = world, world["db"]
+    loan, txn = _prepaid_off(w, monkeypatch)
+    r = _edit_row(w, txn, **fields)
+    assert r.status_code == 200, r.text
+    assert _is_on(db, loan) is False
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+
+
+def test_a_debit_on_the_loan_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, _ = _prepaid_off(w, monkeypatch)
+    _on_the_loan(w, loan, "debit")
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_deleting_a_credit_on_the_loan_clears_the_flag(world, monkeypatch):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    _delete_row(w, _on_the_loan(w, loan, "credit"))
+    assert _is_on(db, loan) is False
+
+
+def test_a_debit_moved_onto_the_loan_clears_the_flag(world):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    txn = sw_post(w["client"], w["o"], "/transactions/", {
+        "account_id": w["checking"], "amount": 3_000, "transaction_type": "debit",
+        "transaction_date": "2026-10-18T00:00:00", "description": "Fee"})["id"]
+    r = _edit_row(w, txn, account_id=loan)
+    assert r.status_code == 200, r.text
+    assert _is_on(db, loan) is False
+
+
+def test_a_credit_on_the_loan_keeps_the_flag(world):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    _on_the_loan(w, loan, "credit")
+    assert _is_on(db, loan) is True

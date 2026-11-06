@@ -652,12 +652,20 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date
     return [r for r in rows if datetime(r[1].year, r[1].month, r[1].day) < end]
 
 
-def scheduled_cash(txn: Transaction) -> Decimal:
-    """The cash a row gives ``settle_posted``: a posted scheduled payment's
-    principal + interest, zero on any other row."""
-    if not txn.is_posted or txn.loan_payment_kind != SCHEDULED:
+def cash_paid(txn: Transaction, account_id: Optional[int]) -> Decimal:
+    """What a posted row took off ``account_id``'s debt, negative where it added to
+    it: the cash of a transfer into it, or a credit or debit on it. Less of this
+    raises what is owed, which can open a past due date (``stop_autopay``)."""
+    if not txn.is_posted or account_id is None:
         return _ZERO
-    return _money(txn.amount) + _money(txn.transfer_fee or 0)
+    if txn.transaction_type == TransactionType.TRANSFER:
+        if txn.transfer_to_account_id != account_id:
+            return _ZERO
+        return _money(txn.amount) + _money(txn.transfer_fee or 0)
+    if txn.account_id != account_id:
+        return _ZERO
+    amount = _money(txn.amount)
+    return amount if txn.transaction_type == TransactionType.CREDIT else -amount
 
 
 def planned_cover(txn: Transaction) -> Optional[Tuple[int, date]]:
@@ -670,7 +678,7 @@ def planned_cover(txn: Transaction) -> Optional[Tuple[int, date]]:
 
 
 def stop_autopay(db: Session, loan_id: Optional[int]) -> None:
-    """Clear the loan's autopay, without committing: its settled cash fell, or a
+    """Clear the loan's autopay, without committing: the cash paid into it fell, or a
     recurring transfer or planned payment that held it back went, so a due date may
     stand open and it must post only with a confirmed count. A failed bank debit is
     when an owner deletes a payment. The caller holds the account lock, which a run

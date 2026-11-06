@@ -1137,6 +1137,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account.balance = _D(primary_account.balance) - out
         if destination_account:
             destination_account.balance = _D(destination_account.balance) + received
+    if loan_svc.cash_paid(db_transaction, primary_account.id) < 0:
+        loan_svc.stop_autopay(db, primary_account.id)
 
     budget_allocations = _lock_allocations(db, _counted_allocations(
         db, user_id=owner.id, transaction_type=transaction.transaction_type,
@@ -1313,7 +1315,8 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
     old_transaction_date = db_transaction.transaction_date
-    old_scheduled_cash = loan_svc.scheduled_cash(db_transaction)
+    old_paid = {account_id: loan_svc.cash_paid(db_transaction, account_id)
+                for account_id in (old_account_id, old_transfer_to)}
     old_cover = loan_svc.planned_cover(db_transaction)
     
     # Reverse previous balance effects if posted
@@ -1435,8 +1438,9 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
             new_out, new_in = transfer_sides(db_transaction)
             primary_account.balance = _D(primary_account.balance) - new_out
             destination_account.balance = _D(destination_account.balance) + new_in
-    if loan_svc.scheduled_cash(db_transaction) < old_scheduled_cash:
-        loan_svc.stop_autopay(db, old_transfer_to)
+    for account_id in {*old_paid, db_transaction.account_id}:
+        if loan_svc.cash_paid(db_transaction, account_id) < old_paid.get(account_id, 0):
+            loan_svc.stop_autopay(db, account_id)
 
     # The budgets the row counted toward, at its old date, and those it counts
     # toward now, at its new one (both, old then new, for a budget in each).
@@ -1494,9 +1498,11 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - received
-    if (loan_svc.scheduled_cash(db_transaction) > 0
-            or loan_svc.planned_cover(db_transaction) is not None):
+    if loan_svc.planned_cover(db_transaction) is not None:
         loan_svc.stop_autopay(db, db_transaction.transfer_to_account_id)
+    for account_id in (db_transaction.account_id, db_transaction.transfer_to_account_id):
+        if loan_svc.cash_paid(db_transaction, account_id) > 0:
+            loan_svc.stop_autopay(db, account_id)
 
     # The budgets the row counted toward, found before it goes and recomputed at
     # its date once the delete is flushed (STU-222).
