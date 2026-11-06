@@ -115,6 +115,9 @@ class AccountFields(AccountBase):
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Read-only, here and not on AccountBase, so no create or edit can set it.
+    # Loans only; null for anyone but an owner or admin.
+    auto_post_enabled: Optional[bool] = None
     tags: TagSummaries = tags_response_field()
 
     class Config:
@@ -124,8 +127,8 @@ class AccountFields(AccountBase):
 class DirectAccountResponse(AccountFields):
     """An account as a caller with a direct role sees it.
 
-    ``description``, ``credit_limit``, ``minimum_due_rule``, the routing ids and
-    the loan terms are null unless ``my_role`` is "owner" or "admin". ``is_shared``
+    ``description``, ``credit_limit``, ``minimum_due_rule``, the routing ids,
+    the loan terms and ``auto_post_enabled`` are null unless ``my_role`` is "owner" or "admin". ``is_shared``
     is set only for the owner (true when the account has an account share or
     carries the owner's Household tag); null for every other role.
     """

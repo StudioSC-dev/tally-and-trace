@@ -438,7 +438,7 @@ MANAGER_ONLY_ACCOUNT_FIELDS = (
     "description", "credit_limit", "minimum_due_rule", "payment_account_id",
     "payment_overflow_account_id", "loan_annual_rate", "loan_term_months",
     "loan_payment_amount", "loan_first_payment_date", "loan_amortization",
-    "loan_payments_made_offset",
+    "loan_payments_made_offset", "auto_post_enabled",
 )
 
 

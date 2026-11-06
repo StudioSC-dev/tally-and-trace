@@ -73,7 +73,8 @@ ACCOUNT_FIELDS = (
     "due_date", "billing_cycle_start", "days_until_due_date", "minimum_due_rule",
     "payment_account_id", "payment_overflow_account_id", "is_spending_wallet", "loan_kind",
     "loan_annual_rate", "loan_term_months", "loan_payment_amount", "loan_first_payment_date",
-    "loan_amortization", "loan_payments_made_offset", "is_active", "created_at", "updated_at",
+    "loan_amortization", "loan_payments_made_offset", "auto_post_enabled", "is_active",
+    "created_at", "updated_at",
 )
 
 TRANSACTION_FIELDS = (
