@@ -435,7 +435,6 @@ interface RecurringEntryDetail {
   overflow_account_id?: number | null
   /** Recurring transfer: occurrences move money from account_id to this non-credit account. */
   transfer_to_account_id?: number | null
-  is_autopay: boolean
   is_active: boolean
   /**
    * Card expenses: how an open-ended one is billed. null derives it (Utilities
@@ -980,7 +979,6 @@ export interface UpcomingBill {
   currency: CurrencyCode
   entry_type: BudgetEntryType
   lead_time_days: number
-  is_autopay: boolean
 }
 
 /**
