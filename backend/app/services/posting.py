@@ -1045,7 +1045,7 @@ def loan_plan(db: Session, loan: Account, through: date, caller: Optional[User] 
     A due date a pending payment covers any part of stops the walk
     (``planned_payment``: the planned row is the owner's). So does one the paying
     account's posted balance does not cover (``insufficient_funds``), cumulatively
-    and with no partial payment, and one ``split_payment`` refuses (``needs_amount``:
+    and with no partial payment, and one ``split_due`` refuses (``needs_amount``:
     the final, smaller payment on a fixed loan, which the owner records by hand).
     A recorder holds the account locks, so nothing here moves under it.
     """
@@ -1058,10 +1058,12 @@ def loan_plan(db: Session, loan: Account, through: date, caller: Optional[User] 
     uncovered = loan_svc.cover_planned([(day, owed) for day, _, owed in due],
                                        loan_svc.planned_covers(db, loan))
     funds = Decimal(str(db.get(Account, loan.payment_account_id).balance))
-    # What ``split_payment`` reads, carried forward as each step would leave it.
+    # What ``split_due`` reads, carried forward as each step would leave it.
     after = SimpleNamespace(balance=Decimal(str(loan.balance)),
                             loan_payment_amount=loan.loan_payment_amount,
-                            loan_annual_rate=loan.loan_annual_rate)
+                            loan_annual_rate=loan.loan_annual_rate,
+                            loan_amortization=loan.loan_amortization,
+                            loan_kind=loan.loan_kind)
     steps: List[LoanStep] = []
     for (day, when, owed), left in zip(due, uncovered):
         if left < owed:
@@ -1069,7 +1071,7 @@ def loan_plan(db: Session, loan: Account, through: date, caller: Optional[User] 
         if funds < owed:
             return LoanPlan(due, steps, "insufficient_funds")
         try:
-            principal, interest = loan_svc.split_payment(after, owed)
+            principal, interest = loan_svc.split_due(after, owed)
         except loan_svc.LoanError:
             return LoanPlan(due, steps, "needs_amount")
         funds -= owed

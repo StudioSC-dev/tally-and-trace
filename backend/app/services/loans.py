@@ -291,6 +291,21 @@ def split_payment(loan, total) -> Tuple[Decimal, Decimal]:
     return total - interest, interest
 
 
+def split_due(loan, total) -> Tuple[Decimal, Decimal]:
+    """``(principal, interest)`` of a due date's ``total``, as the schedule says it.
+
+    ``split_payment``, except that the amount a ``reduce_term`` schedule says
+    clears the loan is all the principal left and only the rest interest: on a
+    part-paid last due date ``_reduce_term_rows`` nets the part payment off the
+    month's interest, so a month's interest here would leave a balance to pay
+    again.
+    """
+    left = owed(loan)
+    if amortization_of(loan) == REDUCE_TERM and cents(total) >= left:
+        return propose_split(loan, principal=left, interest=cents(total) - left)
+    return split_payment(loan, total)
+
+
 def amortize(balance: Decimal, annual_rate, payment: Decimal, first_due: date) -> Optional[List[dict]]:
     """Monthly rows paying ``balance`` down at ``payment``; None if it never repays."""
     rate = _monthly_rate(annual_rate)

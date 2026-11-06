@@ -505,6 +505,20 @@ def test_a_final_smaller_reduce_term_payment_posts_what_is_left(world, monkeypat
     assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
 
 
+def test_a_final_part_paid_reduce_term_payment_posts_what_the_schedule_says(world, monkeypatch):
+    w, db = world, world["db"]
+    loan = _loan(w, loan_amortization="reduce_term", balance=-5_000)
+    _turn_on(w, loan)
+    on_day(monkeypatch, "2026-10-25")
+    _pay(w, loan, "2026-10-24", principal="1000", interest="30")
+    said = _schedule(w, loan)["upcoming"][0]
+    assert (said["payment"], said["principal"], said["interest"]) == (4_000, 4_000, 0)
+    assert _job(w["client"]) == {"dry_run": False, "posted": 1, "skipped": {}}
+    assert _rows(db, loan)[1:] == [("2026-10-25", 4_000, 0, True)]
+    assert _balance(db, loan) == 0
+    assert _balance(db, w["checking"]) == 50_000 - 1_030 - 4_000
+
+
 # 11 ----------------------------------------------------------------------------------------
 
 def test_a_final_smaller_fixed_payment_stops_at_needs_amount(world, monkeypatch):
