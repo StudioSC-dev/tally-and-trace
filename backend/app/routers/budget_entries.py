@@ -74,7 +74,7 @@ from app.services.recurring_kinds import (
 from app.services.recurrence import (
     DAY_FIELDS, MONTH_FAMILY, DayRuleError, canon, resolve_day_fields,
 )
-from app.services.statements import statement_close
+from app.services.statements import load_due_overrides, statement_close, statement_due_date
 
 router = APIRouter()
 
@@ -897,10 +897,8 @@ def update_budget_entry(
         entry.auto_post_enabled = False
 
     # A forced date was validated against the old walk, so a schedule edit drops
-    # them all rather than leave one out of order or resurrect it later. Moved
-    # onto a card it goes too: a card entry takes no forced date yet.
-    if _walk_fields(entry) != stored_walk or (
-            entry.account_id != stored_account_id and _is_card(account)):
+    # them all rather than leave one out of order or resurrect it later.
+    if _walk_fields(entry) != stored_walk:
         payment_dates.clear_all(db, budget_entry_id=entry.id)
 
     # Set explicitly so every successful edit moves the version the guard
@@ -959,7 +957,6 @@ def delete_budget_entry(
 
 
 NO_ACCOUNT_MESSAGE = "This entry has no account to post to"
-CARD_FORCED_DATE = "A card charge's date can't be changed"
 SKIPPED_HEADER_LIMIT = 60  # the most skipped dates ``X-Occurrences-Skipped`` lists
 
 
@@ -1116,18 +1113,32 @@ def set_occurrence_date(
     scheduled date itself clears it. The caller needs the write rule on the
     entry (404 otherwise, ``_lock_entry_to_post``).
 
-    422 on a card entry, on a ``day`` that is not an occurrence of the walk from
+    422 on a ``day`` that is not an occurrence of the walk from
     ``next_occurrence``, more than 31 days from ``day``, not strictly between the
     effective dates of the occurrences either side, or outside the record dates.
     409 when a row, posted or pending, is linked to the occurrence: its date is
     the transaction's. Returns ``{occurrence_date, effective_date}``.
+
+    On a card the date decides which statement bills the charge, by design: a
+    charge that posts late falls into the next one. A date inside a closed
+    statement is a 422 (``posting.STATEMENT_CLOSED``); an unrecorded occurrence on
+    a closed statement may leave it. The response adds ``statement_close`` and
+    ``statement_due``, null on a card with no cycle. The account is locked after
+    the entry (the ledger's order) because ``update_account`` changes its type
+    and cycle under that lock, so the check reads the settings that stand.
     """
     entry = _lock_entry_to_post(db, current_user, entry_id)
-    if _is_card(db.get(Account, entry.account_id)):
-        raise HTTPException(status_code=422, detail=CARD_FORCED_DATE)
-    posting.set_forced_date(db, entry, current_user, day, body.effective_date)
+    account = locking.lock_accounts(db, [entry.account_id]).get(entry.account_id)
+    card = account if _is_card(account) else None
+    posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card)
+    result = {"occurrence_date": day, "effective_date": body.effective_date}
+    if card is not None:
+        due = statement_due_date(card, body.effective_date,
+                                 due_overrides=load_due_overrides(db, [card.id])[card.id])
+        result["statement_close"] = statement_close(card, body.effective_date)
+        result["statement_due"] = due.date() if due is not None else None
     db.commit()
-    return {"occurrence_date": day, "effective_date": body.effective_date}
+    return result
 
 
 @router.delete("/{entry_id}/occurrences/{day}/date", status_code=204)
@@ -1444,7 +1455,7 @@ def _apply_review(db: Session, entry: BudgetEntry, caller: User, today: date, *,
 
     if (entry.installment_reviewed_at is not None and entry.auto_post_enabled
             and _links_stand(db, entry, links)
-            and not posting.schedule_walk(entry, today)):
+            and not posting.due_walk(db, entry, today)):
         return ReviewApplied(replayed=True, outcomes=[])
     _refuse_paused_or_ended(entry)
     block = auto_post_block(entry, db.get(Account, entry.account_id))
@@ -1459,7 +1470,7 @@ def _apply_review(db: Session, entry: BudgetEntry, caller: User, today: date, *,
     if require_clean and (state.missed or state.candidates):
         raise HTTPException(status_code=409, detail=NOT_CLEAN)
 
-    walk_days = {occ.date() for occ in posting.schedule_walk(entry, today)}
+    walk_days = {occ.date() for occ in posting.due_walk(db, entry, today)}
     pending = {txn_id for _, when, txn_id, is_posted in _linked_rows(
         db, [entry.id], occurrence_match=True)
         if not is_posted and _naive(when).date() in walk_days}

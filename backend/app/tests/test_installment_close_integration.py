@@ -301,7 +301,7 @@ def test_normalised_month_posts_on_close_and_bills_that_statement(world):
         return cycle["window_start"].date() < day <= close
 
     model = db.get(BudgetEntry, entry["id"])
-    (billed, ) = [occ for e, occ in fc._billed_card_occurrences(
+    (billed, ) = [occ for e, occ, _ in fc._billed_card_occurrences(
         db, [model], {card: account}, datetime(2026, 11, 4), datetime(2026, 12, 3))]
     assert billed.date() == date(2026, 12, 2)
     assert in_cycle(billed.date(), date(2026, 12, 2))
