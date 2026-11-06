@@ -2,8 +2,9 @@
 
 ``POST /jobs/post-due-installments`` posts every due month of the auto-post-on
 card installments and autopay cash entries (services/posting.py
-``post_due_installments``; the name predates the cash entries), as each entry's
-creator. A GitHub Actions schedule calls it every morning.
+``post_due_installments``; the name predates them), as each entry's creator, and
+then the due payments of the autopay loans (``post_due_loans``), as each loan's
+owner. A GitHub Actions schedule calls it every morning.
 
 The caller sends ``X-Job-Token``, compared in constant time with
 ``settings.JOB_TOKEN``. With no token configured the endpoint does not exist
@@ -40,9 +41,10 @@ def post_due_installments_job(
     x_job_token: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """Post the due months of auto-posted entries through ``through`` (default and
-    latest: Manila's today; a later day is a 422). ``dry_run`` rolls each
-    entry back after computing it. Returns ``{dry_run, posted, skipped}``."""
+    """Post the due months of auto-posted entries and the due payments of autopay
+    loans through ``through`` (default and latest: Manila's today; a later day is
+    a 422). ``dry_run`` rolls each entry and loan back after computing it. Returns
+    ``{dry_run, posted, skipped}``."""
     _require_job_token(x_job_token)
     today = manila_today()
     if through is None:
@@ -50,4 +52,5 @@ def post_due_installments_job(
     elif through > today:
         raise HTTPException(status_code=422, detail="through cannot be after today")
     result = posting.post_due_installments(db, through=through, dry_run=dry_run)
+    posting.post_due_loans(db, through=through, dry_run=dry_run, result=result)
     return {"dry_run": dry_run, "posted": result.posted, "skipped": dict(result.skipped)}

@@ -17,7 +17,8 @@
   ``installment_auto_post`` keys (STU-343 Plan B), and each card installment's
   ``installment_state``, which ``recurring_missed`` repeats on its rows.
 - ``autopay_due``: the snapshot's ``autopay_due`` key, the due autopay cash
-  entries, a payment held by its funds or a duplicate among them.
+  entries and loans, a held payment among them.
+- ``loan_row_fields``: ``settlement`` on the snapshot's full loan rows.
 - ``upcoming_occurrences``: ``GET /budget-entries/upcoming-occurrences``
   (STU-465), the occurrences after Manila's today that no row stands for yet,
   posted or pending, from the same entries as ``recurring_missed`` (card
@@ -39,19 +40,23 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.access import (
-    VIEW_ROLES, readable_criterion, record_account_ids, touches_accounts, viewable_account_ids,
+    MANAGE_ROLES, VIEW_ROLES, account_role, editable_account_ids, readable_criterion,
+    record_account_ids, touches_accounts, viewable_account_ids,
 )
 from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.tags import effective_tag_criterion
 from app.core.time import manila_today
-from app.models.account import AccountType
+from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType
 from app.services import forecast as fc
 from app.services import posting as posting_svc
 from app.services.installment_duplicates import held_occurrences
+from app.services.loans import loan_settlement
 from app.services.payment_dates import effective, load_entry_overrides
-from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
+from app.services.posting import (
+    OCCURRENCE_HORIZON, PostPlan, first_occurrence, loan_plan, post_plan,
+)
 from app.services.recurring_kinds import (
     BILLING_KINDS, auto_post_block, auto_posts, entry_kind, is_capped, is_card_installment,
     is_kind_eligible, plan_kind, settlement,
@@ -115,17 +120,18 @@ def installment_state(entry: BudgetEntry, plan: PostPlan) -> str:
 
 
 def blocker_state(blocker: Optional[str]) -> str:
-    """A ``post_plan`` blocker as a state: ``unreviewed``, ``off`` (reviewed,
-    auto-post off), ``blocked`` (reviewed and on, but ``blocked:<reason>`` or
-    ``creator_no_access``), ``held`` (a due month is held by a duplicate or, on a
-    cash entry, its funds) or ``on``. ``caller_no_access`` leaves the state ``on``:
-    it only empties the caller's ``postable``.
+    """A ``post_plan`` or ``loan_plan`` blocker as a state: ``unreviewed``, ``off``
+    (reviewed, auto-post off), ``blocked`` (reviewed and on, but
+    ``blocked:<reason>`` or ``creator_no_access``), ``held`` (a due month is held
+    by a duplicate or, on a cash entry or a loan, its funds; on a loan, a planned
+    payment or a final amount to enter) or ``on``. ``caller_no_access`` leaves the
+    state ``on``: it only empties the caller's ``postable``.
     """
     if blocker == "unreviewed":
         return "unreviewed"
     if blocker == "auto_post_off":
         return "off"
-    if blocker in ("held", "insufficient_funds"):
+    if blocker in ("held", "insufficient_funds", "planned_payment", "needs_amount"):
         return "held"
     if blocker is not None and (blocker.startswith("blocked:") or blocker == "creator_no_access"):
         return "blocked"
@@ -295,16 +301,50 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     return [e for e in entries if access.readable(e) and redactor.view(e) != LIMITED]
 
 
+def _autopay_due_loans(db: Session, user, redactor: Redactor) -> List[dict]:
+    """``autopay_due``'s rows for the autopay loans the caller manages (only an
+    owner or admin sees the flag), planned for the caller by ``loan_plan``.
+    ``account_name`` is the paying account a notice names."""
+    today = manila_today()
+    loans = db.query(Account).filter(
+        Account.account_type == AccountType.LOAN, Account.is_active.is_(True),
+        Account.auto_post_enabled.is_(True),
+        Account.id.in_(editable_account_ids(db, user))).order_by(Account.id).all()
+    out = []
+    for loan in loans:
+        if account_role(user, loan) not in MANAGE_ROLES:
+            continue
+        plan = loan_plan(db, loan, today, user)
+        if not plan.due:
+            continue
+        paying = loan.payment_account_id
+        redactor.access.load([paying])
+        out.append({
+            "source": "loan",
+            "source_id": loan.id,
+            "name": loan.name,
+            "account_name": (redactor.access.account(paying).name
+                             if paying is not None and redactor.can_view(paying) else None),
+            "due_count": len(plan.due),
+            "postable_count": len(plan.steps),
+            "oldest": plan.due[0][1].date().isoformat(),
+            "state": blocker_state(plan.blocker),
+            "block_reason": posting_svc.blocker_reason(plan.blocker),
+        })
+    return out
+
+
 def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
     """The snapshot's ``autopay_due`` key: one row per autopay cash entry the
     caller can edit, in a view not Limited, with an occurrence due through
-    Manila's today, planned for the caller by ``post_plan``, sorted by ``oldest``
-    then name. ``due_count`` and ``postable_count`` are the plan's, ``oldest``
-    the first due occurrence's effective date, ``state`` its ``installment_state``
-    and ``block_reason`` ``posting.blocker_reason`` (``insufficient_funds``,
-    ``possible_duplicate`` and the rest), ``account_name`` the account a notice
-    names. A held row stays until it posts. Card installments stay in
-    ``installment_auto_post``. Not filtered by tag, as that list is not.
+    Manila's today, planned for the caller by ``post_plan``, and per autopay loan
+    the caller manages with a due date open (``_autopay_due_loans``), sorted by
+    ``oldest`` then name. ``due_count`` and ``postable_count`` are the plan's,
+    ``oldest`` the first due occurrence's effective date, ``state`` its
+    ``installment_state`` and ``block_reason`` ``posting.blocker_reason``
+    (``insufficient_funds``, ``possible_duplicate`` and the rest), ``account_name``
+    the account a notice names. A held row stays until it posts. Card installments
+    stay in ``installment_auto_post``. Not filtered by tag, as that list is not.
     """
     access = redactor.access
     entries = _listed_entries(db, user, redactor, None,
@@ -314,12 +354,10 @@ def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
                if not is_card_installment(e, access.account(e.account_id))
                and auto_posts(e, access.account(e.account_id))
                and access.permissions(e)["can_edit"]]
-    if not entries:
-        return []
     today = manila_today()
-    held = held_occurrences(db, entries, today)
+    held = held_occurrences(db, entries, today) if entries else Counter()
     forced = load_entry_overrides(db, [e.id for e in entries])
-    out = []
+    out = _autopay_due_loans(db, user, redactor)
     for entry in entries:
         plan = post_plan(db, entry, user, today, held, access)
         if not plan.due:
@@ -338,6 +376,22 @@ def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
         })
     out.sort(key=lambda row: (row["oldest"], row["name"], row["source_id"]))
     return out
+
+
+def loan_row_fields(db: Session, rows: List[dict], redactor: Redactor) -> None:
+    """Add ``settlement`` to each full loan row, in place: the loan's for an owner
+    or admin, null for anyone else (the flag is theirs to see). Limited rows and
+    other sources are left as they are."""
+    rows = [r for r in rows if r.get("view") != LIMITED and r.get("source") == "loan"
+            and r.get("source_id") is not None]
+    if not rows:
+        return
+    loans = {a.id: a for a in db.query(Account).filter(
+        Account.id.in_({r["source_id"] for r in rows})).all()}
+    for row in rows:
+        loan = loans.get(row["source_id"])
+        row["settlement"] = (loan_settlement(loan)
+                             if account_role(redactor.user, loan) in MANAGE_ROLES else None)
 
 
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],

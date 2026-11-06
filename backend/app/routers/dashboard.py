@@ -63,10 +63,11 @@ def get_snapshot(
       months due (``installment_auto_post``, with the caller's ``postable_count``
       and ``due_today_count``), and whether the morning job is configured
       (``auto_post_scheduled``)
-    - Autopay cash entries with a payment due (``autopay_due``, services/missed.py),
-      a payment held by its funds or a duplicate among them with its ``block_reason``
+    - Autopay cash entries and loans with a payment due (``autopay_due``,
+      services/missed.py), a held payment among them with its ``block_reason``
     - Full budget-entry rows in ``upcoming_this_month``
-      and ``payables`` carry ``kind`` and ``can_mark_paid``
+      and ``payables`` carry ``kind`` and ``can_mark_paid``, and full loan rows
+      ``settlement``
 
     With ``?tag=`` the upcoming items, monthly summary, forecast, closings and
     payables keep only tagged records (see routers/forecast.py), and so does
@@ -242,6 +243,8 @@ def get_snapshot(
     # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
     missed_svc.entry_row_fields(db, upcoming, redactor)
     missed_svc.entry_row_fields(db, payables, redactor)
+    missed_svc.loan_row_fields(db, upcoming, redactor)
+    missed_svc.loan_row_fields(db, payables, redactor)
 
     return {
         "balances": {

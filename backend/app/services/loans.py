@@ -136,6 +136,11 @@ def default_amortization(loan_kind: Optional[str]) -> str:
     return REDUCE_TERM if loan_kind == "home" else FIXED
 
 
+def loan_settlement(loan) -> str:
+    """The wire value of ``auto_post_enabled``: an owner's or admin's to see."""
+    return "autopay" if loan.auto_post_enabled else "manual"
+
+
 def amortization_of(loan) -> str:
     return loan.loan_amortization or default_amortization(loan.loan_kind)
 
@@ -504,6 +509,7 @@ def build_schedule(db: Session, loan: Account) -> dict:
         "next_due_date": next_due,
         "next_due_effective_date": effective(moved, next_due) if next_due else None,
         "proposed_split": proposed,
+        "settlement": loan_settlement(loan),
         "payments": [{
             "transaction_id": t.id,
             "date": t.transaction_date,

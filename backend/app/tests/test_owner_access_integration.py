@@ -180,6 +180,8 @@ def _id_routes(w):
         ("post", f"/cards/{w['card']}/payments",
          {"json": {"amount": 100, "from_account_id": sb, "payment_date": "2026-10-05"}}),
         ("get", f"/accounts/{w['loan']}/loan-schedule", {}),
+        ("get", f"/accounts/{w['loan']}/auto-post-preview", {}),
+        ("post", f"/accounts/{w['loan']}/auto-post", {"json": {"enabled": False}}),
         ("post", f"/accounts/{w['loan']}/loan-payment",
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),
         ("post", f"/accounts/{w['loan']}/loan-prepayment",

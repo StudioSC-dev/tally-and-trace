@@ -29,12 +29,12 @@ from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
-from app.schemas.budget_entry import ForcedDateSet
+from app.schemas.budget_entry import AutoPostPreview, AutoPostToggle, ForcedDateSet
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.minimum_due import MinimumDuePresetOut, MinimumDueRule
 from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
-from app.services import payment_dates
+from app.services import payment_dates, posting
 from app.services.minimum_due import PRESETS as MINIMUM_DUE_PRESETS
 from app.services.fx import FxRates, get_fx
 from app.services.statements import (
@@ -871,10 +871,12 @@ def get_card_statements(
 
 # --- Loans -------------------------------------------------------------------
 
-def _loan_or_404(db: Session, current_user: User, account_id: int, *, edit: bool = False) -> Account:
-    """The loan, 404ing unless the caller holds a role on it (an edit role with ``edit``)."""
-    account = get_account_or_404(
-        db, current_user, account_id, roles=EDIT_ROLES if edit else DIRECT_ROLES)
+def _loan_or_404(db: Session, current_user: User, account_id: int, *, edit: bool = False,
+                 manage: bool = False) -> Account:
+    """The loan, 404ing unless the caller holds a role on it (an edit role with
+    ``edit``, an owner's or admin's with ``manage``)."""
+    roles = MANAGE_ROLES if manage else EDIT_ROLES if edit else DIRECT_ROLES
+    account = get_account_or_404(db, current_user, account_id, roles=roles)
     if account.account_type != AccountType.LOAN:
         raise HTTPException(status_code=400, detail="Account is not a loan")
     return account
@@ -1090,9 +1092,71 @@ def clear_loan_due_date(
     return Response(status_code=204)
 
 
-# Schedule fields built from the loan's terms: shown to its owner and admins only.
+LOAN_BLOCK_MESSAGES = {
+    "inactive": "This loan is closed",
+    "no_funding_account": "Set a payment account on this loan to settle it by autopay",
+    "no_access": "You can't pay this loan from its payment account",
+    "no_schedule": "Set this loan's first payment date and payment amount to settle it by autopay",
+    "no_rate": "Set this loan's interest rate to settle it by autopay",
+    "foreign_currency": "This loan's payment account is in another currency, "
+                        "so it can't settle by autopay",
+    "recurring_entry": "A recurring transfer already pays this loan; end it first, "
+                       "or autopay would pay it twice",
+}
+
+
+@router.get("/{account_id}/auto-post-preview", response_model=AutoPostPreview)
+def get_loan_auto_post_preview(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """What turning autopay on would do: its ``block``, or the ``due_count`` to
+    confirm and the ``oldest`` due date (``posting.loan_autopay_preview``). The
+    flag is an owner's or admin's; anyone else gets 404."""
+    loan = _loan_or_404(db, current_user, account_id, manage=True)
+    return posting.loan_autopay_preview(db, loan, current_user)
+
+
+@router.post("/{account_id}/auto-post", response_model=AccountResponse)
+def set_loan_auto_post(
+    account_id: int,
+    payload: AutoPostToggle,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Turn a loan's autopay on or off. Off never posts or changes history.
+
+    On: a ``posting.loan_block`` is a 400 with its reason, ``expected_due`` must
+    match the due count (``GET .../auto-post-preview``), else a 409, and the same
+    commit then sets the flag and posts each due date on its own day, as the job
+    would (``posting.turn_on_loan_autopay``); a funds or planned-payment stop
+    leaves the flag on and the rest flagged. An owner or admin, under the owner
+    and account locks; anyone else gets 404. The role is checked again on what the
+    locks read.
+    """
+    loan = _loan_or_404(db, current_user, account_id, manage=True)
+    if posting.lock_loan(db, account_id, loan.user_id) is None:
+        raise HTTPException(status_code=409, detail=posting.LOAN_CHANGED)
+    loan = _loan_or_404(db, current_user, account_id, manage=True)
+    if payload.enabled:
+        block = posting.loan_block(db, loan, current_user)
+        if block is not None:
+            raise HTTPException(status_code=400, detail=LOAN_BLOCK_MESSAGES[block])
+        posting.turn_on_loan_autopay(db, loan, current_user, payload.expected_due)
+    else:
+        loan.auto_post_enabled = False
+        loan.updated_at = utc_now()
+    db.commit()
+    db.refresh(loan)
+    return serialize_account(db, current_user, loan)
+
+
+# Schedule fields built from the loan's terms, and its settlement flag: shown to
+# its owner and admins only.
 LOAN_TERM_SCHEDULE_FIELDS = ("annual_rate", "payment_amount", "term_months",
-                             "first_payment_date", "amortization", "proposed_split")
+                             "first_payment_date", "amortization", "proposed_split",
+                             "settlement")
 
 
 @router.get("/{account_id}/loan-schedule")
@@ -1106,7 +1170,7 @@ def get_loan_schedule(
     An owner, admin or editor gets the full schedule (``view`` "full"). Loan
     terms are an owner's or admin's (plan §2), so for an editor they are null:
     ``annual_rate``, ``payment_amount``, ``term_months``, ``first_payment_date``,
-    ``amortization``, ``proposed_split``, and each upcoming row's
+    ``amortization``, ``proposed_split``, ``settlement``, and each upcoming row's
     ``principal``, ``interest`` and ``balance_after`` (derived from the rate).
     The editor keeps the payment rows (with ``transaction_id``) and each
     upcoming due date and amount. A viewer gets the limited schedule: ``{name, currency, owed, next_due_date,

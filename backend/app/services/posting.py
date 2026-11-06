@@ -18,6 +18,10 @@ Transactions page, a posted one is already recorded.
 A forced date (``services/payment_dates.py``) moves when an occurrence is due
 and how a new row is dated, and nothing else: ``occurrence_date``, the links, the
 schedule's walk and its advance all stay on the nominal date.
+
+A loan has no occurrence links. ``post_due_loans`` recomputes its open due dates
+under the account locks after each post, so a hand payment settles a due date
+(``loans.settle_posted``, by cash) and the run finds nothing open.
 """
 from calendar import monthrange
 from collections import Counter, defaultdict
@@ -25,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -32,11 +37,11 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core import locking
-from app.core.access import RecordAccess
+from app.core.access import MANAGE_ROLES, RecordAccess, account_role
 from app.core.record_dates import refuse_record_date
 from app.core.tags import copy_explicit_tags
 from app.core.time import manila_today, utc_now
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.payment_date_override import PaymentDateOverride
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
@@ -49,8 +54,8 @@ from app.services.forecast import (
     occurrence_links,
 )
 from app.services.payment_dates import (
-    CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_override, effective, effective_at, in_order,
-    load_entry_overrides, refuse_forced_date, set_override,
+    CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_override, effective, effective_at, extend,
+    in_order, load_entry_overrides, load_loan_overrides, refuse_forced_date, set_override,
 )
 from app.services.recurring_kinds import (
     auto_posts, entry_kind, is_capped, is_card_installment, settlement_block,
@@ -808,11 +813,13 @@ class AutoPostResult:
     posted: int = 0
     skipped: Counter = field(default_factory=Counter)
     entries: List[dict] = field(default_factory=list)
+    loans: List[dict] = field(default_factory=list)
 
 
-# A ``post_plan`` blocker as a skip reason; None is not a skip.
+# A ``post_plan`` or ``loan_plan`` blocker as a skip reason; None is not a skip.
 BLOCKER_REASONS = {"held": "possible_duplicate", "creator_no_access": "no_access",
-                   "caller_no_access": "no_access", "insufficient_funds": "insufficient_funds"}
+                   "caller_no_access": "no_access", "insufficient_funds": "insufficient_funds",
+                   "planned_payment": "planned_payment", "needs_amount": "needs_amount"}
 
 
 def blocker_reason(blocker: Optional[str]) -> Optional[str]:
@@ -924,6 +931,252 @@ def post_due_installments(db: Session, *, through: date, actor_scope: Optional[U
         if reason is not None:
             result.skipped[reason] += 1
         result.entries.append({"entry_id": entry_id, "posted": posted, "skipped_reason": reason})
+    return result
+
+
+# --- Auto-post: loans -------------------------------------------------------------------------
+
+LOAN_CHANGED = "This loan's paying account changed; try again"
+
+
+def lock_loan(db: Session, loan_id: int, owner_id: int) -> Optional[Account]:
+    """The loan, with the owner's budget lock and then the loan and its paying
+    account locked, or None once it is gone or was re-routed while waiting: its
+    new paying account could sort before a lock already held, so the caller
+    gives up rather than break the order. ``record_loan_payment`` locks the same
+    accounts and ``add_transaction`` takes owner then accounts, so a hand payment
+    and a run queue on the same rows."""
+    db.expire_all()
+    locking.lock_owner_budgets(db, owner_id)
+    loan = db.get(Account, loan_id)
+    if loan is None:
+        return None
+    paying = loan.payment_account_id
+    locking.lock_accounts(db, [loan_id, paying])
+    return loan if loan.payment_account_id == paying else None
+
+
+def _paying_account(db: Session, user: Optional[User], loan: Account
+                    ) -> Tuple[Optional[Account], Optional[str]]:
+    """``(paying account, None)``, or ``(None, reason)`` when ``user`` cannot pay
+    the loan from it: ``no_funding_account`` (none set, closed, or not a funding
+    account) or ``no_access``. ``routers/accounts.py`` ``_loan_funding`` is the
+    rule the Record payment route applies; it refuses a credit card, so a loan is
+    never autopaid from one."""
+    from app.routers.accounts import _loan_funding
+
+    if user is None:
+        return None, "no_access"
+    try:
+        funding = _loan_funding(db, user, loan, None)
+    except HTTPException as exc:
+        return None, "no_access" if exc.status_code == 404 else "no_funding_account"
+    return (funding, None) if funding.is_active else (None, "no_funding_account")
+
+
+def loan_block(db: Session, loan: Account, caller: Optional[User] = None) -> Optional[str]:
+    """Why a loan cannot settle by autopay, or None when it can, read for its
+    creator and ``caller`` when given: ``inactive``, ``no_funding_account``,
+    ``no_access``, ``no_schedule`` (no first date or payment amount), ``no_rate``
+    (the split would invent all-principal), ``foreign_currency``, or
+    ``recurring_entry`` (an active recurring transfer into the loan, which would
+    pay it twice)."""
+    if not loan.is_active:
+        return "inactive"
+    funding, reason = _paying_account(db, db.get(User, loan.user_id), loan)
+    if reason is None and caller is not None:
+        reason = _paying_account(db, caller, loan)[1]
+    if reason is not None:
+        return reason
+    if loan.loan_first_payment_date is None or loan.loan_payment_amount is None:
+        return "no_schedule"
+    if loan.loan_annual_rate is None:
+        return "no_rate"
+    if funding.currency != loan.currency:
+        return "foreign_currency"
+    recurring = db.query(BudgetEntry.id).filter(
+        BudgetEntry.transfer_to_account_id == loan.id, BudgetEntry.is_active.is_(True)).first()
+    return "recurring_entry" if recurring is not None else None
+
+
+def _due_loan_dates(db: Session, loan: Account, through: date
+                    ) -> List[Tuple[date, datetime, Decimal]]:
+    """``(nominal due date, effective date at midnight, still owed)`` of the open
+    due dates whose effective date is on or before ``through``, oldest first. A
+    part-paid one owes the rest. Forced dates keep the schedule's order, so this
+    is a prefix of the open due dates."""
+    moved = load_loan_overrides(db, [loan.id]).get(loan.id)
+    end = _day_after(through)
+    rows = []
+    for _, due, owed in loan_svc.due_dates(db, loan, extend(end) if moved else end):
+        day = effective(moved, due)
+        if day <= through:
+            rows.append((due, datetime(day.year, day.month, day.day), owed))
+    return rows
+
+
+@dataclass
+class LoanStep:
+    """A payment a run would record: the due date's nominal ``due``, the
+    effective date it is dated ``when``, and its split."""
+    due: date
+    when: datetime
+    principal: Decimal
+    interest: Decimal
+
+
+@dataclass
+class LoanPlan:
+    """What a run would post for one loan, written nowhere.
+
+    ``due`` is ``_due_loan_dates``' rows and ``steps`` those it would post, oldest
+    first, each split on the balance the ones before leave. ``blocker`` says why
+    ``steps`` stops short: ``blocked:<reason>`` (``loan_block``), ``caller_no_access``,
+    ``planned_payment``, ``insufficient_funds`` or ``needs_amount``.
+    """
+    due: List[Tuple[date, datetime, Decimal]]
+    steps: List[LoanStep]
+    blocker: Optional[str]
+
+
+def loan_plan(db: Session, loan: Account, through: date, caller: Optional[User] = None) -> LoanPlan:
+    """The payments a run through ``through`` would record for ``loan``.
+
+    A due date a pending payment covers any part of stops the walk
+    (``planned_payment``: the planned row is the owner's). So does one the paying
+    account's posted balance does not cover (``insufficient_funds``), cumulatively
+    and with no partial payment, and one ``split_payment`` refuses (``needs_amount``:
+    the final, smaller payment on a fixed loan, which the owner records by hand).
+    A recorder holds the account locks, so nothing here moves under it.
+    """
+    due = _due_loan_dates(db, loan, through)
+    block = loan_block(db, loan)
+    if block is not None:
+        return LoanPlan(due, [], f"blocked:{block}")
+    if caller is not None and _paying_account(db, caller, loan)[1] is not None:
+        return LoanPlan(due, [], "caller_no_access")
+    uncovered = loan_svc.cover_planned([(day, owed) for day, _, owed in due],
+                                       loan_svc.planned_covers(db, loan))
+    funds = Decimal(str(db.get(Account, loan.payment_account_id).balance))
+    # What ``split_payment`` reads, carried forward as each step would leave it.
+    after = SimpleNamespace(balance=Decimal(str(loan.balance)),
+                            loan_payment_amount=loan.loan_payment_amount,
+                            loan_annual_rate=loan.loan_annual_rate)
+    steps: List[LoanStep] = []
+    for (day, when, owed), left in zip(due, uncovered):
+        if left < owed:
+            return LoanPlan(due, steps, "planned_payment")
+        if funds < owed:
+            return LoanPlan(due, steps, "insufficient_funds")
+        try:
+            principal, interest = loan_svc.split_payment(after, owed)
+        except loan_svc.LoanError:
+            return LoanPlan(due, steps, "needs_amount")
+        funds -= owed
+        after.balance += principal
+        steps.append(LoanStep(day, when, principal, interest))
+    return LoanPlan(due, steps, None)
+
+
+def _post_loan_due(db: Session, loan: Account, through: date, caller: Optional[User]
+                   ) -> Tuple[int, Optional[str]]:
+    """Post ``loan``'s due payments oldest first, without committing, and return
+    ``(posted, blocker)``. The caller holds ``lock_loan``'s locks. The plan is
+    recomputed after each post, so the split and a ``reduce_term`` preview see the
+    new balance and a settled due date is gone. Each row is a posted scheduled
+    transfer, the creator's, dated on the effective date. A date outside the
+    record dates is left to the caller as a 422."""
+    posted = 0
+    while True:
+        plan = loan_plan(db, loan, through, caller)
+        if not plan.steps:
+            return posted, plan.blocker if plan.due else None
+        step = plan.steps[0]
+        refuse_record_date(step.when)
+        loan_svc.record_payment(
+            db, user_id=loan.user_id, loan=loan, funding=db.get(Account, loan.payment_account_id),
+            principal=step.principal, interest=step.interest, kind=loan_svc.SCHEDULED,
+            when=step.when, is_posted=True, description=None)
+        # The next plan reads the row by query; the session does not autoflush.
+        db.flush()
+        posted += 1
+
+
+def loan_autopay_preview(db: Session, loan: Account, caller: User) -> dict:
+    """``GET /accounts/{id}/auto-post-preview``: ``block`` (``loan_block``), and the
+    due dates through Manila's today still owed: ``due_count`` and ``oldest``, the
+    first one's effective date."""
+    due = _due_loan_dates(db, loan, manila_today())
+    return {"block": loan_block(db, loan, caller), "due_count": len(due),
+            "oldest": due[0][1].date() if due else None}
+
+
+def turn_on_loan_autopay(db: Session, loan: Account, caller: User,
+                         expected_due: Optional[int]) -> None:
+    """Turn autopay on for a loan and post what is due, without committing.
+
+    ``turn_on_autopay``'s rules: the caller holds ``lock_loan``'s locks and has
+    checked ``loan_block``, ``expected_due`` must be the due count the owner
+    confirmed, a due date outside the record dates is a 422 before any write, and
+    a funds or planned-payment stop leaves the flag on and the rest flagged.
+    """
+    today = manila_today()
+    due = _due_loan_dates(db, loan, today)
+    if (expected_due or 0) != len(due):
+        raise HTTPException(status_code=409, detail=AUTOPAY_COUNT_CHANGED)
+    for _, when, _ in due:
+        refuse_record_date(when)
+    loan.auto_post_enabled = True
+    loan.updated_at = utc_now()
+    _post_loan_due(db, loan, today, caller)
+
+
+def _auto_post_loans(db: Session, actor_scope: Optional[User]) -> List[Tuple[int, int]]:
+    """``[(loan id, owner id)]`` in id order: active, flagged loans; for a caller,
+    only those the caller manages, since only an owner or admin may see the flag."""
+    from app.core.access import editable_account_ids
+
+    query = db.query(Account).filter(Account.account_type == AccountType.LOAN,
+                                     Account.is_active.is_(True),
+                                     Account.auto_post_enabled.is_(True))
+    if actor_scope is not None:
+        query = query.filter(Account.id.in_(editable_account_ids(db, actor_scope)))
+    return [(loan.id, loan.user_id) for loan in query.order_by(Account.id).all()
+            if actor_scope is None or account_role(actor_scope, loan) in MANAGE_ROLES]
+
+
+def post_due_loans(db: Session, *, through: date, actor_scope: Optional[User] = None,
+                   dry_run: bool = False,
+                   result: Optional[AutoPostResult] = None) -> AutoPostResult:
+    """Post the due payments of the flagged loans in scope, adding to ``result``.
+
+    A second half of ``post_due_installments``, run after it, with the same
+    ``actor_scope`` and ``dry_run``. Each loan runs in its own transaction: the
+    locks (``lock_loan``), a recheck on the locked row (still on and active; a
+    caller still manages it), then ``_post_loan_due``. A loan is listed in
+    ``result.loans`` only when it posted or stopped with a due date open.
+    """
+    result = result if result is not None else AutoPostResult()
+    for loan_id, owner_id in _auto_post_loans(db, actor_scope):
+        loan = lock_loan(db, loan_id, owner_id)
+        posted, reason = 0, None
+        if (loan is not None and loan.is_active and loan.auto_post_enabled
+                and (actor_scope is None or account_role(actor_scope, loan) in MANAGE_ROLES)):
+            try:
+                posted, blocker = _post_loan_due(db, loan, through, actor_scope)
+                reason = blocker_reason(blocker)
+            except HTTPException as exc:
+                db.rollback()
+                posted, reason = 0, _failure_reason(exc)
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        result.posted += posted
+        if reason is not None:
+            result.skipped[reason] += 1
+        if posted or reason is not None:
+            result.loans.append({"loan_id": loan_id, "posted": posted, "skipped_reason": reason})
     return result
 
 
