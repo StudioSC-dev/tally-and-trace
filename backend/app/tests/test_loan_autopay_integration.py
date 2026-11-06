@@ -990,6 +990,113 @@ def test_an_edit_on_an_unflagged_loan_leaves_it_off(world):
     assert _edit(w, loan, loan_first_payment_date="2026-08-25")["auto_post_enabled"] is False
 
 
+# A payment taken back stops autopay ----------------------------------------------------------
+
+def _paid_by_the_job(w, monkeypatch) -> tuple:
+    """A loan whose 2026-10-25 payment the job posted, and that row's id."""
+    db = w["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    on_day(monkeypatch, "2026-10-25")
+    assert _job(w["client"])["posted"] == 1
+    db.rollback()
+    return loan, db.execute(text("SELECT id FROM transactions WHERE transfer_to_account_id = :l"),
+                            {"l": loan}).scalar()
+
+
+def _edit_row(w, txn, **fields):
+    return w["client"].put(f"{API}/transactions/{txn}", json=fields, headers=w["o"]["headers"])
+
+
+def _delete_row(w, txn) -> None:
+    r = w["client"].delete(f"{API}/transactions/{txn}", headers=w["o"]["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_a_deleted_payment_is_not_posted_again_and_the_loan_reads_manual(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    _delete_row(w, txn)
+    assert _is_on(db, loan) is False
+    assert _schedule(w, loan)["settlement"] == "manual"
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert _rows(db, loan) == []
+    assert _balance(db, w["checking"]) == 50_000
+
+
+def test_turning_it_back_on_shows_the_count_and_posts_once(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    _delete_row(w, txn)
+    assert _preview(w, loan).json() == {"block": None, "due_count": 1, "oldest": "2026-10-25"}
+    assert _toggle(w, loan).status_code == 409
+    _turn_on(w, loan, expected_due=1)
+    assert _rows(db, loan) == [("2026-10-25", 9_000, 1_000, True)]
+    assert _job(w["client"])["posted"] == 0
+    assert len(_rows(db, loan)) == 1
+
+
+def test_an_unposted_payment_is_not_posted_again_and_the_loan_reads_manual(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    assert _edit_row(w, txn, is_posted=False).status_code == 200
+    assert _is_on(db, loan) is False
+    assert _schedule(w, loan)["settlement"] == "manual"
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert [row[3] for row in _rows(db, loan)] == [False]
+    assert _balance(db, w["checking"]) == 50_000
+
+
+def test_a_reduced_payment_stops_autopay(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    assert _edit_row(w, txn, amount=8_000).status_code == 200
+    assert _is_on(db, loan) is False
+    assert _job(w["client"])["posted"] == 0
+    assert len(_rows(db, loan)) == 1
+
+
+@pytest.mark.parametrize("edit", [
+    {"transaction_date": "2026-10-26T00:00:00"},
+    {"description": "BPI debit"},
+    {"amount": 9_500, "transfer_fee": 500},  # the bank's split: the same cash
+    {"amount": 9_500, "transfer_fee": 1_000},  # more cash pays more, reopens nothing
+])
+def test_an_edit_that_reopens_nothing_keeps_the_flag(world, monkeypatch, edit):
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    r = _edit_row(w, txn, **edit)
+    assert r.status_code == 200, r.text
+    assert _is_on(db, loan) is True
+    assert _job(w["client"])["posted"] == 0
+
+
+def test_a_payment_cannot_be_retargeted_so_the_flag_stands(world, monkeypatch):
+    w, db = world, world["db"]
+    other = _loan(w, name="Other")
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    assert _edit_row(w, txn, transfer_to_account_id=other).status_code == 400
+    assert _is_on(db, loan) is True
+
+
+def test_deleting_a_hand_payment_stops_autopay_too(world, monkeypatch):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    txn = _pay(w, loan, "2026-10-17")["id"]
+    _delete_row(w, txn)
+    assert _is_on(db, loan) is False
+
+
+def test_deleting_a_planned_payment_keeps_the_flag(world):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    txn = _pay(w, loan, "2026-10-24", is_posted=False, amount="4000")["id"]
+    _delete_row(w, txn)
+    assert _is_on(db, loan) is True
+
+
 # Post now and the page-open run ------------------------------------------------------------
 
 def test_post_now_posts_a_due_loan_and_reports_it(world, monkeypatch):

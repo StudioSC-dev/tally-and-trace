@@ -1312,6 +1312,7 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
     old_transaction_date = db_transaction.transaction_date
+    old_scheduled_cash = loan_svc.scheduled_cash(db_transaction)
     
     # Reverse previous balance effects if posted
     if old_is_posted:
@@ -1432,6 +1433,8 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
             new_out, new_in = transfer_sides(db_transaction)
             primary_account.balance = _D(primary_account.balance) - new_out
             destination_account.balance = _D(destination_account.balance) + new_in
+    if loan_svc.scheduled_cash(db_transaction) < old_scheduled_cash:
+        loan_svc.stop_autopay(db, old_transfer_to)
 
     # The budgets the row counted toward, at its old date, and those it counts
     # toward now, at its new one (both, old then new, for a budget in each).
@@ -1487,6 +1490,8 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - received
+    if loan_svc.scheduled_cash(db_transaction) > 0:
+        loan_svc.stop_autopay(db, db_transaction.transfer_to_account_id)
 
     # The budgets the row counted toward, found before it goes and recomputed at
     # its date once the delete is flushed (STU-222).

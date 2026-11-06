@@ -659,6 +659,24 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date
     return [r for r in rows if datetime(r[1].year, r[1].month, r[1].day) < end]
 
 
+def scheduled_cash(txn: Transaction) -> Decimal:
+    """The cash a row gives ``settle_posted``: a posted scheduled payment's
+    principal + interest, zero on any other row."""
+    if not txn.is_posted or txn.loan_payment_kind != SCHEDULED:
+        return _ZERO
+    return _money(txn.amount) + _money(txn.transfer_fee or 0)
+
+
+def stop_autopay(db: Session, loan_id: Optional[int]) -> None:
+    """Clear the loan's autopay, without committing: its settled cash fell, so a
+    due date reopened and it must post only with a confirmed count. A failed
+    bank debit is when an owner deletes a payment. The caller holds the account
+    lock, which a run reads the flag under."""
+    loan = db.get(Account, loan_id) if loan_id else None
+    if loan is not None and loan.auto_post_enabled:
+        loan.auto_post_enabled = False
+
+
 def planned_covers(db: Session, loan: Account, fx=None) -> List[Tuple[date, Decimal]]:
     """``(date, cash)`` of every unposted non-prepayment transfer into the loan.
 
