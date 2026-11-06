@@ -919,8 +919,11 @@ def test_lowering_the_offset_posts_nothing_and_reads_manual(world):
     {"loan_amortization": "reduce_term"}, {"balance": -120_000},
     {"payment_account_id": None}, {"loan_annual_rate": None},
     {"loan_first_payment_date": None}, {"loan_payment_amount": None},
+    {"loan_payment_amount": 8_000}, {"loan_term_months": 6}, {"loan_annual_rate": 10},
+    {"loan_first_payment_date": "2026-10-28"}, {"loan_payments_made_offset": 1},
+    {"loan_term_months": None},
 ])
-def test_any_other_edit_that_can_open_past_dates_clears_the_flag(world, edit):
+def test_any_change_to_a_schedule_term_clears_the_flag(world, edit):
     w = world
     loan = _loan(w)
     _turn_on(w, loan)
@@ -946,32 +949,45 @@ def test_a_rate_rise_on_a_reduce_term_loan_posts_nothing_unconfirmed(world, monk
     assert _schedule(w, loan)["settlement"] == "manual"
 
 
-def test_a_rate_cut_on_a_reduce_term_loan_keeps_the_flag(world, monkeypatch):
+def test_a_rate_cut_on_a_reduce_term_loan_clears_the_flag(world):
     w = world
     loan = _loan(w, loan_amortization="reduce_term")
     _turn_on(w, loan)
-    assert _edit(w, loan, loan_annual_rate=10)["auto_post_enabled"] is True
+    assert _edit(w, loan, loan_annual_rate=10)["auto_post_enabled"] is False
+
+
+def test_a_lower_amount_on_a_reduce_term_loan_posts_nothing_unconfirmed(world, monkeypatch):
+    """A held loan with one payment left. A smaller payment runs the schedule longer,
+    and the extra one is a due date already past."""
+    w, db = world, world["db"]
+    poor = _bank(w, "Poor", 1_000)
+    loan = _loan(w, loan_amortization="reduce_term", balance=-9_800,
+                 loan_first_payment_date="2026-09-25", payment_account_id=poor)
+    _flag(db, loan)
     on_day(monkeypatch, "2026-10-25")
-    assert _job(w["client"])["posted"] == 1
+    assert _preview(w, loan).json()["due_count"] == 1
+
+    assert _edit(w, loan, loan_payment_amount=5_000)["auto_post_enabled"] is False
+    assert _preview(w, loan).json()["due_count"] == 2
+    _deposit(w, poor, 100_000)
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert _rows(db, loan) == []
+    assert _schedule(w, loan)["settlement"] == "manual"
 
 
-def test_lifting_a_block_by_an_edit_does_not_post_what_fell_due_behind_it(world, monkeypatch):
+def test_a_home_loan_kind_clears_the_flag_where_it_sets_the_mode(world):
     w, db = world, world["db"]
     loan = _loan(w)
     _turn_on(w, loan)
-    _edit(w, loan, payment_account_id=None)
-    on_day(monkeypatch, "2026-11-25")
-    _edit(w, loan, payment_account_id=w["checking"])
-    assert _job(w["client"])["posted"] == 0
-    assert _is_on(db, loan) is False
+    _sql(db, "UPDATE accounts SET loan_amortization = NULL WHERE id = :a", a=loan)
+    assert _edit(w, loan, loan_kind="home")["auto_post_enabled"] is False
 
 
-def test_reopening_a_closed_loan_clears_the_flag(world):
-    w, db = world, world["db"]
+def test_a_new_kind_keeps_the_flag_where_the_mode_is_stored(world):
+    w = world
     loan = _loan(w)
     _turn_on(w, loan)
-    _sql(db, "UPDATE accounts SET is_active = FALSE WHERE id = :a", a=loan)
-    assert _edit(w, loan, is_active=True)["auto_post_enabled"] is False
+    assert _edit(w, loan, loan_kind="home")["auto_post_enabled"] is True
 
 
 @pytest.mark.parametrize("edit", [
@@ -979,9 +995,7 @@ def test_reopening_a_closed_loan_clears_the_flag(world):
     {"loan_first_payment_date": "2026-10-25", "loan_payment_amount": 10_000,
      "loan_term_months": 12, "loan_payments_made_offset": 0, "loan_amortization": "fixed",
      "loan_annual_rate": 12, "balance": -100_000},
-    {"loan_payment_amount": 8_000}, {"loan_term_months": 6}, {"loan_annual_rate": 10},
-    {"balance": -90_000}, {"loan_first_payment_date": "2026-10-28"},
-    {"loan_payments_made_offset": 1},
+    {"balance": -90_000},
 ])
 def test_an_edit_that_opens_nothing_keeps_the_flag(world, edit):
     w = world
