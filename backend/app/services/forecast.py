@@ -2958,9 +2958,10 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
     the public shape (``limited_event``), split per currency it moves cash in,
     and its public ids are assigned after the split.
 
-    With ``today`` a full budget-entry item also carries the occurrence it
-    stands for and whether it is overdue (``_occurrence_fields``, as payables
-    do): an overdue capped occurrence is listed on the window start.
+    With ``today`` every full item also carries whether it is overdue and, when
+    listed overdue, its real day (``_due_fields``, as payables do); a
+    budget-entry item also the occurrence it stands for. An overdue item is
+    listed on the window start.
     """
     collector = collector or FxCollector()
     items = []
@@ -2979,8 +2980,7 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
                 **({"household_occurrence": True} if e.get("household_occurrence") else {}),
                 "currency": row["currency"],
                 **collector.row(_row_key(e, row["currency"]), row),
-                **(_occurrence_fields(e, today)
-                   if today is not None and e["source"] == "budget_entry" else {}),
+                **(_due_fields(e, today) if today is not None else {}),
             })
     limited = sorted((r for e in events if e.get("view") == LIMITED for r in _limited_rows(e)),
                      key=_event_sort_key)
@@ -2990,10 +2990,18 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
     return items
 
 
-def _occurrence_fields(e: dict, today: date) -> dict:
-    """``occurrence_date`` (``YYYY-MM-DD``) and ``overdue`` of a budget-entry event."""
-    occurrence = _naive(e.get("original_date") or e["date"]).date()
-    return {"occurrence_date": occurrence.isoformat(), "overdue": occurrence < today}
+def _due_fields(e: dict, today: date) -> dict:
+    """``overdue`` of a full event: its real day (``original_date`` when it was
+    listed overdue, else its own) is before ``today``. ``original_date``
+    (``YYYY-MM-DD``) is set when the event has one, ``occurrence_date`` for a
+    budget entry only."""
+    original = e.get("original_date")
+    real = _naive(original or e["date"]).date()
+    return {
+        "overdue": real < today,
+        **({"original_date": real.isoformat()} if original else {}),
+        **({"occurrence_date": real.isoformat()} if e["source"] == "budget_entry" else {}),
+    }
 
 
 def _statement_fields(e: dict) -> dict:
@@ -3014,10 +3022,10 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     cash, so it is not a payable. ``ids`` numbers its limited payables
     (``PublicIds``, shared across a response's lists; a new one by default).
 
-    A full budget-entry payable also carries the occurrence it stands for
-    (``occurrence_date``: its ``original_date`` when listed overdue on the
-    window start, else its own day) and ``overdue``, that occurrence being
-    before today on the Manila calendar (``manila_today``). A full card
+    Every full payable carries ``overdue``, its real day being before today on
+    the Manila calendar (``manila_today``), and ``original_date`` when listed
+    overdue on the window start (``_due_fields``); a budget-entry payable also
+    the occurrence it stands for (``occurrence_date``). A full card
     statement payable carries its ``statement_close`` (``_statement_fields``)."""
     start, end = _upcoming_window(days, reference)
     today = manila_today()
@@ -3063,7 +3071,7 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
             "overflow_account_name": names.get(ov),
             "currency": currency,
             **collector.row(_row_key(e, currency), row),
-            **(_occurrence_fields(e, today) if e["source"] == "budget_entry" else {}),
+            **_due_fields(e, today),
             **_statement_fields(e),
         })
     public_ids = (ids or PublicIds()).assign([e for _, e in limited])

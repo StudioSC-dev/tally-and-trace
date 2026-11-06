@@ -32,7 +32,7 @@ LIMITED_KEYS = {"view", "public_id", "date", "original_date", "overdue", "displa
 # A full payable as ``payables_by_currency`` builds it, before any snapshot field.
 PAYABLE_KEYS = {"due_date", "name", "amount", "source", "source_id", "account_id",
                 "account_name", "overflow_account_id", "overflow_account_name", "currency"}
-STATEMENT_PAYABLE_KEYS = PAYABLE_KEYS | {"statement_close"}
+STATEMENT_PAYABLE_KEYS = PAYABLE_KEYS | {"statement_close", "overdue"}
 ENTRY_PAYABLE_KEYS = PAYABLE_KEYS | {"occurrence_date", "overdue"}
 # The snapshot adds the row permissions to full budget-entry rows (missed.entry_row_fields).
 SNAPSHOT_ENTRY_PAYABLE_KEYS = ENTRY_PAYABLE_KEYS | {"kind", "plan_kind", "can_mark_paid"}
