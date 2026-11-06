@@ -178,3 +178,21 @@ def test_limited_row_keeps_its_real_date(sw, sw_client, sw_db, monkeypatch):
     limited = [p for p in _snapshot_payables(client, v) if p.get("view") == "limited"]
     assert [(p["date"], p["overdue"], p["original_date"]) for p in limited] == [
         ("2026-10-18", True, "2026-10-10")]
+
+
+def test_household_upcoming_flags_an_overdue_full_row(hh, sw_client, monkeypatch):
+    """The Household view's upcoming items carry the same due fields as the ordinary list."""
+    client, a = sw_client, hh["a"]
+    sw_post(client, a, "/transactions/", {
+        "account_id": hh["joint"], "transaction_type": "debit", "amount": 700,
+        "description": "Household water", "transaction_date": "2026-10-10T00:00:00",
+        "is_posted": False})
+    pin_clock(monkeypatch, REF)
+
+    for path, key in ((f"/household/{a['id']}/upcoming", "items"),
+                      (f"/household/{a['id']}/dashboard", "upcoming")):
+        r = client.get(f"{API}{path}", headers=a["headers"])
+        assert r.status_code == 200, r.text
+        (row,) = [i for i in r.json()[key] if i.get("name") == "Household water"]
+        assert (row["due_date"], row["overdue"], row["original_date"]) == (
+            "2026-10-18", True, "2026-10-10")
