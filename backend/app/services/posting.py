@@ -1003,14 +1003,15 @@ def _due_loan_dates(db: Session, loan: Account, through: date
                     ) -> List[Tuple[date, datetime, Decimal]]:
     """``(nominal due date, effective date at midnight, still owed)`` of the open
     due dates whose effective date is on or before ``through``, oldest first. A
-    part-paid one owes the rest. Forced dates keep the schedule's order, so this
-    is a prefix of the open due dates."""
+    part-paid one owes the rest; one owing nothing is not a payment, so it is
+    neither counted nor funds-checked. Forced dates keep the schedule's order, so
+    this is a prefix of the open due dates."""
     moved = load_loan_overrides(db, [loan.id]).get(loan.id)
     end = _day_after(through)
     rows = []
     for _, due, owed in loan_svc.due_dates(db, loan, extend(end) if moved else end):
         day = effective(moved, due)
-        if day <= through:
+        if day <= through and owed > 0:
             rows.append((due, datetime(day.year, day.month, day.day), owed))
     return rows
 

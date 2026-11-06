@@ -408,6 +408,66 @@ def test_a_held_due_date_paid_by_hand_never_posts_twice(world, monkeypatch):
     assert len(_rows(db, loan)) == 1
 
 
+def _overdraw(w, account) -> None:
+    _sql(w["db"], "UPDATE accounts SET balance = -500 WHERE id = :a", a=account)
+
+
+def test_a_negative_paying_account_holds_rather_than_errors(world, monkeypatch):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    _overdraw(w, w["checking"])
+    on_day(monkeypatch, "2026-10-25")
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0,
+                                 "skipped": {"insufficient_funds": 1}}
+    assert _rows(db, loan) == []
+    row = _due_row(w, loan)
+    assert (row["state"], row["block_reason"]) == ("held", "insufficient_funds")
+
+
+def test_a_negative_paying_account_holds_a_catch_up(world):
+    w, db = world, world["db"]
+    loan = _loan(w, loan_first_payment_date="2026-08-25")
+    _overdraw(w, w["checking"])
+    _turn_on(w, loan, expected_due=2)
+    assert _is_on(db, loan) is True
+    assert _rows(db, loan) == []
+    assert _balance(db, w["checking"]) == -500
+
+
+@pytest.fixture
+def a_due_date_owing_nothing(monkeypatch):
+    """The first row of every loan's open due dates owes nothing. The schedule
+    never lists one today; this pins what a run does if it ever does."""
+    from decimal import Decimal
+
+    from app.services import loans as loan_svc
+
+    real = loan_svc.due_dates
+    monkeypatch.setattr(loan_svc, "due_dates", lambda db, loan, end: [
+        (-1, date(2026, 9, 25), Decimal("0")), *real(db, loan, end)])
+
+
+def test_a_due_date_owing_nothing_is_not_counted_or_funds_checked(
+        world, monkeypatch, a_due_date_owing_nothing):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    assert _preview(w, loan).json() == {"block": None, "due_count": 0, "oldest": None}
+    _turn_on(w, loan)
+    _overdraw(w, w["checking"])
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+
+
+def test_a_due_date_owing_nothing_does_not_stall_the_walk(
+        world, monkeypatch, a_due_date_owing_nothing):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    on_day(monkeypatch, "2026-10-25")
+    assert _job(w["client"]) == {"dry_run": False, "posted": 1, "skipped": {}}
+    assert _rows(db, loan) == [("2026-10-25", 9_000, 1_000, True)]
+
+
 # 9 -----------------------------------------------------------------------------------------
 
 def test_catch_up_posts_each_due_date_oldest_first_on_the_reduced_balance(world):
