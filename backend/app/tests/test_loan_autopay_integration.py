@@ -1101,10 +1101,11 @@ def test_a_reduced_payment_stops_autopay(world, monkeypatch):
 @pytest.mark.parametrize("edit", [
     {"transaction_date": "2026-10-26T00:00:00"},
     {"description": "BPI debit"},
-    {"amount": 9_500, "transfer_fee": 500},  # the bank's split: the same cash
+    {"amount": 9_500, "transfer_fee": 500},  # interest moved to principal: the same cash
     {"amount": 9_500, "transfer_fee": 1_000},  # more cash pays more, reopens nothing
 ])
 def test_an_edit_that_reopens_nothing_keeps_the_flag(world, monkeypatch, edit):
+    """The re-split keeps the flag: the same cash, and less owed."""
     w, db = world, world["db"]
     loan, txn = _paid_by_the_job(w, monkeypatch)
     r = _edit_row(w, txn, **edit)
@@ -1128,6 +1129,18 @@ def test_deleting_a_hand_payment_stops_autopay_too(world, monkeypatch):
     txn = _pay(w, loan, "2026-10-17")["id"]
     _delete_row(w, txn)
     assert _is_on(db, loan) is False
+
+
+def test_principal_moved_to_interest_clears_the_flag(world, monkeypatch):
+    """The same cash, and more owed."""
+    w, db = world, world["db"]
+    loan, txn = _paid_by_the_job(w, monkeypatch)
+    owed = _balance(db, loan)
+    r = _edit_row(w, txn, amount=8_500, transfer_fee=1_500)
+    assert r.status_code == 200, r.text
+    assert _balance(db, loan) < owed
+    assert _is_on(db, loan) is False
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
 
 
 def _held_by_a_plan(w, monkeypatch, today="2026-10-26", amount="4000") -> tuple:

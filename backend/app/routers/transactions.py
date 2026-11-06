@@ -1317,6 +1317,8 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     old_transaction_date = db_transaction.transaction_date
     old_paid = {account_id: loan_svc.cash_paid(db_transaction, account_id)
                 for account_id in (old_account_id, old_transfer_to)}
+    old_owed = {account_id: loan_svc.owed(db.get(Account, account_id))
+                for account_id in old_paid if account_id}
     old_cover = loan_svc.planned_cover(db_transaction)
     
     # Reverse previous balance effects if posted
@@ -1440,6 +1442,10 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
             destination_account.balance = _D(destination_account.balance) + new_in
     for account_id in {*old_paid, db_transaction.account_id}:
         if loan_svc.cash_paid(db_transaction, account_id) < old_paid.get(account_id, 0):
+            loan_svc.stop_autopay(db, account_id)
+    # The same cash can owe more: a payment re-split from principal to interest.
+    for account_id, owed in old_owed.items():
+        if loan_svc.owed(db.get(Account, account_id)) > owed:
             loan_svc.stop_autopay(db, account_id)
 
     # The budgets the row counted toward, at its old date, and those it counts
