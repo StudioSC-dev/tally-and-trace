@@ -115,7 +115,7 @@ def test_dry_run_writes_nothing_and_prints_what_would_post(world):
     assert "due: 2 (2026-08-25, 2026-09-25)" in text_out
     assert "would post: txn new 2026-08-25" in text_out
     assert "recurring transfer into loan: none" in text_out
-    assert "dry run, nothing written" in text_out
+    assert "dry run, no rows or balances change" in text_out
 
 
 # 2 ----------------------------------------------------------------------------------------

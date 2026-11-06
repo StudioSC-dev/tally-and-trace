@@ -22,7 +22,8 @@ Per record, in order:
 4. The run posts the catch-up as the job would. A stop for short funds, a
    possible duplicate or a pending planned payment is a hold: the flag stays on
    and the rest is reported as held, not as an error.
-5. ``apply`` commits; a dry run rolls back, so what it reports is what the real
+5. ``apply`` commits; a dry run rolls back (no rows or balances change; id numbers may
+   skip), so what it reports is what the real
    run did on the same rows.
 
 The report holds ids, dates and reason codes only, never an amount.
@@ -180,7 +181,7 @@ def summary(results: List[Result], apply: bool) -> List[str]:
                          f"txn {txn_id if txn_id is not None else 'new'} {when.isoformat()}")
         if r.held:
             lines.append(f"  held: {r.held} (flag stays on; the job retries)")
-        lines.append("  result: " + ("turned on" if apply else "dry run, nothing written"))
+        lines.append("  result: " + ("turned on" if apply else "dry run, no rows or balances change"))
     changed = sum(1 for r in results if r.status == "turned_on")
     refused = sum(1 for r in results if r.status == "refused")
     lines.append(f"changes: {changed} records; refused: {refused}")

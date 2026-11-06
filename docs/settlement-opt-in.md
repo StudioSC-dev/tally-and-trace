@@ -24,7 +24,9 @@ Records are chosen by hand: `--entry ID` and `--loan ID`, each repeatable, at
 least one required. Nothing is selected implicitly.
 
 Dry run (the default; each record is run for real inside its transaction and
-rolled back, so it reports what `--apply` does on the same rows):
+rolled back, so it reports what `--apply` does on the same rows. No rows or
+balances change, but the database's id counters advance, so the ids of later
+rows may skip numbers):
 
 ```sh
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DBNAME \

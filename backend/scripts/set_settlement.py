@@ -3,7 +3,7 @@
 
     DATABASE_URL=... python backend/scripts/set_settlement.py \\
         --expect-host HOST --expect-db NAME --entry ID [--entry ID ...] [--loan ID ...]
-                                                        (dry run: writes nothing)
+                                                        (dry run: no rows or balances change; id numbers may skip)
     ... --apply                                         (writes)
 
 Nothing is selected implicitly: at least one ``--entry`` or ``--loan`` is
@@ -44,7 +44,7 @@ def main(argv=None) -> int:
     parser.add_argument("--loan", type=int, action="append", metavar="ID",
                         help="a loan account id (repeatable)")
     parser.add_argument("--apply", action="store_true",
-                        help="write the changes (default: a dry run that writes nothing)")
+                        help="write the changes (default: a dry run; no rows or balances change, id numbers may skip)")
     args = parser.parse_args(argv)
     entries, loans = _unique(args.entry), _unique(args.loan)
     if not entries and not loans:
@@ -62,7 +62,7 @@ def main(argv=None) -> int:
         print(f"refused: {bootstrap.error_class(exc)}")
         return 2
     print(bootstrap.target_line(url))
-    print("mode: APPLY" if args.apply else "mode: dry run (nothing is written; --apply writes)")
+    print("mode: APPLY" if args.apply else "mode: dry run (no rows or balances change; id numbers may skip; --apply writes)")
 
     # Only now: the rest of the app (settings read the environment, never a .env).
     try:
