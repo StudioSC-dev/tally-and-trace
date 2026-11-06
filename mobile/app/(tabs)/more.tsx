@@ -53,7 +53,7 @@ function BudgetEntriesSection({ currency }: { currency: CurrencyCode }) {
                 <Text className="text-white font-semibold">{entryName(entry)}</Text>
                 <Text className="text-slate-500 text-xs capitalize">
                   {entry.cadence} · {entry.entry_type}
-                  {entry.view !== 'limited' && entry.is_autopay ? ' · Auto-pay' : ''}
+                  {entry.view !== 'limited' && entry.auto_post_enabled ? ' · Auto-pay' : ''}
                 </Text>
                 <Text className="text-slate-500 text-xs mt-0.5">
                   Next: {entry.next_occurrence.split('T')[0]}
