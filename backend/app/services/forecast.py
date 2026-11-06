@@ -853,8 +853,13 @@ def effective_window_occurrences(entry, start: datetime, end: datetime,
         return
     capped = (getattr(entry, "end_mode", None) == "after_occurrences"
               and getattr(entry, "max_occurrences", None) is not None)
-    walk_from = _naive(entry.next_occurrence) if capped else start - OVERRIDE_REACH
-    for nominal in iter_occurrences(entry, walk_from, extend(end)):
+    anchor = _naive(entry.next_occurrence)
+    walk_from = anchor if capped else start - OVERRIDE_REACH
+    horizon = extend(end)
+    # The walk steps from next_occurrence whatever walk_from is, so its bound does
+    # too (schedule_walk's): the projection's guard would stop a long-stale one short.
+    bound = max((horizon - anchor).days, 0) + 2
+    for nominal in iter_occurrences(entry, walk_from, horizon, max_steps=bound):
         when = effective_at(moved, nominal)
         if when >= end:
             continue

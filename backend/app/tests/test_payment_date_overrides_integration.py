@@ -7,11 +7,14 @@ a database.
 Reference: Sunday 2026-10-18, 02:00 UTC (10:00 in Manila). The snapshot's
 payables run 30 days from today.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
 
+from app.models.transaction import RecurrenceFrequency
+from app.services.forecast import effective_window_occurrences, iter_occurrences
 from app.tests.conftest import API, hh_household, sw_db_reachable, sw_post, sw_share
 from app.tests.test_balance_locking_integration import engine, holder  # noqa: F401
 from app.tests.test_card_charges_integration import pin_clock
@@ -981,3 +984,26 @@ def test_upgrade_adds_the_table_and_downgrade_drops_it(scratch_url):  # noqa: F8
         engine.dispose()
     _alembic(scratch_url, "downgrade", PREVIOUS)
     assert "payment_date_overrides" not in tables()
+
+
+# --- the walk's reach --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cadence, first, cap", [
+    (RecurrenceFrequency.WEEKLY, datetime(1985, 1, 7), None),  # past the 2000-step guard
+    (RecurrenceFrequency.WEEKLY, datetime(1985, 1, 7), 3000),
+    (RecurrenceFrequency.SEMI_MONTHLY, datetime(1970, 1, 1), None),  # past the 600-month one
+])
+def test_a_long_stale_schedule_still_reaches_the_window(cadence, first, cap):
+    """The walk starts at ``next_occurrence`` whatever its window, as a recurring cover's
+    does (same walker); its step bound comes from that distance, not the default guard."""
+    entry = SimpleNamespace(
+        cadence=cadence, next_occurrence=first, end_date=None, anchor_day=None, day_rule=None,
+        end_mode="after_occurrences" if cap else "never", max_occurrences=cap,
+        semi_monthly_day_1=1, semi_monthly_day_2=15)
+    start, end = datetime(2026, 10, 18), datetime(2026, 11, 5)
+    nominal = next(iter_occurrences(entry, start, end, max_steps=20_000))
+    forced = nominal + timedelta(days=1)
+
+    walked = list(effective_window_occurrences(entry, start, end, {nominal.date(): forced.date()}))
+
+    assert (forced, None, nominal) in walked
