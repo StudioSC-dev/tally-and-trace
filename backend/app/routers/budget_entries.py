@@ -679,16 +679,6 @@ ENDED_MESSAGE = "This entry has ended"
 PAUSED_MESSAGE = "This entry is paused"
 
 
-def _has_ended(e, today: date) -> bool:
-    """Whether the schedule is over: a capped entry's last occurrence used up, or
-    an end date before ``today`` (Manila). An inactive entry that has not ended
-    is paused."""
-    return bool(
-        (is_capped(e) and e.max_occurrences <= 0)
-        or (e.end_mode == "on_date" and e.end_date is not None
-            and _naive(e.end_date).date() < today))
-
-
 def _refuse_paused_or_ended(entry: BudgetEntry) -> None:
     """409 for an entry that cannot be posted to: ended (cap used up, or inactive
     past its end date) or paused (any other inactive entry). An active entry
@@ -699,7 +689,7 @@ def _refuse_paused_or_ended(entry: BudgetEntry) -> None:
     if not entry.is_active:
         raise HTTPException(
             status_code=409,
-            detail=ENDED_MESSAGE if _has_ended(entry, manila_today()) else PAUSED_MESSAGE)
+            detail=ENDED_MESSAGE if posting.has_ended(entry, manila_today()) else PAUSED_MESSAGE)
 
 
 def _first_occurrence_from_today(entry: BudgetEntry) -> Optional[datetime]:
@@ -831,7 +821,7 @@ def update_budget_entry(
         merged = SimpleNamespace(**{
             f: prospective_data.get(f, getattr(entry, f))
             for f in ("end_mode", "end_date", "max_occurrences")})
-        if _has_ended(merged, manila_today()):
+        if posting.has_ended(merged, manila_today()):
             raise HTTPException(status_code=409, detail=ENDED_MESSAGE)
         sent = prospective_data.get("next_occurrence")
         skip_paused = (
@@ -1607,11 +1597,13 @@ def set_auto_post(
     entry = _lock_entry_to_post(db, current_user, entry_id)
     if payload.enabled:
         account = db.get(Account, entry.account_id)
-        if is_card_installment(entry, account):
+        block = posting.autopay_toggle_block(entry, account)
+        if block == "card_installment":
             raise HTTPException(status_code=400,
                                 detail="Review the installment to turn auto-post on")
-        _refuse_paused_or_ended(entry)
-        block = settlement_block(entry, account)
+        if block in ("ended", "paused"):
+            raise HTTPException(status_code=409,
+                                detail=ENDED_MESSAGE if block == "ended" else PAUSED_MESSAGE)
         if block is not None:
             raise HTTPException(status_code=400, detail=SETTLEMENT_BLOCK_MESSAGES[block])
         posting.turn_on_autopay(db, entry, current_user, payload.expected_due)

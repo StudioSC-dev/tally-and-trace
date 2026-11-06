@@ -766,6 +766,29 @@ def _post_entry_due(db: Session, entry, actor: User, through: date, *,
     return EntryPosting(blocker=blocker, recorded=recorded)
 
 
+def has_ended(e, today: date) -> bool:
+    """Whether the schedule is over: a capped entry's last occurrence used up, or
+    an end date before ``today`` (Manila). An inactive entry that has not ended
+    is paused."""
+    return bool(
+        (is_capped(e) and e.max_occurrences <= 0)
+        or (e.end_mode == "on_date" and e.end_date is not None
+            and _naive(e.end_date).date() < today))
+
+
+def autopay_toggle_block(entry, account: Optional[Account]) -> Optional[str]:
+    """Why autopay cannot be turned on for ``entry``, or None: ``card_installment``
+    (the review turns that on), ``ended`` or ``paused`` (a capped entry used up, or
+    inactive), else ``settlement_block``'s reason. The order is the toggle's."""
+    if is_card_installment(entry, account):
+        return "card_installment"
+    if is_capped(entry) and entry.max_occurrences <= 0:
+        return "ended"
+    if not entry.is_active:
+        return "ended" if has_ended(entry, manila_today()) else "paused"
+    return settlement_block(entry, account)
+
+
 AUTOPAY_COUNT_CHANGED = "The number of missed payments has changed; check them and try again"
 
 
@@ -975,6 +998,13 @@ def _paying_account(db: Session, user: Optional[User], loan: Account
     return (funding, None) if funding.is_active else (None, "no_funding_account")
 
 
+def loan_feeding_entries(db: Session, loan: Account) -> List[int]:
+    """Ids, ascending, of the active recurring transfers into ``loan``."""
+    return [entry_id for (entry_id,) in db.query(BudgetEntry.id).filter(
+        BudgetEntry.transfer_to_account_id == loan.id,
+        BudgetEntry.is_active.is_(True)).order_by(BudgetEntry.id)]
+
+
 def loan_block(db: Session, loan: Account, caller: Optional[User] = None) -> Optional[str]:
     """Why a loan cannot settle by autopay, or None when it can, read for its
     creator and ``caller`` when given: ``inactive``, ``no_funding_account``,
@@ -995,9 +1025,7 @@ def loan_block(db: Session, loan: Account, caller: Optional[User] = None) -> Opt
         return "no_rate"
     if funding.currency != loan.currency:
         return "foreign_currency"
-    recurring = db.query(BudgetEntry.id).filter(
-        BudgetEntry.transfer_to_account_id == loan.id, BudgetEntry.is_active.is_(True)).first()
-    return "recurring_entry" if recurring is not None else None
+    return "recurring_entry" if loan_feeding_entries(db, loan) else None
 
 
 def _due_loan_dates(db: Session, loan: Account, through: date
