@@ -387,6 +387,30 @@ def test_the_funds_check_is_cumulative_and_stops_oldest_first(world, monkeypatch
     assert (row["due_count"], row["postable_count"], row["oldest"]) == (2, 0, "2026-10-25")
 
 
+def test_a_negative_balance_does_not_stop_a_month_already_paid(world, monkeypatch):
+    """A posted-linked month moves no money, so the job advances past it whatever
+    the balance; the next month, which would move money, is still held."""
+    w, db = world, world["db"]
+    poor = _account(w["client"], w["o"], "Poor", "checking", 1_000)
+    rent = _entry(w, account=poor)
+    _turn_on(w, rent)
+    on_day(monkeypatch, "2026-10-25")
+    r = w["client"].post(f"{API}/budget-entries/{rent}/materialize", json={"advance": False},
+                         headers=w["o"]["headers"])
+    assert r.status_code == 201, r.text
+    assert _balance(db, poor) == -4_000
+    assert _state(db, rent)[0] == date(2026, 10, 25)
+
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert _state(db, rent)[0] == date(2026, 11, 25)
+    assert len(_rows(db, rent)) == 1
+    assert _balance(db, poor) == -4_000
+
+    on_day(monkeypatch, "2026-11-25")
+    assert _job(w["client"])["skipped"] == {"insufficient_funds": 1}
+    assert len(_rows(db, rent)) == 1
+
+
 def test_the_overflow_account_does_not_count_as_funds(world, monkeypatch):
     w, db = world, world["db"]
     poor = _account(w["client"], w["o"], "Poor", "checking", 1_000)
