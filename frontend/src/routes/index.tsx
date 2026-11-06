@@ -82,7 +82,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     return {
       key: `${payable.public_id}-${index}`,
       name: payable.display_name,
-      day: parseCalendarDay(payable.date),
+      day: parseCalendarDay(payable.original_date ?? payable.date),
       amount: payable.face_amount,
       currency: payable.currency,
       labels: {},
@@ -101,12 +101,12 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
   return {
     key: `${payable.source}-${payable.source_id ?? 'x'}-${payable.due_date}-${index}`,
     name: payable.name,
-    day: parseCalendarDay(payable.due_date),
+    day: parseCalendarDay(payable.original_date ?? payable.due_date),
     amount: payable.amount,
     currency: payable.currency ?? fallback,
     labels: payable,
     detail: `${label}${pays}${overflow}`,
-    // Budget-entry rows say whether their occurrence is before today on the Manila calendar.
+    // Every row says whether its real day is before today on the Manila calendar.
     overdue: payable.overdue === true,
     budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
