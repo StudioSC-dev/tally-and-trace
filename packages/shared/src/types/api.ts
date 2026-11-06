@@ -439,6 +439,8 @@ interface RecurringEntryDetail {
   billing_kind?: BillingKind | null
   /** Read-only, derived by the server. null for income and transfers. */
   kind?: RecurringKind | null
+  /** Read-only, derived from the flag by the server. null when the entry names no settlement. */
+  settlement?: Settlement | null
   /**
    * Card installments: the settlement status. True once the installment was reviewed
    * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
@@ -501,7 +503,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement'
   >
 > &
   TagIdsInput & {
