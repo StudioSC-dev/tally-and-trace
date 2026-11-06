@@ -68,6 +68,8 @@ type PayableRow = {
   /** The estimate labels: the row was converted from another currency. */
   labels: EstimateLabels
   detail: string
+  /** The scheduled day, when the row sits on a forced date; null otherwise. */
+  movedFrom: Date | null
   overdue: boolean
   /** What kind of payable this is. */
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
@@ -88,6 +90,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
       currency: payable.currency,
       labels: {},
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
+      movedFrom: null,
       overdue: payable.overdue,
       kind: 'shared',
       settlement: null,
@@ -99,6 +102,9 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
   // An unposted transaction is Pending once its day has come and Planned before it.
   const transactionKind = statusFromDate(payable.due_date, false, today) === 'planned' ? 'planned' : 'pending'
   const label = payable.source === 'statement' ? 'Card statement' : payable.source === 'loan' ? 'Loan payment' : payable.source === 'budget_entry' ? 'Scheduled' : transactionKind === 'planned' ? 'Planned' : 'Pending'
+  // A budget entry names its scheduled day as `occurrence_date`; a loan payable carries none, so it shows its date only.
+  const effective = (payable.original_date ?? payable.due_date).slice(0, 10)
+  const scheduled = (payable.source === 'budget_entry' ? payable.occurrence_date : undefined)?.slice(0, 10)
   return {
     key: `${payable.source}-${payable.source_id ?? 'x'}-${payable.due_date}-${index}`,
     name: payable.name,
@@ -107,6 +113,7 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     currency: payable.currency ?? fallback,
     labels: payable,
     detail: `${label}${pays}${overflow}`,
+    movedFrom: scheduled !== undefined && scheduled !== effective ? parseCalendarDay(scheduled) : null,
     // Every row says whether its real day is before today on the Manila calendar.
     overdue: payable.overdue === true,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
@@ -573,7 +580,7 @@ export function Dashboard() {
                         <span className="block">
                           <span className="block font-medium text-ink group-hover:underline">{row.name}</span>
                           <span className="block text-sm text-muted">
-                            {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
+                            {formatDateWithOrdinal(row.day)}{row.movedFrom && <span data-testid="payable-moved"> (moved from {formatDateWithOrdinal(row.movedFrom)})</span>} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
                           </span>
                           <span className="block text-xs text-muted">{row.detail}</span>
                         </span>
@@ -584,7 +591,7 @@ export function Dashboard() {
                         <div>
                           <p className="font-medium text-ink">{row.name}</p>
                           <p className="text-sm text-muted">
-                            {formatDateWithOrdinal(row.day)} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
+                            {formatDateWithOrdinal(row.day)}{row.movedFrom && <span data-testid="payable-moved"> (moved from {formatDateWithOrdinal(row.movedFrom)})</span>} · <span data-testid="payable-amount" title={estimateTitle(row.labels)}>{estimateText(row.amount, row.currency, row.labels)}</span>
                           </p>
                           <p className="text-xs text-muted">{row.detail}</p>
                         </div>
@@ -654,7 +661,7 @@ export function Dashboard() {
           payable={detailRow.payable}
           display={{
             name: detailRow.name,
-            dateLabel: formatDateWithOrdinal(detailRow.day),
+            dateLabel: `${formatDateWithOrdinal(detailRow.day)}${detailRow.movedFrom ? ` (moved from ${formatDateWithOrdinal(detailRow.movedFrom)})` : ''}`,
             amountText: estimateText(detailRow.amount, detailRow.currency, detailRow.labels),
             amountTitle: estimateTitle(detailRow.labels),
             detail: detailRow.detail,
