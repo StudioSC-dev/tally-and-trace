@@ -102,9 +102,9 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
   // An unposted transaction is Pending once its day has come and Planned before it.
   const transactionKind = statusFromDate(payable.due_date, false, today) === 'planned' ? 'planned' : 'pending'
   const label = payable.source === 'statement' ? 'Card statement' : payable.source === 'loan' ? 'Loan payment' : payable.source === 'budget_entry' ? 'Scheduled' : transactionKind === 'planned' ? 'Planned' : 'Pending'
-  // A budget entry names its scheduled day as `occurrence_date`; a loan payable carries none, so it shows its date only.
+  // A budget entry names its scheduled day as `occurrence_date`, a loan as `loan_due_date`.
   const effective = (payable.original_date ?? payable.due_date).slice(0, 10)
-  const scheduled = (payable.source === 'budget_entry' ? payable.occurrence_date : undefined)?.slice(0, 10)
+  const scheduled = (payable.source === 'loan' ? payable.loan_due_date : payable.source === 'budget_entry' ? payable.occurrence_date : undefined)?.slice(0, 10)
   return {
     key: `${payable.source}-${payable.source_id ?? 'x'}-${payable.due_date}-${index}`,
     name: payable.name,
