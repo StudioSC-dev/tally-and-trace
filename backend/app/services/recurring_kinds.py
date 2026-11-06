@@ -121,3 +121,41 @@ def auto_post_block(e, account: Optional[Account]) -> Optional[str]:
     if not e.is_active:
         return "inactive"
     return None
+
+
+def settlement_block(e, account: Optional[Account]) -> Optional[str]:
+    """Why an entry cannot settle by autopay, or None when it can.
+
+    A card installment answers with ``auto_post_block``. Anything else must be a
+    cash entry: ``not_cash`` (income, a transfer, a card subscription or bill),
+    ``no_account``, ``spending_wallet``, ``inactive`` (paused or completed),
+    ``foreign_currency`` (the entry is not in its account's currency, so posting
+    would need a typed figure).
+
+    ``auto_post_block`` keeps its card-only answer: ``create_budget_entry`` turns
+    an entry on when that function returns None.
+    """
+    from app.services.forecast import is_spending_wallet
+
+    if is_card_installment(e, account):
+        return auto_post_block(e, account)
+    if entry_kind(e, account) != "cash":
+        return "not_cash"
+    if account is None:
+        return "no_account"
+    if is_spending_wallet(account):
+        return "spending_wallet"
+    if not e.is_active:
+        return "inactive"
+    if e.currency != account.currency:
+        return "foreign_currency"
+    return None
+
+
+def settlement(e, account: Optional[Account]) -> Optional[str]:
+    """The wire value, from ``auto_post_enabled`` alone: ``autopay`` or ``manual``
+    on a cash entry or a card installment, None on everything else (a row that
+    names no settlement)."""
+    if settlement_block(e, account) in ("not_cash", "no_account", "spending_wallet"):
+        return None
+    return "autopay" if e.auto_post_enabled else "manual"
