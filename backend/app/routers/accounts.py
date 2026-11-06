@@ -683,14 +683,11 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_loan(db, update_data, db_account)
     _validate_minimum_due_rule(update_data, account_update.minimum_due_rule, db_account)
     stored_first = db_account.loan_first_payment_date
-    stored_type = db_account.account_type
     for field, value in update_data.items():
         setattr(db_account, field, value)
     # Every due date moves, so no forced date still stands for one.
     if db_account.loan_first_payment_date != stored_first:
         payment_dates.clear_all(db, loan_account_id=db_account.id)
-    if db_account.account_type != stored_type and db_account.account_type == AccountType.CREDIT:
-        payment_dates.clear_entries_on(db, db_account.id)
 
     db_account.updated_at = utc_now()
     if tag_ids is not None:

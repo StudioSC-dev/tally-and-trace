@@ -27,6 +27,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core import locking
@@ -36,6 +37,7 @@ from app.core.tags import copy_explicit_tags
 from app.core.time import manila_today, utc_now
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
+from app.models.payment_date_override import PaymentDateOverride
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import BudgetEntryMaterialize
@@ -269,16 +271,30 @@ def _neighbours(db: Session, entry, day: date) -> Tuple[Optional[date], date]:
 
 
 ALREADY_RECORDED = "This occurrence is already recorded; change the transaction's date"
+STATEMENT_CLOSED = "That date is on a statement that has already closed"
 
 
-def set_forced_date(db: Session, entry, actor: User, day: date, forced: date) -> None:
+def refuse_closed_statement(card: Account, day: date) -> None:
+    """422 for a ``day`` inside a closed statement of ``card``. A card with no
+    cycle has no statements to close."""
+    from app.services.statements import statement_close
+
+    close = statement_close(card, day)
+    if close is not None and close < manila_today():
+        raise HTTPException(status_code=422, detail=STATEMENT_CLOSED)
+
+
+def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
+                    card: Optional[Account] = None) -> None:
     """Force the occurrence on the nominal ``day`` to ``forced``, without committing.
 
     The caller holds the owner's budget lock and then the entry lock. 422 when
     ``day`` is not an occurrence of the walk; 409 when a row, posted or pending,
     is linked to it; 422 past the reach, out of order or outside the record
-    dates. ``forced`` equal to ``day`` clears the override instead
-    (``clear_forced_date``).
+    dates, and on ``card`` (a locked credit account) inside a closed statement:
+    that is what the bank printed. ``forced`` equal to ``day`` clears the
+    override instead (``clear_forced_date``), which restores what the schedule
+    says even on a closed statement.
     """
     previous, following = _neighbours(db, entry, day)
     if occurrence_links(db, entry, day):
@@ -287,6 +303,8 @@ def set_forced_date(db: Session, entry, actor: User, day: date, forced: date) ->
         clear_forced_date(db, entry, day)
         return
     refuse_forced_date(day, forced, previous, following)
+    if card is not None:
+        refuse_closed_statement(card, forced)
     set_override(db, actor.id, day, forced, budget_entry_id=entry.id)
 
 
@@ -743,11 +761,15 @@ def _auto_post_scope(db: Session, through: date, actor_scope: Optional[User],
                      entry_ids) -> List[Tuple[int, int]]:
     """``[(entry id, creator id)]`` in id order: active, reviewed, auto-post-on,
     capped card entries with months left and a next occurrence on or before
-    ``through``; only ``entry_ids`` when given; for a caller, only entries the
+    ``through``, or a later one forced on or before it (a forced date stays within
+    the reach); only ``entry_ids`` when given; for a caller, only entries the
     caller can edit."""
     from app.core.access import editable_account_ids
     from app.models.account import AccountType
 
+    forced = db.query(PaymentDateOverride.budget_entry_id).filter(
+        PaymentDateOverride.budget_entry_id.isnot(None),
+        PaymentDateOverride.effective_date <= through)
     query = (
         db.query(BudgetEntry)
         .join(Account, Account.id == BudgetEntry.account_id)
@@ -756,7 +778,9 @@ def _auto_post_scope(db: Session, through: date, actor_scope: Optional[User],
                 BudgetEntry.installment_reviewed_at.isnot(None),
                 BudgetEntry.end_mode == "after_occurrences",
                 BudgetEntry.max_occurrences > 0,
-                BudgetEntry.next_occurrence < _day_after(through),
+                or_(BudgetEntry.next_occurrence < _day_after(through),
+                    and_(BudgetEntry.next_occurrence < _day_after(through) + OVERRIDE_REACH,
+                         BudgetEntry.id.in_(forced))),
                 Account.account_type == AccountType.CREDIT)
     )
     if entry_ids is not None:
@@ -925,15 +949,16 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
       days), kept only when ``caller`` reads the row (each is checked). No
       row's entry, category or allocation is returned.
     - ``remaining_after``: ``max_occurrences`` less the whole walk through
-      ``today`` (``schedule_walk``, posted-linked months included, since the
-      review advances past them); None for an open-ended entry.
+      ``today`` (``due_walk``, posted-linked months included, since the review
+      advances past them); None for an open-ended entry.
     - ``envelope``: the entry's allocation name for its creator only
       (allocations are creator-private), else None.
-    - ``past_cycles``: some missed month's statement cycle closed before ``today``.
+    - ``past_cycles``: some missed month's statement cycle, read on its effective
+      date, closed before ``today``.
     - ``review_token``: ``review_token`` over ``today``, the caller, the
-      entry's stored state and version, each missed month with its linked
-      rows and each candidate with its version, so a change to any of them,
-      another caller or another Manila day gives another token.
+      entry's stored state and version, its forced dates, each missed month with
+      its linked rows and each candidate with its version, so a change to any of
+      them, another caller or another Manila day gives another token.
     """
     from app.models.allocation import Allocation
     from app.services.forecast import unrecorded_occurrences
@@ -944,6 +969,7 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
     card = db.get(Account, entry.account_id) if entry.account_id else None
     block = auto_post_block(entry, card)
     missed = unrecorded_occurrences(db, [entry], today)[entry.id]
+    moved = _moved(db, entry)
     missed_days = {occ.date() for occ in missed}
     linked: dict = defaultdict(list)
     for _, when, txn_id, _ in _linked_rows(db, [entry.id], occurrence_match=True):
@@ -954,12 +980,12 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
     access = RecordAccess(db, caller)
     candidates = {}
     for day, rows in duplicate_candidates(
-            db, entry, [occ for occ in missed if occ.date() not in linked]).items():
+            db, entry, [occ for occ in missed if occ.date() not in linked], moved).items():
         readable = [txn for txn in rows if access.readable(txn)]
         if readable:
             candidates[day] = readable
 
-    walk = schedule_walk(entry, today)
+    walk = due_walk(db, entry, today)
     remaining_after = (entry.max_occurrences - len(walk)
                        if is_capped(entry) and entry.max_occurrences is not None else None)
     envelope = None
@@ -970,7 +996,7 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
     past_cycles = False
     if card is not None:
         for occ in missed:
-            close = statement_close(card, occ.date())
+            close = statement_close(card, effective(moved, occ.date()))
             if close is not None and close < today:
                 past_cycles = True
                 break
@@ -989,6 +1015,8 @@ def review_state(db: Session, entry, caller: User, today: date) -> ReviewState:
         "currency": getattr(entry.currency, "value", entry.currency),
         "reviewed": reviewed,
         "auto_post_enabled": bool(entry.auto_post_enabled),
+        "forced": sorted([nominal.isoformat(), forced.isoformat()]
+                         for nominal, forced in moved.items()),
         "missed": [[occ.date().isoformat(),
                     [[txn.id, bool(txn.is_posted), _row_version(txn)]
                      for txn in linked.get(occ.date(), [])]]

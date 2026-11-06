@@ -2246,6 +2246,11 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
     so a longer window changes no payable inside a shorter one. A Mark paid
     dated later than its occurrence is outside this (Plan A's accepted risk).
 
+    **Forced dates.** A line's date is the occurrence's effective date
+    (``services/payment_dates.py``), and that alone is what a statement reads,
+    so a forced date moves the charge onto the statement holding it. The rules
+    above read that date; suppression stays on the nominal date.
+
     In-window occurrences are appended to ``events`` as non-cash listings, like
     unposted card charges; with ``events`` None (a discovered card's internal
     inputs) nothing is listed. Returns ``{card_id: [line items]}``.
@@ -2259,7 +2264,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
         return {}
     money = money or Money(db)
     charges: dict = {}
-    for entry, occ in _billed_card_occurrences(db, entries, cards, start, end):
+    for entry, occ, nominal in _billed_card_occurrences(db, entries, cards, start, end):
         income = entry.entry_type == BudgetEntryType.INCOME
         card = cards[entry.account_id]
         card_currency = _code(card.currency)
@@ -2286,6 +2291,7 @@ def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime
                 face_amount=entry.amount,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
+                occurrence=nominal,
             ), [card_currency] if legs else [], [_row(card_currency, amount, estimate)],
                 entry.currency))
     return charges
@@ -2314,31 +2320,40 @@ def _held_card_months(db: Session, entries: list, cards: dict, start: datetime) 
 
 def _billed_card_occurrences(db: Session, entries: list, cards: dict, start: datetime,
                              end: datetime) -> Iterator[tuple]:
-    """Lazily yield ``(entry, occurrence)`` for each card-backed occurrence before
-    ``end`` that ``_card_entry_charges`` bills, in its order: linked occurrences
-    and held months (``_held_card_months``) suppressed, and lapsed ones
-    (statement due before ``start``) dropped, except a reviewed card
-    installment's (``reviewed_card_installment``), whose unrecorded lapsed
-    months are billed on their own cycles."""
+    """Lazily yield ``(entry, when, nominal)`` for each card-backed occurrence
+    that ``_card_entry_charges`` bills, in its order: ``when`` is the effective
+    date, before ``end``, and ``nominal`` the schedule's date. Linked occurrences
+    and held months (``_held_card_months``) are suppressed on the nominal date,
+    and lapsed ones (effective date before ``start``, on a statement due before
+    ``start``) dropped, except a reviewed card installment's
+    (``reviewed_card_installment``), whose unrecorded lapsed months are billed on
+    their own cycles. An entry with forced dates is walked the reach past ``end``;
+    one with none takes the old path exactly."""
     linked = _linked_occurrence_days(db, [e.id for e in entries])
     held = _held_card_months(db, entries, cards, start)
     due_overrides = load_due_overrides(db, list(cards))
+    forced = load_entry_overrides(db, [e.id for e in entries])
     for entry in entries:
         card = cards[entry.account_id]
         keep_lapsed = reviewed_card_installment(entry, card)
-        for occ in iter_occurrences(entry, _naive(entry.next_occurrence), end):
-            key = (entry.id, occ.date())
+        moved = forced.get(entry.id)
+        horizon = extend(end) if moved else end
+        for nominal in iter_occurrences(entry, _naive(entry.next_occurrence), horizon):
+            when = effective_at(moved, nominal)
+            if when >= end:
+                continue
+            key = (entry.id, nominal.date())
             if linked[key]:
                 linked[key] -= 1
                 continue
             if held[key]:
                 held[key] -= 1
                 continue  # counted once, as the possible duplicate already on the card
-            if (not keep_lapsed and occ < start
-                    and statement_due_date(card, occ.date(),
+            if (not keep_lapsed and when < start
+                    and statement_due_date(card, when.date(),
                                            due_overrides=due_overrides[card.id]) < start):
                 continue  # lapsed: its statement fell due before the window
-            yield entry, occ
+            yield entry, when, nominal
 
 
 def has_unsuppressed_occurrence(db: Session, entries: list, start: datetime) -> bool:

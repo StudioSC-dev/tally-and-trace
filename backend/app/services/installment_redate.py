@@ -187,7 +187,7 @@ def _billed(db: Session, card: Account, start: date) -> Counter:
     if not entries:
         return Counter()
     begin = datetime.combine(start, time())
-    return Counter((entry.id, occ.date()) for entry, occ in _billed_card_occurrences(
+    return Counter((entry.id, nominal.date()) for entry, _, nominal in _billed_card_occurrences(
         db, entries, {card.id: card}, begin, datetime.max))
 
 

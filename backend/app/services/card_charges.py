@@ -51,6 +51,7 @@ from app.models.transaction import Transaction, TransactionType, pending_face
 from app.services import forecast as fc
 from app.services.fx import FxRates
 from app.services.missed import split_pending_links
+from app.services.payment_dates import effective, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible, plan_kind
 from app.services.statements import resolve_cycle_fields
 
@@ -255,7 +256,8 @@ def _entry_charge(e: dict, entry: BudgetEntry, card: Account, collector: fc.FxCo
     when, original = _event_times(e)
     row = _card_row(e, card)
     return _full(redactor.view(entry), when=when, original=original,
-                 occurrence=(original or when).date(), name=e["name"],
+                 occurrence=fc._naive(e.get("occurrence") or original or when).date(),
+                 name=e["name"],
                  kind=entry_kind(entry, card), source="budget_entry", source_id=entry.id,
                  row=row, key=fc._row_key(e, row["currency"]), collector=collector,
                  can_mark_paid=bool(redactor.access.permissions(entry)["can_post"]),
@@ -312,7 +314,8 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             redactor: Redactor) -> Dict[int, List[dict]]:
     """``{card id: [missed item]}``: each open-ended subscription or bill on a
     card, seen in full or shared_full, with occurrences before today that no
-    posted row records (``count``), also counting today's (``due_count``).
+    posted row records (``count``), also counting today's (``due_count``), both
+    on the effective date; ``oldest`` is nominal, as Mark paid sends it back.
     ``unlinked_count``, ``oldest_unlinked`` and ``pending_transaction_ids``
     split ``count`` by pending linked rows (``missed.split_pending_links``)."""
     entries = [e for e in db.query(BudgetEntry).filter(
@@ -323,7 +326,9 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
         and entry_kind(e, cards[e.account_id]) in ("subscription", "bill")
         and redactor.access.readable(e) and redactor.view(e) != LIMITED]
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today)
-    missed = {entry_id: [occ for occ in due if occ.date() < today]
+    forced = load_entry_overrides(db, [e.id for e in entries])
+    missed = {entry_id: [occ for occ in due
+                         if effective(forced.get(entry_id), occ.date()) < today]
               for entry_id, due in unrecorded.items()}
     links = split_pending_links(db, entries, missed, redactor)
     out: Dict[int, List[dict]] = {}

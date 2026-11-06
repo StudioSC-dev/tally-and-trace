@@ -2,8 +2,9 @@
 
 A **candidate** for occurrence ``o`` of entry ``e`` is a transaction that is a
 DEBIT on ``e``'s card, owned by ``e``'s creator, linked to no entry, in the
-card's currency for exactly ``e.amount``, dated within three days of ``o``,
-posted or pending. Candidates are the creator's rows only: a link counts only
+card's currency for exactly ``e.amount``, dated within three days of ``o``'s
+effective date (a forced date, services/payment_dates.py, is where the charge is
+expected; the keys stay nominal), posted or pending. Candidates are the creator's rows only: a link counts only
 for a row the entry's creator owns (``forecast._linked_rows``).
 
 A month is **held** when it is due, unrecorded, has no linked row and has a
@@ -18,7 +19,7 @@ the functions, so ``forecast`` can import this module without a cycle.
 """
 from collections import Counter
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
@@ -26,26 +27,29 @@ from sqlalchemy.orm import Session
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType
+from app.services.payment_dates import Moved, effective, load_entry_overrides
 
 WINDOW_DAYS = 3  # a candidate is dated within this many days of the occurrence
 
 
-def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime]
-                         ) -> Dict[date, List[Transaction]]:
-    """``{occurrence day: [candidate]}`` for ``entry``'s ``occurrences``, one query.
+def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime],
+                         moved: Optional[Moved] = None) -> Dict[date, List[Transaction]]:
+    """``{occurrence day: [candidate]}`` for ``entry``'s nominal ``occurrences``,
+    one query, each window centred on the effective date (``moved``).
 
     Days with no candidate are left out. Each list is in id order; a
     transaction may be listed under two days.
     """
-    days = sorted({occ.date() for occ in occurrences})
+    days = {occ.date(): effective(moved, occ.date()) for occ in sorted(occurrences)}
     if not days or entry.account_id is None:
         return {}
     card = db.get(Account, entry.account_id)
     if card is None:
         return {}
     window = timedelta(days=WINDOW_DAYS)
-    low = datetime.combine(days[0] - window, datetime.min.time())
-    high = datetime.combine(days[-1] + window + timedelta(days=1), datetime.min.time())
+    low = datetime.combine(min(days.values()) - window, datetime.min.time())
+    high = datetime.combine(max(days.values()) + window + timedelta(days=1),
+                            datetime.min.time())
     rows = (
         db.query(Transaction)
         .filter(Transaction.transaction_type == TransactionType.DEBIT,
@@ -60,9 +64,9 @@ def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime]
         .all()
     )
     out: Dict[date, List[Transaction]] = {}
-    for day in days:
+    for day, centre in days.items():
         found = [txn for txn in rows
-                 if abs((txn.transaction_date.date() - day).days) <= WINDOW_DAYS]
+                 if abs((txn.transaction_date.date() - centre).days) <= WINDOW_DAYS]
         if found:
             out[day] = found
     return out
@@ -93,10 +97,10 @@ def held_assignment(db: Session, entries, through: date) -> Dict[Tuple[int, date
     each one is held by.
 
     Each due unrecorded occurrence with no linked row (posted or pending) takes
-    one unused candidate. Occurrences go in order of (day, entry id); each
-    takes, of its unused candidates, the one with the smallest day gap, then
-    the earliest ``transaction_date``, then the lowest id. The result depends
-    only on the universe and ``through``.
+    one unused candidate. Occurrences go in order of (effective date, entry
+    id); each takes, of its unused candidates, the one with the smallest day gap
+    from that date, then the earliest ``transaction_date``, then the lowest id.
+    The result depends only on the universe, its forced dates and ``through``.
     """
     from app.services.forecast import _linked_rows, _naive, unrecorded_occurrences
 
@@ -106,21 +110,23 @@ def held_assignment(db: Session, entries, through: date) -> Dict[Tuple[int, date
     linked = {(entry_id, _naive(when).date()) for entry_id, when, _, _ in _linked_rows(
         db, [e.id for e in universe], occurrence_match=True)}
     unrecorded = unrecorded_occurrences(db, universe, through)
-    open_months: List[Tuple[date, int]] = []
+    forced = load_entry_overrides(db, [e.id for e in universe])
+    open_months: List[Tuple[date, int, date]] = []
     candidates: Dict[Tuple[int, date], List[Transaction]] = {}
     for entry in universe:
+        moved = forced.get(entry.id)
         days = [occ for occ in unrecorded[entry.id] if (entry.id, occ.date()) not in linked]
-        for day, found in duplicate_candidates(db, entry, days).items():
+        for day, found in duplicate_candidates(db, entry, days, moved).items():
             candidates[(entry.id, day)] = found
-            open_months.append((day, entry.id))
+            open_months.append((effective(moved, day), entry.id, day))
 
     used: set = set()
     held: Dict[Tuple[int, date], int] = {}
-    for day, entry_id in sorted(open_months):
+    for centre, entry_id, day in sorted(open_months):
         free = [txn for txn in candidates[(entry_id, day)] if txn.id not in used]
         if not free:
             continue
-        best = min(free, key=lambda txn: (abs((txn.transaction_date.date() - day).days),
+        best = min(free, key=lambda txn: (abs((txn.transaction_date.date() - centre).days),
                                           txn.transaction_date, txn.id))
         used.add(best.id)
         held[(entry_id, day)] = best.id

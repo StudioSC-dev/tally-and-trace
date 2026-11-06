@@ -51,6 +51,11 @@ Every recurring occurrence comes from one stream, ``capped_distinct_days``
 its day, as ``unrecorded_occurrences`` consumes them; on a day with several
 linked rows, posted rows are taken first, then by ascending id.
 
+A forced date (``services/payment_dates.py``) places an occurrence: before
+today, inside the window and each check's ``date`` read the effective date,
+while links, held months and each check's ``occurrence_date`` stay nominal. An
+installment's hold counts occurrences, so a forced date cannot change it.
+
 A foreign figure is ``convert(face, rate x (1 + CARD_FX_BUFFER))`` at the
 request's live stored rate, never a row's own ``exchange_rate``; with no rate
 it is unknown (``unknown_count`` in the opening for a ``now`` row, ``unchecked``
@@ -84,6 +89,7 @@ from app.models.transaction import Transaction, TransactionType, pending_face, t
 from app.services import forecast as fc
 from app.services.fx import FxRates, convert
 from app.services.installment_duplicates import held_occurrences
+from app.services.payment_dates import Moved, effective, extend, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
 from app.services.statements import (
     _card_rows, iter_cycles_from, load_due_overrides, statement_history,
@@ -160,14 +166,18 @@ class _Converter:
         } for _, r in sorted(self.used.items())]
 
 
-def _stream(entry, end: datetime, *, whole: bool) -> List[datetime]:
+def _stream(entry, end: datetime, *, whole: bool, moved: Optional[Moved] = None
+            ) -> List[datetime]:
     """The entry's occurrences from ``next_occurrence`` (``capped_distinct_days``).
 
     ``whole`` (a capped installment) walks every remaining occurrence, however
     far: one step per day to ``end`` as ``unrecorded_occurrences`` bounds it,
     and never fewer steps than the cap plus two, so a long plan is never cut
-    short at the window's end. Otherwise the walk stops at ``end``.
+    short at the window's end. Otherwise the walk stops at ``end``, or the reach
+    past it for an entry with forced dates (``moved``).
     """
+    if moved and not whole:
+        end = extend(end)
     start = fc._naive(entry.next_occurrence)
     bound = max((end - start).days, 0) + 2
     if whole:
@@ -226,6 +236,7 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
         linked.setdefault((entry_id, fc._naive(when).date()), []).append(txn_id)
     reviewed = [e for e in entries if fc.reviewed_card_installment(e, cards[e.account_id])]
     held = held_occurrences(db, reviewed, start.date()) if reviewed else Counter()
+    forced = load_entry_overrides(db, [e.id for e in entries])
     entry_by_id = {e.id: e for e in entries}
 
     def view(record) -> str:
@@ -237,7 +248,7 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
             card, start, end, fx,
             rows=[r for r in rows if _touches(r, card.id)],
             entries=[e for e in entries if e.account_id == card.id],
-            linked=linked, held=held, entry_by_id=entry_by_id, view=view)
+            linked=linked, held=held, forced=forced, entry_by_id=entry_by_id, view=view)
     return out
 
 
@@ -251,12 +262,14 @@ def _touches(txn: Transaction, card_id: int) -> bool:
 def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
                  rows: List[Transaction], entries: List[BudgetEntry],
                  linked: Dict[tuple, List[int]], held: Counter,
-                 entry_by_id: Dict[int, BudgetEntry], view) -> dict:
+                 forced: Dict[int, Moved], entry_by_id: Dict[int, BudgetEntry],
+                 view) -> dict:
     """One card's ``CardCredit`` (the module docstring).
 
     ``linked`` is ``{(entry id, day): [transaction id]}`` (posted rows first),
     consumed here; ``held`` is ``Counter[(entry id, day)]`` of the held months
-    (``credit_for_cards``), read only. The streams pre-pass drops each
+    (``credit_for_cards``), read only; ``forced`` is each entry's forced dates.
+    The streams pre-pass keeps ``(effective, nominal)`` pairs and drops each
     occurrence a linked row takes, and each held installment month: its
     possible duplicate is not added to ``replacing_ids`` and keeps its own
     placement, so the month is counted once, as that charge.
@@ -287,18 +300,21 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
     streams = []
     for entry in entries:
         installment = is_card_installment(entry, card)
+        moved = forced.get(entry.id)
         occurrences = []
-        for occ in _stream(entry, end, whole=installment):
-            key = (entry.id, occ.date())
+        for occ in _stream(entry, end, whole=installment, moved=moved):
+            nominal = occ.date()
+            day = effective(moved, nominal)
+            key = (entry.id, nominal)
             taken = linked.get(key)
             if taken:
                 txn_id = taken.pop(0)
-                if installment or occ.date() < s_day:
+                if installment or day < s_day:
                     replacing_ids.add(txn_id)
                 continue
             if installment and held[key]:
                 continue
-            occurrences.append(occ.date())
+            occurrences.append((day, nominal))
         streams.append((entry, installment, occurrences))
 
     # --- transactions ---------------------------------------------------------
@@ -369,8 +385,8 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
         if view(entry) == LIMITED:
             # Left out: the opening when it holds or missed anything, else
             # every check from its first occurrence in the window.
-            before = [d for d in occurrences if d < s_day]
-            inside = [d for d in occurrences if s_day <= d < e_day]
+            before = [d for d, _ in occurrences if d < s_day]
+            inside = [d for d, _ in occurrences if s_day <= d < e_day]
             if (installment and occurrences) or before:
                 uncounted_shared += 1
                 opening_uncounted = True
@@ -386,14 +402,14 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
                     opening_uncounted = True
                 else:
                     hold += each * len(occurrences)
-            for d in occurrences:
+            for d, nominal in occurrences:
                 if s_day <= d < e_day:
                     walk.append((d, _CHARGE, (1, entry.id), {
                         "source": "budget_entry", "source_id": entry.id, "date": d,
-                        "occurrence_date": d, "kind": "installment", "amount": each,
+                        "occurrence_date": nominal, "kind": "installment", "amount": each,
                         "subtract": False}))
             continue
-        before = [d for d in occurrences if d < s_day]
+        before = [d for d, _ in occurrences if d < s_day]
         if before:
             total = each * len(before) if each is not None else None
             if total is None:
@@ -403,11 +419,11 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
                 missed_total += total
             missed.append({"entry_id": entry.id, "name": entry.name, "kind": kind,
                            "count": len(before), "total": _amount(total)})
-        for d in occurrences:
+        for d, nominal in occurrences:
             if s_day <= d < e_day:
                 walk.append((d, _CHARGE, (1, entry.id), {
                     "source": "budget_entry", "source_id": entry.id, "date": d,
-                    "occurrence_date": d, "kind": kind, "amount": each,
+                    "occurrence_date": nominal, "kind": kind, "amount": each,
                     "subtract": True}))
 
     available_now = limit - (balance_owed + pending_total + hold + missed_total)
@@ -557,7 +573,9 @@ def unposted_months(db: Session, card: Account, caller,
     ``post_plan``'s ``due`` through Manila's today (no posted row stands for
     it) that has no pending linked row (that row is already on the card) and
     is not held (its possible duplicate is), on a cycle that closed before
-    Manila's today (a month in the open cycle is on no closed statement).
+    Manila's today (a month in the open cycle is on no closed statement), the
+    cycle read on the effective date: a month forced into the open cycle is not
+    on a closed one.
     One ``held_occurrences`` call (the canonical assignment). ``postable`` is
     whether the month is in ``post_plan(..., caller)``'s ``postable``: what
     the caller's Post now would record. Computed over cycles, not recorded
@@ -581,6 +599,7 @@ def unposted_months(db: Session, card: Account, caller,
     if due_overrides is None:
         due_overrides = load_due_overrides(db, [card.id])[card.id]
     held = held_occurrences(db, entries, today)
+    forced = load_entry_overrides(db, [e.id for e in entries])
     pending = {(entry_id, fc._naive(when).date())
                for entry_id, when, _, is_posted in fc._linked_rows(
                    db, [e.id for e in entries], occurrence_match=True)
@@ -594,7 +613,8 @@ def unposted_months(db: Session, card: Account, caller,
             day = occ.date()
             if (entry.id, day) in pending or held[(entry.id, day)]:
                 continue
-            cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+            billed_on = effective(forced.get(entry.id), day)
+            cycle = next(iter_cycles_from(card, billed_on, datetime.min, through=billed_on,
                                           due_overrides=due_overrides), None)
             if cycle is None or cycle["close"].date() >= today:
                 continue

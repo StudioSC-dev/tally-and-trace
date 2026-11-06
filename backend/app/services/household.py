@@ -293,10 +293,11 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     for entry in entries:
         if entry.account_id in billed and entry.transfer_to_account_id is None:
             card = billed[entry.account_id]
-            for _, when in _billed_card_occurrences(db, [entry], billed, start, end):
+            for _, when, nominal in _billed_card_occurrences(db, [entry], billed, start, end):
                 if when < start:
                     continue  # billed on its statement, but not listed: before the window
-                occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount))
+                occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount),
+                                 {"occurrence": nominal})
                 out.append(occ)
                 if entry.entry_type != BudgetEntryType.EXPENSE:
                     # Income on a billed card is never covered: in its account's currency.

@@ -680,18 +680,6 @@ def test_a_date_outside_the_record_range_is_a_422(world):
     _force(client, me, entry, "2000-01-05", "1999-12-30", expect=422)
 
 
-def test_a_card_entry_is_a_422(world):
-    client, me, bank = world["client"], world["me"], world["bank"]
-    card = sw_post(client, me, "/accounts/", {
-        "name": "Card", "account_type": "credit", "balance": 0, "billing_cycle_start": 4,
-        "days_until_due_date": 25, "payment_account_id": bank})["id"]
-    subscription = _entry(client, me, card, "2026-10-20", name="Video", amount=500)
-
-    r = _force(client, me, subscription, "2026-10-20", "2026-10-25", expect=422)
-
-    assert "card" in r.json()["detail"]
-
-
 def test_a_body_with_an_unknown_field_is_a_422(world):
     client, me, bank = world["client"], world["me"], world["bank"]
     entry = _entry(client, me, bank, "2026-10-20")
@@ -755,40 +743,6 @@ def test_resuming_past_paused_months_deletes_the_overrides(world):
     _edit(client, me, entry, {"is_active": True})
 
     assert _overrides(db, budget_entry_id=entry) == []
-
-
-def test_moving_an_entry_onto_a_card_deletes_its_overrides(world):
-    """No half-built card path: a card entry has no forced dates until they are read."""
-    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
-    card = sw_post(client, me, "/accounts/", {
-        "name": "Card", "account_type": "credit", "balance": 0, "billing_cycle_start": 4,
-        "days_until_due_date": 25, "payment_account_id": bank})["id"]
-    second = _checking(client, me, name="Second")
-    entry = _entry(client, me, bank, "2026-10-20")
-    _force(client, me, entry, "2026-10-20", "2026-10-22")
-
-    _edit(client, me, entry, {"account_id": second})
-    assert _overrides(db, budget_entry_id=entry) == [("2026-10-20", "2026-10-22")]
-
-    _edit(client, me, entry, {"account_id": card})
-    assert _overrides(db, budget_entry_id=entry) == []
-
-
-def test_turning_an_account_into_a_card_deletes_its_entries_overrides(world):
-    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
-    second = _checking(client, me, name="Second")
-    moved = _entry(client, me, second, "2026-10-20")
-    other = _entry(client, me, bank, "2026-10-20", name="Other")
-    _force(client, me, moved, "2026-10-20", "2026-10-22")
-    _force(client, me, other, "2026-10-20", "2026-10-22")
-
-    r = client.put(f"{API}/accounts/{second}", json={
-        "account_type": "credit", "billing_cycle_start": 4, "days_until_due_date": 25,
-        "payment_account_id": bank}, headers=me["headers"])
-
-    assert r.status_code == 200, r.text
-    assert _overrides(db, budget_entry_id=moved) == []
-    assert _overrides(db, budget_entry_id=other) == [("2026-10-20", "2026-10-22")]
 
 
 def test_a_loan_first_date_change_deletes_its_overrides(world):
