@@ -683,10 +683,9 @@ def planned_cover(txn: Transaction) -> Optional[Tuple[int, date]]:
 def stop_autopay(db: Session, loan_id: Optional[int]) -> None:
     """Clear the loan's autopay, without committing: its settled cash fell, or a
     recurring transfer or planned payment that held it back went, so a due date may
-    stand open and
-    it must post only with a confirmed count. A failed bank debit is when an
-    owner deletes a payment. The caller holds the account lock, which a run reads
-    the flag under."""
+    stand open and it must post only with a confirmed count. A failed bank debit is
+    when an owner deletes a payment. The caller holds the account lock, which a run
+    reads the flag under."""
     loan = db.get(Account, loan_id) if loan_id else None
     if loan is not None and loan.auto_post_enabled:
         loan.auto_post_enabled = False
