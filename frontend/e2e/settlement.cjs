@@ -499,6 +499,7 @@ async function pageOpen(browser) {
   await settle(page)
   const runs = calls.filter((c) => c.what === 'post-due')
   check('(g) the page-open run was sent once, and posted both', [runs.length, runs[0]?.body, runs[0]?.json?.posted], [1, { trigger: 'page_open' }, 2])
+  check('(g) the page says what posted, with no installment wording', (await page.locator('[data-testid="due-page-open-result"]').textContent({ timeout: 10000 }).catch(() => null))?.trim(), 'Posted 2 due payments')
   const rows = await entryRows(u, rent.id)
   check('(g) the rent posted on its own day, linked', rows.map((t) => [day10(t.transaction_date), t.is_posted]), [[today, true]])
   check('(g) the bank paid the rent and the loan payment', (await balanceOf(u, bank.id)) < 1000 + 50000 - 5000, true)

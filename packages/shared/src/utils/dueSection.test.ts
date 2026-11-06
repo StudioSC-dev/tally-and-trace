@@ -951,8 +951,8 @@ describe('postNowCount', () => {
     expect(postNowText(1)).toBe('Post 1 due installment month now')
     expect(postNowText(3)).toBe('Post 3 due installment months now')
     expect(postedOnOpenText(0)).toBeNull()
-    expect(postedOnOpenText(1)).toBe('Posted 1 due installment month')
-    expect(postedOnOpenText(2)).toBe('Posted 2 due installment months')
+    expect(postedOnOpenText(1)).toBe('Posted 1 due payment')
+    expect(postedOnOpenText(2)).toBe('Posted 2 due payments')
   })
 })
 

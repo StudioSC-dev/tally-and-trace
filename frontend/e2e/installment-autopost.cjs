@@ -46,7 +46,7 @@
 //       postable unposted months opens Pay with "Full leaves out 2 installment months
 //       not yet posted" and Post due installments now
 //   (h) a reviewed installment due today is posted by opening Transactions, with no click:
-//       "Posted 1 due installment month", the API has the linked row, the due-today line
+//       "Posted 1 due payment", the API has the linked row, the due-today line
 //       is gone, leaving and coming back sends no page-open request, and a viewer opening
 //       Transactions sends none
 //   (i) the screen loader stays hidden while the page-open POST is held and input works;
@@ -655,7 +655,7 @@ const isPageOpenPath = (url) => /\/budget-entries\/post-due-installments$/.test(
 const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
 const isPostDue = (r) => r.method() === 'POST' && isPageOpenPath(r.url())
 const openResult = (page) => testId(page, 'due-page-open-result')
-const POSTED_ONE = 'Posted 1 due installment month'
+const POSTED_ONE = 'Posted 1 due payment'
 
 /** A request log for counts, and the bodies of the post-due-installments POSTs (logRequests keeps no bodies). */
 function watchPostDue(page) {

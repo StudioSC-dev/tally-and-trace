@@ -835,10 +835,10 @@ export function postedResultText(posted: number): string {
   return `Posted ${posted}`
 }
 
-/** The quiet line after a page-open run posted months; null when it posted none. */
+/** The quiet line after a page-open run posted payments of any kind (installments, cash entries, loans); null when it posted none. */
 export function postedOnOpenText(posted: number): string | null {
   if (posted <= 0) return null
-  return `Posted ${posted} due installment ${posted === 1 ? 'month' : 'months'}`
+  return `Posted ${posted} due ${posted === 1 ? 'payment' : 'payments'}`
 }
 
 /**
