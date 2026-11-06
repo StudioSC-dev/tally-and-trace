@@ -5,7 +5,9 @@ import { Link } from '@tanstack/react-router'
 import {
   canPostAllDue,
   defaultMarkPaidDay,
+  effectiveDay,
   formatEntryDate,
+  isForced,
   isDetailed,
   markPaidAmountEdited,
   markPaidAmountShown,
@@ -90,7 +92,8 @@ function selectItems(occurrences: readonly EntryOccurrence[], omitted: number): 
 }
 
 const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => {
-  const day = occurrence.occurrence_date
+  // Overdue, due today and the listed date read the effective date; the value stays the scheduled day.
+  const day = effectiveDay(occurrence.occurrence_date, occurrence.effective_date)
   const due = day < today ? ' · overdue' : day === today ? ' · due today' : ''
   const linked =
     occurrence.linked === 'pending' || occurrence.linked === 'posted'
@@ -98,7 +101,10 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
       : occurrence.linked === 'ambiguous'
         ? ' · more than one linked transaction'
         : ''
-  return `${formatEntryDate(day)}${due}${linked}`
+  const moved = isForced(occurrence.occurrence_date, occurrence.effective_date)
+    ? ` (moved from ${formatEntryDate(occurrence.occurrence_date)})`
+    : ''
+  return `${formatEntryDate(day)}${moved}${due}${linked}`
 }
 
 /**
@@ -237,13 +243,13 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const sendsAmount = markPaidSendsAmount({ needsCharged, editableAmount, linked: selected?.linked, edited: markPaidAmountEdited({ linked: selected?.linked, input: amountInput }) })
   const showsAmount = needsCharged || editableAmount
 
-  const defaultDay = selected && today ? defaultMarkPaidDay({ kind, occurrenceDate: selected.occurrence_date, today }) : ''
+  const defaultDay = selected && today ? defaultMarkPaidDay({ kind, occurrenceDate: selected.occurrence_date, effectiveDate: selected.effective_date, today }) : ''
   const day = dayInput ?? defaultDay
   // A card installment is dated on its occurrence; another day may land it on another statement.
   const card = source?.account_type === 'credit' ? source : undefined
   const cycleWarning =
-    kind === 'installment' && card && selected && day && !sameStatementCycle(card, selected.occurrence_date, day)
-      ? `This day falls on the statement closing ${formatEntryDate(statementCycleClose(card, day) ?? day)}, not the one closing ${formatEntryDate(statementCycleClose(card, selected.occurrence_date) ?? selected.occurrence_date)} that this installment belongs to.`
+    kind === 'installment' && card && selected && day && !sameStatementCycle(card, effectiveDay(selected.occurrence_date, selected.effective_date), day)
+      ? `This day falls on the statement closing ${formatEntryDate(statementCycleClose(card, day) ?? day)}, not the one closing ${formatEntryDate(statementCycleClose(card, effectiveDay(selected.occurrence_date, selected.effective_date)) ?? selected.occurrence_date)} that this installment belongs to.`
       : null
 
   const skippedSummary = selected && listing ? skippedBefore(listing, occurrences, selected) : null

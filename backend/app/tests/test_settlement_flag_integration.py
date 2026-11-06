@@ -229,6 +229,45 @@ def test_a_limited_row_carries_no_settlement(sw, sw_client, monkeypatch):
     assert limited and all("settlement" not in row for row in limited)
 
 
+# --- settlement on the entry responses --------------------------------------------------------
+
+def _listed(client, who, entry_id) -> dict:
+    r = client.get(f"{API}/budget-entries/", headers=who["headers"], params={"limit": 100})
+    assert r.status_code == 200, r.text
+    (row,) = [e for e in r.json()["items"] if e["id"] == entry_id]
+    return row
+
+
+def test_entry_responses_name_the_settlement_from_the_flag(world, sw_db):
+    client, o, checking, card = world["client"], world["o"], world["checking"], world["card"]
+    savings = _account(client, o, "Savings", "savings")
+    wallet = _account(client, o, "Wallet", "cash", is_spending_wallet=True)
+    stale = _entry(client, o, checking, "Old rent", is_autopay=True)
+    assert stale["settlement"] == "manual"
+    _switch_on(sw_db, stale["id"])
+    assert _listed(client, o, stale["id"])["settlement"] == "autopay"
+
+    installment = _entry(client, o, card, "Tablet", next_occurrence=TODAY,
+                         end_mode="after_occurrences", max_occurrences=12)
+    assert installment["settlement"] == "autopay"
+    for none in (_entry(client, o, card, "Streaming", billing_kind="subscription"),
+                 _entry(client, o, card, "Power", billing_kind="bill"),
+                 _entry(client, o, checking, "Top-up", transfer_to_account_id=savings),
+                 _entry(client, o, checking, "Salary", entry_type="income"),
+                 _entry(client, o, wallet, "Lunch")):
+        assert none["settlement"] is None, none["name"]
+        assert _listed(client, o, none["id"])["settlement"] is None, none["name"]
+
+
+def test_a_shared_full_entry_names_it_and_a_limited_one_does_not(sw, sw_client, monkeypatch):
+    _pin_clock(monkeypatch, REF)
+    entry = _entry(sw_client, sw["a"], sw["joint"])
+    shared = _listed(sw_client, sw["b"], entry["id"])
+    assert (shared["view"], shared["settlement"]) == ("shared_full", "manual")
+    limited = _listed(sw_client, sw["v"], entry["id"])
+    assert limited["view"] == "limited" and "settlement" not in limited
+
+
 # --- the edit guard ---------------------------------------------------------------------------
 
 @pytest.fixture

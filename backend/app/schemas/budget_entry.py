@@ -16,6 +16,7 @@ from app.schemas.tag import (
 DayRule = Literal["last_weekday"]
 BillingKind = Literal["subscription", "bill"]
 EntryKind = Literal["subscription", "installment", "bill", "cash"]
+Settlement = Literal["autopay", "manual"]
 # The Transactions card tab that lists an entry's occurrences
 # (services/recurring_kinds.py ``plan_kind``); null is Due and Upcoming.
 PlanKind = Literal["subscription", "installment"]
@@ -134,6 +135,8 @@ class BudgetEntryFields(BudgetEntryBase):
     occurrences_paid: Optional[int] = None
     # Read-only, derived (services/recurring_kinds.py); null for income and transfers.
     kind: Optional[EntryKind] = None
+    # Read-only, derived from the flag; null when the entry names no settlement.
+    settlement: Optional[Settlement] = None
     # Read-only (STU-343 Plan B): set by create and the review, never by an edit.
     installment_reviewed: bool = False
     auto_post_enabled: bool = False
@@ -184,6 +187,7 @@ class SharedFullRecurringEntry(BaseModel):
     occurrences_paid: Optional[int] = None
     billing_kind: Optional[BillingKind] = None
     kind: Optional[EntryKind] = None
+    settlement: Optional[Settlement] = None
     installment_reviewed: bool = False
     auto_post_enabled: bool = False
     category_name: Optional[str] = None

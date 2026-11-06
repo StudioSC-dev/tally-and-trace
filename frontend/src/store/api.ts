@@ -60,6 +60,8 @@ export type {
   NetDisposableIncome,
   DashboardSnapshot,
   BudgetEntryMaterializeInput,
+  ForcedDateInput,
+  ForcedDateResult,
   EntryOccurrence,
   EntryOccurrences,
   MaterializeOutcome,
@@ -121,6 +123,8 @@ import type {
   AllocationProgress,
   GoalsSummary,
   BudgetEntryMaterializeInput,
+  ForcedDateInput,
+  ForcedDateResult,
   EntryOccurrences,
   MaterializeOutcome,
   MaterializeDueResult,
@@ -397,6 +401,23 @@ export const accountingApi = createApi({
     materializeBudgetEntry: builder.mutation<MaterializeOutcome, { id: number; data: BudgetEntryMaterializeInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data }),
       transformResponse: (transaction: Transaction, meta) => ({ transaction, ...readMaterializeHeaders(responseHeaders(meta)) }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    // Force an occurrence onto another date (its scheduled day stays its identity), or put it back.
+    setOccurrenceDate: builder.mutation<ForcedDateResult, { id: number; day: string; data: ForcedDateInput }>({
+      query: ({ id, day, data }) => ({ url: `budget-entries/${id}/occurrences/${day}/date`, method: 'PUT', body: data }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    clearOccurrenceDate: builder.mutation<void, { id: number; day: string }>({
+      query: ({ id, day }) => ({ url: `budget-entries/${id}/occurrences/${day}/date`, method: 'DELETE' }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    setLoanDueDate: builder.mutation<ForcedDateResult, { id: number; day: string; data: ForcedDateInput }>({
+      query: ({ id, day, data }) => ({ url: `accounts/${id}/loan-due-dates/${day}/date`, method: 'PUT', body: data }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    clearLoanDueDate: builder.mutation<void, { id: number; day: string }>({
+      query: ({ id, day }) => ({ url: `accounts/${id}/loan-due-dates/${day}/date`, method: 'DELETE' }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
     }),
     // Post N due: every due occurrence of a non-capped subscription or cash expense at once.
@@ -782,6 +803,10 @@ export const {
   useDeleteBudgetEntryMutation,
   useMaterializeBudgetEntryMutation,
   useMaterializeDueBudgetEntryMutation,
+  useSetOccurrenceDateMutation,
+  useClearOccurrenceDateMutation,
+  useSetLoanDueDateMutation,
+  useClearLoanDueDateMutation,
   useGetEntryOccurrencesQuery,
   useGetUpcomingOccurrencesQuery,
   useGetInstallmentPlansQuery,

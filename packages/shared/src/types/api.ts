@@ -127,7 +127,7 @@ export interface Account {
 
 /** POST /accounts/ and PUT /accounts/{id}. */
 export type AccountInput = Partial<
-  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at' | 'auto_post_enabled'>
 > &
   TagIdsInput
 
@@ -174,8 +174,10 @@ export interface LoanSchedulePayment {
 export interface LoanScheduleRow {
   /** Payment number in the loan's term. */
   number: number
-  /** ISO date. */
+  /** ISO date; the scheduled day, which identifies the due date. */
   due_date: string
+  /** The forced date, else `due_date`. Absent from an older API. */
+  effective_date?: string
   payment: number | null
   /** Null on a `fixed` loan: the bank's split is not known in advance. */
   principal: number | null
@@ -204,6 +206,8 @@ export interface LoanSchedule {
   payments_made: number
   payments_left: number | null
   next_due_date: string | null
+  /** `next_due_date` on its forced date. Absent from an older API. */
+  next_due_effective_date?: string | null
   proposed_split: LoanScheduleSplit | null
   payments: LoanSchedulePayment[]
   upcoming: LoanScheduleRow[]
@@ -439,6 +443,8 @@ interface RecurringEntryDetail {
   billing_kind?: BillingKind | null
   /** Read-only, derived by the server. null for income and transfers. */
   kind?: RecurringKind | null
+  /** Read-only, derived from the flag by the server. null when the entry names no settlement. */
+  settlement?: Settlement | null
   /**
    * Card installments: the settlement status. True once the installment was reviewed
    * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
@@ -501,7 +507,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement'
   >
 > &
   TagIdsInput & {
@@ -666,7 +672,10 @@ export interface MaterializeOutcome {
 
 /** One occurrence in GET /budget-entries/{id}/occurrences. */
 export interface EntryOccurrence {
+  /** The scheduled day: the occurrence's identity, and what Mark paid sends back. */
   occurrence_date: string
+  /** Its forced date, or `occurrence_date`. `due` and the default Mark paid day read it. Absent from an older API. */
+  effective_date?: string
   due: boolean
   /** A pending row will be posted, a posted one only moves the schedule on, an ambiguous one blocks. */
   linked: 'pending' | 'posted' | 'ambiguous' | null
@@ -1032,6 +1041,8 @@ export interface UpcomingItem extends Partial<Estimate> {
    * capped occurrence is listed on the window start, so `due_date` differs.
    */
   occurrence_date?: string
+  /** Loan items: the scheduled due date (`YYYY-MM-DD`), when the date was forced. */
+  loan_due_date?: string
   /** The item's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
   /** Any item listed overdue on the window start: its real day (`YYYY-MM-DD`); `due_date` is the listing day. */
@@ -1070,6 +1081,8 @@ export interface Payable extends Partial<Estimate> {
   currency?: CurrencyCode
   /** Budget-entry rows: the occurrence this payable stands for (`YYYY-MM-DD`). */
   occurrence_date?: string
+  /** Loan rows: the scheduled due date (`YYYY-MM-DD`), which a forced `due_date` or `original_date` leaves as the identity. */
+  loan_due_date?: string
   /** The row's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
   /** Rows listed overdue on the window start: the real day (`YYYY-MM-DD`); `due_date` is the listing day. */
@@ -1586,6 +1599,8 @@ export interface RecurringMissed {
   /** Occurrences before today. */
   count: number
   oldest: string
+  /** `oldest` on its forced date, for display. Absent from an older API. */
+  oldest_effective?: string
   /** Of `count`, the occurrences with no pending linked row. */
   unlinked_count: number
   /** The oldest of those; null when `unlinked_count` is 0. */
@@ -1610,8 +1625,10 @@ export interface UpcomingOccurrence {
   view: 'full' | 'shared_full'
   entry_id: number
   name: string
-  /** `YYYY-MM-DD`. */
+  /** `YYYY-MM-DD`: the scheduled day, the occurrence's identity. */
   occurrence_date: string
+  /** The forced date, or `occurrence_date`; the list is filtered and sorted on it. Absent from an older API. */
+  effective_date?: string
   entry_type: BudgetEntryType
   is_transfer: boolean
   /** The entry's derived kind (a card kind, `cash`); null for income and transfers. */
@@ -2034,4 +2051,22 @@ export interface DashboardSnapshot {
   fx: FxMeta
   /** The Manila day the snapshot was computed for (`YYYY-MM-DD`); absent from an older API. */
   today?: string
+}
+
+// ─── Forced dates ────────────────────────────────────────────────────────────
+
+/** Body of `PUT /budget-entries/{id}/occurrences/{day}/date` and `PUT /accounts/{id}/loan-due-dates/{day}/date`. */
+export interface ForcedDateInput {
+  effective_date: string
+}
+
+/**
+ * The reply to setting a forced date. A card entry also reports the statement now billing
+ * the charge (null on a card with no cycle settings).
+ */
+export interface ForcedDateResult {
+  occurrence_date: string
+  effective_date: string
+  statement_close?: string | null
+  statement_due?: string | null
 }

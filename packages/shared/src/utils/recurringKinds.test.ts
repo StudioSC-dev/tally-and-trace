@@ -2,8 +2,17 @@ import { describe, it, expect } from 'vitest'
 import type { BudgetEntry, FullBudgetEntry, LimitedBudgetEntry, RecordPermissions, RecurringKind } from '../index'
 import {
   KIND_LABELS, KIND_ORDER, automaticOffered, billingKindChoices, groupByKind, isCappedEnd, kindChoiceFor, offeredKindChoices,
-  settleKindChoice,
+  settleKindChoice, settlementLabel,
 } from './recurringKinds'
+
+describe('settlementLabel', () => {
+  it('names autopay and manual, and reads Scheduled when the entry names no settlement', () => {
+    expect(settlementLabel('autopay')).toBe('Auto-pay')
+    expect(settlementLabel('manual')).toBe('Manual')
+    expect(settlementLabel(null)).toBe('Scheduled')
+    expect(settlementLabel(undefined)).toBe('Scheduled')
+  })
+})
 
 const perms: RecordPermissions = { can_edit: true, can_delete: true, can_post: true, can_revert: true, can_tag: true }
 

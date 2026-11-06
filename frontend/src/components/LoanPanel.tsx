@@ -1,6 +1,6 @@
 import { LoadingLine } from './Loading'
 import { useState } from 'react'
-import { RECORD_DATE_MIN, recordDateError, recordDateMax } from '@tally-trace/shared'
+import { movedText, RECORD_DATE_MIN, recordDateError, recordDateMax } from '@tally-trace/shared'
 import {
   Account,
   useGetLoanScheduleQuery,
@@ -8,6 +8,8 @@ import {
   useRecordLoanPrepaymentMutation,
 } from '../store/api'
 import { formatCurrency, CurrencyCode } from '../utils/currency'
+import { ForceDateDialog } from './ForceDateDialog'
+import type { ForceDateTarget } from './ForceDateDialog'
 
 /** A calendar date (YYYY-MM-DD) shown without a timezone shift. */
 const formatDueDate = (value: string): string => {
@@ -52,10 +54,78 @@ export function LoanSummary({ account }: { account: Account }) {
       <div>
         <dt className="text-muted">Next due</dt>
         <dd className="mt-1 text-sm font-semibold text-ink">
-          {schedule.next_due_date ? formatDueDate(schedule.next_due_date) : 'Not set'}
+          {schedule.next_due_date
+            ? schedule.view === 'full' && schedule.next_due_effective_date && schedule.next_due_effective_date !== schedule.next_due_date
+              ? formatDueDate(schedule.next_due_effective_date)
+              : formatDueDate(schedule.next_due_date)
+            : 'Not set'}
         </dd>
       </div>
     </dl>
+  )
+}
+
+/** How many open due dates the loan page lists. */
+const DUE_DATES_SHOWN = 3
+
+/**
+ * The loan's next open due dates, each with Change date for an owner, admin or editor (the
+ * ones who get the full schedule; a viewer's rows already carry the forced date and no
+ * action). A loan has no row in the Transactions "Due and overdue" card, so this is where its
+ * due dates are moved. The scheduled day stays the due date's identity: a moved one reads
+ * "(moved from ...)", and Clear in the dialog puts it back.
+ */
+export function LoanDueDates({ account }: { account: Account }) {
+  const { data: schedule } = useGetLoanScheduleQuery(account.id)
+  const [target, setTarget] = useState<ForceDateTarget | null>(null)
+  const currency = account.currency as CurrencyCode
+  if (!schedule) return null
+
+  const rows =
+    schedule.view === 'full'
+      ? schedule.upcoming.slice(0, DUE_DATES_SHOWN).map((row) => ({
+          day: row.due_date,
+          effective: row.effective_date ?? row.due_date,
+          amount: row.payment,
+        }))
+      : schedule.rows
+          .filter((row) => row.status === 'open')
+          .slice(0, DUE_DATES_SHOWN)
+          .map((row) => ({ day: row.due_date, effective: row.due_date, amount: row.amount }))
+  if (rows.length === 0) return null
+  const canChange = schedule.view === 'full'
+
+  return (
+    <div data-testid="loan-due-dates">
+      <h3 className="text-sm font-semibold text-ink">Next due dates</h3>
+      <ul className="mt-2 divide-y divide-line border border-line">
+        {rows.map((row) => (
+          <li key={row.day} className="flex items-center justify-between gap-3 px-3 py-2 text-sm" data-testid="loan-due-date" data-day={row.day}>
+            <div>
+              <p className="text-ink" data-testid="loan-due-date-text">{movedText(row.day, row.effective)}</p>
+              {row.amount != null && <p className="text-xs text-muted">{formatCurrency(row.amount, currency)}</p>}
+            </div>
+            {canChange && (
+              <button
+                type="button"
+                onClick={() => setTarget({ kind: 'loan', id: account.id, name: account.name, occurrenceDate: row.day, effectiveDate: row.effective })}
+                className="btn-secondary focus-ring"
+                data-testid="loan-change-date"
+              >
+                Change date
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {target && (
+        <ForceDateDialog
+          key={target.occurrenceDate}
+          target={target}
+          onClose={() => setTarget(null)}
+        />
+      )}
+    </div>
   )
 }
 

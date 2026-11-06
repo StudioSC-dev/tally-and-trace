@@ -363,7 +363,7 @@ describe('dueRecurringRows: missed coverage', () => {
   it('drops a capped upcoming row collapsed onto today with last month as its occurrence', () => {
     const s = snap({
       missed: [missed({ entry_id: 3, name: 'Salary', entry_type: 'income', kind: null, capped: true, oldest: '2026-09-25' })],
-      upcoming_this_month: [upcoming({ name: 'Salary', source_id: 3, entry_type: 'income', due_date: TODAY, occurrence_date: '2026-09-25', overdue: true })],
+      upcoming_this_month: [upcoming({ name: 'Salary', source_id: 3, entry_type: 'income', due_date: TODAY, occurrence_date: '2026-09-25', original_date: '2026-09-25', overdue: true })],
     })
     expect(entries(dueRecurringRows(s, TODAY))).toEqual([])
   })
@@ -390,6 +390,19 @@ describe('dueRecurringRows: missed coverage', () => {
     expect(entries(dueRecurringRows(s, TODAY))).toEqual([])
   })
 
+  it('places a forced occurrence by its effective date and keeps the scheduled day as its identity', () => {
+    // Scheduled yesterday, forced to tomorrow: not due yet.
+    const later = snap({ payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-19', due_date: '2026-10-21' })] })
+    expect(entries(dueRecurringRows(later, TODAY))).toEqual([])
+    // Scheduled tomorrow, forced to yesterday: due, overdue, and Mark paid still sends the scheduled day.
+    const earlier = snap({
+      payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-21', due_date: TODAY, original_date: '2026-10-19', overdue: true })],
+    })
+    expect(entries(dueRecurringRows(earlier, TODAY))).toMatchObject([
+      { occurrenceDate: '2026-10-21', effectiveDate: '2026-10-19', overdue: true, key: '2:2026-10-21' },
+    ])
+  })
+
   it('splits on the day passed in: the same row is due on its own day and gone the day before', () => {
     const s = snap({ payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-10-21', due_date: '2026-10-21' })] })
     expect(entries(dueRecurringRows(s, '2026-10-20'))).toEqual([])
@@ -414,7 +427,7 @@ describe('dueRecurringRows: missed coverage', () => {
   it('is covered by a missed row even when every occurrence is linked (count > 0, unlinked 0)', () => {
     const s = snap({
       missed: [missed({ entry_id: 2, name: 'Rent', count: 1, unlinked_count: 0, oldest_unlinked: null, oldest: '2026-09-20' })],
-      payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-09-20', due_date: TODAY, overdue: true })],
+      payables: [payable({ name: 'Rent', source_id: 2, occurrence_date: '2026-09-20', due_date: TODAY, original_date: '2026-09-20', overdue: true })],
     })
     expect(dueRecurringRows(s, TODAY)).toEqual([])
   })
@@ -462,7 +475,7 @@ describe('dueRecurringRows: missed rows and the pending split', () => {
       payables: [
         payable({ name: 'Later', source_id: 10, occurrence_date: '2026-10-25', due_date: '2026-10-25' }),
         payable({ name: 'Today', source_id: 11, occurrence_date: TODAY }),
-        payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true }),
+        payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, original_date: '2026-10-10', overdue: true }),
       ],
     })
     // 'Later' is in Upcoming, not here.
@@ -612,7 +625,7 @@ describe('orderDueRows', () => {
         missed: [missed({ entry_id: 2, name: 'Old Rent', oldest_unlinked: '2026-09-01' })],
         payables: [
           payable({ name: 'Today', source_id: 11 }),
-          payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true }),
+          payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, original_date: '2026-10-10', overdue: true }),
         ],
       }),
       TODAY,
@@ -621,7 +634,7 @@ describe('orderDueRows', () => {
   })
 
   it('puts the oldest overdue row first across kinds', () => {
-    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true })] }), TODAY)
+    const rec = dueRecurringRows(snap({ payables: [payable({ name: 'Late', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, original_date: '2026-10-10', overdue: true })] }), TODAY)
     expect(names(orderDueRows(rec, pend(40, '2026-10-05')))).toEqual(['p40', 'Late'])
   })
 
@@ -629,7 +642,7 @@ describe('orderDueRows', () => {
     const rec = dueRecurringRows(
       snap({
         missed: [missed({ entry_id: 2, name: 'Zed', oldest_unlinked: '2026-10-10' })],
-        payables: [payable({ name: 'Alpha', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, overdue: true })],
+        payables: [payable({ name: 'Alpha', source_id: 12, occurrence_date: '2026-10-10', due_date: TODAY, original_date: '2026-10-10', overdue: true })],
       }),
       TODAY,
     )
@@ -771,7 +784,7 @@ describe('orderDueRows with statements', () => {
   it('orders a day tie as recurring family, then statements by name and card id, then pending', () => {
     const day = '2026-10-10'
     const rec = dueRecurringRows(
-      snap({ payables: [payable({ name: 'Zulu', source_id: 12, occurrence_date: day, due_date: TODAY, overdue: true })] }),
+      snap({ payables: [payable({ name: 'Zulu', source_id: 12, occurrence_date: day, due_date: TODAY, original_date: day, overdue: true })] }),
       TODAY,
     )
     const statements = stmts(

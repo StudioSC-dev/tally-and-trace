@@ -1,4 +1,4 @@
-import { formatEntryDate, RECURRING_ACTION_LABELS, upcomingOccurrenceRow } from '@tally-trace/shared'
+import { movedText, RECURRING_ACTION_LABELS, upcomingOccurrenceRow } from '@tally-trace/shared'
 import type { CreditCheck, RecurringAction, UpcomingOccurrence } from '@tally-trace/shared'
 import { formatCurrency } from '../../utils/currency'
 import type { CurrencyCode } from '../../utils/currency'
@@ -26,6 +26,8 @@ interface Props {
   credit?: CreditCheck | undefined
   onRecord: (action: RecurringAction) => void
   onReview: () => void
+  /** Open the Change date dialog; the button shows only for a caller who can record the occurrence. */
+  onChangeDate?: () => void
 }
 
 /**
@@ -34,7 +36,7 @@ interface Props {
  * "{date} · {account}", "Not recorded" with the auto-post label, the amount and the buttons.
  * The buttons come from `upcomingOccurrenceRow` alone: the server decides what can be recorded.
  */
-export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview }: Props) {
+export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview, onChangeDate }: Props) {
   const view = upcomingOccurrenceRow(occurrence, scheduled)
   const amountClass = occurrence.is_transfer ? 'text-ink' : occurrence.entry_type === 'income' ? 'text-ok' : 'text-danger'
   const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'
@@ -63,7 +65,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
         <div className="min-w-0">
           <p className="text-sm font-medium text-ink" data-testid="upcoming-occurrence-name">{occurrence.name}</p>
           <p className="text-xs text-muted">
-            {formatEntryDate(occurrence.occurrence_date)}
+            <span data-testid="upcoming-occurrence-date">{movedText(occurrence.occurrence_date, occurrence.effective_date)}</span>
             {accountLabel && ` · ${accountLabel}`}
           </p>
           <p className="text-xs text-muted" data-testid="upcoming-occurrence-note">
@@ -77,7 +79,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
             {sign}
             {formatCurrency(occurrence.amount, occurrence.currency as CurrencyCode)}
           </p>
-          {(view.actions.length > 0 || view.review) && (
+          {(view.actions.length > 0 || view.review || (onChangeDate && occurrence.can_mark_paid)) && (
             <div className="flex flex-wrap justify-end gap-2">
               {view.review && (
                 <button type="button" onClick={onReview} className={buttonClass} data-testid="upcoming-review">
@@ -95,6 +97,11 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
                   {RECURRING_ACTION_LABELS[action]}
                 </button>
               ))}
+              {onChangeDate && occurrence.can_mark_paid && (
+                <button type="button" onClick={onChangeDate} className={buttonClass} data-testid="occurrence-change-date">
+                  Change date
+                </button>
+              )}
             </div>
           )}
         </div>

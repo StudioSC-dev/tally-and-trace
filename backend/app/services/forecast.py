@@ -3081,7 +3081,8 @@ def _due_fields(e: dict, today: date) -> dict:
     listed overdue, else its own, both the effective date) is before ``today``.
     ``original_date`` (``YYYY-MM-DD``) is set when the event has one,
     ``occurrence_date`` for a budget entry only: the nominal date (``occurrence``)
-    that Mark paid sends back."""
+    that Mark paid sends back, and ``loan_due_date`` for a loan: its scheduled day
+    (``YYYY-MM-DD``), which a forced date leaves as the identity."""
     original = e.get("original_date")
     real = _naive(original or e["date"]).date()
     occurrence = e.get("occurrence")
@@ -3090,6 +3091,8 @@ def _due_fields(e: dict, today: date) -> dict:
         "overdue": real < today,
         **({"original_date": real.isoformat()} if original else {}),
         **({"occurrence_date": nominal.isoformat()} if e["source"] == "budget_entry" else {}),
+        **({"loan_due_date": (lambda d: (d.date() if isinstance(d, datetime) else d).isoformat())(e["loan_due_date"])}
+           if e["source"] == "loan" and e.get("loan_due_date") is not None else {}),
     }
 
 

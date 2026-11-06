@@ -20,6 +20,7 @@ import {
   dueStatementRows,
   dueTodayLines,
   formatEntryDate,
+  movedText,
   dueTabBadge,
   freshFor,
   installmentPlanView,
@@ -92,6 +93,8 @@ import { apiErrorMessage } from '../../utils/apiError'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
 import { CreditCheckBadge } from '../CreditSummary'
+import { ForceDateDialog } from '../ForceDateDialog'
+import type { ForceDateTarget } from '../ForceDateDialog'
 import { InstallmentReviewDialog } from '../InstallmentReviewDialog'
 import { MarkPaidDialog } from '../MarkPaidDialog'
 import { Pager } from '../Pager'
@@ -292,6 +295,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const [tab, setTab] = useState<DueTab>('due')
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [target, setTarget] = useState<RecordTarget | null>(null)
+  // The occurrence whose date is being changed.
+  const [forceTarget, setForceTarget] = useState<ForceDateTarget | null>(null)
   // The card whose statement is being paid.
   const [payCardId, setPayCardId] = useState<number | null>(null)
   // The installment being reviewed, and whether the review notice is expanded.
@@ -608,6 +613,18 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       action,
     })
 
+  // Change date: the occurrence's date, for a caller who can record it (the server's `can_mark_paid`).
+  const changeDateButton = (entryId: number, name: string, occurrenceDate: string, effectiveDate?: string) => (
+    <button
+      type="button"
+      onClick={() => setForceTarget({ kind: 'entry', id: entryId, name, occurrenceDate, ...(effectiveDate ? { effectiveDate } : {}) })}
+      className={buttonClass}
+      data-testid="row-change-date"
+    >
+      Change date
+    </button>
+  )
+
   const actionButtons = (row: DueEntryRow | DueMissedRow) =>
     row.actions.map((action, index) => (
       <button
@@ -752,7 +769,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       <div>
         <p className="text-sm font-medium text-ink">{row.name}</p>
         <p className="text-xs text-muted">
-          {formatEntryDate(row.occurrenceDate)}
+          <span data-testid="due-date">{movedText(row.occurrenceDate, row.effectiveDate)}</span>
           {row.accountName && ` · ${row.accountName}`}
           {row.overdue && <span className="text-danger" data-testid="due-overdue"> · Overdue</span>}
         </p>
@@ -764,7 +781,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             {estimateText(row.amount, row.currency, row.estimate)}
           </p>
         )}
-        <div className="flex flex-wrap justify-end gap-2">{actionButtons(row)}</div>
+        <div className="flex flex-wrap justify-end gap-2">
+          {actionButtons(row)}
+          {row.can_mark_paid && changeDateButton(row.entryId, row.name, row.occurrenceDate, row.effectiveDate)}
+        </div>
       </div>
     </li>
   )
@@ -877,6 +897,15 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         setTarget({ entryId: occurrence.entry_id, name: occurrence.name, occurrenceDate: occurrence.occurrence_date, action })
       }
       onReview={() => review(occurrence.entry_id, occurrence.name)}
+      onChangeDate={() =>
+        setForceTarget({
+          kind: 'entry',
+          id: occurrence.entry_id,
+          name: occurrence.name,
+          occurrenceDate: occurrence.occurrence_date,
+          ...(occurrence.effective_date ? { effectiveDate: occurrence.effective_date } : {}),
+        })
+      }
     />
   )
 
@@ -944,6 +973,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                 </button>
               ))}
             </div>
+          )}
+          {next !== null && plan.can_mark_paid && (
+            <div className="flex flex-wrap justify-end gap-2">{changeDateButton(plan.entry_id, plan.name, next)}</div>
           )}
         </div>
       </li>
@@ -1374,6 +1406,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           {...(target.action ? { action: target.action } : {})}
           onClose={() => setTarget(null)}
           onPaid={onChanged}
+        />
+      )}
+      {forceTarget && (
+        <ForceDateDialog
+          key={`${forceTarget.kind}:${forceTarget.id}:${forceTarget.occurrenceDate}`}
+          target={forceTarget}
+          onClose={() => setForceTarget(null)}
+          onChanged={onChanged}
         />
       )}
       {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} />}

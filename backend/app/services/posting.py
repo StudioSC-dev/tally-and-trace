@@ -637,9 +637,10 @@ class PostPlan:
 def _funded(db: Session, entry, account: Account, walk: List[datetime]) -> List[datetime]:
     """The months of ``walk`` that ``account``'s posted balance covers, oldest
     first and cumulatively, stopping at the first it does not: no partial
-    payment. A posted-linked month moves no money, a pending-linked one moves
-    its own amount, and a new row the entry's. ``overflow_account_id`` plays no
-    part: ``_create`` posts to the primary account only."""
+    payment. A posted-linked month moves no money, so it passes whatever the
+    balance, a pending-linked one moves its own amount, and a new row the
+    entry's. ``overflow_account_id`` plays no part: ``_create`` posts to the
+    primary account only."""
     links = {_naive(when).date(): (txn_id, is_posted) for _, when, txn_id, is_posted
              in _linked_rows(db, [entry.id], occurrence_match=True)}
     balance = Decimal(str(account.balance))
@@ -649,7 +650,7 @@ def _funded(db: Session, entry, account: Account, walk: List[datetime]) -> List[
         amount = (0 if is_posted else db.get(Transaction, txn_id).amount if txn_id
                   else entry.amount)
         cost = Decimal(str(amount))
-        if cost > balance:
+        if cost > 0 and cost > balance:
             break
         balance -= cost
         funded.append(occ)
