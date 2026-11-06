@@ -1148,3 +1148,161 @@ def test_the_page_open_run_posts_a_due_loan(world, monkeypatch):
     assert result["posted"] == 1
     assert len(_rows(db, loan)) == 1
     assert date.fromisoformat(_rows(db, loan)[0][0]) == date(2026, 10, 25)
+
+
+# A recurring transfer into the loan stops -----------------------------------------------------
+
+def _behind_a_transfer(w, monkeypatch, today="2026-10-26", who=None, **entry) -> tuple:
+    """A loan turned on, then a recurring transfer that holds the job off while a
+    payment falls due behind it."""
+    loan = _loan(w)
+    _turn_on(w, loan)
+    feed = sw_post(w["client"], who or w["o"], "/budget-entries/", {
+        "name": "Car loan", "entry_type": "expense", "amount": 10_000, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": w["checking"],
+        "transfer_to_account_id": loan, **entry})["id"]
+    on_day(monkeypatch, today)
+    assert _job(w["client"])["skipped"] == {"recurring_entry": 1}
+    return loan, feed
+
+
+def _reads_manual_and_confirms(w, loan, due=1) -> None:
+    """The job posts nothing, and turning it back on shows the count and posts once."""
+    db = w["db"]
+    before = _rows(db, loan)
+    assert _is_on(db, loan) is False
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert _rows(db, loan) == before
+    assert set(sum(_settlements(w, loan).values(), [])) <= {"manual"}
+    preview = _preview(w, loan).json()
+    assert (preview["block"], preview["due_count"]) == (None, due)
+    _turn_on(w, loan, expected_due=due)
+    assert len(_rows(db, loan)) == len(before) + due
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+
+
+def _put_entry(w, feed, **fields) -> None:
+    r = w["client"].put(f"{API}/budget-entries/{feed}", json=fields, headers=w["o"]["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_pausing_the_transfer_clears_autopay(world, monkeypatch):
+    loan, feed = _behind_a_transfer(world, monkeypatch)
+    _put_entry(world, feed, is_active=False)
+    _reads_manual_and_confirms(world, loan)
+
+
+def test_pointing_the_transfer_elsewhere_clears_autopay(world, monkeypatch):
+    loan, feed = _behind_a_transfer(world, monkeypatch)
+    _put_entry(world, feed, transfer_to_account_id=_bank(world, "Savings", 0))
+    _reads_manual_and_confirms(world, loan)
+
+
+def test_taking_the_destination_off_the_transfer_clears_autopay(world, monkeypatch):
+    loan, feed = _behind_a_transfer(world, monkeypatch)
+    _put_entry(world, feed, transfer_to_account_id=None)
+    _reads_manual_and_confirms(world, loan)
+
+
+def test_deleting_the_transfer_clears_autopay(world, monkeypatch):
+    w = world
+    loan, feed = _behind_a_transfer(w, monkeypatch)
+    r = w["client"].delete(f"{API}/budget-entries/{feed}", headers=w["o"]["headers"])
+    assert r.status_code == 204, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_the_last_occurrence_of_a_capped_transfer_clears_autopay(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, feed = _behind_a_transfer(w, monkeypatch, today="2026-11-26",
+                                    end_mode="after_occurrences", max_occurrences=1)
+    r = w["client"].post(f"{API}/budget-entries/{feed}/materialize", json={},
+                         headers=w["o"]["headers"])
+    assert r.status_code == 201, r.text
+    assert db.execute(text("SELECT is_active FROM budget_entries WHERE id = :e"),
+                      {"e": feed}).scalar() is False
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_a_transfer_ended_on_a_date_clears_autopay_at_its_last_one(world, monkeypatch):
+    w = world
+    loan, feed = _behind_a_transfer(w, monkeypatch, today="2026-11-26", end_mode="on_date",
+                                    end_date="2026-10-30T00:00:00")
+    r = w["client"].post(f"{API}/budget-entries/{feed}/materialize", json={},
+                         headers=w["o"]["headers"])
+    assert r.status_code == 201, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_an_end_date_alone_keeps_the_block_and_the_flag(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, feed = _behind_a_transfer(w, monkeypatch)
+    _put_entry(w, feed, end_mode="on_date", end_date="2026-10-25T00:00:00")
+    assert _is_on(db, loan) is True
+    assert _job(w["client"])["skipped"] == {"recurring_entry": 1}
+    assert _rows(db, loan) == []
+
+
+def _shared_feed(w, sw_people, monkeypatch) -> tuple:
+    """Mia, an editor on both accounts, sets up the transfer into Olive's loan."""
+    mia = sw_people("Mia", "Member")
+    loan = _loan(w)
+    shares = {a: sw_share(w["db"], a, mia["id"], "editor") for a in (w["checking"], loan)}
+    _turn_on(w, loan)
+    sw_post(w["client"], mia, "/budget-entries/", {
+        "name": "Car loan", "entry_type": "expense", "amount": 10_000, "cadence": "monthly",
+        "next_occurrence": "2026-10-25T00:00:00", "account_id": w["checking"],
+        "transfer_to_account_id": loan})
+    on_day(monkeypatch, "2026-10-26")
+    assert _job(w["client"])["skipped"] == {"recurring_entry": 1}
+    return loan, mia, shares
+
+
+@pytest.mark.parametrize("on", ["checking", "loan"])
+def test_removing_the_creators_share_clears_autopay(world, sw_people, monkeypatch, on):
+    w = world
+    loan, mia, shares = _shared_feed(w, sw_people, monkeypatch)
+    account = {"checking": w["checking"], "loan": loan}[on]
+    r = w["client"].delete(f"{API}/accounts/{account}/shares/{shares[account]}",
+                           headers=w["o"]["headers"])
+    assert r.status_code == 204, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_demoting_the_creator_clears_autopay(world, sw_people, monkeypatch):
+    w = world
+    loan, mia, shares = _shared_feed(w, sw_people, monkeypatch)
+    r = w["client"].patch(f"{API}/accounts/{w['checking']}/shares/{shares[w['checking']]}",
+                          json={"role": "viewer"}, headers=w["o"]["headers"])
+    assert r.status_code == 200, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_the_creator_leaving_clears_autopay(world, sw_people, monkeypatch):
+    w = world
+    loan, mia, shares = _shared_feed(w, sw_people, monkeypatch)
+    r = w["client"].delete(f"{API}/shares/received/{shares[w['checking']]}",
+                           headers=mia["headers"])
+    assert r.status_code == 204, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+@pytest.mark.parametrize("fields", [
+    {"amount": 9_000}, {"name": "Renamed"}, {"is_active": True},
+    {"end_mode": "on_date", "end_date": "2027-06-25T00:00:00"},
+], ids=["amount", "name", "still_active", "later_end"])
+def test_an_edit_that_keeps_the_transfer_on_the_loan_keeps_the_flag(world, monkeypatch, fields):
+    w, db = world, world["db"]
+    loan, feed = _behind_a_transfer(w, monkeypatch)
+    _put_entry(w, feed, **fields)
+    assert _is_on(db, loan) is True
+    assert _job(w["client"])["skipped"] == {"recurring_entry": 1}
+
+
+def test_an_edit_to_a_paused_transfer_leaves_a_flag_set_after_the_pause(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, feed = _behind_a_transfer(w, monkeypatch)
+    _put_entry(w, feed, is_active=False)
+    _turn_on(w, loan, expected_due=1)
+    _put_entry(w, feed, name="Renamed", transfer_to_account_id=_bank(w, "Savings", 0))
+    assert _is_on(db, loan) is True

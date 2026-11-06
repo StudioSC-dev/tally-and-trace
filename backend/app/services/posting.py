@@ -481,7 +481,10 @@ def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMater
         outcome = Outcome.CREATED
 
     if payload.advance:
+        was_active = entry.is_active
         _advance(entry, occurrence)
+        if was_active and not entry.is_active:
+            loan_svc.transfers_stopped(db, [entry.transfer_to_account_id])
     db.flush()
     return Recorded(transaction=txn, outcome=outcome, occurrence=occurrence)
 

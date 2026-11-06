@@ -79,10 +79,11 @@ import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core import locking
 from app.models.account import Account
 from app.models.transaction import Transaction, TransactionType
 from app.services.payment_dates import effective, extend, load_loan_overrides
@@ -671,13 +672,24 @@ def scheduled_cash(txn: Transaction) -> Decimal:
 
 
 def stop_autopay(db: Session, loan_id: Optional[int]) -> None:
-    """Clear the loan's autopay, without committing: its settled cash fell, so a
-    due date reopened and it must post only with a confirmed count. A failed
-    bank debit is when an owner deletes a payment. The caller holds the account
-    lock, which a run reads the flag under."""
+    """Clear the loan's autopay, without committing: its settled cash fell, or a
+    recurring transfer that blocked it stopped, so a due date may stand open and
+    it must post only with a confirmed count. A failed bank debit is when an
+    owner deletes a payment. The caller holds the account lock, which a run reads
+    the flag under."""
     loan = db.get(Account, loan_id) if loan_id else None
     if loan is not None and loan.auto_post_enabled:
         loan.auto_post_enabled = False
+
+
+def transfers_stopped(db: Session, account_ids: Iterable[Optional[int]]) -> None:
+    """Active recurring transfers into these accounts stopped: lock them and clear
+    autopay on any that is a flagged loan, without committing. The transfer's
+    ``recurring_entry`` block held the job off, so without this a date that fell
+    due behind it would post unconfirmed. The caller holds any owner, entry and
+    transaction locks; the accounts come next in the ledger's order."""
+    for account_id in locking.lock_accounts(db, account_ids):
+        stop_autopay(db, account_id)
 
 
 def planned_covers(db: Session, loan: Account, fx=None) -> List[Tuple[date, Decimal]]:
