@@ -2713,7 +2713,7 @@ export function TransactionsPage() {
                           <dd>{actionSchedule.lead_time_days} day{actionSchedule.lead_time_days === 1 ? '' : 's'} before</dd>
                         </div>
                       ) : null}
-                      {actionSchedule.is_autopay && (
+                      {actionSchedule.auto_post_enabled && (
                         <div className="flex justify-between gap-3 text-xs text-ink">
                           <dt>Autopay</dt>
                           <dd>Enabled</dd>
@@ -3472,7 +3472,7 @@ export function TransactionsPage() {
                       <p>Cadence: {RECURRENCE_LABELS[selectedBudgetEntry.cadence]}</p>
                       <p>Next due: {formatEntryDate(selectedBudgetEntry.next_occurrence)}</p>
                       <p>Amount: {formatCurrency(selectedBudgetEntry.amount, selectedBudgetEntry.currency)}</p>
-                      {selectedBudgetEntry.is_autopay && <p>Autopay enabled</p>}
+                      {selectedBudgetEntry.auto_post_enabled && <p>Autopay enabled</p>}
                     </div>
                   )}
                 </div>

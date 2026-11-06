@@ -1434,7 +1434,7 @@ export function AllocationsPage() {
                 <span className="text-muted">•</span>
                 <span>{cadenceLabel}</span>
                 <span className="text-muted">•</span>
-                <span>{entry.is_autopay ? 'Auto-pay' : 'Manual'}</span>
+                <span>{entry.auto_post_enabled ? 'Auto-pay' : 'Manual'}</span>
                 {!entry.is_active && (
                   <>
                     <span className="text-muted">•</span>

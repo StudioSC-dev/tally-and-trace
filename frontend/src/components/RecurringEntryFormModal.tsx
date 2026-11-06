@@ -59,7 +59,6 @@ type SubscriptionFormState = {
   cadence: BudgetEntry['cadence']
   next_occurrence: string
   lead_time_days: number
-  is_autopay: boolean
   is_active: boolean
   end_mode: 'indefinite' | 'on_date' | 'after_occurrences'
   end_date?: string
@@ -92,7 +91,6 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   cadence: 'monthly',
   next_occurrence: toLocalDateTimeInput(new Date()),
   lead_time_days: 0,
-  is_autopay: true,
   is_active: true,
   end_mode: 'indefinite',
   end_date: undefined,
@@ -235,7 +233,6 @@ export function RecurringEntryFormModal({
       cadence: entry.cadence,
       next_occurrence: fromWireWallTime(entry.next_occurrence),
       lead_time_days: entry.lead_time_days ?? 0,
-      is_autopay: entry.is_autopay,
       is_active: entry.is_active,
       end_mode: (entry.end_mode as SubscriptionFormState['end_mode']) ?? 'indefinite',
       end_date: entry.end_date ? fromWireWallTime(entry.end_date) : undefined,
@@ -522,7 +519,6 @@ export function RecurringEntryFormModal({
         ...(resuming ? {} : { next_occurrence: nextOccurrenceWire }),
         ...dayFields,
         lead_time_days: subscriptionForm.lead_time_days,
-        is_autopay: subscriptionForm.is_autopay,
         is_active: subscriptionForm.is_active,
         end_mode: subscriptionForm.end_mode,
         end_date: endDateIso,
@@ -1100,32 +1096,6 @@ export function RecurringEntryFormModal({
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex items-center justify-between border border-line px-4 py-3">
-          <div>
-                    <p className="text-sm font-medium text-body">Autopay</p>
-                    <p className="text-xs text-muted">Mark if the charge posts automatically.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSubscriptionForm((prev) => ({
-                        ...prev,
-                        is_autopay: !prev.is_autopay,
-                      }))
-                    }
-                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-colors duration-200 ${ subscriptionForm.is_autopay ? 'text-ink hover:bg-sunken' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {subscriptionForm.is_autopay ? (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      ) : (
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      )}
-                    </svg>
-                    <span>{subscriptionForm.is_autopay ? 'Enabled' : 'Disabled'}</span>
-                  </button>
-          </div>
-
                 {(!editingBudgetEntry || editingBudgetEntry.permissions.can_tag) && (
                   <TagPicker
                     value={subscriptionForm.tag_ids}
