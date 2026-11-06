@@ -43,7 +43,9 @@ export function settlementReasonText(reason: string | null | undefined): string 
 
 /** The confirmation before turning autopay on over missed payments. */
 export function catchUpText(count: number): string {
-  return `This will post ${count} missed ${count === 1 ? 'payment' : 'payments'}, each dated on its own day.`
+  return count === 1
+    ? 'This will post 1 missed payment, dated on its own day.'
+    : `This will post ${count} missed payments, each dated on its own day.`
 }
 
 /** A held payment on the dashboard: "Rent could not post: not enough in X". Null when nothing holds the row. */

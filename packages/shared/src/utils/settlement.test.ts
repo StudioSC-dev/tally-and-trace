@@ -37,7 +37,7 @@ describe('settlement wording', () => {
 
   it('asks the count before catching up', () => {
     expect(catchUpText(3)).toBe('This will post 3 missed payments, each dated on its own day.')
-    expect(catchUpText(1)).toBe('This will post 1 missed payment, each dated on its own day.')
+    expect(catchUpText(1)).toBe('This will post 1 missed payment, dated on its own day.')
   })
 
   it('says why a held payment did not post', () => {
