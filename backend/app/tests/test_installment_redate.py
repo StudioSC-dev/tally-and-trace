@@ -264,6 +264,51 @@ def test_apply_refuses_hand_linked_bank_row(world):
     _refused(db, entry, "is not on the installment's card")
 
 
+def _force(world, entry, day, to):
+    r = world["client"].put(f"{API}/budget-entries/{entry}/occurrences/{day}/date",
+                            json={"effective_date": to}, headers=world["me"]["headers"])
+    assert r.status_code == 200, r.text
+
+
+def _overrides(db, entry):
+    from app.models.payment_date_override import PaymentDateOverride as P
+
+    db.rollback()
+    return [(o.occurrence_date, o.effective_date, o.updated_at)
+            for o in db.query(P).filter_by(budget_entry_id=entry).all()]
+
+
+def test_legacy_entry_with_a_forced_date_is_refused_until_it_is_cleared(world):
+    """The script writes ``next_occurrence`` straight, which would orphan the row."""
+    db, me, card = world["db"], world["me"], world["card_c"]
+    entry = _entry(db, me, card, date(2026, 11, 25))
+    _force(world, entry, "2026-11-25", "2026-11-27")
+    forced = _overrides(db, entry)
+
+    _refused(db, entry, "forced dates")
+    assert _overrides(db, entry) == forced
+
+    r = world["client"].delete(f"{API}/budget-entries/{entry}/occurrences/2026-11-25/date",
+                               headers=me["headers"])
+    assert r.status_code == 204, r.text
+    assert _run(True, {entry})[entry].status == "converted"
+
+
+def test_rerun_over_a_normalised_entry_with_a_forced_date_and_a_redated_row(world, card_c_plans):
+    """A normalised installment is no candidate, so neither its override nor its
+    re-dated rows are touched."""
+    db = world["db"]
+    e25, e27, _ = card_c_plans
+    _run(True, {e25, e27})
+    _force(world, e27, "2026-12-02", "2026-12-05")
+    before = (_state(db, e27), _overrides(db, e27))
+    assert before[0][1], "the first run re-dated its rows"
+
+    assert _run(True, {e25, e27}) == {}
+
+    assert (_state(db, e27), _overrides(db, e27)) == before
+
+
 def test_collision_refuses_entry(world):
     db, me, card = world["db"], world["me"], world["card_c"]
     entry = _entry(db, me, card, date(2026, 11, 27))

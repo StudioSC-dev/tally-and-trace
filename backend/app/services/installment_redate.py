@@ -19,8 +19,10 @@ a dry run), so no lock is held into the next entry.
    with ``occurrence_match``, the creator's) in ascending id, then the card,
    whose cycle settings are re-read from the locked row. Allocations are
    locked last, inside ``redate_row``.
-2. Refusals, before anything is written: a cadence other than monthly; a
-   linked row not on the installment's card (a hand-linked bank debit:
+2. Refusals, before anything is written: a forced date on the entry
+   (``payment_date_overrides``, keyed on the nominal dates this rewrites, so it
+   would be orphaned; clearing it lets the entry proceed); a cadence other than
+   monthly; a linked row not on the installment's card (a hand-linked bank debit:
    stamping ``occurrence_date`` on it would change which occurrence it
    suppresses); a row whose occurrence day and ``transaction_date`` are on
    different statements; two rows on one statement; a posted row on or after
@@ -63,6 +65,7 @@ from app.core.time import manila_today, utc_now
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
+from app.services.payment_dates import load_entry_overrides
 from app.services.recurrence import canon
 from app.services.statements import (
     iter_cycles_from, resolve_cycle_fields, statement_balance, statement_close)
@@ -271,6 +274,8 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     close_day = resolve_cycle_fields(card)[0]
 
     # --- refusals before any write
+    if load_entry_overrides(db, [entry.id]).get(entry.id):
+        raise Refused("it has forced dates; clear them first")
     if entry.cadence != RecurrenceFrequency.MONTHLY:
         raise Refused(f"cadence is {entry.cadence.value}, not monthly")
     for row in rows:

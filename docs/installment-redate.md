@@ -47,6 +47,8 @@ toward at its old and new dates and touches no balance.
 The entry and its rows are left exactly as they were, and the reason is
 printed, when:
 
+- the entry has a forced date (`payment_date_overrides`, keyed on the dates this
+  rewrites). Clearing it lets the entry proceed;
 - the cadence is not monthly;
 - a linked row is not on the installment's card (for example a bank debit
   linked by hand);
