@@ -910,16 +910,25 @@ async function staleReview(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
+  // A card closes on the 28th at the latest, and the API moves a new installment onto its statement close, so a
+  // scenario that creates one dated today (or tomorrow, for b) cannot hold when that date is the 29th to 31st.
+  const todayDay = manilaToday()
+  const tomorrowDay = addDays(todayDay, 1)
+  const dated = (k, day) => {
+    if (dom(day) <= 28) return true
+    console.log(`(${k}) SKIPPED: it needs an installment dated ${day}, and a card cannot close after the 28th`)
+    return false
+  }
   if (run('a')) await reviewWithDuplicate(browser)
-  if (run('b')) await newFromTomorrow(browser)
-  if (run('c')) await postNowToday(browser)
-  if (run('d')) await heldMonth(browser)
+  if (run('b') && dated('b', tomorrowDay)) await newFromTomorrow(browser)
+  if (run('c') && dated('c', todayDay)) await postNowToday(browser)
+  if (run('d') && dated('d', todayDay)) await heldMonth(browser)
   if (run('e')) await roles(browser)
-  if (run('f')) await allocationsAutoPost(browser)
+  if (run('f') && dated('f', todayDay)) await allocationsAutoPost(browser)
   if (run('g')) await unpostedPanel(browser)
-  if (run('h')) await postOnOpen(browser)
-  if (run('i')) await pageOpenIsQuiet(browser)
-  if (run('j')) await freshSnapshot(browser)
+  if (run('h') && dated('h', todayDay)) await postOnOpen(browser)
+  if (run('i') && dated('i', todayDay)) await pageOpenIsQuiet(browser)
+  if (run('j') && dated('j', todayDay)) await freshSnapshot(browser)
   if (run('k')) await staleReview(browser)
   await browser.close()
   stack.stop()
