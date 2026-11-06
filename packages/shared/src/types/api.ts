@@ -1027,8 +1027,10 @@ export interface UpcomingItem extends Partial<Estimate> {
    * capped occurrence is listed on the window start, so `due_date` differs.
    */
   occurrence_date?: string
-  /** Budget-entry items: the occurrence is before today on the Manila calendar. */
+  /** The item's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
+  /** Any item listed overdue on the window start: its real day (`YYYY-MM-DD`); `due_date` is the listing day. */
+  original_date?: string
   /** Snapshot budget-entry items only: the entry's derived kind (null for income and transfers). */
   kind?: RecurringKind | null
   /** Snapshot budget-entry items only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
@@ -1061,8 +1063,10 @@ export interface Payable extends Partial<Estimate> {
   currency?: CurrencyCode
   /** Budget-entry rows: the occurrence this payable stands for (`YYYY-MM-DD`). */
   occurrence_date?: string
-  /** Budget-entry rows: the occurrence is before today on the Manila calendar. */
+  /** The row's real day (`occurrence_date` for a budget entry) is before today on the Manila calendar. */
   overdue?: boolean
+  /** Rows listed overdue on the window start: the real day (`YYYY-MM-DD`); `due_date` is the listing day. */
+  original_date?: string
   /** Snapshot budget-entry rows only: the entry's derived kind (null for income and transfers). */
   kind?: RecurringKind | null
   /** Snapshot budget-entry rows only: the Transactions card tab that lists the entry (null: Due and Upcoming). */

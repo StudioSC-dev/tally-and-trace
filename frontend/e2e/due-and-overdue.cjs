@@ -51,7 +51,7 @@
 // posted yet", read with openDueTab(page, 'not-posted'): (b), (e), (e2), (e3), (e5), (h),
 // (p) and (q) read that tab, and (n) hand-links its pending row so it stays in Due.
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q|r]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q|r|s]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -1270,12 +1270,45 @@ async function outOfOrderRefetch(browser) {
   await ctx.close()
 }
 
+// (s) STU-343: an overdue loan or shared row reads "Overdue" with its real day, not "Due today".
+async function overdueEverySource(browser) {
+  console.log('\n=== (s) an overdue loan and a Limited row show their real day and "Overdue"')
+  const owner = await makeUser('s')
+  const view = await makeUser('sv')
+  const today = manilaToday()
+  const bank = await account(owner, 'S Checking')
+  const due = addDays(today, -10)
+  await post(owner.token, '/accounts/', {
+    name: 'S Car loan', account_type: 'loan', loan_kind: 'auto', balance: -90000, currency: 'PHP',
+    loan_annual_rate: 6, loan_term_months: 12, loan_payment_amount: 8000,
+    loan_first_payment_date: due, payment_account_id: bank.id,
+  })
+  await unposted(owner, bank, addDays(today, -4), 640, 'S Water bill')
+  await post(owner.token, `/accounts/${bank.id}/shares`, { email: view.email, role: 'viewer' })
+
+  const rows = async (u, name) => {
+    const { ctx, page } = await newPage(browser)
+    await uiLogin(page, u)
+    await page.locator('[data-testid="payables"]').waitFor()
+    await settle(page)
+    const more = page.locator('[data-testid="payables-more"]')
+    if (await more.count() && (await more.getAttribute('aria-expanded')) === 'false') await more.click()
+    const text = (await page.locator('[data-testid="payable-row"]').allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+    await ctx.close()
+    return text.filter((t) => t.includes(name))
+  }
+  const [loan] = await rows(owner, 'S Car loan')
+  check('(s) the loan row reads its real day and Overdue, not Due today', [loan?.includes(fmt(due)), loan?.includes('Overdue'), loan?.includes('Due today')], [true, true, false])
+  const shared = (await rows(view, 'Shared')).filter((t) => t.includes(fmt(addDays(today, -4))))
+  check('(s) the shared viewer\'s Limited row reads its real day and Overdue', [shared.length, shared[0]?.includes('Overdue')], [1, true])
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch, s: overdueEverySource }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

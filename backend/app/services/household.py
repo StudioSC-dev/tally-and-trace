@@ -606,9 +606,11 @@ def household_upcoming(db: Session, user, grant: HouseholdGrant, start: datetime
     leg's, or the in-scope account's) and, when estimated, the B5 labels, as
     in ``/forecast/upcoming``; a limited one keeps its own ``currency``.
     """
+    from app.core.time import manila_today
     from app.services.forecast import currency_upcoming_items
 
-    return currency_upcoming_items(household_events(db, user, grant, start, end, fx=fx))
+    return currency_upcoming_items(household_events(db, user, grant, start, end, fx=fx),
+                                   today=manila_today())
 
 
 def household_transactions_criterion(db: Session, user, grant: HouseholdGrant,
