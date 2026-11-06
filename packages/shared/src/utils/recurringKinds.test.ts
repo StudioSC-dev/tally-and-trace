@@ -28,7 +28,6 @@ function full(id: number, kind: RecurringKind | null): FullBudgetEntry {
     next_occurrence: '2026-10-20T00:00:00Z',
     lead_time_days: 0,
     end_mode: 'indefinite',
-    is_autopay: false,
     is_active: true,
     kind,
     tags: [],

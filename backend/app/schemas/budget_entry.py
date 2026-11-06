@@ -45,7 +45,6 @@ class BudgetEntryBase(BaseModel):
     transfer_to_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
-    is_autopay: bool = False
     is_active: bool = True
     description: Optional[str] = Field(None, max_length=500)
     end_date: Optional[datetime] = None
@@ -97,7 +96,6 @@ class BudgetEntryUpdate(BaseModel):
     transfer_to_account_id: Optional[int] = Field(None, gt=0)
     category_id: Optional[int] = Field(None, gt=0)
     allocation_id: Optional[int] = Field(None, gt=0)
-    is_autopay: Optional[bool] = None
     is_active: Optional[bool] = None
     description: Optional[str] = Field(None, max_length=500)
     end_mode: Optional[Literal["indefinite", "on_date", "after_occurrences"]] = None
@@ -178,7 +176,6 @@ class SharedFullRecurringEntry(BaseModel):
     account_id: Optional[int] = None
     overflow_account_id: Optional[int] = None
     transfer_to_account_id: Optional[int] = None
-    is_autopay: bool = False
     is_active: bool = True
     description: Optional[str] = None
     end_date: Optional[datetime] = None

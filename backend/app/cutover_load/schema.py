@@ -151,7 +151,6 @@ class BudgetEntryIn(_Model):
     transfer_to_account_key: Optional[Key] = None
     overflow_account_key: Optional[Key] = None
     category_key: Optional[Key] = None
-    is_autopay: bool = False
     is_active: bool = True
     tags: List[str] = Field(default_factory=list)
     last_imported_line_key: Optional[Key] = None

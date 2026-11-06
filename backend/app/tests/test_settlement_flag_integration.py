@@ -1,7 +1,7 @@
 """One settlement flag: ``auto_post_enabled`` (settlement plan, PR 2).
 
 ``settlement`` on the snapshot's full budget-entry rows is derived from the flag
-alone, never from ``is_autopay``, and is null on a row that names no settlement.
+alone, and is null on a row that names no settlement.
 Nothing new starts on but a card installment, and an edit clears the flag when
 it makes the entry ineligible. Skips without a database.
 """
@@ -107,7 +107,6 @@ CAPPED = dict(end_mode="after_occurrences", max_occurrences=12)
     (_plain_entry(), BANK, None, "manual"),
     (_plain_entry(billing_kind="subscription"), BANK, None, "manual"),
     (_plain_entry(auto_post_enabled=True), BANK, None, "autopay"),
-    (_plain_entry(is_autopay=True), BANK, None, "manual"),
     (_plain_entry(is_active=False), BANK, "inactive", "manual"),
     (_plain_entry(currency="USD"), BANK, "foreign_currency", "manual"),
     (_plain_entry(), None, "no_account", None),
@@ -142,9 +141,8 @@ def test_auto_post_block_is_not_widened_to_cash_entries():
 @pytest.mark.parametrize("next_day", [TODAY, SOON])
 def test_a_new_cash_entry_starts_manual(world, next_day):
     client, o = world["client"], world["o"]
-    created = _entry(client, o, world["checking"], next_occurrence=next_day, is_autopay=True)
+    created = _entry(client, o, world["checking"], next_occurrence=next_day)
     assert created["auto_post_enabled"] is False
-    assert created["is_autopay"] is True
     assert _settlements(client, o, created["id"]) == {"manual"}
 
 
@@ -209,11 +207,11 @@ def test_a_cash_entry_and_a_card_installment_are_set(world, sw_db):
     assert _settlements(client, o, backdated["id"]) == {"manual"}
 
 
-def test_rows_read_the_flag_and_never_is_autopay(world, sw_db):
+def test_rows_read_the_flag(world, sw_db):
     client, o = world["client"], world["o"]
-    stale = _entry(client, o, world["checking"], "Old rent", is_autopay=True)
-    assert _settlements(client, o, stale["id"]) == {"manual"}
-    opted = _entry(client, o, world["checking"], "Opted", is_autopay=False)
+    plain = _entry(client, o, world["checking"], "Old rent")
+    assert _settlements(client, o, plain["id"]) == {"manual"}
+    opted = _entry(client, o, world["checking"], "Opted")
     _switch_on(sw_db, opted["id"])
     assert _settlements(client, o, opted["id"]) == {"autopay"}
 
@@ -242,7 +240,7 @@ def test_entry_responses_name_the_settlement_from_the_flag(world, sw_db):
     client, o, checking, card = world["client"], world["o"], world["checking"], world["card"]
     savings = _account(client, o, "Savings", "savings")
     wallet = _account(client, o, "Wallet", "cash", is_spending_wallet=True)
-    stale = _entry(client, o, checking, "Old rent", is_autopay=True)
+    stale = _entry(client, o, checking, "Old rent")
     assert stale["settlement"] == "manual"
     _switch_on(sw_db, stale["id"])
     assert _listed(client, o, stale["id"])["settlement"] == "autopay"
@@ -342,3 +340,14 @@ def test_an_edit_never_turns_the_flag_on(world):
     entry = _entry(client, o, world["checking"])
     body = _put(client, o, entry["id"], {"is_autopay": True, "auto_post_enabled": True})
     assert body["auto_post_enabled"] is False
+    assert "is_autopay" not in body
+
+
+def test_an_old_client_still_sending_is_autopay_succeeds(world):
+    """The key is gone from the schema, not refused: an old tab keeps working."""
+    client, o = world["client"], world["o"]
+    created = _entry(client, o, world["checking"], is_autopay=True)
+    assert "is_autopay" not in created
+    body = _put(client, o, created["id"], {"is_autopay": False, "name": "Renamed"})
+    assert body["name"] == "Renamed"
+    assert "is_autopay" not in body

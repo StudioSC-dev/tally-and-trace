@@ -432,7 +432,6 @@ def check_recurring(ctx: Context, block: Block) -> None:
             ("end_mode", f.end_mode, e.end_mode),
             ("end_date", f.end_date, naive(e.end_date).date() if e.end_date else None),
             ("max_occurrences", f.max_occurrences, e.max_occurrences),
-            ("is_autopay", f.is_autopay, bool(e.is_autopay)),
             ("is_active", f.is_active, bool(e.is_active)),
         ]
         if f.semi_monthly_days is not None:

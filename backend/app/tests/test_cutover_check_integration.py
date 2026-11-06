@@ -473,7 +473,7 @@ def build_world(client, people) -> dict:
                          "account_id": bank, "next_occurrence": day("2031-03-25")}),
         "utilities": entry({"name": "Utilities", "entry_type": "expense", "amount": 2000,
                             "account_id": bank, "overflow_account_id": second,
-                            "is_autopay": True, "next_occurrence": day("2031-03-20")}),
+                            "next_occurrence": day("2031-03-20")}),
         "loan": entry({"name": "Car loan payment", "entry_type": "expense", "amount": 5000,
                        "account_id": bank, "transfer_to_account_id": loan,
                        "next_occurrence": day("2031-04-20")}),
@@ -1239,7 +1239,6 @@ def test_a_wrong_loan_next_due_or_next_row_fails(world, target):
 @needs_db
 @pytest.mark.parametrize("name, field, value, message", [
     ("Utilities", "overflow_account", None, "recurring overflow_account differs"),
-    ("Utilities", "is_autopay", False, "recurring is_autopay differs"),
     ("Salary", "amount", "30001.00", "recurring amount differs"),
     ("Salary", "next_occurrence", "2031-03-26", "recurring next_occurrence differs"),
     ("Phone plan", "installment", {"n": 3, "m": 6}, "recurring installment differs"),
@@ -1268,7 +1267,7 @@ def add_payday(world) -> dict:
     return {"name": "Payday", "account": sel("Main bank", "checking"), "destination": None,
             "overflow_account": None, "entry_type": "income", "amount": "1000.00",
             "currency": "PHP", "cadence": "monthly", "next_occurrence": "2031-03-31",
-            "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+            "end_mode": "indefinite", "is_active": True,
             "day_rule": "last_weekday",
             "next_dates": ["2031-03-31", "2031-04-30", "2031-05-30"]}
 
@@ -1369,7 +1368,7 @@ def test_a_semi_monthly_entry_expects_two_a_month(world, target):
         "name": "Allowance", "account": sel("Second bank", "savings"), "destination": None,
         "overflow_account": None, "entry_type": "expense", "amount": "1000.00",
         "currency": "PHP", "cadence": "semi_monthly", "semi_monthly_days": [1, 15],
-        "next_occurrence": "2031-03-15", "end_mode": "indefinite", "is_autopay": False,
+        "next_occurrence": "2031-03-15", "end_mode": "indefinite",
         "is_active": True, "expected": {"2031-03": 1, "2031-04": 2, "2031-05": 2}})
     report = run_check(target, raw)
     assert block(report, "occurrences")["status"] == "pass", block(report, "occurrences")
@@ -1413,7 +1412,7 @@ def test_a_foreign_materialisation_without_advance_counts_once(world, target, sw
         "name": "Streaming", "account": sel("Main card", "credit"), "destination": None,
         "overflow_account": None, "entry_type": "expense", "amount": "10.00",
         "currency": "USD", "cadence": "monthly", "next_occurrence": "2031-03-25",
-        "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+        "end_mode": "indefinite", "is_active": True,
         "expected": {"2031-03": 1, "2031-04": 1}})
     occ = block(run_check(target, raw), "occurrences")
     assert occ["status"] == "pass", occ
@@ -1449,7 +1448,7 @@ def test_an_ambiguous_row_fails_until_description_contains_is_frozen(world, targ
         "name": "Gym", "account": sel("Main bank", "checking"), "destination": None,
         "overflow_account": None, "entry_type": "expense", "amount": "2000.00",
         "currency": "PHP", "cadence": "monthly", "next_occurrence": "2031-03-28",
-        "end_mode": "indefinite", "is_autopay": False, "is_active": True,
+        "end_mode": "indefinite", "is_active": True,
         "expected": {"2031-03": 1, "2031-04": 1}})
     failures = block(run_check(target, raw), "occurrences")["failures"]
     ambiguous = [f for f in failures if f["message"] == "unlinked row matches several entries"]
