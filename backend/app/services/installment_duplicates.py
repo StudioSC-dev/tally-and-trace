@@ -1,18 +1,19 @@
-"""Possible duplicates of a card installment's months, and the months they hold (STU-343).
+"""Possible duplicates of an auto-posted entry's months, and the months they hold (STU-343).
 
 A **candidate** for occurrence ``o`` of entry ``e`` is a transaction that is a
-DEBIT on ``e``'s card, owned by ``e``'s creator, linked to no entry, in the
-card's currency for exactly ``e.amount``, dated within three days of ``o``'s
+DEBIT on ``e``'s account (a card, or a cash entry's bank account), owned by
+``e``'s creator, linked to no entry, in the account's currency for exactly
+``e.amount``, dated within three days of ``o``'s
 effective date (a forced date, services/payment_dates.py, is where the charge is
 expected; the keys stay nominal), posted or pending. Candidates are the creator's rows only: a link counts only
 for a row the entry's creator owns (``forecast._linked_rows``).
 
 A month is **held** when it is due, unrecorded, has no linked row and has a
 candidate not already used by another held month. The assignment is canonical
-per (creator, card): it is computed over every active, reviewed card
-installment of that creator on that card (the universe), whatever subset a
-caller passes and whatever the caller can see, so every caller sees the same
-held months.
+per (creator, account): it is computed over every active, reviewed card
+installment and every active autopay cash entry of that creator on that account
+(the universe), whatever subset a caller passes and whatever the caller can
+see, so every caller sees the same held months.
 
 Models are imported at module level; ``forecast`` helpers are imported inside
 the functions, so ``forecast`` can import this module without a cycle.
@@ -21,7 +22,7 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import tuple_
+from sqlalchemy import or_, tuple_
 from sqlalchemy.orm import Session
 
 from app.models.account import Account
@@ -73,8 +74,9 @@ def duplicate_candidates(db: Session, entry, occurrences: Iterable[datetime],
 
 
 def _universe(db: Session, entries) -> List[BudgetEntry]:
-    """Every active, reviewed card installment of each (creator, card) pair in ``entries``."""
-    from app.services.recurring_kinds import is_card_installment
+    """Every active, reviewed card installment and active autopay cash entry of
+    each (creator, account) pair in ``entries``."""
+    from app.services.recurring_kinds import auto_posts, is_card_installment
 
     pairs = {(e.user_id, e.account_id) for e in entries if e.account_id is not None}
     if not pairs:
@@ -83,18 +85,24 @@ def _universe(db: Session, entries) -> List[BudgetEntry]:
         db.query(BudgetEntry)
         .filter(tuple_(BudgetEntry.user_id, BudgetEntry.account_id).in_(sorted(pairs)),
                 BudgetEntry.is_active.is_(True),
-                BudgetEntry.installment_reviewed_at.isnot(None))
+                or_(BudgetEntry.installment_reviewed_at.isnot(None),
+                    BudgetEntry.auto_post_enabled.is_(True)))
         .order_by(BudgetEntry.id)
         .all()
     )
-    return [e for e in rows if is_card_installment(e, db.get(Account, e.account_id))]
+    out = []
+    for e in rows:
+        account = db.get(Account, e.account_id)
+        if (e.installment_reviewed_at is not None if is_card_installment(e, account)
+                else e.auto_post_enabled and auto_posts(e, account)):
+            out.append(e)
+    return out
 
 
 def held_assignment(db: Session, entries, through: date) -> Dict[Tuple[int, date], int]:
     """``{(entry id, occurrence day): transaction id}``: the held months of the
-    universe of ``entries`` (every active, reviewed card installment of each of
-    their (creator, card) pairs) through the day ``through``, and the candidate
-    each one is held by.
+    universe of ``entries`` (``_universe``) through the day ``through``, and the
+    candidate each one is held by.
 
     Each due unrecorded occurrence with no linked row (posted or pending) takes
     one unused candidate. Occurrences go in order of (effective date, entry

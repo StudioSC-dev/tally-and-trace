@@ -16,6 +16,8 @@
 - ``installment_snapshot``: the snapshot's ``installment_review`` and
   ``installment_auto_post`` keys (STU-343 Plan B), and each card installment's
   ``installment_state``, which ``recurring_missed`` repeats on its rows.
+- ``autopay_due``: the snapshot's ``autopay_due`` key, the due autopay cash
+  entries, a payment held by its funds or a duplicate among them.
 - ``upcoming_occurrences``: ``GET /budget-entries/upcoming-occurrences``
   (STU-465), the occurrences after Manila's today that no row stands for yet,
   posted or pending, from the same entries as ``recurring_missed`` (card
@@ -51,8 +53,8 @@ from app.services.installment_duplicates import held_occurrences
 from app.services.payment_dates import effective, load_entry_overrides
 from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
 from app.services.recurring_kinds import (
-    BILLING_KINDS, auto_post_block, entry_kind, is_capped, is_card_installment, is_kind_eligible,
-    plan_kind, settlement,
+    BILLING_KINDS, auto_post_block, auto_posts, entry_kind, is_capped, is_card_installment,
+    is_kind_eligible, plan_kind, settlement,
 )
 
 
@@ -108,18 +110,19 @@ def _card_missed_covers(entry: BudgetEntry, account) -> bool:
             and entry_kind(entry, account) in BILLING_KINDS)
 
 def installment_state(entry: BudgetEntry, plan: PostPlan) -> str:
-    """A card installment's auto-post state from ``post_plan``'s blocker:
+    """An auto-posted entry's state from ``post_plan``'s blocker:
     ``unreviewed``, ``off`` (reviewed, auto-post off), ``blocked`` (reviewed and
     on, but ``blocked:<reason>`` or ``creator_no_access``), ``held`` (a due
-    month is held) or ``on``. ``caller_no_access`` leaves the state ``on``: it
-    only empties the caller's ``postable``.
+    month is held by a duplicate or, on a cash entry, its funds) or ``on``.
+    ``caller_no_access`` leaves the state ``on``: it only empties the caller's
+    ``postable``.
     """
     blocker = plan.blocker
     if blocker == "unreviewed":
         return "unreviewed"
     if blocker == "auto_post_off":
         return "off"
-    if blocker == "held":
+    if blocker in ("held", "insufficient_funds"):
         return "held"
     if blocker is not None and (blocker.startswith("blocked:") or blocker == "creator_no_access"):
         return "blocked"
@@ -287,6 +290,51 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     access.load(i for e in entries for i in record_account_ids(e))
     access.load_explicit(entries)
     return [e for e in entries if access.readable(e) and redactor.view(e) != LIMITED]
+
+
+def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
+    """The snapshot's ``autopay_due`` key: one row per autopay cash entry the
+    caller can edit, in a view not Limited, with an occurrence due through
+    Manila's today, planned for the caller by ``post_plan``, sorted by ``oldest``
+    then name. ``due_count`` and ``postable_count`` are the plan's, ``oldest``
+    the first due occurrence's effective date, ``state`` its ``installment_state``
+    and ``block_reason`` ``posting.blocker_reason`` (``insufficient_funds``,
+    ``possible_duplicate`` and the rest), ``account_name`` the account a notice
+    names. A held row stays until it posts. Card installments stay in
+    ``installment_auto_post``. Not filtered by tag, as that list is not.
+    """
+    access = redactor.access
+    entries = _listed_entries(db, user, redactor, None,
+                              (BudgetEntry.auto_post_enabled.is_(True),))
+    access.load(e.account_id for e in entries)
+    entries = [e for e in entries
+               if not is_card_installment(e, access.account(e.account_id))
+               and auto_posts(e, access.account(e.account_id))
+               and access.permissions(e)["can_edit"]]
+    if not entries:
+        return []
+    today = manila_today()
+    held = held_occurrences(db, entries, today)
+    forced = load_entry_overrides(db, [e.id for e in entries])
+    out = []
+    for entry in entries:
+        plan = post_plan(db, entry, user, today, held, access)
+        if not plan.due:
+            continue
+        account = access.account(entry.account_id)
+        out.append({
+            "source": "budget_entry",
+            "source_id": entry.id,
+            "name": entry.name,
+            "account_name": account.name if redactor.can_view(account.id) else None,
+            "due_count": len(plan.due),
+            "postable_count": len(plan.postable),
+            "oldest": effective(forced.get(entry.id), plan.due[0].date()).isoformat(),
+            "state": installment_state(entry, plan),
+            "block_reason": posting_svc.blocker_reason(plan.blocker),
+        })
+    out.sort(key=lambda row: (row["oldest"], row["name"], row["source_id"]))
+    return out
 
 
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],

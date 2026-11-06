@@ -46,6 +46,7 @@ from app.schemas.budget_entry import (
     BudgetEntryOut,
     BudgetEntryListResponse,
     BudgetEntryMaterialize,
+    AutoPostPreview,
     AutoPostReview,
     AutoPostReviewRequest,
     AutoPostReviewResult,
@@ -993,8 +994,9 @@ def post_due_installments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Post due installments now: every due month of the auto-post-on card
-    installments the caller can edit, through Manila's today, as the caller
+    """Post due payments now: every due month of the auto-post-on card
+    installments and autopay cash entries the caller can edit, through Manila's
+    today, as the caller
     (services/posting.py ``post_due_installments``; the rows belong to each
     entry's creator). The same run as the daily job, under the same locks, so
     whichever runs second finds nothing due. A ``through`` is not accepted.
@@ -1338,6 +1340,14 @@ AUTO_POST_BLOCK_MESSAGES = {
 }
 
 
+SETTLEMENT_BLOCK_MESSAGES = {
+    "not_cash": "Only a cash entry can settle by autopay",
+    "spending_wallet": "Spending from a wallet can't settle by autopay",
+    "foreign_currency": "This entry is in another currency than its account, "
+                        "so it can't settle by autopay",
+}
+
+
 NOT_CLEAN = "This installment now has a month to record; review it on its own"
 
 
@@ -1555,6 +1565,21 @@ def review_auto_post(
         {"occurrence_date": day, "outcome": outcome} for day, outcome in applied.outcomes])
 
 
+@router.get("/{entry_id}/auto-post-preview", response_model=AutoPostPreview)
+def get_auto_post_preview(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """What turning autopay on would do: its ``block``, or the ``due_count`` to
+    confirm and the ``oldest`` due date (``posting.autopay_preview``). Anyone who
+    can edit the entry; anyone else gets 404."""
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    return posting.autopay_preview(db, entry)
+
+
 @router.post("/{entry_id}/auto-post", response_model=BudgetEntryOut)
 def set_auto_post(
     entry_id: int,
@@ -1562,16 +1587,32 @@ def set_auto_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Turn a card installment's auto-post off (``enabled`` false). The entry
-    stays reviewed, so its missed months still bill on their statements;
-    Mark paid still records them. Turning it on is the review's: ``enabled``
-    true is a 400. Anyone who can edit the entry, under the owner and entry
-    locks (``_lock_entry_to_post``); anyone else gets 404."""
+    """Turn an entry's auto-post on or off. Off never posts or changes history: a
+    card installment stays reviewed, so its missed months still bill on their
+    statements, and Mark paid still records them.
+
+    On is a cash entry's: a card installment's is the review's (400), a paused
+    or ended entry is a 409, a ``settlement_block`` a 400 with its reason.
+    ``expected_due`` must match the due count (``GET .../auto-post-preview``),
+    else a 409; the same commit then sets the flag and posts each due occurrence
+    on its own day, as the job would (``posting.turn_on_autopay``), and a funds or
+    duplicate stop leaves the flag on and the rest flagged. Anyone who can edit
+    the entry, under the owner and entry locks (``_lock_entry_to_post``); anyone
+    else gets 404."""
     entry = _lock_entry_to_post(db, current_user, entry_id)
     if payload.enabled:
-        raise HTTPException(status_code=400, detail="Review the installment to turn auto-post on")
-    entry.auto_post_enabled = False
-    entry.updated_at = utc_now()
+        account = db.get(Account, entry.account_id)
+        if is_card_installment(entry, account):
+            raise HTTPException(status_code=400,
+                                detail="Review the installment to turn auto-post on")
+        _refuse_paused_or_ended(entry)
+        block = settlement_block(entry, account)
+        if block is not None:
+            raise HTTPException(status_code=400, detail=SETTLEMENT_BLOCK_MESSAGES[block])
+        posting.turn_on_autopay(db, entry, current_user, payload.expected_due)
+    else:
+        entry.auto_post_enabled = False
+        entry.updated_at = utc_now()
     db.commit()
     db.refresh(entry)
     return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
