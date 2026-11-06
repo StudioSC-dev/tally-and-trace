@@ -63,6 +63,7 @@ from app.schemas.budget_entry import (
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services import loans as loan_svc
 from app.services import missed as missed_svc
 from app.services import payment_dates
 from app.services import posting
@@ -863,6 +864,7 @@ def update_budget_entry(
     stored_next = _naive(entry.next_occurrence)
     stored_account_id = entry.account_id
     stored_walk = _walk_fields(entry)
+    stored_transfer = entry.transfer_to_account_id if entry.is_active else None
     for field, value in prospective_data.items():
         setattr(entry, field, value)
     if skip_paused:
@@ -901,6 +903,11 @@ def update_budget_entry(
     # them all rather than leave one out of order or resurrect it later.
     if _walk_fields(entry) != stored_walk:
         payment_dates.clear_all(db, budget_entry_id=entry.id)
+
+    # Paused, ended or pointed elsewhere, the transfer stops feeding its account.
+    if stored_transfer and not (entry.is_active
+                                and entry.transfer_to_account_id == stored_transfer):
+        loan_svc.transfers_stopped(db, [stored_transfer])
 
     # Set explicitly so every successful edit moves the version the guard
     # reads, a tag-only edit (no column change) included.
@@ -953,6 +960,8 @@ def delete_budget_entry(
     for txn in linked:
         txn.is_recurring = False
         txn.recurrence_frequency = None
+    if entry.is_active:
+        loan_svc.transfers_stopped(db, [entry.transfer_to_account_id])
     db.delete(entry)
     db.commit()
 

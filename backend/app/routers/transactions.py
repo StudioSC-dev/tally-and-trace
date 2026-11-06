@@ -39,6 +39,7 @@ from app.core.attachments import (
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
+from app.services import posting
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
@@ -1136,6 +1137,8 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
         primary_account.balance = _D(primary_account.balance) - out
         if destination_account:
             destination_account.balance = _D(destination_account.balance) + received
+    if loan_svc.cash_paid(db_transaction, primary_account.id) < 0:
+        loan_svc.stop_autopay(db, primary_account.id)
 
     budget_allocations = _lock_allocations(db, _counted_allocations(
         db, user_id=owner.id, transaction_type=transaction.transaction_type,
@@ -1312,6 +1315,11 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     old_transfer_from = db_transaction.transfer_from_account_id
     old_transfer_to = db_transaction.transfer_to_account_id
     old_transaction_date = db_transaction.transaction_date
+    old_paid = {account_id: loan_svc.cash_paid(db_transaction, account_id)
+                for account_id in (old_account_id, old_transfer_to)}
+    old_owed = {account_id: loan_svc.owed(db.get(Account, account_id))
+                for account_id in old_paid if account_id}
+    old_cover = loan_svc.planned_cover(db_transaction)
     
     # Reverse previous balance effects if posted
     if old_is_posted:
@@ -1432,10 +1440,19 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
             new_out, new_in = transfer_sides(db_transaction)
             primary_account.balance = _D(primary_account.balance) - new_out
             destination_account.balance = _D(destination_account.balance) + new_in
+    for account_id in {*old_paid, db_transaction.account_id}:
+        if loan_svc.cash_paid(db_transaction, account_id) < old_paid.get(account_id, 0):
+            loan_svc.stop_autopay(db, account_id)
+    # The same cash can owe more: a payment re-split from principal to interest.
+    for account_id, owed in old_owed.items():
+        if loan_svc.owed(db.get(Account, account_id)) > owed:
+            loan_svc.stop_autopay(db, account_id)
 
     # The budgets the row counted toward, at its old date, and those it counts
     # toward now, at its new one (both, old then new, for a budget in each).
     db.flush()
+    if old_cover is not None and posting.cover_released(db, db_transaction, old_cover):
+        loan_svc.stop_autopay(db, old_transfer_to)
     for allocation in budget_allocations:
         references = ([old_transaction_date] if allocation.id in before_ids else []) + (
             [db_transaction.transaction_date] if allocation.id in after_ids else [])
@@ -1487,6 +1504,11 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - received
+    if loan_svc.planned_cover(db_transaction) is not None:
+        loan_svc.stop_autopay(db, db_transaction.transfer_to_account_id)
+    for account_id in (db_transaction.account_id, db_transaction.transfer_to_account_id):
+        if loan_svc.cash_paid(db_transaction, account_id) > 0:
+            loan_svc.stop_autopay(db, account_id)
 
     # The budgets the row counted toward, found before it goes and recomputed at
     # its date once the delete is flushed (STU-222).
