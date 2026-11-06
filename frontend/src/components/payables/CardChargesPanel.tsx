@@ -36,11 +36,25 @@ const checkFor = (checks: readonly CreditCheck[], charge: FullCharge): CreditChe
   return checks.find((check) => creditCheckKey(check) === key)
 }
 
-/** "Oct 18th, 2026", or "Oct 18th, 2026 · was due Oct 12th, 2026" for an overdue one. */
-const dayText = (charge: FullCharge | LimitedCharge): string =>
-  charge.overdue && charge.original_date
-    ? `${formatEntryDate(charge.date)} · was due ${formatEntryDate(charge.original_date)}`
-    : formatEntryDate(charge.date)
+/** The scheduled day of a charge that sits on a forced date; null for any other. */
+const movedFrom = (charge: FullCharge | LimitedCharge): string | null => {
+  if (isLimitedEvent(charge) || !charge.occurrence_date) return null
+  const scheduled = charge.occurrence_date.slice(0, 10)
+  return scheduled !== (charge.original_date ?? charge.date).slice(0, 10) ? scheduled : null
+}
+
+/**
+ * "Oct 18th, 2026", or "Oct 18th, 2026 · was due Oct 12th, 2026" for an overdue one; a charge
+ * on a forced date adds "(moved from ...)" naming its scheduled day.
+ */
+const dayText = (charge: FullCharge | LimitedCharge): string => {
+  const base =
+    charge.overdue && charge.original_date
+      ? `${formatEntryDate(charge.date)} · was due ${formatEntryDate(charge.original_date)}`
+      : formatEntryDate(charge.date)
+  const scheduled = movedFrom(charge)
+  return scheduled ? `${base} (moved from ${formatEntryDate(scheduled)})` : base
+}
 
 /**
  * Upcoming charges on each card over the next 30 days: recurring card expenses,

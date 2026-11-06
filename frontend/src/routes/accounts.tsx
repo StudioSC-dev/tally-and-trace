@@ -7,7 +7,7 @@ import type { CardCredit, MinimumDuePreset, MinimumDueRule, QueryPhase } from '@
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
-import { LoanActions, LoanSummary } from '../components/LoanPanel'
+import { LoanActions, LoanDueDates, LoanSummary } from '../components/LoanPanel'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
@@ -899,6 +899,7 @@ export function AccountsPage() {
             {actionAccount.account_type === 'loan' && actionAccount.my_role !== 'tag_viewer' && (
               <div className="mt-6 space-y-4">
                 <LoanSummary account={actionAccount} />
+                <LoanDueDates account={actionAccount} />
                 {actionAccount.permissions.can_add_transactions && (
                 <LoanActions
                   key={actionAccount.id}

@@ -46,7 +46,10 @@ export interface DueEntryRow {
   key: string
   entryId: number
   name: string
+  /** The scheduled day: the occurrence's identity, sent back by Mark paid. */
   occurrenceDate: string
+  /** Its forced date, or `occurrenceDate`. The row is placed, sorted and called overdue on it. */
+  effectiveDate: string
   overdue: boolean
   /** `income`, `expense` or `transfer`; null when only a payables row lists it. */
   entry_type: string | null
@@ -81,6 +84,8 @@ export interface DueMissedRow {
   count: number
   /** The oldest of them, where the dialog opens. */
   oldest: string
+  /** `oldest` on its forced date, where the row sorts. */
+  oldestEffective: string
   /** "{count} missed since {oldest}". */
   text: string
   can_mark_paid: boolean
@@ -136,6 +141,7 @@ interface Candidate {
   entryId: number
   name: string
   occurrenceDate: string
+  effectiveDate: string
   overdue: boolean
   entry_type: string | null
   recurring_kind: string | null
@@ -174,6 +180,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
         entryId: charge.source_id,
         name: charge.name,
         occurrenceDate: day(charge.occurrence_date ?? charge.original_date ?? charge.date),
+        effectiveDate: day(charge.original_date ?? charge.date),
         overdue: charge.overdue,
         entry_type: 'expense',
         recurring_kind: charge.kind,
@@ -194,6 +201,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       entryId: payable.source_id,
       name: payable.name,
       occurrenceDate: day(payable.occurrence_date ?? payable.due_date),
+      effectiveDate: day(payable.original_date ?? payable.due_date),
       overdue: payable.overdue === true,
       entry_type: null,
       recurring_kind: payable.kind ?? null,
@@ -214,6 +222,7 @@ function candidates(snapshot: DashboardSnapshot): Candidate[] {
       entryId: item.source_id,
       name: item.name,
       occurrenceDate: day(item.occurrence_date ?? item.due_date),
+      effectiveDate: day(item.original_date ?? item.due_date),
       overdue: item.overdue === true,
       entry_type: item.entry_type,
       recurring_kind: item.kind ?? null,
@@ -238,6 +247,7 @@ interface MissedSource {
   account_name: string | null
   count: number
   oldest: string
+  oldest_effective: string
   unlinked_count: number
   oldest_unlinked: string | null
   can_mark_paid: boolean
@@ -259,6 +269,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
       account_name: c.account_name,
       count: m.count,
       oldest: m.oldest,
+      oldest_effective: m.oldest,
       unlinked_count: m.unlinked_count,
       oldest_unlinked: m.oldest_unlinked,
       can_mark_paid: m.can_mark_paid,
@@ -278,6 +289,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
     account_name: m.account_name,
     count: m.count,
     oldest: m.oldest,
+    oldest_effective: m.oldest_effective ?? m.oldest,
     unlinked_count: m.unlinked_count,
     oldest_unlinked: m.oldest_unlinked,
     can_mark_paid: m.can_mark_paid,
@@ -311,9 +323,9 @@ function limitedRows(snapshot: DashboardSnapshot): DueLimitedRow[] {
 function sortDay(row: DueRecurringRow): string {
   switch (row.kind) {
     case 'missed':
-      return row.oldest
+      return row.oldestEffective
     case 'recurring':
-      return row.view === 'limited' ? row.date : row.occurrenceDate
+      return row.view === 'limited' ? row.date : row.effectiveDate
   }
 }
 
@@ -361,12 +373,13 @@ function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKin
   const rows: Array<DueEntryRow | DueMissedRow> = []
   for (const [key, c] of merged) {
     if (c.planKind !== plan) continue
-    const occ = c.occurrenceDate
+    const occ = c.effectiveDate
     // After today it is in Upcoming, recorded or not.
     if (occ > today) continue
     const past = occ !== today && (occ < today || c.overdue)
     const oldest = coveredFrom.get(c.entryId)
-    if (past && oldest !== undefined && oldest <= occ) continue
+    // A missed run is nominal, like the candidate's identity.
+    if (past && oldest !== undefined && oldest <= c.occurrenceDate) continue
     const fields = { kind: c.recurring_kind, entry_type: c.entry_type, can_mark_paid: c.can_mark_paid }
     rows.push({
       kind: 'recurring',
@@ -374,7 +387,8 @@ function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKin
       key,
       entryId: c.entryId,
       name: c.name,
-      occurrenceDate: occ,
+      occurrenceDate: c.occurrenceDate,
+      effectiveDate: occ,
       overdue: occ < today || (c.overdue && occ !== today),
       entry_type: c.entry_type,
       recurring_kind: c.recurring_kind,
@@ -403,6 +417,8 @@ function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKin
       accountName: m.account_name,
       count: m.unlinked_count,
       oldest,
+      // `oldest_effective` belongs to the oldest missed day; a later unlinked one has no forced date to show.
+      oldestEffective: day(m.oldest) === oldest ? m.oldest_effective : oldest,
       text: `${m.unlinked_count} missed since ${formatEntryDate(oldest)}`,
       can_mark_paid: m.can_mark_paid,
       // The oldest unlinked occurrence has no pending link and no posted one.

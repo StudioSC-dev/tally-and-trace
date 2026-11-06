@@ -189,6 +189,32 @@ def test_moved_later_a_past_loan_due_date_is_not_overdue(world):
     assert schedule["upcoming"][1]["effective_date"] == "2026-11-10"
 
 
+def test_a_loan_payable_names_its_scheduled_day_and_an_entry_does_not(world):
+    client, me, bank = world["client"], world["me"], world["bank"]
+    loan = _loan(client, me, bank)
+    entry = _entry(client, me, bank, "2026-10-20")
+
+    def loan_days():
+        snap = _rows(_snapshot(client, me)["payables"], "loan", loan)
+        return [(p["due_date"], p.get("loan_due_date")) for p in snap]
+
+    # Unmoved: the scheduled day is the due date (overdue, listed on the window start).
+    assert loan_days()[0][1] == "2026-10-10"
+    _force_loan(client, me, loan, "2026-10-10", "2026-10-25")
+    assert loan_days()[0] == ("2026-10-25", "2026-10-10")
+    # An overdue forced one keeps PR 1's original_date and still names its scheduled day.
+    _force_loan(client, me, loan, "2026-10-10", "2026-10-12")
+    row = _rows(_snapshot(client, me)["payables"], "loan", loan)[0]
+    assert (row["due_date"], row["original_date"], row["loan_due_date"]) == (
+        "2026-10-18", "2026-10-12", "2026-10-10")
+    # The upcoming list (snapshot and forecast) carries it too, and an entry never does.
+    _force_loan(client, me, loan, "2026-10-10", "2026-10-25")
+    upcoming = _get(client, me, "/forecast/upcoming?days=14")["items"]
+    assert [i.get("loan_due_date") for i in _rows(upcoming, "loan", loan)] == ["2026-10-10"]
+    assert all("loan_due_date" not in p for p in _rows(
+        _snapshot(client, me)["payables"], "budget_entry", entry))
+
+
 def test_moved_earlier_into_the_window_from_past_its_end_is_listed(world):
     client, me, bank = world["client"], world["me"], world["bank"]
     entry = _entry(client, me, bank, "2026-11-05")
