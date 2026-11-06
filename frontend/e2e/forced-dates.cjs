@@ -11,7 +11,7 @@
 //       row's date; each is one PUT
 //   (b) the dialog shows the server's refusal inline (a date over 31 days away) and stays
 //       open; Clear puts the occurrence back on its scheduled day and in Due
-//   (c) Mark paid opens on the effective date (forced a day earlier)
+//   (c) Mark paid opens on the effective date (forced a day earlier; forced into the future)
 //   (d) the loan page lists the next three open due dates with Change date; moving one
 //       reads "(moved from ...)", and the API's schedule agrees
 //   (e) the dashboard shows "(moved from ...)" on a moved entry and a moved loan due date, not on an unmoved one
@@ -280,6 +280,27 @@ async function markPaidDate(browser) {
   await waitQuiet(page)
   check('(c) the dialog opens on the scheduled day as the occurrence', await markPaidDialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), today)
   check('(c) and its date on the effective day', await markPaidDialog(page).locator('[data-testid="mark-paid-date"]').inputValue(), yesterday)
+  await page.keyboard.press('Escape')
+  await markPaidDialog(page).waitFor({ state: 'detached' })
+
+  // A future forced cash row opens on its forced date too, not today; the backend records it there.
+  const gas = await entry(u, { name: 'C Gas', amount: 1200, account_id: bank.id, next_occurrence: wire(addDays(today, 10)) })
+  const gasDay = addDays(today, 14)
+  await force(u, gas.id, addDays(today, 10), gasDay)
+  await openTransactions(page)
+  await openDueTab(page, 'upcoming')
+  const gasRow = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="occurrence"][data-source="budget_entry:${gas.id}"][data-day="${addDays(today, 10)}"]`))
+  await gasRow.locator('[data-testid="upcoming-mark-paid"]').click()
+  await markPaidDialog(page).locator('[data-testid="mark-paid-occurrence"]').waitFor()
+  await waitQuiet(page)
+  check('(c) a future forced row opens on its forced date, not today', await markPaidDialog(page).locator('[data-testid="mark-paid-date"]').inputValue(), gasDay)
+  const done = page.waitForResponse((r) => r.request().method() === 'POST' && /\/materialize$/.test(new URL(r.url()).pathname))
+  await markPaidDialog(page).locator('[data-testid="mark-paid-submit"]').click()
+  const res = await done
+  check('(c) the backend accepts the future date on record (201)', res.status(), 201)
+  const recorded = (await get(u.token, '/transactions/?limit=100')).items.find((t) => t.budget_entry_id === gas.id)
+  console.log(`    recorded: ${JSON.stringify({ date: recorded?.transaction_date, is_posted: recorded?.is_posted, occurrence_date: recorded?.occurrence_date })}`)
+  check('(c) the row is posted and dated on the forced day', [recorded?.transaction_date?.slice(0, 10), recorded?.is_posted], [gasDay, true])
   checkNoNative('c', native)
   await ctx.close()
 }

@@ -43,10 +43,16 @@ describe('defaultMarkPaidDay', () => {
   it('opens on the effective date of a forced occurrence', () => {
     // Scheduled Oct 10, forced to Oct 12: Mark paid opens on Oct 12.
     expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-12', today: '2026-10-20' })).toBe('2026-10-12')
-    // Forced past today it is still capped at today, as an unforced future one is.
-    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-25', today: '2026-10-20' })).toBe('2026-10-20')
-    // An installment keeps the forced date even when ahead.
+    // A forced date after today is the chosen date, not capped at today.
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-25', today: '2026-10-20' })).toBe('2026-10-25')
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-11-01', effectiveDate: '2026-11-03', today: '2026-10-20' })).toBe('2026-11-03')
+    // An installment keeps the forced date too.
     expect(defaultMarkPaidDay({ kind: 'installment', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-25', today: '2026-10-20' })).toBe('2026-10-25')
+  })
+
+  it('keeps the clamp for an occurrence that is not forced', () => {
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-11-01', effectiveDate: '2026-11-01', today: '2026-10-17' })).toBe('2026-10-17')
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-11-01', effectiveDate: null, today: '2026-10-17' })).toBe('2026-10-17')
   })
 
   it('falls back to the occurrence when the API sends no effective date', () => {
