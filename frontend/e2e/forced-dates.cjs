@@ -14,7 +14,7 @@
 //   (c) Mark paid opens on the effective date (forced a day earlier)
 //   (d) the loan page lists the next three open due dates with Change date; moving one
 //       reads "(moved from ...)", and the API's schedule agrees
-//   (e) the dashboard shows "(moved from ...)" on a moved entry, not on an unmoved one
+//   (e) the dashboard shows "(moved from ...)" on a moved entry and a moved loan due date, not on an unmoved one
 //   (f) roles: an editor changes a date from the card; a viewer has no Change date on the
 //       card or on the loan page and the API answers a viewer's PUT with 404
 //   (g) a card subscription moved past the statement close confirms "Now on the statement
@@ -119,9 +119,9 @@ const card = (u, bank, name, cycleDay, due) => post(u.token, '/accounts/', {
   billing_cycle_start: cycleDay, days_until_due_date: due, payment_account_id: bank.id,
 })
 const entry = (u, fields) => post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
-const loanOf = (u, name, first) => post(u.token, '/accounts/', {
+const loanOf = (u, name, first, extra = {}) => post(u.token, '/accounts/', {
   name, account_type: 'loan', loan_kind: 'auto', balance: -100000, currency: 'PHP',
-  loan_annual_rate: 12, loan_term_months: 24, loan_payment_amount: 5000, loan_first_payment_date: first,
+  loan_annual_rate: 12, loan_term_months: 24, loan_payment_amount: 5000, loan_first_payment_date: first, ...extra,
 })
 
 async function newPage(browser) {
@@ -327,11 +327,14 @@ async function loanPage(browser) {
 
 // (e) The dashboard shows "(moved from ...)".
 async function dashboard(browser) {
-  console.log('\n=== (e) the dashboard shows "(moved from ...)" on a moved entry; a moved loan due date shows its new date')
+  console.log('\n=== (e) the dashboard shows "(moved from ...)" on a moved entry and a moved loan due date')
   const today = manilaToday()
   const u = await makeUser('e')
   const bank = await account(u, 'E Checking')
   const rent = await entry(u, { name: 'E Rent', amount: 15000, account_id: bank.id, next_occurrence: wire(addDays(today, 4)) })
+  const loan = await loanOf(u, 'E Loan', addDays(today, 6), { payment_account_id: bank.id })
+  const forcedLoan = await api(u.token, 'PUT', `/accounts/${loan.id}/loan-due-dates/${addDays(today, 6)}/date`, { effective_date: addDays(today, 8) })
+  check('(e) seed: the loan due date is forced', forcedLoan.status, 200)
   await entry(u, { name: 'E Plain', amount: 700, account_id: bank.id, next_occurrence: wire(addDays(today, 5)) })
   await force(u, rent.id, addDays(today, 4), addDays(today, 7))
   const { ctx, page, native } = await newPage(browser)
@@ -340,6 +343,10 @@ async function dashboard(browser) {
   const rentRow = rows.filter({ hasText: 'E Rent' })
   check('(e) the rent reads its new date and where it moved from', (await rentRow.locator('[data-testid="payable-moved"]').textContent())?.trim(), `(moved from ${fmt(addDays(today, 4))})`)
   check('(e) the rent\'s date is the forced one', ((await rentRow.first().textContent()) ?? '').includes(fmt(addDays(today, 7))), true)
+  const loanRow = rows.filter({ hasText: 'E Loan' }).first()
+  check('(e) the loan reads its forced date and where it moved from',
+    [((await loanRow.textContent()) ?? '').includes(fmt(addDays(today, 8))), (await loanRow.locator('[data-testid="payable-moved"]').textContent())?.trim()],
+    [true, `(moved from ${fmt(addDays(today, 6))})`])
   check('(e) an unmoved payable says nothing', await rows.filter({ hasText: 'E Plain' }).locator('[data-testid="payable-moved"]').count(), 0)
   checkNoNative('e', native)
   await ctx.close()
