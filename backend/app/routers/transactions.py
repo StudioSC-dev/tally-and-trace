@@ -39,6 +39,7 @@ from app.core.attachments import (
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
+from app.services import posting
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
@@ -1313,6 +1314,7 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     old_transfer_to = db_transaction.transfer_to_account_id
     old_transaction_date = db_transaction.transaction_date
     old_scheduled_cash = loan_svc.scheduled_cash(db_transaction)
+    old_cover = loan_svc.planned_cover(db_transaction)
     
     # Reverse previous balance effects if posted
     if old_is_posted:
@@ -1439,6 +1441,8 @@ def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
     # The budgets the row counted toward, at its old date, and those it counts
     # toward now, at its new one (both, old then new, for a budget in each).
     db.flush()
+    if old_cover is not None and posting.cover_released(db, db_transaction, old_cover):
+        loan_svc.stop_autopay(db, old_transfer_to)
     for allocation in budget_allocations:
         references = ([old_transaction_date] if allocation.id in before_ids else []) + (
             [db_transaction.transaction_date] if allocation.id in after_ids else [])
@@ -1490,7 +1494,8 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
                 to_account = db.query(Account).filter(Account.id == db_transaction.transfer_to_account_id).first()
                 if to_account:
                     to_account.balance = _D(to_account.balance) - received
-    if loan_svc.scheduled_cash(db_transaction) > 0:
+    if (loan_svc.scheduled_cash(db_transaction) > 0
+            or loan_svc.planned_cover(db_transaction) is not None):
         loan_svc.stop_autopay(db, db_transaction.transfer_to_account_id)
 
     # The budgets the row counted toward, found before it goes and recomputed at

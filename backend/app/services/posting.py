@@ -1085,6 +1085,20 @@ def loan_plan(db: Session, loan: Account, through: date, caller: Optional[User] 
     return LoanPlan(due, steps, None)
 
 
+def cover_released(db: Session, txn, cover: Tuple[int, date]) -> bool:
+    """Whether an edit, already flushed, let go of due dates ``txn`` held as a planned
+    payment, ``cover`` being its ``planned_cover`` before the edit. The hold is on a
+    date, not an amount, so a pending row releases by leaving its day or its loan.
+    Posted into the same loan, it releases whatever it left open and due: the walk
+    that stopped on it would carry on with no count."""
+    loan = db.get(Account, cover[0])
+    if loan is None or not loan.auto_post_enabled:
+        return False
+    if txn.is_posted and txn.transfer_to_account_id == loan.id:
+        return bool(_due_loan_dates(db, loan, manila_today()))
+    return loan_svc.planned_cover(txn) != cover
+
+
 def _post_loan_due(db: Session, loan: Account, through: date, caller: Optional[User]
                    ) -> Tuple[int, Optional[str]]:
     """Post ``loan``'s due payments oldest first, without committing, and return

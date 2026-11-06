@@ -1116,13 +1116,87 @@ def test_deleting_a_hand_payment_stops_autopay_too(world, monkeypatch):
     assert _is_on(db, loan) is False
 
 
-def test_deleting_a_planned_payment_keeps_the_flag(world):
-    w, db = world, world["db"]
+def _held_by_a_plan(w, monkeypatch, today="2026-10-26", amount="4000") -> tuple:
+    loan = _loan(w)
+    _turn_on(w, loan)
+    txn = _pay(w, loan, "2026-10-24", is_posted=False, amount=amount)["id"]
+    on_day(monkeypatch, today)
+    assert _job(w["client"])["skipped"] == {"planned_payment": 1}
+    return loan, txn
+
+
+def test_deleting_a_planned_payment_clears_the_flag(world, monkeypatch):
+    w = world
     loan = _loan(w)
     _turn_on(w, loan)
     txn = _pay(w, loan, "2026-10-24", is_posted=False, amount="4000")["id"]
     _delete_row(w, txn)
+    on_day(monkeypatch, "2026-10-25")
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_deleting_a_planned_payment_that_held_a_due_date_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, txn = _held_by_a_plan(w, monkeypatch)
+    _delete_row(w, txn)
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_deleting_a_pending_prepayment_keeps_the_flag(world):
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    txn = _pay(w, loan, "2026-10-24", is_posted=False, amount="4000")["id"]
+    _sql(db, "UPDATE transactions SET loan_payment_kind = 'prepayment' WHERE id = :t", t=txn)
+    _delete_row(w, txn)
     assert _is_on(db, loan) is True
+
+
+def test_moving_a_planned_payment_off_its_date_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, txn = _held_by_a_plan(w, monkeypatch)
+    r = _edit_row(w, txn, transaction_date="2026-12-20T00:00:00")
+    assert r.status_code == 200, r.text
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_posting_a_planned_payment_for_part_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, txn = _held_by_a_plan(w, monkeypatch)
+    assert _edit_row(w, txn, is_posted=True).status_code == 200
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_posting_a_planned_payment_with_a_date_due_behind_it_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, txn = _held_by_a_plan(w, monkeypatch, today="2026-11-26", amount="10000")
+    assert _edit_row(w, txn, is_posted=True).status_code == 200
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_posting_a_planned_payment_that_settles_all_that_is_due_keeps_the_flag(world, monkeypatch):
+    w, db = world, world["db"]
+    loan, txn = _held_by_a_plan(w, monkeypatch, amount="10000")
+    assert _edit_row(w, txn, is_posted=True).status_code == 200
+    assert _is_on(db, loan) is True
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+
+
+@pytest.mark.parametrize("fields", [{"amount": 1_000}, {"description": "Renamed"},
+                                    {"amount": 6_000}], ids=["less", "text", "more"])
+def test_an_edit_that_leaves_a_plan_on_its_date_keeps_the_hold(world, monkeypatch, fields):
+    w, db = world, world["db"]
+    loan, txn = _held_by_a_plan(w, monkeypatch)
+    assert _edit_row(w, txn, **fields).status_code == 200
+    assert _is_on(db, loan) is True
+    assert _job(w["client"])["skipped"] == {"planned_payment": 1}
+    assert len(_rows(db, loan)) == 1
+
+
+def test_a_planned_payment_cannot_be_edited_down_to_nothing(world, monkeypatch):
+    w = world
+    _, txn = _held_by_a_plan(w, monkeypatch)
+    assert _edit_row(w, txn, amount=0, transfer_fee=0).status_code == 400
 
 
 # Post now and the page-open run ------------------------------------------------------------
