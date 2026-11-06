@@ -127,7 +127,7 @@ export interface Account {
 
 /** POST /accounts/ and PUT /accounts/{id}. */
 export type AccountInput = Partial<
-  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at' | 'auto_post_enabled'>
 > &
   TagIdsInput
 
