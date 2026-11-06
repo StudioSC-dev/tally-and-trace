@@ -927,6 +927,34 @@ def test_any_other_edit_that_can_open_past_dates_clears_the_flag(world, edit):
     assert _edit(w, loan, **edit)["auto_post_enabled"] is False
 
 
+def test_a_rate_rise_on_a_reduce_term_loan_posts_nothing_unconfirmed(world, monkeypatch):
+    """A held loan with one payment left at 1%. At 100% interest takes more of it,
+    the schedule runs one payment longer, and that one is a due date already past."""
+    w, db = world, world["db"]
+    poor = _bank(w, "Poor", 1_000)
+    loan = _loan(w, loan_amortization="reduce_term", balance=-9_800, loan_annual_rate=1,
+                 loan_first_payment_date="2026-09-25", payment_account_id=poor)
+    _flag(db, loan)
+    on_day(monkeypatch, "2026-10-25")
+    assert _preview(w, loan).json()["due_count"] == 1
+
+    assert _edit(w, loan, loan_annual_rate=100)["auto_post_enabled"] is False
+    assert _preview(w, loan).json()["due_count"] == 2
+    _deposit(w, poor, 100_000)
+    assert _job(w["client"]) == {"dry_run": False, "posted": 0, "skipped": {}}
+    assert _rows(db, loan) == []
+    assert _schedule(w, loan)["settlement"] == "manual"
+
+
+def test_a_rate_cut_on_a_reduce_term_loan_keeps_the_flag(world, monkeypatch):
+    w = world
+    loan = _loan(w, loan_amortization="reduce_term")
+    _turn_on(w, loan)
+    assert _edit(w, loan, loan_annual_rate=10)["auto_post_enabled"] is True
+    on_day(monkeypatch, "2026-10-25")
+    assert _job(w["client"])["posted"] == 1
+
+
 def test_lifting_a_block_by_an_edit_does_not_post_what_fell_due_behind_it(world, monkeypatch):
     w, db = world, world["db"]
     loan = _loan(w)
@@ -951,7 +979,7 @@ def test_reopening_a_closed_loan_clears_the_flag(world):
     {"loan_first_payment_date": "2026-10-25", "loan_payment_amount": 10_000,
      "loan_term_months": 12, "loan_payments_made_offset": 0, "loan_amortization": "fixed",
      "loan_annual_rate": 12, "balance": -100_000},
-    {"loan_payment_amount": 8_000}, {"loan_term_months": 6}, {"loan_annual_rate": 14},
+    {"loan_payment_amount": 8_000}, {"loan_term_months": 6}, {"loan_annual_rate": 10},
     {"balance": -90_000}, {"loan_first_payment_date": "2026-10-28"},
     {"loan_payments_made_offset": 1},
 ])

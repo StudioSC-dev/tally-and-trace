@@ -158,15 +158,18 @@ def opens_due_dates(before: dict, after: dict) -> bool:
     """Whether an edit from ``before`` to ``after`` (``due_terms``) can open past
     due dates, which would post with no confirmed count: the first date moved
     earlier, the offset lowered, a larger payment amount (the same cash settles
-    fewer due dates), a longer or open-ended term, the amortisation changed, more
-    owed or the loan reopened. A term autopay needs set or cleared counts too: a
-    block lifted by an edit lets go of whatever fell due behind it."""
+    fewer due dates), a higher rate (more of each payment is interest, so a
+    ``reduce_term`` schedule runs longer), a longer or open-ended term, the
+    amortisation changed, more owed or the loan reopened. A term autopay needs set
+    or cleared counts too: a block lifted by an edit lets go of whatever fell due
+    behind it."""
     first, last = before["needs"], after["needs"]
     if any((first[field] is None) != (last[field] is None) for field in _AUTOPAY_NEEDS):
         return True
-    day, amount = "loan_first_payment_date", "loan_payment_amount"
+    day, amount, rate = "loan_first_payment_date", "loan_payment_amount", "loan_annual_rate"
     return ((last[day] is not None and last[day] < first[day])
             or (last[amount] is not None and _money(last[amount]) > _money(first[amount]))
+            or (last[rate] is not None and Decimal(str(last[rate])) > Decimal(str(first[rate])))
             or after["offset"] < before["offset"]
             or (before["term"] is not None
                 and (after["term"] is None or after["term"] > before["term"]))
