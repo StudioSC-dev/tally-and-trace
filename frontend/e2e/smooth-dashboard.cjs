@@ -49,7 +49,7 @@ const isAllocations = isGet('/allocations/')
 const shownTexts = (texts, id) => (texts[id] || { texts: [] }).texts
 const textOf = async (locator) => ((await locator.textContent()) || '').replace(/\s+/g, ' ').trim()
 
-/** A user with a checking account, income and an expense this month, one envelope and one schedule due in 10 days (`is_autopay` set, flag off). */
+/** A user with a checking account, income and an expense this month, one envelope and one schedule due in 10 days (flag off). */
 async function seed(tag, { currency = 'PHP', day = today } = {}) {
   const u = await h.makeUser(stack, tag, { currency })
   const bank = await client.post(u.token, '/accounts/', { name: `Checking ${tag}`, account_type: 'checking', balance: 100000, currency })
@@ -63,7 +63,7 @@ async function seed(tag, { currency = 'PHP', day = today } = {}) {
   })
   await client.post(u.token, '/budget-entries/', {
     entry_type: 'expense', currency, cadence: 'monthly', name: `Gym ${tag}`, amount: 750, account_id: bank.id,
-    is_autopay: true, next_occurrence: wire(addDays(day, 10)),
+    next_occurrence: wire(addDays(day, 10)),
   })
   return { ...u, bank }
 }
@@ -391,7 +391,7 @@ async function scenarioC(browser) {
   }
 }
 
-// (f) A payable reads its settlement from the snapshot row: no entries request, and `is_autopay` is not the flag.
+// (f) A payable reads its settlement from the snapshot row: no entries request.
 async function scenarioF(browser) {
   console.log('\n=== (f) a payable reads its settlement from the snapshot row')
   const u = await seed('f')
