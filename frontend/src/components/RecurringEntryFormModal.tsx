@@ -574,8 +574,10 @@ export function RecurringEntryFormModal({
     // The save went through. Settlement is its own call: an edit can also clear the flag on its
     // own (the entry moved earlier, or stopped being a cash expense), so it is judged from what the
     // save returned. A refusal leaves the entry saved as Manual and says so.
-    const pick: Settlement = settlementControl.shown && settlementControl.disabledReason === null ? subscriptionForm.settlement : 'manual'
-    const followUp = settlementFollowUp(pick, saved.view === 'limited' ? null : saved.settlement)
+    // An entry the control is not offered for (a card installment keeps its own review) is left as the server has it.
+    const followUp = settlementControl.shown && settlementControl.disabledReason === null
+      ? settlementFollowUp(subscriptionForm.settlement, saved.view === 'limited' ? null : saved.settlement)
+      : null
     if (followUp !== null) {
       const subject = { kind: 'entry' as const, id: saved.id, name: subscriptionForm.name.trim() }
       const outcome = await (followUp === 'turn_on' ? turnOn(subject) : turnOff(subject))
