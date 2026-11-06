@@ -87,6 +87,8 @@ export interface Account {
    * in available cash or projections. Topping it up is the expense.
    */
   is_spending_wallet?: boolean
+  /** Loans only: the settlement flag. Read-only; null for anyone but an owner or admin. */
+  auto_post_enabled?: boolean | null
   /** Loans only (balance is negative while owed; owed = -balance). */
   loan_kind?: LoanKind | null
   /** Loans: nominal annual rate in percent (6.5 = 6.5%). */
@@ -383,6 +385,9 @@ export type RecurringKind = 'installment' | 'subscription' | 'bill' | 'cash'
  * card subscription, or an open-ended bank expense the user marked). Null: Due and Upcoming.
  */
 export type PlanKind = 'subscription' | 'installment'
+
+/** How a payment settles: the app posts it by itself, or it waits for the owner. */
+export type Settlement = 'autopay' | 'manual'
 /** A month-family entry's day rule: the last Monday-Friday of each month. */
 export type DayRule = 'last_weekday'
 
@@ -1035,6 +1040,8 @@ export interface UpcomingItem extends Partial<Estimate> {
   kind?: RecurringKind | null
   /** Snapshot budget-entry items only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
   plan_kind?: PlanKind | null
+  /** Snapshot budget-entry items only: how it settles, from the flag (null: the item names no settlement). */
+  settlement?: Settlement | null
   /** Snapshot budget-entry items only: the caller can record this occurrence. */
   can_mark_paid?: boolean
 }
@@ -1071,6 +1078,8 @@ export interface Payable extends Partial<Estimate> {
   kind?: RecurringKind | null
   /** Snapshot budget-entry rows only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
   plan_kind?: PlanKind | null
+  /** Snapshot budget-entry rows only: how it settles, from the flag (null: the row names no settlement). */
+  settlement?: Settlement | null
   /** Snapshot budget-entry rows only: the caller can record this occurrence. */
   can_mark_paid?: boolean
   /** Statement rows: the statement's close day (`YYYY-MM-DD`). */
