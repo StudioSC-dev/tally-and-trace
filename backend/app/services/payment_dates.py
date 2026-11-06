@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.record_dates import refuse_record_date
+from app.models.budget_entry import BudgetEntry
 from app.models.payment_date_override import PaymentDateOverride
 
 OVERRIDE_REACH = timedelta(days=31)
@@ -127,3 +128,11 @@ def clear_all(db: Session, *, budget_entry_id: Optional[int] = None,
     db.query(PaymentDateOverride).filter(
         _owner_filter(budget_entry_id, loan_account_id),
     ).delete(synchronize_session=False)
+
+
+def clear_entries_on(db: Session, account_id: int) -> None:
+    """Delete the overrides of every entry on an account, without committing: it
+    became a card, and a card entry has no forced dates."""
+    db.query(PaymentDateOverride).filter(PaymentDateOverride.budget_entry_id.in_(
+        db.query(BudgetEntry.id).filter(BudgetEntry.account_id == account_id)
+    )).delete(synchronize_session=False)

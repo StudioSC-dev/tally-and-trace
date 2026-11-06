@@ -774,6 +774,23 @@ def test_moving_an_entry_onto_a_card_deletes_its_overrides(world):
     assert _overrides(db, budget_entry_id=entry) == []
 
 
+def test_turning_an_account_into_a_card_deletes_its_entries_overrides(world):
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    second = _checking(client, me, name="Second")
+    moved = _entry(client, me, second, "2026-10-20")
+    other = _entry(client, me, bank, "2026-10-20", name="Other")
+    _force(client, me, moved, "2026-10-20", "2026-10-22")
+    _force(client, me, other, "2026-10-20", "2026-10-22")
+
+    r = client.put(f"{API}/accounts/{second}", json={
+        "account_type": "credit", "billing_cycle_start": 4, "days_until_due_date": 25,
+        "payment_account_id": bank}, headers=me["headers"])
+
+    assert r.status_code == 200, r.text
+    assert _overrides(db, budget_entry_id=moved) == []
+    assert _overrides(db, budget_entry_id=other) == [("2026-10-20", "2026-10-22")]
+
+
 def test_a_loan_first_date_change_deletes_its_overrides(world):
     client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
     loan = _loan(client, me, bank)
