@@ -48,6 +48,11 @@ describe('payableTarget', () => {
       .toEqual({ kind: 'account', source: 'loan', accountId: 11 })
   })
 
+  it('points an overdue loan row, which carries original_date, at the loan account', () => {
+    const overdueLoan: Payable = { ...payable, source: 'loan', source_id: 11, overdue: true, original_date: '2026-10-05' }
+    expect(payableTarget(overdueLoan)).toEqual({ kind: 'account', source: 'loan', accountId: 11 })
+  })
+
   it('gives a Limited event no target', () => {
     expect(payableTarget(limited)).toEqual({ kind: 'none' })
   })
