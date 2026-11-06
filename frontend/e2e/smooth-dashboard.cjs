@@ -49,7 +49,7 @@ const isAllocations = isGet('/allocations/')
 const shownTexts = (texts, id) => (texts[id] || { texts: [] }).texts
 const textOf = async (locator) => ((await locator.textContent()) || '').replace(/\s+/g, ' ').trim()
 
-/** A user with a checking account, income and an expense this month, one envelope and one autopay schedule due in 10 days. */
+/** A user with a checking account, income and an expense this month, one envelope and one schedule due in 10 days (`is_autopay` set, flag off). */
 async function seed(tag, { currency = 'PHP', day = today } = {}) {
   const u = await h.makeUser(stack, tag, { currency })
   const bank = await client.post(u.token, '/accounts/', { name: `Checking ${tag}`, account_type: 'checking', balance: 100000, currency })
@@ -391,37 +391,23 @@ async function scenarioC(browser) {
   }
 }
 
-// (f) Budget entries are held: no payable reads "Pay manually" until its autopay flag is known.
+// (f) A payable reads its settlement from the snapshot row: no entries request, and `is_autopay` is not the flag.
 async function scenarioF(browser) {
-  console.log('\n=== (f) budget entries held: no payable reads "Pay manually" before the flag lands')
+  console.log('\n=== (f) a payable reads its settlement from the snapshot row')
   const u = await seed('f')
   const { ctx, page } = await openPage(browser)
-  let g
+  const entryRequests = []
+  page.on('request', (req) => { if (isEntries(req)) entryRequests.push(req.url()) })
   try {
-    g = await h.gate(page, isEntries)
     await h.uiLogin(page, stack, u)
-    await h.check('f.entries-held', 'S', async () => (await g.waitHits(1)) || 'budget entries never requested')
-    await page.locator(tid('net-worth')).waitFor()
-    await h.sleep(500)
-    await h.check('f.payables-pending', 'S', async () => (await page.locator(tid('payables-pending')).count()) === 1 || 'no payables-pending')
-    await h.check('f.no-manual-while-held', 'B', async () => {
-      const labels = await page.locator(tid('payable-status')).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
-      return !labels.includes('Pay manually') || `labels while held ${JSON.stringify(labels)}`
-    })
-    g.release({ disarm: true })
     await page.locator(tid('payable-status')).first().waitFor()
     await h.waitQuiet(page)
-    await h.check('f.row-reads-autopay', 'B', async () => {
+    await h.check('f.row-reads-manual', 'B', async () => {
       const labels = await page.locator(tid('payable-status')).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
-      return labels.includes('Autopay') || `labels ${JSON.stringify(labels)}`
+      return (labels.includes('Pay manually') && !labels.includes('Autopay')) || `labels ${JSON.stringify(labels)}`
     })
-    const texts = await h.readTexts(page)
-    await h.check('f.history-never-manual', 'B', async () => {
-      const labels = (texts['payable-status'] || { attrs: {} }).attrs['aria-label'] || []
-      return !labels.includes('Pay manually') || `aria-label history ${JSON.stringify(labels)}`
-    })
+    await h.check('f.no-entries-request', 'B', async () => entryRequests.length === 0 || `requested ${JSON.stringify(entryRequests)}`)
   } finally {
-    g?.release({ disarm: true })
     await ctx.close()
   }
 }

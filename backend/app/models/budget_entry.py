@@ -83,7 +83,9 @@ class BudgetEntry(Base):
 
     # Card installments (STU-343 Plan B). ``installment_reviewed_at`` is the settlement
     # status (set by the review, or on create for a new installment dated from today);
-    # ``auto_post_enabled`` is the scheduling flag and is never true without it.
+    # ``auto_post_enabled`` is the scheduling flag and, on a card installment, is
+    # never true without it. It is the one settlement flag: ``is_autopay`` decides
+    # nothing (services/recurring_kinds.py ``settlement``).
     auto_post_enabled = Column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

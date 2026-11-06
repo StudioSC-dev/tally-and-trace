@@ -94,6 +94,12 @@ class Account(Base):
     # payments, or a legacy transfer moved out of the loan and back in (which
     # stamps it), is counted again, so this offset must be lowered for it.
     loan_payments_made_offset = Column(Integer, nullable=True)
+    # Loans only: the settlement flag, as on budget entries. True means the app
+    # posts each due payment by itself (settlement "autopay"), false that it
+    # waits for the owner ("manual"). Read-only on the API.
+    auto_post_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # Account status
     is_active = Column(Boolean, default=True)

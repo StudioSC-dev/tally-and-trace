@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useGetBudgetEntriesQuery, useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery } from '../store/api'
+import { useGetAllocationsQuery, useGetDashboardSnapshotQuery, useGetTransactionSummaryQuery } from '../store/api'
 import type { Allocation } from '../store/api'
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -19,8 +19,8 @@ import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
 import { payableActions, payableTarget, periodWindow, queryPhase } from '@tally-trace/shared'
 import { Skeleton, SkeletonRows } from '../components/Loading'
-import { fullCardChargeKeys, isDetailed, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
-import type { LimitedEvent, Payable } from '@tally-trace/shared'
+import { fullCardChargeKeys, isLimitedEvent, isOtherUpcoming, loggedDays, localToday, statusFromDate, upcomingItemAmount } from '@tally-trace/shared'
+import type { LimitedEvent, Payable, Settlement } from '@tally-trace/shared'
 
 const MAX_PAYABLES_SHOWN = 6
 const MAX_OTHER_UPCOMING_SHOWN = 4
@@ -69,9 +69,10 @@ type PayableRow = {
   labels: EstimateLabels
   detail: string
   overdue: boolean
-  budgetEntryId: number | null
-  /** What kind of payable this is; only scheduled entries have a known autopay state. */
+  /** What kind of payable this is. */
   kind: 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
+  /** How the row settles; null when it names no settlement. */
+  settlement: Settlement | null
   /** The payable itself, for the detail dialog; null for a Limited row, which never opens. */
   payable: Payable | null
 }
@@ -88,8 +89,8 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
       labels: {},
       detail: payable.account ? `Shared account · ${payable.account.name}` : 'Shared item',
       overdue: payable.overdue,
-      budgetEntryId: null,
       kind: 'shared',
+      settlement: null,
       payable: null,
     }
   }
@@ -108,8 +109,8 @@ const payableRow = (fallback: CurrencyCode, today: string) => (payable: Payable 
     detail: `${label}${pays}${overflow}`,
     // Every row says whether its real day is before today on the Manila calendar.
     overdue: payable.overdue === true,
-    budgetEntryId: payable.source === 'budget_entry' ? payable.source_id : null,
     kind: payable.source === 'statement' ? 'statement' : payable.source === 'loan' ? 'loan' : payable.source === 'transaction' ? transactionKind : 'scheduled',
+    settlement: payable.settlement ?? null,
     payable,
   }
 }
@@ -140,9 +141,6 @@ export function Dashboard() {
   const { data: snapshot, error: snapshotError } = snapshotQuery
   const summaryQuery = useGetTransactionSummaryQuery({ ...dateRange, ...tagParam }, { skip: !isAuthenticated })
   const { data: periodSummary, error: summaryError } = summaryQuery
-  // Only for the autopay set below: the payables carry no autopay flag, so the entries are looked up here.
-  const entriesQuery = useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
-  const { data: budgetEntriesData, error: budgetEntriesError } = entriesQuery
   const allocationsQuery = useGetAllocationsQuery({ limit: 1000, offset: 0 }, { skip: !isAuthenticated })
   const { data: allocationsData, error: allocationsError } = allocationsQuery
 
@@ -150,11 +148,10 @@ export function Dashboard() {
   const snapshotPhase = queryPhase(snapshot, snapshotQuery)
   const summaryPhase = queryPhase(periodSummary, summaryQuery)
   const allocationsPhase = queryPhase(allocationsData, allocationsQuery)
-  const entriesPhase = queryPhase(budgetEntriesData, entriesQuery)
   // Every total is read in the snapshot's currency; until it lands the profile default may be the wrong one.
   const currencyReady = snapshotPhase === 'ready'
   const totalsPending = summaryPhase === 'pending' || !currencyReady
-  const payablesPending = snapshotPhase === 'pending' || entriesPhase === 'pending'
+  const payablesPending = snapshotPhase === 'pending'
   // The snapshot adds FxNotice above the envelopes and CardChargesPanel below them; hold both until it lands so nothing moves.
   const envelopesPending = allocationsPhase === 'pending' || snapshotPhase === 'pending'
 
@@ -164,10 +161,6 @@ export function Dashboard() {
   // Budget envelopes are always in the default currency.
   const formatDefault = (amount: number) => formatCurrency(amount, defaultCurrency)
 
-  const autopayEntryIds = useMemo(
-    () => new Set((budgetEntriesData?.items ?? []).filter(isDetailed).filter((e) => e.is_autopay).map((e) => e.id)),
-    [budgetEntriesData]
-  )
   const allocations = useMemo(() => allocationsData?.items ?? [], [allocationsData])
   const budgetAllocations = useMemo(
     () => allocations.filter((a) => a.allocation_type === 'budget' && a.is_active),
@@ -215,11 +208,12 @@ export function Dashboard() {
       .filter((value): value is { allocation: Allocation; limit: number; spent: number; remaining: number; usagePercentage: number } => value !== null)
   }, [budgetAllocations])
 
-  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
+  type PayableStatus = 'danger' | 'autopay' | 'manual' | 'scheduled' | 'statement' | 'loan' | 'shared' | 'planned' | 'pending'
   const STATUS_LABELS: Record<PayableStatus, string> = {
     danger: 'Overdue',
     autopay: 'Autopay',
     manual: 'Pay manually',
+    scheduled: 'Scheduled',
     statement: 'Statement',
     loan: 'Loan payment',
     shared: 'Shared item',
@@ -228,7 +222,7 @@ export function Dashboard() {
   }
 
   const payableStatusOf = (row: PayableRow): PayableStatus =>
-    row.overdue ? 'danger' : row.kind !== 'scheduled' ? row.kind : row.budgetEntryId !== null && autopayEntryIds.has(row.budgetEntryId) ? 'autopay' : 'manual'
+    row.overdue ? 'danger' : row.settlement ?? row.kind
   const dueLabelOf = (row: PayableRow) => {
     const remaining = daysUntil(row.day, manilaDay)
     return row.overdue ? 'Overdue' : remaining === 0 ? 'Due today' : `${remaining} day${remaining === 1 ? '' : 's'} remaining`
@@ -266,7 +260,7 @@ export function Dashboard() {
         </span>
       )
     }
-    // Statements, loan payments, planned transactions and shared items: no autopay state is known, so a neutral mark, not the manual warning.
+    // Statements, loan payments, planned transactions, shared items and rows that name no settlement: a neutral mark, not the manual warning.
     return (
       <span role="img" aria-label={label} title={label} data-testid="payable-status" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line text-muted">
         <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -294,7 +288,6 @@ export function Dashboard() {
   const retryFailed = () => {
     if (snapshotQuery.isError) void snapshotQuery.refetch()
     if (summaryQuery.isError) void summaryQuery.refetch()
-    if (entriesQuery.isError) void entriesQuery.refetch()
     if (allocationsQuery.isError) void allocationsQuery.refetch()
   }
 
@@ -311,7 +304,7 @@ export function Dashboard() {
     return undefined
   }
 
-  if ([snapshotPhase, summaryPhase, entriesPhase, allocationsPhase].includes('error')) {
+  if ([snapshotPhase, summaryPhase, allocationsPhase].includes('error')) {
     return (
       <div className="flex items-center justify-center min-h-96">
         <div className="text-center">
@@ -325,7 +318,6 @@ export function Dashboard() {
           <div className="text-sm text-muted space-y-1">
             {snapshotQuery.isError && <p>• Balances and projection: {getErrorDetail(snapshotError) ?? 'Failed to load'}</p>}
             {summaryQuery.isError && <p>• Period totals: {getErrorDetail(summaryError) ?? 'Failed to load'}</p>}
-            {entriesQuery.isError && <p>• Schedules: {getErrorDetail(budgetEntriesError) ?? 'Failed to load'}</p>}
             {allocationsQuery.isError && <p>• Budgets: {getErrorDetail(allocationsError) ?? 'Failed to load'}</p>}
           </div>
           <button

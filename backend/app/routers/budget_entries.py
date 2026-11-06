@@ -68,7 +68,7 @@ from app.services.forecast import (
 )
 from app.services.recurring_kinds import (
     auto_post_block, default_billing_kind, entry_kind, installment_close_day, is_capped,
-    is_card_installment, is_normalised_installment)
+    is_card_installment, is_normalised_installment, settlement_block)
 from app.services.recurrence import (
     DAY_FIELDS, MONTH_FAMILY, DayRuleError, canon, resolve_day_fields,
 )
@@ -866,15 +866,22 @@ def update_budget_entry(
 
     # An edit never turns review or auto-post on. On a reviewed entry it clears
     # both when the card changes, the next date moves earlier, or the edited
-    # entry cannot auto-post for any reason but being paused (Plan B).
+    # entry cannot auto-post for any reason but being paused (Plan B). Any other
+    # entry with the flag on loses it when ``settlement_block`` names a reason,
+    # when the next date moves earlier (history would post silently), or when
+    # the edit makes it a card installment (never on without a review).
+    account = db.get(Account, entry.account_id) if entry.account_id else None
+    moved_earlier = _naive(entry.next_occurrence) < stored_next
     if entry.installment_reviewed_at is not None:
-        block = auto_post_block(
-            entry, db.get(Account, entry.account_id) if entry.account_id else None)
+        block = auto_post_block(entry, account)
         if (entry.account_id != stored_account_id
-                or _naive(entry.next_occurrence) < stored_next
+                or moved_earlier
                 or block not in (None, "inactive")):
             entry.installment_reviewed_at = None
             entry.auto_post_enabled = False
+    elif entry.auto_post_enabled and (moved_earlier or is_card_installment(entry, account)
+                                      or settlement_block(entry, account) is not None):
+        entry.auto_post_enabled = False
 
     # Set explicitly so every successful edit moves the version the guard
     # reads, a tag-only edit (no column change) included.

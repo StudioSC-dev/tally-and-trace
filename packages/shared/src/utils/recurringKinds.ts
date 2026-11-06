@@ -1,4 +1,10 @@
-import type { BillingKind, BudgetEntry, RecurringKind } from '../types/api'
+import type { BillingKind, BudgetEntry, RecurringKind, Settlement } from '../types/api'
+
+/** How an entry reads where it names its settlement: null names none, so it reads Scheduled. */
+export function settlementLabel(settlement: Settlement | null | undefined): string {
+  if (settlement === 'autopay') return 'Auto-pay'
+  return settlement === 'manual' ? 'Manual' : 'Scheduled'
+}
 
 /** The sections of the recurring-entries list: a derived kind, income and transfers, or someone else's. */
 export type KindGroupKey = RecurringKind | 'other' | 'shared'

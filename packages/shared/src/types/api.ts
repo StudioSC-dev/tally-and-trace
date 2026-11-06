@@ -87,6 +87,8 @@ export interface Account {
    * in available cash or projections. Topping it up is the expense.
    */
   is_spending_wallet?: boolean
+  /** Loans only: the settlement flag. Read-only; null for anyone but an owner or admin. */
+  auto_post_enabled?: boolean | null
   /** Loans only (balance is negative while owed; owed = -balance). */
   loan_kind?: LoanKind | null
   /** Loans: nominal annual rate in percent (6.5 = 6.5%). */
@@ -125,7 +127,7 @@ export interface Account {
 
 /** POST /accounts/ and PUT /accounts/{id}. */
 export type AccountInput = Partial<
-  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at'>
+  Omit<Account, 'id' | 'tags' | 'my_role' | 'is_shared' | 'owner_name' | 'permissions' | 'created_at' | 'updated_at' | 'auto_post_enabled'>
 > &
   TagIdsInput
 
@@ -383,6 +385,9 @@ export type RecurringKind = 'installment' | 'subscription' | 'bill' | 'cash'
  * card subscription, or an open-ended bank expense the user marked). Null: Due and Upcoming.
  */
 export type PlanKind = 'subscription' | 'installment'
+
+/** How a payment settles: the app posts it by itself, or it waits for the owner. */
+export type Settlement = 'autopay' | 'manual'
 /** A month-family entry's day rule: the last Monday-Friday of each month. */
 export type DayRule = 'last_weekday'
 
@@ -434,6 +439,8 @@ interface RecurringEntryDetail {
   billing_kind?: BillingKind | null
   /** Read-only, derived by the server. null for income and transfers. */
   kind?: RecurringKind | null
+  /** Read-only, derived from the flag by the server. null when the entry names no settlement. */
+  settlement?: Settlement | null
   /**
    * Card installments: the settlement status. True once the installment was reviewed
    * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
@@ -496,7 +503,7 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement'
   >
 > &
   TagIdsInput & {
@@ -1035,6 +1042,8 @@ export interface UpcomingItem extends Partial<Estimate> {
   kind?: RecurringKind | null
   /** Snapshot budget-entry items only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
   plan_kind?: PlanKind | null
+  /** Snapshot budget-entry items only: how it settles, from the flag (null: the item names no settlement). */
+  settlement?: Settlement | null
   /** Snapshot budget-entry items only: the caller can record this occurrence. */
   can_mark_paid?: boolean
 }
@@ -1071,6 +1080,8 @@ export interface Payable extends Partial<Estimate> {
   kind?: RecurringKind | null
   /** Snapshot budget-entry rows only: the Transactions card tab that lists the entry (null: Due and Upcoming). */
   plan_kind?: PlanKind | null
+  /** Snapshot budget-entry rows only: how it settles, from the flag (null: the row names no settlement). */
+  settlement?: Settlement | null
   /** Snapshot budget-entry rows only: the caller can record this occurrence. */
   can_mark_paid?: boolean
   /** Statement rows: the statement's close day (`YYYY-MM-DD`). */
