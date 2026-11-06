@@ -39,6 +39,19 @@ describe('defaultMarkPaidDay', () => {
   it('reads a wire occurrence by its UTC day', () => {
     expect(defaultMarkPaidDay({ kind: 'bill', occurrenceDate: '2026-10-18T00:00:00Z', today: '2026-10-20' })).toBe('2026-10-18')
   })
+
+  it('opens on the effective date of a forced occurrence', () => {
+    // Scheduled Oct 10, forced to Oct 12: Mark paid opens on Oct 12.
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-12', today: '2026-10-20' })).toBe('2026-10-12')
+    // Forced past today it is still capped at today, as an unforced future one is.
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-25', today: '2026-10-20' })).toBe('2026-10-20')
+    // An installment keeps the forced date even when ahead.
+    expect(defaultMarkPaidDay({ kind: 'installment', occurrenceDate: '2026-10-10', effectiveDate: '2026-10-25', today: '2026-10-20' })).toBe('2026-10-25')
+  })
+
+  it('falls back to the occurrence when the API sends no effective date', () => {
+    expect(defaultMarkPaidDay({ kind: 'cash', occurrenceDate: '2026-10-10', effectiveDate: undefined, today: '2026-10-20' })).toBe('2026-10-10')
+  })
 })
 
 describe('markPaidWireDate', () => {

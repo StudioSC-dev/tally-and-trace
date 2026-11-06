@@ -23,16 +23,18 @@ function day(value: string): string {
 }
 
 /**
- * The day a Mark paid dialog opens on. A card installment posts on its occurrence
+ * The day a Mark paid dialog opens on. A card installment posts on its effective date
  * (the statement it falls in is what matters); everything else on the earlier of
- * the occurrence and today, so a future occurrence is never dated ahead.
+ * that date and today, so a future occurrence is never dated ahead.
  */
 export function defaultMarkPaidDay(args: {
   kind: RecurringKind | null | undefined
   occurrenceDate: string
+  /** The occurrence's forced date; the dialog opens on it rather than on the scheduled day. */
+  effectiveDate?: string | null | undefined
   today: string
 }): string {
-  const occurrence = day(args.occurrenceDate)
+  const occurrence = day(args.effectiveDate ?? args.occurrenceDate)
   if (args.kind === 'installment') return occurrence
   const today = day(args.today)
   return occurrence < today ? occurrence : today
