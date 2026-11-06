@@ -213,6 +213,7 @@ def _id_routes(w):
         ("post", f"/budget-entries/{w['entry']}/auto-post-review",
          {"json": {"entry_version": None, "review_token": "0" * 64, "links": []}}),
         ("post", f"/budget-entries/{w['entry']}/auto-post", {"json": {"enabled": False}}),
+        ("get", f"/budget-entries/{w['entry']}/auto-post-preview", {}),
         ("get", f"/budget-entries/{w['accountless']}", {}),
         ("put", f"/budget-entries/{w['accountless']}", {"json": {"amount": 1}}),
         ("delete", f"/budget-entries/{w['accountless']}", {}),

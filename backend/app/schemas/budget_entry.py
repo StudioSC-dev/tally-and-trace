@@ -535,6 +535,16 @@ class InstallmentPlans(BaseModel):
 
 
 class AutoPostToggle(BaseModel):
-    """POST /budget-entries/{id}/auto-post: only ``false`` (turn off) is
-    accepted; turning on is the review's."""
+    """POST /budget-entries/{id}/auto-post. ``enabled`` true on a cash entry takes
+    ``expected_due``, the count of missed occurrences the owner confirmed
+    (``AutoPostPreview.due_count``); a card installment turns on by its review."""
     enabled: bool
+    expected_due: Optional[int] = None
+
+
+class AutoPostPreview(BaseModel):
+    """GET /budget-entries/{id}/auto-post-preview: why the entry cannot settle by
+    autopay (``settlement_block``), and what turning it on would post."""
+    block: Optional[str] = None
+    due_count: int
+    oldest: Optional[date] = None

@@ -152,6 +152,23 @@ def settlement_block(e, account: Optional[Account]) -> Optional[str]:
     return None
 
 
+def auto_posts(e, account: Optional[Account]) -> bool:
+    """Whether posting obeys the flag on ``e``; on anything else a flag is stray
+    and is ignored.
+
+    A reviewed card installment with months left, or a cash entry that is not
+    wallet spending. A cash entry carrying a review stamp is out too: the toggle
+    never leaves one, so its flag was turned on for a card installment, not for
+    this entry (its account stopped being a card, say).
+    """
+    from app.services.forecast import is_spending_wallet
+
+    if is_card_installment(e, account):
+        return e.installment_reviewed_at is not None and e.max_occurrences > 0
+    return (entry_kind(e, account) == "cash" and account is not None
+            and not is_spending_wallet(account) and e.installment_reviewed_at is None)
+
+
 def settlement(e, account: Optional[Account]) -> Optional[str]:
     """The wire value, from ``auto_post_enabled`` alone: ``autopay`` or ``manual``
     on a cash entry or a card installment, None on everything else (a row that

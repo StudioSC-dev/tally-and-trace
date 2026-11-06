@@ -23,6 +23,7 @@ from calendar import monthrange
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import List, Optional, Tuple
 
@@ -51,7 +52,9 @@ from app.services.payment_dates import (
     CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_override, effective, effective_at, in_order,
     load_entry_overrides, refuse_forced_date, set_override,
 )
-from app.services.recurring_kinds import entry_kind, is_capped
+from app.services.recurring_kinds import (
+    auto_posts, entry_kind, is_capped, is_card_installment, settlement_block,
+)
 
 
 class Outcome(str, Enum):
@@ -606,17 +609,18 @@ def materialize_due(db: Session, entry, actor: User) -> List[Recorded]:
             for occ in due]
 
 
-# --- Card installment auto-post (STU-343 Plan B) ---------------------------------------------
+# --- Auto-post: card installments (STU-343 Plan B) and autopay cash entries -------------------
 
 @dataclass
 class PostPlan:
-    """What a recorder would record for one card installment, written nowhere.
+    """What a recorder would record for one auto-posted entry, written nowhere.
 
     ``walk`` is what the job, the page-open trigger and the backstop record, in
     order: the schedule from ``next_occurrence`` through ``through``
     (``due_walk``), posted-linked months included (they only advance the
-    schedule), cut before the first held month, or empty behind any other
-    blocker. ``due`` (the months no posted row stands for) and ``postable``
+    schedule), cut before the first held month and, on a cash entry, before the
+    first the balance does not cover, or empty behind any other blocker. ``due``
+    (the months no posted row stands for) and ``postable``
     (the ``due`` months in ``walk``) are for counts and labels only.
     """
     walk: List[datetime]
@@ -625,29 +629,54 @@ class PostPlan:
     blocker: Optional[str]
 
 
+def _funded(db: Session, entry, account: Account, walk: List[datetime]) -> List[datetime]:
+    """The months of ``walk`` that ``account``'s posted balance covers, oldest
+    first and cumulatively, stopping at the first it does not: no partial
+    payment. A posted-linked month moves no money, so it passes whatever the
+    balance, a pending-linked one moves its own amount, and a new row the
+    entry's. ``overflow_account_id`` plays no part: ``_create`` posts to the
+    primary account only."""
+    links = {_naive(when).date(): (txn_id, is_posted) for _, when, txn_id, is_posted
+             in _linked_rows(db, [entry.id], occurrence_match=True)}
+    balance = Decimal(str(account.balance))
+    funded = []
+    for occ in walk:
+        txn_id, is_posted = links.get(occ.date(), (None, False))
+        amount = (0 if is_posted else db.get(Transaction, txn_id).amount if txn_id
+                  else entry.amount)
+        cost = Decimal(str(amount))
+        if cost > 0 and cost > balance:
+            break
+        balance -= cost
+        funded.append(occ)
+    return funded
+
+
 def post_plan(db: Session, entry, actor: User, through: date, held: Counter,
               access: RecordAccess) -> PostPlan:
     """The months ``actor`` would record for ``entry`` through ``through``, and why not.
 
     ``held`` is ``installment_duplicates.held_occurrences`` (its keys for this
     entry are read); ``access`` is ``actor``'s ``RecordAccess``. The blocker
-    is the first that applies: ``unreviewed``, ``auto_post_off``,
-    ``blocked:<reason>`` (``recurring_kinds.auto_post_block``),
+    is the first that applies: ``unreviewed`` (a card installment only),
+    ``auto_post_off``, ``blocked:<reason>`` (``recurring_kinds.settlement_block``),
     ``blocked:ambiguous`` (a walk day with more than one linked row, which
     ``record_occurrence`` refuses), ``creator_no_access``,
     ``caller_no_access``, ``held`` (a due month is held: the months before the
-    first held one stay in ``walk``).
+    first held one stay in ``walk``). On a cash entry the walk is then cut by
+    ``_funded``, and a cut makes the blocker ``insufficient_funds``; a recorder
+    holds the account lock so the balance it reads cannot move under it.
     """
     from app.services.forecast import unrecorded_occurrences
-    from app.services.recurring_kinds import auto_post_block
 
     due = unrecorded_occurrences(db, [entry], through)[entry.id]
     full_walk = due_walk(db, entry, through)
-    card = db.get(Account, entry.account_id) if entry.account_id else None
-    block = auto_post_block(entry, card)
+    account = db.get(Account, entry.account_id) if entry.account_id else None
+    block = settlement_block(entry, account)
+    card_installment = is_card_installment(entry, account)
     blocker: Optional[str] = None
     first_held: Optional[date] = None
-    if entry.installment_reviewed_at is None:
+    if card_installment and entry.installment_reviewed_at is None:
         blocker = "unreviewed"
     elif not entry.auto_post_enabled:
         blocker = "auto_post_off"
@@ -675,6 +704,10 @@ def post_plan(db: Session, entry, actor: User, through: date, held: Counter,
         walk = [occ for occ in full_walk if occ.date() < first_held]
     else:
         walk = []
+    if blocker in (None, "held") and not card_installment:
+        funded = _funded(db, entry, account, walk)
+        if len(funded) < len(walk):
+            walk, blocker = funded, "insufficient_funds"
     walked = {occ.date() for occ in walk}
     postable = [occ for occ in due if occ.date() in walked]
     return PostPlan(walk=walk, due=due, postable=postable, blocker=blocker)
@@ -700,29 +733,75 @@ def _post_entry_due(db: Session, entry, actor: User, through: date, *,
     checked the entry. With ``hold_duplicates`` the walk is ``post_plan``'s
     (cut before the first held month, empty behind any other blocker);
     without it (the review, which has just resolved this entry's candidates)
-    it is the uncut ``due_walk``. Every pending row linked to a walk day
-    is locked first, in ascending id, as ``materialize_due`` does. No
-    ``transaction_date`` is passed: a new row is dated on its effective date and a
-    linked pending row keeps its own date. A 409 or 400 from
+    it is the uncut ``due_walk``. Every pending row linked to a day of the
+    ``due_walk`` is locked first, in ascending id, as ``materialize_due`` does,
+    and then a cash entry's account, so the plan reads its balance under the
+    lock. No ``transaction_date`` is passed: a new row is dated on its effective
+    date and a linked pending row keeps its own date. A 409 or 400 from
     ``record_occurrence`` is left to the caller, which rolls back.
     """
     from app.services.installment_duplicates import held_occurrences
 
-    if hold_duplicates:
-        plan = post_plan(db, entry, actor, through, held_occurrences(db, [entry], through),
-                         RecordAccess(db, actor))
-        walk, blocker = plan.walk, plan.blocker
-    else:
-        walk, blocker = due_walk(db, entry, through), None
+    walk = due_walk(db, entry, through)
     days = {occ.date() for occ in walk}
     pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
         db, [entry.id], occurrence_match=True)
         if not is_posted and _naive(when).date() in days)
     for txn_id in pending:
         locking.lock_transaction(db, txn_id)
+    blocker = None
+    if hold_duplicates:
+        if not is_card_installment(entry, db.get(Account, entry.account_id)):
+            locking.lock_accounts(db, [entry.account_id])
+        plan = post_plan(db, entry, actor, through, held_occurrences(db, [entry], through),
+                         RecordAccess(db, actor))
+        walk, blocker = plan.walk, plan.blocker
     recorded = [record_occurrence(db, entry, actor, BudgetEntryMaterialize(), occ)
                 for occ in walk]
     return EntryPosting(blocker=blocker, recorded=recorded)
+
+
+AUTOPAY_COUNT_CHANGED = "The number of missed payments has changed; check them and try again"
+
+
+def autopay_preview(db: Session, entry) -> dict:
+    """``GET .../auto-post-preview``: ``block`` (``settlement_block``), and the
+    occurrences due through Manila's today that no posted row stands for:
+    ``due_count`` and ``oldest``, the first one's effective date."""
+    from app.services.forecast import unrecorded_occurrences
+
+    account = db.get(Account, entry.account_id) if entry.account_id else None
+    due = unrecorded_occurrences(db, [entry], manila_today())[entry.id]
+    return {"block": settlement_block(entry, account), "due_count": len(due),
+            "oldest": effective(_moved(db, entry), due[0].date()) if due else None}
+
+
+def turn_on_autopay(db: Session, entry, actor: User, expected_due: Optional[int]) -> EntryPosting:
+    """Turn autopay on for a cash entry and post what is due, without committing.
+
+    The caller holds the owner's budget lock and then the entry lock, and has
+    checked ``settlement_block``. ``expected_due`` must be the due count the
+    owner confirmed (none when nothing is due), else a 409 that changes nothing;
+    an occurrence outside the record dates is a 422, also before any write. The
+    run is the job's (``_post_entry_due``), so a funds or duplicate stop leaves
+    the flag on and the rest flagged. A leftover review stamp goes with it: the
+    job would ignore the flag otherwise (``auto_posts``).
+    """
+    from app.services.forecast import unrecorded_occurrences
+
+    today = manila_today()
+    due = unrecorded_occurrences(db, [entry], today)[entry.id]
+    if (expected_due or 0) != len(due):
+        raise HTTPException(status_code=409, detail=AUTOPAY_COUNT_CHANGED)
+    moved = _moved(db, entry)
+    for occ in due:
+        refuse_record_date(effective_at(moved, occ))
+    entry.auto_post_enabled = True
+    entry.installment_reviewed_at = None
+    entry.updated_at = utc_now()
+    # The duplicate universe reads the flag by query; the session does not autoflush.
+    db.flush()
+    return _post_entry_due(db, entry, actor, today, hold_duplicates=True)
 
 
 @dataclass
@@ -734,10 +813,10 @@ class AutoPostResult:
 
 # A ``post_plan`` blocker as a skip reason; None is not a skip.
 BLOCKER_REASONS = {"held": "possible_duplicate", "creator_no_access": "no_access",
-                   "caller_no_access": "no_access"}
+                   "caller_no_access": "no_access", "insufficient_funds": "insufficient_funds"}
 
 
-def _blocker_reason(blocker: Optional[str]) -> Optional[str]:
+def blocker_reason(blocker: Optional[str]) -> Optional[str]:
     if blocker is None or blocker in ("unreviewed", "auto_post_off", "blocked:inactive"):
         return None
     if blocker.startswith("blocked:"):
@@ -759,35 +838,31 @@ def _failure_reason(exc: HTTPException) -> str:
 
 def _auto_post_scope(db: Session, through: date, actor_scope: Optional[User],
                      entry_ids) -> List[Tuple[int, int]]:
-    """``[(entry id, creator id)]`` in id order: active, reviewed, auto-post-on,
-    capped card entries with months left and a next occurrence on or before
-    ``through``, or a later one forced on or before it (a forced date stays within
-    the reach); only ``entry_ids`` when given; for a caller, only entries the
-    caller can edit."""
+    """``[(entry id, creator id)]`` in id order: active, auto-post-on entries that
+    ``auto_posts`` admits (a stray flag on anything else is ignored) with a next
+    occurrence on or before ``through``, or a later one forced on or before it (a
+    forced date stays within the reach); only ``entry_ids`` when given; for a
+    caller, only entries the caller can edit."""
     from app.core.access import editable_account_ids
-    from app.models.account import AccountType
 
     forced = db.query(PaymentDateOverride.budget_entry_id).filter(
         PaymentDateOverride.budget_entry_id.isnot(None),
         PaymentDateOverride.effective_date <= through)
     query = (
-        db.query(BudgetEntry)
+        db.query(BudgetEntry, Account)
         .join(Account, Account.id == BudgetEntry.account_id)
         .filter(BudgetEntry.is_active.is_(True),
                 BudgetEntry.auto_post_enabled.is_(True),
-                BudgetEntry.installment_reviewed_at.isnot(None),
-                BudgetEntry.end_mode == "after_occurrences",
-                BudgetEntry.max_occurrences > 0,
                 or_(BudgetEntry.next_occurrence < _day_after(through),
                     and_(BudgetEntry.next_occurrence < _day_after(through) + OVERRIDE_REACH,
-                         BudgetEntry.id.in_(forced))),
-                Account.account_type == AccountType.CREDIT)
+                         BudgetEntry.id.in_(forced))))
     )
     if entry_ids is not None:
         query = query.filter(BudgetEntry.id.in_(list(entry_ids)))
     if actor_scope is not None:
         query = query.filter(BudgetEntry.account_id.in_(editable_account_ids(db, actor_scope)))
-    entries = query.order_by(BudgetEntry.id).all()
+    entries = [entry for entry, account in query.order_by(BudgetEntry.id).all()
+               if auto_posts(entry, account)]
     if actor_scope is not None:
         access = RecordAccess(db, actor_scope)
         entries = [e for e in entries if access.permissions(e)["can_edit"]]
@@ -796,21 +871,20 @@ def _auto_post_scope(db: Session, through: date, actor_scope: Optional[User],
 
 def post_due_installments(db: Session, *, through: date, actor_scope: Optional[User] = None,
                           entry_ids=None, dry_run: bool = False) -> AutoPostResult:
-    """Post every due month of the auto-post-on card installments in scope.
+    """Post every due month of the auto-post-on entries in scope (reviewed card
+    installments and autopay cash entries, ``_auto_post_scope``).
 
     The job (``actor_scope`` None) posts as each entry's creator; the
     backstop and the page-open trigger pass the caller, who is then the actor
     and sees only entries they can edit. Each entry runs in its own
     transaction, committed (rolled back when ``dry_run``) before the next:
     ``expire_all``, the creator's owner lock, the entry lock, then a recheck
-    on the locked row with a new ``RecordAccess`` (still on, reviewed, active
+    on the locked row with a new ``RecordAccess`` (still on, active, in scope
     and eligible; the creator, and a caller, can still edit it; else skipped),
     then ``_post_entry_due``. An ``HTTPException`` while recording rolls back
     that entry only and records its reason. ``posted`` counts ``created`` and
     ``posted_pending``; a posted-linked month only advances.
     """
-    from app.services.recurring_kinds import auto_post_block
-
     result = AutoPostResult()
     for entry_id, creator_id in _auto_post_scope(db, through, actor_scope, entry_ids):
         db.expire_all()
@@ -818,13 +892,14 @@ def post_due_installments(db: Session, *, through: date, actor_scope: Optional[U
         entry = locking.lock_entry(db, entry_id)
         reason: Optional[str] = None
         posted = 0
+        account = db.get(Account, entry.account_id) if entry is not None else None
         if entry is None or not (entry.is_active and entry.auto_post_enabled
-                                 and entry.installment_reviewed_at is not None):
+                                 and auto_posts(entry, account)):
             db.rollback()
             if entry is not None:
                 result.entries.append({"entry_id": entry_id, "posted": 0, "skipped_reason": None})
             continue
-        block = auto_post_block(entry, db.get(Account, entry.account_id))
+        block = settlement_block(entry, account)
         creator = db.get(User, entry.user_id)
         actor = creator if actor_scope is None else actor_scope
         if block is not None:
@@ -838,7 +913,7 @@ def post_due_installments(db: Session, *, through: date, actor_scope: Optional[U
             try:
                 run = _post_entry_due(db, entry, actor, through, hold_duplicates=True)
                 posted = run.posted
-                reason = _blocker_reason(run.blocker)
+                reason = blocker_reason(run.blocker)
             except HTTPException as exc:
                 db.rollback()
                 posted, reason = 0, _failure_reason(exc)
