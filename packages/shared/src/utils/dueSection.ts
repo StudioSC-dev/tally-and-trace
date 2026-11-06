@@ -15,6 +15,7 @@ import type { CurrencyCode } from './currency'
 import { formatEntryDate } from './entryDate'
 import { unpostedNote } from './cardPay'
 import { autoPostLabel } from './installmentReview'
+import { autopayPostable } from './settlement'
 import { type RecurringAction, recurringActionsFor } from './recurringActions'
 import { wallDay } from './transactionList'
 import type { UpcomingRow } from './upcomingList'
@@ -840,9 +841,12 @@ export function postedOnOpenText(posted: number): string | null {
   return `Posted ${posted} due installment ${posted === 1 ? 'month' : 'months'}`
 }
 
-/** Whether Due and overdue sends the page-open POST for this fresh snapshot: exactly when Post now has something. */
-export function shouldPostOnOpen(snapshot: Pick<DashboardSnapshot, 'installment_auto_post'>): boolean {
-  return postNowCount(snapshot) > 0
+/**
+ * Whether Due and overdue sends the page-open POST for this fresh snapshot: when Post now has a
+ * card installment month, or an autopay cash entry or loan has a payment the run can post.
+ */
+export function shouldPostOnOpen(snapshot: Pick<DashboardSnapshot, 'installment_auto_post'> & Partial<Pick<DashboardSnapshot, 'autopay_due'>>): boolean {
+  return postNowCount(snapshot) > 0 || autopayPostable(snapshot.autopay_due)
 }
 
 /** One row of the card-installment notice. */

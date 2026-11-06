@@ -76,6 +76,7 @@ function snap(
     missed: [],
     installment_review: [],
     installment_auto_post: [],
+    autopay_due: [],
     auto_post_scheduled: false,
     currencies: ['PHP'],
     fx: { rates: [], unconverted_count: 0 },
@@ -961,6 +962,15 @@ describe('shouldPostOnOpen', () => {
     expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A', postable_count: 0, state: 'off' })] }))).toBe(false)
     expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A' })] }))).toBe(true)
     expect(shouldPostOnOpen(snap({ installment_auto_post: [apRow({ entry_id: 1, name: 'A', state: 'held', postable_count: 1, due_count: 3 })] }))).toBe(true)
+  })
+
+  it('is also true when an autopay payment is postable, and false when every one is held', () => {
+    const due = (postable_count: number) => ({
+      source: 'budget_entry' as const, source_id: 9, name: 'Rent', account_name: 'Bank', due_count: 1,
+      postable_count, oldest: '2026-11-01', state: 'on' as const, block_reason: null,
+    })
+    expect(shouldPostOnOpen({ ...snap({}), autopay_due: [due(1)] })).toBe(true)
+    expect(shouldPostOnOpen({ ...snap({}), autopay_due: [due(0)] })).toBe(false)
   })
 })
 
