@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
@@ -29,17 +29,19 @@ from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate, AccountListResponse
+from app.schemas.budget_entry import ForcedDateSet
 from app.schemas.loan import LoanPaymentCreate, LoanPrepaymentCreate
 from app.schemas.minimum_due import MinimumDuePresetOut, MinimumDueRule
 from app.schemas.transaction import TransactionOut
 from app.services import loans as loan_svc
+from app.services import payment_dates
 from app.services.minimum_due import PRESETS as MINIMUM_DUE_PRESETS
 from app.services.fx import FxRates, get_fx
 from app.services.statements import (
     due_override_conflicts, load_due_overrides, resolve_cycle_fields,
 )
 from app.core.time import manila_midnight, naive_utc_now, utc_now
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -680,8 +682,15 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_spending_wallet(db, update_data, db_account)
     _validate_loan(db, update_data, db_account)
     _validate_minimum_due_rule(update_data, account_update.minimum_due_rule, db_account)
+    stored_first = db_account.loan_first_payment_date
+    stored_type = db_account.account_type
     for field, value in update_data.items():
         setattr(db_account, field, value)
+    # Every due date moves, so no forced date still stands for one.
+    if db_account.loan_first_payment_date != stored_first:
+        payment_dates.clear_all(db, loan_account_id=db_account.id)
+    if db_account.account_type != stored_type and db_account.account_type == AccountType.CREDIT:
+        payment_dates.clear_entries_on(db, db_account.id)
 
     db_account.updated_at = utc_now()
     if tag_ids is not None:
@@ -988,6 +997,102 @@ def record_loan_prepayment(
                    loan_svc.PREPAYMENT, prepayment)
 
 
+def _locked_loan(db: Session, current_user: User, account_id: int) -> Account:
+    """The loan, locked in the ledger's order and checked for an edit role.
+
+    The owner's budget lock, then the loan, so a forced date and a payment of
+    the loan queue on the same rows. The access check runs again on what the
+    locks read: a demotion committed while the caller waited is seen.
+    """
+    loan = _loan_or_404(db, current_user, account_id, edit=True)
+    locking.lock_owner_budgets(db, loan.user_id)
+    db.expire_all()
+    locking.lock_accounts(db, [account_id])
+    return _loan_or_404(db, current_user, account_id, edit=True)
+
+
+def _due_neighbours(db: Session, loan: Account, step: int) -> tuple:
+    """The effective dates of the due dates either side of ``step``. Read from
+    the schedule rather than the open list: a due date before it may reopen if a
+    payment is deleted, and one after it may appear if the term grows."""
+    moved = payment_dates.load_loan_overrides(db, [loan.id]).get(loan.id)
+    first = loan.loan_first_payment_date
+    previous = (payment_dates.effective(moved, loan_svc.due_date(first, step - 1))
+                if step > 0 else None)
+    return previous, payment_dates.effective(moved, loan_svc.due_date(first, step + 1))
+
+
+@router.put("/{account_id}/loan-due-dates/{day}/date")
+def set_loan_due_date(
+    account_id: int,
+    day: date,
+    body: ForcedDateSet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Force a loan's scheduled due date ``day`` onto another date.
+
+    The due date keeps ``day`` as its identity, for settling and covers; the
+    forced date decides when it is due, shown and overdue. The scheduled date
+    itself clears it. An edit role on the loan (404 otherwise).
+
+    409 when ``settle_posted`` has allocated money to the due date: its payment
+    is the record, and its date the transaction's. 422 unless ``day`` is an open
+    due date, and on a date more than 31 days from ``day``, not strictly between
+    the dates of the due dates either side, or outside the record dates.
+    Returns ``{occurrence_date, effective_date}``.
+    """
+    loan = _locked_loan(db, current_user, account_id)
+    step = loan_svc.due_step(loan, day)
+    state = loan_svc.settle_posted(loan, loan_svc._payments_into(db, loan))
+    if step is not None and loan_svc.money_allocated(loan, state, step):
+        raise HTTPException(
+            status_code=409,
+            detail="Money is already allocated to this due date; change the payment's date")
+    midnight = datetime(day.year, day.month, day.day)
+    if day not in {due for _, due, _ in loan_svc.due_dates(db, loan, midnight + timedelta(days=1))}:
+        raise HTTPException(status_code=422, detail="Not an open due date of this loan")
+    previous, following = _due_neighbours(db, loan, step)
+    forced = body.effective_date
+    if forced == day:
+        _clear_due_date(db, loan, step, day)
+    else:
+        payment_dates.refuse_forced_date(day, forced, previous, following)
+        payment_dates.set_override(db, current_user.id, day, forced, loan_account_id=loan.id)
+    db.commit()
+    return {"occurrence_date": day, "effective_date": forced}
+
+
+def _clear_due_date(db: Session, loan: Account, step: Optional[int], day: date) -> None:
+    """Clear the forced date on ``day`` if there is one, a 409 when the neighbours
+    were forced so that ``day`` would no longer fall between them."""
+    moved = payment_dates.load_loan_overrides(db, [loan.id]).get(loan.id, {})
+    if step is not None and day in moved:
+        previous, following = _due_neighbours(db, loan, step)
+        if not payment_dates.in_order(previous, day, following):
+            raise HTTPException(status_code=409, detail=payment_dates.CLEAR_OUT_OF_ORDER)
+    payment_dates.clear_override(db, day, loan_account_id=loan.id)
+
+
+@router.delete("/{account_id}/loan-due-dates/{day}/date", status_code=204)
+def clear_loan_due_date(
+    account_id: int,
+    day: date,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Put a loan's due date back on its scheduled date.
+
+    The same access and locks as the PUT; 204 whether or not one was set. 409
+    when a neighbour is forced so that the scheduled date would no longer fall
+    between them.
+    """
+    loan = _locked_loan(db, current_user, account_id)
+    _clear_due_date(db, loan, loan_svc.due_step(loan, day), day)
+    db.commit()
+    return Response(status_code=204)
+
+
 # Schedule fields built from the loan's terms: shown to its owner and admins only.
 LOAN_TERM_SCHEDULE_FIELDS = ("annual_rate", "payment_amount", "term_months",
                              "first_payment_date", "amortization", "proposed_split")
@@ -1025,14 +1130,14 @@ def get_loan_schedule(
         return {"view": "full", **schedule, **terms, "upcoming": upcoming}
     rows = [{"due_date": p["date"], "amount": round(p["principal"] + p["interest"], 2),
              "status": "paid"} for p in schedule["payments"]]
-    rows += [{"due_date": r["due_date"], "amount": r["payment"], "status": "open"}
+    rows += [{"due_date": r["effective_date"], "amount": r["payment"], "status": "open"}
              for r in schedule["upcoming"]]
     return {
         "view": "limited",
         "name": loan.name,
         "currency": loan.currency,
         "owed": schedule["owed"],
-        "next_due_date": schedule["next_due_date"],
+        "next_due_date": schedule["next_due_effective_date"],
         "payments_left": schedule["payments_left"],
         "rows": rows,
     }

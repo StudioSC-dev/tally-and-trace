@@ -126,7 +126,7 @@ class Occurrence:
     record: object
     face: Decimal           # the amount as entered
     remainder: Decimal      # what is left after in-scope payments (returned when > 0)
-    extra: dict = field(default_factory=dict)  # overdue / original_date
+    extra: dict = field(default_factory=dict)  # overdue / original_date / occurrence
     currency: Optional[str] = None  # the remainder's (module docstring); the record's by default
     # FX state, for a full row only (plan B5, G): ``estimate`` is
     # ``{original_amount, original_currency, rate}`` when the remainder is in
@@ -182,8 +182,9 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     """
     from app.core.redaction import LIMITED, Redactor
     from app.services.forecast import (
-        Money, _billed_card_occurrences, _linked_occurrence_days, iter_window_occurrences,
+        Money, _billed_card_occurrences, _linked_occurrence_days, effective_window_occurrences,
     )
+    from app.services.payment_dates import load_entry_overrides
 
     start, end = _naive(start), _naive(end)
     money = Money(db, fx)
@@ -288,6 +289,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
             account_fx(occ, face, face_currency)
 
     linked = _linked_occurrence_days(db, [e.id for e in entries])
+    forced = load_entry_overrides(db, [e.id for e in entries])
     for entry in entries:
         if entry.account_id in billed and entry.transfer_to_account_id is None:
             card = billed[entry.account_id]
@@ -303,15 +305,17 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
                     card_lines.setdefault(entry.account_id, []).append(
                         (occ, ("e", entry.id, when)))
             continue
-        for when, original in iter_window_occurrences(entry, start, end):
-            key = (entry.id, (original or when).date())
+        for when, original, nominal in effective_window_occurrences(
+                entry, start, end, forced.get(entry.id)):
+            key = (entry.id, nominal.date())
             if linked[key]:
                 linked[key] -= 1
                 continue
             # An installment's overdue occurrence is listed on ``start``, as an
             # overdue unposted transaction is above.
-            extra = ({"overdue": True, "original_date": original}
-                     if original is not None else {})
+            extra = {"occurrence": nominal,
+                     **({"overdue": True, "original_date": original}
+                        if original is not None else {})}
             occ = Occurrence(when, entry, _money(entry.amount), _money(entry.amount), extra)
             out.append(occ)
             if entry.account_id not in billed and entry.transfer_to_account_id is None:
@@ -381,8 +385,9 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
     rates (``forecast.Money``).
     """
     from app.services.forecast import (
-        Money, _card_entry_charges, _linked_occurrence_days, iter_window_occurrences,
+        Money, _card_entry_charges, _linked_occurrence_days, effective_window_occurrences,
     )
+    from app.services.payment_dates import load_entry_overrides
     from app.services.statements import _card_rows, _split_card_rows, normalise_lines
 
     by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
@@ -420,11 +425,13 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
             BudgetEntry.transfer_to_account_id == card.id,
             BudgetEntry.is_active.is_(True)).all()
         linked = _linked_occurrence_days(db, [e.id for e in transfers])
+        forced = load_entry_overrides(db, [e.id for e in transfers])
         for entry in transfers:
             # An installment's overdue occurrence pays on ``start``, as the
             # projection dates it; it is suppressed on its own day.
-            for when, original in iter_window_occurrences(entry, start, end):
-                key = (entry.id, (original or when).date())
+            for when, _, nominal in effective_window_occurrences(
+                    entry, start, end, forced.get(entry.id)):
+                key = (entry.id, nominal.date())
                 if linked[key]:
                     linked[key] -= 1
                     continue

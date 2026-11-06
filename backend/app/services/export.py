@@ -25,7 +25,8 @@ Version 2 (STU-232, shared accounts):
 ``card_statement_minimums`` (STU-343 Plan C): the minimum amounts due
 entered from the statements of the cards the caller owns.
 ``card_statement_due_overrides``: the due dates entered from the statements
-of the cards the caller owns, the same way.
+of the cards the caller owns, the same way. ``payment_date_overrides``: the
+forced dates of the caller's own ``budget_entries`` and owned loans.
 
 Tags (STU-231): the caller's own tags, and the links from those tags to the
 caller's own accounts and the records in ``transactions`` and
@@ -38,7 +39,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
@@ -59,6 +60,7 @@ from app.models.budget_entry import BudgetEntry
 from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.category import Category
+from app.models.payment_date_override import PaymentDateOverride
 from app.models.tag import Tag, account_tags, budget_entry_tags, transaction_tags
 from app.models.transaction import Transaction
 from app.models.user import User
@@ -120,6 +122,11 @@ CARD_STATEMENT_DUE_OVERRIDE_FIELDS = (
     "id", "account_id", "statement_close", "due_date", "created_at", "updated_at",
 )
 
+PAYMENT_DATE_OVERRIDE_FIELDS = (
+    "id", "budget_entry_id", "loan_account_id", "occurrence_date", "effective_date",
+    "created_at", "updated_at",
+)
+
 TAG_FIELDS = ("id", "name", "color", "is_system", "created_at")
 
 ACCOUNT_TAG_FIELDS = ("tag_id", "account_id")
@@ -145,7 +152,7 @@ TABLES = (
     "accounts", "shared_accounts", "transactions", "budget_entries", "categories", "allocations",
     "wishlist_items", "others_transactions", "others_budget_entries", "tags",
     "account_tags", "transaction_tags", "budget_entry_tags", "card_statement_minimums",
-    "card_statement_due_overrides",
+    "card_statement_due_overrides", "payment_date_overrides",
 )
 
 
@@ -216,6 +223,11 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
                      .order_by(CardStatementDueOverride.account_id,
                                CardStatementDueOverride.statement_close)
                      .all()) if owned_ids else []
+    date_overrides = (db.query(PaymentDateOverride)
+                      .filter(or_(PaymentDateOverride.budget_entry_id.in_([e.id for e in entries]),
+                                  PaymentDateOverride.loan_account_id.in_(owned_ids)))
+                      .order_by(PaymentDateOverride.id)
+                      .all())
 
     return {
         "export_version": EXPORT_VERSION,
@@ -247,6 +259,8 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
         "card_statement_minimums": [_row(m, CARD_STATEMENT_MINIMUM_FIELDS) for m in minimums],
         "card_statement_due_overrides": [
             _row(o, CARD_STATEMENT_DUE_OVERRIDE_FIELDS) for o in due_overrides],
+        "payment_date_overrides": [
+            _row(o, PAYMENT_DATE_OVERRIDE_FIELDS) for o in date_overrides],
     }
 
 
@@ -266,4 +280,5 @@ TABLE_FIELDS: Dict[str, tuple] = {
     "budget_entry_tags": BUDGET_ENTRY_TAG_FIELDS,
     "card_statement_minimums": CARD_STATEMENT_MINIMUM_FIELDS,
     "card_statement_due_overrides": CARD_STATEMENT_DUE_OVERRIDE_FIELDS,
+    "payment_date_overrides": PAYMENT_DATE_OVERRIDE_FIELDS,
 }

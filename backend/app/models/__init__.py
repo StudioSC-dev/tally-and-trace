@@ -18,6 +18,7 @@ from app.models.card_statement_minimum import CardStatementMinimum as CardStatem
 from app.models.card_statement_due_override import (
     CardStatementDueOverride as CardStatementDueOverride,
 )
+from app.models.payment_date_override import PaymentDateOverride as PaymentDateOverride
 
 # ---------------------------------------------------------------------------
 # User relationships

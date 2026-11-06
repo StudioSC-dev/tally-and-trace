@@ -40,6 +40,7 @@ from app.core.redaction import (
     Redactor, full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
 )
 from app.schemas.budget_entry import (
+    ForcedDateSet,
     BudgetEntryCreate,
     BudgetEntryUpdate,
     BudgetEntryOut,
@@ -62,6 +63,7 @@ from app.schemas.budget_entry import (
 )
 from app.schemas.transaction import TransactionOut
 from app.services import missed as missed_svc
+from app.services import payment_dates
 from app.services import posting
 from app.services.forecast import (
     _clamp_day, _linked_rows, _naive, capped_distinct_days, iter_occurrences, occurrences_paid,
@@ -723,6 +725,16 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone(timezone.utc)
 
 
+def _walk_fields(entry: BudgetEntry) -> tuple:
+    """The stored fields that decide which days the schedule walks."""
+    return (entry.cadence, entry.anchor_day, entry.day_rule, entry.semi_monthly_day_1,
+            entry.semi_monthly_day_2, _naive(entry.next_occurrence))
+
+
+def _is_card(account: Optional[Account]) -> bool:
+    return account is not None and account.account_type == AccountType.CREDIT
+
+
 @router.put("/{entry_id}", response_model=BudgetEntryOut)
 def update_budget_entry(
     entry_id: int,
@@ -849,6 +861,7 @@ def update_budget_entry(
 
     stored_next = _naive(entry.next_occurrence)
     stored_account_id = entry.account_id
+    stored_walk = _walk_fields(entry)
     for field, value in prospective_data.items():
         setattr(entry, field, value)
     if skip_paused:
@@ -882,6 +895,13 @@ def update_budget_entry(
     elif entry.auto_post_enabled and (moved_earlier or is_card_installment(entry, account)
                                       or settlement_block(entry, account) is not None):
         entry.auto_post_enabled = False
+
+    # A forced date was validated against the old walk, so a schedule edit drops
+    # them all rather than leave one out of order or resurrect it later. Moved
+    # onto a card it goes too: a card entry takes no forced date yet.
+    if _walk_fields(entry) != stored_walk or (
+            entry.account_id != stored_account_id and _is_card(account)):
+        payment_dates.clear_all(db, budget_entry_id=entry.id)
 
     # Set explicitly so every successful edit moves the version the guard
     # reads, a tag-only edit (no column change) included.
@@ -939,6 +959,7 @@ def delete_budget_entry(
 
 
 NO_ACCOUNT_MESSAGE = "This entry has no account to post to"
+CARD_FORCED_DATE = "A card charge's date can't be changed"
 SKIPPED_HEADER_LIMIT = 60  # the most skipped dates ``X-Occurrences-Skipped`` lists
 
 
@@ -1078,6 +1099,54 @@ def _occurrence_headers(outcome, occurrence: datetime, skipped: list) -> dict:
         headers["X-Occurrences-Skipped"] = ",".join(
             occ.date().isoformat() for occ in skipped[:SKIPPED_HEADER_LIMIT])
     return headers
+
+
+@router.put("/{entry_id}/occurrences/{day}/date")
+def set_occurrence_date(
+    entry_id: int,
+    day: date,
+    body: ForcedDateSet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Force the occurrence on the scheduled ``day`` onto another date.
+
+    The occurrence keeps ``day`` as its identity; ``effective_date`` decides when
+    it is due, shown, overdue and posted (services/payment_dates.py). The
+    scheduled date itself clears it. The caller needs the write rule on the
+    entry (404 otherwise, ``_lock_entry_to_post``).
+
+    422 on a card entry, on a ``day`` that is not an occurrence of the walk from
+    ``next_occurrence``, more than 31 days from ``day``, not strictly between the
+    effective dates of the occurrences either side, or outside the record dates.
+    409 when a row, posted or pending, is linked to the occurrence: its date is
+    the transaction's. Returns ``{occurrence_date, effective_date}``.
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    if _is_card(db.get(Account, entry.account_id)):
+        raise HTTPException(status_code=422, detail=CARD_FORCED_DATE)
+    posting.set_forced_date(db, entry, current_user, day, body.effective_date)
+    db.commit()
+    return {"occurrence_date": day, "effective_date": body.effective_date}
+
+
+@router.delete("/{entry_id}/occurrences/{day}/date", status_code=204)
+def clear_occurrence_date(
+    entry_id: int,
+    day: date,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Put an occurrence back on its scheduled date.
+
+    The same access and lock as the PUT; 204 whether or not one was set. 409
+    when a neighbour is forced so that the scheduled date would no longer fall
+    between its neighbours (``posting.clear_forced_date``).
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    posting.clear_forced_date(db, entry, day)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)

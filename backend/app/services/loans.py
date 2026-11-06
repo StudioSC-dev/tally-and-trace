@@ -58,6 +58,12 @@ A planned or recurring payment is itself a cash leg on its source account, so
 its cash (amount + interest fee) is consumed once and only the covered part of
 a payable is removed. Prepayments never cover one.
 
+Forced dates (``services/payment_dates.py``): a due date's nominal date is its
+identity, in settling, covering and ``loan_due_date``, since nothing above reads
+a payment against anything else. Only ``build_loan_payables`` and
+``build_schedule`` read the effective date, for what they show. A longer walk
+adds due dates after the others, so it changes nothing about the ones before.
+
 The result for a due date inside a window is the same for every window with
 the same start: posted and planned payments are loaded whatever their date and
 fill the due dates in order, so a longer window only adds due dates after the
@@ -79,6 +85,7 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account
 from app.models.transaction import Transaction, TransactionType
+from app.services.payment_dates import effective, extend, load_loan_overrides
 
 SCHEDULED = "scheduled"
 PREPAYMENT = "prepayment"
@@ -162,6 +169,15 @@ def own_due_index(first: date, day: date) -> int:
         k -= 1
     before, after = due_date(first, k), due_date(first, k + 1)
     return k + 1 if (after - day) < (day - before) else k
+
+
+def due_step(loan, day: date) -> Optional[int]:
+    """The step of the nominal due date ``day``, None when it is not one."""
+    first = loan.loan_first_payment_date
+    if first is None:
+        return None
+    step = own_due_index(first, day)
+    return step if due_date(first, step) == day else None
 
 
 def fill_oldest_first(amounts: List[Decimal], cash: Decimal) -> List[Decimal]:
@@ -351,6 +367,16 @@ def settle_posted(loan, payments: List[Transaction]) -> dict:
     return {"made": made, "open": open_, "next_due": next_due}
 
 
+def money_allocated(loan, state: dict, step: int) -> bool:
+    """Whether ``settle_posted`` (``state``) has allocated any money to ``step``:
+    the due date is made, or still owes less than the payment amount. A loan's
+    due date has no linked row, so this is what recorded means for it."""
+    if (loan.loan_payments_made_offset or 0) <= step < state["made"]:
+        return True
+    left = dict(state["open"]).get(step)
+    return left is not None and left < _money(loan.loan_payment_amount)
+
+
 def _reduce_term_rows(balance: Decimal, annual_rate, payment: Decimal,
                       paid: List[Decimal]) -> Optional[List[dict]]:
     """The amortisation preview from ``balance``, given ``paid[i]`` already toward payment ``i``.
@@ -431,8 +457,11 @@ def build_schedule(db: Session, loan: Account) -> dict:
     ``reduce_term`` one that never repays at its payment). A loan without a
     first payment date has no upcoming rows; its payments left are the term
     minus the payments made. A loan with nothing owed has no payments left and
-    no next due date.
+    no next due date. ``due_date`` and ``next_due_date`` stay nominal; each
+    upcoming row's ``effective_date`` and ``next_due_effective_date`` are the
+    forced date when there is one, and these dates otherwise.
     """
+    moved = load_loan_overrides(db, [loan.id]).get(loan.id)
     payments = _payments_into(db, loan)
     state = settle_posted(loan, payments)
     mode = amortization_of(loan)
@@ -473,6 +502,7 @@ def build_schedule(db: Session, loan: Account) -> dict:
         "payments_made": state["made"],
         "payments_left": payments_left,
         "next_due_date": next_due,
+        "next_due_effective_date": effective(moved, next_due) if next_due else None,
         "proposed_split": proposed,
         "payments": [{
             "transaction_id": t.id,
@@ -481,7 +511,8 @@ def build_schedule(db: Session, loan: Account) -> dict:
             "principal": float(_money(t.amount)),
             "interest": float(_money(t.transfer_fee or 0)),
         } for t in payments],
-        "upcoming": [{k: money(v) for k, v in row.items()} for row in upcoming],
+        "upcoming": [{**{k: money(v) for k, v in row.items()},
+                      "effective_date": effective(moved, row["due_date"])} for row in upcoming],
     }
 
 
@@ -638,7 +669,11 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
     occurrences into each loan up to ``end`` plus ``COVER_HORIZON``, each from
     its own due date forward (``allocate_to_due_dates``). A due date before
     ``start`` is overdue: emitted on ``start`` with ``overdue`` True and its due
-    date as ``original_date``. Covers are in the loan's currency: the planned
+    date as ``original_date``. A forced date moves all of that: a loan with
+    overrides walks its due dates the reach past ``end``, covers run on the
+    nominal dates as ever, and the event's date, the overdue test, the ``end``
+    filter and ``original_date`` read the effective date; ``loan_due_date`` stays
+    nominal. Covers are in the loan's currency: the planned
     ones are normalised here (``planned_covers``, with ``fx``), the projected
     ones by the caller, and the payable is in the loan's currency.
 
@@ -649,10 +684,12 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
     a loan is paid from cannot be made a wallet (routers/accounts.py).
     """
     events: List[dict] = []
+    forced = load_loan_overrides(db, [loan.id for loan in loans])
     for loan in loans:
         if loan.payment_account_id is None or loan.loan_payment_amount is None:
             continue
-        dates = due_dates(db, loan, end)
+        moved = forced.get(loan.id)
+        dates = due_dates(db, loan, extend(end) if moved else end)
         if not dates:
             continue
         after_planned = cover_planned([(due, amount) for _, due, amount in dates],
@@ -664,7 +701,10 @@ def build_loan_payables(db: Session, loans: List[Account], start: datetime, end:
         for (_, due, _), remaining in zip(dates, dues):
             if remaining <= 0:
                 continue
-            when = datetime(due.year, due.month, due.day)
+            day = effective(moved, due)
+            when = datetime(day.year, day.month, day.day)
+            if when >= end:
+                continue
             overdue = {"overdue": True, "original_date": when} if when < start else {}
             events.append({
                 "date": start if overdue else when,

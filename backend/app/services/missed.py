@@ -48,6 +48,7 @@ from app.models.transaction import Transaction, TransactionType
 from app.services import forecast as fc
 from app.services import posting as posting_svc
 from app.services.installment_duplicates import held_occurrences
+from app.services.payment_dates import effective, load_entry_overrides
 from app.services.posting import OCCURRENCE_HORIZON, PostPlan, first_occurrence, post_plan
 from app.services.recurring_kinds import (
     BILLING_KINDS, auto_post_block, entry_kind, is_capped, is_card_installment, is_kind_eligible,
@@ -225,6 +226,7 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
 
     review = []
     posting = []
+    forced = load_entry_overrides(db, infos)
     for info in infos.values():
         entry, plan = info.entry, info.plan
         if entry.installment_reviewed_at is None:
@@ -241,7 +243,9 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
                 "account_name": account_name(entry),
                 "due_count": len(plan.due),
                 "postable_count": len(plan.postable),
-                "due_today_count": sum(1 for occ in plan.due if occ.date() == info.today),
+                "due_today_count": sum(
+                    1 for occ in plan.due
+                    if effective(forced.get(entry.id), occ.date()) == info.today),
                 "oldest": plan.due[0].date().isoformat(),
                 "state": info.state,
                 "block_reason": info.block_reason,
@@ -288,11 +292,13 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
                      infos: Optional[Dict[int, InstallmentInfo]] = None) -> List[dict]:
     """The snapshot's ``missed`` key (see the module docstring), sorted by
-    ``oldest``, then name.
+    ``oldest_effective``, then name.
 
     ``count`` is the occurrences before today that no posted row records, from
     the entry's ``next_occurrence`` (``unrecorded_occurrences``, each calendar
-    day once, capped entries at their cap), with ``oldest`` the first. A pending
+    day once, capped entries at their cap, read on the effective date), with
+    ``oldest`` the first: its nominal date, which Mark paid sends back, and
+    ``oldest_effective`` the date to show. A pending
     linked row records nothing yet; ``split_pending_links`` adds the occurrences
     without one. With ``tag_id`` only entries carrying it effectively are kept,
     as the payables are. A card installment's row also carries ``auto_post`` (its
@@ -322,6 +328,7 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
     today = manila_today()
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today - timedelta(days=1))
     links = split_pending_links(db, entries, unrecorded, redactor)
+    forced = load_entry_overrides(db, [e.id for e in entries])
     out = []
     for entry in entries:
         missed = unrecorded.get(entry.id, [])
@@ -342,13 +349,14 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
             and redactor.can_view(account.id) else None,
             "count": len(missed),
             "oldest": missed[0].date().isoformat(),
+            "oldest_effective": effective(forced.get(entry.id), missed[0].date()).isoformat(),
             **links[entry.id],
             "can_mark_paid": bool(access.permissions(entry)["can_post"]),
             **({"auto_post": info.state, "block_reason": info.block_reason,
                 "can_review": info.can_edit and auto_post_block(entry, account) is None}
                if info is not None else {}),
         })
-    out.sort(key=lambda row: (row["oldest"], row["name"]))
+    out.sort(key=lambda row: (row["oldest_effective"], row["name"]))
     return out
 
 
@@ -402,7 +410,9 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
     stands for, posted or pending (``unrecorded_occurrences`` with
     ``pending_records``): such a row is listed itself. Card subscriptions and
     bills and wallet spending are kept, as the Transactions page lists their
-    rows. Sorted by day, name and entry id; ``total`` counts before ``limit``.
+    rows. The window, the filter and the sort read ``effective_date``, the
+    forced date or the occurrence's own; ``occurrence_date`` stays nominal.
+    Sorted by day, name and entry id; ``total`` counts before ``limit``.
 
     The walk runs from each entry's ``next_occurrence``, not from ``start``: a
     capped entry's cap and the matching of linked rows both count from there,
@@ -456,6 +466,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
              if any(is_card_installment(e, access.account(e.account_id)) for e in entries)
              else {})
     unrecorded = fc.unrecorded_occurrences(db, entries, through=last, pending_records=True)
+    forced = load_entry_overrides(db, [e.id for e in entries])
 
     def account_name(account_id: Optional[int]) -> Optional[str]:
         account = access.account(account_id) if account_id is not None else None
@@ -463,7 +474,10 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
 
     items = []
     for entry in entries:
-        days = [occ.date() for occ in unrecorded.get(entry.id, []) if occ.date() >= first]
+        moved = forced.get(entry.id)
+        days = [(occ.date(), effective(moved, occ.date()))
+                for occ in unrecorded.get(entry.id, [])
+                if effective(moved, occ.date()) >= first]
         if not days:
             continue
         account = access.account(entry.account_id)
@@ -491,14 +505,15 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
             "can_review": bool(info is not None and info.can_edit
                                and auto_post_block(entry, account) is None),
         }
-        for day in days:
+        for day, when in days:
             items.append({
                 **shared,
                 "occurrence_date": day,
+                "effective_date": when,
                 "recordable": (can_mark_paid and (not capped or day == first_day)
                                and auto_post != "on"),
             })
-    items.sort(key=lambda row: (row["occurrence_date"], row["name"], row["entry_id"]))
+    items.sort(key=lambda row: (row["effective_date"], row["name"], row["entry_id"]))
     return {"items": items[:limit], "total": len(items)}
 
 
@@ -511,7 +526,7 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
     pending (``unrecorded_occurrences`` with ``pending_records``), over the
     whole remaining schedule (``capped_schedule_end``), so a charge years out is
     still found; null only when every remaining month has a row. ``missed``
-    counts those occurrences before today. ``payments_left`` is
+    counts those whose effective date is before today. ``payments_left`` is
     ``max_occurrences`` and ``payments_total`` adds the paid count
     (``forecast.occurrences_paid``), as Allocations reads "n of m".
     ``can_mark_paid``, ``auto_post``, ``block_reason`` and ``can_review`` are
@@ -534,6 +549,7 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
     unrecorded = fc.unrecorded_occurrences(
         db, entries, through=max(fc.capped_schedule_end(e) for e in entries),
         pending_records=True) if entries else {}
+    forced = load_entry_overrides(db, [e.id for e in entries])
     items = []
     for entry in entries:
         account = access.account(entry.account_id)
@@ -551,7 +567,8 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
             "amount": float(entry.amount),
             "currency": entry.currency.value,
             "next_charge": next_charge,
-            "missed": sum(1 for occ in days if occ.date() < today),
+            "missed": sum(1 for occ in days
+                          if effective(forced.get(entry.id), occ.date()) < today),
             "payments_left": entry.max_occurrences,
             "payments_total": paid[entry.id] + entry.max_occurrences,
             "can_mark_paid": can_mark_paid,
