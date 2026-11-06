@@ -60,6 +60,7 @@ from app.schemas.share import (
     ReceivedTagShare, ShareCreate, ShareResponse, ShareUpdate, TagShareCreate,
     TagShareResponse, UserMatch,
 )
+from app.services import loans as loan_svc
 
 account_router = APIRouter()
 received_router = APIRouter()
@@ -123,9 +124,14 @@ def _guard_admin_rules(user: User, account: Account, share: AccountShare, new_ro
 def deactivate_entries(db: Session, user_id: int, account_id: int) -> int:
     """Deactivate ``user_id``'s recurring entries touching ``account_id`` (not committed)."""
     touches = or_(*(getattr(BudgetEntry, c) == account_id for c in TOUCHED_COLUMNS[BudgetEntry]))
-    return (db.query(BudgetEntry)
-            .filter(BudgetEntry.user_id == user_id, BudgetEntry.is_active.is_(True), touches)
-            .update({BudgetEntry.is_active: False}, synchronize_session=False))
+    active = db.query(BudgetEntry).filter(
+        BudgetEntry.user_id == user_id, BudgetEntry.is_active.is_(True), touches)
+    # Entries first, then accounts: the ledger's order (app.core.locking).
+    fed = (active.with_entities(BudgetEntry.transfer_to_account_id)
+           .order_by(BudgetEntry.id).with_for_update(key_share=True).all())
+    deactivated = active.update({BudgetEntry.is_active: False}, synchronize_session=False)
+    loan_svc.transfers_stopped(db, [row.transfer_to_account_id for row in fed])
+    return deactivated
 
 
 def _share_out(share: AccountShare) -> dict:

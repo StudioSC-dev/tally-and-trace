@@ -63,6 +63,7 @@ from app.schemas.budget_entry import (
     zero_remaining_allowed,
 )
 from app.schemas.transaction import TransactionOut
+from app.services import loans as loan_svc
 from app.services import missed as missed_svc
 from app.services import payment_dates
 from app.services import posting
@@ -863,6 +864,7 @@ def update_budget_entry(
     stored_next = _naive(entry.next_occurrence)
     stored_account_id = entry.account_id
     stored_walk = _walk_fields(entry)
+    stored_transfer = entry.transfer_to_account_id if entry.is_active else None
     for field, value in prospective_data.items():
         setattr(entry, field, value)
     if skip_paused:
@@ -901,6 +903,11 @@ def update_budget_entry(
     # them all rather than leave one out of order or resurrect it later.
     if _walk_fields(entry) != stored_walk:
         payment_dates.clear_all(db, budget_entry_id=entry.id)
+
+    # Paused, ended or pointed elsewhere, the transfer stops feeding its account.
+    if stored_transfer and not (entry.is_active
+                                and entry.transfer_to_account_id == stored_transfer):
+        loan_svc.transfers_stopped(db, [stored_transfer])
 
     # Set explicitly so every successful edit moves the version the guard
     # reads, a tag-only edit (no column change) included.
@@ -953,6 +960,8 @@ def delete_budget_entry(
     for txn in linked:
         txn.is_recurring = False
         txn.recurrence_frequency = None
+    if entry.is_active:
+        loan_svc.transfers_stopped(db, [entry.transfer_to_account_id])
     db.delete(entry)
     db.commit()
 
@@ -988,7 +997,8 @@ def _lock_entry_to_post(db: Session, current_user: User, entry_id: int) -> Budge
     return entry
 
 
-@router.post("/post-due-installments", response_model=PostDueInstallmentsResult)
+@router.post("/post-due-installments", response_model=PostDueInstallmentsResult,
+             response_model_exclude_unset=True)
 def post_due_installments(
     payload: PostDueInstallmentsRequest = PostDueInstallmentsRequest(),
     db: Session = Depends(get_db),
@@ -998,10 +1008,11 @@ def post_due_installments(
     installments and autopay cash entries the caller can edit, through Manila's
     today, as the caller
     (services/posting.py ``post_due_installments``; the rows belong to each
-    entry's creator). The same run as the daily job, under the same locks, so
-    whichever runs second finds nothing due. A ``through`` is not accepted.
-    Each entry commits on its own; one that cannot post is listed with its
-    reason and the rest still run.
+    entry's creator), then the due payments of the autopay loans the caller
+    manages (``post_due_loans``; the rows belong to each loan's owner). The same
+    run as the daily job, under the same locks, so whichever runs second finds
+    nothing due. A ``through`` is not accepted. Each entry and loan commits on its
+    own; one that cannot post is listed with its reason and the rest still run.
 
     ``trigger`` is ``button`` (Post now, the default) or ``page_open`` (the
     Transactions page's automatic run). A page-open run first claims the
@@ -1011,9 +1022,12 @@ def post_due_installments(
     if payload.trigger == "page_open" and not posting.claim_page_open(db, current_user):
         return {"trigger": payload.trigger, "throttled": True, "posted": 0, "skipped": {},
                 "entries": []}
-    result = posting.post_due_installments(db, through=manila_today(), actor_scope=current_user)
+    today = manila_today()
+    result = posting.post_due_installments(db, through=today, actor_scope=current_user)
+    posting.post_due_loans(db, through=today, actor_scope=current_user, result=result)
     return {"trigger": payload.trigger, "throttled": False, "posted": result.posted,
-            "skipped": dict(result.skipped), "entries": result.entries}
+            "skipped": dict(result.skipped), "entries": result.entries,
+            **({"loans": result.loans} if result.loans else {})}
 
 
 @router.post("/review-installments", response_model=ReviewInstallmentsResult)

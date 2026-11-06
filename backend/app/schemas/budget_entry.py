@@ -317,19 +317,28 @@ class PostDueEntry(BaseModel):
     skipped_reason: Optional[str] = None
 
 
+class PostDueLoan(BaseModel):
+    """One loan of a backstop run: payments posted, and why it stopped (null when it did not)."""
+    loan_id: int
+    posted: int
+    skipped_reason: Optional[str] = None
+
+
 class PostDueInstallmentsResult(BaseModel):
     """POST /budget-entries/post-due-installments (STU-343 Plan B).
 
-    ``posted`` counts months that moved money (new rows and posted pending
-    rows); ``skipped`` counts entries by reason. Every listed entry is one the
-    caller can edit. ``throttled`` is a page-open run refused because the
-    caller's last one was under 15 minutes ago; it posts nothing.
+    ``posted`` counts months and loan payments that moved money (new rows and
+    posted pending rows); ``skipped`` counts entries and loans by reason. Every
+    listed entry is one the caller can edit. ``loans`` is sent only when a loan
+    the caller manages posted or stopped. ``throttled`` is a page-open run refused
+    because the caller's last one was under 15 minutes ago; it posts nothing.
     """
     trigger: Literal["button", "page_open"]
     throttled: bool
     posted: int
     skipped: dict[str, int]
     entries: List[PostDueEntry]
+    loans: List[PostDueLoan] = []
 
 
 AutoPostBlock = Literal["foreign_currency", "no_statement_cycle", "inactive", "not_installment"]
@@ -535,16 +544,17 @@ class InstallmentPlans(BaseModel):
 
 
 class AutoPostToggle(BaseModel):
-    """POST /budget-entries/{id}/auto-post. ``enabled`` true on a cash entry takes
-    ``expected_due``, the count of missed occurrences the owner confirmed
-    (``AutoPostPreview.due_count``); a card installment turns on by its review."""
+    """POST /budget-entries/{id}/auto-post and /accounts/{id}/auto-post. ``enabled``
+    true on a cash entry or a loan takes ``expected_due``, the count of missed
+    occurrences the owner confirmed (``AutoPostPreview.due_count``); a card
+    installment turns on by its review."""
     enabled: bool
     expected_due: Optional[int] = None
 
 
 class AutoPostPreview(BaseModel):
-    """GET /budget-entries/{id}/auto-post-preview: why the entry cannot settle by
-    autopay (``settlement_block``), and what turning it on would post."""
+    """GET .../auto-post-preview on an entry or a loan: why it cannot settle by
+    autopay (``settlement_block``, ``loan_block``), and what turning it on would post."""
     block: Optional[str] = None
     due_count: int
     oldest: Optional[date] = None

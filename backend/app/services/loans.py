@@ -79,10 +79,11 @@ import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core import locking
 from app.models.account import Account
 from app.models.transaction import Transaction, TransactionType
 from app.services.payment_dates import effective, extend, load_loan_overrides
@@ -134,6 +135,37 @@ def cents(value) -> Optional[Decimal]:
 def default_amortization(loan_kind: Optional[str]) -> str:
     """Home loans shorten their term on prepayment by default; others follow the bank."""
     return REDUCE_TERM if loan_kind == "home" else FIXED
+
+
+def loan_settlement(loan) -> str:
+    """The wire value of ``auto_post_enabled``: an owner's or admin's to see."""
+    return "autopay" if loan.auto_post_enabled else "manual"
+
+
+def _number(value) -> Optional[Decimal]:
+    return None if value is None else Decimal(str(value))
+
+
+def due_terms(loan) -> dict:
+    """What decides which of the loan's due dates are open (``opens_due_dates``).
+    ``amortization_of`` carries ``loan_kind`` where no mode is stored."""
+    return {"schedule": (loan.loan_first_payment_date, _number(loan.loan_payment_amount),
+                         _number(loan.loan_annual_rate), loan.loan_term_months,
+                         loan.loan_payments_made_offset or 0, amortization_of(loan)),
+            "routed": loan.payment_account_id is not None,
+            "owed": owed(loan),
+            "active": bool(loan.is_active)}
+
+
+def opens_due_dates(before: dict, after: dict) -> bool:
+    """Whether an edit from ``before`` to ``after`` (``due_terms``) can open past due
+    dates, which would post with no confirmed count: any change to the schedule's
+    terms, in either direction, set and cleared included; a paying account set or
+    cleared, which lifts or lays a block; more owed; or the loan reopened."""
+    return (after["schedule"] != before["schedule"]
+            or after["routed"] != before["routed"]
+            or after["owed"] > before["owed"]
+            or (after["active"] and not before["active"]))
 
 
 def amortization_of(loan) -> str:
@@ -284,6 +316,21 @@ def split_payment(loan, total) -> Tuple[Decimal, Decimal]:
             f"month's interest ({interest}): enter the final payment amount, or give the "
             "principal as the amount and the interest as the fee")
     return total - interest, interest
+
+
+def split_due(loan, total) -> Tuple[Decimal, Decimal]:
+    """``(principal, interest)`` of a due date's ``total``, as the schedule says it.
+
+    ``split_payment``, except that the amount a ``reduce_term`` schedule says
+    clears the loan is all the principal left and only the rest interest: on a
+    part-paid last due date ``_reduce_term_rows`` nets the part payment off the
+    month's interest, so a month's interest here would leave a balance to pay
+    again.
+    """
+    left = owed(loan)
+    if amortization_of(loan) == REDUCE_TERM and cents(total) >= left:
+        return propose_split(loan, principal=left, interest=cents(total) - left)
+    return split_payment(loan, total)
 
 
 def amortize(balance: Decimal, annual_rate, payment: Decimal, first_due: date) -> Optional[List[dict]]:
@@ -504,6 +551,7 @@ def build_schedule(db: Session, loan: Account) -> dict:
         "next_due_date": next_due,
         "next_due_effective_date": effective(moved, next_due) if next_due else None,
         "proposed_split": proposed,
+        "settlement": loan_settlement(loan),
         "payments": [{
             "transaction_id": t.id,
             "date": t.transaction_date,
@@ -602,6 +650,52 @@ def due_dates(db: Session, loan: Account, end: datetime) -> List[Tuple[int, date
     rows = ([(r["step"], r["due_date"], r["payment"]) for r in dues] if dues is not None
             else [(step, due_date(first, step), left) for step, left in state["open"]])
     return [r for r in rows if datetime(r[1].year, r[1].month, r[1].day) < end]
+
+
+def cash_paid(txn: Transaction, account_id: Optional[int]) -> Decimal:
+    """What a posted row took off ``account_id``'s debt, negative where it added to
+    it: the cash of a transfer into it, or a credit or debit on it. Less of this
+    raises what is owed, which can open a past due date (``stop_autopay``)."""
+    if not txn.is_posted or account_id is None:
+        return _ZERO
+    if txn.transaction_type == TransactionType.TRANSFER:
+        if txn.transfer_to_account_id != account_id:
+            return _ZERO
+        return _money(txn.amount) + _money(txn.transfer_fee or 0)
+    if txn.account_id != account_id:
+        return _ZERO
+    amount = _money(txn.amount)
+    return amount if txn.transaction_type == TransactionType.CREDIT else -amount
+
+
+def planned_cover(txn: Transaction) -> Optional[Tuple[int, date]]:
+    """``(destination, day)`` of a row ``planned_covers`` counts, which holds a loan's
+    due dates back from a run; None on any other row."""
+    if (txn.is_posted or txn.transaction_type != TransactionType.TRANSFER
+            or not txn.transfer_to_account_id or txn.loan_payment_kind == PREPAYMENT):
+        return None
+    return txn.transfer_to_account_id, txn.transaction_date.date()
+
+
+def stop_autopay(db: Session, loan_id: Optional[int]) -> None:
+    """Clear the loan's autopay, without committing: the cash paid into it fell, or a
+    recurring transfer or planned payment that held it back went, so a due date may
+    stand open and it must post only with a confirmed count. A failed bank debit is
+    when an owner deletes a payment. The caller holds the account lock, which a run
+    reads the flag under."""
+    loan = db.get(Account, loan_id) if loan_id else None
+    if loan is not None and loan.auto_post_enabled:
+        loan.auto_post_enabled = False
+
+
+def transfers_stopped(db: Session, account_ids: Iterable[Optional[int]]) -> None:
+    """Active recurring transfers into these accounts stopped: lock them and clear
+    autopay on any that is a flagged loan, without committing. The transfer's
+    ``recurring_entry`` block held the job off, so without this a date that fell
+    due behind it would post unconfirmed. The caller holds any owner, entry and
+    transaction locks; the accounts come next in the ledger's order."""
+    for account_id in locking.lock_accounts(db, account_ids):
+        stop_autopay(db, account_id)
 
 
 def planned_covers(db: Session, loan: Account, fx=None) -> List[Tuple[date, Decimal]]:
