@@ -683,11 +683,16 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
     _validate_loan(db, update_data, db_account)
     _validate_minimum_due_rule(update_data, account_update.minimum_due_rule, db_account)
     stored_first = db_account.loan_first_payment_date
+    stored_terms = loan_svc.due_terms(db_account)
     for field, value in update_data.items():
         setattr(db_account, field, value)
     # Every due date moves, so no forced date still stands for one.
     if db_account.loan_first_payment_date != stored_first:
         payment_dates.clear_all(db, loan_account_id=db_account.id)
+    # Past due dates post only with a confirmed count: turning it back on asks.
+    if db_account.auto_post_enabled and loan_svc.opens_due_dates(
+            stored_terms, loan_svc.due_terms(db_account)):
+        db_account.auto_post_enabled = False
 
     db_account.updated_at = utc_now()
     if tag_ids is not None:

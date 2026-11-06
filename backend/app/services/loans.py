@@ -96,6 +96,9 @@ _CENTS = Decimal("0.01")
 _ZERO = Decimal("0")
 # Upper bound on preview rows (50 years of monthly payments).
 _MAX_ROWS = 600
+# The terms autopay cannot run without (``posting.loan_block``).
+_AUTOPAY_NEEDS = ("payment_account_id", "loan_first_payment_date", "loan_payment_amount",
+                  "loan_annual_rate")
 # How far past a window's end recurring payments are projected to find covers:
 # a payment belongs to its nearest due date, so it is never more than half a
 # month after the due date it covers.
@@ -139,6 +142,37 @@ def default_amortization(loan_kind: Optional[str]) -> str:
 def loan_settlement(loan) -> str:
     """The wire value of ``auto_post_enabled``: an owner's or admin's to see."""
     return "autopay" if loan.auto_post_enabled else "manual"
+
+
+def due_terms(loan) -> dict:
+    """What decides which of the loan's due dates are open (``opens_due_dates``)."""
+    return {"needs": {field: getattr(loan, field) for field in _AUTOPAY_NEEDS},
+            "offset": loan.loan_payments_made_offset or 0,
+            "term": loan.loan_term_months,
+            "mode": amortization_of(loan),
+            "owed": owed(loan),
+            "active": bool(loan.is_active)}
+
+
+def opens_due_dates(before: dict, after: dict) -> bool:
+    """Whether an edit from ``before`` to ``after`` (``due_terms``) can open past
+    due dates, which would post with no confirmed count: the first date moved
+    earlier, the offset lowered, a larger payment amount (the same cash settles
+    fewer due dates), a longer or open-ended term, the amortisation changed, more
+    owed or the loan reopened. A term autopay needs set or cleared counts too: a
+    block lifted by an edit lets go of whatever fell due behind it."""
+    first, last = before["needs"], after["needs"]
+    if any((first[field] is None) != (last[field] is None) for field in _AUTOPAY_NEEDS):
+        return True
+    day, amount = "loan_first_payment_date", "loan_payment_amount"
+    return ((last[day] is not None and last[day] < first[day])
+            or (last[amount] is not None and _money(last[amount]) > _money(first[amount]))
+            or after["offset"] < before["offset"]
+            or (before["term"] is not None
+                and (after["term"] is None or after["term"] > before["term"]))
+            or after["mode"] != before["mode"]
+            or after["owed"] > before["owed"]
+            or (after["active"] and not before["active"]))
 
 
 def amortization_of(loan) -> str:
