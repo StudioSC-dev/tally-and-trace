@@ -449,8 +449,8 @@ def a_due_date_owing_nothing(monkeypatch):
 
 
 def test_a_due_date_owing_nothing_is_not_counted_or_funds_checked(
-        world, monkeypatch, a_due_date_owing_nothing):
-    w, db = world, world["db"]
+        world, a_due_date_owing_nothing):
+    w = world
     loan = _loan(w)
     assert _preview(w, loan).json() == {"block": None, "due_count": 0, "oldest": None}
     _turn_on(w, loan)
