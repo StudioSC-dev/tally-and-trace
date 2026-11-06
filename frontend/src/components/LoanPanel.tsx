@@ -9,6 +9,7 @@ import {
 } from '../store/api'
 import { formatCurrency, CurrencyCode } from '../utils/currency'
 import { ForceDateDialog } from './ForceDateDialog'
+import { SettlementControl } from './SettlementControl'
 import type { ForceDateTarget } from './ForceDateDialog'
 
 /** A calendar date (YYYY-MM-DD) shown without a timezone shift. */
@@ -63,6 +64,16 @@ export function LoanSummary({ account }: { account: Account }) {
       </div>
     </dl>
   )
+}
+
+/**
+ * Autopay or manual for a loan. The flag is an owner's or admin's: an editor's schedule
+ * carries it as null (and the API answers 404), so the control is not rendered for them.
+ */
+export function LoanSettlement({ account }: { account: Account }) {
+  const { data: schedule } = useGetLoanScheduleQuery(account.id)
+  if (schedule?.view !== 'full' || schedule.settlement == null) return null
+  return <SettlementControl subject={{ kind: 'loan', id: account.id, name: account.name }} settlement={schedule.settlement} />
 }
 
 /** How many open due dates the loan page lists. */

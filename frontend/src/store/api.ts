@@ -95,6 +95,8 @@ export type {
   StatementDueInput,
   StatementMinimumInput,
   InstallmentAutoPostToggleInput,
+  AutoPostToggleInput,
+  AutoPostPreview,
   InstallmentReviewInput,
   InstallmentReviewResult,
   ReviewInstallmentsInput,
@@ -150,6 +152,8 @@ import type {
   StatementMinimumInput,
   InstallmentReview,
   InstallmentAutoPostToggleInput,
+  AutoPostToggleInput,
+  AutoPostPreview,
   InstallmentReviewInput,
   InstallmentReviewResult,
   ReviewInstallmentsInput,
@@ -444,6 +448,25 @@ export const accountingApi = createApi({
     setInstallmentAutoPost: builder.mutation<BudgetEntry, { id: number; data: InstallmentAutoPostToggleInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post`, method: 'POST', body: data }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account'],
+    }),
+    // Settlement of a cash entry (autopay or manual): what turning it on would post, and the toggle. On posts
+    // each missed occurrence on its own day, so it invalidates what a posting does.
+    getEntryAutoPostPreview: builder.query<AutoPostPreview, number>({
+      query: (id) => `budget-entries/${id}/auto-post-preview`,
+      providesTags: ['BudgetEntry', 'Transaction'],
+    }),
+    setEntryAutoPost: builder.mutation<BudgetEntry, { id: number; data: AutoPostToggleInput }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post`, method: 'POST', body: data }),
+      invalidatesTags: [...INSTALLMENTS_POSTED],
+    }),
+    // The same for a loan; an owner's or admin's (anyone else gets 404).
+    getLoanAutoPostPreview: builder.query<AutoPostPreview, number>({
+      query: (id) => `accounts/${id}/auto-post-preview`,
+      providesTags: ['Account', 'Transaction'],
+    }),
+    setLoanAutoPost: builder.mutation<Account, { id: number; data: AutoPostToggleInput }>({
+      query: ({ id, data }) => ({ url: `accounts/${id}/auto-post`, method: 'POST', body: data }),
+      invalidatesTags: [...INSTALLMENTS_POSTED],
     }),
     // "Post due installments now": every postable month of the auto-post-on installments the caller can edit.
     postDueInstallments: builder.mutation<PostDueInstallmentsResult, void>({
@@ -814,6 +837,12 @@ export const {
   useReviewInstallmentMutation,
   useReviewInstallmentsMutation,
   useSetInstallmentAutoPostMutation,
+  useGetEntryAutoPostPreviewQuery,
+  useLazyGetEntryAutoPostPreviewQuery,
+  useSetEntryAutoPostMutation,
+  useGetLoanAutoPostPreviewQuery,
+  useLazyGetLoanAutoPostPreviewQuery,
+  useSetLoanAutoPostMutation,
   usePostDueInstallmentsMutation,
   usePostDueInstallmentsOnOpenMutation,
 

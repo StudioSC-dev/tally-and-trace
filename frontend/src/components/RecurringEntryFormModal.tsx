@@ -5,6 +5,7 @@ import {
   categoryOptionLabel,
   dateForDaySetting,
   daySettingOf,
+  DEFAULT_SETTLEMENT,
   formatEntryDate,
   fromWireWallTime,
   generateOccurrences,
@@ -17,6 +18,8 @@ import {
   parseEntryDate,
   resolveEntryDayFields,
   settleKindChoice,
+  settlementControlState,
+  settlementFollowUp,
   statementCloseDay,
   statementCycleClose,
   finalMonthHelp,
@@ -25,10 +28,11 @@ import {
   withLoadedVersion,
   withoutError,
 } from '@tally-trace/shared'
-import type { BillingKind, BillingKindChoice, DaySetting, FieldErrors } from '@tally-trace/shared'
+import type { BillingKind, BillingKindChoice, DaySetting, FieldErrors, Settlement } from '@tally-trace/shared'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
+import { useAutopayActions } from '../hooks/useAutopayActions'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { chargedOnCloseLabel, formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
@@ -67,6 +71,8 @@ type SubscriptionFormState = {
   kind_choice: BillingKindChoice['id']
   /** Open-ended bank (non-card) expenses: Subscription stores `billing_kind: 'subscription'`; Other stores null. */
   bank_kind: BankKind
+  /** Cash expenses: how it settles. Applied after the save, as the toggle call. */
+  settlement: Settlement
   /** Month-family cadences: the Day control (an edit sends it only when it changed). */
   day: DaySetting
   // The tags picked in the form; an edit sends them only when they changed.
@@ -97,6 +103,7 @@ const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormSta
   max_occurrences: undefined,
   kind_choice: 'automatic',
   bank_kind: 'other',
+  settlement: DEFAULT_SETTLEMENT,
   day: { kind: 'same_as_date' },
   tag_ids: [],
 })
@@ -239,6 +246,7 @@ export function RecurringEntryFormModal({
       max_occurrences: entry.max_occurrences ?? undefined,
       kind_choice: kindChoiceFor(isCappedEnd(entry.end_mode, entry.max_occurrences), entry.billing_kind),
       bank_kind: bankKindOf(entry.billing_kind),
+      settlement: entry.settlement === 'autopay' ? 'autopay' : DEFAULT_SETTLEMENT,
       day: daySettingOf(entry),
       tag_ids: tagIdsOf(entry.tags),
     }
@@ -259,6 +267,17 @@ export function RecurringEntryFormModal({
     selectedAccountType !== undefined &&
     selectedAccountType !== 'credit' &&
     subscriptionForm.end_mode === 'indefinite'
+  // The Settlement control: only a cash expense has one (a card entry, a transfer and income name no settlement).
+  const settlementControl = settlementControlState({
+    entryType: subscriptionForm.entry_type,
+    transferToAccountId: subscriptionForm.transfer_to_account_id,
+    account: accountsById.get(subscriptionForm.account_id),
+    currency: subscriptionForm.currency,
+    isActive: subscriptionForm.is_active,
+  })
+  const { turnOn, turnOff } = useAutopayActions()
+  // What the save could not finish (autopay refused after the entry was saved); the form then only offers Close.
+  const [savedNote, setSavedNote] = useState<string | null>(null)
   // The pick the form opened on: an edit sends the bank kind only when the pick moved off it.
   const openingBankKind = editingBudgetEntry ? bankKindOf(editingBudgetEntry.billing_kind) : null
   // The pick the form opened on: an edit sends the field only when the pick moved off it.
@@ -419,8 +438,10 @@ export function RecurringEntryFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (savedNote !== null) return
     setSaveError('')
     setFieldErrors({})
+    let saved: BudgetEntry
     try {
       if (!subscriptionForm.name.trim()) {
         fail('name', 'Please provide a name for the recurring entry.')
@@ -540,9 +561,9 @@ export function RecurringEntryFormModal({
         const { category_id, allocation_id, ...sharedPayload } = subscriptionPayload
         const data = isSharedFull(editingBudgetEntry) ? sharedPayload : { ...sharedPayload, category_id, allocation_id }
         // The version this form loaded, so a save from a stale copy is refused rather than overwriting.
-        await updateBudgetEntry({ id: editingBudgetEntry.id, data: withLoadedVersion(data, editingBudgetEntry) }).unwrap()
+        saved = await updateBudgetEntry({ id: editingBudgetEntry.id, data: withLoadedVersion(data, editingBudgetEntry) }).unwrap()
       } else {
-        await createBudgetEntry(subscriptionPayload).unwrap()
+        saved = await createBudgetEntry(subscriptionPayload).unwrap()
       }
     } catch (error) {
       console.error('Error saving allocation data:', error)
@@ -550,8 +571,24 @@ export function RecurringEntryFormModal({
       setSaveError(apiErrorMessage(error) || 'Could not save the recurring entry. Please try again.')
       return
     }
-    // The save went through: a failed reload after it is not a failed save, so
-    // it is logged rather than reported as one.
+    // The save went through. Settlement is its own call: an edit can also clear the flag on its
+    // own (the entry moved earlier, or stopped being a cash expense), so it is judged from what the
+    // save returned. A refusal leaves the entry saved as Manual and says so.
+    const pick: Settlement = settlementControl.shown && settlementControl.disabledReason === null ? subscriptionForm.settlement : 'manual'
+    const followUp = settlementFollowUp(pick, saved.view === 'limited' ? null : saved.settlement)
+    if (followUp !== null) {
+      const subject = { kind: 'entry' as const, id: saved.id, name: subscriptionForm.name.trim() }
+      const outcome = await (followUp === 'turn_on' ? turnOn(subject) : turnOff(subject))
+      if (outcome.error !== null) {
+        setSavedNote(
+          followUp === 'turn_on'
+            ? `The entry was saved as Manual. Autopay was not turned on: ${outcome.error}`
+            : `The entry was saved, but autopay is still on: ${outcome.error}`,
+        )
+        return
+      }
+    }
+    // A failed reload after the save is not a failed save, so it is logged rather than reported as one.
     try {
       await onSaved()
     } catch (error) {
@@ -1095,6 +1132,28 @@ export function RecurringEntryFormModal({
                 </div>
               )}
 
+              {settlementControl.shown && (
+                <div>
+                  <label className="block text-sm font-medium text-body" htmlFor="recurring-settlement">Settlement</label>
+                  <select
+                    id="recurring-settlement"
+                    value={settlementControl.disabledReason === null ? subscriptionForm.settlement : 'manual'}
+                    onChange={(e) =>
+                      setSubscriptionForm((prev) => ({ ...prev, settlement: e.target.value === 'autopay' ? 'autopay' : 'manual' }))
+                    }
+                    disabled={settlementControl.disabledReason !== null}
+                    className="mt-1 block w-full border border-line px-3 py-2 disabled:opacity-60"
+                    data-testid="recurring-settlement"
+                  >
+                    <option value="manual">Manual: I record each payment</option>
+                    <option value="autopay">Autopay: post it on its date</option>
+                  </select>
+                  <p className="mt-1 text-xs text-muted" data-testid="recurring-settlement-help">
+                    {settlementControl.disabledReason ?? 'Autopay posts each payment by itself on its date. Manual waits for you.'}
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(!editingBudgetEntry || editingBudgetEntry.permissions.can_tag) && (
                   <TagPicker
@@ -1156,6 +1215,29 @@ export function RecurringEntryFormModal({
             </p>
           )}
 
+          {savedNote !== null && (
+            <div className="space-y-3" data-testid="recurring-settlement-note">
+              <p className="text-sm text-danger" role="alert">{savedNote}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await onSaved()
+                    } catch (error) {
+                      console.error('Error reloading after saving the recurring entry:', error)
+                    }
+                  })()
+                }}
+                className="bg-ink text-paper py-2 px-4 hover:bg-ink"
+                data-testid="recurring-settlement-note-close"
+              >
+                Close
+              </button>
+            </div>
+          )}
+
+          {savedNote === null && (
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
               type="submit"
@@ -1180,6 +1262,7 @@ export function RecurringEntryFormModal({
               </button>
             )}
           </div>
+          )}
         </form>
       </div>
       </div>
