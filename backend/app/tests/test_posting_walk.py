@@ -95,6 +95,7 @@ def test_capped_walk_counts_a_clamped_semi_monthly_day_once(monkeypatch):
 
     # ``unrecorded_occurrences`` (card missed items) caps the same way.
     monkeypatch.setattr(fc, "_linked_rows", lambda *a, **k: [])
+    monkeypatch.setattr(fc, "load_entry_overrides", lambda *a: {})
     e.id = 1
     assert [o.date() for o in fc.unrecorded_occurrences(None, [e], date(2027, 12, 31))[1]] == four
 
@@ -121,6 +122,7 @@ def test_unrecorded_occurrences_count_pending_rows_only_when_asked(monkeypatch):
     rows = [(7, datetime(2026, 11, 5), 1, True), (7, datetime(2026, 12, 5), 2, False),
             (7, datetime(2027, 1, 5), 3, False), (7, datetime(2027, 1, 5), 4, False)]
     monkeypatch.setattr(fc, "_linked_rows", lambda *a, **k: rows)
+    monkeypatch.setattr(fc, "load_entry_overrides", lambda *a: {})
     through = date(2027, 2, 5)
 
     assert [o.date() for o in fc.unrecorded_occurrences(None, [e], through)[7]] == [

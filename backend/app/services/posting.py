@@ -14,6 +14,10 @@ Charged (``is_posted`` False, a card expense only, checked by the router)
 records the occurrence as one new pending debit linked to it, and refuses an
 occurrence that already has a linked row: a pending one is posted on the
 Transactions page, a posted one is already recorded.
+
+A forced date (``services/payment_dates.py``) moves when an occurrence is due
+and how a new row is dated, and nothing else: ``occurrence_date``, the links, the
+schedule's walk and its advance all stay on the nominal date.
 """
 from calendar import monthrange
 from collections import Counter, defaultdict
@@ -40,6 +44,10 @@ from app.services import loans as loan_svc
 from app.services.forecast import (
     _linked_rows, _naive, _next_occurrence, capped_distinct_days, iter_occurrences,
     occurrence_links,
+)
+from app.services.payment_dates import (
+    CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_override, effective, effective_at, in_order,
+    load_entry_overrides, refuse_forced_date, set_override,
 )
 from app.services.recurring_kinds import entry_kind, is_capped
 
@@ -74,6 +82,24 @@ def schedule_walk(entry, through: date) -> List[datetime]:
     start, end = _naive(entry.next_occurrence), _day_after(through)
     bound = max((end - start).days, 0) + 2
     return capped_distinct_days(entry, start, end, max_steps=bound)
+
+
+def _moved(db: Session, entry) -> Moved:
+    """``entry``'s forced dates, read now: a caller holding the entry lock sees
+    every override written before it."""
+    return load_entry_overrides(db, [entry.id]).get(entry.id, {})
+
+
+def due_walk(db: Session, entry, through: date) -> List[datetime]:
+    """``schedule_walk`` read on the effective date: the nominal occurrences whose
+    effective date is on or before ``through``, walked the reach past it for an
+    entry with overrides. Forced dates keep the schedule's order, so this is a
+    prefix of the schedule."""
+    moved = _moved(db, entry)
+    if not moved:
+        return schedule_walk(entry, through)
+    return [occ for occ in schedule_walk(entry, through + OVERRIDE_REACH)
+            if effective(moved, occ.date()) <= through]
 
 
 def first_occurrence(entry) -> datetime:
@@ -227,10 +253,62 @@ def advance_occurrence(entry: BudgetEntry, current: datetime) -> datetime:
     return step_occurrence(entry, current)
 
 
+def _neighbours(db: Session, entry, day: date) -> Tuple[Optional[date], date]:
+    """The effective dates of the occurrences either side of the nominal ``day``,
+    a 422 when ``day`` is not an occurrence of the walk from ``next_occurrence``.
+    The first has no previous. The next is the schedule's next step (``_advance``'s),
+    past the cap or the end date too, so raising either later cannot put the
+    last occurrence's forced date out of order."""
+    refuse_far_occurrence(day)
+    walk = schedule_walk(entry, day)
+    if not walk or walk[-1].date() != day:
+        raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
+    moved = _moved(db, entry)
+    previous = effective(moved, walk[-2].date()) if len(walk) > 1 else None
+    return previous, effective(moved, advance_occurrence(entry, walk[-1]).date())
+
+
+ALREADY_RECORDED = "This occurrence is already recorded; change the transaction's date"
+
+
+def set_forced_date(db: Session, entry, actor: User, day: date, forced: date) -> None:
+    """Force the occurrence on the nominal ``day`` to ``forced``, without committing.
+
+    The caller holds the owner's budget lock and then the entry lock. 422 when
+    ``day`` is not an occurrence of the walk; 409 when a row, posted or pending,
+    is linked to it; 422 past the reach, out of order or outside the record
+    dates. ``forced`` equal to ``day`` clears the override instead
+    (``clear_forced_date``).
+    """
+    previous, following = _neighbours(db, entry, day)
+    if occurrence_links(db, entry, day):
+        raise HTTPException(status_code=409, detail=ALREADY_RECORDED)
+    if forced == day:
+        clear_forced_date(db, entry, day)
+        return
+    refuse_forced_date(day, forced, previous, following)
+    set_override(db, actor.id, day, forced, budget_entry_id=entry.id)
+
+
+def clear_forced_date(db: Session, entry, day: date) -> None:
+    """Clear the override on the nominal ``day`` if there is one, without
+    committing. A 409 when the neighbours were forced past the nominal date, so
+    clearing would break the order; a row left on a date no longer in the walk
+    is inert, and goes."""
+    if day in _moved(db, entry) and any(
+            occ.date() == day for occ in schedule_walk(entry, day)):
+        previous, following = _neighbours(db, entry, day)
+        if not in_order(previous, day, following):
+            raise HTTPException(status_code=409, detail=CLEAR_OUT_OF_ORDER)
+    clear_override(db, day, budget_entry_id=entry.id)
+
+
 def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
             occurrence: datetime) -> Transaction:
     """A new row for ``occurrence``, posted unless ``payload.is_posted`` is
-    False (Charged): the materialise create body."""
+    False (Charged): the materialise create body. Dated
+    ``payload.transaction_date`` or the effective date; ``occurrence_date`` stays
+    the nominal ``occurrence``."""
     from app.routers.transactions import add_transaction, exchange_rate
     from app.schemas.transaction import TransactionCreate
 
@@ -276,15 +354,16 @@ def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
         )
         transfer_fields = {}
 
+    when = effective_at(_moved(db, entry), occurrence)
     if payload.transaction_date is None:
         # The date is the server's own (the occurrence): a legacy schedule's
         # old occurrence is a 422 here, not a ValidationError from the model.
-        refuse_record_date(occurrence)
+        refuse_record_date(when)
     txn_create = TransactionCreate(
         account_id=entry.account_id,
         amount=amount,
         transaction_type=txn_type,
-        transaction_date=payload.transaction_date or occurrence,
+        transaction_date=payload.transaction_date or when,
         category_id=entry.category_id,
         allocation_id=entry.allocation_id,
         budget_entry_id=entry.id,
@@ -334,7 +413,7 @@ def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMater
     pending row is locked and posted as ``actor`` (``pending_update_for``,
     ``apply_transaction_update``), a 409 when ``actor`` cannot edit it
     (``posted_pending``). No linked row gets a new posted transaction dated
-    ``payload.transaction_date`` or the occurrence (``created``). With
+    ``payload.transaction_date`` or the effective date (``created``). With
     ``payload.is_posted`` False (Charged) the new row is pending, and any
     linked row is a 409. With ``payload.advance`` the schedule then moves past
     ``occurrence``.
@@ -403,12 +482,23 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     listed occurrence's ``omitted_before`` counts the walked ones left out of
     the listing immediately before it (0 when it follows the previous listed
     one, or is the walk's first).
+
+    ``occurrence_date`` stays nominal, the date a Mark paid sends back. Each row
+    adds ``effective_date``, its forced date or that same day, and ``due``,
+    ``oldest_due``, ``latest_due`` and the distance from today read it. An
+    occurrence forced into the walked range from past its end is walked too.
     """
     if include is not None:
         refuse_far_occurrence(include)
     today = manila_today()
     around = timedelta(days=OCCURRENCES_AROUND)
-    walk = schedule_walk(entry, max(today + around, include or today))
+    through = max(today + around, include or today)
+    moved = _moved(db, entry)
+    if moved:
+        walk = [occ for occ in schedule_walk(entry, through + OVERRIDE_REACH)
+                if occ.date() <= through or effective(moved, occ.date()) <= through]
+    else:
+        walk = schedule_walk(entry, through)
     if include is not None and include not in {occ.date() for occ in walk}:
         raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
 
@@ -425,17 +515,18 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
         flags = links.get(day, [])
         linked = (None if not flags else "ambiguous" if len(flags) > 1
                   else "posted" if flags[0] else "pending")
-        rows.append({"occurrence_date": day, "due": day <= today, "linked": linked,
-                     "skipped_before": unrecorded})
+        when = effective(moved, day)
+        rows.append({"occurrence_date": day, "effective_date": when, "due": when <= today,
+                     "linked": linked, "skipped_before": unrecorded})
         if posted[day]:
             posted[day] -= 1
             continue
         unrecorded += 1
         oldest_unrecorded = oldest_unrecorded or day
-        if day <= today:
+        if when <= today:
             due_unposted += 1
-            oldest_due = oldest_due or day
-            latest_due = day
+            oldest_due = oldest_due or when
+            latest_due = when
 
     capped = is_capped(entry)
     if capped:
@@ -443,7 +534,7 @@ def entry_occurrences(db: Session, entry, include: Optional[date]) -> dict:
     else:
         kept = [i for i, r in enumerate(rows)
                 if i < OCCURRENCES_FIRST
-                or today - around <= r["occurrence_date"] <= today + around
+                or today - around <= r["effective_date"] <= today + around
                 or r["occurrence_date"] == include]
     listed, previous = [], -1
     for i in kept:
@@ -470,26 +561,30 @@ def materialize_due(db: Session, entry, actor: User) -> List[Recorded]:
     The caller holds the owner's budget lock and then the entry lock, and has
     checked the entry may be posted this way (a non-capped subscription or cash
     expense in its account's currency). The due set is the schedule from
-    ``next_occurrence`` through Manila's today. Every pending row linked to it
+    ``next_occurrence`` whose effective date is through Manila's today
+    (``due_walk``). Every pending row linked to it
     is locked first, in ascending id, before anything is created, so the lock
     order stays owner, entry, transaction rows, accounts. Then every due
-    occurrence goes through ``record_occurrence`` in order, dated on its own
-    day; a posted one only advances the schedule, so it never stalls behind a
+    occurrence goes through ``record_occurrence`` in order, dated on its
+    effective date; a posted one only advances the schedule, so it never stalls behind a
     recorded month. A 409 on any occurrence leaves the caller to roll back.
     """
-    due = schedule_walk(entry, manila_today())
+    due = due_walk(db, entry, manila_today())
+    moved = _moved(db, entry)
     # Each due occurrence is posted on its own day, so one outside the allowed
     # range refuses the whole request, before anything is written (Post N due
     # on a decades-old schedule would otherwise write rows the bounds forbid).
     for occ in due:
-        refuse_record_date(occ)
+        refuse_record_date(effective_at(moved, occ))
     days = {occ.date() for occ in due}
     pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
         db, [entry.id], occurrence_match=True)
         if not is_posted and _naive(when).date() in days)
     for txn_id in pending:
         locking.lock_transaction(db, txn_id)
-    return [record_occurrence(db, entry, actor, BudgetEntryMaterialize(transaction_date=occ), occ)
+    return [record_occurrence(db, entry, actor,
+                              BudgetEntryMaterialize(transaction_date=effective_at(moved, occ)),
+                              occ)
             for occ in due]
 
 
@@ -501,7 +596,7 @@ class PostPlan:
 
     ``walk`` is what the job, the page-open trigger and the backstop record, in
     order: the schedule from ``next_occurrence`` through ``through``
-    (``schedule_walk``), posted-linked months included (they only advance the
+    (``due_walk``), posted-linked months included (they only advance the
     schedule), cut before the first held month, or empty behind any other
     blocker. ``due`` (the months no posted row stands for) and ``postable``
     (the ``due`` months in ``walk``) are for counts and labels only.
@@ -529,7 +624,7 @@ def post_plan(db: Session, entry, actor: User, through: date, held: Counter,
     from app.services.recurring_kinds import auto_post_block
 
     due = unrecorded_occurrences(db, [entry], through)[entry.id]
-    full_walk = schedule_walk(entry, through)
+    full_walk = due_walk(db, entry, through)
     card = db.get(Account, entry.account_id) if entry.account_id else None
     block = auto_post_block(entry, card)
     blocker: Optional[str] = None
@@ -587,9 +682,9 @@ def _post_entry_due(db: Session, entry, actor: User, through: date, *,
     checked the entry. With ``hold_duplicates`` the walk is ``post_plan``'s
     (cut before the first held month, empty behind any other blocker);
     without it (the review, which has just resolved this entry's candidates)
-    it is the uncut ``schedule_walk``. Every pending row linked to a walk day
+    it is the uncut ``due_walk``. Every pending row linked to a walk day
     is locked first, in ascending id, as ``materialize_due`` does. No
-    ``transaction_date`` is passed: a new row is dated on its occurrence and a
+    ``transaction_date`` is passed: a new row is dated on its effective date and a
     linked pending row keeps its own date. A 409 or 400 from
     ``record_occurrence`` is left to the caller, which rolls back.
     """
@@ -600,7 +695,7 @@ def _post_entry_due(db: Session, entry, actor: User, through: date, *,
                          RecordAccess(db, actor))
         walk, blocker = plan.walk, plan.blocker
     else:
-        walk, blocker = schedule_walk(entry, through), None
+        walk, blocker = due_walk(db, entry, through), None
     days = {occ.date() for occ in walk}
     pending = sorted(txn_id for _, when, txn_id, is_posted in _linked_rows(
         db, [entry.id], occurrence_match=True)

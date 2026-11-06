@@ -26,7 +26,8 @@ pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not
 # Sunday 2026-10-18, 02:00 UTC: 10:00 in Manila.
 REF = datetime(2026, 10, 18, 2, 0)
 MISSED_KEYS = {"view", "entry_id", "name", "entry_type", "kind", "plan_kind", "is_transfer", "capped",
-               "account_name", "count", "oldest", "unlinked_count", "oldest_unlinked",
+               "account_name", "count", "oldest", "oldest_effective", "unlinked_count",
+               "oldest_unlinked",
                "pending_transaction_ids", "can_mark_paid"}
 # A card installment's row also carries its auto-post state (STU-343 Plan B).
 INSTALLMENT_KEYS = MISSED_KEYS | {"auto_post", "block_reason", "can_review"}
@@ -106,7 +107,7 @@ def test_rule_counts_occurrences_before_today_and_splits_pending_links(me):
         "view": "full", "entry_id": rent, "name": "Rent", "entry_type": "expense",
         "kind": "cash", "plan_kind": None, "is_transfer": False, "capped": False,
         "account_name": "Checking",
-        "count": 2, "oldest": "2026-08-18", "unlinked_count": 2,
+        "count": 2, "oldest": "2026-08-18", "oldest_effective": "2026-08-18", "unlinked_count": 2,
         "oldest_unlinked": "2026-08-18", "pending_transaction_ids": [], "can_mark_paid": True}
 
     # A pending row linked by hand to a missed day: still missed, but not unlinked.

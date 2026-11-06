@@ -32,8 +32,8 @@ pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not
 # Sunday 2026-10-18, 02:00 UTC: 10:00 in Manila.
 REF = datetime(2026, 10, 18, 2, 0)
 TODAY = date(2026, 10, 18)
-KEYS = {"view", "entry_id", "name", "occurrence_date", "entry_type", "is_transfer", "kind",
-        "plan_kind", "amount", "currency", "account_name", "transfer_to_account_name", "capped",
+KEYS = {"view", "entry_id", "name", "occurrence_date", "effective_date", "entry_type",
+        "is_transfer", "kind", "plan_kind", "amount", "currency", "account_name", "transfer_to_account_name", "capped",
         "can_mark_paid", "recordable", "auto_post", "block_reason", "can_review"}
 
 
@@ -118,7 +118,7 @@ def test_three_salaries_list_each_unrecorded_month_once(me):
     item = body["items"][0]
     assert item == {
         "view": "full", "entry_id": due, "name": "Salary B", "occurrence_date": "2026-10-30",
-        "entry_type": "income", "is_transfer": False, "kind": None, "plan_kind": None,
+        "effective_date": "2026-10-30", "entry_type": "income", "is_transfer": False, "kind": None, "plan_kind": None,
         "amount": 1000.0,
         "currency": "PHP", "account_name": "Checking", "transfer_to_account_name": None,
         "capped": False, "can_mark_paid": True, "recordable": True, "auto_post": None,

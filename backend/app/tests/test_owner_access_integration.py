@@ -36,6 +36,7 @@ API = "/api/v1"
 PASSWORD = "Password123!"
 WHEN = "2026-10-05T00:00:00"
 MARK = "Zq7Owner"  # in every name the owner creates; never in the stranger's responses
+DAY = "2026-10-15"  # a date in a path; the guard test reads it as ``{day}``
 
 
 @pytest.fixture(scope="module")
@@ -183,6 +184,9 @@ def _id_routes(w):
          {"json": {"from_account_id": sb, "principal": 100, "interest": 0}}),
         ("post", f"/accounts/{w['loan']}/loan-prepayment",
          {"json": {"from_account_id": sb, "amount": 100}}),
+        ("put", f"/accounts/{w['loan']}/loan-due-dates/{DAY}/date",
+         {"json": {"effective_date": "2026-10-20"}}),
+        ("delete", f"/accounts/{w['loan']}/loan-due-dates/{DAY}/date", {}),
         ("get", f"/transactions/{w['transaction']}", {}),
         ("put", f"/transactions/{w['transaction']}", {"json": {"amount": 1}}),
         ("delete", f"/transactions/{w['transaction']}", {}),
@@ -201,6 +205,9 @@ def _id_routes(w):
         ("delete", f"/budget-entries/{w['entry']}", {}),
         ("post", f"/budget-entries/{w['entry']}/materialize", {}),
         ("get", f"/budget-entries/{w['entry']}/occurrences", {}),
+        ("put", f"/budget-entries/{w['entry']}/occurrences/{DAY}/date",
+         {"json": {"effective_date": "2026-10-20"}}),
+        ("delete", f"/budget-entries/{w['entry']}/occurrences/{DAY}/date", {}),
         ("post", f"/budget-entries/{w['entry']}/materialize-due", {}),
         ("get", f"/budget-entries/{w['entry']}/auto-post-review", {}),
         ("post", f"/budget-entries/{w['entry']}/auto-post-review",
@@ -301,7 +308,8 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
     w = {k: 0 for k in ("bank", "card", "loan", "transaction", "category", "allocation",
                         "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share",
                         "owner_id")}
-    swept = {(m.upper(), p.replace("/0", "/{id}")) for m, p, _ in _id_routes(w)}
+    swept = {(m.upper(), p.replace("/0", "/{id}").replace(DAY, "{day}"))
+             for m, p, _ in _id_routes(w)}
     for path, ops in app.openapi()["paths"].items():
         if "{" not in path or not path.startswith(API) or "/entities/" in path:
             continue

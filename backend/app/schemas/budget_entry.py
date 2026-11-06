@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import Annotated, Optional, List, Literal, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.core.record_dates import check_record_date
 from app.schemas.access import AccountRef, RecordPermissions
 from app.schemas.transaction import TransactionOut
@@ -247,8 +247,9 @@ class BudgetEntryMaterialize(BaseModel):
 
 class EntryOccurrence(BaseModel):
     """One occurrence offered by Mark paid."""
-    occurrence_date: date
-    due: bool  # on or before today on the Manila calendar
+    occurrence_date: date  # the schedule's date, which Mark paid sends back
+    effective_date: date  # its forced date, or that same day
+    due: bool  # the effective date is on or before today on the Manila calendar
     # The row(s) already standing for it: one pending (posted by Mark paid), one
     # posted (Mark paid only moves the schedule on), or several (refused).
     linked: Optional[Literal["pending", "posted", "ambiguous"]] = None
@@ -265,7 +266,8 @@ class EntryOccurrences(BaseModel):
     capped: bool
     kind: Optional[EntryKind] = None
     due_unposted: int
-    # The first and last of those, listed or not; None when due_unposted is 0.
+    # The first and last of those (effective dates), listed or not; None when
+    # due_unposted is 0.
     oldest_due: Optional[date] = None
     latest_due: Optional[date] = None
     # The first walked occurrence, due or not, listed or not, that no posted row
@@ -273,6 +275,14 @@ class EntryOccurrences(BaseModel):
     oldest_unrecorded: Optional[date] = None
     omitted: int  # walked occurrences left out of ``occurrences``
     occurrences: List[EntryOccurrence]
+
+
+class ForcedDateSet(BaseModel):
+    """``PUT .../date``: the day an occurrence or loan due date really falls on.
+    The scheduled date clears it."""
+    model_config = ConfigDict(extra="forbid")
+
+    effective_date: date
 
 
 class MaterializeDueItem(BaseModel):
@@ -460,7 +470,8 @@ class UpcomingOccurrence(BaseModel):
     view: Literal["full", "shared_full"]
     entry_id: int
     name: str
-    occurrence_date: date
+    occurrence_date: date  # the schedule's date, which Mark paid sends back
+    effective_date: date  # its forced date, or that same day
     entry_type: BudgetEntryType
     is_transfer: bool
     kind: Optional[EntryKind] = None
@@ -479,7 +490,7 @@ class UpcomingOccurrence(BaseModel):
 
 class UpcomingOccurrences(BaseModel):
     """GET /budget-entries/upcoming-occurrences (STU-465): sorted by
-    ``occurrence_date``, then ``name``, then ``entry_id``; ``total`` counts
+    ``effective_date``, then ``name``, then ``entry_id``; ``total`` counts
     every match, before ``limit``."""
     items: List[UpcomingOccurrence]
     total: int

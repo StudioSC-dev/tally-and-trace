@@ -40,6 +40,9 @@ from app.models.transaction import Transaction, TransactionType, pending_face
 from app.models.transaction import RecurrenceFrequency
 from app.services.fx import FxMeta, FxRates, convert
 from app.services.installment_duplicates import held_occurrences
+from app.services.payment_dates import (
+    OVERRIDE_REACH, Moved, effective, effective_at, extend, load_entry_overrides,
+)
 from app.services.recurrence import step_occurrence
 from app.services.recurring_kinds import is_card_installment
 
@@ -826,6 +829,41 @@ def iter_window_occurrences(entry, start: datetime, end: datetime) -> Iterator[t
         yield occ, None
 
 
+def effective_window_occurrences(entry, start: datetime, end: datetime,
+                                 moved: Optional[Moved]) -> Iterator[tuple]:
+    """Yield ``(date, original, nominal)``: ``iter_window_occurrences`` with the
+    entry's forced dates (``moved``), read on the effective date.
+
+    ``nominal`` is the schedule's date, the occurrence's identity: callers
+    suppress a recorded occurrence on it. With no overrides this is the old path
+    exactly. With them the walk runs from ``OVERRIDE_REACH`` before ``start`` (a
+    capped entry from ``next_occurrence``, where its cap counts) to the reach
+    past ``end``, and only an effective date before ``end`` is kept. An effective
+    date before ``start`` is ``(start, effective, nominal)``, overdue, on a capped
+    entry; an open-ended entry drops it, as ``iter_window_occurrences`` drops a
+    missed occurrence (the ``missed`` list shows it). The walk's order is the
+    effective dates' order (``payment_dates``).
+    """
+    if not moved:
+        for when, original in iter_window_occurrences(entry, start, end):
+            yield when, original, original or when
+        return
+    start, end = _naive(start), _naive(end)
+    if start >= end:
+        return
+    capped = (getattr(entry, "end_mode", None) == "after_occurrences"
+              and getattr(entry, "max_occurrences", None) is not None)
+    walk_from = _naive(entry.next_occurrence) if capped else start - OVERRIDE_REACH
+    for nominal in iter_occurrences(entry, walk_from, extend(end)):
+        when = effective_at(moved, nominal)
+        if when >= end:
+            continue
+        if when >= start:
+            yield when, None, nominal
+        elif capped:
+            yield start, when, nominal
+
+
 def build_timeline(opening, events: List[dict]) -> dict:
     """Pure core: walk signed-amount events in date order over an opening balance.
 
@@ -945,7 +983,8 @@ def _event(*, date, name, type, source, source_id, face_amount, legs: List[dict]
 # Internal per-currency keys every event carries inside this module; collect_events
 # drops them unless asked (``detail``), so a default caller's events are unchanged.
 DETAIL_KEYS = ("leg_currencies", "rows", "cash_by_currency", "moved_by_currency",
-               "estimate", "face_currency", "unconverted", "household_bucket", "event_uid")
+               "estimate", "face_currency", "unconverted", "household_bucket", "event_uid",
+               "occurrence")
 
 
 def _row(currency, amount, estimate=None) -> dict:
@@ -1258,6 +1297,13 @@ def collect_events(
     ``keep_origin`` keeps each event's internal ``origin`` (model, id) for
     callers in this service layer; it never reaches a response.
 
+    A forced date (``services/payment_dates.py``) moves an occurrence, for
+    every entry walked here: the event is dated on the effective date, overdue
+    reads it and ``original_date`` holds it, while suppression stays on the
+    nominal date, which the event keeps as ``occurrence`` (a detail key). A loan
+    due date moves the same way (``build_loan_payables``), its covers staying on
+    the nominal date.
+
     Currencies (STU-236, plan B6, B7, C1): every leg's ``amount`` is in its
     own account's currency. A figure in another currency (an unposted row's
     foreign face, ``pending_face``; a recurring entry in another currency than
@@ -1403,6 +1449,7 @@ def collect_events(
     records = {(BudgetEntry, e.id): e for e in entries}
     records.update(((Transaction, t.id), t) for t in txns)
     linked = _linked_occurrence_days(db, walked_entry_ids)
+    forced = load_entry_overrides(db, walked_entry_ids)
 
     card_entries = []
     for entry in entries:
@@ -1410,8 +1457,9 @@ def collect_events(
         overflow_id = entry.overflow_account_id if entry.overflow_account_id in scoped_ids else None
         if entry.transfer_to_account_id is not None:
             # Only the scoped legs are kept (see _transfer_event).
-            for occ, original in iter_window_occurrences(entry, start, end):
-                key = (entry.id, (original or occ).date())
+            for occ, original, nominal in effective_window_occurrences(
+                    entry, start, end, forced.get(entry.id)):
+                key = (entry.id, nominal.date())
                 if linked[key]:
                     linked[key] -= 1
                     continue  # already materialised (e.g. advance=False)
@@ -1434,7 +1482,7 @@ def collect_events(
                     hidden_loan_ids=hidden_loan_ids, unbilled_ids=outside_unbilled,
                     source="budget_entry",
                     overflow_account_id=overflow_id, origin=(BudgetEntry, entry.id),
-                    money=money, face_currency=entry.currency, **overdue,
+                    money=money, face_currency=entry.currency, occurrence=nominal, **overdue,
                 ))
             continue
         if entry.account_id in wallet_ids:
@@ -1458,8 +1506,9 @@ def collect_events(
                     leg_currency]
         else:
             rows = [_row(entry.currency, _money(entry.amount))]
-        for occ, original in iter_window_occurrences(entry, start, end):
-            key = (entry.id, (original or occ).date())
+        for occ, original, nominal in effective_window_occurrences(
+                entry, start, end, forced.get(entry.id)):
+            key = (entry.id, nominal.date())
             if linked[key]:
                 linked[key] -= 1
                 continue  # already recorded (e.g. advance=False)
@@ -1474,6 +1523,7 @@ def collect_events(
                 face_amount=entry.amount,
                 legs=legs,
                 origin=(BudgetEntry, entry.id),
+                occurrence=nominal,
                 **overdue,
             ), leg_currencies, rows, entry.currency))
 
@@ -1633,6 +1683,10 @@ def collect_events(
     # payments into it cover (see services/loans.py). Recurring transfers into a
     # loan are projected past the window end, as a payment late for a due date in
     # the window still covers it; one already materialised is skipped, as above.
+    # The horizon adds the reach, so a due date extended by a forced date still
+    # finds its cover. A cover belongs to a due date by its nominal date
+    # (``own_due_index``), whatever its own forced date; a later occurrence never
+    # changes an earlier due date, so the longer horizon changes no result.
     # They are found by the loan alone, so an entry another user created (paid
     # from their own bank) still covers this loan; such an entry moves no cash
     # here, since its source account is outside this projection.
@@ -1652,10 +1706,12 @@ def collect_events(
         BudgetEntry.is_active.is_(True),
     ).all() if payable_loan_ids else []
     linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
+    forced_covers = load_entry_overrides(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
     for entry in loan_entries:
-        for occ, original in iter_window_occurrences(entry, start, end + COVER_HORIZON):
-            day = (original or occ).date()  # an overdue cover is dated its own day
+        for _, _, nominal in effective_window_occurrences(
+                entry, start, end + COVER_HORIZON + OVERRIDE_REACH, forced_covers.get(entry.id)):
+            day = nominal.date()  # an overdue cover is dated its own day
             key = (entry.id, day)
             if linked_covers[key]:
                 linked_covers[key] -= 1
@@ -1815,7 +1871,8 @@ def _household_events(db: Session, redactor, user_id: int, grant, scope: list,
 
 
 # Keys a limited event never carries: the hidden source's id and details.
-_LIMITED_DROPPED = ("transfer_fee", "statement_close", "statement_balance", "loan_due_date")
+_LIMITED_DROPPED = ("transfer_fee", "statement_close", "statement_balance", "loan_due_date",
+                    "occurrence")
 
 
 def _limit(e: dict, redactor, *, name: str, currency, kind: str) -> dict:
@@ -2087,7 +2144,12 @@ def unrecorded_occurrences(db: Session, entries, through: date, *,
     row is listed itself. The walk is
     complete through ``through``, not capped by the projection's step guard:
     one step per day from ``next_occurrence`` (``posting.schedule_walk``'s
-    bound), so a long-stale entry counts every missed occurrence."""
+    bound), so a long-stale entry counts every missed occurrence.
+
+    Forced dates (``services/payment_dates.py``) are loaded here, so every
+    caller reads them: an entry with some is walked past ``through`` by the reach,
+    rows match on the nominal date, and only an effective date through
+    ``through`` is kept. The occurrences returned stay nominal."""
     entries = list(entries)
     posted = Counter((entry_id, _naive(when).date())
                      for entry_id, when, _, is_posted in _linked_rows(
@@ -2096,17 +2158,21 @@ def unrecorded_occurrences(db: Session, entries, through: date, *,
     # A schedule ending on the last representable day has no next day.
     end = (datetime.max if through >= date.max
            else datetime.combine(through + timedelta(days=1), datetime.min.time()))
+    forced = load_entry_overrides(db, [e.id for e in entries])
     out: Dict[int, List[datetime]] = {}
     for entry in entries:
         out[entry.id] = []
+        moved = forced.get(entry.id)
         start = _naive(entry.next_occurrence)
-        bound = max((end - start).days, 0) + 2
-        for occ in capped_distinct_days(entry, start, end, max_steps=bound):
+        last = extend(end) if moved else end
+        bound = max((last - start).days, 0) + 2
+        for occ in capped_distinct_days(entry, start, last, max_steps=bound):
             key = (entry.id, occ.date())
             if posted[key]:
                 posted[key] -= 1
                 continue
-            out[entry.id].append(occ)
+            if effective(moved, occ.date()) <= through:
+                out[entry.id].append(occ)
     return out
 
 
@@ -2992,15 +3058,18 @@ def currency_upcoming_items(events: List[dict], collector: Optional[FxCollector]
 
 def _due_fields(e: dict, today: date) -> dict:
     """``overdue`` of a full event: its real day (``original_date`` when it was
-    listed overdue, else its own) is before ``today``. ``original_date``
-    (``YYYY-MM-DD``) is set when the event has one, ``occurrence_date`` for a
-    budget entry only."""
+    listed overdue, else its own, both the effective date) is before ``today``.
+    ``original_date`` (``YYYY-MM-DD``) is set when the event has one,
+    ``occurrence_date`` for a budget entry only: the nominal date (``occurrence``)
+    that Mark paid sends back."""
     original = e.get("original_date")
     real = _naive(original or e["date"]).date()
+    occurrence = e.get("occurrence")
+    nominal = _naive(occurrence).date() if occurrence is not None else real
     return {
         "overdue": real < today,
         **({"original_date": real.isoformat()} if original else {}),
-        **({"occurrence_date": real.isoformat()} if e["source"] == "budget_entry" else {}),
+        **({"occurrence_date": nominal.isoformat()} if e["source"] == "budget_entry" else {}),
     }
 
 
