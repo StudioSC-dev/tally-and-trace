@@ -452,7 +452,7 @@ interface RecurringEntryDetail {
    * (or created from today on). Read-only; the review POST sets it. Absent on Limited entries.
    */
   installment_reviewed?: boolean
-  /** Card installments: whether the job, page-open and Post now record its due months. Read-only. */
+  /** Whether the job, page-open and Post now record its due payments by themselves: a reviewed card installment or an autopay cash entry. Read-only. */
   auto_post_enabled?: boolean
   /** The caller's tags on the entry. */
   tags: TagRef[]
