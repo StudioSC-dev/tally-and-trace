@@ -409,7 +409,7 @@ class Writer:
             overflow_account_id=self.account_id(e.overflow_account_key),
             transfer_to_account_id=self.account_id(e.transfer_to_account_key),
             category_id=self.categories.get(e.category_key) if e.category_key else None,
-            is_autopay=e.is_autopay, is_active=p.is_active,
+            is_active=p.is_active,
             max_occurrences=p.max_occurrences,
             occurrences_paid_offset=p.occurrences_paid_offset,
             tag_ids=self.tag_ids(e.tags))

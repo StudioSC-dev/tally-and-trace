@@ -349,7 +349,6 @@ def test_recurring_entries_load_with_their_installment_counts(tmp_path, owner, s
     assert wall(salary.next_occurrence) == datetime(2026, 3, 15)
     loan_entry = entry(sw_db, owner, "Car Loan Payment")
     assert loan_entry.transfer_to_account_id == account(sw_db, owner, "Car Loan").id
-    assert loan_entry.is_autopay is True
 
 
 def test_day_fields_load_as_given_and_a_day_31_entry_gets_anchor_31(tmp_path, owner, sw_db):

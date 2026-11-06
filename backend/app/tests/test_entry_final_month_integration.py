@@ -120,7 +120,7 @@ def test_form_shaped_payload_keeps_the_final_month(world, sw_db):
         "name": "Tablet", "entry_type": "expense", "amount": 5_000, "currency": "PHP",
         "account_id": card, "overflow_account_id": None, "transfer_to_account_id": None,
         "cadence": "monthly", "next_occurrence": _day("2026-11-05"), "anchor_day": 5,
-        "lead_time_days": 0, "is_autopay": False, "is_active": True,
+        "lead_time_days": 0, "is_active": True,
         "end_mode": "after_occurrences", "end_date": None, "max_occurrences": 24,
         "expected_updated_at": loaded["updated_at"]})
 

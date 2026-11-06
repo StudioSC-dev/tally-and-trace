@@ -67,7 +67,7 @@ def _form_payload(stored, **changes):
         "currency": stored["currency"], "account_id": stored["account_id"],
         "overflow_account_id": None, "transfer_to_account_id": None,
         "cadence": stored["cadence"], "next_occurrence": stored["next_occurrence"],
-        "lead_time_days": stored["lead_time_days"], "is_autopay": stored["is_autopay"],
+        "lead_time_days": stored["lead_time_days"],
         "is_active": stored["is_active"], "end_mode": stored["end_mode"],
         "max_occurrences": stored["max_occurrences"],
     }
@@ -186,7 +186,7 @@ def test_web_shaped_create_off_close_date_snaps(world):
     r = client.post(f"{API}/budget-entries/", json={
         "name": "Phone plan", "entry_type": "expense", "amount": 1_500, "currency": "PHP",
         "account_id": card, "cadence": "monthly", "next_occurrence": "2026-11-25T00:00:00.000Z",
-        "lead_time_days": 0, "is_autopay": False, "is_active": True,
+        "lead_time_days": 0, "is_active": True,
         "end_mode": "after_occurrences", "max_occurrences": 6, "tag_ids": [],
     }, headers=me["headers"])
     assert r.status_code == 201, r.text

@@ -241,7 +241,6 @@ class Recurring(_Strict):
     end_mode: Literal["indefinite", "on_date", "after_occurrences"]
     end_date: Optional[Day] = None
     max_occurrences: Optional[int] = None
-    is_autopay: bool
     is_active: bool
     description_contains: Optional[str] = None
     installment: Optional[Installment] = None

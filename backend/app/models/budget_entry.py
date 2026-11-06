@@ -84,8 +84,8 @@ class BudgetEntry(Base):
     # Card installments (STU-343 Plan B). ``installment_reviewed_at`` is the settlement
     # status (set by the review, or on create for a new installment dated from today);
     # ``auto_post_enabled`` is the scheduling flag and, on a card installment, is
-    # never true without it. It is the one settlement flag: ``is_autopay`` decides
-    # nothing (services/recurring_kinds.py ``settlement``).
+    # never true without it. It is the one settlement flag (services/recurring_kinds.py
+    # ``settlement``).
     auto_post_enabled = Column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -100,7 +100,6 @@ class BudgetEntry(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     allocation_id = Column(Integer, ForeignKey("allocations.id"), nullable=True)
 
-    is_autopay = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -235,7 +235,6 @@
       "lead_time_days": 3,
       "account_id": 1,
       "category_id": 9,
-      "is_autopay": true,
       "description": "Projected salary credited to main checking",
       "end_mode": "indefinite"
     },
@@ -250,7 +249,6 @@
       "account_id": 3,
       "category_id": 3,
       "allocation_id": 2,
-      "is_autopay": true,
       "description": "Netflix auto-pay each month",
       "end_mode": "on_date",
       "end_date": "2026-03-05T08:00:00",
@@ -266,7 +264,6 @@
       "lead_time_days": 5,
       "account_id": 1,
       "category_id": 4,
-      "is_autopay": false,
       "description": "Power utility statement due monthly",
       "end_mode": "indefinite",
       "tags": ["Household"]
@@ -282,7 +279,6 @@
       "account_id": 1,
       "category_id": 3,
       "allocation_id": 2,
-      "is_autopay": true,
       "description": "Monthly gym membership auto-charge",
       "end_mode": "after_occurrences",
       "max_occurrences": 12
@@ -298,7 +294,6 @@
       "account_id": 1,
       "category_id": 13,
       "allocation_id": 4,
-      "is_autopay": true,
       "description": "Automatic transfer to brokerage account",
       "end_mode": "indefinite"
     },
@@ -312,7 +307,6 @@
       "lead_time_days": 3,
       "account_id": 6,
       "category_id": 7,
-      "is_autopay": false,
       "description": "Household rent, paid from the joint account",
       "end_mode": "indefinite",
       "tags": ["Household"]
@@ -327,7 +321,6 @@
       "lead_time_days": 2,
       "account_id": 3,
       "category_id": 4,
-      "is_autopay": true,
       "description": "Household internet, charged to the owner's card",
       "end_mode": "indefinite",
       "tags": ["Household"]

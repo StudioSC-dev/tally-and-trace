@@ -232,7 +232,6 @@
    "end_mode": "indefinite",
    "end_date": null,
    "max_occurrences": null,
-   "is_autopay": false,
    "is_active": true,
    "expected": {
     "2026-03": 1,
@@ -260,7 +259,6 @@
    "end_mode": "indefinite",
    "end_date": null,
    "max_occurrences": null,
-   "is_autopay": true,
    "is_active": true,
    "expected": {
     "2026-03": 1,
@@ -284,7 +282,6 @@
    "end_mode": "indefinite",
    "end_date": null,
    "max_occurrences": null,
-   "is_autopay": false,
    "is_active": true,
    "expected": {
     "2026-03": 2,
@@ -312,7 +309,6 @@
    "end_mode": "indefinite",
    "end_date": null,
    "max_occurrences": null,
-   "is_autopay": false,
    "is_active": true,
    "expected": {
     "2026-03": 1,
@@ -336,7 +332,6 @@
    "end_mode": "after_occurrences",
    "end_date": null,
    "max_occurrences": 8,
-   "is_autopay": false,
    "is_active": true,
    "expected": {
     "2026-03": 0,
@@ -364,7 +359,6 @@
    "end_mode": "after_occurrences",
    "end_date": null,
    "max_occurrences": 0,
-   "is_autopay": false,
    "is_active": false,
    "expected": {
     "2026-03": 0,
