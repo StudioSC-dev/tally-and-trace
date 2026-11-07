@@ -444,13 +444,31 @@ def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
             "original_currency": currencies.pop(), "rate": found[0]["rate"], "rates": rates}
 
 
+def statement_day(row, today: date) -> date:
+    """The calendar day that places a line item on a statement.
+
+    ``today`` is the day the reading is made on.
+    """
+    return row.transaction_date.date()
+
+
+def on_statement(row, cycle: Mapping, today: date) -> bool:
+    """Whether line item ``row`` is on the statement of ``cycle`` (an
+    ``iter_cycles_from`` cycle): its ``statement_day`` is in the cycle's
+    calendar days ``(window_start, close]``."""
+    return (cycle["window_start"].date() < statement_day(row, today)
+            <= cycle["close"].date())
+
+
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime,
-                      amount_of=_row_amount) -> Decimal:
+                      amount_of=_row_amount, *, today: date) -> Decimal:
     """Sum a card's charges over the calendar days ``(window_start, close]``.
 
     Days, not instants: ``close`` is midnight of the closing day, but a charge at
     any time ON that day belongs to this statement, and one at any time on the
-    previous closing day belongs to the previous statement.
+    previous closing day belongs to the previous statement. A row's day is its
+    ``statement_day`` on ``today``; ``today`` is required, so no caller can
+    forget it.
 
     This is the LINE-ITEM balance: purchases add to what's owed, refunds subtract.
     Transfers are not line items -- a card payment (a transfer into the card) is
@@ -459,7 +477,7 @@ def statement_balance(transactions: List[Transaction], window_start: datetime, c
     first_excluded, last_included = window_start.date(), close.date()
     total = Decimal("0")
     for txn in transactions:
-        if not (first_excluded < txn.transaction_date.date() <= last_included):
+        if not (first_excluded < statement_day(txn, today) <= last_included):
             continue
         if txn.transaction_type == TransactionType.DEBIT:
             total += amount_of(txn)
@@ -531,6 +549,7 @@ def build_statement_payables(
     ``route_accounts`` already consume (negative amount = outflow).
     """
     events: List[dict] = []
+    today = start.date()
     unbilled_ids = unbilled_sources | frozenset(
         c.id for c in cards if resolve_cycle_fields(c) is None)
     for card in cards:
@@ -549,18 +568,19 @@ def build_statement_payables(
         if not lines and not projected:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
-        days = [row.transaction_date.date() for row in [*lines, *projected]]
+        days = [statement_day(row, today) for row in [*lines, *projected]]
         cycles = list(iter_cycles_from(
             card, min(days), end, through=max(days),
             due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
-        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of,
+                                      today=today)
                     for c in cycles]
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
         remaining = settle_projected(
             cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
         balances = [statement_balance([*lines, *projected], c["window_start"], c["close"],
-                                      amount_of)
+                                      amount_of, today=today)
                     for c in cycles]
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0 or cycle["due"] >= end:
@@ -570,10 +590,9 @@ def build_statement_payables(
                 overdue = {"overdue": True, "original_date": cycle["due"]}
             labels = {}
             if estimates:
-                lo, hi = cycle["window_start"].date(), cycle["close"].date()
                 estimate = statement_estimate(
                     [row for row in [*lines, *projected]
-                     if lo < row.transaction_date.date() <= hi], estimates)
+                     if on_statement(row, cycle, today)], estimates)
                 if estimate is not None:
                     labels = {"line_estimate": estimate}
             events.append({
@@ -689,26 +708,26 @@ def statement_history(db: Session, card: Account, today: datetime,
     lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
     if not lines and not unconverted:
         return []
-    days = [row.transaction_date.date() for row in [*lines, *(u[0] for u in unconverted)]]
-    last = max(max(days), today.date())
+    day = today.date()
+    days = [statement_day(row, day) for row in [*lines, *(u[0] for u in unconverted)]]
+    last = max(max(days), day)
     if due_overrides is None:
         due_overrides = load_due_overrides(db, [card.id])[card.id]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
                                    due_overrides=due_overrides))
-    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of, today=day)
                 for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     history = []
     clear_through = Decimal("0")
     incomplete = False
     for cycle, balance, left in zip(cycles, balances, owed):
-        first_excluded, last_included = cycle["window_start"].date(), cycle["close"].date()
-        window = [row for row in lines
-                  if first_excluded < row.transaction_date.date() <= last_included]
+        last_included = cycle["close"].date()
+        window = [row for row in lines if on_statement(row, cycle, day)]
         charged = sum(((-amount_of(row) if row.transaction_type == TransactionType.CREDIT
                         else amount_of(row))
                        for row in lines
-                       if row.transaction_date.date() <= last_included
+                       if statement_day(row, day) <= last_included
                        and row.transaction_type in (TransactionType.DEBIT,
                                                     TransactionType.CREDIT)),
                       Decimal("0"))
@@ -718,11 +737,10 @@ def statement_history(db: Session, card: Account, today: datetime,
                                 if when.date() > last_included), Decimal("0"))
         clear_through += left
         incomplete = incomplete or any(
-            first_excluded < line.transaction_date.date() <= last_included
-            for line, _, _ in unconverted)
+            on_statement(line, cycle, day) for line, _, _ in unconverted)
         if left <= 0:
             status = "paid"
-        elif cycle["due"].date() < today.date():
+        elif cycle["due"].date() < day:
             status = "overdue"
         else:
             status = "open"
@@ -753,7 +771,7 @@ def statement_history(db: Session, card: Account, today: datetime,
                 "original_currency": currency,
                 "transaction": line,
             } for line, face, currency in sorted(unconverted, key=lambda u: u[0].transaction_date)
-                if first_excluded < line.transaction_date.date() <= last_included],
+                if on_statement(line, cycle, day)],
         })
     return history
 

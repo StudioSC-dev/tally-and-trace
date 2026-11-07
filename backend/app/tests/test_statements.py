@@ -22,6 +22,9 @@ from app.services.statements import (
     statement_history,
 )
 
+# The day statement balances below are read on (``statement_balance``'s ``today``).
+TODAY = date(2026, 8, 1)
+
 
 def _card(**kw):
     base = dict(
@@ -314,7 +317,7 @@ def test_statement_close_helper():
 
 def test_balance_sums_purchases_in_the_window():
     txns = [_txn(1, "1000.50"), _txn(15, "2000.25"), _txn(24, "300.25")]
-    total = statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24))
+    total = statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY)
     assert total == Decimal("3301.00")
 
 
@@ -324,33 +327,33 @@ def test_balance_excludes_charges_outside_the_window():
         _txn(25, "100.00", month=6),   # first day of this cycle -> counts
         _txn(25, "700.00", month=7),   # after this close -> next statement
     ]
-    total = statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24))
+    total = statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY)
     assert total == Decimal("100.00")
 
 
 def test_window_is_exclusive_at_start_and_inclusive_at_close():
     """A charge exactly on the previous close belongs to the PREVIOUS statement."""
     on_prev_close = [_txn(24, "999.00", month=6)]
-    assert statement_balance(on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("0")
+    assert statement_balance(on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("0")
 
     on_close = [_txn(24, "999.00", month=7)]
-    assert statement_balance(on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("999.00")
+    assert statement_balance(on_close, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("999.00")
 
 
 def test_midday_charge_on_the_closing_day_belongs_to_that_statement():
     """Close is midnight of the 24th, but the whole 24th is inside the statement."""
     noon_on_close = [_txn(24, "12000.00")]
     noon_on_close[0].transaction_date = datetime(2026, 7, 24, 12)
-    assert statement_balance(noon_on_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("12000.00")
+    assert statement_balance(noon_on_close, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("12000.00")
     # ...and therefore NOT in the next one.
-    assert statement_balance(noon_on_close, datetime(2026, 7, 24), datetime(2026, 8, 24)) == Decimal("0")
+    assert statement_balance(noon_on_close, datetime(2026, 7, 24), datetime(2026, 8, 24), today=TODAY) == Decimal("0")
 
 
 def test_midday_charge_on_the_previous_closing_day_belongs_to_the_previous_statement():
     noon_on_prev_close = [_txn(24, "500.00", month=6)]
     noon_on_prev_close[0].transaction_date = datetime(2026, 6, 24, 12)
-    assert statement_balance(noon_on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("0")
-    assert statement_balance(noon_on_prev_close, datetime(2026, 5, 24), datetime(2026, 6, 24)) == Decimal("500.00")
+    assert statement_balance(noon_on_prev_close, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("0")
+    assert statement_balance(noon_on_prev_close, datetime(2026, 5, 24), datetime(2026, 6, 24), today=TODAY) == Decimal("500.00")
 
 
 def test_midday_closing_day_charge_is_payable_on_that_statements_due_date():
@@ -365,19 +368,19 @@ def test_midday_closing_day_charge_is_payable_on_that_statements_due_date():
 
 def test_refunds_reduce_the_balance():
     txns = [_txn(5, "1000.00"), _txn(10, "250.00", kind=TransactionType.CREDIT)]
-    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("750.00")
+    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("750.00")
 
 
 def test_transfers_are_not_line_items():
     """A payment is netted against statements by allocation, not summed as a line."""
     txns = [_txn(5, "1000.00"), _pay(10, "1000.00")]
-    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("1000.00")
+    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("1000.00")
 
 
 def test_balance_is_decimal_exact():
     """Three 0.10 charges must be exactly 0.30, not 0.30000000000000004."""
     txns = [_txn(1, "0.10"), _txn(2, "0.10"), _txn(3, "0.10")]
-    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24)) == Decimal("0.30")
+    assert statement_balance(txns, datetime(2026, 6, 24), datetime(2026, 7, 24), today=TODAY) == Decimal("0.30")
 
 
 # ---------------------------------------------------------------------------
@@ -759,3 +762,22 @@ def test_window_independence_holds_for_overdue_statements():
         short = _payables(WINDOW_SCENARIO, SEP, projected, start=start)
         long = _payables(WINDOW_SCENARIO, datetime(2026, 12, 1), projected, start=start)
         assert short == [e for e in long if e[0] < SEP]
+
+
+def test_today_keyword_is_required():
+    """``today`` has no default and is keyword-only, so no caller can forget it."""
+    import inspect
+
+    import pytest
+
+    from app.services.household import _settle_with_sources
+
+    for fn in (statement_balance, _settle_with_sources):
+        param = inspect.signature(fn).parameters["today"]
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+        assert param.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        statement_balance([_txn(1, "1.00")], datetime(2026, 6, 24), datetime(2026, 7, 24))
+    with pytest.raises(TypeError):
+        statement_balance([_txn(1, "1.00")], datetime(2026, 6, 24), datetime(2026, 7, 24),
+                          None, TODAY)

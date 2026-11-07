@@ -5,7 +5,7 @@ cash; what each cycle still owes must match ``statements.allocate_payments``
 plus ``settle_projected`` on the same inputs, whatever the payment sources.
 """
 import random
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -16,6 +16,7 @@ from app.services.statements import (
 )
 
 DEBIT, CREDIT = TransactionType.DEBIT, TransactionType.CREDIT
+TODAY = date(2026, 4, 1)  # the day the rows are read on (``statement_day``)
 
 
 def _cycles(n=5):
@@ -42,12 +43,12 @@ def test_owed_matches_the_engine_on_random_ledgers():
         payments = sorted(((datetime(2026, 1, 16) + timedelta(days=rng.randrange(150)),
                             Decimal(rng.randrange(1, 400)), rng.random() < 0.5)
                            for _ in range(rng.randrange(0, 5))), key=lambda p: p[0])
-        balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+        balances = [statement_balance(lines, c["window_start"], c["close"], today=TODAY) for c in cycles]
         paid = [amount for _, amount, _ in payments]
         settled = allocate_payments(balances, paid)
         engine = settle_projected(cycles, settled, unspent_pool(balances, paid, settled),
                                   projected)
-        owed, in_scope = _settle_with_sources(cycles, lines, payments, projected)
+        owed, in_scope = _settle_with_sources(cycles, lines, payments, projected, today=TODAY)
         assert owed == engine
         assert all(Decimal(0) <= part for part in in_scope)
         assert sum(in_scope) <= sum(amount for _, amount, flag in payments if flag)
@@ -58,5 +59,5 @@ def test_in_scope_part_follows_the_payment_order():
     lines = [_row(1, 100, DEBIT), _row(40, 100, DEBIT)]   # one charge per cycle
     payments = [(datetime(2026, 2, 20), Decimal(100), False),
                 (datetime(2026, 2, 21), Decimal(100), True)]
-    owed, in_scope = _settle_with_sources(cycles, lines, payments, [])
+    owed, in_scope = _settle_with_sources(cycles, lines, payments, [], today=TODAY)
     assert owed == [0, 0] and in_scope == [0, 100]

@@ -381,7 +381,8 @@ def test_balance_snapshot_sums_the_whole_statement(world, card_key, inside, outs
     for day in outside:
         _txn(db, me, card, day, amount=7)
     db.expire_all()
-    assert _statement_balances(db, db.get(Account, card), [close]) == {close: Decimal("600")}
+    assert _statement_balances(db, db.get(Account, card), [close],
+                               today=TODAY) == {close: Decimal("600")}
 
 
 def test_apply_refuses_entry_whose_row_would_cross_a_statement(world, monkeypatch):
