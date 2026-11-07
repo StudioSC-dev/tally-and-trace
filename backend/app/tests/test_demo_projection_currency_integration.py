@@ -52,6 +52,16 @@ def v4(name):
     return DIFF[name][1]
 
 
+# The posted-date rule (``statements.statement_day``): the pending Netflix row
+# (2025-09-05, USD 14.99, 869.42 at 58.00) is unposted, so read on 2026-11-02
+# it is no longer on the closed statement closing 2025-10-01 (which is now
+# empty) but on the open one closing 2026-12-01, due 2026-12-22, beside that
+# cycle's 60.00. The overdue statement payable on the window start is gone; the
+# same 869.42 leaves on Dec 22 instead, so the 60-day closing is unchanged.
+NETFLIX = v4("Netflix line, statement closing 2025-10-01")
+ROLLED_DUE = "2026-12-22"
+
+
 @pytest.fixture
 def demo(sw_client, sw_db, monkeypatch):
     """A freshly seeded demo, logged in, with every clock frozen at FX_REF."""
@@ -106,9 +116,11 @@ def test_timeline(demo):
         ("2026-11-11", "Monthly Salary", v4("Monthly Salary, Nov 11")),
         ("2026-12-11", "Monthly Salary", v4("Monthly Salary, Dec 11"))]
     assert all(_estimated(e, 55.0) for e in salary)
+    assert not [e for e in body["events"]
+                if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
     (statement,) = [e for e in body["events"]
-                    if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
-    assert statement["amount"] == -v4("overdue card statement payable from the Joint Account")
+                    if e["name"] == "Credit Card statement" and e["date"] == ROLLED_DUE]
+    assert statement["amount"] == -round(60.0 + NETFLIX, 2)
     assert _estimated(statement, 14.99)
     # Every other event is as on main.
     others = [(e["date"], e["name"], e["amount"]) for e in body["events"]
@@ -121,8 +133,7 @@ def test_timeline(demo):
         ("2026-12-01", "Rent", -2_500.0),
         ("2026-12-02", "Gym Membership", -45.0),
         ("2026-12-15", "Brokerage Auto-Deposit", -500.0),
-        ("2026-12-20", "Electric Bill", -1_200.0),
-        ("2026-12-22", "Credit Card statement", -60.0)]
+        ("2026-12-20", "Electric Bill", -1_200.0)]
     assert [(r["base"], r["quote"], r["rate"]) for r in body["fx"]["rates"]] == [
         ("USD", "PHP", 58.0)]
 
@@ -140,25 +151,25 @@ def test_snapshot(demo):
             summary["monthly_disposable"]) == (
         v4("disposable monthly_income"), v4("disposable monthly_expenses"),
         v4("disposable monthly_disposable"))
+    # No overdue statement: the pending Netflix row is on the statement due
+    # Dec 22, beyond these 30 days (test_timeline).
     assert [(p["due_date"], p["name"], p["amount"], p["account_name"], p["currency"])
             for p in body["payables"]] == [
-        ("2026-11-02", "Credit Card statement",
-         v4("overdue card statement payable from the Joint Account"), "Joint Account", "PHP"),
         ("2026-11-15", "Brokerage Auto-Deposit", 500.0, "Main Checking Account", "PHP"),
         ("2026-11-20", "Electric Bill", 1_200.0, "Main Checking Account", "PHP"),
         ("2026-11-23", "Credit Card statement", 60.0, "Joint Account", "PHP"),
         ("2026-12-01", "Rent", 2_500.0, "Joint Account", "PHP"),
         ("2026-12-02", "Gym Membership", 45.0, "Main Checking Account", "PHP")]
-    assert _estimated(body["payables"][0], 14.99)
 
 
 def test_cashflow(demo):
     periods = demo("/forecast/cashflow", months=3)["periods"]
+    # The rolled Netflix line leaves in December, not November.
     assert [(p["period_label"], p["income"], p["expenses"], p["net"]) for p in periods] == [
         ("November 2026", v4("cash-flow income, each month (PHP)"), 1_700.0,
-         v4("cash-flow net, November 2026 (PHP)")),
+         round(v4("cash-flow net, November 2026 (PHP)") + NETFLIX, 2)),
         ("December 2026", v4("cash-flow income, each month (PHP)"), 4_245.0,
-         v4("cash-flow net, December 2026 and January 2027 (PHP)")),
+         round(v4("cash-flow net, December 2026 and January 2027 (PHP)") - NETFLIX, 2)),
         ("January 2027", v4("cash-flow income, each month (PHP)"), 4_245.0,
          v4("cash-flow net, December 2026 and January 2027 (PHP)"))]
     for p in periods:
@@ -177,10 +188,13 @@ def test_card_statement_history(demo):
     accounts = {a["name"]: a["id"] for a in demo("/accounts/", limit=1000)["items"]}
     statements = demo(f"/accounts/{accounts['Credit Card']}/statements")["statements"]
     (sept,) = [s for s in statements if s["close_date"].startswith("2025-10-01")]
-    assert sept["statement_balance"] == v4("statement balance, closing 2025-10-01")
-    (line,) = sept["lines"]
-    assert (line["display_description"], line["amount"]) == (
-        "Netflix subscription (auto-pay)", v4("Netflix line, statement closing 2025-10-01"))
+    assert (sept["statement_balance"], sept["lines"], sept["status"]) == (0.0, [], "paid")
+    (dec,) = [s for s in statements if s["close_date"].startswith("2026-12-01")]
+    assert (dec["statement_balance"], dec["amount_due"], dec["status"]) == (
+        NETFLIX, NETFLIX, "open")
+    (line,) = dec["lines"]
+    assert (line["date"][:10], line["display_description"], line["amount"]) == (
+        "2025-09-05", "Netflix subscription (auto-pay)", NETFLIX)
     assert _estimated(line, 14.99)
     (aug,) = [s for s in statements if s["close_date"].startswith("2025-09-01")]
     assert (aug["statement_balance"], [(ln["display_description"], ln["amount"])

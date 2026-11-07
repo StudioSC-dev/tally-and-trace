@@ -394,10 +394,11 @@ def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
     # Pre-migration routing onto an account that is now a wallet (the API refuses it).
     card.payment_account_id = wallet.id
     db.commit()
-    # Billed on the 24 Oct statement, due 14 Nov.
+    # Billed on the 24 Oct statement, due 14 Nov. Posted, since an unposted
+    # charge read after the close rolls to the open statement.
     db.add(Transaction(user_id=user.id, account_id=card.id, amount=Decimal("1200.00"),
                        transaction_type=TransactionType.DEBIT,
-                       transaction_date=datetime(2026, 10, 10), is_posted=False))
+                       transaction_date=datetime(2026, 10, 10), is_posted=True))
     db.commit()
 
     events = collect_events(db, REF, datetime(2026, 12, 1), user_id=user.id)
