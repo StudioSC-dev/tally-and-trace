@@ -250,6 +250,8 @@ export interface StatementLine extends Partial<Estimate> {
   /** In the card's currency (signed: a credit is negative). Estimate labels appear when it was converted. */
   amount: number
   transaction_id: number
+  /** `YYYY-MM-DD` (a Manila day); present only when the row was posted on a day other than its own. */
+  posted_date?: string
 }
 
 /**

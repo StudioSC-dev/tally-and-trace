@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.tests.conftest import API, hh_household, sw_db_reachable, sw_post
+from app.tests.conftest import API, hh_household, sw_db_reachable, sw_post, sw_share
 from app.tests.test_card_charges_integration import pin_clock
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
@@ -60,7 +60,9 @@ def world(sw_client, sw_db, sw_people, monkeypatch):
     moved = [_post(client, me, card, day, amount, posting=posting, tags=[household])
              for day, amount, posting in MOVED]
     opened = _post(client, me, card, *OPEN, tags=[household])
-    return {"client": client, "db": db, "me": me, "card": card, "kept": kept,
+    viewer = sw_people("Vera", "Viewer")
+    sw_share(db, card, viewer["id"], "viewer", me["id"])
+    return {"client": client, "db": db, "me": me, "viewer": viewer, "card": card, "kept": kept,
             "moved": moved, "open": opened}
 
 
@@ -261,3 +263,26 @@ def test_household_cover_keys_a_rolled_charge_to_the_open_statement(sw_client, s
                                   viewable_ids=viewable, readable=lambda record: True)
     assert ("t", rolled) in cover
     assert cover[("t", rolled)][2] == dues[DEC_5]
+
+
+def test_statement_line_carries_posted_date(world):
+    w = world
+    statements = _statements(w)
+    posted = {line["transaction_id"]: line.get("posted_date")
+              for statement in statements.values() for line in statement["lines"]}
+    # A line posted on another day than its own names it, as a Manila day (the
+    # pre-#85 instant too); a line posted on its own day, or with none, does not.
+    assert {txn_id: posted[txn_id] for txn_id in w["moved"]} == {
+        txn_id: "2026-11-06" for txn_id in w["moved"]}
+    assert [posted[txn_id] for txn_id in [*w["kept"], w["open"]]] == [None] * 4
+    assert all("posted_date" not in line for statement in statements.values()
+               for line in statement["lines"] if line["transaction_id"] not in w["moved"])
+
+    viewer = w["viewer"]
+    r = w["client"].get(f"{API}/accounts/{w['card']}/statements", headers=viewer["headers"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["view"] == "limited"
+    lines = [line for statement in body["statements"] for line in statement["lines"]]
+    assert len(lines) == 7
+    assert all(set(line) == {"date", "amount", "display_description"} for line in lines)

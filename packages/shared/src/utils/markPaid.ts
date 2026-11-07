@@ -105,6 +105,22 @@ export function sameStatementCycle(card: StatementCycleSettings, a: string, b: s
 }
 
 /**
+ * The hint for a posted day that puts a card row on another statement than its transaction day,
+ * or null when both land on one statement or the card has no cycle settings. The server places a
+ * posted row on the later of the two days, so a posted day before the transaction day gives no hint.
+ */
+export function postedCycleHint(card: StatementCycleSettings, transactionDay: string, postedDay: string): string | null {
+  const own = day(transactionDay)
+  const posted = day(postedDay)
+  if (!DAY.test(own) || !DAY.test(posted)) return null
+  const placed = posted > own ? posted : own
+  const ownClose = statementCycleClose(card, own)
+  const placedClose = statementCycleClose(card, placed)
+  if (ownClose === null || placedClose === null || ownClose === placedClose) return null
+  return `This puts it on the statement closing ${formatEntryDate(placedClose)}, not the one closing ${formatEntryDate(ownClose)}.`
+}
+
+/**
  * The skipped-occurrences warning, or null when none were skipped. Up to five
  * dates are listed; above that, the count and the oldest date.
  */

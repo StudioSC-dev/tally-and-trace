@@ -40,7 +40,7 @@ from app.services.fx import FxRates, get_fx
 from app.services.statements import (
     due_override_conflicts, load_due_overrides, resolve_cycle_fields,
 )
-from app.core.time import manila_midnight, naive_utc_now, utc_now
+from app.core.time import manila_day, manila_midnight, naive_utc_now, utc_now
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
@@ -805,7 +805,8 @@ def get_card_statements(
     the limited statement: ``{close_date, due_date, amount_due, currency,
     status, lines: [{date, display_description, amount}]}``. Line descriptions
     follow the description rule (app/core/redaction.py). ``status`` is "paid",
-    "open" or "overdue".
+    "open" or "overdue". A full line carries ``posted_date`` (a Manila day) when
+    its row is posted on a day other than its own; the limited line never does.
 
     Lines are in the card's currency (STU-236, plan D5). In the full view a
     line estimated from a foreign figure carries the estimate labels when the
@@ -839,6 +840,9 @@ def get_card_statements(
                     "display_description": redactor.display_description(txn)}
             if not limited:
                 item["transaction_id"] = txn.id
+                posted = manila_day(txn.posting_date) if txn.is_posted and txn.posting_date else None
+                if posted is not None and posted != txn.transaction_date.date():
+                    item["posted_date"] = posted
                 if "estimate" in line and redactor.view(txn) in (FULL, SHARED_FULL):
                     item.update(row_labels(_row(card_currency, abs(line["amount"]),
                                                 line["estimate"])))

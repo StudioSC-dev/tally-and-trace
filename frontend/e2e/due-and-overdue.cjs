@@ -19,6 +19,9 @@
 //       Manila day at the moment the form opens, even before the day hook has polled
 //   (e4) a posting date reads as its Manila day in the list and the account page,
 //       in a browser in Los Angeles and in Manila
+//   (e6) a posted date across a card's close shows a hint in the Mark posted form, and saving is not
+//       blocked; (e7) the edit form shows the same hint; (e8) a statement line posted on another day
+//       than its own reads "posted <day>"
 //   (f) Mark received on an income: STU-540, the amount is prefilled and an edited one posts
 //   (r) STU-540: a pending-linked income's amount starts blank; untouched omits it, typed is sent
 //   (g) the expense category list has Gifts & Donations, the income one not
@@ -51,7 +54,7 @@
 // posted yet", read with openDueTab(page, 'not-posted'): (b), (e), (e2), (e3), (e5), (h),
 // (p) and (q) read that tab, and (n) hand-links its pending row so it stays in Due.
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|f|g|h|i|j|k|l|m|n|o|p|q|r|s]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|e6|e7|e8|f|g|h|i|j|k|l|m|n|o|p|q|r|s]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -1303,12 +1306,129 @@ async function overdueEverySource(browser) {
   check('(s) the shared viewer\'s Limited row reads its real day and Overdue', [shared.length, shared[0]?.includes('Overdue')], [1, true])
 }
 
+// ─── Posted date across a statement close (e6, e7, e8) ───────────────────────
+/** A card closing on yesterday's day of month, so a row dated yesterday posts across the close today. */
+async function crossingCard(u, bank, name) {
+  const today = manilaToday()
+  const own = addDays(today, -1)
+  const close = Number(own.slice(8, 10))
+  return {
+    own,
+    today,
+    ownClose: own,
+    postedClose: addMonths(own, 1, close),
+    acct: await card(u, bank, name, close),
+  }
+}
+const hintText = (c) => `This puts it on the statement closing ${fmt(c.postedClose)}, not the one closing ${fmt(c.ownClose)}.`
+
+// (e6) A posted date on another statement shows a hint in the Mark posted form; saving is not blocked.
+async function postedHintMarkPosted(browser) {
+  console.log('\n=== (e6) posted date across a close shows the hint')
+  const u = await makeUser('e6')
+  const bank = await account(u, 'E6 Checking')
+  const c = await crossingCard(u, bank, 'E6 Card')
+  const charge = await unposted(u, c.acct, c.own, 70, 'E6 Charge')
+  await unposted(u, bank, c.own, 71, 'E6 Cash')
+  const { ctx, page } = await openDue(browser, u)
+  const hint = page.locator('[data-testid="posting-form-hint"]')
+  await openDueTab(page, 'not-posted')
+  await (await showRow(page, pendRows(page, 'E6 Cash'))).locator('[data-testid="due-mark-posted"]').click()
+  await postedOnInput(page).waitFor()
+  check('(e6) a cash account row shows no hint', await hint.count(), 0)
+  await openTransactions(page)
+  await openDueTab(page, 'not-posted')
+  await (await showRow(page, pendRows(page, 'E6 Charge'))).locator('[data-testid="due-mark-posted"]').click()
+  await postedOnInput(page).waitFor()
+  check('(e6) the default day, past the close, shows both statements', (await hint.textContent())?.trim(), hintText(c))
+  await postedOnInput(page).fill(c.own)
+  check('(e6) the transaction day shows no hint', await hint.count(), 0)
+  await postedOnInput(page).fill(addDays(c.own, -2))
+  check('(e6) a day before the transaction day shows no hint', await hint.count(), 0)
+  await postedOnInput(page).fill(c.today)
+  check('(e6) the later day shows it again', (await hint.textContent())?.trim(), hintText(c))
+  const put = await savePosted(page, charge.id)
+  check('(e6) saving is not blocked (200)', put.status(), 200)
+  check('(e6) the PUT sends the posted day', put.request().postDataJSON().posting_date.startsWith(c.today), true)
+  await ctx.close()
+}
+
+// (e7) The edit form shows the same hint under its posting date.
+async function postedHintEditForm(browser) {
+  console.log('\n=== (e7) edit form shows the same hint')
+  const u = await makeUser('e7')
+  const bank = await account(u, 'E7 Checking')
+  const c = await crossingCard(u, bank, 'E7 Card')
+  const row = await post(u.token, '/transactions/', {
+    account_id: c.acct.id, transaction_type: 'debit', amount: 80, description: 'E7 Charge',
+    transaction_date: wire(c.own), is_posted: true, posting_date: `${c.today}T00:00:00Z`,
+  })
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await page.goto(`${stack.webUrl}/transactions`)
+  const article = page.locator('article[role="button"]').filter({ hasText: 'E7 Charge' }).first()
+  await article.waitFor()
+  await settle(page)
+  await article.click()
+  await page.getByRole('button', { name: 'Edit Transaction', exact: true }).click()
+  const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Edit Transaction', exact: true }) })
+  await modal.waitFor()
+  await settle(page)
+  const hint = modal.locator('[data-testid="posting-date-hint"]')
+  const posting = modal.locator('[data-testid="posting-date"]')
+  check('(e7) the edit form shows the hint for the stored posted day', (await hint.textContent())?.trim(), hintText(c))
+  await posting.fill(c.own)
+  check('(e7) the transaction day shows no hint', await hint.count(), 0)
+  await posting.fill(addDays(c.own, -2))
+  check('(e7) a day before the transaction day shows no hint', await hint.count(), 0)
+  await posting.fill(c.today)
+  check('(e7) the later day shows it again', (await hint.textContent())?.trim(), hintText(c))
+  const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/transactions/${row.id}`))
+  await modal.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  check('(e7) saving is not blocked (200)', (await put).status(), 200)
+  await ctx.close()
+}
+
+// (e8) A statement line posted on another day than its own reads "posted <day>"; one posted on its own day does not.
+async function statementLinePostedDay(browser) {
+  console.log('\n=== (e8) statement line shows its posted day')
+  const u = await makeUser('e8')
+  const bank = await account(u, 'E8 Checking')
+  const c = await crossingCard(u, bank, 'E8 Card')
+  const base = { account_id: c.acct.id, transaction_type: 'debit', amount: 90, transaction_date: wire(c.own), is_posted: true }
+  await post(u.token, '/transactions/', { ...base, description: 'E8 Moved', posting_date: `${c.today}T00:00:00Z` })
+  await post(u.token, '/transactions/', { ...base, description: 'E8 Same', posting_date: `${c.own}T00:00:00Z` })
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await page.goto(`${stack.webUrl}/accounts`)
+  await page.locator('article').first().waitFor()
+  await settle(page)
+  await page.locator('article').filter({ has: page.getByText('E8 Card', { exact: true }) }).locator('[role="button"]').first().click()
+  await page.locator('[data-testid="statements-panel"]').waitFor()
+  await settle(page)
+  for (const summary of await page.locator('[data-testid="statement"] > summary').all()) await summary.click()
+  const line = (name) => page.locator('[data-testid="statements-panel"] li').filter({ hasText: name })
+  const short = (day) => {
+    const d = new Date(`${day}T00:00:00Z`)
+    return `${new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(d)} ${d.getUTCDate()}`
+  }
+  check('(e8) the moved line reads its posted day', (await line('E8 Moved').locator('[data-testid="statement-posted"]').textContent())?.trim(), `· posted ${short(c.today)}`)
+  check('(e8) the moved line is on the later statement', await page.locator('[data-testid="statement"]').filter({ hasText: fmtClose(c.postedClose) }).filter({ hasText: 'E8 Moved' }).count(), 1)
+  check('(e8) a line posted on its own day has no posted day', await line('E8 Same').locator('[data-testid="statement-posted"]').count(), 0)
+  await ctx.close()
+}
+/** A statement close as the panel shows it: "Nov 5, 2026". */
+const fmtClose = (day) => {
+  const d = new Date(`${day}T00:00:00Z`)
+  return `${new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(d)} ${d.getUTCDate()}, ${d.getUTCFullYear()}`
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch, s: overdueEverySource }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, e6: postedHintMarkPosted, e7: postedHintEditForm, e8: statementLinePostedDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch, s: overdueEverySource }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
