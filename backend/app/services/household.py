@@ -60,6 +60,10 @@ in the record's currency (``Occurrence.month``).
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
 planned and recurring payments plus the routed payment (the projection).
+A line is on the statement holding its ``statement_day``
+(``statements.statement_day``) read on the window's first day, as the engine
+reads it: a posted charge by the later of its own day and its posted day, an
+unposted one rolled to the cycle open on that day.
 
 **The projection's horizon is the statement's, never the request's.** A
 line's projected cover counts the recurring payments and projected entry
@@ -87,7 +91,7 @@ so still covers).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -99,7 +103,9 @@ from app.core.access import (
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
 from app.models.transaction import Transaction, TransactionType, pending_face
-from app.services.statements import iter_cycles_from, load_due_overrides, resolve_cycle_fields
+from app.services.statements import (
+    iter_cycles_from, load_due_overrides, on_statement, resolve_cycle_fields, statement_day,
+)
 
 ZERO = Decimal("0")
 
@@ -443,23 +449,25 @@ def _card_household_cover(db: Session, card: Account, paying_ids: set, start: da
 
     if not keys:
         return {}
-    days = [line.transaction_date.date() for line in [*lines, *projected]]
+    # The projection's first day: the statement engine reads rows on it too
+    # (``build_statement_payables`` takes ``start``'s day).
+    today = start.date()
+    days = [statement_day(line, today) for line in [*lines, *projected]]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=max(days),
                                    due_overrides=load_due_overrides(db, [card.id])[card.id]))
     paying = [(when, amount, src in paying_ids and readable(row))
               for when, amount, src, row in payments]
     owed, in_scope = _settle_with_sources(cycles, lines, paying, projected, recurring,
-                                          amount_of=amount_of)
+                                          amount_of=amount_of, today=today)
     # Projected only: in a recorded month only posted payments cover anything.
     routed = not recorded and card.payment_account_id in paying_ids
 
     out: Dict[tuple, Tuple[Decimal, bool, datetime, Decimal]] = {}
     for idx, c in enumerate(cycles):
         cover = in_scope[idx] + (owed[idx] if routed else ZERO)
-        lo, hi = c["window_start"].date(), c["close"].date()
         household = sorted(((line.transaction_date, _money(amount_of(line)), keys[id(line)])
                             for line in [*lines, *projected]
-                            if id(line) in keys and lo < line.transaction_date.date() <= hi),
+                            if id(line) in keys and on_statement(line, c, today)),
                            key=lambda line: (line[0].date(), str(line[2])))
         for _, amt, key in household:
             part = min(cover, amt)
@@ -475,7 +483,7 @@ def _currency(value) -> str:
 def _settle_with_sources(cycles: List[dict], lines: list,
                          payments: List[Tuple[datetime, Decimal, bool]], projected: list,
                          recurring: List[Tuple[datetime, Decimal, bool]] = (),
-                         amount_of=None) -> Tuple[List[Decimal], List[Decimal]]:
+                         amount_of=None, *, today: date) -> Tuple[List[Decimal], List[Decimal]]:
     """``(owed, in_scope)`` per cycle: the statement engine's settlement, by payment source.
 
     The same sequence as ``statements.build_statement_payables``: the
@@ -490,7 +498,8 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     spending wallet); credits are never in
     scope. Recurring transfers into the card, which the engine does not net,
     are applied last, in date order, oldest statement first. ``amount_of``
-    reads a line's figure in the card's currency (``normalise_lines``).
+    reads a line's figure in the card's currency (``normalise_lines``), and
+    ``today`` is the day the rows are read on (``statements.statement_day``).
 
     A projected line carrying ``settles_as_recorded`` (a reviewed card
     installment's month due by the window start, STU-343 Plan B) is settled
@@ -502,7 +511,7 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     lines = [*lines, *(row for row in projected
                        if getattr(row, "settles_as_recorded", False))]
     projected = [row for row in projected if not getattr(row, "settles_as_recorded", False)]
-    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of, today=today)
                 for c in cycles]
     owed = [max(b, ZERO) for b in balances]
     in_scope = [ZERO] * len(cycles)
@@ -686,6 +695,11 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
       scope spending wallet counted when the wallet was topped up, so it is
       counted once.
 
+    Today is Manila's (``reference``, naive Manila wall time, else
+    ``manila_wall_now``), as for every other projection window, so the
+    projection here starts on the same day as Upcoming and the statement
+    history.
+
     Transfers between two scope cash accounts in one currency count only
     their fee; across currencies they also count the money moved
     (``moved_out`` and ``moved_in``, each in its own currency). A card
@@ -694,11 +708,11 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
     from app.core.access import household_grants, readable_criterion, touches_accounts
     from app.core.access import viewable_account_ids
     from app.core.redaction import Redactor
-    from app.core.time import naive_utc_now
+    from app.core.time import manila_wall_now
     from app.services.forecast import is_projection_cash
 
     uid = _uid(user)
-    now = reference or naive_utc_now()
+    now = reference or manila_wall_now()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     current = today.replace(day=1)
     end = _next_month(last)

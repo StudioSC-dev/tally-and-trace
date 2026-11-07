@@ -30,10 +30,14 @@ be modelled and is skipped.
 The statement balance is derived from the card's own transactions in the window --
 matching how the owner keeps per-card SOA ledgers, where line items sum to the
 statement balance. DEBIT (a purchase) increases what's owed; CREDIT (a refund or
-payment) decreases it. Both posted and unposted transactions count: an unposted
-charge inside the window is planned spending that will still land on that
-statement. A cycle whose balance is <= 0 owes nothing; a negative balance (refunds
-exceeding charges) is a credit that pays other statements like a payment does.
+payment) decreases it. A line item is placed by its ``statement_day``, read on a
+given today: a posted row by the later of its own day and the Manila day of its
+``posting_date`` (a charge the bank posts after the close is on the next
+statement), an unposted row by the later of its own day and today (it is
+planned spending that will land on the statement still open, never on one
+already closed). Both posted and unposted transactions count. A cycle whose
+balance is <= 0 owes nothing; a negative balance (refunds exceeding charges) is
+a credit that pays other statements like a payment does.
 
 Payments are transfers INTO the card (``transfer_to_account_id``), posted or
 planned. They are netted against statements, not against the cycle they are dated
@@ -46,8 +50,10 @@ engine (a posted one is in its balance, a planned one is a dated outflow), so
 each peso of a statement leaves cash exactly once: as payment or as payable.
 
 A transfer OUT of the card (a cash advance or balance transfer) is a line item:
-the card is charged the amount plus the transfer fee on the transfer's date, so
-the cash it brought in is repaid through that statement.
+the card is charged the amount plus the transfer fee, placed by the transfer's
+``statement_day``, so the cash it brought in is repaid through that statement.
+Payments keep their ``transaction_date``: when money was paid decides what it
+pays and whether it was on time.
 
 All money is Decimal end to end; dates are naive UTC to match the naive
 transaction_date column (see app/core/time.py for the naive/aware split).
@@ -65,6 +71,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 
+from app.core.time import manila_day
 from app.models.account import Account, AccountType
 from app.models.card_statement_due_override import CardStatementDueOverride
 from app.services.banking_days import next_banking_day
@@ -353,6 +360,8 @@ def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozens
                 extra = {"source": row} if keep_source else {}
                 lines.append(SimpleNamespace(
                     transaction_date=row.transaction_date,
+                    is_posted=getattr(row, "is_posted", True),
+                    posting_date=getattr(row, "posting_date", None),
                     amount=amount + fee,
                     transaction_type=TransactionType.DEBIT,
                     **extra,
@@ -444,13 +453,44 @@ def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
             "original_currency": currencies.pop(), "rate": found[0]["rate"], "rates": rates}
 
 
+def statement_day(row, today: date) -> date:
+    """The calendar day that places a line item on a statement, read on ``today``.
+
+    - A posted row is billed on the later of its own day and the Manila day of
+      its ``posting_date`` (``manila_day``): a charge the bank posts after the
+      close is on the next statement. It never bills before it happened, so
+      an earlier ``posting_date`` is ignored; with none, its own day.
+    - An unposted row is billed on the later of its own day and ``today``: it
+      has not reached any statement that has already closed, so it sits on the
+      cycle open on ``today``, exactly where posting it today would put it.
+      A stale ``posting_date`` on it is ignored.
+    - A row without ``is_posted`` (a projected line, a ``settles_as_recorded``
+      month) counts as posted with no ``posting_date``: its own day.
+    """
+    own = row.transaction_date.date()
+    if not getattr(row, "is_posted", True):
+        return max(own, today)
+    posted = getattr(row, "posting_date", None)
+    return max(own, manila_day(posted)) if posted is not None else own
+
+
+def on_statement(row, cycle: Mapping, today: date) -> bool:
+    """Whether line item ``row`` is on the statement of ``cycle`` (an
+    ``iter_cycles_from`` cycle): its ``statement_day`` is in the cycle's
+    calendar days ``(window_start, close]``."""
+    return (cycle["window_start"].date() < statement_day(row, today)
+            <= cycle["close"].date())
+
+
 def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime,
-                      amount_of=_row_amount) -> Decimal:
+                      amount_of=_row_amount, *, today: date) -> Decimal:
     """Sum a card's charges over the calendar days ``(window_start, close]``.
 
     Days, not instants: ``close`` is midnight of the closing day, but a charge at
     any time ON that day belongs to this statement, and one at any time on the
-    previous closing day belongs to the previous statement.
+    previous closing day belongs to the previous statement. A row's day is its
+    ``statement_day`` on ``today``; ``today`` is required, so no caller can
+    forget it.
 
     This is the LINE-ITEM balance: purchases add to what's owed, refunds subtract.
     Transfers are not line items -- a card payment (a transfer into the card) is
@@ -459,7 +499,7 @@ def statement_balance(transactions: List[Transaction], window_start: datetime, c
     first_excluded, last_included = window_start.date(), close.date()
     total = Decimal("0")
     for txn in transactions:
-        if not (first_excluded < txn.transaction_date.date() <= last_included):
+        if not (first_excluded < statement_day(txn, today) <= last_included):
             continue
         if txn.transaction_type == TransactionType.DEBIT:
             total += amount_of(txn)
@@ -523,6 +563,12 @@ def build_statement_payables(
     cycles left of the pool, and a projected credit dated on or after ``end`` only
     pays statements due on or after its date.
 
+    Line items are placed by their ``statement_day`` on ``start``'s day, which
+    never reads ``end``, so the invariant above holds for unposted rows too.
+    What does move with ``start`` is membership: an unposted row leaves a
+    statement the day after it closes (it rolls to the open one), and returns
+    if it is later posted with a ``posting_date`` before that close.
+
     A cycle still owing something whose due date is before ``start`` is overdue:
     like an overdue unposted transaction, it is emitted dated ``start`` with
     ``overdue`` True and its due date as ``original_date``.
@@ -531,6 +577,7 @@ def build_statement_payables(
     ``route_accounts`` already consume (negative amount = outflow).
     """
     events: List[dict] = []
+    today = start.date()
     unbilled_ids = unbilled_sources | frozenset(
         c.id for c in cards if resolve_cycle_fields(c) is None)
     for card in cards:
@@ -549,18 +596,19 @@ def build_statement_payables(
         if not lines and not projected:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes.
-        days = [row.transaction_date.date() for row in [*lines, *projected]]
+        days = [statement_day(row, today) for row in [*lines, *projected]]
         cycles = list(iter_cycles_from(
             card, min(days), end, through=max(days),
             due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
-        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of,
+                                      today=today)
                     for c in cycles]
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
         remaining = settle_projected(
             cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
         balances = [statement_balance([*lines, *projected], c["window_start"], c["close"],
-                                      amount_of)
+                                      amount_of, today=today)
                     for c in cycles]
         for cycle, balance, owed in zip(cycles, balances, remaining):
             if owed <= 0 or cycle["due"] >= end:
@@ -570,10 +618,9 @@ def build_statement_payables(
                 overdue = {"overdue": True, "original_date": cycle["due"]}
             labels = {}
             if estimates:
-                lo, hi = cycle["window_start"].date(), cycle["close"].date()
                 estimate = statement_estimate(
                     [row for row in [*lines, *projected]
-                     if lo < row.transaction_date.date() <= hi], estimates)
+                     if on_statement(row, cycle, today)], estimates)
                 if estimate is not None:
                     labels = {"line_estimate": estimate}
             events.append({
@@ -654,14 +701,15 @@ def statement_history(db: Session, card: Account, today: datetime,
     oldest statement first, as for payables), ``status`` "paid" (nothing owed),
     "overdue" (owed and due before ``today``) or "open", and ``lines`` the
     charges and refunds in its window as ``{date, amount, transaction}``
-    (a refund negative; a cash advance its amount plus fee). Recorded rows
-    only: nothing is projected. ``viewable_ids`` are the caller's viewable
-    accounts (see ``_card_rows``).
+    (a refund negative; a cash advance its amount plus fee), each placed by
+    its ``statement_day`` read on ``today``'s day, so the listed lines always
+    sum to ``balance``. Recorded rows only: nothing is projected.
+    ``viewable_ids`` are the caller's viewable accounts (see ``_card_rows``).
 
     Four more keys feed the minimum amount due (STU-343 Plan C, 2.5):
-    ``outstanding`` is every line dated on or before the close (debits less
-    credits) less every payment dated on or before it; ``paid_since_close``
-    every payment dated after the close; ``clear_through`` the sum of
+    ``outstanding`` is every line whose ``statement_day`` is on or before the
+    close (debits less credits) less every payment dated on or before it;
+    ``paid_since_close`` every payment dated after the close; ``clear_through`` the sum of
     ``owed`` over this statement and every one before it (what clears it,
     since payments settle oldest first); and ``incomplete`` whether this or
     an earlier statement left a line out for want of a rate. Posted and
@@ -689,26 +737,26 @@ def statement_history(db: Session, card: Account, today: datetime,
     lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
     if not lines and not unconverted:
         return []
-    days = [row.transaction_date.date() for row in [*lines, *(u[0] for u in unconverted)]]
-    last = max(max(days), today.date())
+    day = today.date()
+    days = [statement_day(row, day) for row in [*lines, *(u[0] for u in unconverted)]]
+    last = max(max(days), day)
     if due_overrides is None:
         due_overrides = load_due_overrides(db, [card.id])[card.id]
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
                                    due_overrides=due_overrides))
-    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of)
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of, today=day)
                 for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     history = []
     clear_through = Decimal("0")
     incomplete = False
     for cycle, balance, left in zip(cycles, balances, owed):
-        first_excluded, last_included = cycle["window_start"].date(), cycle["close"].date()
-        window = [row for row in lines
-                  if first_excluded < row.transaction_date.date() <= last_included]
+        last_included = cycle["close"].date()
+        window = [row for row in lines if on_statement(row, cycle, day)]
         charged = sum(((-amount_of(row) if row.transaction_type == TransactionType.CREDIT
                         else amount_of(row))
                        for row in lines
-                       if row.transaction_date.date() <= last_included
+                       if statement_day(row, day) <= last_included
                        and row.transaction_type in (TransactionType.DEBIT,
                                                     TransactionType.CREDIT)),
                       Decimal("0"))
@@ -718,11 +766,10 @@ def statement_history(db: Session, card: Account, today: datetime,
                                 if when.date() > last_included), Decimal("0"))
         clear_through += left
         incomplete = incomplete or any(
-            first_excluded < line.transaction_date.date() <= last_included
-            for line, _, _ in unconverted)
+            on_statement(line, cycle, day) for line, _, _ in unconverted)
         if left <= 0:
             status = "paid"
-        elif cycle["due"].date() < today.date():
+        elif cycle["due"].date() < day:
             status = "overdue"
         else:
             status = "open"
@@ -753,7 +800,7 @@ def statement_history(db: Session, card: Account, today: datetime,
                 "original_currency": currency,
                 "transaction": line,
             } for line, face, currency in sorted(unconverted, key=lambda u: u[0].transaction_date)
-                if first_excluded < line.transaction_date.date() <= last_included],
+                if on_statement(line, cycle, day)],
         })
     return history
 

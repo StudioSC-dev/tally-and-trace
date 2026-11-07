@@ -81,10 +81,9 @@ def frozen(monkeypatch):
     """Every clock a projection, statement or Household route reads, frozen at REF."""
     from app.core import time as time_module
     from app.routers import accounts as accounts_router
-    from app.routers import household as household_router
     from app.services import forecast as forecast_module
 
-    for module in (time_module, accounts_router, household_router, forecast_module):
+    for module in (time_module, accounts_router, forecast_module):
         monkeypatch.setattr(module, "naive_utc_now", lambda: REF)
     return REF
 

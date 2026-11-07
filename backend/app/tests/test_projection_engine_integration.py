@@ -473,8 +473,10 @@ def test_monthly_projection_bills_a_midday_closing_day_charge_on_that_statement(
     card = _account(db, user, "Card C", AccountType.CREDIT, "0.00",
                     billing_cycle_start=24, days_until_due_date=21,
                     payment_account_id=checking.id)
+    # Posted: under the posted-date rule an unposted charge read after its
+    # close rolls to the open statement; this test is about the closing day.
     _txn(db, user, card, TransactionType.DEBIT, "12000.00", datetime(2026, 7, 24, 12),
-         description="Card charge")
+         description="Card charge", is_posted=True)
 
     aug, sep = project_cashflow(db, user.id, months=2, reference=datetime(2026, 8, 1))
 

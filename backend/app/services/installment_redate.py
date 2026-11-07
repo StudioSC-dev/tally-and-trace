@@ -213,8 +213,10 @@ def _paid(db: Session, entry: BudgetEntry) -> Optional[int]:
     return occurrences_paid(db, [entry])[entry.id]
 
 
-def _statement_balances(db: Session, card: Account, closes: Iterable[date]) -> Dict[date, object]:
-    """The line-item balance of each statement closing on one of ``closes``."""
+def _statement_balances(db: Session, card: Account, closes: Iterable[date], *,
+                        today: date) -> Dict[date, object]:
+    """The line-item balance of each statement closing on one of ``closes``, its
+    rows read on ``today`` (``statements.statement_day``)."""
     rows = (db.query(Transaction)
             .filter(Transaction.account_id == card.id,
                     Transaction.transaction_type.in_([TransactionType.DEBIT,
@@ -223,7 +225,7 @@ def _statement_balances(db: Session, card: Account, closes: Iterable[date]) -> D
     out = {}
     for close in sorted(set(closes)):
         out[close] = statement_balance(rows, _window_start(card, close),
-                                       datetime.combine(close, time()))
+                                       datetime.combine(close, time()), today=today)
     return out
 
 
@@ -320,7 +322,7 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     billed_before = {start: _billed(db, card, start) for start in boundaries}
     affected = {close for _, close in plan} | {
         statement_close(card, _day(row.transaction_date)) for row, _ in plan}
-    balances_before = _statement_balances(db, card, affected)
+    balances_before = _statement_balances(db, card, affected, today=today)
 
     def mapped(day: date) -> date:
         return day_map.get(day) or statement_close(card, day)
@@ -367,7 +369,7 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     for start in boundaries:
         if _billed(db, card, start) != map_keys(billed_before[start]):
             raise Refused(f"the forecast from {start.isoformat()} would bill different months")
-    if _statement_balances(db, card, affected) != balances_before:
+    if _statement_balances(db, card, affected, today=today) != balances_before:
         raise Refused("a statement balance would change")
     return result
 

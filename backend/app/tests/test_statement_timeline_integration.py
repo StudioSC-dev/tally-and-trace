@@ -124,8 +124,12 @@ def _timeline(db, scenario, reference):
 
 
 def test_statement_payable_lands_on_the_due_date_not_the_purchase_date(db, scenario):
-    """The charge was 10 Jul; the cash must leave on 14 Aug."""
-    result = _timeline(db, scenario, reference=datetime(2026, 8, 1))
+    """The charge was 10 Jul; the cash must leave on 14 Aug.
+
+    Read on 20 Jul, before the 24 Jul close: an unposted charge read after its
+    close has rolled to the open statement (``statements.statement_day``).
+    """
+    result = _timeline(db, scenario, reference=datetime(2026, 7, 20))
 
     statements = [e for e in result["events"] if e["source"] == "statement"]
     assert len(statements) == 1, result["events"]
@@ -162,8 +166,17 @@ def test_statement_payable_is_routed_to_its_payment_account(db, scenario):
 
 
 def test_unpaid_statement_past_its_due_date_is_overdue_on_the_window_start(db, scenario):
-    """Nothing paid the 14 Aug statement, so on 15 Aug it is still owed, today."""
+    """Nothing paid the 14 Aug statement, so on 15 Aug it is still owed, today.
+
+    The charge is posted here: an unposted one read after the 24 Jul close
+    would have rolled to the open statement (``statements.statement_day``).
+    """
+    from app.models.transaction import Transaction
     from app.services.forecast import collect_events
+
+    db.query(Transaction).filter(Transaction.account_id == scenario["card"].id).update(
+        {"is_posted": True})
+    db.commit()
 
     result = _timeline(db, scenario, reference=datetime(2026, 8, 15))
 

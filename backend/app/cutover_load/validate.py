@@ -28,7 +28,7 @@ from app.models.tag import HOUSEHOLD_TAG_NAME
 from app.models.transaction import TransactionType
 from app.services.recurrence import DAY_FIELDS, DayRuleError, resolve_day_fields
 from app.services.statements import (
-    _split_card_rows, allocate_payments, iter_cycles_from, statement_balance,
+    _split_card_rows, allocate_payments, iter_cycles_from, statement_balance, statement_day,
 )
 from app.cutover_load.schema import AccountIn, BudgetEntryIn, CutoverInput, TransactionIn
 
@@ -167,11 +167,13 @@ def card_cycles(card, card_id, rows: Iterable, unbilled: frozenset,
     lines, payments = _split_card_rows(card_id, kept, unbilled)
     if not lines:
         return []
-    days = [line.transaction_date.date() for line in lines]
+    today = boundary.date()
+    days = [statement_day(line, today) for line in lines]
     through = (boundary - timedelta(days=1)).date()
     cycles = list(iter_cycles_from(card, min(days), datetime.min, through=through,
                                    due_overrides=due_overrides))
-    balances = [statement_balance(lines, c["window_start"], c["close"]) for c in cycles]
+    balances = [statement_balance(lines, c["window_start"], c["close"], today=today)
+                for c in cycles]
     owed = allocate_payments(balances, [amount for _, amount in payments])
     compared = []
     for i, (cycle, balance, left) in enumerate(zip(cycles, balances, owed)):
