@@ -232,3 +232,32 @@ def test_household_monthly_reads_manila_today(sw_client, sw_db, sw_people, monke
     assert r.status_code == 200, r.text
     assert r.json()["month"]["month"] == "2026-11"
 
+
+def test_household_cover_keys_a_rolled_charge_to_the_open_statement(sw_client, sw_db,
+                                                                    sw_people, monkeypatch):
+    """An unposted Household charge in the closed Nov 5 cycle, every other line
+    older: it rolls to Dec 5 and is keyed to that statement's due, not left
+    without a statement because the cycle walk stopped at its own day."""
+    from app.core.access import viewable_account_ids
+    from app.models.account import Account
+    from app.services.household import _card_household_cover
+    from app.services.statements import statement_history
+
+    pin_clock(monkeypatch, REF)
+    client, db = sw_client, sw_db
+    me = sw_people()
+    household, _, card = _household_card(client, db, me)
+    _post(client, me, card, "2026-09-20", "300.00", tags=[household])
+    rolled = sw_post(client, me, "/transactions/", {
+        "account_id": card, "transaction_type": "debit", "amount": 450,
+        "description": "Groceries", "transaction_date": "2026-10-20T00:00:00",
+        "is_posted": False, "tag_ids": [household]})["id"]
+
+    db.expire_all()
+    account = db.get(Account, card)
+    viewable = viewable_account_ids(db, me["id"])
+    dues = {s["close"].date(): s["due"] for s in statement_history(db, account, START, viewable)}
+    cover = _card_household_cover(db, account, set(), START, END, recorded=False,
+                                  viewable_ids=viewable, readable=lambda record: True)
+    assert ("t", rolled) in cover
+    assert cover[("t", rolled)][2] == dues[DEC_5]
