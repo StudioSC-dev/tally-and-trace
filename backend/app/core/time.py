@@ -69,3 +69,16 @@ def manila_today() -> date:
 def manila_midnight() -> datetime:
     """The start of ``manila_today()`` as a naive datetime (wall time stored as UTC)."""
     return datetime.combine(manila_today(), time())
+
+
+def manila_day(value: datetime) -> date:
+    """The Manila calendar day of a stored instant.
+
+    A naive value is read as UTC (``TIMESTAMP WITHOUT TIME ZONE``); an aware
+    one is converted to UTC first. A value stored as UTC midnight of a day
+    keeps that day, and an instant (``2026-11-05T23:00Z``, 07:00 in Manila on
+    Nov 6) reads as the day it was in Manila.
+    """
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return (value + MANILA_OFFSET).date()

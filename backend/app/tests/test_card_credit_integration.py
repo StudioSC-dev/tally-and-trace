@@ -877,11 +877,16 @@ def test_credit_per_role(sw, sw_client, sw_db, sw_people, monkeypatch):
            end_mode="after_occurrences", max_occurrences=3)
     _debit(client, a, card, "2027-02-20", 1_000.01, "Pharmacy")
     _debit(client, a, card, "2027-03-18", 234.55, "Bakery")
+    # A posted charge on the open statement: both unposted charges have rolled
+    # onto it (``statements.statement_day``), and without this its payable,
+    # which these roles already see on the joint account, would equal
+    # ``pending_total`` to the centavo and read as a leak by number.
+    _debit(client, a, card, "2027-03-10", 100, "Cafe", posted=True)
 
     mine = _credit(client, a, card)
     assert (mine["limit"], mine["opening"]["installment_hold"],
             mine["opening"]["pending_total"], mine["available_now"]) == (
-        77_777.0, 9_999.0, 1_234.56, 66_543.44)
+        77_777.0, 9_999.0, 1_234.56, 66_443.44)
     numbers = [77_777, mine["available_now"], mine["opening"]["installment_hold"],
                mine["opening"]["pending_total"]]
 

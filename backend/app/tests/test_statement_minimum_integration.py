@@ -8,7 +8,7 @@ already due. Owner and admin only. Skips without a database.
 Reference: Thursday 2027-03-18, 02:00 UTC (10:00 in Manila). "Card M": BDO
 rule, PHP, limit ₱200,000, closes on the 3rd, due 21 days later.
 """
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -100,6 +100,18 @@ def _statements(client, who, card):
         assert set(statement) == STATEMENT_KEYS
         assert set(statement["minimum_due"]) == MINIMUM_KEYS
     return {s["close_date"]: s for s in body["statements"]}
+
+
+def _history_incomplete(w, card, today):
+    """``{close: incomplete}`` of the card's ``statement_history`` read on ``today``."""
+    from app.core.access import viewable_account_ids
+    from app.models.account import Account
+    from app.services.statements import statement_history
+
+    db = w["db"]
+    db.expire_all()
+    return {s["close"].date(): s["incomplete"] for s in statement_history(
+        db, db.get(Account, card), today, viewable_account_ids(db, w["me"]["id"]))}
 
 
 def _minimum(client, who, card, close):
@@ -380,10 +392,18 @@ def test_earlier_unconverted_line_makes_later_minimums_incomplete(world):
     card = _card(client, me, "Card EUR")
     _foreign_debit(client, me, card, "2027-01-20", 100)
     _debit(client, me, card, "2027-02-15", 30_000)
+    # Read before the Feb 3 close, the unposted line is on that statement and
+    # leaves every later one incomplete.
+    assert _history_incomplete(w, card, datetime(2027, 1, 25)) == {
+        date(2027, 2, 3): True, date(2027, 3, 3): True}
+    # Unposted on Mar 18, it has rolled to the open statement (``statement_day``),
+    # so no closed statement holds it and their minimums are complete.
+    assert _history_incomplete(w, card, datetime(2027, 3, 18)) == {
+        date(2027, 3, 3): False, date(2027, 4, 3): True}
     march = _statements(client, me, card)["2027-03-03"]
-    assert march["incomplete"] is True
-    assert march["minimum_due"]["complete"] is False
-    assert "unconverted_lines_left_out" in march["minimum_due"]["assumptions"]
+    assert march["incomplete"] is False
+    assert march["minimum_due"]["complete"] is True
+    assert "unconverted_lines_left_out" not in march["minimum_due"]["assumptions"]
 
     _override(client, me, card, "2027-03-03", 900)
     minimum = _minimum(client, me, card, "2027-03-03")
@@ -395,12 +415,15 @@ def test_unconverted_line_marks_the_minimum_incomplete(card_m):
     w = card_m
     client, me, card = w["client"], w["me"], w["card"]
     _foreign_debit(client, me, card, "2027-02-28", 50)
+    # Read before the Mar 3 close, the unposted line is on that statement.
+    history = _history_incomplete(w, card, datetime(2027, 3, 1))
+    assert (history[date(2027, 2, 3)], history[date(2027, 3, 3)]) == (False, True)
+    # On Mar 18 it has rolled to the open statement: March is complete.
     march = _statements(client, me, card)["2027-03-03"]
     minimum = march["minimum_due"]
     assert (minimum["amount"], minimum["complete"], march["incomplete"]) == (
-        1_650.0, False, True)
-    assert minimum["assumptions"] == ["fees_not_itemised", "installments_linked_only",
-                                      "unconverted_lines_left_out"]
+        1_650.0, True, False)
+    assert minimum["assumptions"] == ["fees_not_itemised", "installments_linked_only"]
     assert _statements(client, me, card)["2027-02-03"]["incomplete"] is False
 
 

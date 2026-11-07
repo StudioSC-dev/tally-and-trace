@@ -781,3 +781,269 @@ def test_today_keyword_is_required():
     with pytest.raises(TypeError):
         statement_balance([_txn(1, "1.00")], datetime(2026, 6, 24), datetime(2026, 7, 24),
                           None, TODAY)
+
+
+# ---------------------------------------------------------------------------
+# Placing rows by their posted day (statement_day)
+#
+# "Card 5" closes on the 5th, due 20 days later, read on Saturday 7 Nov 2026
+# unless a test says otherwise: the Nov 5 statement is closed, Dec 5 is open.
+# ---------------------------------------------------------------------------
+
+NOV_7 = date(2026, 11, 7)
+
+
+def _card5():
+    return _card(id=5, name="Card 5", billing_cycle_start=5, days_until_due_date=20,
+                 currency="PHP")
+
+
+def _row(day, amount="100.00", *, posted=True, posting=None, kind=TransactionType.DEBIT,
+         month=11):
+    return SimpleNamespace(transaction_date=datetime(2026, month, day),
+                           amount=Decimal(amount), transaction_type=kind,
+                           is_posted=posted, posting_date=posting)
+
+
+def _history5(rows, today=NOV_7):
+    card = _card5()
+    return {s["close"].date(): s for s in statement_history(
+        None, card, datetime.combine(today, datetime.min.time()), [card.id],
+        card_rows=({card.id: rows}, frozenset()), due_overrides={})}
+
+
+def _closes5(rows, today=NOV_7):
+    """``{close: balance}`` of every statement in the history read on ``today``."""
+    return {close: s["balance"] for close, s in _history5(rows, today).items()}
+
+
+def test_statement_day_posted_without_posting_date():
+    from app.services.statements import statement_day
+
+    assert statement_day(_row(4), NOV_7) == date(2026, 11, 4)
+    # A row without the fields at all (a projected line) is read the same way.
+    assert statement_day(_txn(4, "1.00", month=11), NOV_7) == date(2026, 11, 4)
+    assert _closes5([_row(4, "250.00")]) == {date(2026, 11, 5): Decimal("250.00"),
+                                             date(2026, 12, 5): Decimal("0")}
+
+
+def test_statement_day_reads_posting_date_as_manila_day():
+    from datetime import timezone
+
+    from app.core.time import manila_day
+    from app.services.statements import statement_day
+
+    # A pre-#85 click at 07:00 on Nov 6 in Manila was stored as Nov 5 23:00 UTC.
+    instant = datetime(2026, 11, 5, 23, 0)
+    assert manila_day(instant) == date(2026, 11, 6)
+    assert manila_day(instant.replace(tzinfo=timezone.utc)) == date(2026, 11, 6)
+    assert statement_day(_row(4, posting=instant), NOV_7) == date(2026, 11, 6)
+    # Rows written since #85 are UTC midnight of the day: they keep it.
+    midnight = datetime(2026, 11, 6)
+    assert manila_day(midnight) == date(2026, 11, 6)
+    assert statement_day(_row(4, posting=midnight), NOV_7) == date(2026, 11, 6)
+    # Up to 15:59 UTC is still the same Manila day; 16:00 UTC is the next one.
+    assert manila_day(datetime(2026, 11, 5, 15, 59)) == date(2026, 11, 5)
+    assert manila_day(datetime(2026, 11, 5, 16, 0)) == date(2026, 11, 6)
+    # So the instant moves the row past the Nov 5 close, as the UI shows it.
+    assert _closes5([_row(4, "250.00", posting=instant)]) == {
+        date(2026, 12, 5): Decimal("250.00")}
+
+
+def test_statement_day_clamps_early_posting_date():
+    from app.services.statements import statement_day
+
+    early = _row(4, posting=datetime(2026, 10, 30))
+    assert statement_day(early, NOV_7) == date(2026, 11, 4)
+    # It never bills before it happened: an Oct 30 posted day can't pull a
+    # Nov 6 charge back into the closed Nov 5 statement.
+    assert _closes5([_row(6, "250.00", posting=datetime(2026, 11, 2))]) == {
+        date(2026, 12, 5): Decimal("250.00")}
+
+
+def test_statement_day_unposted_cases():
+    from app.services.statements import statement_close, statement_day
+
+    card = _card5()
+    # Dated before today in the open cycle: today is in the same cycle.
+    nov_3 = date(2026, 11, 3)
+    assert statement_day(_row(1, posted=False), nov_3) == nov_3
+    assert statement_close(card, nov_3) == statement_close(card, date(2026, 11, 1))
+    # In a closed cycle: today, so the open statement.
+    assert statement_day(_row(4, posted=False), NOV_7) == NOV_7
+    assert _closes5([_row(4, "250.00", posted=False)]) == {date(2026, 12, 5): Decimal("250.00")}
+    # A close of today is not closed yet: the row stays on it.
+    nov_5 = date(2026, 11, 5)
+    assert statement_day(_row(4, posted=False), nov_5) == nov_5
+    assert _closes5([_row(4, "250.00", posted=False)], today=nov_5) == {
+        date(2026, 11, 5): Decimal("250.00")}
+    # Dated after today: its own day.
+    assert statement_day(_row(20, posted=False), NOV_7) == date(2026, 11, 20)
+    # A stale posted day (from before a revert) is ignored while unposted.
+    stale = _row(1, posted=False, posting=datetime(2026, 12, 20))
+    assert statement_day(stale, nov_3) == nov_3
+    # Posting it today with today's date moves nothing.
+    assert statement_day(_row(4, posting=datetime(2026, 11, 7)), NOV_7) == NOV_7
+
+
+def test_cash_advance_follows_posted_date():
+    def advance(**fields):
+        row = SimpleNamespace(transaction_date=datetime(2026, 11, 4), amount=Decimal("3000.00"),
+                              transfer_fee=Decimal("50.00"),
+                              transaction_type=TransactionType.TRANSFER, account_id=5,
+                              transfer_from_account_id=5, transfer_to_account_id=10, **fields)
+        return row
+
+    nov, dec = date(2026, 11, 5), date(2026, 12, 5)
+    posted_late = advance(is_posted=True, posting_date=datetime(2026, 11, 6))
+    assert _closes5([posted_late]) == {dec: Decimal("3050.00")}
+    history = _history5([posted_late])
+    assert [(line["amount"], line["transaction"]) for line in history[dec]["lines"]] == [
+        (Decimal("3050.00"), posted_late)]
+    # Without a posted day it stays on its own statement; unposted, it rolls.
+    assert _closes5([advance(is_posted=True, posting_date=None)])[nov] == Decimal("3050.00")
+    assert _closes5([advance(is_posted=False, posting_date=None)]) == {dec: Decimal("3050.00")}
+    # The payable follows too, fee included.
+    events = build_statement_payables([_card5()], {5: [posted_late]}, datetime(2026, 11, 7),
+                                      datetime(2027, 1, 31))
+    assert [(e["statement_close"].date(), e["amount"]) for e in events] == [
+        (dec, Decimal("-3050.00"))]
+
+
+def test_refund_follows_posted_date():
+    nov, dec = date(2026, 11, 5), date(2026, 12, 5)
+    charge = _row(20, "1000.00", month=10)
+    refund = _row(3, "400.00", kind=TransactionType.CREDIT, posting=datetime(2026, 11, 6))
+    history = _history5([charge, refund])
+    assert (history[nov]["balance"], history[dec]["balance"]) == (
+        Decimal("1000.00"), Decimal("-400.00"))
+    # The later statement's net credit still pays the older one.
+    assert (history[nov]["owed"], history[dec]["owed"]) == (Decimal("600.00"), Decimal("0"))
+    assert [line["transaction"] for line in history[dec]["lines"]] == [refund]
+
+
+def test_payment_keeps_transaction_date():
+    from app.services.statements import _split_card_rows
+
+    nov, dec = date(2026, 11, 5), date(2026, 12, 5)
+    charge = _row(20, "1000.00", month=10)
+    # Paid Nov 4, before the close; the bank posted it Nov 6.
+    payment = SimpleNamespace(
+        transaction_date=datetime(2026, 11, 4), amount=Decimal("700.00"),
+        transaction_type=TransactionType.TRANSFER, account_id=10,
+        transfer_from_account_id=10, transfer_to_account_id=5, is_posted=True,
+        posting_date=datetime(2026, 11, 6))
+    assert _split_card_rows(5, [charge, payment])[1] == [
+        (datetime(2026, 11, 4), Decimal("700.00"))]
+    history = _history5([charge, payment])
+    assert history[nov]["owed"] == Decimal("300.00")
+    assert history[nov]["outstanding"] == Decimal("300.00")  # paid by the close
+    assert history[nov]["paid_since_close"] == Decimal("0")
+    assert dec not in history or history[dec]["lines"] == []
+    # Unposted, a payment is not rolled either.
+    payment.is_posted, payment.posting_date = False, None
+    assert _history5([charge, payment])[nov]["outstanding"] == Decimal("300.00")
+
+
+def test_foreign_lines_follow_statement_day():
+    from app.models.transaction import Transaction
+    from app.services.fx import Rate
+
+    class Fx:
+        def rate(self, base, quote):
+            if (base, quote) == ("USD", "PHP"):
+                return Rate("USD", "PHP", Decimal("50"), date(2026, 11, 1), "test", False)
+            return None
+
+    def foreign(day, currency, amount):
+        return Transaction(id=day * 10, account_id=5, transaction_type=TransactionType.DEBIT,
+                           amount=Decimal(amount), currency="PHP",
+                           projected_amount=Decimal(amount), projected_currency=currency,
+                           transaction_date=datetime(2026, 11, day), is_posted=False)
+
+    card = _card5()
+    rows = [_row(20, "1000.00", month=10), foreign(3, "USD", "10"), foreign(4, "EUR", "5")]
+    nov, dec = date(2026, 11, 5), date(2026, 12, 5)
+
+    def history(today):
+        return {s["close"].date(): s for s in statement_history(
+            None, card, datetime.combine(today, datetime.min.time()), [card.id], fx=Fx(),
+            card_rows=({card.id: rows}, frozenset()), due_overrides={})}
+
+    # Read before the close, both sit on the Nov 5 statement.
+    before = history(date(2026, 11, 4))
+    assert before[nov]["balance"] == Decimal("1500.00")
+    assert before[nov]["incomplete"] is True
+    assert [u["transaction"] for u in before[nov]["unconverted"]] == [rows[2]]
+    # Read on Nov 7, unposted, both have rolled to Dec 5: the estimate, the
+    # unconverted listing and ``incomplete`` all follow.
+    after = history(NOV_7)
+    assert (after[nov]["balance"], after[nov]["incomplete"], after[nov]["unconverted"]) == (
+        Decimal("1000.00"), False, [])
+    assert after[dec]["balance"] == Decimal("500.00")
+    assert after[dec]["incomplete"] is True
+    assert [u["transaction"] for u in after[dec]["unconverted"]] == [rows[2]]
+    assert [line["estimate"]["original_amount"] for line in after[dec]["lines"]] == [
+        Decimal("10")]
+    # The payables label the Dec 5 statement as the estimate, not Nov 5.
+    from app.services.statements import normalise_lines
+
+    events = build_statement_payables(
+        [card], {5: rows}, datetime(2026, 11, 7), datetime(2027, 1, 31),
+        normalise=lambda c, lines: normalise_lines(None, c, lines, Fx()))
+    labelled = {e["statement_close"].date(): "line_estimate" in e for e in events}
+    assert labelled == {nov: False, dec: True}
+
+
+def test_row_posted_past_last_date_is_not_dropped():
+    nov, dec, jan = date(2026, 11, 5), date(2026, 12, 5), date(2027, 1, 5)
+    # Posted with a day past every dated row and past today's cycle.
+    far = _row(4, "250.00", posting=datetime(2026, 12, 10))
+    assert _closes5([far]) == {jan: Decimal("250.00")}
+    # A refund posted that far still pays the older statement in an earlier window.
+    charge = _row(1, "1000.00", month=10)
+    refund = _row(2, "1000.00", month=10, kind=TransactionType.CREDIT,
+                  posting=datetime(2026, 12, 10))
+    events = build_statement_payables([_card5()], {5: [charge, refund]},
+                                      datetime(2026, 10, 6), datetime(2026, 11, 1))
+    assert events == []
+    assert _closes5([charge, refund]) == {date(2026, 10, 5): Decimal("1000.00"), nov: Decimal("0"),
+                                          dec: Decimal("0"), jan: Decimal("-1000.00")}
+
+
+def test_rolled_row_keeps_window_independence():
+    rows = [_row(20, "1000.00", month=10),                # Nov 5 statement
+            _row(4, "250.00", posted=False),              # rolls to Dec 5
+            _row(6, "300.00", posting=datetime(2026, 11, 6))]
+    start = datetime(2026, 11, 7)
+
+    def payables(end):
+        return [(e["statement_close"].date(), e["amount"], e["statement_balance"])
+                for e in build_statement_payables([_card5()], {5: rows}, start, end)]
+
+    short = payables(datetime(2027, 1, 1))
+    assert short == [(date(2026, 11, 5), Decimal("-1000.00"), Decimal("1000.00")),
+                     (date(2026, 12, 5), Decimal("-550.00"), Decimal("550.00"))]
+    longer = payables(datetime(2027, 6, 1))
+    assert longer[:len(short)] == short
+
+
+def test_projected_lines_are_not_rolled():
+    start, end = datetime(2026, 11, 7), datetime(2027, 1, 31)
+    nov = date(2026, 11, 5)
+    # A projected charge dated in the closed Nov 5 cycle stays on it.
+    projected = SimpleNamespace(transaction_date=datetime(2026, 10, 20), amount=Decimal("80.00"),
+                                transaction_type=TransactionType.DEBIT)
+    events = build_statement_payables([_card5()], {5: []}, start, end,
+                                      projected_by_card={5: [projected]})
+    assert [(e["statement_close"].date(), e["amount"]) for e in events] == [
+        (nov, Decimal("-80.00"))]
+    # A month settled as recorded stays too, and recording it (a posted row
+    # with no posted day, as every recorder writes) moves no payable.
+    settles = SimpleNamespace(transaction_date=datetime(2026, 10, 20), amount=Decimal("80.00"),
+                              transaction_type=TransactionType.DEBIT, settles_as_recorded=True)
+    as_projected = build_statement_payables([_card5()], {5: []}, start, end,
+                                            projected_by_card={5: [settles]})
+    recorded = build_statement_payables([_card5()], {5: [_row(20, "80.00", month=10)]},
+                                        start, end)
+    assert as_projected == recorded == events

@@ -178,3 +178,27 @@ def test_a_valid_custom_rule_round_trips():
 def test_validators_refuse(change):
     with pytest.raises(ValidationError):
         MinimumDueRule.model_validate({**VALID, **change})
+
+
+def test_outstanding_uses_statement_day():
+    """``outstanding`` (T for the minimum) leaves out a row posted after the close."""
+    from datetime import date, datetime
+    from types import SimpleNamespace
+
+    from app.models.transaction import TransactionType
+    from app.services.statements import statement_history
+
+    card = SimpleNamespace(id=5, name="Card 5", billing_cycle_start=5, days_until_due_date=20,
+                           due_date=None, currency="PHP")
+
+    def row(day, amount, posting=None, month=11):
+        return SimpleNamespace(transaction_date=datetime(2026, month, day), amount=D(amount),
+                               transaction_type=TransactionType.DEBIT, is_posted=True,
+                               posting_date=posting)
+
+    rows = [row(20, "1000", month=10), row(4, "600", posting=datetime(2026, 11, 6))]
+    history = {s["close"].date(): s for s in statement_history(
+        None, card, datetime(2026, 11, 7), [card.id], card_rows=({card.id: rows}, frozenset()),
+        due_overrides={})}
+    assert history[date(2026, 11, 5)]["outstanding"] == D("1000")
+    assert history[date(2026, 12, 5)]["outstanding"] == D("1600")

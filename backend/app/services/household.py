@@ -60,6 +60,10 @@ in the record's currency (``Occurrence.month``).
 ``recorded`` picks the data: posted charges against posted payments (a
 recorded month), or every row plus projected entry charges against posted,
 planned and recurring payments plus the routed payment (the projection).
+A line is on the statement holding its ``statement_day``
+(``statements.statement_day``) read on the window's first day, as the engine
+reads it: a posted charge by the later of its own day and its posted day, an
+unposted one rolled to the cycle open on that day.
 
 **The projection's horizon is the statement's, never the request's.** A
 line's projected cover counts the recurring payments and projected entry
