@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -792,6 +792,17 @@ export function TransactionsPage() {
     () => accounts.find((account) => account.id === formData.account_id),
     [accounts, formData.account_id]
   )
+  // A posted day that puts a card row on another statement than its own day says so; saving is never blocked.
+  const editFormHint =
+    selectedFormAccount?.account_type === 'credit' && formData.is_posted && formData.transaction_date && formData.posting_date
+      ? postedCycleHint(selectedFormAccount, formData.transaction_date, formData.posting_date)
+      : null
+  const postingFormRow = actionTransaction && !isLimited(actionTransaction) ? actionTransaction : null
+  const postingFormCard = accounts.find((account) => account.id === postingFormRow?.account_id)
+  const postingFormHint =
+    postingFormRow && postingFormCard?.account_type === 'credit' && postingFormState.postedOn
+      ? postedCycleHint(postingFormCard, postingFormRow.transaction_date, postingFormState.postedOn)
+      : null
   const destinationFormAccount = useMemo(
     () => accounts.find((account) => account.id === formData.transfer_to_account_id),
     [accounts, formData.transfer_to_account_id]
@@ -2932,6 +2943,9 @@ export function TransactionsPage() {
                           {postingFormState.dateError}
                         </p>
                       )}
+                      {postingFormHint && (
+                        <p className="mt-1 text-xs text-muted" data-testid="posting-form-hint">{postingFormHint}</p>
+                      )}
                     </div>
                   )}
                   {postingFormState.error && (
@@ -3403,6 +3417,9 @@ export function TransactionsPage() {
                     <p id="posting-date-error" className="mt-1 text-xs text-danger" role="alert" data-testid="record-date-error">
                       {dateErrors.posting_date}
                     </p>
+                  )}
+                  {editFormHint && (
+                    <p className="mt-1 text-xs text-muted" data-testid="posting-date-hint">{editFormHint}</p>
                   )}
                 </div>
               </div>

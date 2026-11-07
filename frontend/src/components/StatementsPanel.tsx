@@ -15,6 +15,12 @@ const formatDay = (value: string): string => {
   })
 }
 
+/** A calendar day (YYYY-MM-DD) as month and day, for a line's posted day. */
+const formatShortDay = (value: string): string => {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
+  return new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
 /** A full line may carry the estimate labels; a limited one never does. */
 const lineLabels = (line: object): EstimateLabels => ('original_amount' in line ? (line as EstimateLabels) : {})
 
@@ -59,6 +65,9 @@ export function StatementsPanel({ account }: { account: Account }) {
                 <li key={index} className="flex justify-between gap-3 py-1">
                   <span className="text-body">
                     {formatDay(line.date)} · {line.display_description ?? 'Charge'}
+                    {'posted_date' in line && line.posted_date && (
+                      <span className="text-muted" data-testid="statement-posted"> · posted {formatShortDay(line.posted_date)}</span>
+                    )}
                   </span>
                   <span className="text-ink" title={estimateTitle(lineLabels(line))}>{estimateText(line.amount, currency, lineLabels(line))}</span>
                 </li>
