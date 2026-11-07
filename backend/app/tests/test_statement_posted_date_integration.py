@@ -175,3 +175,60 @@ def test_moving_rows_conserves_total_and_card_balance(world):
     assert Decimal(str(statements[NOV_5]["statement_balance"])) == NOV_5_TOTAL
     assert (total, balance) == (total_before, balance_before)
     assert total == NOV_5_TOTAL + DEC_5_TOTAL
+
+
+# --- Household reads the same Manila day ---------------------------------------------------------
+
+def _household_card(client, db, who):
+    """``who``'s Household-tagged joint account and a Household-tagged card
+    (closing on the 5th, due 20 days later) paid from it."""
+    household = hh_household(db, who)
+    joint = sw_post(client, who, "/accounts/", {
+        "name": "Joint", "account_type": "checking", "balance": 100_000,
+        "tag_ids": [household]})["id"]
+    card = sw_post(client, who, "/accounts/", {
+        "name": "Joint card", "account_type": "credit", "balance": 0, "billing_cycle_start": 5,
+        "days_until_due_date": 20, "credit_limit": 200_000, "payment_account_id": joint,
+        "tag_ids": [household]})["id"]
+    return household, joint, card
+
+
+def test_household_monthly_reads_manila_today(sw_client, sw_db, sw_people, monkeypatch):
+    """At 04:00 on Nov 6 in Manila (Nov 5 20:00 UTC) the Nov 5 statement is
+    closed: an unposted charge dated Nov 3 is on the open Dec 5 statement in
+    Household monthly (no reference, as the router calls it), as in the
+    statement history."""
+    from app.core.access import viewable_account_ids
+    from app.core.time import manila_midnight
+    from app.models.account import Account
+    from app.services.statements import statement_history
+
+    pin_clock(monkeypatch, datetime(2026, 11, 5, 20, 0))
+    client, db = sw_client, sw_db
+    me = sw_people()
+    household, _, card = _household_card(client, db, me)
+    charge = sw_post(client, me, "/transactions/", {
+        "account_id": card, "transaction_type": "debit", "amount": 1_234.5,
+        "description": "Groceries", "transaction_date": "2026-11-03T00:00:00",
+        "is_posted": False, "tag_ids": [household]})["id"]
+
+    db.expire_all()
+    history = statement_history(db, db.get(Account, card), manila_midnight(),
+                                viewable_account_ids(db, me["id"]))
+    (holding,) = [s for s in history if charge in [line["transaction"].id for line in s["lines"]]]
+    assert holding["close"].date() == DEC_5
+    due_month = holding["due"].strftime("%Y-%m")
+    assert due_month == "2026-12"
+
+    r = client.get(f"{API}/household/{me['id']}/monthly", params={"from": "2026-11", "to": "2026-12"},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    expense = {m["month"]: sum(line["expense"] for line in m["currencies"])
+               for m in r.json()["months"]}
+    assert expense == {"2026-11": 0, "2026-12": 1_234.5}
+    assert expense[due_month] == float(holding["balance"])
+    # The dashboard's month is Manila's too.
+    r = client.get(f"{API}/household/{me['id']}/dashboard", headers=me["headers"])
+    assert r.status_code == 200, r.text
+    assert r.json()["month"]["month"] == "2026-11"
+

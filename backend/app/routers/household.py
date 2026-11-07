@@ -31,7 +31,7 @@ from app.core.access import household_grants
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.redaction import display_name, serialize_accounts, serialize_transactions
-from app.core.time import naive_utc_now
+from app.core.time import manila_wall_now
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.household import HouseholdMonthlyResponse, HouseholdViewOut
@@ -135,7 +135,7 @@ def household_monthly(
     fx: FxRates = Depends(get_fx),
 ):
     grant = _grant(db, current_user, sharer_id)
-    this_month = naive_utc_now().strftime("%Y-%m")
+    this_month = manila_wall_now().strftime("%Y-%m")
     from_, to = from_ or this_month, to or this_month
     first, last = _month(from_), _month(to)
     span = (last.year - first.year) * 12 + last.month - first.month + 1
@@ -155,7 +155,7 @@ def household_dashboard(
 ):
     grant = _grant(db, current_user, sharer_id)
     accounts = household_svc.household_accounts(db, current_user, grant)
-    month = naive_utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month = manila_wall_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     [current] = household_svc.household_monthly(db, current_user, grant, month, month, fx=fx)
     start, end = _upcoming_window(30, None)
     return {

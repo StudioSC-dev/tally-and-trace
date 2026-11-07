@@ -328,9 +328,10 @@ def test_payment_into_a_visible_loan_keeps_its_fee(hh, sw_client, sw_db, mode):
 @pytest.mark.parametrize("viewer,expected", [
     ("c", {"expense": 450.0}), ("a", {"expense": 400.0, "fees": 50.0})])
 def test_dashboard_month_hides_a_hidden_loans_interest(hh, sw_client, sw_db, viewer, expected):
-    from app.core.time import naive_utc_now
+    from app.core.time import manila_wall_now
 
-    today = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # The dashboard's month is Manila's (``household_monthly``).
+    today = manila_wall_now().replace(hour=0, minute=0, second=0, microsecond=0)
     _transfer(sw_client, hh["a"], hh["joint"], hh["a_loan"], 400, today.isoformat(),
               posted=True, transfer_fee=50, description="Loan payment")
     body = _get(sw_client, hh[viewer], f"/household/{hh['a']['id']}/dashboard")
@@ -587,7 +588,6 @@ def test_recorded_month_does_not_depend_on_the_requested_range(hh, sw_client, sw
     # October 20. Each month's lines are the same whatever the range's end,
     # before today or after it, and on the dashboard.
     import app.core.time as time_module
-    import app.routers.household as household_router
 
     _charge(sw_client, hh, "recorded", when="2026-09-20T00:00:00")
     _charge(sw_client, hh, "recorded", when="2026-10-12T00:00:00")
@@ -605,7 +605,6 @@ def test_recorded_month_does_not_depend_on_the_requested_range(hh, sw_client, sw
                                   "expense": 200.0}]
 
     monkeypatch.setattr(time_module, "naive_utc_now", lambda: MIXED)
-    monkeypatch.setattr(household_router, "naive_utc_now", lambda: MIXED)
     dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
     assert dashboard["month"]["month"] == "2026-10"
     assert dashboard["month"]["currencies"] == to_dec["2026-10"]
@@ -620,7 +619,6 @@ def test_projected_month_does_not_depend_on_the_requested_range(hh, sw_client, s
     # recurring joint payment on November 3; today is October 10. October's
     # lines, the dashboard and Upcoming agree whatever the range or window.
     import app.core.time as time_module
-    import app.routers.household as household_router
     import app.services.forecast as forecast_module
 
     _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
@@ -637,7 +635,7 @@ def test_projected_month_does_not_depend_on_the_requested_range(hh, sw_client, s
     assert to_dec["2026-11"] == [{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
                                   "expense": float(paid)}]
 
-    for module in (time_module, household_router, forecast_module):
+    for module in (time_module, forecast_module):
         monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
     sharer = hh["a"]["id"]
     dashboard = _get(sw_client, hh["c"], f"/household/{sharer}/dashboard")
@@ -658,7 +656,6 @@ def test_two_statements_with_different_due_dates_each_keep_their_remainder(
     # payment before its due date (November 3 and December 3). Each line keeps
     # its own remainder whatever the range, and the dashboard agrees.
     import app.core.time as time_module
-    import app.routers.household as household_router
     import app.services.forecast as forecast_module
 
     _charge(sw_client, hh, "projected", when="2026-10-14T00:00:00")
@@ -678,7 +675,7 @@ def test_two_statements_with_different_due_dates_each_keep_their_remainder(
     assert to_dec["2026-12"] == [{"currency": "PHP", **dict.fromkeys(FIELDS, 0.0),
                                   "expense": 60.0}]
 
-    for module in (time_module, household_router, forecast_module):
+    for module in (time_module, forecast_module):
         monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
     dashboard = _get(sw_client, hh["c"], f"/household/{hh['a']['id']}/dashboard")
     assert dashboard["month"]["month"] == "2026-10"
@@ -796,7 +793,6 @@ def test_household_wallet_covers_a_projected_card_entry(hh, sw_client, sw_db, mo
     # only). With no payment (the control) the bill stays paid from other
     # accounts, in the month, on the dashboard and in Upcoming.
     import app.core.time as time_module
-    import app.routers.household as household_router
     import app.services.forecast as forecast_module
 
     _hh_wallet(sw_client, hh)
@@ -809,7 +805,7 @@ def test_household_wallet_covers_a_projected_card_entry(hh, sw_client, sw_db, mo
                            datetime(2026, 11, 1))
     elif via == "routed":
         _route_card_to_wallet(sw_db, hh)
-    for module in (time_module, household_router, forecast_module):
+    for module in (time_module, forecast_module):
         monkeypatch.setattr(module, "naive_utc_now", lambda: PROJECTED)
 
     months = _monthly(sw_db, hh["c"], hh["a"], PROJECTED)

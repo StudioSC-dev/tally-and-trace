@@ -695,6 +695,11 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
       scope spending wallet counted when the wallet was topped up, so it is
       counted once.
 
+    Today is Manila's (``reference``, naive Manila wall time, else
+    ``manila_wall_now``), as for every other projection window, so the
+    projection here starts on the same day as Upcoming and the statement
+    history.
+
     Transfers between two scope cash accounts in one currency count only
     their fee; across currencies they also count the money moved
     (``moved_out`` and ``moved_in``, each in its own currency). A card
@@ -703,11 +708,11 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
     from app.core.access import household_grants, readable_criterion, touches_accounts
     from app.core.access import viewable_account_ids
     from app.core.redaction import Redactor
-    from app.core.time import naive_utc_now
+    from app.core.time import manila_wall_now
     from app.services.forecast import is_projection_cash
 
     uid = _uid(user)
-    now = reference or naive_utc_now()
+    now = reference or manila_wall_now()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     current = today.replace(day=1)
     end = _next_month(last)
