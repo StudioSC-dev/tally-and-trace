@@ -8,6 +8,7 @@ import {
   omittedRuns,
   markPaidWireDate,
   postAllDueRange,
+  postedCycleHint,
   readMaterializeHeaders,
   sameStatementCycle,
   skippedBefore,
@@ -119,6 +120,36 @@ describe('sameStatementCycle', () => {
 
   it('has nothing to warn about without cycle settings', () => {
     expect(sameStatementCycle({}, '2026-11-05', '2026-10-18')).toBe(true)
+  })
+})
+
+describe('postedCycleHint', () => {
+  const card5 = { billing_cycle_start: 5 }
+
+  it('names both statements when the posted day crosses a close', () => {
+    expect(postedCycleHint(card5, '2026-11-04', '2026-11-06')).toBe(
+      'This puts it on the statement closing Dec 5th, 2026, not the one closing Nov 5th, 2026.',
+    )
+  })
+
+  it('is null when both days are on one statement', () => {
+    expect(postedCycleHint(card5, '2026-11-01', '2026-11-05')).toBeNull()
+  })
+
+  it('is null when the posted day is before the transaction day, as the server clamps it', () => {
+    expect(postedCycleHint(card5, '2026-11-06', '2026-10-30')).toBeNull()
+  })
+
+  it('is null for a card with no cycle settings', () => {
+    expect(postedCycleHint({}, '2026-11-04', '2026-11-06')).toBeNull()
+  })
+
+  it('reads a wire transaction date by its UTC day', () => {
+    expect(postedCycleHint(card5, '2026-11-04T00:00:00Z', '2026-11-06')).not.toBeNull()
+  })
+
+  it('is null for an unreadable day', () => {
+    expect(postedCycleHint(card5, '2026-11-04', '')).toBeNull()
   })
 })
 
