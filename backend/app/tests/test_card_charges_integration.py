@@ -30,7 +30,7 @@ FULL_KEYS = {"view", "date", "original_date", "overdue", "occurrence_date", "nam
 LABEL_KEYS = {"estimated", "unconverted", "original_amount", "original_currency", "rate",
               "rate_as_of", "rate_stale"}
 MISSED_KEYS = {"entry_id", "name", "kind", "plan_kind", "count", "due_count", "oldest", "unlinked_count",
-               "oldest_unlinked", "pending_transaction_ids", "can_mark_paid"}
+               "oldest_unlinked", "oldest_effective", "pending_transaction_ids", "can_mark_paid"}
 CREDIT_WORDS = ("credit", "limit", "available", "hold", "utiliz", "buffer", "total")
 
 
@@ -243,11 +243,11 @@ def test_missed_subscriptions_are_counted_and_cleared_by_post_due(sw_client, sw_
         {"entry_id": netflix, "name": "Netflix", "kind": "subscription",
          "plan_kind": "subscription", "count": 3,
          "due_count": 3, "oldest": "2026-08-10", "unlinked_count": 3,
-         "oldest_unlinked": "2026-08-10", "pending_transaction_ids": [],
+         "oldest_unlinked": "2026-08-10", "oldest_effective": "2026-08-10", "pending_transaction_ids": [],
          "can_mark_paid": True},
         {"entry_id": meralco, "name": "Meralco", "kind": "bill", "plan_kind": None, "count": 1,
          "due_count": 2, "oldest": "2026-09-18", "unlinked_count": 1,
-         "oldest_unlinked": "2026-09-18", "pending_transaction_ids": [],
+         "oldest_unlinked": "2026-09-18", "oldest_effective": "2026-09-18", "pending_transaction_ids": [],
          "can_mark_paid": True},
     ]
 
@@ -470,7 +470,7 @@ def test_card_charges_window_starts_at_manila_midnight(sw_client, sw_people, mon
         {"entry_id": spotify, "name": "Spotify", "kind": "subscription",
          "plan_kind": "subscription", "count": 1,
          "due_count": 1, "oldest": "2026-10-18", "unlinked_count": 1,
-         "oldest_unlinked": "2026-10-18", "pending_transaction_ids": [],
+         "oldest_unlinked": "2026-10-18", "oldest_effective": "2026-10-18", "pending_transaction_ids": [],
          "can_mark_paid": True}]
     upcoming = [u for u in body["upcoming_this_month"]
                 if u.get("source") == "transaction" and u.get("source_id") == bookstore]
