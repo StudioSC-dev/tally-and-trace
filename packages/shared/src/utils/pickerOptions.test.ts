@@ -261,6 +261,11 @@ describe('pushRecent', () => {
     expect(pushRecent([1, 2, 3], 3)).toEqual([3, 1, 2])
   })
 
+  it('removes repeated ids that are not the new one', () => {
+    expect(pushRecent([1, 1, 2], 3)).toEqual([3, 1, 2])
+    expect(pushRecent([2, 1, 2, 1, 3], 1)).toEqual([1, 2, 3])
+  })
+
   it('caps at 8 by default and at max when given', () => {
     const full = [1, 2, 3, 4, 5, 6, 7, 8]
     expect(pushRecent(full, 9)).toEqual([9, 1, 2, 3, 4, 5, 6, 7])

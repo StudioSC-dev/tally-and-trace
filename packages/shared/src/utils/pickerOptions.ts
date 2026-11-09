@@ -187,7 +187,7 @@ export function filterPickerGroups(
   return { groups: walk(groups), count }
 }
 
-/** Puts `id` first, drops its earlier copy and keeps at most `max` ids. */
+/** Puts `id` first, removes every repeated id keeping first-seen order, and keeps at most `max` ids. */
 export function pushRecent(list: readonly PickerId[], id: PickerId, max: number = RECENT_MAX): PickerId[] {
-  return [id, ...list.filter((x) => x !== id)].slice(0, max)
+  return [...new Set<PickerId>([id, ...list])].slice(0, max)
 }
