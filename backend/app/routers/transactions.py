@@ -1126,7 +1126,11 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     
     db_transaction = Transaction(**transaction_data)
     db.add(db_transaction)
-    
+    # What each locked account owes before the row moves it: a new row that owes
+    # more (a transfer out of a loan, a debit on one) can open a past due date.
+    touched = [a for a in (primary_account, destination_account) if a is not None]
+    old_owed = {account.id: loan_svc.owed(account) for account in touched}
+
     if transaction.transaction_type == TransactionType.CREDIT and transaction.is_posted:
         primary_account.balance = _D(primary_account.balance) + _D(transaction.amount)
     elif transaction.transaction_type == TransactionType.DEBIT and transaction.is_posted:
@@ -1139,6 +1143,9 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
             destination_account.balance = _D(destination_account.balance) + received
     if loan_svc.cash_paid(db_transaction, primary_account.id) < 0:
         loan_svc.stop_autopay(db, primary_account.id)
+    for account in touched:
+        if loan_svc.owed(account) > old_owed[account.id]:
+            loan_svc.stop_autopay(db, account.id)
 
     budget_allocations = _lock_allocations(db, _counted_allocations(
         db, user_id=owner.id, transaction_type=transaction.transaction_type,
