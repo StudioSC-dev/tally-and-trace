@@ -630,7 +630,10 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
     ``next_charge`` is the first occurrence no linked row stands for, posted or
     pending (``unrecorded_occurrences`` with ``pending_records``), over the
     whole remaining schedule (``capped_schedule_end``), so a charge years out is
-    still found; null only when every remaining month has a row. ``missed``
+    still found; null only when every remaining month has a row. It stays the
+    scheduled day (the occurrence's identity); ``effective_date`` is the day it
+    is due on, its forced date when it was moved (``payment_dates``), else the
+    same day, null with no ``next_charge``. ``missed``
     counts those whose effective date is before today. ``payments_left`` is
     ``max_occurrences`` and ``payments_total`` adds the paid count
     (``forecast.occurrences_paid``), as Allocations reads "n of m".
@@ -638,8 +641,8 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
     ``upcoming_occurrences``'; ``recordable`` is its gate for ``next_charge``:
     the schedule's first occurrence only, never with auto-post on.
 
-    Sorted with an overdue ``next_charge`` first, then by ``next_charge``,
-    ``name`` and ``entry_id``; a null ``next_charge`` goes last."""
+    Sorted with an overdue ``effective_date`` first, then by ``effective_date``,
+    ``name`` and ``entry_id``; a null one goes last."""
     today = manila_today()
     access = redactor.access
     entries = _listed_entries(db, user, redactor, None,
@@ -661,6 +664,8 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
         info = infos.get(entry.id)
         days = unrecorded.get(entry.id, [])
         next_charge = days[0].date() if days else None
+        # The date the charge is due on: its forced date when it was moved, else the scheduled one.
+        due_on = effective(forced.get(entry.id), next_charge) if next_charge is not None else None
         can_mark_paid = bool(access.permissions(entry)["can_post"])
         auto_post = info.state if info is not None else None
         items.append({
@@ -672,6 +677,7 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
             "amount": float(entry.amount),
             "currency": entry.currency.value,
             "next_charge": next_charge,
+            "effective_date": due_on,
             "missed": sum(1 for occ in days
                           if effective(forced.get(entry.id), occ.date()) < today),
             "payments_left": entry.max_occurrences,
@@ -685,10 +691,10 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
                            and next_charge == first_occurrence(entry).date()
                            and auto_post != "on"),
         })
-    items.sort(key=lambda row: (row["next_charge"] is None,
-                                not (row["next_charge"] is not None
-                                     and row["next_charge"] < today),
-                                row["next_charge"] or today, row["name"], row["entry_id"]))
+    items.sort(key=lambda row: (row["effective_date"] is None,
+                                not (row["effective_date"] is not None
+                                     and row["effective_date"] < today),
+                                row["effective_date"] or today, row["name"], row["entry_id"]))
     return {"items": items, "auto_post_scheduled": settings.JOB_TOKEN is not None,
             "today": today}
 

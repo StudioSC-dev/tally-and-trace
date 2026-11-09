@@ -510,8 +510,9 @@ class UpcomingOccurrences(BaseModel):
 class InstallmentPlan(BaseModel):
     """One active card installment (services/missed.py ``installment_plans``).
     ``next_charge`` is the first scheduled month no row stands for, posted or
-    pending, null once every remaining month has one; ``missed`` counts such
-    months before Manila's today. "N of M left" is ``payments_left`` of
+    pending, null once every remaining month has one; ``effective_date`` is the
+    day it is due on (its forced date when moved, else ``next_charge``), null
+    with no next charge; ``missed`` counts such months before Manila's today. "N of M left" is ``payments_left`` of
     ``payments_total`` (``occurrences_paid + max_occurrences``). ``recordable``:
     Mark paid can record ``next_charge`` now."""
     view: Literal["full", "shared_full"]
@@ -521,6 +522,7 @@ class InstallmentPlan(BaseModel):
     amount: float
     currency: CurrencyType
     next_charge: Optional[date] = None
+    effective_date: Optional[date] = None
     missed: int
     payments_left: int
     payments_total: int
@@ -533,7 +535,7 @@ class InstallmentPlan(BaseModel):
 
 class InstallmentPlans(BaseModel):
     """GET /budget-entries/installment-plans (STU-511): overdue next charges
-    first, then by ``next_charge``, ``name`` and ``entry_id``, null last.
+    first, then by ``effective_date``, ``name`` and ``entry_id``, null last.
     ``today`` is the Manila day the items were computed for."""
     items: List[InstallmentPlan]
     auto_post_scheduled: bool
