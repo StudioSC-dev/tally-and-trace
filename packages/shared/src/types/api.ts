@@ -2137,3 +2137,55 @@ export interface ForcedDateResult {
   statement_close?: string | null
   statement_due?: string | null
 }
+
+// ─── Quick balances ──────────────────────────────────────────────────────────
+
+/** The default slot a tile fills; null when the tile is pinned. */
+export type QuickBalanceSlot = 'debit' | 'credit' | 'e_wallet'
+
+/** A credit card's amount due, for an owner or admin. Card currency. */
+export interface QuickBalanceCard {
+  /** The latest closed statement's `clear_through`; 0 with nothing owed or no closed statement. */
+  amount_due: number
+  /** The latest closed statement's due date (`YYYY-MM-DD`); null with no closed statement. */
+  due_date: string | null
+  /** An owed statement is past due. */
+  overdue: boolean
+  /** A foreign line with no rate may have left `amount_due` low. */
+  incomplete: boolean
+  /** Charges not yet on a statement, less refunds, payments not netted; null without cycle settings. */
+  unbilled: number | null
+}
+
+/** The part of `CardCredit` a tile carries. Present when the caller manages every card in the limit's group. */
+export interface QuickBalanceCredit {
+  limit: number
+  available_now: number
+  /** False when something is left out, so `available_now` is "at most". */
+  complete: boolean
+  /** The other members of the limit; empty on an unlinked card. */
+  shared_with: CreditSharedCard[]
+}
+
+/** One account tile. Every figure is in the account's own currency. */
+export interface QuickBalanceTile {
+  account_id: number
+  name: string
+  account_type: AccountType
+  currency: CurrencyCode
+  /** `Account.balance`, posted only. */
+  balance: number
+  slot: QuickBalanceSlot | null
+  /** Owner or admin of a credit card only; the key is absent for everyone else. */
+  card?: QuickBalanceCard
+  /** A card whose limit the caller can see; the key is absent otherwise. */
+  credit?: QuickBalanceCredit
+}
+
+/** GET /dashboard/quick-balances. */
+export interface QuickBalances {
+  /** True when a stored pin list is in effect. */
+  pinned: boolean
+  max_tiles: number
+  tiles: QuickBalanceTile[]
+}
