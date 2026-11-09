@@ -219,6 +219,7 @@ def test_card_statement_history(demo):
     assert (aug["statement_balance"], [(ln["display_description"], ln["amount"])
                                        for ln in aug["lines"]]) == (
         235.0, [("Online purchase - Amazon", 150.0), ("Household groceries", 85.0)])
+    assert aug["status"] == "paid"
 
 
 def test_august_2025_summary(demo):
@@ -252,8 +253,10 @@ def test_pending_netflix_is_dated_on_the_manila_reset_day(demo_at, now, manila_d
     assert line["date"][:10] == manila_day_
     assert line_statement["close_date"].startswith(close)
     assert line_statement["status"] == "open"
-    # Pending: still unposted, so it has no posted date of its own.
-    assert not line.get("posted_date")
+    # Pending: the seeded transaction itself is unposted.
+    (netflix,) = [t for t in get("/transactions/", limit=1000)["items"]
+                  if t.get("description") == "Netflix subscription (auto-pay)"]
+    assert netflix["is_posted"] is False
     # The overdue example holds.
     (sept,) = [s for s in statements if s["close_date"].startswith("2025-10-01")]
     assert (sept["statement_balance"], sept["status"]) == (OVERDUE, "overdue")
