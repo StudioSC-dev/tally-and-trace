@@ -286,3 +286,130 @@ def test_limited_row_on_other_member(sw, sw_client, sw_db, monkeypatch):
     assert [(c["source_id"], c["status"]) for c in credit["checks"]] == [
         (early, "ok"), (late, "incomplete")]
     assert PRIVATE not in str(credit)
+
+
+# --- 10, 11: the minimum due ----------------------------------------------------------------
+
+BDO = {"version": 1, "preset": "bdo", "base_percent": "3",
+       "base_excludes": ["installments", "overlimit"], "installment_percent": "3",
+       "floor": {"PHP": "850", "USD": "17"}, "floored_terms": [],
+       "added_terms": ["installments", "overdue", "overlimit"], "annual_fee": None,
+       "rounding": "down"}
+
+
+def _statements(client, who, card):
+    return {s["close_date"]: s for s in _detail(client, who, card)["statements"]}
+
+
+def _without_minimum(statements):
+    return {close: {k: v for k, v in s.items() if k != "minimum_due"}
+            for close, s in statements.items()}
+
+
+def test_secondary_minimum_uses_shared_limit(pair):
+    w = pair
+    client, me = w["client"], w["me"]
+    r = client.put(f"{API}/accounts/{w['platinum']}", json={"minimum_due_rule": BDO},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+    _debit(client, me, w["platinum"], "2027-02-20", 500_000, "Platinum spend", posted=True)
+    march = _statements(client, me, w["platinum"])["2027-03-14"]
+    assert march["outstanding"] == 500_000.0
+    assert march["minimum_due"]["inputs"]["overlimit"] == 20_000.0
+    # 3% of the 480,000 within the limit, plus the 20,000 over it.
+    assert march["minimum_due"]["amount"] == 14_400.0 + 20_000.0
+
+
+def _snapshot_rows(client, who, cards):
+    body = _snapshot(client, who)
+    return ([r for r in body["card_statements_due"] if r["account_id"] in cards],
+            body["payables"])
+
+
+def test_link_leaves_statements_unchanged(sw_client, sw_people, monkeypatch):
+    """Linking an existing card keeps both cards' statements, dues, payables and
+    Pay; only the secondary's minimum may move."""
+    pin_clock(monkeypatch, REF)
+    client = sw_client
+    me = sw_people("Seth", "Owner")
+    bank = sw_post(client, me, "/accounts/", {
+        "name": "Security Bank", "account_type": "checking", "balance": 500_000})["id"]
+    amex = sw_post(client, me, "/accounts/", {
+        "name": AMEX, "account_type": "credit", "balance": 0, "credit_limit": LIMIT,
+        "billing_cycle_start": 4, "days_until_due_date": 25, "payment_account_id": bank,
+        "minimum_due_rule": BDO})["id"]
+    platinum = sw_post(client, me, "/accounts/", {
+        "name": PLATINUM, "account_type": "credit", "balance": 0, "credit_limit": 100_000,
+        "billing_cycle_start": 14, "days_until_due_date": 25, "payment_account_id": bank,
+        "minimum_due_rule": BDO})["id"]
+    for card, base in ((amex, 1_000), (platinum, 2_000)):
+        _debit(client, me, card, "2027-01-20", base * 3, "January", posted=True)
+        _debit(client, me, card, "2027-02-20", base * 5, "February", posted=True)
+        _transfer(client, me, bank, card, "2027-02-25", base, posted=True)
+        _debit(client, me, card, "2027-03-16", base, "Pending")
+        _entry(client, me, card, "2027-04-05", base, f"Plan {card}",
+               end_mode="after_occurrences", max_occurrences=3)
+        _transfer(client, me, bank, card, "2027-03-30", base * 2)
+
+    before = {card: _detail(client, me, card) for card in (amex, platinum)}
+    rows_before = _snapshot_rows(client, me, (amex, platinum))
+    assert before[platinum]["statements"] and before[amex]["statements"]
+    assert {r["account_id"] for r in rows_before[0]} == {amex, platinum}
+
+    r = client.put(f"{API}/accounts/{platinum}", json={FIELD: amex, "credit_limit": None},
+                   headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    after = {card: _detail(client, me, card) for card in (amex, platinum)}
+    assert _snapshot_rows(client, me, (amex, platinum)) == rows_before
+    for card in (amex, platinum):
+        for key in ("open_cycle", "unposted", "rule"):
+            assert after[card][key] == before[card][key], (card, key)
+    # The primary's statements are untouched, its minimums included.
+    assert after[amex]["statements"] == before[amex]["statements"]
+    assert _without_minimum({s["close_date"]: s for s in after[platinum]["statements"]}) == \
+        _without_minimum({s["close_date"]: s for s in before[platinum]["statements"]})
+
+
+def test_link_changes_only_secondary_minimum(sw_client, sw_people, monkeypatch):
+    """A secondary over the shared limit: its overlimit and estimate rise by
+    the expected figures, a printed minimum stays, the primary's do not move."""
+    pin_clock(monkeypatch, REF)
+    client = sw_client
+    me = sw_people("Seth", "Owner")
+    bank = sw_post(client, me, "/accounts/", {
+        "name": "Security Bank", "account_type": "checking", "balance": 500_000})["id"]
+    amex = sw_post(client, me, "/accounts/", {
+        "name": AMEX, "account_type": "credit", "balance": 0, "credit_limit": LIMIT,
+        "billing_cycle_start": 4, "days_until_due_date": 25, "payment_account_id": bank,
+        "minimum_due_rule": BDO})["id"]
+    platinum = sw_post(client, me, "/accounts/", {
+        "name": PLATINUM, "account_type": "credit", "balance": 0,
+        "billing_cycle_start": 14, "days_until_due_date": 25, "payment_account_id": bank,
+        "minimum_due_rule": BDO})["id"]
+    _debit(client, me, amex, "2027-02-20", 20_000, "Amex spend", posted=True)
+    _debit(client, me, platinum, "2027-01-20", 1_000, "January", posted=True)
+    _debit(client, me, platinum, "2027-02-20", 490_000, "February", posted=True)
+    r = client.put(f"{API}/cards/{platinum}/statements/2027-02-14/minimum-due",
+                   json={"amount": 900}, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    amex_before = _statements(client, me, amex)
+    before = _statements(client, me, platinum)
+    assert before["2027-02-14"]["minimum_due"]["source"] == "statement"
+    march = before["2027-03-14"]["minimum_due"]
+    assert (march["source"], march["inputs"]["outstanding"], march["inputs"]["overlimit"],
+            march["inputs"]["overdue"]) == ("estimate", 491_000.0, 0.0, 900.0)
+
+    r = client.put(f"{API}/accounts/{platinum}", json={FIELD: amex}, headers=me["headers"])
+    assert r.status_code == 200, r.text
+
+    after = _statements(client, me, platinum)
+    assert _statements(client, me, amex) == amex_before
+    assert after["2027-02-14"] == before["2027-02-14"]
+    moved = after["2027-03-14"]["minimum_due"]
+    assert moved["inputs"] == {**march["inputs"], "overlimit": 11_000.0}
+    # The base drops by 3% of the 11,000 now over the limit, which is added whole.
+    assert moved["amount"] == march["amount"] + 11_000.0 - 330.0
+    assert moved["remaining"] == march["remaining"] + 11_000.0 - 330.0
+    assert _without_minimum(after) == _without_minimum(before)

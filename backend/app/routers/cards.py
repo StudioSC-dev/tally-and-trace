@@ -83,6 +83,23 @@ def _minimum_out(result: dict) -> dict:
     }
 
 
+def _minimum_limit(db: Session, user: User, card: Account) -> Optional[Decimal]:
+    """The limit behind the card's overlimit term: its own, or for a card
+    sharing another card's limit, that card's (``T`` of this card's statement
+    less the shared limit; going over only in combination is not counted).
+    None, so no overlimit, when there is none or the caller does not manage
+    the card holding it."""
+    if card.credit_limit is not None:
+        return fc._money(card.credit_limit)
+    if card.shares_limit_with_account_id is None:
+        return None
+    primary = db.get(Account, card.shares_limit_with_account_id)
+    if primary is None or primary.credit_limit is None or not card_credit.can_see_credit(
+            user, primary):
+        return None
+    return fc._money(primary.credit_limit)
+
+
 def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates],
                     redactor: Redactor,
                     unposted: List[card_credit.UnpostedMonth]) -> List[dict]:
@@ -99,7 +116,7 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
         return []
     overrides = {row.statement_close: row.amount for row in db.query(CardStatementMinimum)
                  .filter(CardStatementMinimum.account_id == card.id)}
-    limit = fc._money(card.credit_limit) if card.credit_limit is not None else None
+    limit = _minimum_limit(db, user, card)
     # Each minimum reads only the statements before it, so the closed ones
     # alone give the same figures.
     minimums = statement_minimums(db, card, history, _rule(card), overrides, limit, redactor)
