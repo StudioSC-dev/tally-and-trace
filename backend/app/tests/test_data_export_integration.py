@@ -230,6 +230,25 @@ def test_the_export_never_carries_another_users_details_or_unlisted_columns(clie
     assert [e["id"] for e in other["others_budget_entries"]] == [world["legacy_entry"]]
 
 
+def test_the_owners_export_carries_a_shared_limit_link(client, world, monkeypatch):
+    from app.routers import accounts
+
+    monkeypatch.setattr(accounts, "SHARED_LIMITS_ENABLED", True)  # the rollout gate
+    owner = world["owner"]
+    h = owner["headers"]
+    amex = _post(client, h, "/accounts/", {
+        "name": f"{OWNER_MARK} Amex", "account_type": "credit", "credit_limit": 480_000})
+    platinum = _post(client, h, "/accounts/", {
+        "name": f"{OWNER_MARK} Platinum", "account_type": "credit",
+        "shares_limit_with_account_id": amex})
+    rows = {a["id"]: a for a in _export(client, owner).json()["accounts"]}
+    assert (rows[platinum]["shares_limit_with_account_id"], rows[platinum]["credit_limit"]) == (
+        amex, None)
+    assert (rows[amex]["shares_limit_with_account_id"], rows[amex]["credit_limit"]) == (
+        None, "480000.00")
+    assert rows[owner["bank"]]["shares_limit_with_account_id"] is None
+
+
 def test_the_export_holds_own_tags_and_their_links_to_own_records_only(client, db, world):
     from app.models.tag import Tag
 
