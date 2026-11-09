@@ -800,7 +800,9 @@ async function missedRowCardEffective(browser) {
   await dialog(page).waitFor({ timeout: 10000 })
   const saved = await saveInDialog(page, to, puts)
   check('(m) the PUT names the oldest day, between its neighbours', [saved?.status, saved?.day, saved?.body, to < second], [200, oldest, { effective_date: to }, true])
+  // The save either confirms the statement it now falls on or closes the dialog.
   const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
+  await Promise.race([confirmation.waitFor({ timeout: 10000 }), dialog(page).waitFor({ state: 'detached', timeout: 10000 })]).catch(() => {})
   if (await confirmation.count()) await dialog(page).locator('[data-testid="force-date-close"]').click()
   await dialog(page).waitFor({ state: 'detached' })
   await settle(page)
