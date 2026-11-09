@@ -56,7 +56,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
-from app.core.time import naive_utc_now
+from app.core.time import manila_midnight
 from app.core.tags import LINKS, ensure_household_tag
 from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
 from app.models.account_share import AccountShare
@@ -410,11 +410,11 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
         transaction_type_str = transaction_data["transaction_type"].lower()
         transaction_data["transaction_type"] = TransactionType(transaction_type_str)
         # Convert date strings to datetime
-        # A row with ``days_before_reset`` is dated relative to the reset day (midnight, UTC)
-        # instead of a fixed date: a pending row shows as recent whenever the demo resets.
+        # A row with ``days_before_reset`` is dated relative to the reset day on the Manila
+        # calendar (stored as that day's midnight, as ``statement_day`` reads it) instead of
+        # a fixed date: a pending row shows as recent whenever the demo resets.
         if "days_before_reset" in transaction_data:
-            reset_day = naive_utc_now().replace(hour=0, minute=0, second=0, microsecond=0)
-            transaction_data["transaction_date"] = reset_day - timedelta(
+            transaction_data["transaction_date"] = manila_midnight() - timedelta(
                 days=transaction_data.pop("days_before_reset"))
         else:
             transaction_data["transaction_date"] = datetime.fromisoformat(transaction_data["transaction_date"])

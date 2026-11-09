@@ -16,6 +16,7 @@ Shape 6 (STU-217) moves the "Gym Membership" installment's next payment to
 payables, the 60-day closing, and each month's expenses from December on.
 """
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -64,28 +65,38 @@ OPEN_DUE = "2026-12-22"
 
 
 @pytest.fixture
-def demo(sw_client, sw_db, monkeypatch):
-    """A freshly seeded demo, logged in, with every clock frozen at FX_REF."""
+def demo_at(sw_client, sw_db, monkeypatch):
+    """A factory: reseed the demo with every clock frozen at the given naive UTC
+    instant, log in, and return the ``get`` helper."""
     from app.core import seed
     from app.models.demo_state import DemoState
 
-    for name, module in list(sys.modules.items()):
-        if name.startswith("app.") and hasattr(module, "naive_utc_now"):
-            monkeypatch.setattr(module, "naive_utc_now", lambda: FX_REF)
-    sw_db.query(DemoState).delete()
-    sw_db.commit()
-    seed.seed_database()
-    r = sw_client.post(f"{API}/auth/login",
-                       json={"email": "demo@example.com", "password": "password123"})
-    assert r.status_code == 200, r.text
-    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    def build(now):
+        for name, module in list(sys.modules.items()):
+            if name.startswith("app.") and hasattr(module, "naive_utc_now"):
+                monkeypatch.setattr(module, "naive_utc_now", lambda: now)
+        sw_db.query(DemoState).delete()
+        sw_db.commit()
+        seed.seed_database()
+        r = sw_client.post(f"{API}/auth/login",
+                           json={"email": "demo@example.com", "password": "password123"})
+        assert r.status_code == 200, r.text
+        headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
-    def get(path, **params):
-        r = sw_client.get(f"{API}{path}", headers=headers, params=params)
-        assert r.status_code == 200, (path, r.text)
-        return r.json()
+        def get(path, **params):
+            r = sw_client.get(f"{API}{path}", headers=headers, params=params)
+            assert r.status_code == 200, (path, r.text)
+            return r.json()
 
-    return get
+        return get
+
+    return build
+
+
+@pytest.fixture
+def demo(demo_at):
+    """A freshly seeded demo, logged in, with every clock frozen at FX_REF."""
+    return demo_at(FX_REF)
 
 
 def test_the_shape_is_seven():
@@ -217,3 +228,32 @@ def test_august_2025_summary(demo):
         "total_income": v4("Aug 2025 summary income"), "total_expenses": 925.5,
         "net_flow": v4("Aug 2025 summary net flow"), "transaction_count": 11}
 
+
+
+# Reset days (naive UTC instant, Manila day, close of the cycle holding the row,
+# status of that statement). The card closes on the 1st.
+RESET_DAYS = [
+    pytest.param(datetime(2026, 11, 2, 17, 0), "2026-11-03", "2026-12-01", id="17:00 UTC is next Manila day"),
+    pytest.param(datetime(2026, 12, 1, 4, 0), "2026-12-01", "2026-12-01", id="on the close day"),
+    pytest.param(datetime(2026, 12, 2, 4, 0), "2026-12-02", "2027-01-01", id="the day after close"),
+]
+
+
+@pytest.mark.parametrize("now, manila_day_, close", RESET_DAYS)
+def test_pending_netflix_is_dated_on_the_manila_reset_day(demo_at, now, manila_day_, close):
+    get = demo_at(now)
+    accounts = {a["name"]: a["id"] for a in get("/accounts/", limit=1000)["items"]}
+    statements = get(f"/accounts/{accounts['Credit Card']}/statements")["statements"]
+    (line_statement,) = [s for s in statements
+                         if any(ln["display_description"] == "Netflix subscription (auto-pay)"
+                                for ln in s["lines"])]
+    (line,) = [ln for ln in line_statement["lines"]
+               if ln["display_description"] == "Netflix subscription (auto-pay)"]
+    assert line["date"][:10] == manila_day_
+    assert line_statement["close_date"].startswith(close)
+    assert line_statement["status"] == "open"
+    # Pending: still unposted, so it has no posted date of its own.
+    assert not line.get("posted_date")
+    # The overdue example holds.
+    (sept,) = [s for s in statements if s["close_date"].startswith("2025-10-01")]
+    assert (sept["statement_balance"], sept["status"]) == (OVERDUE, "overdue")
