@@ -9,7 +9,8 @@
 //     eligible payers; (d) the loan page's payment account (S7); (e) the account form's Paid
 //     From and Overflow To on a card (S8, S9, the stored placeholder first) and Paid From on a
 //     loan (S10, loan currency only); (f) Settings' Main account (S11, "name (currency)" text,
-//     "None" first) and saving still works.
+//     "None" first) and saving still works; (g) a card whose saved payer is no longer offered
+//     keeps its "Current account" option after the placeholder, selected.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
 // through the API. Not wired into CI and not part of `pnpm build`. Run steps: see ./README.md.
 //
@@ -82,7 +83,7 @@ async function scenarioA(browser) {
     const account = await shape(field(form, 'account_id'))
     await h.check('a.account.groups', 'B', async () => same(labelsOf(account), ['Debit', 'Credit', 'E-wallet', 'Cash']))
     await h.check('a.account.placeholder-first-and-outside', 'B', async () => same(account.loose, [['0', 'Select account']]))
-    await h.check('a.account.no-loan-and-filtered-set', 'B', async () => same(idsOf(account).sort(), [A.bank.id, A.bank2.id, A.card.id, A.wallet.id, A.cash.id, A.usd.id, A.payCard.id].sort()))
+    await h.check('a.account.no-loan-and-filtered-set', 'B', async () => same(idsOf(account).sort(), [A.bank.id, A.bank2.id, A.card.id, A.wallet.id, A.cash.id, A.usd.id, A.payCard.id, A.orphan.id].sort()))
     await h.check('a.account.sorted-by-name-within-group', 'B', async () => same(namesIn(account, 'Debit'), ['Alpha Checking', 'Dollar Checking', 'Zeta Savings']))
     await h.check('a.account.option-text-is-the-name', 'B', async () => same(namesIn(account, 'Cash'), ['Pocket Cash']))
     await h.check('a.account.listed-once', 'S', async () => new Set(idsOf(account)).size === idsOf(account).length || 'duplicate option')
@@ -100,7 +101,7 @@ async function scenarioA(browser) {
     })
 
     const overflow = await shape(form.locator('select').filter({ has: page.locator('option', { hasText: /^None$/ }) }))
-    await h.check('a.overflow.filter-kept', 'B', async () => same(overflow.loose, [['0', 'None']]) === true && same(idsOf(overflow).sort(), [A.bank.id, A.bank2.id, A.cash.id, A.card.id, A.usd.id, A.payCard.id].sort()))
+    await h.check('a.overflow.filter-kept', 'B', async () => same(overflow.loose, [['0', 'None']]) === true && same(idsOf(overflow).sort(), [A.bank.id, A.bank2.id, A.cash.id, A.card.id, A.usd.id, A.payCard.id, A.orphan.id].sort()))
     await h.check('a.overflow.no-spending-wallet-or-loan', 'B', async () => !idsOf(overflow).includes(A.wallet.id) && !idsOf(overflow).includes(A.loan.id) || 'a wallet or loan is offered')
 
     await field(form, 'account_id').selectOption(String(A.bank.id))
@@ -141,7 +142,7 @@ async function scenarioB(browser) {
     const s = await shape(sel)
     await h.check('b.groups', 'B', async () => same(labelsOf(s), ['Debit', 'Credit', 'E-wallet', 'Cash', 'Loan']))
     await h.check('b.placeholder-first-and-outside', 'B', async () => same(s.loose, [['0', 'Select account']]))
-    await h.check('b.own-accounts-set', 'B', async () => same(idsOf(s).sort(), [A.bank.id, A.bank2.id, A.card.id, A.wallet.id, A.cash.id, A.usd.id, A.loan.id, A.payCard.id].sort()))
+    await h.check('b.own-accounts-set', 'B', async () => same(idsOf(s).sort(), [A.bank.id, A.bank2.id, A.card.id, A.wallet.id, A.cash.id, A.usd.id, A.loan.id, A.payCard.id, A.orphan.id].sort()))
     await h.check('b.value-selectable', 'B', async () => {
       await sel.selectOption(String(A.bank.id))
       return (await sel.inputValue()) === String(A.bank.id) || 'value not set'
@@ -261,7 +262,30 @@ async function scenarioF(browser) {
   }
 }
 
-const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['d', scenarioD], ['e', scenarioE], ['f', scenarioF]]
+// (g) A card whose saved payer is no longer offered keeps its "Current account" option, selected.
+async function scenarioG(browser) {
+  console.log('\n=== (g) card Paid From: a saved payer that is not offered shows "Current account", selected')
+  const { ctx, page } = await newPage(browser)
+  try {
+    await page.goto(`${stack.webUrl}/accounts`)
+    await page.locator('article').first().waitFor()
+    await h.waitQuiet(page)
+    await page.locator('article').filter({ has: page.getByText('Orphan Card', { exact: true }) }).locator('[role="button"]').first().click()
+    await page.getByRole('button', { name: 'Edit account' }).click()
+    await page.getByRole('button', { name: 'Show details' }).click()
+    const paid = page.locator('label', { hasText: 'Paid From' }).locator('xpath=following-sibling::select').first()
+    await paid.waitFor()
+    const s = await shape(paid)
+    await h.check('g.setup-payer-not-offered', 'S', async () => !idsOf(s).includes(A.gone.id) || 'the inactive payer is offered')
+    await h.check('g.current-account-after-placeholder', 'B', async () => same(s.loose, [['', 'Not set'], [String(A.gone.id), 'Current account']]))
+    await h.check('g.current-account-selected', 'B', async () => (await paid.inputValue()) === String(A.gone.id) || `selected ${await paid.inputValue()}`)
+    await h.check('g.offered-payers-grouped', 'B', async () => labelsOf(s).join('|') === 'Debit|Cash' || `got ${labelsOf(s)}`)
+  } finally {
+    await ctx.close()
+  }
+}
+
+const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['d', scenarioD], ['e', scenarioE], ['f', scenarioF], ['g', scenarioG]]
 
 async function setup() {
   owner = await h.makeUser(stack, 'optgroups')
@@ -293,12 +317,18 @@ async function setup() {
     account_id: payCard.id, transaction_type: 'debit', amount: 2000, description: 'Purchase',
     transaction_date: wire(addDays(close, -3)), is_posted: true,
   })
+  const gone = await mk('Closed Checking', 'checking')
+  const orphan = await client.post(owner.token, '/accounts/', {
+    name: 'Orphan Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
+    billing_cycle_start: 10, days_until_due_date: 21, payment_account_id: gone.id,
+  })
+  await client.put(owner.token, `/accounts/${gone.id}`, { is_active: false })
   const cats = await client.get(owner.token, '/categories/')
   const list = Array.isArray(cats) ? cats : cats.items
   const kindOf = (c) => c.kind ?? (c.is_expense ? 'expense' : 'income')
   const first = (k) => list.find((c) => kindOf(c) === k)
   A = {
-    bank, bank2, wallet, cash, card, loan, payCard, usd,
+    bank, bank2, wallet, cash, card, loan, payCard, usd, gone, orphan,
     income: first('income'), expense: first('expense'), transfer: first('transfer'), categoryCount: list.length,
   }
   if (!A.income || !A.expense || !A.transfer) throw new Error('default categories of every kind are missing')

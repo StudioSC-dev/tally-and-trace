@@ -1344,7 +1344,8 @@ export function AccountsPage() {
                           className="select-field focus-ring"
                         >
                           <option value="">Not set</option>
-                          \1                          <PickerOptGroups groups={accountPickerGroups(fundingAccounts)} />
+                          {storedRouteOption('payment_account_id')}
+                          <PickerOptGroups groups={accountPickerGroups(fundingAccounts)} />
                         </select>
                       </div>
 
