@@ -52,14 +52,15 @@ def v4(name):
     return DIFF[name][1]
 
 
-# The posted-date rule (``statements.statement_day``): the pending Netflix row
-# (2025-09-05, USD 14.99, 869.42 at 58.00) is unposted, so read on 2026-11-02
-# it is no longer on the closed statement closing 2025-10-01 (which is now
-# empty) but on the open one closing 2026-12-01, due 2026-12-22, beside that
-# cycle's 60.00. The overdue statement payable on the window start is gone; the
-# same 869.42 leaves on Dec 22 instead, so the 60-day closing is unchanged.
+# The demo's two card examples (the posted-date rule, ``statements.statement_day``).
+# The pending Netflix row (USD 14.99, 869.42 at 58.00) is dated on the reset day,
+# and an unposted row is read on the day anyway, so it sits on the open statement
+# closing 2026-12-01 (due 2026-12-22), beside that cycle's 60.00. The overdue
+# example is the posted Shopee charge of Sept 2025 on the statement closing
+# 2025-10-01 (due 2025-10-22, unpaid): 120.00.
 NETFLIX = v4("Netflix line, statement closing 2025-10-01")
-ROLLED_DUE = "2026-12-22"
+OVERDUE = 120.0
+OPEN_DUE = "2026-12-22"
 
 
 @pytest.fixture
@@ -68,12 +69,12 @@ def demo(sw_client, sw_db, monkeypatch):
     from app.core import seed
     from app.models.demo_state import DemoState
 
-    sw_db.query(DemoState).delete()
-    sw_db.commit()
-    seed.seed_database()
     for name, module in list(sys.modules.items()):
         if name.startswith("app.") and hasattr(module, "naive_utc_now"):
             monkeypatch.setattr(module, "naive_utc_now", lambda: FX_REF)
+    sw_db.query(DemoState).delete()
+    sw_db.commit()
+    seed.seed_database()
     r = sw_client.post(f"{API}/auth/login",
                        json={"email": "demo@example.com", "password": "password123"})
     assert r.status_code == 200, r.text
@@ -87,10 +88,10 @@ def demo(sw_client, sw_db, monkeypatch):
     return get
 
 
-def test_the_shape_is_six():
+def test_the_shape_is_seven():
     from app.core.seed import DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 6
+    assert DEMO_SHAPE_VERSION == 7
 
 
 def _estimated(item, original):
@@ -103,7 +104,8 @@ def test_timeline(demo):
     body = demo("/forecast/timeline", days=60)
     assert body["currencies"] == ["PHP", "USD"]
     assert body["opening_balance"] == v4("timeline opening (PHP scalar)")
-    assert body["closing_balance"] == v4("timeline closing, 60 days (PHP scalar)")
+    assert body["closing_balance"] == round(
+        v4("timeline closing, 60 days (PHP scalar)") - OVERDUE, 2)
     php, usd = body["by_currency"]
     assert php["currency"] == "PHP" and php["opening_balance"] == 21_700.0
     assert (usd["currency"], usd["opening_balance"], usd["events"], usd["closing_balance"]) == (
@@ -116,15 +118,16 @@ def test_timeline(demo):
         ("2026-11-11", "Monthly Salary", v4("Monthly Salary, Nov 11")),
         ("2026-12-11", "Monthly Salary", v4("Monthly Salary, Dec 11"))]
     assert all(_estimated(e, 55.0) for e in salary)
-    assert not [e for e in body["events"]
-                if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
+    (overdue,) = [e for e in body["events"]
+                  if e["name"] == "Credit Card statement" and e["date"] == "2026-11-02"]
+    assert overdue["amount"] == -OVERDUE
     (statement,) = [e for e in body["events"]
-                    if e["name"] == "Credit Card statement" and e["date"] == ROLLED_DUE]
+                    if e["name"] == "Credit Card statement" and e["date"] == OPEN_DUE]
     assert statement["amount"] == -round(60.0 + NETFLIX, 2)
     assert _estimated(statement, 14.99)
     # Every other event is as on main.
     others = [(e["date"], e["name"], e["amount"]) for e in body["events"]
-              if e not in salary and e is not statement]
+              if e not in salary and e is not statement and e is not overdue]
     assert others == [
         ("2026-11-02", "Projected September electric bill", 0.0),
         ("2026-11-15", "Brokerage Auto-Deposit", -500.0),
@@ -151,10 +154,11 @@ def test_snapshot(demo):
             summary["monthly_disposable"]) == (
         v4("disposable monthly_income"), v4("disposable monthly_expenses"),
         v4("disposable monthly_disposable"))
-    # No overdue statement: the pending Netflix row is on the statement due
-    # Dec 22, beyond these 30 days (test_timeline).
+    # The overdue statement (Sept 2025 purchase) is first; the pending Netflix
+    # row is on the statement due Dec 22, beyond these 30 days (test_timeline).
     assert [(p["due_date"], p["name"], p["amount"], p["account_name"], p["currency"])
             for p in body["payables"]] == [
+        ("2026-11-02", "Credit Card statement", OVERDUE, "Joint Account", "PHP"),
         ("2026-11-15", "Brokerage Auto-Deposit", 500.0, "Main Checking Account", "PHP"),
         ("2026-11-20", "Electric Bill", 1_200.0, "Main Checking Account", "PHP"),
         ("2026-11-23", "Credit Card statement", 60.0, "Joint Account", "PHP"),
@@ -164,10 +168,10 @@ def test_snapshot(demo):
 
 def test_cashflow(demo):
     periods = demo("/forecast/cashflow", months=3)["periods"]
-    # The rolled Netflix line leaves in December, not November.
+    # The Netflix line leaves in December, not November.
     assert [(p["period_label"], p["income"], p["expenses"], p["net"]) for p in periods] == [
         ("November 2026", v4("cash-flow income, each month (PHP)"), 1_700.0,
-         round(v4("cash-flow net, November 2026 (PHP)") + NETFLIX, 2)),
+         round(v4("cash-flow net, November 2026 (PHP)") + NETFLIX - OVERDUE, 2)),
         ("December 2026", v4("cash-flow income, each month (PHP)"), 4_245.0,
          round(v4("cash-flow net, December 2026 and January 2027 (PHP)") - NETFLIX, 2)),
         ("January 2027", v4("cash-flow income, each month (PHP)"), 4_245.0,
@@ -188,13 +192,17 @@ def test_card_statement_history(demo):
     accounts = {a["name"]: a["id"] for a in demo("/accounts/", limit=1000)["items"]}
     statements = demo(f"/accounts/{accounts['Credit Card']}/statements")["statements"]
     (sept,) = [s for s in statements if s["close_date"].startswith("2025-10-01")]
-    assert (sept["statement_balance"], sept["lines"], sept["status"]) == (0.0, [], "paid")
+    assert (sept["statement_balance"], sept["amount_due"], sept["status"]) == (
+        OVERDUE, OVERDUE, "overdue")
+    (shopee,) = sept["lines"]
+    assert (shopee["date"][:10], shopee["display_description"], shopee["amount"]) == (
+        "2025-09-12", "Online purchase - Shopee", OVERDUE)
     (dec,) = [s for s in statements if s["close_date"].startswith("2026-12-01")]
     assert (dec["statement_balance"], dec["amount_due"], dec["status"]) == (
         NETFLIX, NETFLIX, "open")
     (line,) = dec["lines"]
     assert (line["date"][:10], line["display_description"], line["amount"]) == (
-        "2025-09-05", "Netflix subscription (auto-pay)", NETFLIX)
+        "2026-11-02", "Netflix subscription (auto-pay)", NETFLIX)
     assert _estimated(line, 14.99)
     (aug,) = [s for s in statements if s["close_date"].startswith("2025-09-01")]
     assert (aug["statement_balance"], [(ln["display_description"], ln["amount"])

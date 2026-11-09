@@ -415,7 +415,7 @@
       "amount": 14.99,
       "description": "Netflix subscription (auto-pay)",
       "transaction_type": "DEBIT",
-      "transaction_date": "2025-09-05T08:00:00",
+      "days_before_reset": 0,
       "projected_amount": 14.99,
       "projected_currency": "USD",
       "is_posted": false,
@@ -482,6 +482,15 @@
       "transaction_date": "2025-09-21T09:00:00",
       "transfer_from_account_id": 6,
       "transfer_to_account_id": 3,
+      "is_posted": true
+    },
+    {
+      "account_id": 3,
+      "category_id": 3,
+      "amount": 120.00,
+      "description": "Online purchase - Shopee",
+      "transaction_type": "DEBIT",
+      "transaction_date": "2025-09-12T15:30:00",
       "is_posted": true
     }
   ],
