@@ -14,6 +14,7 @@ import { useManilaDay } from '../hooks/useManilaDay'
 import { FxNotice } from '../components/FxNotice'
 import { Link } from '@tanstack/react-router'
 import { CashflowTimelineCard } from '../components/CashflowTimelineCard'
+import { QuickBalances } from '../components/QuickBalances'
 import { TagFilter } from '../components/TagFilter'
 import { PayableDetailDialog } from '../components/payables/PayableDetailDialog'
 import { CardChargesPanel } from '../components/payables/CardChargesPanel'
@@ -377,6 +378,8 @@ export function Dashboard() {
       </div>
 
       <FxNotice fx={snapshot?.fx} />
+
+      <QuickBalances />
 
       {/* Cash-Flow Timeline (pre-due-date solvency) */}
       <CashflowTimelineCard tag={selectedTag} currency={currencyReady ? currency : null} />
