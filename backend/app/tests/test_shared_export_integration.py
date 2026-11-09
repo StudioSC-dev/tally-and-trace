@@ -117,3 +117,27 @@ def test_exports_stay_clean_after_a_revocation(sw, sw_client, house):  # noqa: F
     assert theirs[spent]["display_description"] == "Bea snacks"
     assert theirs[spent]["created_by"] == "Bea P."
     assert sw_leaks(owner["others_transactions"], {sw["b_private"]}) == []
+
+
+def test_a_shared_limit_link_stays_out_of_another_users_export(sw, sw_client, sw_db,
+                                                               monkeypatch):
+    """The owner's card linked to their private card, shared with Bea: her export
+    names the shared card as a reference only, never the link or its target."""
+    from app.routers import accounts
+    from app.tests.conftest import sw_share
+
+    monkeypatch.setattr(accounts, "SHARED_LIMITS_ENABLED", True)  # the rollout gate
+    a, b = sw["a"], sw["b"]
+    platinum = sw_post(sw_client, a, "/accounts/", {
+        "name": "Shared platinum", "account_type": "credit",
+        "shares_limit_with_account_id": sw["a_card"]})["id"]
+    sw_share(sw_db, platinum, b["id"], "editor", a["id"])
+
+    body, texts = _all_exports(sw_client, b)
+    shared = {x["id"]: x for x in body["shared_accounts"]}
+    assert set(shared[platinum]) == {"id", "name", "account_type", "currency", "my_role",
+                                     "owner_name"}
+    assert sw_leaks(body, {sw["a_card"], sw["a_private"]}) == []
+    assert all(PRIVATE not in t for t in texts)
+    owner = {x["id"]: x for x in _get(sw_client, a, "/data/export.json").json()["accounts"]}
+    assert owner[platinum]["shares_limit_with_account_id"] == sw["a_card"]

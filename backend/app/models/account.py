@@ -35,6 +35,14 @@ class Account(Base):
             "loan_amortization IS NULL OR loan_amortization IN ('fixed', 'reduce_term')",
             name="ck_accounts_loan_amortization",
         ),
+        CheckConstraint(
+            "shares_limit_with_account_id IS NULL OR shares_limit_with_account_id <> id",
+            name="ck_accounts_shared_limit_not_self",
+        ),
+        CheckConstraint(
+            "shares_limit_with_account_id IS NULL OR credit_limit IS NULL",
+            name="ck_accounts_shared_limit_no_own_limit",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -50,6 +58,16 @@ class Account(Base):
     
     # Credit card specific fields
     credit_limit = Column(Numeric(15, 2), nullable=True)
+    # Credit cards only: the card whose credit_limit this card shares (the
+    # primary). A linked card keeps no limit of its own, and the primary points
+    # at nothing (no chains); routers/accounts.py ``_validate_shared_limit``.
+    shares_limit_with_account_id = Column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="SET NULL",
+                   name="fk_accounts_shares_limit_with_account_id"),
+        nullable=True,
+        index=True,
+    )
     due_date = Column(Integer, nullable=True)  # Day of month for due date (legacy support)
     billing_cycle_start = Column(Integer, nullable=True)  # Day of month the statement closes
     days_until_due_date = Column(Integer, nullable=True, default=21)
