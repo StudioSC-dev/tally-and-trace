@@ -172,10 +172,6 @@ def _validate_currency_routing(db: Session, data: dict, account: Account) -> Non
             raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
 
 
-# Rollout gate: the credit figures read a shared limit only once the shared
-# calculation ships, so until then no card may be linked. Tests lift it.
-SHARED_LIMITS_ENABLED = False
-SHARED_LIMITS_DISABLED_DETAIL = "Shared credit limits are not enabled yet"
 SHARED_LIMIT_TARGET_DETAIL = "shares_limit_with_account_id account not found"
 SHARED_LIMIT_UNLINK_DETAIL = "Unlink the shared credit limit first"
 
@@ -228,8 +224,6 @@ def _validate_shared_limit(db: Session, current_user: User, data: dict,
     leaves_credit = ("account_type" in data and account_type != AccountType.CREDIT)
 
     if link_changes and pointer is not None:
-        if not SHARED_LIMITS_ENABLED:
-            raise HTTPException(status_code=400, detail=SHARED_LIMITS_DISABLED_DETAIL)
         if account is not None and pointer == account.id:
             raise HTTPException(status_code=400,
                                 detail="A card cannot share its own credit limit")

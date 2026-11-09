@@ -30,7 +30,7 @@ REF = datetime(2027, 3, 18, 2, 0)
 CREDIT_KEYS = {"account_id", "currency", "limit", "as_of", "available_now",
                "available_with_planned", "planned_by", "complete", "uncounted_shared",
                "unknown_count", "opening", "missed", "planned_payments", "checks", "fx",
-               "fx_buffer_pct", "planned_charges_total"}
+               "fx_buffer_pct", "planned_charges_total", "shared_with"}
 CHECK_KEYS = {"source", "source_id", "date", "occurrence_date", "kind", "amount",
               "available_after", "available_after_without_planned", "status",
               "relies_on_planned"}

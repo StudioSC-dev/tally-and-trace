@@ -119,14 +119,11 @@ def test_exports_stay_clean_after_a_revocation(sw, sw_client, house):  # noqa: F
     assert sw_leaks(owner["others_transactions"], {sw["b_private"]}) == []
 
 
-def test_a_shared_limit_link_stays_out_of_another_users_export(sw, sw_client, sw_db,
-                                                               monkeypatch):
+def test_a_shared_limit_link_stays_out_of_another_users_export(sw, sw_client, sw_db):
     """The owner's card linked to their private card, shared with Bea: her export
     names the shared card as a reference only, never the link or its target."""
-    from app.routers import accounts
     from app.tests.conftest import sw_share
 
-    monkeypatch.setattr(accounts, "SHARED_LIMITS_ENABLED", True)  # the rollout gate
     a, b = sw["a"], sw["b"]
     platinum = sw_post(sw_client, a, "/accounts/", {
         "name": "Shared platinum", "account_type": "credit",
