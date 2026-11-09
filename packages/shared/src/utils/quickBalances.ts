@@ -43,7 +43,7 @@ export function tileGroupLabel(tile: Pick<QuickBalanceTile, 'account_type'>): st
  * - Checking, savings, e-wallet, cash: the balance.
  * - A loan, or a credit card with no `card` (an editor or viewer): Owed, the negated balance.
  * - A card with `card`: the latest statement's amount due and due date ("Overdue" when past
- *   due, "Nothing due" at 0, "No statement yet" with none, "may be low" when incomplete),
+ *   due, "Nothing due" at 0 (with "may be low" when incomplete), "No statement yet" with none, "may be low" when incomplete),
  *   the unbilled charges as a smaller line (omitted when null or 0), then the available
  *   credit ("at most" when incomplete, followed by "shared with ..." on a linked card, or
  *   "No limit set" when no credit is served).
@@ -59,7 +59,7 @@ export function tileLines(tile: QuickBalanceTile): TileLine[] {
   if (card.due_date === null) {
     lines.push(line('due', null, 'No statement yet', 'muted'))
   } else if (!(card.amount_due > 0)) {
-    lines.push(line('due', null, 'Nothing due', 'muted'))
+    lines.push(line('due', null, card.incomplete ? 'Nothing due (may be low)' : 'Nothing due', 'muted'))
   } else {
     const low = card.incomplete ? ' (may be low)' : ''
     lines.push(line('due', card.overdue ? 'Overdue' : 'Due', `${money(card.amount_due)} · ${shortDate(card.due_date)}${low}`, card.overdue ? 'danger' : 'normal'))

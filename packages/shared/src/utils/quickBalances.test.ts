@@ -43,6 +43,10 @@ describe('tileLines', () => {
     expect(texts(creditTile({ card: card({ amount_due: 0 }), credit: credit() }))[0]).toEqual(['due', null, 'Nothing due'])
   })
 
+  it('keeps the may be low cue when nothing is due but the figure is incomplete', () => {
+    expect(texts(creditTile({ card: card({ amount_due: 0, incomplete: true }), credit: credit() }))[0]).toEqual(['due', null, 'Nothing due (may be low)'])
+  })
+
   it('reads No statement yet with no closed statement', () => {
     expect(texts(creditTile({ card: card({ amount_due: 0, due_date: null }), credit: credit() }))[0]).toEqual(['due', null, 'No statement yet'])
   })
