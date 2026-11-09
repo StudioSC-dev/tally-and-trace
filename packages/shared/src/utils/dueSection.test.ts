@@ -434,6 +434,50 @@ describe('dueRecurringRows: missed coverage', () => {
   })
 })
 
+describe('dueRecurringRows: a missed row carries what Change date needs', () => {
+  const oneRow = (m: RecurringMissed): DueMissedRow => {
+    const [row] = missedRows(dueRecurringRows(snap({ missed: [m] }), TODAY))
+    if (!row) throw new Error('no missed row')
+    return row
+  }
+
+  it('carries can_mark_paid as the permission for Change date, true for an owner and false for a viewer', () => {
+    const rows = missedRows(dueRecurringRows(snap({
+      missed: [missed({ entry_id: 2, name: 'Owner rent', can_mark_paid: true }), missed({ entry_id: 6, name: 'Viewer rent', can_mark_paid: false })],
+      card_charges: [card({ missed: [cardMissed({ entry_id: 7, name: 'Spotify', can_mark_paid: false })] })],
+    }), TODAY))
+    expect(Object.fromEntries(rows.map((r) => [r.name, r.can_mark_paid]))).toEqual({ 'Owner rent': true, 'Viewer rent': false, Spotify: false })
+  })
+
+  it('opens on the oldest unlinked occurrence with its forced date as the effective one', () => {
+    const row = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-22', oldest_unlinked: '2026-09-20' }))
+    expect(row).toMatchObject({ oldest: '2026-09-20', oldestEffective: '2026-09-22', oldestEffectiveKnown: true })
+  })
+
+  it('knows no effective date when the oldest unlinked day is not the oldest missed one, or the API gives none', () => {
+    const later = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-08-20', oldest_effective: '2026-08-22', oldest_unlinked: '2026-09-20' }))
+    expect(later).toMatchObject({ oldest: '2026-09-20', oldestEffective: '2026-09-20', oldestEffectiveKnown: false })
+    const [spotify] = missedRows(dueRecurringRows(snap({ card_charges: [card({ missed: [cardMissed({ entry_id: 7, name: 'Spotify' })] })] }), TODAY))
+    expect(spotify?.oldestEffectiveKnown).toBe(false)
+    const older = oneRow({ ...missed({ entry_id: 3, name: 'Old API' }), oldest_effective: undefined })
+    expect(older.oldestEffectiveKnown).toBe(false)
+  })
+
+  it('reads "since" on the effective date once the oldest is moved to another past day, count unchanged', () => {
+    const before = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-20', oldest_unlinked: '2026-09-20', unlinked_count: 2 }))
+    const after = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-23', oldest_unlinked: '2026-09-20', unlinked_count: 2 }))
+    expect([before.count, before.text]).toEqual([2, '2 missed since Sep 20th, 2026'])
+    expect([after.count, after.text, after.oldest]).toEqual([2, '2 missed since Sep 23rd, 2026', '2026-09-20'])
+  })
+
+  it('counts one fewer and starts at the next occurrence once the oldest is moved into the future, and no row for the last one', () => {
+    const two = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-20', oldest_unlinked: '2026-09-20', unlinked_count: 2 }))
+    const one = oneRow(missed({ entry_id: 2, name: 'Rent', count: 1, oldest: '2026-10-20', oldest_effective: '2026-10-20', oldest_unlinked: '2026-10-20', unlinked_count: 1 }))
+    expect([two.count, one.count, one.oldest, one.text]).toEqual([2, 1, '2026-10-20', '1 missed since Oct 20th, 2026'])
+    expect(missedRows(dueRecurringRows(snap({ missed: [] }), TODAY))).toEqual([])
+  })
+})
+
 describe('dueRecurringRows: missed rows and the pending split', () => {
   it('lists no missed row when every missed occurrence has a pending row', () => {
     const s = snap({ missed: [missed({ entry_id: 2, name: 'Rent', count: 2, unlinked_count: 0, oldest_unlinked: null, pending_transaction_ids: [31, 32] })] })

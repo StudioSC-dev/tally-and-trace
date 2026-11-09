@@ -751,6 +751,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           </button>
         )}
         {actionButtons(row)}
+        {row.can_mark_paid && changeDateButton(row.entryId, row.name, row.oldest, row.oldestEffectiveKnown ? row.oldestEffective : undefined)}
       </div>
     </li>
   )
