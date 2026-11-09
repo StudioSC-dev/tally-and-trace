@@ -23,10 +23,18 @@
 //   (i) an installment's plan row on the Installments tab reads "Next charge" on the effective date
 //       with "(moved from ...)" once its occurrence is moved (the API's `next_charge` stays the
 //       scheduled day, `effective_date` is the forced one), and back on the scheduled day after Clear
+//   (j) a missed row's Change date: an owner and an editor have it, a view-only viewer gets no missed row
+//       and no button; it opens on the oldest unlinked missed day with its forced date pre-filled; a future
+//       date is refused (the server keeps the occurrences in order, so the count stays); another past day
+//       keeps the row missed and "since" reads that day; Clear restores the original row
+//   (k) a missed row with one occurrence: moved into the future it leaves the missed list and is an
+//       Upcoming row "(moved from ...)"; Clear from that row brings the missed row back
+//   (l) the Subscriptions tab's missed row (a card subscription) has Change date; moved into the future
+//       it leaves the missed row and reads "(moved from ...)" there; Clear restores it
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i]
+// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -541,12 +549,214 @@ async function installmentPlanRow(browser) {
   await ctx.close()
 }
 
+// ─── Missed rows (j, k, l) ───────────────────────────────────────────────────
+const missedRowOf = (page, entryId) => page.locator(`[data-testid="due-row"][data-kind="missed"][data-source="budget_entry:${entryId}"]`)
+const missedText = async (page, entryId) => {
+  const row = missedRowOf(page, entryId)
+  if ((await row.count()) === 0) return null
+  return (await row.locator('[data-testid="due-missed-text"]').textContent())?.replace(/\s+/g, ' ').trim() ?? null
+}
+const changeButtonOf = (page, entryId) => missedRowOf(page, entryId).locator('[data-testid="row-change-date"]')
+/**
+ * Fills the open dialog with `day`, saves and returns the PUT. After a refusal the first fill
+ * is not taken by the dialog (the refusal stays and the field is put back), so it fills again until the refusal clears.
+ */
+async function saveInDialog(page, day, puts) {
+  const before = puts.length
+  const input = dialog(page).locator('[data-testid="force-date-input"]')
+  const error = dialog(page).locator('[data-testid="force-date-error"]')
+  for (let i = 0; i < 4; i++) {
+    await input.fill(day)
+    await page.waitForTimeout(300)
+    // The dialog took the change when its refusal went away with it.
+    if ((await input.inputValue()) === day && (await error.count()) === 0) break
+  }
+  await dialog(page).locator('[data-testid="force-date-save"]').click()
+  await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/date$/.test(new URL(r.url()).pathname))
+  await page.waitForTimeout(200)
+  return puts.slice(before)[0] ?? null
+}
+const missedOf = async (u, entryId) => {
+  const snap = await get(u.token, '/dashboard/snapshot')
+  return [...snap.missed, ...snap.card_charges.flatMap((c) => c.missed)].find((m) => m.entry_id === entryId) ?? null
+}
+
+// (j) Change date on a missed row: permission, pre-fill, refusal, a past day, Clear.
+async function missedRowChangeDate(browser) {
+  console.log('\n=== (j) a missed row\'s Change date: permission, pre-fill, refusal, a past day, Clear')
+  const today = manilaToday()
+  const owner = await makeUser('j-owner')
+  const viewer = await makeUser('j-viewer')
+  const editor = await makeUser('j-editor')
+  const bank = await account(owner, 'J Joint')
+  await post(owner.token, `/accounts/${bank.id}/shares`, { email: editor.email, role: 'editor' })
+  await post(owner.token, `/accounts/${bank.id}/shares`, { email: viewer.email, role: 'viewer' })
+  const oldest = addDays(today, -14)
+  const second = addDays(today, -7)
+  const rent = await entry(owner, { name: 'J Rent', cadence: 'weekly', amount: 100, account_id: bank.id, next_occurrence: wire(oldest) })
+  const seeded = addDays(today, -13)
+  await force(owner, rent.id, oldest, seeded)
+  const m0 = await missedOf(owner, rent.id)
+  check('(j) setup: two missed occurrences, the oldest forced', [m0?.unlinked_count, m0?.oldest_unlinked, m0?.oldest_effective], [2, oldest, seeded])
+
+  const { ctx, page, native, puts } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openTransactions(page)
+  await showRow(page, missedRowOf(page, rent.id))
+  check('(j) the owner\'s missed row has Change date, once', await changeButtonOf(page, rent.id).count(), 1)
+  check('(j) the row reads the oldest\'s forced date and the count', await missedText(page, rent.id), `2 missed since ${fmt(seeded)}`)
+
+  await changeButtonOf(page, rent.id).click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  await waitQuiet(page)
+  const input = dialog(page).locator('[data-testid="force-date-input"]')
+  check('(j) the dialog opens for the oldest day, its forced date pre-filled', [(await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), await input.inputValue()], [`Scheduled ${fmt(oldest)} · now ${fmt(seeded)}`, seeded])
+  check('(j) Clear is offered while it is forced', await dialog(page).locator('[data-testid="force-date-clear"]').count(), 1)
+
+  const future = addDays(today, 2)
+  const refused = await saveInDialog(page, future, puts)
+  check('(j) a future date is sent for the oldest day and refused by the server', [refused?.day, refused?.body, refused?.status], [oldest, { effective_date: future }, 422])
+  const error = dialog(page).locator('[data-testid="force-date-error"]')
+  await error.waitFor()
+  check('(j) the dialog stays open with the server\'s reason', [await dialog(page).count(), ((await error.textContent()) ?? '').trim().length > 0], [1, true])
+
+  const toPast = addDays(today, -10)
+  const saved = await saveInDialog(page, toPast, puts)
+  check('(j) another past day is sent for the oldest day and saved', [saved?.day, saved?.body, saved?.status], [oldest, { effective_date: toPast }, 200])
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(j) the row is still missed, its count unchanged and "since" on the new day', await missedText(page, rent.id), `2 missed since ${fmt(toPast)}`)
+  const m1 = await missedOf(owner, rent.id)
+  check('(j) the API agrees', [m1?.unlinked_count, m1?.oldest_unlinked, m1?.oldest_effective], [2, oldest, toPast])
+  check('(j) the entry still has exactly one missed row', (await dueRowsOf(page, 'J Rent')).filter((r) => r.kind === 'missed').length, 1)
+
+  await changeButtonOf(page, rent.id).click()
+  await dialog(page).locator('[data-testid="force-date-clear"]').waitFor()
+  check('(j) reopened, it is pre-filled with the new day', await dialog(page).locator('[data-testid="force-date-input"]').inputValue(), toPast)
+  const before = puts.length
+  await dialog(page).locator('[data-testid="force-date-clear"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(j) Clear sends one DELETE for the oldest day', puts.slice(before).map((p) => [p.method, p.day, p.status]), [['DELETE', oldest, 204]])
+  check('(j) the original row is back', await missedText(page, rent.id), `2 missed since ${fmt(oldest)}`)
+  check('(j) the second missed day is untouched', (await get(owner.token, `/budget-entries/${rent.id}/occurrences`)).occurrences.filter((o) => o.occurrence_date === second).map((o) => o.effective_date ?? o.occurrence_date), [second])
+  checkNoNative('j', native)
+  await ctx.close()
+
+  const ed = await newPage(browser)
+  await uiLogin(ed.page, editor)
+  await openTransactions(ed.page)
+  await showRow(ed.page, missedRowOf(ed.page, rent.id))
+  check('(j) an editor sees the missed row with Change date', [await missedText(ed.page, rent.id), await changeButtonOf(ed.page, rent.id).count()], [`2 missed since ${fmt(oldest)}`, 1])
+  check('(j) the API gives the editor can_mark_paid true', (await missedOf(editor, rent.id))?.can_mark_paid, true)
+  checkNoNative('j', ed.native)
+  await ed.ctx.close()
+
+  const vw = await newPage(browser)
+  await uiLogin(vw.page, viewer)
+  await openTransactions(vw.page)
+  check('(j) the viewer has no missed row for it (a view-only share gets Limited rows) and no Change date anywhere', [await missedRowOf(vw.page, rent.id).count(), await vw.page.locator('[data-testid="row-change-date"]').count()], [0, 0])
+  check('(j) the API lists no missed entry for the viewer', await missedOf(viewer, rent.id), null)
+  checkNoNative('j', vw.native)
+  await vw.ctx.close()
+}
+
+// (k) A single missed occurrence moved into the future becomes an Upcoming row; Clear brings the row back.
+async function missedRowFuture(browser) {
+  console.log('\n=== (k) the only missed occurrence moved into the future is an Upcoming row; Clear restores the missed row')
+  const today = manilaToday()
+  const u = await makeUser('k')
+  const bank = await account(u, 'K Checking')
+  const oldest = addDays(today, -3)
+  const gym = await entry(u, { name: 'K Gym', cadence: 'weekly', amount: 800, account_id: bank.id, next_occurrence: wire(oldest) })
+  const { ctx, page, native, puts } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await showRow(page, missedRowOf(page, gym.id))
+  check('(k) before: one missed row', await missedText(page, gym.id), `1 missed since ${fmt(oldest)}`)
+  await changeButtonOf(page, gym.id).click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  await waitQuiet(page)
+  check('(k) the dialog opens on the scheduled day with nothing forced',
+    [(await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), await dialog(page).locator('[data-testid="force-date-input"]').inputValue(), await dialog(page).locator('[data-testid="force-date-clear"]').count()],
+    [`Scheduled ${fmt(oldest)}`, oldest, 0])
+  const to = addDays(today, 2)
+  const saved = await saveInDialog(page, to, puts)
+  check('(k) the PUT names the oldest day and the new date', [saved?.day, saved?.body, saved?.status], [oldest, { effective_date: to }, 200])
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(k) the missed row is gone', await missedRowOf(page, gym.id).count(), 0)
+  check('(k) nothing of the entry is left in Due', (await dueRowsOf(page, 'K Gym')).length, 0)
+  const row = await upcomingRow(page, gym.id, oldest)
+  check('(k) it is an Upcoming row on its new date reading "(moved from ...)"', [await row.count(), await dateText(row)], [1, moved(to, oldest)])
+
+  const before = puts.length
+  await row.locator('[data-testid="occurrence-change-date"]').click()
+  await dialog(page).locator('[data-testid="force-date-clear"]').waitFor()
+  await dialog(page).locator('[data-testid="force-date-clear"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(k) Clear sends one DELETE for the scheduled day', puts.slice(before).map((p) => [p.method, p.day, p.status]), [['DELETE', oldest, 204]])
+  await openDueTab(page, 'due')
+  await showRow(page, missedRowOf(page, gym.id))
+  check('(k) the missed row is back', await missedText(page, gym.id), `1 missed since ${fmt(oldest)}`)
+  checkNoNative('k', native)
+  await ctx.close()
+}
+
+// (l) The Subscriptions tab's missed row.
+async function missedRowSubscription(browser) {
+  console.log('\n=== (l) the Subscriptions tab\'s missed row has Change date')
+  const today = manilaToday()
+  const u = await makeUser('l')
+  const bank = await account(u, 'L Checking')
+  const cycleDay = Math.min(28, dom(addDays(today, 12)))
+  const visa = await card(u, bank, 'L Visa', cycleDay, 5)
+  const oldest = addDays(today, -4)
+  const spotify = await entry(u, { name: 'L Spotify', amount: 500, account_id: visa.id, next_occurrence: wire(oldest) })
+  const m0 = await missedOf(u, spotify.id)
+  check('(l) setup: one missed month on the card', [m0?.unlinked_count, m0?.oldest_unlinked], [1, oldest])
+  const { ctx, page, native, puts } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await openDueTab(page, 'subscriptions')
+  const row = await showRow(page, missedRowOf(page, spotify.id))
+  check('(l) the row is on the Subscriptions tab, with Change date', [await row.getAttribute('data-plan'), await row.locator('[data-testid="row-change-date"]').count()], ['subscription', 1])
+  const to = addDays(today, 2)
+  await row.locator('[data-testid="row-change-date"]').click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  await waitQuiet(page)
+  check('(l) the dialog opens for the oldest missed day (the card row carries no forced date, so the dialog looks it up)', (await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), `Scheduled ${fmt(oldest)}`)
+  const saved = await saveInDialog(page, to, puts)
+  check('(l) the PUT names the oldest missed day', [saved?.status, saved?.day, saved?.body], [200, oldest, { effective_date: to }])
+  const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
+  if (await confirmation.count()) await dialog(page).locator('[data-testid="force-date-close"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  await openDueTab(page, 'subscriptions')
+  check('(l) the missed row is gone', await missedRowOf(page, spotify.id).count(), 0)
+  const moved1 = await upcomingRow(page, spotify.id, oldest, 'subscriptions')
+  check('(l) the month reads "(moved from ...)" on Subscriptions', [await moved1.count(), await dateText(moved1)], [1, moved(to, oldest)])
+  const before = puts.length
+  await moved1.locator('[data-testid="occurrence-change-date"]').click()
+  await dialog(page).locator('[data-testid="force-date-clear"]').waitFor()
+  await dialog(page).locator('[data-testid="force-date-clear"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(l) Clear sends one DELETE', puts.slice(before).map((p) => [p.method, p.day, p.status]), [['DELETE', oldest, 204]])
+  await openDueTab(page, 'subscriptions')
+  await showRow(page, missedRowOf(page, spotify.id))
+  check('(l) the missed row is back', await missedText(page, spotify.id), `1 missed since ${fmt(oldest)}`)
+  checkNoNative('l', native)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement, i: installmentPlanRow }
+  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement, i: installmentPlanRow, j: missedRowChangeDate, k: missedRowFuture, l: missedRowSubscription }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
