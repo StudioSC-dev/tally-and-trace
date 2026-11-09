@@ -10,7 +10,12 @@
 // the panel open nothing scrolls sideways and every chip is at least 44 px tall; (8) a
 // non-recent account picked by keyboard only; (a) a recent account is one tap with no
 // expansion; (b) group headings in ACCOUNT_GROUPS order with Shared last; (c) "No
-// matches" and the live count. Every scenario checks that no browser dialog fired.
+// matches" and the live count. PR 3, the transaction list's filters: (f1) the Accounts filter
+// is multi select behind an "All accounts" chip and sends the picked account_ids; (f2) a
+// category name used in two kinds is one choice, selected once, with "All categories" and
+// "No category" ahead of the chips; (f3) a selected non-recent account stays in the
+// collapsed quick row; (f4) Reset filters clears both pickers; (f5) the 50-name cap and its message. Every scenario checks that
+// no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
@@ -37,7 +42,7 @@ try {
 
 const only = process.argv[2]
 
-let stack, client, owner, ownerId, partner, small
+let stack, client, owner, ownerId, partner, small, filt, cap
 /** The owner's 17 writable accounts by name. */
 const acct = {}
 
@@ -616,6 +621,225 @@ async function scenarioC(browser) {
   }
 }
 
+// ---- PR 3: the transaction list's filters (Accounts, Categories) ----------------------------
+
+const listRequests = (page) => {
+  const seen = []
+  page.on('request', (r) => {
+    if (r.method() === 'GET' && pathOf(r.url()).endsWith('/transactions')) {
+      const u = new URL(r.url())
+      seen.push({ accounts: u.searchParams.getAll('account_ids'), names: u.searchParams.getAll('category_names'), none: u.searchParams.get('uncategorized') })
+    }
+  })
+  return seen
+}
+const filterGroup = (page, key) => page.locator(`[data-field="${key}"]`)
+const filtersTab = async (page) => {
+  await page.getByRole('button', { name: 'Show filters' }).click()
+  await h.waitQuiet(page)
+  await filterGroup(page, 'filter_accounts').waitFor()
+}
+const selectedIn = (group) => group.locator('[data-picker-id][data-selected="true"]').evaluateAll((els) => els.map((el) => el.getAttribute('data-picker-id')))
+const lastReq = (seen) => seen[seen.length - 1]
+const sameSet = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
+async function openFilters(browser) {
+  const t = await openTransactions(browser, filt.user)
+  t.seen = listRequests(t.page)
+  await filtersTab(t.page)
+  return t
+}
+
+// (f1) The Accounts filter: "All accounts" leading chip, multi select, and the account_ids on the wire.
+async function scenarioF1(browser) {
+  console.log('\n=== (f1) Accounts filter: multi select over the grouped picker; account_ids on the wire')
+  const { ctx, page, native, seen } = await openFilters(browser)
+  try {
+    const group = filterGroup(page, 'filter_accounts')
+    const all = group.locator('[data-picker-leading="all"]')
+    await h.check('f1.collapsed-with-all-chip-selected', 'B', async () => {
+      const got = { mode: await group.getAttribute('data-picker'), all: await all.getAttribute('data-selected'), disabled: await all.isDisabled(), toggle: ((await toggleOf(group).textContent()) || '').trim() }
+      return (got.mode === 'collapsed' && got.all === 'true' && got.disabled && /^All 10 accounts/.test(got.toggle)) || JSON.stringify(got)
+    })
+    await pick(group, 'F Wise USD')
+    await h.waitQuiet(page)
+    await pick(group, 'F Maya')
+    await h.waitQuiet(page)
+    await h.check('f1.two-accounts-on-the-wire', 'B', async () => {
+      const want = [String(filt.acct['F Wise USD'].id), String(filt.acct['F Maya'].id)]
+      const got = lastReq(seen)
+      return (sameSet(got.accounts, want)) || JSON.stringify({ got, want })
+    })
+    await h.check('f1.panel-stays-open-all-chip-off', 'B', async () => {
+      const got = { mode: await group.getAttribute('data-picker'), all: await all.getAttribute('data-selected'), count: ((await group.locator('[data-picker-count]').textContent()) || '').trim() }
+      return (got.mode === 'expanded' && got.all === null && got.count === '2 selected') || JSON.stringify(got)
+    })
+    await chipOf(group, 'F Wise USD').click()
+    await h.waitQuiet(page)
+    await h.check('f1.untoggle-removes-one', 'B', async () => {
+      const got = lastReq(seen).accounts
+      return sameSet(got, [String(filt.acct['F Maya'].id)]) || JSON.stringify(got)
+    })
+    await all.click()
+    await h.waitQuiet(page)
+    await h.check('f1.all-accounts-clears', 'B', async () => {
+      const got = { req: lastReq(seen).accounts, sel: await selectedIn(group), all: await all.getAttribute('data-selected') }
+      return (got.req.length === 0 && got.sel.length === 0 && got.all === 'true') || JSON.stringify(got)
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f1', native)
+    await ctx.close()
+  }
+}
+
+// (f2) The Categories filter: a name used in two kinds is one choice, selected once.
+async function scenarioF2(browser) {
+  console.log('\n=== (f2) Categories filter: a name shared across kinds is selected once; All categories and No category')
+  const { ctx, page, native, seen } = await openFilters(browser)
+  try {
+    const group = filterGroup(page, 'filter_categories')
+    await h.check('f2.toggle-counts-names-not-rows', 'B', async () => {
+      const names = new Set((await client.get(filt.user.token, '/categories/')).filter((c) => c.is_active !== false).map((c) => c.name))
+      const text = ((await toggleOf(group).textContent()) || '').trim()
+      return text.startsWith(`All ${names.size} categories`) || `toggle "${text}", ${names.size} distinct names`
+    })
+    await toggleOf(group).click()
+    const both = group.locator('[data-picker-id="F Both"]')
+    await h.check('f2.listed-under-both-kinds', 'B', async () => {
+      const heads = await both.evaluateAll((els) => els.map((el) => el.closest('[data-picker-group]')?.getAttribute('data-picker-group')))
+      return (heads.length === 2 && heads.includes('expense') && heads.includes('income')) || JSON.stringify(heads)
+    })
+    await both.first().click()
+    await h.waitQuiet(page)
+    await h.check('f2.one-name-on-the-wire', 'B', async () => {
+      const got = lastReq(seen)
+      return (JSON.stringify(got.names) === JSON.stringify(['F Both'])) || JSON.stringify(got)
+    })
+    await h.check('f2.both-chips-selected-count-is-one', 'B', async () => {
+      const marks = await both.evaluateAll((els) => els.map((el) => el.getAttribute('data-selected')))
+      const count = ((await group.locator('[data-picker-count]').textContent()) || '').trim()
+      return (JSON.stringify(marks) === '["true","true"]' && count === '1 selected') || JSON.stringify({ marks, count })
+    })
+    await h.check('f2.active-filter-pill-once', 'B', async () => {
+      const n = await page.getByRole('button', { name: 'Remove category filter F Both' }).count()
+      return n === 1 || `pills ${n}`
+    })
+    await both.last().click()
+    await h.waitQuiet(page)
+    await h.check('f2.second-click-deselects', 'B', async () => {
+      const got = { names: lastReq(seen).names, sel: await selectedIn(group) }
+      return (got.names.length === 0 && got.sel.length === 0) || JSON.stringify(got)
+    })
+    const none = group.locator('[data-picker-leading="none"]')
+    await none.click()
+    await h.waitQuiet(page)
+    await h.check('f2.no-category-leading-chip', 'B', async () => {
+      const got = { req: lastReq(seen).none, on: await none.getAttribute('data-selected'), all: await group.locator('[data-picker-leading="all"]').isDisabled() }
+      return (got.req === 'true' && got.on === 'true' && got.all === false) || JSON.stringify(got)
+    })
+    await group.locator('[data-picker-leading="all"]').click()
+    await h.waitQuiet(page)
+    await h.check('f2.all-categories-clears-both', 'B', async () => {
+      const got = { req: lastReq(seen), none: await none.getAttribute('data-selected') }
+      return (got.req.none === null && got.req.names.length === 0 && got.none === null) || JSON.stringify(got)
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f2', native)
+    await ctx.close()
+  }
+}
+
+// (f3) A selected filter is never hidden: a non-recent account stays first in the collapsed row.
+async function scenarioF3(browser) {
+  console.log('\n=== (f3) A non-recent account, selected then collapsed, is still in the quick row')
+  const { ctx, page, native } = await openFilters(browser)
+  try {
+    const group = filterGroup(page, 'filter_accounts')
+    const target = 'F Car Loan'
+    await h.check('f3.not-in-quick-row-at-first', 'B', async () => {
+      const n = await chipOf(group, target).count()
+      return n === 0 || `chip present: ${n}`
+    })
+    await pick(group, target)
+    await h.waitQuiet(page)
+    await toggleOf(group).click()
+    await h.check('f3.collapsed-shows-it-first-and-selected', 'B', async () => {
+      const ids = await idsIn(group)
+      const got = { mode: await group.getAttribute('data-picker'), first: ids[0], sel: await selectedIn(group), count: ((await group.locator('[data-picker-count]').textContent()) || '').trim() }
+      return (got.mode === 'collapsed' && got.first === String(filt.acct[target].id) && sameSet(got.sel, [got.first]) && got.count === '1 selected') || JSON.stringify(got)
+    })
+    await h.check('f3.recents-are-read-only', 'B', async () => {
+      const got = await page.evaluate((key) => localStorage.getItem(key), `tt:recent:${filt.id}:account`)
+      return got === null || `the filter wrote recents: ${JSON.stringify(got)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f3', native)
+    await ctx.close()
+  }
+}
+
+// (f4) Reset filters clears both pickers and the Active filters pills.
+async function scenarioF4(browser) {
+  console.log('\n=== (f4) Reset filters clears the account and category pickers')
+  const { ctx, page, native, seen } = await openFilters(browser)
+  try {
+    const accounts = filterGroup(page, 'filter_accounts')
+    const cats = filterGroup(page, 'filter_categories')
+    await pick(accounts, 'F Wise USD')
+    await h.waitQuiet(page)
+    await pick(cats, 'F Both')
+    await h.waitQuiet(page)
+    await cats.locator('[data-picker-leading="none"]').click()
+    await h.waitQuiet(page)
+    await h.check('f4.filters-active-first', 'B', async () => {
+      const got = lastReq(seen)
+      const pills = await page.locator('[aria-label="Active filters"] button').count()
+      return (got.accounts.length === 1 && got.names.length === 1 && got.none === 'true' && pills >= 2) || JSON.stringify({ got, pills })
+    })
+    await page.getByRole('button', { name: 'Reset filters' }).click()
+    await h.waitQuiet(page)
+    await h.check('f4.reset-clears-both-pickers', 'B', async () => {
+      const got = {
+        req: lastReq(seen),
+        accountsSel: await selectedIn(accounts),
+        catsSel: await selectedIn(cats),
+        allAcc: await accounts.locator('[data-picker-leading="all"]').getAttribute('data-selected'),
+        allCat: await cats.locator('[data-picker-leading="all"]').getAttribute('data-selected'),
+        none: await cats.locator('[data-picker-leading="none"]').getAttribute('data-selected'),
+        pills: await page.locator('[aria-label="Active filters"]').count(),
+      }
+      const ok = got.req.accounts.length === 0 && got.req.names.length === 0 && got.req.none === null && got.accountsSel.length === 0 && got.catsSel.length === 0 && got.allAcc === 'true' && got.allCat === 'true' && got.none === null && got.pills === 0
+      return ok || JSON.stringify(got)
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f4', native)
+    await ctx.close()
+  }
+}
+
+// (f5) The 50-name cap and its message still apply.
+async function scenarioF5(browser) {
+  console.log('\n=== (f5) Categories filter: at most 50 names, with the message')
+  const { ctx, page, native } = await openTransactions(browser, cap.user)
+  const seen = listRequests(page)
+  try {
+    await filtersTab(page)
+    const group = filterGroup(page, 'filter_categories')
+    await toggleOf(group).click()
+    const ids = (await idsIn(group)).filter((id) => id.startsWith('C Cap '))
+    await h.check('f5.fifty-two-offered', 'S', async () => ids.length === 52 || `chips ${ids.length}`)
+    for (const id of ids.slice(0, 51)) await group.locator(`[data-picker-id="${id}"]`).first().click()
+    await h.waitQuiet(page)
+    await h.check('f5.capped-at-50', 'B', async () => {
+      const sel = await selectedIn(group)
+      const msg = await page.getByText('You can filter by up to 50 categories at once.').count()
+      return (sel.length === 50 && !sel.includes(ids[50]) && msg === 1 && lastReq(seen).names.length === 50) || JSON.stringify({ sel: sel.length, msg, sent: lastReq(seen).names.length })
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'f5', native)
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'pickers')
   partner = await h.makeUser(stack, 'pickpart')
@@ -634,6 +858,20 @@ async function setup() {
   const smallUser = await h.makeUser(stack, 'picksmall')
   for (let i = 1; i <= 8; i++) await client.post(smallUser.token, '/accounts/', accountBody(`S Account ${i}`, i % 2 ? 'checking' : 'cash'))
   small = { user: smallUser }
+  // The filters' user: 10 accounts (collapsed), and a name used as both an expense and an income category.
+  const filterUser = await h.makeUser(stack, 'pickfilt')
+  const facct = {}
+  for (const [name, type, currency] of [
+    ['F Bdo Savings', 'savings'], ['F Bpi Checking', 'checking'], ['F Wise USD', 'savings', 'USD'], ['F Bpi Visa', 'credit'],
+    ['F GCash', 'e_wallet'], ['F Maya', 'e_wallet'], ['F Cash', 'cash'], ['F Petty Cash', 'cash'], ['F Car Loan', 'loan'], ['F Home Loan', 'loan'],
+  ]) facct[name] = await client.post(filterUser.token, '/accounts/', accountBody(name, type, currency))
+  await client.post(filterUser.token, '/categories/', { name: 'F Both', color: '#16a34a', is_expense: true, kind: 'expense' })
+  await client.post(filterUser.token, '/categories/', { name: 'F Both', color: '#16a34a', is_expense: false, kind: 'income' })
+  const capUser = await h.makeUser(stack, 'pickcap')
+  await client.post(capUser.token, '/accounts/', accountBody('C Cap Account', 'cash'))
+  for (let i = 1; i <= 52; i++) await client.post(capUser.token, '/categories/', { name: `C Cap ${String(i).padStart(2, '0')}`, color: '#16a34a', is_expense: true, kind: 'expense' })
+  cap = { user: capUser }
+  filt = { user: filterUser, acct: facct, id: (await client.get(filterUser.token, '/auth/me')).id }
 }
 
 const SCENARIOS = [
@@ -646,6 +884,11 @@ const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
+  ['f1', scenarioF1],
+  ['f2', scenarioF2],
+  ['f3', scenarioF3],
+  ['f4', scenarioF4],
+  ['f5', scenarioF5],
 ]
 
 ;(async () => {

@@ -559,7 +559,7 @@ async function filters(browser) {
 
   await apply('Income only', () => page.getByRole('button', { name: 'Income', exact: true }).click())
   await reset()
-  await apply('one account', () => pick(page, /^G Bank B$/))
+  await apply('one account', () => pick(page, /^G Bank B \(/))
   await reset()
   await apply('search', async () => { await page.locator('[data-testid="transactions-search"]').fill('Rent'); await page.waitForTimeout(700) })
   await reset()
