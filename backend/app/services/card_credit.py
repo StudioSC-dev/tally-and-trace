@@ -3,6 +3,18 @@
 Owner and admin only (``can_see_credit``), on a credit card with a limit; the
 figure is in the card's own currency K.
 
+**Shared limit.** A card linked to another card's limit
+(``shares_limit_with_account_id``, the secondary) has no limit of its own; the
+card it points at (the primary) holds it. A primary and every card pointing at
+it form a group, and every figure below covers the group: ``limit`` is the
+primary's, each opening component is summed over the group's active members
+(each worked out exactly as for one card), and one walk runs over every
+member's items, so both cards show the same headline. Each card's ``checks``
+hold only its own charges, each checked in that merged walk, and
+``shared_with`` names the other members (``[]`` on an unlinked card). A caller
+sees a group's credit only when ``can_see_credit`` holds on every member;
+otherwise no member gets one, as for a card with no limit.
+
 **Opening** (everything already committed)::
 
     available_now = limit - (balance_owed + pending_total + installment_hold + missed_total)
@@ -112,10 +124,13 @@ def can_see_credit(user, card: Optional[Account]) -> bool:
 
 
 def managed_card_ids(db: Session, user) -> List[int]:
-    """Every active credit card with a limit the caller manages, by name."""
+    """Every active credit card with a limit, or linked to another card's
+    limit, that the caller manages, by name. ``credit_for_cards`` applies the
+    group gate."""
     cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
         Account.account_type == AccountType.CREDIT,
-        Account.credit_limit.isnot(None),
+        or_(Account.credit_limit.isnot(None),
+            Account.shares_limit_with_account_id.isnot(None)),
     ).all()
     return [c.id for c in sorted(cards, key=lambda a: (a.name, a.id))]
 
@@ -189,21 +204,24 @@ def _stream(entry, end: datetime, *, whole: bool, moved: Optional[Moved] = None
 def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
                      fx: Optional[FxRates], redactor: Optional[Redactor] = None
                      ) -> Dict[int, dict]:
-    """``{card id: CardCredit}`` for each of ``card_ids`` that passes
-    ``can_see_credit`` and has a limit; the others are left out.
+    """``{card id: CardCredit}`` for each of ``card_ids`` whose group (the card,
+    or its primary and every card pointing at it; the module docstring) has a
+    limit and passes ``can_see_credit`` on every member; the others are left
+    out. An unlinked card is a group of one.
 
+    Rows and entries are read once for every member of every group served.
     Beside ``linked`` it builds ``held``: the held months of the cards'
     reviewed card installments through Manila's today
     (``installment_duplicates.held_occurrences``, one call; the canonical
     assignment per creator and card, whatever the caller sees), which
-    ``_card_credit`` leaves out of the hold."""
+    ``_card_parts`` leaves out of the hold."""
     card_ids = list(dict.fromkeys(card_ids))
     if not card_ids:
         return {}
-    cards = {c.id: c for c in db.query(Account).filter(Account.id.in_(card_ids)).all()
-             if can_see_credit(user, c) and c.credit_limit is not None}
-    if not cards:
+    groups = _credit_groups(db, user, card_ids)
+    if not groups:
         return {}
+    cards = {m.id: m for _, members in groups for m in members}
     fx = fx if fx is not None else FxRates.offline(db)
     redactor = redactor or Redactor(db, user)
     start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())
@@ -242,13 +260,50 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
     def view(record) -> str:
         return redactor.view(record) if redactor.access.readable(record) else LIMITED
 
+    requested = set(card_ids)
     out = {}
-    for card in cards.values():
-        out[card.id] = _card_credit(
-            card, start, end, fx,
+    for primary, members in groups:
+        money = _Converter(fx, fc._code(primary.currency))
+        parts = [_card_parts(
+            card, start, end, money,
             rows=[r for r in rows if _touches(r, card.id)],
             entries=[e for e in entries if e.account_id == card.id],
             linked=linked, held=held, forced=forced, entry_by_id=entry_by_id, view=view)
+            for card in members]
+        credit = _group_credit(primary, members, parts, start, money)
+        out.update({card_id: c for card_id, c in credit.items() if card_id in requested})
+    return out
+
+
+def _credit_groups(db: Session, user, card_ids: List[int]) -> List[tuple]:
+    """``[(primary, members)]``: the group of each of ``card_ids`` that is
+    served credit, each group once. ``members`` (by id) are the primary and
+    every card pointing at it, active or requested, and the group is served
+    only when the primary has a limit and the caller passes
+    ``can_see_credit`` on every member. One query when the cards' groups are
+    all among ``card_ids`` (the managed list), two otherwise."""
+    accounts = {a.id: a for a in db.query(Account).filter(or_(
+        Account.id.in_(card_ids), Account.shares_limit_with_account_id.in_(card_ids))).all()}
+    missing = {a.shares_limit_with_account_id for a in accounts.values()
+               if a.shares_limit_with_account_id is not None
+               and a.shares_limit_with_account_id not in accounts}
+    if missing:
+        accounts.update({a.id: a for a in db.query(Account).filter(or_(
+            Account.id.in_(missing), Account.shares_limit_with_account_id.in_(missing))).all()})
+    requested = set(card_ids)
+    by_primary: Dict[int, List[Account]] = {}
+    for a in accounts.values():
+        if a.is_active or a.id in requested:
+            by_primary.setdefault(a.shares_limit_with_account_id or a.id, []).append(a)
+    out = []
+    for primary_id in dict.fromkeys(
+            accounts[i].shares_limit_with_account_id or i for i in card_ids if i in accounts):
+        primary = accounts.get(primary_id)
+        members = sorted(by_primary.get(primary_id, []), key=lambda a: a.id)
+        if (primary is None or primary.credit_limit is None or not members
+                or not all(can_see_credit(user, m) for m in members)):
+            continue
+        out.append((primary, members))
     return out
 
 
@@ -259,12 +314,14 @@ def _touches(txn: Transaction, card_id: int) -> bool:
         or txn.transfer_to_account_id == card_id
 
 
-def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
-                 rows: List[Transaction], entries: List[BudgetEntry],
-                 linked: Dict[tuple, List[int]], held: Counter,
-                 forced: Dict[int, Moved], entry_by_id: Dict[int, BudgetEntry],
-                 view) -> dict:
-    """One card's ``CardCredit`` (the module docstring).
+def _card_parts(card: Account, start: datetime, end: datetime, money: _Converter, *,
+                rows: List[Transaction], entries: List[BudgetEntry],
+                linked: Dict[tuple, List[int]], held: Counter,
+                forced: Dict[int, Moved], entry_by_id: Dict[int, BudgetEntry],
+                view) -> dict:
+    """One card's share of its group's ``CardCredit`` (the module docstring):
+    its opening components, counts, missed list, planned payments and walk
+    items, which ``_group_credit`` sums and walks with the other members'.
 
     ``linked`` is ``{(entry id, day): [transaction id]}`` (posted rows first),
     consumed here; ``held`` is ``Counter[(entry id, day)]`` of the held months
@@ -274,9 +331,6 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
     possible duplicate is not added to ``replacing_ids`` and keeps its own
     placement, so the month is counted once, as that charge.
     """
-    currency = fc._code(card.currency)
-    money = _Converter(fx, currency)
-    limit = fc._money(card.credit_limit)
     s_day, e_day = start.date(), end.date()
 
     balance_owed = -fc._money(card.balance or 0)
@@ -426,12 +480,45 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
                     "occurrence_date": nominal, "kind": kind, "amount": each,
                     "subtract": True}))
 
+    for _, phase, _, item in walk:
+        if phase == _CHARGE:
+            item["card_id"] = card.id
+    return {"balance_owed": balance_owed, "pending_total": pending_total,
+            "planned_charges": planned_charges, "hold": hold, "missed_total": missed_total,
+            "unknown": unknown, "uncounted_shared": uncounted_shared,
+            "opening_uncounted": opening_uncounted, "walk": walk, "planned": planned,
+            "missed": missed}
+
+
+def _group_credit(primary: Account, members: List[Account], parts: List[dict],
+                  start: datetime, money: _Converter) -> Dict[int, dict]:
+    """``{card id: CardCredit}`` for each member of a group (one card when it
+    is unlinked): the primary's limit less every member's opening, then one
+    walk over every member's items in ``(day, phase, order)`` order, so a
+    charge on one card is checked after the other card's earlier charges and
+    payments. Every figure is the group's; each card keeps only the checks for
+    its own charges, and ``shared_with`` names the other members by name."""
+    limit = fc._money(primary.credit_limit)
+    s_day = start.date()
+
+    def total(key):
+        return sum((part[key] for part in parts), _ZERO)
+
+    balance_owed, pending_total = total("balance_owed"), total("pending_total")
+    hold, missed_total = total("hold"), total("missed_total")
+    planned_charges = total("planned_charges")
+    unknown = sum(part["unknown"] for part in parts)
+    uncounted_shared = sum(part["uncounted_shared"] for part in parts)
+    walk = [item for part in parts for item in part["walk"]]
+    planned = [p for part in parts for p in part["planned"]]
+    missed = [m for part in parts for m in part["missed"]]
+
     available_now = limit - (balance_owed + pending_total + hold + missed_total)
 
     # --- the walk ---------------------------------------------------------------
     walk.sort(key=lambda item: (item[0], item[1], item[2]))
     after = without = available_now
-    uncounted = opening_uncounted
+    uncounted = any(part["opening_uncounted"] for part in parts)
     payments: List[tuple] = []  # (day, amount), counted, in walk order
     checks: List[dict] = []
     for day, phase, _, item in walk:
@@ -469,7 +556,7 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
                 status = "ok"
             if uncounted and status in ("ok", "ok_with_planned"):
                 status, relies = "incomplete", None
-        checks.append({
+        checks.append((item["card_id"], {
             "source": item["source"],
             "source_id": item["source_id"],
             "date": item["date"].isoformat(),
@@ -481,7 +568,7 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
             "available_after_without_planned": _amount(values[1]),
             "status": status,
             "relies_on_planned": relies,
-        })
+        }))
         if figure is None and item["kind"] != "installment":
             uncounted = True
 
@@ -490,9 +577,10 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
     for p in planned:
         p.pop("_order")
     with_planned = available_now + sum((amount for _, amount in payments), _ZERO)
-    return {
+    by_name = sorted(members, key=lambda a: (a.name, a.id))
+    return {card.id: {
         "account_id": card.id,
-        "currency": currency,
+        "currency": money.currency,
         "limit": _amount(limit),
         "as_of": s_day.isoformat(),
         "available_now": _amount(available_now),
@@ -508,12 +596,15 @@ def _card_credit(card: Account, start: datetime, end: datetime, fx: FxRates, *,
             "installment_hold": _amount(hold),
             "missed_total": _amount(missed_total),
         },
-        "missed": missed,
-        "planned_payments": planned,
-        "checks": checks,
+        # Each card gets its own copies of the group's lists.
+        "missed": [dict(m) for m in missed],
+        "planned_payments": [dict(p) for p in planned],
+        "checks": [check for owner, check in checks if owner == card.id],
         "fx": money.rates(),
         "fx_buffer_pct": int(CARD_FX_BUFFER * 100),
-    }
+        "shared_with": [{"account_id": m.id, "name": m.name}
+                        for m in by_name if m.id != card.id],
+    } for card in members}
 
 
 def open_cycle(card: Account, today: date, *, due_overrides) -> Optional[dict]:

@@ -230,10 +230,7 @@ def test_the_export_never_carries_another_users_details_or_unlisted_columns(clie
     assert [e["id"] for e in other["others_budget_entries"]] == [world["legacy_entry"]]
 
 
-def test_the_owners_export_carries_a_shared_limit_link(client, world, monkeypatch):
-    from app.routers import accounts
-
-    monkeypatch.setattr(accounts, "SHARED_LIMITS_ENABLED", True)  # the rollout gate
+def test_the_owners_export_carries_a_shared_limit_link(client, world):
     owner = world["owner"]
     h = owner["headers"]
     amex = _post(client, h, "/accounts/", {

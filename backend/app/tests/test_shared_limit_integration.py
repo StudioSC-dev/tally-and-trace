@@ -4,12 +4,8 @@ A linked card (the secondary) stores ``shares_limit_with_account_id``, pointing
 at the card that holds the limit (the primary), and no limit of its own. This
 module covers the link itself: storing it, its refusals, the locks that keep
 two writes from making a chain or an inactive linked card, who sees the field,
-and unlinking. The credit figures that read it ship separately.
-
-Until they do, the API refuses every link (``SHARED_LIMITS_ENABLED`` off,
-``test_link_refused_until_enabled``). Every other test here lifts that gate with
-the ``enabled`` fixture, a test-only override of the module flag; the next PR
-removes the flag and the fixture with it.
+and unlinking. The credit figures that read it are covered in
+test_shared_limit_credit_integration.py.
 
 Races follow test_balance_locking_integration.py: a holder session runs the
 first write up to its commit, a worker thread sends the second, the probe waits
@@ -31,15 +27,6 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 FIELD = "shares_limit_with_account_id"
 NOT_FOUND = "shares_limit_with_account_id account not found"
 UNLINK_FIRST = "Unlink the shared credit limit first"
-GATE = "Shared credit limits are not enabled yet"
-
-
-@pytest.fixture
-def enabled(monkeypatch):
-    """Lift the rollout gate (test-only; the shared credit calculation removes it)."""
-    from app.routers import accounts
-
-    monkeypatch.setattr(accounts, "SHARED_LIMITS_ENABLED", True)
 
 
 @pytest.fixture
@@ -103,22 +90,26 @@ def owner(sw_client, sw_people):
     return {"me": me, "bank": bank, "amex": amex}
 
 
-# --- Gate ----------------------------------------------------------------------------------
+# --- Gate removed ------------------------------------------------------------------------
 
-def test_link_refused_until_enabled(sw_client, sw_db, owner):
-    """Until the shared credit calculation ships, no link can be stored."""
+def test_link_saves_without_a_rollout_gate(sw_client, sw_db, owner):
+    """The rollout gate is gone with the shared credit calculation: a link saves
+    on create and on update, and an ordinary edit still saves."""
+    from app.routers import accounts
+
+    assert not hasattr(accounts, "SHARED_LIMITS_ENABLED")
     client, me, amex = sw_client, owner["me"], owner["amex"]
     r = client.post(f"{API}/accounts/", json={
         "name": "BDO Platinum Mastercard", "account_type": "credit", FIELD: amex},
         headers=me["headers"])
-    assert (r.status_code, r.json()["detail"]) == (400, GATE)
+    assert r.status_code in (200, 201), r.text
+    assert _stored(sw_db, r.json()["id"]) == (amex, None, True)
 
     other = _card(client, me, "Other card", 10_000)
     r = _put(client, me, other, {FIELD: amex, "credit_limit": None})
-    assert (r.status_code, r.json()["detail"]) == (400, GATE)
-    assert _stored(sw_db, other) == (None, 10_000, True)
+    assert r.status_code == 200, r.text
+    assert _stored(sw_db, other) == (amex, None, True)
 
-    # Null (no link) is not a link: an ordinary edit still saves.
     r = _put(client, me, other, {FIELD: None, "name": "Other card 2"})
     assert r.status_code == 200, r.text
     assert r.json()[FIELD] is None
@@ -126,7 +117,7 @@ def test_link_refused_until_enabled(sw_client, sw_db, owner):
 
 # --- 2, 3: creating and linking ------------------------------------------------------------
 
-def test_create_card_linked_to_limit(sw_client, sw_db, owner, enabled):
+def test_create_card_linked_to_limit(sw_client, sw_db, owner):
     client, me, amex = sw_client, owner["me"], owner["amex"]
     platinum = sw_post(client, me, "/accounts/", {
         "name": "BDO Platinum Mastercard", "account_type": "credit", "currency": "PHP",
@@ -146,7 +137,7 @@ def test_create_card_linked_to_limit(sw_client, sw_db, owner, enabled):
     assert listed[platinum["id"]][FIELD] == amex
 
 
-def test_link_clears_secondary_limit(sw_client, sw_db, owner, enabled):
+def test_link_clears_secondary_limit(sw_client, sw_db, owner):
     client, me, amex = sw_client, owner["me"], owner["amex"]
     card = _card(client, me, "Has its own limit", 50_000)
     r = _put(client, me, card, {FIELD: amex})
@@ -163,7 +154,7 @@ NOT_ACTIVE = "Both cards must be active to share a credit limit"
 OWN_LIMIT = "A card that shares another card's limit has no limit of its own"
 
 
-def test_link_refusals(sw_client, sw_db, owner, enabled):
+def test_link_refusals(sw_client, sw_db, owner):
     client, me, amex, bank = sw_client, owner["me"], owner["amex"], owner["bank"]
     card = _card(client, me, "Linkable", 20_000)
 
@@ -206,7 +197,7 @@ def test_link_refusals(sw_client, sw_db, owner, enabled):
     assert _stored(sw_db, sleeping) == (None, None, False)
 
 
-def test_link_refuses_chain_and_cycle(sw_client, sw_db, owner, enabled):
+def test_link_refuses_chain_and_cycle(sw_client, sw_db, owner):
     client, me, amex = sw_client, owner["me"], owner["amex"]
     platinum = _card(client, me, "Platinum")
     assert _put(client, me, platinum, {FIELD: amex}).status_code == 200
@@ -246,7 +237,7 @@ def _hold(holder, fn, *args, user_id):
         del holder.refresh
 
 
-def test_concurrent_links_leave_no_cycle(sw_client, sw_db, owner, engine, holder, enabled):
+def test_concurrent_links_leave_no_cycle(sw_client, sw_db, owner, engine, holder):
     """A -> B held open, B -> A sent: the second waits on the first and is refused."""
     from app.routers.accounts import update_account
     from app.schemas.account import AccountUpdate
@@ -263,7 +254,7 @@ def test_concurrent_links_leave_no_cycle(sw_client, sw_db, owner, engine, holder
     assert _stored(sw_db, b) == (None, 20_000, True)
 
 
-def test_concurrent_link_and_delete(sw_client, sw_db, owner, engine, holder, enabled):
+def test_concurrent_link_and_delete(sw_client, sw_db, owner, engine, holder):
     """A link to a card and the card's delete take turns, in either order.
 
     The link first: the delete waits, then sees the link (409). The delete
@@ -297,7 +288,7 @@ def test_concurrent_link_and_delete(sw_client, sw_db, owner, engine, holder, ena
 
 # --- 7, 8: access and redaction ------------------------------------------------------------
 
-def test_link_access(sw_client, sw_db, sw_people, owner, enabled):
+def test_link_access(sw_client, sw_db, sw_people, owner):
     client, me, amex = sw_client, owner["me"], owner["amex"]
     card = _card(client, me, "Mine", 10_000)
 
@@ -332,7 +323,7 @@ def test_link_access(sw_client, sw_db, sw_people, owner, enabled):
     assert _stored(sw_db, card) == (other, None, True)
 
 
-def test_link_field_redaction(hh, sw_client, sw_db, sw_people, enabled):
+def test_link_field_redaction(hh, sw_client, sw_db, sw_people):
     client, db, a = sw_client, sw_db, hh["a"]
     primary = hh["a_card"]
     platinum = sw_post(client, a, "/accounts/", {
@@ -370,7 +361,7 @@ def test_link_field_redaction(hh, sw_client, sw_db, sw_people, enabled):
 # --- 9, 10, 11: edits while linked ---------------------------------------------------------
 
 @pytest.fixture
-def linked(sw_client, owner, enabled):
+def linked(sw_client, owner):
     platinum = sw_post(sw_client, owner["me"], "/accounts/", {
         "name": "BDO Platinum Mastercard", "account_type": "credit",
         "billing_cycle_start": 14, "days_until_due_date": 25,
