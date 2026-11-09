@@ -59,6 +59,7 @@ export type {
   UpcomingBill,
   NetDisposableIncome,
   DashboardSnapshot,
+  QuickBalances,
   BudgetEntryMaterializeInput,
   ForcedDateInput,
   ForcedDateResult,
@@ -138,6 +139,7 @@ import type {
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
+  QuickBalances,
   WishlistItem,
   WishlistPlan,
   LoanPaymentRequest,
@@ -212,7 +214,7 @@ export const accountingApi = createApi({
   // A save's invalidation runs inside its own settle, so its reload is pending before
   // the save leaves the screen loader's busy level (STU-335).
   invalidationBehavior: 'immediately',
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
@@ -621,6 +623,12 @@ export const accountingApi = createApi({
       providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation'],
     }),
 
+    // The tiles under "Quick balances". A payment or any balance change refreshes them.
+    getQuickBalances: builder.query<QuickBalances, void>({
+      query: () => 'dashboard/quick-balances',
+      providesTags: ['Account', 'Transaction', 'BudgetEntry', 'QuickBalances'],
+    }),
+
     // ── Forecast ──────────────────────────────────────────────────────────────
     getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number; account_id?: number } | void>({
       query: (params) => ({ url: 'forecast/timeline', params: params ?? {} }),
@@ -889,6 +897,7 @@ export const {
 
   // Dashboard hooks
   useGetDashboardSnapshotQuery,
+  useGetQuickBalancesQuery,
   // Forecast hooks
   useGetForecastTimelineQuery,
 
