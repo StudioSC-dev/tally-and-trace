@@ -41,6 +41,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
 import { useConfirm } from '../hooks/useConfirm'
+import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
+import { useRecentPicks } from '../hooks/useRecentPicks'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -273,7 +275,9 @@ export const Route = createFileRoute('/allocations')({
 })
 
 export function AllocationsPage() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth()
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth()
+  const recentAccounts = useRecentPicks('account')
+  const recentCategories = useRecentPicks('category')
   const navigate = useNavigate()
   const { format } = useCurrency()
 
@@ -701,11 +705,14 @@ export function AllocationsPage() {
   const focusField = (key: AllocationFieldKey) => {
     const el = fieldRefs.current[key]
     if (!el) return
-    // A chip group focuses its selected chip, else its first.
-    const target =
-      el.getAttribute('role') === 'group'
-        ? el.querySelector<HTMLElement>('[data-selected="true"]') ?? el.querySelector<HTMLElement>('button')
-        : el
+    // A chip group focuses its selected chip, else its first chip. A picker's toggle comes
+    // before its chips in the DOM, so it is passed over while there is a chip.
+    const group = el.getAttribute('role') === 'group' ? el : el.querySelector<HTMLElement>('[role="group"][data-field]')
+    const target = group
+      ? group.querySelector<HTMLElement>('button[data-selected="true"]') ??
+        group.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
+        group.querySelector<HTMLElement>('button')
+      : el
     target?.focus()
   }
   const fail = (key: AllocationFieldKey, message: string) => {
@@ -758,20 +765,6 @@ export function AllocationsPage() {
       }
       fail(key, (first.validity.valueMissing && ALLOCATION_REQUIRED_COPY[key]) || first.validationMessage)
     }, 0)
-  }
-
-  const toggleBudgetCategory = (categoryId: number) => {
-    clearFieldErrors('category_ids')
-    setSelectedBudgetCategoryIds((prev) =>
-      prev.includes(categoryId) ? prev.filter((id) => id !== categoryId) : [...prev, categoryId]
-    )
-  }
-
-  const toggleSavingsAccount = (accountId: number) => {
-    clearFieldErrors('savings_account_ids')
-    setSelectedSavingsAccountIds((prev) =>
-      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
-    )
   }
 
   const handleBudgetCadenceSelect = useCallback(
@@ -2086,23 +2079,22 @@ export function AllocationsPage() {
                   {allocationForm.allocation_type === 'budget' && (
                     <div>
                       <label className="block text-sm font-medium text-body" id="allocation-categories-label">Tracked Categories</label>
-                      <div className="mt-1 flex flex-wrap gap-2" aria-labelledby="allocation-categories-label" {...groupProps('category_ids')}>
-                        {categories.map((category) => {
-                          const isSelected = selectedBudgetCategoryIds.includes(category.id)
-                          return (
-                            <button
-                              type="button"
-                              key={category.id}
-                              data-selected={isSelected ? 'true' : undefined}
-                              aria-describedby={fieldProps('category_ids')['aria-describedby']}
-                              onClick={() => toggleBudgetCategory(category.id)}
-                              className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                            >
-                              {categoryOptionLabel(category, categories)}
-                            </button>
-                          )
-                        })}
-              </div>
+                      <div ref={bindField('category_ids')}>
+                        <CategoryPicker
+                          mode="multi"
+                          categories={categories}
+                          all={categories}
+                          value={selectedBudgetCategoryIds}
+                          onChange={(ids) => {
+                            clearFieldErrors('category_ids')
+                            setSelectedBudgetCategoryIds(ids.filter((id): id is number => typeof id === 'number'))
+                          }}
+                          recentIds={recentCategories.recentIds}
+                          dataField="category_ids"
+                          labelledBy="allocation-categories-label"
+                          describedBy={fieldProps('category_ids')['aria-describedby']}
+                        />
+                      </div>
                     {renderFieldError('category_ids')}
                     <p className="mt-2 text-xs text-muted">
                       Transactions in these categories will roll into this envelope when they post.
@@ -2217,22 +2209,21 @@ export function AllocationsPage() {
                           <label className="block text-sm font-medium text-body" id="allocation-savings-accounts-label">
                             Accounts to aggregate
                           </label>
-                          <div className="mt-1 flex flex-wrap gap-2" aria-labelledby="allocation-savings-accounts-label" {...groupProps('savings_account_ids')}>
-                            {ownAccounts.map((account) => {
-                              const isSelected = selectedSavingsAccountIds.includes(account.id)
-                              return (
-                                <button
-                                  type="button"
-                                  key={account.id}
-                                  data-selected={isSelected ? 'true' : undefined}
-                                  aria-describedby={fieldProps('savings_account_ids')['aria-describedby']}
-                                  onClick={() => toggleSavingsAccount(account.id)}
-                                  className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                                >
-                                  {account.name}
-                                </button>
-                              )
-                            })}
+                          <div ref={bindField('savings_account_ids')}>
+                            <AccountPicker
+                              mode="multi"
+                              accounts={ownAccounts}
+                              value={selectedSavingsAccountIds}
+                              onChange={(ids) => {
+                                clearFieldErrors('savings_account_ids')
+                                setSelectedSavingsAccountIds(ids.filter((id): id is number => typeof id === 'number'))
+                              }}
+                              recentIds={recentAccounts.recentIds}
+                              pinnedId={user?.main_account_id ?? undefined}
+                              dataField="savings_account_ids"
+                              labelledBy="allocation-savings-accounts-label"
+                              describedBy={fieldProps('savings_account_ids')['aria-describedby']}
+                            />
                           </div>
                           {renderFieldError('savings_account_ids')}
                         </div>
