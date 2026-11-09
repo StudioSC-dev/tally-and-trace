@@ -172,6 +172,134 @@ def _validate_currency_routing(db: Session, data: dict, account: Account) -> Non
             raise HTTPException(status_code=400, detail=ROUTING_CURRENCY_DETAIL)
 
 
+# Rollout gate: the credit figures read a shared limit only once the shared
+# calculation ships, so until then no card may be linked. Tests lift it.
+SHARED_LIMITS_ENABLED = False
+SHARED_LIMITS_DISABLED_DETAIL = "Shared credit limits are not enabled yet"
+SHARED_LIMIT_TARGET_DETAIL = "shares_limit_with_account_id account not found"
+SHARED_LIMIT_UNLINK_DETAIL = "Unlink the shared credit limit first"
+
+
+def _validate_shared_limit(db: Session, current_user: User, data: dict,
+                           account: Optional[Account] = None, owner=None) -> None:
+    """Check a card's link to another card's credit limit, and edits that would break one.
+
+    A linked card (the secondary) points at the card holding the limit (the
+    primary) and keeps no limit of its own; the primary points at nothing, so
+    there are no chains or cycles. Every rule is judged on the resulting
+    fields. On an update a link is checked only when it changes, as
+    ``_validate_payment_routing`` does.
+
+    Linking (to a target, from the account or the new card):
+
+    - the target must be a card the caller manages and the account's owner
+      (``owner``, default the caller) owns, or 404 without describing it;
+    - not the card itself, both cards credit cards, both active, one currency,
+      and the target holds a limit of its own (400);
+    - the target is not linked itself, and no card is linked to this one (409);
+    - the request carries no limit of its own (400); the stored one is cleared.
+
+    While a card is linked, a limit of its own is refused (400). While a card
+    is a primary, clearing its limit is refused (409). On either side, a change
+    of currency or away from a credit card is refused (409), and so is
+    deactivating it (409): unlink first, and the usual deactivation guards then
+    apply. Unlinking (null) is any manager's of the linked card, and may set a
+    limit in the same request.
+
+    The caller locks every card the write touches first: the account and the
+    target on an update, the target on a create, the account on a delete.
+    """
+    owner = owner if owner is not None else current_user
+
+    def resolved(field, default=None):
+        if field in data:
+            return data[field]
+        return getattr(account, field) if account is not None else default
+
+    account_type = resolved("account_type")
+    is_active = resolved("is_active", True)
+    pointer = resolved("shares_limit_with_account_id")
+    link_changes = "shares_limit_with_account_id" in data and (
+        account is None or data["shares_limit_with_account_id"]
+        != account.shares_limit_with_account_id)
+    deactivating = data.get("is_active") is False and (account is None or account.is_active)
+    currency_changes = (account is not None and "currency" in data
+                        and data["currency"] != account.currency)
+    leaves_credit = ("account_type" in data and account_type != AccountType.CREDIT)
+
+    if link_changes and pointer is not None:
+        if not SHARED_LIMITS_ENABLED:
+            raise HTTPException(status_code=400, detail=SHARED_LIMITS_DISABLED_DETAIL)
+        if account is not None and pointer == account.id:
+            raise HTTPException(status_code=400,
+                                detail="A card cannot share its own credit limit")
+        target = db.get(Account, pointer)
+        if (target is None or account_role(current_user, target) not in MANAGE_ROLES
+                or target.user_id != owner.id):
+            raise HTTPException(status_code=404, detail=SHARED_LIMIT_TARGET_DETAIL)
+        if account_type != AccountType.CREDIT or target.account_type != AccountType.CREDIT:
+            raise HTTPException(status_code=400,
+                                detail="Only a credit card can share another credit card's limit")
+        if not target.is_active or not is_active:
+            raise HTTPException(status_code=400,
+                                detail="Both cards must be active to share a credit limit")
+        if target.currency != resolved("currency"):
+            raise HTTPException(status_code=400,
+                                detail="Cards sharing a credit limit must be in one currency")
+        if target.shares_limit_with_account_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="That card shares another card's limit; link to the card that holds it")
+        if account is not None and db.query(Account.id).filter(
+                Account.shares_limit_with_account_id == account.id).first():
+            raise HTTPException(
+                status_code=409,
+                detail="Other cards share this card's limit, so it cannot share another's")
+        if target.credit_limit is None:
+            raise HTTPException(status_code=400,
+                                detail="That card has no credit limit to share")
+        if data.get("credit_limit") is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="A card that shares another card's limit has no limit of its own")
+        data["credit_limit"] = None
+        return
+
+    if pointer is not None:
+        # A linked card, its link unchanged.
+        if data.get("credit_limit") is not None:
+            primary = db.get(Account, pointer)
+            if primary is not None and can_view_account(current_user, primary):
+                detail = (f"This card shares its limit with {primary.name}; "
+                          "change the limit there")
+            else:
+                detail = "This card shares another card's limit; change the limit there"
+            raise HTTPException(status_code=400, detail=detail)
+        if currency_changes or leaves_credit:
+            raise HTTPException(
+                status_code=409,
+                detail="This card shares a credit limit; unlink it before changing its "
+                       "currency or type")
+        if deactivating:
+            raise HTTPException(status_code=409, detail=SHARED_LIMIT_UNLINK_DETAIL)
+
+    if account is None or not db.query(Account.id).filter(
+            Account.shares_limit_with_account_id == account.id).first():
+        return
+    # A primary: other cards share its limit.
+    if "credit_limit" in data and data["credit_limit"] is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Other cards share this card's limit; unlink them before removing it")
+    if currency_changes or leaves_credit:
+        raise HTTPException(
+            status_code=409,
+            detail="Other cards share this card's limit; unlink them before changing its "
+                   "currency or type")
+    if deactivating:
+        raise HTTPException(status_code=409, detail=SHARED_LIMIT_UNLINK_DETAIL)
+
+
 def _validate_spending_wallet(db: Session, data: dict, account: Optional[Account] = None) -> None:
     """Reject a spending-wallet flag that would leave a wallet funding something.
 
@@ -633,7 +761,11 @@ def create_account(
     # The caller's own tags only (404 otherwise); linked once the account exists.
     tag_ids = own_tag_ids(db, current_user, account_data.pop("tag_ids", None) or [])
 
+    # The target is locked first, so a link to it and its own edits take turns.
+    locking.lock_accounts(db, [account_data.get("shares_limit_with_account_id")])
+
     _validate_payment_routing(db, current_user, account_data)
+    _validate_shared_limit(db, current_user, account_data)
     _validate_spending_wallet(db, account_data)
     _validate_loan(db, account_data)
     _validate_minimum_due_rule(account_data, account.minimum_due_rule)
@@ -657,12 +789,15 @@ def get_account(account_id: int, db: Session = Depends(get_db), current_user: Us
 def update_account(account_id: int, account_update: AccountUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing account (settings and routing: owner or admin; deactivating: owner)"""
     db_account = get_account_or_404(db, current_user, account_id, roles=MANAGE_ROLES)
+    update_data = account_update.dict(exclude_unset=True)
     # Locked before any validation, field write or tag-link write, whatever the edit
     # (STU-226): a tags-only edit that deleted its link rows first and wanted the
-    # account only at commit would deadlock with a balance edit holding it.
-    db_account = locking.lock_accounts(db, [db_account.id])[db_account.id]
+    # account only at commit would deadlock with a balance edit holding it. A
+    # shared-limit link locks its target in the same call (ascending id), so two
+    # links that would make a chain or a cycle take turns.
+    db_account = locking.lock_accounts(
+        db, [db_account.id, update_data.get("shares_limit_with_account_id")])[db_account.id]
 
-    update_data = account_update.dict(exclude_unset=True)
     # Tags: the caller's own only, on an account whose settings they may change.
     tag_ids = update_data.pop("tag_ids", None)
     if tag_ids is not None:
@@ -674,6 +809,8 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
         raise HTTPException(status_code=404, detail="Account not found")
     _validate_payment_routing(db, current_user, update_data, account=db_account,
                               owner=db_account.user)
+    _validate_shared_limit(db, current_user, update_data, account=db_account,
+                           owner=db_account.user)
     _validate_currency_routing(db, update_data, db_account)
     _validate_loan_payer(db, current_user, update_data, db_account)
     _validate_deactivation(db, current_user, update_data, db_account)
@@ -705,6 +842,11 @@ def update_account(account_id: int, account_update: AccountUpdate, db: Session =
 def delete_account(account_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Soft delete an account (mark as inactive). Owner only."""
     db_account = get_account_or_404(db, current_user, account_id, roles=OWNER_ROLES)
+    # Locked before any check, as an update is: a shared-limit link to or from
+    # this card locks it too, so the two take turns.
+    db_account = locking.lock_accounts(db, [db_account.id])[db_account.id]
+    _validate_shared_limit(db, current_user, {"is_active": False}, db_account,
+                           owner=db_account.user)
     _validate_loan_payer(db, current_user, {"is_active": False}, db_account)
     _validate_deactivation(db, current_user, {"is_active": False}, db_account)
 

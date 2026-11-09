@@ -34,6 +34,9 @@ class AccountBase(BaseModel):
     
     # Credit card specific fields
     credit_limit: Optional[float] = Field(None, ge=0)
+    # Credit cards only: the card whose credit limit this one shares (its own
+    # credit_limit is then null). Null for anyone but an owner or admin.
+    shares_limit_with_account_id: Optional[int] = Field(None, gt=0)
     due_date: Optional[int] = Field(None, ge=1, le=31)  # Day of month (legacy support)
     billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)  # Day of month the statement closes
     days_until_due_date: Optional[int] = Field(21, ge=1, le=90)
@@ -68,6 +71,8 @@ class AccountUpdate(BaseModel):
     description: Optional[str] = None
     currency: Optional[CurrencyType] = None
     credit_limit: Optional[float] = Field(None, ge=0)
+    # Null unlinks the card from the shared limit.
+    shares_limit_with_account_id: Optional[int] = Field(None, gt=0)
     due_date: Optional[int] = Field(None, ge=1, le=31)
     billing_cycle_start: Optional[int] = Field(None, ge=1, le=31)
     days_until_due_date: Optional[int] = Field(None, ge=1, le=90)
@@ -127,7 +132,8 @@ class AccountFields(AccountBase):
 class DirectAccountResponse(AccountFields):
     """An account as a caller with a direct role sees it.
 
-    ``description``, ``credit_limit``, ``minimum_due_rule``, the routing ids,
+    ``description``, ``credit_limit``, ``shares_limit_with_account_id``,
+    ``minimum_due_rule``, the routing ids,
     the loan terms and ``auto_post_enabled`` are null unless ``my_role`` is "owner" or "admin". ``is_shared``
     is set only for the owner (true when the account has an account share or
     carries the owner's Household tag); null for every other role.
