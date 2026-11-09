@@ -53,6 +53,7 @@ const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, allDueRows, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
+const { seedDays, closeDayOf } = require('./_seed_days.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -142,10 +143,10 @@ async function makeUser(tag) {
 }
 const account = (u, name, type = 'checking', balance = 100000) =>
   post(u.token, '/accounts/', { name, account_type: type, balance, currency: 'PHP' })
-/** A PHP card closing on the 28th, due 21 days later, paid from `bank`. */
-const card = (u, bank, name) => post(u.token, '/accounts/', {
+/** A PHP card closing on `closeDom`, due 21 days later, paid from `bank`. */
+const card = (u, bank, name, closeDom = 28) => post(u.token, '/accounts/', {
   name, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 100000,
-  billing_cycle_start: 28, days_until_due_date: 21, payment_account_id: bank.id,
+  billing_cycle_start: closeDom, days_until_due_date: 21, payment_account_id: bank.id,
 })
 const entry = (u, fields) => post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
 /** A monthly card installment: `count` payments from `next`. */
@@ -412,10 +413,13 @@ async function installments(browser) {
   const today = manilaToday()
   const u = await makeUser('d')
   const bank = await account(u, 'D Checking')
-  const visa = await card(u, bank, 'D Visa')
-  const on = await installment(u, visa, 'D On', addDays(today, 3), 3)
-  const unreviewed = await installment(u, visa, 'D Unreviewed', addDays(today, 4), 3)
-  const off = await installment(u, visa, 'D Off', addDays(today, 5), 3)
+  // One card per installment, each closing on its own date: the API keeps a card installment on its
+  // statement close, and a close is at most the 28th, so the dates are seeded where none needs clamping.
+  const [onDay, unreviewedDay, offDay] = seedDays(today, [3, 4, 5])
+  const cardFor = (name, day) => card(u, bank, name, closeDayOf(day))
+  const on = await installment(u, await cardFor('D Visa On', onDay), 'D On', onDay, 3)
+  const unreviewed = await installment(u, await cardFor('D Visa Unreviewed', unreviewedDay), 'D Unreviewed', unreviewedDay, 3)
+  const off = await installment(u, await cardFor('D Visa Off', offDay), 'D Off', offDay, 3)
   setReview(on.id, 'on')
   setReview(unreviewed.id, 'unreviewed')
   setReview(off.id, 'off')
@@ -427,7 +431,7 @@ async function installments(browser) {
   const plans = await readTab(page, 'installments')
   const planOf = (e) => plans.filter((r) => r.kind === 'installment' && r.source === `budget_entry:${e.id}`)
   const view = (e, next) => planOf(e).map((r) => [r.name, r.left, r.text.includes(`Next charge ${fmt(next)}`), [...r.buttons].sort(), r.autoPost])
-  const first = (e) => addDays(today, e === on ? 3 : e === unreviewed ? 4 : 5)
+  const first = (e) => (e === on ? onDay : e === unreviewed ? unreviewedDay : offDay)
   check('(d) auto-post on: one plan row, "3 of 3 left", no buttons and the auto-post label',
     view(on, first(on)).map(([n, l, nx, b, a]) => [n, l, nx, b, a?.includes('Auto-posts each morning')]), [['D On', '3 of 3 left', true, [], true]])
   check('(d) unreviewed: one plan row with Review, Charged and Posted',

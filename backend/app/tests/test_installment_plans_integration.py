@@ -23,7 +23,7 @@ pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not
 
 T = date(2026, 10, 18)
 KEYS = {"view", "entry_id", "name", "account_name", "amount", "currency", "next_charge",
-        "missed", "payments_left", "payments_total", "can_mark_paid", "auto_post",
+        "effective_date", "missed", "payments_left", "payments_total", "can_mark_paid", "auto_post",
         "block_reason", "can_review", "recordable"}
 
 
@@ -93,7 +93,7 @@ def test_a_plan_reads_its_next_charge_and_n_of_m(w):
     assert body["today"] == T.isoformat()
     assert body["items"] == [{
         "view": "full", "entry_id": sofa, "name": "Sofa", "account_name": "Card C",
-        "amount": 5000.0, "currency": "PHP", "next_charge": _day(3), "missed": 0,
+        "amount": 5000.0, "currency": "PHP", "next_charge": _day(3), "effective_date": _day(3), "missed": 0,
         "payments_left": 10, "payments_total": 12, "can_mark_paid": True, "auto_post": "off",
         "block_reason": None, "can_review": True, "recordable": True}]
 
@@ -113,6 +113,27 @@ def test_an_overdue_plan_counts_its_missed_months_and_sorts_first(w):
         (gone, None, 0)]  # every remaining month has a row: last
     assert items[0]["auto_post"] == "unreviewed" and items[0]["recordable"] is True
     assert items[-1]["recordable"] is False
+
+
+def _move(client, who, entry_id, day, to) -> None:
+    r = client.put(f"{API}/budget-entries/{entry_id}/occurrences/{day}/date",
+                   json={"effective_date": to}, headers=who["headers"])
+    assert r.status_code == 200, r.text
+
+
+def test_a_moved_next_charge_reads_its_forced_date(w):
+    """``next_charge`` stays the scheduled day; ``effective_date`` is the day it is due on, and
+    the order and ``missed`` read it."""
+    client, o = w["client"], w["o"]
+    sofa = _ordinary(w)
+    zed = _ordinary(w, name="Zed")
+    _move(client, o, sofa, _day(3), _day(8))
+    _move(client, o, zed, _day(3), _day(-2))
+    plan = _plan(client, o, sofa)
+    assert (plan["next_charge"], plan["effective_date"], plan["missed"]) == (_day(3), _day(8), 0)
+    items = _plans(client, o)["items"]
+    assert [(i["entry_id"], i["next_charge"], i["effective_date"], i["missed"]) for i in items] == [
+        (zed, _day(3), _day(-2), 1), (sofa, _day(3), _day(8), 0)]  # Zed is overdue: first
 
 
 def test_a_charged_month_moves_the_next_charge_on(w):

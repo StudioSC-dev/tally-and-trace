@@ -1739,6 +1739,8 @@ export interface InstallmentPlan {
   currency: string
   /** The oldest scheduled month with no recorded row (`YYYY-MM-DD`); null once every remaining month has one. */
   next_charge: string | null
+  /** The day `next_charge` is due on: its forced date when it was moved, else `next_charge`; null with no next charge. Absent from an older API. */
+  effective_date?: string | null
   /** Unrecorded scheduled months before today (Manila). */
   missed: number
   /** Payments remaining: the entry's `max_occurrences`. */

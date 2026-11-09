@@ -165,6 +165,24 @@ async function uiLogin(page, u) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.waitForURL((url) => url.pathname === '/')
 }
+/**
+ * Waits until the screen loader lets go of the open Mark paid dialog. While any request is in flight
+ * the loader swallows input events (`change`, `input`, clicks) and makes the dialog's host inert, so
+ * a select or fill sent then moves the field without the app seeing it: the amount keeps the usual
+ * figure, or the typed one is not what is posted. Call it before the first input on a dialog.
+ */
+const inputReady = async (page, ms = 10000) => {
+  try {
+    await page.waitForFunction(() => {
+      const field = document.querySelector(
+        '[data-testid="mark-paid-dialog"] [data-testid="mark-paid-occurrence"], [data-testid="mark-paid-dialog"] [data-testid="mark-paid-amount"]',
+      )
+      return field !== null && field.closest('[inert]') === null
+    }, undefined, { timeout: ms })
+  } catch (e) {
+    throw new Error(`the Mark paid dialog's field was still behind the screen loader after ${ms} ms: ${e.message}`)
+  }
+}
 const settle = async (page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500) }
 /** Signs in and opens Transactions with the section loaded. */
 async function openDue(browser, u) {
@@ -643,6 +661,7 @@ async function markReceivedSalary(browser) {
   check('(f) the amount field is prefilled with the usual amount', await amount.inputValue(), String(w.salary.amount))
   check('(f) the amount field reads "Amount received (PHP)"', ((await dialog(page).locator(`label[for="${await amount.getAttribute('id')}"]`).textContent()) ?? '').trim(), 'Amount received (PHP)')
   const balanceBefore = await accountBalance(w.u, w.checking.id)
+  await inputReady(page)
   await amount.fill('31250.5')
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${w.salary.id}/materialize`))
   await dialog(page).locator('[data-testid="mark-paid-submit"]').click()
@@ -683,6 +702,7 @@ async function pendingLinkedIncome(browser) {
     const name = rec.income.name
     await (await showRow(page, recRows(page, name, 'missed'))).locator('[data-testid="due-mark-received"]').click()
     if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), `(r) ${name}: Mark received opened the dialog`))) return ctx.close()
+    await inputReady(page)
     await dialog(page).locator('[data-testid="mark-paid-occurrence"]').selectOption(start)
     const amount = dialog(page).locator('[data-testid="mark-paid-amount"]')
     await amount.waitFor()
