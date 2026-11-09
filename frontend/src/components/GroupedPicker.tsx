@@ -33,6 +33,12 @@ interface PickerCommon {
   describedBy?: string
   /** Shown in place of the chips when there are no options and no leading chips. */
   emptyText?: string
+  /**
+   * Single mode only. With a value the field is one line (the choice and a Change button);
+   * Change opens one sideways-scrolling chip row, and a pick or Escape collapses it again.
+   * With no value it starts open.
+   */
+  compact?: boolean
 }
 
 interface SinglePickerProps extends PickerCommon {
@@ -81,6 +87,7 @@ function uniqueById(options: readonly PickerOption[]): PickerOption[] {
  */
 export function GroupedPicker(props: GroupedPickerProps) {
   const { groups, recentIds, pinnedId, leading = [], noun, dataField, labelledBy, describedBy, emptyText } = props
+  const compact = props.compact === true && props.mode === 'single'
   const [expanded, setExpanded] = useState(false)
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
@@ -89,6 +96,14 @@ export function GroupedPicker(props: GroupedPickerProps) {
   // After a pick from the panel, focus moves to that chip once it is in the quick row.
   const focusAfterPick = useRef<PickerId | null>(null)
   const panelId = useId()
+  const changeId = useId()
+  const valueId = useId()
+  // Compact: the user has opened a field that has a value. Only a click on Change sets it.
+  const [fieldOpen, setFieldOpen] = useState(false)
+  const changeRef = useRef<HTMLButtonElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const focusChange = useRef(false)
+  const focusRow = useRef(false)
 
   const selected: readonly PickerId[] =
     props.mode === 'single' ? (props.value === undefined ? [] : [props.value]) : props.value
@@ -101,17 +116,41 @@ export function GroupedPicker(props: GroupedPickerProps) {
   const filtered = useMemo(() => filterPickerGroups(groups, open ? query : ''), [groups, open, query])
 
   useEffect(() => {
+    if (focusChange.current) {
+      focusChange.current = false
+      changeRef.current?.focus()
+    }
+    if (focusRow.current && rowRef.current) {
+      focusRow.current = false
+      const target = rowRef.current.querySelector<HTMLElement>('[data-selected="true"]') ?? rowRef.current.querySelector<HTMLElement>('button:not(:disabled)')
+      target?.focus()
+    }
+  })
+
+  useEffect(() => {
     const id = focusAfterPick.current
     if (id === null || open) return
     focusAfterPick.current = null
+    if (compact) return
     const chip = rootRef.current?.querySelector<HTMLElement>(`[data-picker-id="${CSS.escape(String(id))}"]`)
     ;(chip ?? toggleRef.current)?.focus()
   })
+
+  const closeField = () => {
+    setFieldOpen(false)
+    setExpanded(false)
+    setQuery('')
+    focusChange.current = true
+  }
 
   const choose = (id: PickerId, fromPanel: boolean) => {
     if (props.mode === 'single') {
       const next = props.deselectable && props.value === id ? undefined : id
       props.onChange(next)
+      if (compact) {
+        closeField()
+        return
+      }
       if (fromPanel) {
         focusAfterPick.current = id
         setExpanded(false)
@@ -142,7 +181,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
         aria-pressed={isSelected}
         aria-describedby={describedBy}
         onClick={() => choose(option.id, fromPanel)}
-        className={chipClass(isSelected)}
+        className={`${chipClass(isSelected)}${compact ? ' shrink-0 whitespace-nowrap' : ''}`}
       >
         {option.label}
         {option.hint !== undefined && <span className="ml-2 text-xs font-normal">({option.hint})</span>}
@@ -159,8 +198,11 @@ export function GroupedPicker(props: GroupedPickerProps) {
       aria-pressed={l.selected}
       aria-describedby={describedBy}
       disabled={l.disabled}
-      onClick={l.onClick}
-      className={chipClass(l.selected, l.italic)}
+      onClick={() => {
+        l.onClick()
+        if (compact) closeField()
+      }}
+      className={`${chipClass(l.selected, l.italic)}${compact ? ' shrink-0 whitespace-nowrap' : ''}`}
     >
       {l.label}
     </button>
@@ -177,6 +219,13 @@ export function GroupedPicker(props: GroupedPickerProps) {
       collapse()
       toggleRef.current?.focus()
     }
+  }
+
+  const onFieldKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return
+    event.preventDefault()
+    event.stopPropagation()
+    closeField()
   }
 
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -211,6 +260,110 @@ export function GroupedPicker(props: GroupedPickerProps) {
 
   const nSelected = selected.length
   const quickOptions = (quick ?? []).map((id) => byId.get(id)).filter((o): o is PickerOption => o !== undefined)
+
+  const hasValue = selected.length > 0 || leading.some((l) => l.selected)
+  if (compact) {
+    const showLine = hasValue
+    const isOpen = !hasValue || fieldOpen
+    const current = selected.length > 0 ? byId.get(selected[0]) : undefined
+    const currentText =
+      current !== undefined
+        ? current.hint !== undefined ? `${current.label} (${current.hint})` : current.label
+        : (leading.find((l) => l.selected)?.label ?? '')
+    const toggle = !flat && (
+      <button
+        type="button"
+        ref={toggleRef}
+        data-picker-toggle=""
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-describedby={describedBy}
+        onClick={() => (open ? collapse() : setExpanded(true))}
+        className={`${CHIP} shrink-0 whitespace-nowrap border border-line text-body hover:bg-sunken`}
+      >
+        {open ? 'Show fewer' : `All ${options.length} ${noun.many}`}
+        <span aria-hidden="true" className="ml-1">{open ? '▴' : '▾'}</span>
+      </button>
+    )
+    return (
+      <div
+        ref={rootRef}
+        className="flex min-w-0 flex-col gap-2"
+        role="group"
+        aria-labelledby={labelledBy}
+        aria-describedby={describedBy}
+        data-field={dataField}
+        data-picker={!isOpen ? 'line' : flat ? 'flat' : open ? 'expanded' : 'collapsed'}
+        onKeyDown={showLine && isOpen ? onFieldKeyDown : undefined}
+      >
+        {showLine && (
+          <div data-picker-line="" className="flex min-h-11 min-w-0 items-center justify-between gap-2">
+            <span id={valueId} data-picker-value="" className="min-w-0 break-words text-sm font-medium text-body">
+              {currentText}
+            </span>
+            <button
+              type="button"
+              id={changeId}
+              ref={changeRef}
+              data-picker-change=""
+              aria-expanded={isOpen}
+              aria-labelledby={`${changeId} ${labelledBy} ${valueId}`}
+              aria-describedby={describedBy}
+              onClick={() => {
+                if (isOpen) {
+                  closeField()
+                } else {
+                  setFieldOpen(true)
+                  focusRow.current = true
+                }
+              }}
+              className="focus-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-line px-3 text-sm font-medium text-body hover:bg-sunken"
+            >
+              {isOpen ? 'Close' : 'Change'}
+            </button>
+          </div>
+        )}
+        {isOpen && (
+          <>
+            {options.length === 0 && leading.length === 0 && emptyText !== undefined && (
+              <p className="text-sm text-muted">{emptyText}</p>
+            )}
+            <div className="flex min-w-0 items-center gap-2">
+              <div ref={rowRef} data-picker-row="" className="flex min-w-0 flex-1 flex-nowrap gap-2 overflow-x-auto">
+                {leadingChips}
+                {!open && (flat ? options.map((o) => chip(o, false)) : quickOptions.map((o) => chip(o, false)))}
+              </div>
+              {toggle}
+            </div>
+            {open && (
+              <div id={panelId} className="w-full min-w-0 basis-full space-y-3" onKeyDown={onPanelKeyDown}>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={onSearchKeyDown}
+                  placeholder={`Search ${noun.many}`}
+                  aria-label={`Search ${noun.many}`}
+                  data-picker-search=""
+                  className="input-field focus-ring w-full"
+                  autoComplete="off"
+                />
+                <p aria-live="polite" data-picker-matches="" className="text-xs text-muted">
+                  {query.trim() === ''
+                    ? ''
+                    : filtered.count === 0
+                      ? 'No matches'
+                      : `${filtered.count} ${filtered.count === 1 ? 'match' : 'matches'}`}
+                </p>
+                {renderGroups(filtered.groups, 0)}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div

@@ -3049,6 +3049,7 @@ export function TransactionsPage() {
                   recentIds={recentAccounts.recentIds}
                   pinnedId={user?.main_account_id ?? undefined}
                   dataField="account_id"
+                  compact
                   labelledBy="transaction-account-label"
                   describedBy={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
                 />
@@ -3087,6 +3088,7 @@ export function TransactionsPage() {
                     recentIds={recentAccounts.recentIds}
                     pinnedId={user?.main_account_id ?? undefined}
                     dataField="transfer_to_account_id"
+                    compact
                     labelledBy="transaction-destination-label"
                     describedBy={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
                     emptyText="Select a different source account to see destinations."
@@ -3128,6 +3130,7 @@ export function TransactionsPage() {
                   ]}
                   recentIds={recentCategories.recentIds}
                   dataField="category_id"
+                  compact
                   labelledBy="transaction-category-label"
                 />
                 <p className="mt-2 text-xs text-muted">
