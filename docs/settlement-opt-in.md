@@ -12,9 +12,10 @@ loan), under the same locks.
 
 ## Who runs it and how
 
-The owner runs it, in their own shell, with the production URL exported there.
-Agents never hold production credentials. Only `DATABASE_URL` is needed; it is
-read from the environment, never from a `.env`. `PGHOST`, `PGHOSTADDR`, `PGPORT`,
+The owner runs it, or an agent runs it with the owner's explicit go for that
+run. Either way the production URL is exported only for that one command, the
+dry run comes first, and the same guards below apply. Only `DATABASE_URL` is
+needed; it is read from the environment, never from a `.env`. `PGHOST`, `PGHOSTADDR`, `PGPORT`,
 `PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE`, `PGTZ` and `PGOPTIONS` must be unset,
 and the URL must not use the transaction pooler (port 6543). The script refuses,
 before it connects, unless the URL names exactly `--expect-host` and
