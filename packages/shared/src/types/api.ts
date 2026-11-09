@@ -1624,6 +1624,8 @@ export interface MissedCharge {
   unlinked_count: number
   /** The oldest of those; null when `unlinked_count` is 0. */
   oldest_unlinked: string | null
+  /** `oldest_unlinked` on its forced date (itself when none); null when it is. Absent from an older API. */
+  oldest_effective?: string | null
   /** The readable pending rows linked to missed occurrences. */
   pending_transaction_ids: number[]
   can_mark_paid: boolean
