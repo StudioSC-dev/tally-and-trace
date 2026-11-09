@@ -33,6 +33,7 @@ import {
   fieldErrorProps,
   recurringActionsFor,
   settlementLabel,
+  hasCreditLimit,
   withoutError,
 } from '@tally-trace/shared'
 import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
@@ -1620,7 +1621,7 @@ export function AllocationsPage() {
   // Placeholders show only for a card the caller manages; a figure comes only from creditData.
   const managesCredit = (accountId: number | undefined) => {
     const account = accountId === undefined ? undefined : accountsById.get(accountId)
-    return !!account && account.account_type === 'credit' && account.permissions.can_edit_settings && account.credit_limit != null
+    return !!account && account.account_type === 'credit' && account.permissions.can_edit_settings && hasCreditLimit(account)
   }
 
   const renderKindCredit = (group: KindGroup) => {

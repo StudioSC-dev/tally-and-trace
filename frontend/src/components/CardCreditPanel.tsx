@@ -147,7 +147,7 @@ export function CardCreditPanel({ account }: { account: Account }) {
         <div className="space-y-1">
           <CreditSummary credit={detail.credit} />
           <p className="text-xs text-muted" data-testid="card-credit-opening">
-            Owed {formatCurrency(detail.credit.opening.balance_owed, currency)} · pending counted now{' '}
+            {(detail.credit.shared_with?.length ?? 0) > 0 && 'Across both cards: '}Owed {formatCurrency(detail.credit.opening.balance_owed, currency)} · pending counted now{' '}
             {formatCurrency(detail.credit.opening.pending_total, currency)} · held for installments{' '}
             {formatCurrency(detail.credit.opening.installment_hold, currency)} · missed months{' '}
             {formatCurrency(detail.credit.opening.missed_total, currency)}

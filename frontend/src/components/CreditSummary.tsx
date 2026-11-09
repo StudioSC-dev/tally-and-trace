@@ -1,4 +1,4 @@
-import { availableCreditText, creditStatusText, plannedChargesText } from '@tally-trace/shared'
+import { availableCreditText, creditStatusText, plannedChargesText, sharedLimitText } from '@tally-trace/shared'
 import type { CardCredit, CreditCheck } from '@tally-trace/shared'
 import { formatCurrency } from '../utils/currency'
 
@@ -19,6 +19,7 @@ interface Props {
 export function CreditSummary({ credit, compact = false }: Props) {
   const { available, withPlanned } = availableCreditText(credit)
   const plannedCharges = plannedChargesText(credit)
+  const shared = sharedLimitText(credit)
   const missedMonths = credit.missed.reduce((sum, item) => sum + item.count, 0)
   const held = credit.opening.installment_hold
   const holds: string[] = []
@@ -30,6 +31,9 @@ export function CreditSummary({ credit, compact = false }: Props) {
       <p className={compact ? 'text-xs font-medium text-ink' : 'text-sm font-semibold text-ink'} data-testid="credit-available">
         Available {available}
       </p>
+      {!compact && shared && (
+        <p className="text-xs text-muted" data-testid="credit-shared-limit">{shared}</p>
+      )}
       {withPlanned && (
         <p className="text-xs text-info" data-testid="credit-with-planned">{withPlanned}</p>
       )}
