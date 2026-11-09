@@ -19,6 +19,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const d = require('./_dialogs.cjs')
+const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -128,7 +129,7 @@ async function openActions(page, description) {
 
 async function fillValid(modal, description) {
   await control(modal, 'description').fill(description)
-  await control(modal, 'account_id').getByRole('button', { name: /^Dlg Checking/ }).click()
+  await pick(control(modal, 'account_id'), 'Dlg Checking')
   await control(modal, 'amount').fill('42')
 }
 
@@ -178,6 +179,11 @@ async function scenarioA(browser) {
       }))
       return (got.role === 'group' && got.label === 'Account' && got.invalid === null) || `group ${JSON.stringify(got)}`
     })
+    // The first button the error focuses is an account chip, never the picker's toggle.
+    await h.check('a.account.focus-is-chip', 'B', async () => {
+      const got = await firstChip.evaluate((el) => ({ id: el.getAttribute('data-picker-id'), toggle: el.hasAttribute('data-picker-toggle') }))
+      return (got.id !== null && !got.toggle) || `first button ${JSON.stringify(got)}`
+    })
     await h.check('a.account.chips-described', 'B', async () => {
       const ids = await group.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-describedby')))
       return (ids.length > 0 && ids.every((id) => id === 'transaction-account_id-error')) || `chips ${JSON.stringify(ids)}`
@@ -187,7 +193,7 @@ async function scenarioA(browser) {
       return n === 0 || `${n} POST /transactions`
     })
 
-    await group.getByRole('button', { name: /^Dlg Checking/ }).click()
+    await pick(group, 'Dlg Checking')
     await h.check('a.account.cleared-on-select', 'B', async () =>
       (await fieldError(modal, 'account_id').count()) === 0 || 'the account error is still shown')
     from = log.length
@@ -276,7 +282,7 @@ async function scenarioB(browser) {
 
     await modal.getByRole('button', { name: 'Transfer', exact: true }).click()
     await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
-    await control(modal, 'transfer_to_account_id').getByRole('button', { name: /^Dlg Dollars/ }).click()
+    await pick(control(modal, 'transfer_to_account_id'), 'Dlg Dollars')
     await amount.fill('100')
     const received = control(modal, 'received_amount')
     await submit(page, modal)
@@ -518,7 +524,7 @@ async function scenarioG(browser) {
   try {
     const modal = await openAddForm(page)
     await control(modal, 'description').fill('Dialog G tick')
-    await control(modal, 'account_id').getByRole('button', { name: /^Dlg Checking/ }).click()
+    await pick(control(modal, 'account_id'), 'Dlg Checking')
     await modal.getByRole('checkbox', { name: 'Mark as posted' }).uncheck()
     await modal.locator('select').selectOption('USD')
     await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
@@ -542,7 +548,7 @@ async function scenarioH(browser) {
   try {
     const modal = await openAddForm(page)
     await control(modal, 'description').fill('Dialog H switch')
-    await control(modal, 'account_id').getByRole('button', { name: /^Dlg Dollars/ }).click()
+    await pick(control(modal, 'account_id'), 'Dlg Dollars')
     await control(modal, 'amount').fill('10')
     await submit(page, modal)
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})

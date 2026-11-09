@@ -29,6 +29,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const d = require('./_dialogs.cjs')
+const { pick, chipOf } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -81,7 +82,7 @@ const anotherOf = (modal) => modal.locator('[data-testid="save-and-add-another"]
 const cancelOf = (modal) => modal.getByRole('button', { name: 'Cancel', exact: true })
 const postedBox = (modal) => modal.getByRole('checkbox', { name: 'Mark as posted' })
 const recurringSelect = (modal) => modal.locator('select:has(option[value=""])')
-const chip = (scope, name) => scope.getByRole('button', { name: new RegExp(`^${name}`) })
+const chip = chipOf
 const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
 const textOf = async (locator) => ((await locator.textContent({ timeout: 3000 }).catch(() => null)) || '').trim()
 const isFocused = (locator) => locator.evaluate((el) => el === document.activeElement).catch(() => false)
@@ -200,7 +201,8 @@ const openWithPhaseRecorder = (browser, user, scenario, options) => openPage(bro
 async function fillEntry(modal, description, amount, account = 'Sav Checking') {
   await control(modal, 'description').fill(description)
   const accountChip = chip(control(modal, 'account_id'), account)
-  if ((await accountChip.getAttribute('data-selected')) !== 'true') await accountChip.click()
+  const selected = (await accountChip.count()) > 0 && (await accountChip.getAttribute('data-selected')) === 'true'
+  if (!selected) await pick(control(modal, 'account_id'), account)
   await control(modal, 'amount').fill(String(amount))
 }
 
@@ -231,7 +233,7 @@ async function scenarioA(browser) {
     const modal = createModal(page)
     await modal.waitFor()
     await chip(modal, 'Expense').click()
-    await chip(modal, 'Sav Food').click()
+    await pick(control(modal, 'category_id'), 'Sav Food')
     const dateBefore = await control(modal, 'transaction_date').inputValue()
     await fillEntry(modal, 'Coffee', 180)
     await clickAnother(page, modal)
@@ -258,11 +260,11 @@ async function scenarioA(browser) {
       const got = {
         account: await chip(control(modal, 'account_id'), 'Sav Checking').getAttribute('data-selected'),
         type: await chip(modal, 'Expense').evaluate((el) => el.classList.contains('bg-ink')),
-        category: await chip(modal, 'Sav Food').evaluate((el) => el.classList.contains('bg-ink')),
+        category: await chip(control(modal, 'category_id'), 'Sav Food').getAttribute('data-selected'),
         date: await control(modal, 'transaction_date').inputValue(),
         posted: await postedBox(modal).isChecked(),
       }
-      const ok = got.account === 'true' && got.type && got.category && got.date === dateBefore && got.posted
+      const ok = got.account === 'true' && got.type && got.category === 'true' && got.date === dateBefore && got.posted
       return ok || `kept ${JSON.stringify(got)}, date before ${dateBefore}`
     })
     await h.check('a.focus-description', 'B', async () =>
@@ -350,11 +352,11 @@ async function scenarioB(browser) {
     })
     await h.check('b.kept', 'B', async () => {
       const got = {
-        category: await chip(modal, 'Sav Food').evaluate((el) => el.classList.contains('bg-ink')),
+        category: await chip(control(modal, 'category_id'), 'Sav Food').getAttribute('data-selected'),
         date: await control(modal, 'transaction_date').inputValue(),
         posted: await postedBox(modal).isChecked(),
       }
-      return (got.category && got.date === dateBefore && got.posted) || `kept ${JSON.stringify(got)}, date before ${dateBefore}`
+      return (got.category === 'true' && got.date === dateBefore && got.posted) || `kept ${JSON.stringify(got)}, date before ${dateBefore}`
     })
 
     await control(modal, 'description').fill('Other')
@@ -384,8 +386,8 @@ async function scenarioC(browser) {
     const modal = createModal(page)
     await chip(modal, 'Transfer').click()
     await control(modal, 'description').fill('Move one')
-    await chip(control(modal, 'account_id'), 'Sav Checking').click()
-    await chip(control(modal, 'transfer_to_account_id'), 'Sav Dollars').click()
+    await pick(control(modal, 'account_id'), 'Sav Checking')
+    await pick(control(modal, 'transfer_to_account_id'), 'Sav Dollars')
     await control(modal, 'amount').fill('100')
     await control(modal, 'received_amount').fill('2')
     await control(modal, 'transfer_fee').fill('5')
@@ -924,7 +926,7 @@ async function scenarioH(browser) {
   try {
     const modal = createModal(page)
     await control(modal, 'description').fill('Cash in')
-    await chip(control(modal, 'account_id'), 'Sav Checking').click()
+    await pick(control(modal, 'account_id'), 'Sav Checking')
     await postedBox(modal).uncheck()
     await modal.locator('select').selectOption('USD')
     await control(modal, 'projected_amount').fill('10')
@@ -975,7 +977,7 @@ async function scenarioH2(browser) {
   try {
     const modal = createModal(page)
     await control(modal, 'description').fill('Hold test')
-    await chip(control(modal, 'account_id'), 'Sav Checking').click()
+    await pick(control(modal, 'account_id'), 'Sav Checking')
     await postedBox(modal).uncheck()
     const currency = modal.locator('select:not(:has(option[value=""]))')
     await currency.selectOption('USD')
@@ -986,7 +988,7 @@ async function scenarioH2(browser) {
       currency,
       account: control(modal, 'account_id').getByRole('button').first(),
       type: chip(modal, 'Expense'),
-      category: chip(modal, 'Sav Food'),
+      category: control(modal, 'category_id').getByRole('button').first(),
       tag: modal.locator('[data-testid="tag-picker"] button').first(),
       recurring: recurringSelect(modal),
       description: control(modal, 'description'),

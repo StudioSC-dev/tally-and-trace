@@ -13,6 +13,7 @@ const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const dialogs = require('./_dialogs.cjs')
 const { allDueRows, showRow } = require('./_due_pages.cjs')
+const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -838,7 +839,7 @@ async function createTransactionUI(page, { accountName, amount, description }) {
   await form.waitFor()
   await h.waitQuiet(page)
   await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
-  await form.locator('button[type="button"]').filter({ hasText: `${accountName}(PHP)` }).or(form.locator('button[type="button"]').filter({ hasText: accountName })).first().click()
+  await pick(form.locator('[data-field="account_id"]'), accountName)
   await form.getByRole('button', { name: 'Expense', exact: true }).click()
   await form.locator('input[type="number"][placeholder="0.00"]').first().fill(String(amount))
   return form
