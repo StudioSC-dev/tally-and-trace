@@ -68,6 +68,11 @@ export interface Account {
   description?: string | null
   credit_limit?: number | null
   /**
+   * Credit cards: the id of the card whose limit this one uses; its own `credit_limit` is then
+   * null. Null when not linked, and null for an editor or viewer (absent for a tag viewer).
+   */
+  shares_limit_with_account_id?: number | null
+  /**
    * Credit cards: how the minimum amount due is estimated. Owner or admin only: null for
    * an editor or viewer, absent for a tag viewer. Null also means no rule is set.
    */
@@ -1898,6 +1903,16 @@ export interface CardCredit {
   checks: CreditCheck[]
   fx: CreditFxRate[]
   fx_buffer_pct: number
+  /**
+   * The other cards that share this card's limit, by name; empty when it is not linked. On a
+   * linked card `limit` is the shared limit and every figure but `checks` covers the whole group.
+   */
+  shared_with: CreditSharedCard[]
+}
+
+export interface CreditSharedCard {
+  account_id: number
+  name: string
 }
 
 /** Decimal fields travel as strings so no precision is lost. */

@@ -1,4 +1,4 @@
-import type { CardCredit, CreditCheck, CreditStatus } from '../types/api'
+import type { Account, CardCredit, CreditCheck, CreditStatus } from '../types/api'
 import { formatCurrency } from './currency'
 import { formatEntryDate } from './entryDate'
 
@@ -110,4 +110,51 @@ export function entryCreditWarning(checks: readonly CreditCheck[], entryId: numb
   if (!first) return null
   const more = mine.filter((c) => c !== first && COUNTED_WARNINGS.includes(c.status)).length
   return { check: first, more }
+}
+
+/**
+ * Whether a card has a credit limit to report on: its own, or the one it shares. A card the
+ * caller can't see the link of (an editor or viewer) reads as having none, as today.
+ */
+export function hasCreditLimit(account: Pick<Account, 'credit_limit' | 'shares_limit_with_account_id'>): boolean {
+  return account.credit_limit != null || account.shares_limit_with_account_id != null
+}
+
+/** "BDO Amex", "BDO Amex and BDO Visa", "A, B and C". */
+export function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('')
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/**
+ * The line a card with a shared limit shows, e.g. "Shared ₱480,000 limit with BDO Amex".
+ * Null when the card shares its limit with none.
+ */
+export function sharedLimitText(credit: Pick<CardCredit, 'currency' | 'limit' | 'shared_with'>): string | null {
+  if (credit.shared_with.length === 0) return null
+  return `Shared ${formatCurrency(credit.limit, credit.currency)} limit with ${joinNames(credit.shared_with.map((c) => c.name))}`
+}
+
+/**
+ * The cards a card may share its limit with: active credit cards in the same currency that
+ * have a limit of their own, are not linked themselves, are not the card itself, and that the
+ * caller manages and the same person owns. `ownerName` is the card's owner for an edit; null
+ * on create, where the caller owns it and so only the caller's own cards qualify.
+ */
+export function sharedLimitTargets<
+  T extends Pick<Account, 'id' | 'account_type' | 'currency' | 'is_active' | 'credit_limit' | 'shares_limit_with_account_id' | 'my_role' | 'owner_name'> & {
+    permissions: Pick<Account['permissions'], 'can_edit_settings'>
+  },
+>(accounts: readonly T[], card: { id: number | null; currency: string; ownerName: string | null }): T[] {
+  return accounts.filter(
+    (a) =>
+      a.account_type === 'credit' &&
+      a.is_active === true &&
+      a.currency === card.currency &&
+      a.credit_limit != null &&
+      a.shares_limit_with_account_id == null &&
+      a.id !== card.id &&
+      a.permissions.can_edit_settings &&
+      (card.ownerName === null ? a.my_role === 'owner' : a.owner_name === card.ownerName),
+  )
 }

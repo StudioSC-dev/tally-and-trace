@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CardCredit, CreditCheck, CreditStatus } from '../types/api'
-import { availableCreditText, creditCheckKey, occurrenceCreditCheck, creditStatusText, entryCreditWarning, entryCreditWarnings, plannedChargesText } from './cardCredit'
+import { hasCreditLimit, sharedLimitText, sharedLimitTargets, joinNames, availableCreditText, creditCheckKey, occurrenceCreditCheck, creditStatusText, entryCreditWarning, entryCreditWarnings, plannedChargesText } from './cardCredit'
 
 function check(over: Partial<CreditCheck> = {}): CreditCheck {
   return {
@@ -197,5 +197,72 @@ describe('entryCreditWarning', () => {
     const copy = structuredClone(input)
     entryCreditWarning(input, 7)
     expect(input).toEqual(copy)
+  })
+})
+
+describe('hasCreditLimit', () => {
+  it('is true for a limit or a link, false for neither', () => {
+    expect(hasCreditLimit({ credit_limit: 480000, shares_limit_with_account_id: null })).toBe(true)
+    expect(hasCreditLimit({ credit_limit: null, shares_limit_with_account_id: 64 })).toBe(true)
+    expect(hasCreditLimit({ credit_limit: null, shares_limit_with_account_id: null })).toBe(false)
+    expect(hasCreditLimit({})).toBe(false)
+  })
+})
+
+describe('sharedLimitText', () => {
+  const base = { currency: 'PHP' as const, limit: 480000 }
+
+  it('is null when the card shares its limit with none', () => {
+    expect(sharedLimitText({ ...base, shared_with: [] })).toBeNull()
+  })
+
+  it('names the other card with the shared limit', () => {
+    expect(sharedLimitText({ ...base, shared_with: [{ account_id: 64, name: 'BDO Amex' }] }))
+      .toBe('Shared ₱480,000.00 limit with BDO Amex')
+  })
+
+  it('joins several names', () => {
+    expect(joinNames(['A', 'B', 'C'])).toBe('A, B and C')
+    expect(joinNames(['A', 'B'])).toBe('A and B')
+  })
+})
+
+describe('sharedLimitTargets', () => {
+  const card = (id: number, over: Record<string, unknown> = {}) => ({
+    id,
+    account_type: 'credit' as const,
+    currency: 'PHP' as const,
+    is_active: true,
+    credit_limit: 480000 as number | null,
+    shares_limit_with_account_id: null as number | null,
+    my_role: 'owner' as const,
+    owner_name: 'Seth P.',
+    permissions: { can_edit_settings: true },
+    ...over,
+  })
+  const ids = (list: { id: number }[]) => list.map((a) => a.id)
+
+  it('keeps an eligible card and drops the card itself', () => {
+    expect(ids(sharedLimitTargets([card(1), card(2)], { id: 2, currency: 'PHP', ownerName: null }))).toEqual([1])
+  })
+
+  it('drops other currencies, inactive, non-credit, no-limit, linked and unmanaged cards', () => {
+    const all = [
+      card(1, { currency: 'USD' }),
+      card(2, { is_active: false }),
+      card(3, { account_type: 'checking' }),
+      card(4, { credit_limit: null }),
+      card(5, { shares_limit_with_account_id: 1, credit_limit: null }),
+      card(6, { permissions: { can_edit_settings: false } }),
+      card(7),
+    ]
+    expect(ids(sharedLimitTargets(all, { id: null, currency: 'PHP', ownerName: null }))).toEqual([7])
+  })
+
+  it('on create only the caller\'s own cards qualify; on edit only the card\'s owner\'s', () => {
+    const mine = card(1)
+    const theirs = card(2, { my_role: 'admin', owner_name: 'Ana R.' })
+    expect(ids(sharedLimitTargets([mine, theirs], { id: null, currency: 'PHP', ownerName: null }))).toEqual([1])
+    expect(ids(sharedLimitTargets([mine, theirs], { id: 9, currency: 'PHP', ownerName: 'Ana R.' }))).toEqual([2])
   })
 })
