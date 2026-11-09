@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { QuickBalanceCard, QuickBalanceCredit, QuickBalanceTile } from '../types/api'
-import { shortDate, tileGroupLabel, tileLines } from './quickBalances'
+import { canAddPin, MAX_QUICK_BALANCE_PINS, movePin, shortDate, tileGroupLabel, tileLines } from './quickBalances'
 
 function tile(over: Partial<QuickBalanceTile> = {}): QuickBalanceTile {
   return { account_id: 1, name: 'Security Bank', account_type: 'checking', currency: 'PHP', balance: 84210.55, slot: 'debit', ...over }
@@ -112,5 +112,48 @@ describe('tileGroupLabel', () => {
     expect(tileGroupLabel(tile({ account_type: 'credit' }))).toBe('Credit')
     expect(tileGroupLabel(tile({ account_type: 'e_wallet' }))).toBe('E-wallet')
     expect(tileGroupLabel(tile({ account_type: 'loan' }))).toBe('Loan')
+  })
+})
+
+describe('movePin', () => {
+  it('moves one place earlier or later and keeps every other id in order', () => {
+    expect(movePin([1, 2, 3, 4], 2, 'earlier')).toEqual([1, 3, 2, 4])
+    expect(movePin([1, 2, 3, 4], 1, 'later')).toEqual([1, 3, 2, 4])
+  })
+
+  it('ignores a move past either end', () => {
+    expect(movePin([1, 2, 3], 0, 'earlier')).toEqual([1, 2, 3])
+    expect(movePin([1, 2, 3], 2, 'later')).toEqual([1, 2, 3])
+    expect(movePin([7], 0, 'earlier')).toEqual([7])
+    expect(movePin([7], 0, 'later')).toEqual([7])
+  })
+
+  it('ignores an index outside the list and an empty list', () => {
+    expect(movePin([1, 2, 3], -1, 'later')).toEqual([1, 2, 3])
+    expect(movePin([1, 2, 3], 3, 'earlier')).toEqual([1, 2, 3])
+    expect(movePin([], 0, 'later')).toEqual([])
+  })
+
+  it('returns a new list and leaves the input alone', () => {
+    const input = [1, 2, 3]
+    const out = movePin(input, 0, 'later')
+    expect(out).toEqual([2, 1, 3])
+    expect(input).toEqual([1, 2, 3])
+    expect(movePin(input, 0, 'earlier')).not.toBe(input)
+  })
+})
+
+describe('canAddPin', () => {
+  it('allows an add below 6 and stops at 6', () => {
+    expect(MAX_QUICK_BALANCE_PINS).toBe(6)
+    expect(canAddPin(0)).toBe(true)
+    expect(canAddPin(5)).toBe(true)
+    expect(canAddPin(6)).toBe(false)
+    expect(canAddPin(7)).toBe(false)
+  })
+
+  it('takes the limit the API reports', () => {
+    expect(canAddPin(3, 3)).toBe(false)
+    expect(canAddPin(2, 3)).toBe(true)
   })
 })

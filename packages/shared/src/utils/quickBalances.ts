@@ -80,3 +80,23 @@ export function tileLines(tile: QuickBalanceTile): TileLine[] {
   }
   return lines
 }
+
+/** The most tiles a user can pin (the API's `max_tiles`). */
+export const MAX_QUICK_BALANCE_PINS = 6
+
+/**
+ * `ids` with the one at `index` moved one place `earlier` or `later`, as a new list. A move
+ * past either end, or from an index not in the list, leaves the order as it was.
+ */
+export function movePin(ids: readonly number[], index: number, direction: 'earlier' | 'later'): number[] {
+  const next = [...ids]
+  const target = direction === 'earlier' ? index - 1 : index + 1
+  if (!Number.isInteger(index) || index < 0 || index >= next.length || target < 0 || target >= next.length) return next
+  ;[next[index], next[target]] = [next[target], next[index]]
+  return next
+}
+
+/** Whether another account can be pinned when `count` already are: fewer than `max` (6). */
+export function canAddPin(count: number, max: number = MAX_QUICK_BALANCE_PINS): boolean {
+  return count < max
+}

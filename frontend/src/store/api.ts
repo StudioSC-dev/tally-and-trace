@@ -628,6 +628,20 @@ export const accountingApi = createApi({
       query: () => 'dashboard/quick-balances',
       providesTags: ['Account', 'Transaction', 'BudgetEntry', 'QuickBalances'],
     }),
+    // Stores the pinned accounts, in order; `[]` goes back to the defaults. Returns the same
+    // body as the GET, so it is written straight into the tiles' cache. Nothing is invalidated:
+    // a refetch would show the old tiles for a moment, and the snapshot never refetches.
+    putQuickBalances: builder.mutation<QuickBalances, number[]>({
+      query: (accountIds) => ({ url: 'dashboard/quick-balances', method: 'PUT', body: { account_ids: accountIds } }),
+      async onQueryStarted(_ids, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled
+          dispatch(accountingApi.util.updateQueryData('getQuickBalances', undefined, () => data))
+        } catch {
+          // A refused save leaves the tiles as they were; the caller shows the reason.
+        }
+      },
+    }),
 
     // ── Forecast ──────────────────────────────────────────────────────────────
     getForecastTimeline: builder.query<CashflowTimeline, { days?: number; tag?: number; account_id?: number } | void>({
@@ -898,6 +912,7 @@ export const {
   // Dashboard hooks
   useGetDashboardSnapshotQuery,
   useGetQuickBalancesQuery,
+  usePutQuickBalancesMutation,
   // Forecast hooks
   useGetForecastTimelineQuery,
 

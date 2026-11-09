@@ -1,4 +1,4 @@
-// Browser check for STU-578 PR 3: the dashboard's Quick balances section. Starts its own
+// Browser check for STU-578 PRs 3 and 4: the dashboard's Quick balances section and its pinning. Starts its own
 // API and web app against a throwaway database (./_local_stack.cjs). PHP only, so no
 // exchange rate is fetched. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -19,12 +19,26 @@
 //       dashboard renders; Retry loads the tiles
 //   (f) recording a payment from Security Bank to the card updates both tiles without a
 //       reload
-//   (h) an admin of one card in a shared-limit pair sees its Due but no Available and no "No limit set"
 //   (g) a user with no card and no e-wallet sees one tile; a user with no accounts sees
 //       no section
+//   (o) an admin of one card in a shared-limit pair sees its Due but no Available and no "No limit set"
 //
-// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h]
+// Pinning (PR 4), each with a fresh user; every scenario also checks no browser dialog fired:
+//   (h) Edit starts from the shown tiles; Move later, Move earlier, Remove and Save send the
+//       full ordered list in one PUT
+//   (i) Add account lists the pinnable accounts not shown, grouped, without a tag viewer's
+//       account; it is disabled at 6
+//   (j) Reset to defaults sends [] and the default tiles return
+//   (k) Cancel sends nothing and restores the tiles
+//   (l) pins saved in one browser context show in a second context of the same user
+//   (m) a refused save shows the server's reason inline, and a later save works
+//   (q) a tab already open shows pins another context saved once it regains focus, with no reload
+//   (n) saving pins does not refetch the dashboard snapshot
+//   (p) the editor at 390px: no horizontal scroll, every control 44px
+//
+// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
+const dialogs = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -124,9 +138,12 @@ async function setup() {
   await debit(owner, platinum.id, 300, addDays(close, 1), 'Platinum purchase')
 }
 
+const nativeTrackers = []
+const nativeCount = () => nativeTrackers.reduce((n, t) => n + t.count, 0)
 async function newPage(browser, options = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, ...options })
   const page = await ctx.newPage()
+  nativeTrackers.push(dialogs.trackNativeDialogs(page))
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page }
 }
@@ -348,19 +365,308 @@ async function fewAccounts(browser) {
   await b.ctx.close()
 }
 
-// (h) A card whose shared limit the caller can't see in full.
+// ─── Pinning ─────────────────────────────────────────────────────────────────
+const put = async (token, url, body) => {
+  const r = await api(token, 'PUT', url, body)
+  if (r.status >= 300) throw new Error(`PUT ${url} ${r.status} ${JSON.stringify(r.json)}`)
+  return r.json
+}
+const noDialog = (scenario) => check(`(${scenario}) no browser dialog fired in any scenario so far`, nativeCount(), 0)
+
+/** The user's account ids shown as tiles, in order, from the API. */
+const shownIds = async (u) => (await quick(u)).tiles.map((t) => t.account_id)
+
+/**
+ * A user with seven accounts of every pinnable group (so a 6-pin cap can be reached with
+ * accounts to spare): Security Bank, GCash, Card A, Card B, Savings One, Cash Box, Spare.
+ */
+async function seedPinUser(tag) {
+  const u = await makeUser(tag)
+  const mk = (name, account_type, balance = 100) => post(u.token, '/accounts/', { name, account_type, balance, currency: 'PHP' })
+  u.bank = await mk('Security Bank', 'checking', 5000)
+  u.gcash = await mk('GCash', 'e_wallet', 700)
+  u.cardA = await mk('Card A', 'credit', 0)
+  u.cardB = await mk('Card B', 'credit', 0)
+  u.savings = await mk('Savings One', 'savings', 900)
+  u.cash = await mk('Cash Box', 'cash', 50)
+  u.spare = await mk('Spare Checking', 'checking', 0)
+  await debit(u, u.cardA.id, 100, addDays(today, -1), 'Card A purchase')
+  u.defaults = await shownIds(u)
+  return u
+}
+
+/** Records every PUT body to the pins and every GET of the snapshot and of the tiles. */
+function capture(page) {
+  const state = { puts: [], snapshots: 0, tileGets: 0 }
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname
+    if (path.endsWith('/dashboard/quick-balances')) {
+      if (r.method() === 'PUT') state.puts.push(JSON.parse(r.postData() || 'null'))
+      else if (r.method() === 'GET') state.tileGets++
+    } else if (path.endsWith('/dashboard/snapshot') && r.method() === 'GET') state.snapshots++
+  })
+  return state
+}
+const tidSel = (id) => `[data-testid="${id}"]`
+const editRowIds = (page) => page.locator(tidSel('quick-balance-edit-row')).evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-account-id'))))
+async function openEditor(page) {
+  await page.locator(tidSel('quick-balances-edit')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor()
+  await settle(page)
+}
+const openFor = async (browser, u, options) => {
+  const { ctx, page } = await newPage(browser, options)
+  const seen = capture(page)
+  await uiLogin(page, u)
+  await openDashboard(page)
+  return { ctx, page, seen }
+}
+
+// (h) Edit starts from the shown tiles; the full ordered list goes in one PUT.
+async function editAndSave(browser) {
+  console.log('\n=== (h) Edit starts from the shown tiles; Move, Remove and Save send the full ordered list once')
+  const u = await seedPinUser('edit')
+  const [d1, d2, d3] = u.defaults
+  const { ctx, page, seen } = await openFor(browser, u)
+  check('(h) no Reset to defaults while nothing is pinned', [await tiles(page).count(), await page.locator(tidSel('quick-balances-reset')).count()], [3, 0])
+  await openEditor(page)
+  check('(h) the editor starts from the shown tiles, in order', await editRowIds(page), [d1, d2, d3])
+  check('(h) the tile links are gone in edit mode', await tiles(page).count(), 0)
+  check('(h) the first row cannot move earlier, the last cannot move later',
+    [await page.locator(tidSel(`quick-balance-move-earlier-${d1}`)).isDisabled(), await page.locator(tidSel(`quick-balance-move-later-${d3}`)).isDisabled()], [true, true])
+  await page.locator(tidSel(`quick-balance-move-later-${d1}`)).click()
+  check('(h) Move later puts the first after the second', await editRowIds(page), [d2, d1, d3])
+  check('(h) focus stays on the moved row\'s button', await page.evaluate(() => document.activeElement?.getAttribute('data-testid')), `quick-balance-move-later-${d1}`)
+  await page.locator(tidSel(`quick-balance-move-earlier-${d3}`)).click()
+  check('(h) Move earlier puts the last before the second', await editRowIds(page), [d2, d3, d1])
+  await page.locator(tidSel(`quick-balance-remove-${d2}`)).click()
+  check('(h) Remove drops the row', await editRowIds(page), [d3, d1])
+  check('(h) nothing is sent before Save', seen.puts.length, 0)
+  await page.locator(tidSel('quick-balances-save')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(h) Save sent the full ordered list in one PUT', seen.puts, [{ account_ids: [d3, d1] }])
+  check('(h) the tiles show the saved order', await tileIds(page), [d3, d1])
+  const body = await quick(u)
+  check('(h) the API stored the pins', [body.pinned, body.tiles.map((t) => t.account_id)], [true, [d3, d1]])
+  await openEditor(page)
+  check('(h) Reset to defaults is offered once pinned', await page.locator(tidSel('quick-balances-reset')).count(), 1)
+  noDialog('h')
+  await ctx.close()
+}
+
+// (i) Add account.
+async function addAccount(browser) {
+  console.log('\n=== (i) Add account lists the pinnable accounts not shown, grouped, without a tag viewer\'s; disabled at 6')
+  const u = await seedPinUser('add')
+  const other = await makeUser('addother')
+  const theirs = await post(other.token, '/accounts/', { name: 'Their Shared', account_type: 'checking', balance: 10, currency: 'PHP' })
+  await post(other.token, `/accounts/${theirs.id}/shares`, { email: u.email, role: 'viewer' })
+  const tagged = await post(other.token, '/accounts/', { name: 'Their Household Tagged', account_type: 'checking', balance: 10, currency: 'PHP' })
+  await post(other.token, '/tags/household/shares', { email: u.email })
+  const household = (await get(other.token, '/tags/')).find((t) => t.is_system)
+  await put(other.token, `/accounts/${tagged.id}`, { tag_ids: [household.id] })
+  const listed = (await get(u.token, '/accounts/?is_active=true&limit=1000')).items
+  const roleOf = (id) => listed.find((a) => a.id === id)?.my_role
+  check('(i) the API lists the viewer-shared account and the tag-viewer one', [roleOf(theirs.id), roleOf(tagged.id)], ['viewer', 'tag_viewer'])
+
+  const { ctx, page, seen } = await openFor(browser, u)
+  await openEditor(page)
+  const addBtn = page.locator(tidSel('quick-balances-add'))
+  await addBtn.click()
+  const optionIds = async () => (await page.locator(tidSel('quick-balance-add-option')).evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-account-id'))))).sort((a, b) => a - b)
+  const expected = listed.filter((a) => a.my_role !== 'tag_viewer' && !u.defaults.includes(a.id)).map((a) => a.id).sort((a, b) => a - b)
+  check('(i) the list is every pinnable account not already shown', await optionIds(), expected)
+  check('(i) the tag viewer\'s account is not offered, the viewer-shared one is', [(await optionIds()).includes(tagged.id), (await optionIds()).includes(theirs.id)], [false, true])
+  const headings = await page.locator(`${tidSel('quick-balances-add-panel')} p.uppercase`).allTextContents()
+  check('(i) grouped under Debit, Credit, Cash, then Shared with its own groups', headings, ['Debit', 'Credit', 'Cash', 'Shared', 'Debit'])
+  check('(i) the count reads 3 of 6', await text(page.locator(tidSel('quick-balances-count'))), '3 of 6')
+  await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.cash.id}"]`).click()
+  check('(i) a pick adds a row and closes the list', [await editRowIds(page), await page.locator(tidSel('quick-balances-add-panel')).count()], [[...u.defaults, u.cash.id], 0])
+  await addBtn.click()
+  check('(i) the picked account is no longer offered', (await optionIds()).includes(u.cash.id), false)
+  await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.savings.id}"]`).click()
+  await addBtn.click()
+  await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.cardB.id}"]`).click()
+  check('(i) six rows', (await editRowIds(page)).length, 6)
+  check('(i) Add account is disabled at 6 and the count says so', [await addBtn.isDisabled(), await text(page.locator(tidSel('quick-balances-count')))], [true, '6 of 6 (the most you can pin)'])
+  await page.locator(tidSel(`quick-balance-remove-${u.cash.id}`)).click()
+  check('(i) removing one enables it again', await addBtn.isDisabled(), false)
+  await addBtn.click()
+  await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.cash.id}"]`).click()
+  await page.locator(tidSel('quick-balances-save')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  check('(i) Save sent the six in order', seen.puts, [{ account_ids: [...u.defaults, u.savings.id, u.cardB.id, u.cash.id] }])
+  check('(i) six tiles the moment the editor closes, and the API agrees', [(await tileIds(page)).length, (await shownIds(u)).length], [6, 6])
+  noDialog('i')
+  await ctx.close()
+}
+
+// (j) Reset to defaults.
+async function resetDefaults(browser) {
+  console.log('\n=== (j) Reset to defaults sends [] and the default tiles return')
+  const u = await seedPinUser('reset')
+  await put(u.token, '/dashboard/quick-balances', { account_ids: [u.savings.id, u.cash.id] })
+  check('(j) pinned: two tiles', await shownIds(u), [u.savings.id, u.cash.id])
+  const { ctx, page, seen } = await openFor(browser, u)
+  check('(j) the page shows the pins', await tileIds(page), [u.savings.id, u.cash.id])
+  await openEditor(page)
+  await page.locator(tidSel('quick-balances-reset')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(j) Reset sent [] in one PUT', seen.puts, [{ account_ids: [] }])
+  check('(j) the default tiles are back', await tileIds(page), u.defaults)
+  const body = await quick(u)
+  check('(j) the API is back to the defaults', [body.pinned, body.tiles.map((t) => t.account_id)], [false, u.defaults])
+  noDialog('j')
+  await ctx.close()
+}
+
+// (k) Cancel.
+async function cancelEdit(browser) {
+  console.log('\n=== (k) Cancel sends nothing and restores the tiles')
+  const u = await seedPinUser('cancel')
+  const { ctx, page, seen } = await openFor(browser, u)
+  await openEditor(page)
+  await page.locator(tidSel(`quick-balance-remove-${u.defaults[0]}`)).click()
+  await page.locator(tidSel(`quick-balance-move-later-${u.defaults[1]}`)).click()
+  check('(k) the draft changed', await editRowIds(page), [u.defaults[2], u.defaults[1]])
+  await page.locator(tidSel('quick-balances-cancel')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(k) nothing was sent', seen.puts, [])
+  check('(k) the tiles are as they were', await tileIds(page), u.defaults)
+  check('(k) the API still has no pins', (await quick(u)).pinned, false)
+  await openEditor(page)
+  check('(k) editing again starts from the shown tiles, not the abandoned draft', await editRowIds(page), u.defaults)
+  noDialog('k')
+  await ctx.close()
+}
+
+// (l) A second browser context of the same user.
+async function secondContext(browser) {
+  console.log('\n=== (l) pins saved in one browser context show in a second context of the same user')
+  const u = await seedPinUser('devices')
+  const one = await openFor(browser, u)
+  await openEditor(one.page)
+  await one.page.locator(tidSel(`quick-balance-move-later-${u.defaults[0]}`)).click()
+  await one.page.locator(tidSel('quick-balances-save')).click()
+  await one.page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(one.page)
+  const want = [u.defaults[1], u.defaults[0], u.defaults[2]]
+  check('(l) the first context shows the new order', await tileIds(one.page), want)
+  const two = await openFor(browser, u, { viewport: { width: 390, height: 844 } })
+  check('(l) the second context, logged in separately, shows it too', await tileIds(two.page), want)
+  check('(l) the second context never saved anything', two.seen.puts, [])
+  noDialog('l')
+  await one.ctx.close()
+  await two.ctx.close()
+}
+
+// (q) A tab that was already open.
+async function focusRefresh(browser) {
+  console.log('\n=== (q) a tab already open shows pins another context saved once it regains focus, with no reload')
+  const u = await seedPinUser('focus')
+  const a = await openFor(browser, u)
+  const b = await openFor(browser, u, { viewport: { width: 390, height: 844 } })
+  await b.page.evaluate(() => { window.__qbMarker = 1 })
+  check('(q) both contexts start on the defaults', [await tileIds(a.page), await tileIds(b.page)], [u.defaults, u.defaults])
+  await openEditor(a.page)
+  await a.page.locator(tidSel(`quick-balance-move-later-${u.defaults[0]}`)).click()
+  await a.page.locator(tidSel('quick-balances-save')).click()
+  await a.page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(a.page)
+  const want = [u.defaults[1], u.defaults[0], u.defaults[2]]
+  check('(q) the API holds the new order', await shownIds(u), want)
+  check('(q) the second tab still shows the old order until it is focused', await tileIds(b.page), u.defaults)
+  await b.page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
+  await b.page.locator(`${tidSel('quick-balance-tile')}[data-account-id="${want[0]}"]`).first().waitFor({ timeout: 5000 }).catch(() => {})
+  await settle(b.page)
+  check('(q) on focus the second tab shows the new order', await tileIds(b.page), want)
+  check('(q) without a reload', await b.page.evaluate(() => window.__qbMarker), 1)
+  noDialog('q')
+  await a.ctx.close()
+  await b.ctx.close()
+}
+
+// (m) A refused save.
+async function refusedSave(browser) {
+  console.log('\n=== (m) a refused save shows the server\'s reason inline, and a later save works')
+  const u = await seedPinUser('refused')
+  const { ctx, page, seen } = await openFor(browser, u)
+  await openEditor(page)
+  await page.locator(tidSel('quick-balances-add')).click()
+  await page.locator(`${tidSel('quick-balance-add-option')}[data-account-id="${u.spare.id}"]`).click()
+  const del = await api(u.token, 'DELETE', `/accounts/${u.spare.id}`)
+  check('(m) the spare account is deleted behind the editor', del.status < 300, true)
+  await page.locator(tidSel('quick-balances-save')).click()
+  const alert = page.locator(tidSel('quick-balances-save-error'))
+  await alert.waitFor()
+  const reason = (await api(u.token, 'PUT', '/dashboard/quick-balances', { account_ids: [...u.defaults, u.spare.id] })).json
+  check('(m) the refusal shows the server\'s own reason', [await text(alert), await alert.getAttribute('role')], [reason.detail, 'alert'])
+  check('(m) the editor stays open with the draft', await editRowIds(page), [...u.defaults, u.spare.id])
+  check('(m) the stored pins did not change', (await quick(u)).pinned, false)
+  await page.locator(tidSel(`quick-balance-remove-${u.spare.id}`)).click()
+  await page.locator(tidSel('quick-balances-save')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  check('(m) saving without the deleted account works', [seen.puts.length, await tileIds(page)], [2, u.defaults])
+  noDialog('m')
+  await ctx.close()
+}
+
+// (n) The snapshot is not refetched.
+async function noSnapshotRefetch(browser) {
+  console.log('\n=== (n) saving pins does not refetch the dashboard snapshot')
+  const u = await seedPinUser('snapshot')
+  const { ctx, page, seen } = await openFor(browser, u)
+  check('(n) the dashboard loaded the snapshot once', seen.snapshots, 1)
+  await openEditor(page)
+  await page.locator(tidSel(`quick-balance-move-later-${u.defaults[0]}`)).click()
+  await page.locator(tidSel('quick-balances-save')).click()
+  await page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(n) one PUT went out', seen.puts.length, 1)
+  check('(n) the snapshot was not requested again', seen.snapshots, 1)
+  check('(n) the PUT\'s own answer filled the tiles: they were not requested again either', seen.tileGets, 1)
+  noDialog('n')
+  await ctx.close()
+}
+
+// (p) The editor on a phone.
+async function phoneEditor(browser) {
+  console.log('\n=== (p) the editor at 390px: no horizontal scroll, every control 44px')
+  const u = await seedPinUser('phoneedit')
+  await put(u.token, '/dashboard/quick-balances', { account_ids: [u.defaults[0], u.cardA.id, u.gcash.id, u.cardB.id, u.savings.id, u.cash.id] })
+  const { ctx, page } = await openFor(browser, u, { viewport: { width: 390, height: 844 } })
+  await openEditor(page)
+  const m = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll('[data-testid="quick-balances"] button')].map((b) => {
+      const r = b.getBoundingClientRect()
+      return { id: b.getAttribute('data-testid') || b.textContent, w: r.width, h: r.height }
+    })
+    const section = document.querySelector('[data-testid="quick-balances"]').getBoundingClientRect()
+    return { boxes, scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth, right: section.right }
+  })
+  check('(p) no horizontal scroll', m.scrollW <= m.clientW, true)
+  check('(p) every button is at least 44px each way', m.boxes.filter((b) => b.w < 44 || b.h < 44).map((b) => b.id), [])
+  check('(p) the editor has its six rows and the controls', [m.boxes.length >= 6 * 3 + 4], [true])
+  noDialog('p')
+  await ctx.close()
+}
+
+// (o) A card whose shared limit the caller can't see in full.
 async function partialGroup(browser) {
-  console.log('\n=== (h) an admin of one card in a shared-limit pair sees no Available line and no "No limit set"')
+  console.log('\n=== (o) an admin of one card in a shared-limit pair sees no Available line and no "No limit set"')
   const admin = await makeUser('admin')
   await post(owner.token, `/accounts/${platinum.id}/shares`, { email: admin.email, role: 'admin' })
   const t = (await quick(admin)).tiles.find((x) => x.account_id === platinum.id)
-  check('(h) the API gives the admin the card figures and no credit', [t !== undefined, t?.card !== undefined, t?.credit === undefined], [true, true, true])
+  check('(o) the API gives the admin the card figures and no credit', [t !== undefined, t?.card !== undefined, t?.credit === undefined], [true, true, true])
   const { ctx, page } = await newPage(browser)
   await uiLogin(page, admin)
   await openDashboard(page)
   const card = tile(page, platinum.id)
-  check('(h) the tile shows Due', await card.locator('[data-testid="quick-balance-due"]').count(), 1)
-  check('(h) no Available line and no "No limit set"', [await card.locator('[data-testid="quick-balance-available"]').count(), (await text(card)).includes('No limit set')], [0, false])
+  check('(o) the tile shows Due', await card.locator('[data-testid="quick-balance-due"]').count(), 1)
+  check('(o) no Available line and no "No limit set"', [await card.locator('[data-testid="quick-balance-available"]').count(), (await text(card)).includes('No limit set')], [0, false])
   await ctx.close()
 }
 
@@ -377,7 +683,17 @@ async function partialGroup(browser) {
   if (run('e')) await failure(browser)
   if (run('f')) await payment(browser)
   if (run('g')) await fewAccounts(browser)
-  if (run('h')) await partialGroup(browser)
+  if (run('h')) await editAndSave(browser)
+  if (run('i')) await addAccount(browser)
+  if (run('j')) await resetDefaults(browser)
+  if (run('k')) await cancelEdit(browser)
+  if (run('l')) await secondContext(browser)
+  if (run('m')) await refusedSave(browser)
+  if (run('n')) await noSnapshotRefetch(browser)
+  if (run('o')) await partialGroup(browser)
+  if (run('p')) await phoneEditor(browser)
+  if (run('q')) await focusRefresh(browser)
+  check('no browser dialog fired in the whole run', nativeCount(), 0)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)
