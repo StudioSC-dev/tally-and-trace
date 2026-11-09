@@ -36,16 +36,27 @@ posted only). A credit card the caller manages (``can_see_credit``) carries
 (``card_credit.credit_for_cards``: a limit, and the caller manages every card
 in the group) carries ``credit``, a subset of ``CardCredit``. No one else gets
 either key.
+
+**Pins** (``users.quick_balance_account_ids``, null for none): an ordered list
+of up to ``MAX_TILES`` account ids that replaces the default slots. Pinnable
+accounts are the active ones the caller holds a direct role on (owner, admin,
+editor or viewer; ``DIRECT_ROLES``, the main account's scope), of any type; a
+Household ``tag_viewer`` account is not. The list is stored as sent and
+re-checked on every read: an id that is no longer pinnable (deactivated, share
+revoked) is skipped and the stored list is kept, so it comes back when the
+account does. If every id is skipped the defaults show. A pinned tile has
+``slot`` null; its figures come from ``tiles`` like any other tile.
 """
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from fastapi import HTTPException, status
 from sqlalchemy import case, func, select, union_all
 from sqlalchemy.orm import Session
 
-from app.core.access import MANAGE_ROLES, viewable_accounts
+from app.core.access import DIRECT_ROLES, MANAGE_ROLES, viewable_accounts
 from app.core.redaction import Redactor
 from app.core.time import manila_today
 from app.models.account import Account, AccountType
@@ -153,7 +164,33 @@ def tiles(db: Session, user, placed: List[Tuple[Optional[str], Account]],
     return out
 
 
+def pinned_accounts(db: Session, user) -> List[Account]:
+    """The stored pins that are still pinnable, in stored order (maybe empty)."""
+    ids = user.quick_balance_account_ids
+    if not ids:
+        return []
+    found = {a.id: a for a in viewable_accounts(db, user, active_only=True, roles=DIRECT_ROLES)
+             .filter(Account.id.in_(ids)).all()}
+    return [found[i] for i in ids if i in found]
+
+
+def set_pins(db: Session, user, account_ids: Sequence[int]) -> None:
+    """Store ``account_ids`` (distinct, at most ``MAX_TILES``: the schema's job)
+    as the caller's pins, null for ``[]``. An id the caller may not pin is a 404
+    that names nothing."""
+    ids = list(account_ids)
+    if ids:
+        pinnable = {a.id for a in viewable_accounts(
+            db, user, active_only=True, roles=DIRECT_ROLES).filter(Account.id.in_(ids))}
+        if any(i not in pinnable for i in ids):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    user.quick_balance_account_ids = ids or None
+    db.commit()
+
+
 def quick_balances(db: Session, user, fx: Optional[FxRates]) -> dict:
-    """``QuickBalances``: the default tiles (pins are not stored yet)."""
-    placed: List[Tuple[Optional[str], Account]] = list(default_slots(db, user))
-    return {"pinned": False, "max_tiles": MAX_TILES, "tiles": tiles(db, user, placed, fx)}
+    """``QuickBalances``: the pinned tiles, else the default tiles."""
+    pins = pinned_accounts(db, user)
+    placed: List[Tuple[Optional[str], Account]] = (
+        [(None, a) for a in pins] if pins else list(default_slots(db, user)))
+    return {"pinned": bool(pins), "max_tiles": MAX_TILES, "tiles": tiles(db, user, placed, fx)}

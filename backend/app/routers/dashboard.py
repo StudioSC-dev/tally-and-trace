@@ -4,9 +4,10 @@ Returns everything the front-end needs in a single call.
 """
 import math
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -27,6 +28,18 @@ from app.services.fx import FxRates, get_fx
 from app.core.time import manila_today, utc_now
 
 router = APIRouter()
+
+
+class QuickBalancePins(BaseModel):
+    """``PUT /dashboard/quick-balances``: the full ordered list of pinned account ids."""
+    account_ids: List[int] = Field(max_length=quick_balances_svc.MAX_TILES)
+
+    @field_validator("account_ids")
+    @classmethod
+    def _distinct(cls, ids: List[int]) -> List[int]:
+        if len(set(ids)) != len(ids):
+            raise ValueError("account_ids must be distinct")
+        return ids
 
 SAVINGS_RATE_FACTOR = 0.5
 
@@ -297,4 +310,18 @@ def get_quick_balances(
     group is served credit adds ``credit`` (``{limit, available_now,
     complete, shared_with}``, ``card_credit.credit_for_cards``).
     """
+    return quick_balances_svc.quick_balances(db, current_user, fx)
+
+
+@router.put("/quick-balances")
+def put_quick_balances(
+    body: QuickBalancePins,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """Store the caller's pinned quick balances (0 to 6 distinct ids, in order;
+    ``[]`` clears them) and return ``QuickBalances`` as GET does. An account
+    the caller may not pin is a 404 without its name."""
+    quick_balances_svc.set_pins(db, current_user, body.account_ids)
     return quick_balances_svc.quick_balances(db, current_user, fx)
