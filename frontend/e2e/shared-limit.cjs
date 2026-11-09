@@ -17,9 +17,16 @@
 //       disabled
 //   (e) the secondary's edit form unlinks: None sends null, the link and the line go, and
 //       Credit Limit comes back
-//   Every scenario also checks that no native browser dialog fired.
+//   (f) a charge on the Platinum drops the Amex row's figure by the same amount
+//   (g) Allocations shows "Available credit on BDO Platinum Mastercard" for a subscription
+//       on the secondary card
+//   (h) deactivating a linked card from the action modal shows the server's reason
+//   (i) an editor and a viewer see no link control and no credit
+//   Every scenario also checks that no native browser dialog fired. (e) runs last, because
+//   it unlinks; (b), (f) and (g) need the API's shared calculation (PR 2).
 //
-// Usage: node frontend/e2e/shared-limit.cjs [a|b|c|d|e]   (b needs a, and e needs a)
+// Usage: node frontend/e2e/shared-limit.cjs [a|b|c|d|e|f|g|h|i]   (every letter builds the
+// linked card (a) first)
 const { startLocalStack } = require('./_local_stack.cjs')
 const dialogs = require('./_dialogs.cjs')
 
@@ -267,19 +274,113 @@ async function unlink(browser) {
   await ctx.close()
 }
 
+// (f) A charge on the Platinum lowers the Amex row's figure by the same amount.
+async function chargeLowersBoth(browser) {
+  console.log('\n=== (f) a charge on the Platinum drops the Amex row\'s figure by the same amount')
+  const CHARGE = 7000
+  const { ctx, page, native } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openAccounts(page)
+  const avail = async (c) => (await accountRow(page, c.name).locator(`[data-testid="account-credit-${c.id}"] [data-testid="credit-available"]`).textContent({ timeout: 3000 }).catch(() => null))?.trim()
+  const before = await avail(amex)
+  await post(owner.token, '/transactions/', {
+    account_id: platinum.id, transaction_type: 'debit', amount: CHARGE, description: 'Platinum purchase',
+    transaction_date: `${manilaToday()}T00:00:00`, is_posted: true,
+  })
+  await openAccounts(page)
+  const want = `Available ${peso(AMEX_LIMIT - AMEX_OWED - CHARGE)}`
+  check('(f) before the charge the Amex row read the shared figure', before, `Available ${peso(AMEX_LIMIT - AMEX_OWED)}`)
+  check('(f) after it the Amex row dropped by the charge', await avail(amex), want)
+  check('(f) and the Platinum row reads the same figure', await avail(platinum), want)
+  noDialog('(f)', native)
+  await ctx.close()
+}
+
+// (g) Allocations shows the line for a subscription on the secondary card.
+async function allocationsLine(browser) {
+  console.log('\n=== (g) Allocations shows "Available credit on BDO Platinum Mastercard"')
+  await post(owner.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Platinum Sub', amount: 500,
+    next_occurrence: `${manilaToday()}T00:00:00`, account_id: platinum.id,
+  })
+  const { ctx, page, native } = await newPage(browser)
+  await uiLogin(page, owner)
+  await page.goto(`${stack.webUrl}/allocations`)
+  await page.locator('[data-testid="kind-section-subscription"]').waitFor()
+  await settle(page)
+  const line = page.locator(`[data-testid="kind-section-subscription"] [data-testid="kind-credit-line"][data-card-id="${platinum.id}"]`)
+  check('(g) the line names the secondary card',
+    (await line.textContent({ timeout: 3000 }).catch(() => null))?.trim().startsWith('Available credit on BDO Platinum Mastercard:'), true)
+  const served = (await get(owner.token, '/cards/credit')).items.find((c) => c.account_id === platinum.id)
+  check('(g) and reads the API\'s figure, which is the Amex\'s',
+    (await line.locator('[data-testid="kind-credit-available"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(),
+    served === undefined ? null : peso(served.available_now))
+  noDialog('(g)', native)
+  await ctx.close()
+}
+
+// (h) Deactivating a linked card shows the server's reason.
+async function deactivateRefused(browser) {
+  console.log('\n=== (h) deactivating a linked card from the action modal shows the server\'s reason')
+  const { ctx, page, native } = await newPage(browser)
+  await uiLogin(page, owner)
+  await openAccounts(page)
+  for (const c of [platinum, amex]) {
+    await accountRow(page, c.name).locator('[role="button"]').first().click()
+    const put = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${c.id}`))
+    await page.getByRole('button', { name: 'Mark as inactive' }).click()
+    check(`(h) ${c.name}: the server refuses with 409`, (await put).status(), 409)
+    check(`(h) ${c.name}: the modal shows the reason`,
+      (await page.locator('[data-testid="account-action-error"]').textContent())?.trim(), 'Unlink the shared credit limit first')
+    check(`(h) ${c.name}: it stays active`, (await get(owner.token, `/accounts/${c.id}`)).is_active, true)
+    await page.getByRole('button', { name: 'Close account actions modal' }).click()
+  }
+  noDialog('(h)', native)
+  await ctx.close()
+}
+
+// (i) An editor and a viewer see no link control and no credit.
+async function othersSeeNothing(browser) {
+  console.log('\n=== (i) an editor and a viewer see no link control and no credit')
+  const editor = await makeUser('editor')
+  const viewer = await makeUser('viewer')
+  for (const [role, u] of [['editor', editor], ['viewer', viewer]]) {
+    await post(owner.token, `/accounts/${platinum.id}/shares`, { email: u.email, role })
+  }
+  for (const [who, u] of [['editor', editor], ['viewer', viewer]]) {
+    const account = await get(u.token, `/accounts/${platinum.id}`)
+    check(`(i) ${who}: the API gives the link as null`, account.shares_limit_with_account_id ?? null, null)
+    check(`(i) ${who}: credit is 404`, (await api(u.token, 'GET', `/cards/${platinum.id}/credit`)).status, 404)
+    check(`(i) ${who}: GET /cards/credit lists nothing`, (await get(u.token, '/cards/credit')).items, [])
+    const { ctx, page, native } = await newPage(browser)
+    await uiLogin(page, u)
+    await openAccounts(page)
+    check(`(i) ${who}: no credit line`, await page.locator('[data-testid="credit-summary"]').count(), 0)
+    check(`(i) ${who}: no "Shares limit with" line`, await page.locator('[data-testid^="account-shares-limit-"]').count(), 0)
+    await accountRow(page, platinum.name).locator('[role="button"]').first().click()
+    await page.locator('[data-testid="view-account-transactions"]').waitFor()
+    check(`(i) ${who}: no Edit account button`, await page.getByRole('button', { name: 'Edit account' }).count(), 0)
+    check(`(i) ${who}: no link control`, await linkSelect(page).count(), 0)
+    noDialog(`(i) ${who}`, native)
+    await ctx.close()
+  }
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
   await setup()
-  if (run('a') || only === 'b' || only === 'c' || only === 'd' || only === 'e') {
-    // Every later scenario needs the linked card (a), so it is built first when one is named alone.
-    await createLinked(browser)
-  }
+  // Every later scenario needs the linked card (a), so it is built first.
+  await createLinked(browser)
   if (run('b')) await sameAvailable(browser)
   if (run('c')) await eligibleOnly(browser)
   if (run('d')) await primaryForm(browser)
+  if (run('f')) await chargeLowersBoth(browser)
+  if (run('g')) await allocationsLine(browser)
+  if (run('i')) await othersSeeNothing(browser)
+  if (run('h')) await deactivateRefused(browser)
   if (run('e')) await unlink(browser)
   await browser.close()
   stack.stop()
