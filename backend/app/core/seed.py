@@ -38,6 +38,10 @@ payment is 2 Dec 2026, so none of its twelve remaining payments falls before
 the demo window (an installment's unrecorded earlier payments are projected as
 overdue).
 
+Shape 7: the pending Netflix charge is dated on the reset day (``days_before_reset``
+in the seed file), not a fixed day, so it reads as recent and sits on the open
+statement whenever the demo resets.
+
 Bump ``DEMO_SHAPE_VERSION`` whenever the demo data's shape changes.
 """
 
@@ -45,13 +49,14 @@ import copy
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_password_hash
 from app.core.database import SessionLocal
+from app.core.time import manila_midnight
 from app.core.tags import LINKS, ensure_household_tag
 from app.models import Account, Allocation, BudgetEntry, Category, Tag, Transaction, User
 from app.models.account_share import AccountShare
@@ -74,8 +79,8 @@ DEMO_PASSWORD = "password123"
 # 2: tags (STU-231); 3: the Demo Partner and joint share (STU-232); 4: the Household
 # tag share and the card routed to the joint account (STU-233); 5: foreign rows in the
 # form's convention, the ended streaming entry inactive (STU-236); 6: the gym
-# installment current (STU-217)
-DEMO_SHAPE_VERSION = 6
+# installment current (STU-217); 7: the pending Netflix charge dated on the reset day
+DEMO_SHAPE_VERSION = 7
 # One seeder at a time across workers (pg_advisory_xact_lock key).
 _LOCK_KEY = 229_0001
 _SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "constants", "seed_data.json")
@@ -405,7 +410,14 @@ def _load_seed_data(db: Session, default_user: User, household: Tag, partner: Us
         transaction_type_str = transaction_data["transaction_type"].lower()
         transaction_data["transaction_type"] = TransactionType(transaction_type_str)
         # Convert date strings to datetime
-        transaction_data["transaction_date"] = datetime.fromisoformat(transaction_data["transaction_date"])
+        # A row with ``days_before_reset`` is dated relative to the reset day on the Manila
+        # calendar (stored as that day's midnight, as ``statement_day`` reads it) instead of
+        # a fixed date: a pending row shows as recent whenever the demo resets.
+        if "days_before_reset" in transaction_data:
+            transaction_data["transaction_date"] = manila_midnight() - timedelta(
+                days=transaction_data.pop("days_before_reset"))
+        else:
+            transaction_data["transaction_date"] = datetime.fromisoformat(transaction_data["transaction_date"])
         if transaction_data.get("posting_date"):
             transaction_data["posting_date"] = datetime.fromisoformat(transaction_data["posting_date"])
         # Add user_id to transaction data
