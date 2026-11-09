@@ -16,6 +16,7 @@ import {
   useSetLoanDueDateMutation,
   useSetOccurrenceDateMutation,
 } from '../store/api'
+import { useInputBlocked } from '../store/busy'
 import { apiErrorMessage } from '../utils/apiError'
 
 const FOCUSABLE =
@@ -65,6 +66,9 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
   const [setLoan, { isLoading: settingLoan }] = useSetLoanDueDateMutation()
   const [clearLoan, { isLoading: clearingLoan }] = useClearLoanDueDateMutation()
   const busy = settingEntry || clearingEntry || settingLoan || clearingLoan
+  // The screen loader blocks input a little past the request (STU-576): a refusal shown
+  // before it lets go invites a date that is swallowed, so the refusal waits for it.
+  const inputBlocked = useInputBlocked()
 
   // A row without its effective date (an installment plan) reads it from the entry's occurrences.
   const lookup = useGetEntryOccurrencesQuery(
@@ -211,7 +215,7 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                   The schedule is unchanged: this occurrence alone is due, shown and posted on this date.
                 </p>
               </div>
-              {error && (
+              {error && !inputBlocked && (
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
               <div className="flex gap-3">

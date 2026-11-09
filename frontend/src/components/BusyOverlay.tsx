@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { initialOverlayTiming, overlayStep } from '@tally-trace/shared'
 import type { BusyLevel, OverlayPhase, OverlayTiming } from '@tally-trace/shared'
-import { busySignal, isProgrammaticClickAllowed } from '../store/busy'
+import { busySignal, isProgrammaticClickAllowed, setInputBlocked } from '../store/busy'
 import { Spinner } from './Loading'
 
 // The one app-wide screen loader (STU-335, R1 and R5). While any request is in flight
@@ -216,8 +216,9 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
       }
     })
     bodyObserver.observe(document.body, { childList: true })
-    // 3. The capture guard reads this.
+    // 3. The capture guard reads this; the app reads it through `useInputBlocked`.
     blocked = true
+    setInputBlocked(true)
   }
 
   const isCandidate = (el: Element | null): el is HTMLElement =>
@@ -256,6 +257,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     bodyObserver = null
     undoRecorded()
     restoreFocus()
+    setInputBlocked(false)
   }
 
   const schedule = (wakeAt: number | null) => {
@@ -405,6 +407,7 @@ function startController(host: HTMLElement, refs: ControllerRefs, setView: (view
     bodyObserver = null
     undoRecorded()
     blocked = false
+    setInputBlocked(false)
     if (timer !== null) clearTimeout(timer)
     if (frame !== null) cancelAnimationFrame(frame)
   }

@@ -324,6 +324,47 @@ export const busyMiddleware: Middleware = (storeApi) => {
   }
 }
 
+// ─── Input blocked by the screen loader ──────────────────────────────────────
+
+let inputBlocked = false
+const inputBlockedListeners = new Set<() => void>()
+
+/**
+ * Set by the screen loader (BusyOverlay) when it starts and ends blocking input. The block
+ * outlasts the busy level (END_GRACE_MS, MIN_VISIBLE_MS), so a request that has settled can
+ * still have its input swallowed.
+ */
+export function setInputBlocked(blocked: boolean): void {
+  if (blocked === inputBlocked) return
+  inputBlocked = blocked
+  for (const fn of [...inputBlockedListeners]) {
+    try {
+      fn()
+    } catch (error) {
+      // A listener's failure must never break the block that changed it.
+      globalThis.reportError?.(error)
+    }
+  }
+}
+
+/** Whether the screen loader is blocking input now. */
+function isInputBlocked(): boolean {
+  return inputBlocked
+}
+
+/** Calls `listener` synchronously whenever `isInputBlocked()` changes; returns the unsubscribe. */
+function subscribeInputBlocked(listener: () => void): () => void {
+  inputBlockedListeners.add(listener)
+  return () => {
+    inputBlockedListeners.delete(listener)
+  }
+}
+
+/** `isInputBlocked()` as React state. */
+export function useInputBlocked(): boolean {
+  return useSyncExternalStore(subscribeInputBlocked, isInputBlocked)
+}
+
 // ─── Programmatic clicks the screen loader lets through ──────────────────────
 
 const allowedClicks = new WeakSet<EventTarget>()
