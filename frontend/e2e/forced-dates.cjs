@@ -25,8 +25,9 @@
 //       scheduled day, `effective_date` is the forced one), and back on the scheduled day after Clear
 //   (j) a missed row's Change date: an owner and an editor have it, a view-only viewer gets no missed row
 //       and no button; it opens on the oldest unlinked missed day with its forced date pre-filled; a future
-//       date is refused (the server keeps the occurrences in order, so the count stays); another past day
-//       keeps the row missed and "since" reads that day; Clear restores the original row
+//       date is refused (the server keeps the occurrences in order, so the count stays); the refusal shows
+//       once the screen loader releases input and one fill then takes a new date and clears it (STU-576);
+//       another past day keeps the row missed and "since" reads that day; Clear restores the original row
 //   (k) a missed row with one occurrence: moved into the future it leaves the missed list and is an
 //       Upcoming row "(moved from ...)"; Clear from that row brings the missed row back
 //   (l) the Subscriptions tab's missed row (a card subscription) has Change date; moved into the future
@@ -37,7 +38,7 @@
 // Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
-const { waitQuiet } = require('./_smooth.cjs')
+const { overlayPhase, waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -557,24 +558,18 @@ const missedText = async (page, entryId) => {
   return (await row.locator('[data-testid="due-missed-text"]').textContent())?.replace(/\s+/g, ' ').trim() ?? null
 }
 const changeButtonOf = (page, entryId) => missedRowOf(page, entryId).locator('[data-testid="row-change-date"]')
-/**
- * Fills the open dialog with `day`, saves and returns the PUT. After a refusal the first fill
- * is not taken by the dialog (the refusal stays and the field is put back), so it fills again until the refusal clears.
- */
-async function saveInDialog(page, day, puts) {
+/** Saves the open dialog as it is filled and returns the PUT. */
+async function submitDialog(page, puts) {
   const before = puts.length
-  const input = dialog(page).locator('[data-testid="force-date-input"]')
-  const error = dialog(page).locator('[data-testid="force-date-error"]')
-  for (let i = 0; i < 4; i++) {
-    await input.fill(day)
-    await page.waitForTimeout(300)
-    // The dialog took the change when its refusal went away with it.
-    if ((await input.inputValue()) === day && (await error.count()) === 0) break
-  }
   await dialog(page).locator('[data-testid="force-date-save"]').click()
   await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/date$/.test(new URL(r.url()).pathname))
   await page.waitForTimeout(200)
   return puts.slice(before)[0] ?? null
+}
+/** Fills the open dialog with `day` once, saves and returns the PUT. */
+async function saveInDialog(page, day, puts) {
+  await dialog(page).locator('[data-testid="force-date-input"]').fill(day)
+  return submitDialog(page, puts)
 }
 const missedOf = async (u, entryId) => {
   const snap = await get(u.token, '/dashboard/snapshot')
@@ -618,13 +613,18 @@ async function missedRowChangeDate(browser) {
   check('(j) a future date is sent for the oldest day and refused by the server', [refused?.day, refused?.body, refused?.status], [oldest, { effective_date: future }, 422])
   const error = dialog(page).locator('[data-testid="force-date-error"]')
   await error.waitFor()
+  // STU-576: the refusal shows once the screen loader has given input back, so the first date
+  // entered as soon as it shows is taken: one fill updates the field and clears the refusal.
+  check('(j) the refusal shows once the screen loader has released input', await overlayPhase(page), 'hidden')
   check('(j) the dialog stays open with the server\'s reason', [await dialog(page).count(), ((await error.textContent()) ?? '').trim().length > 0], [1, true])
+  const toPast = addDays(today, -10)
+  await input.fill(toPast)
+  check('(j) one fill after the refusal takes the new date and clears the refusal', [await input.inputValue(), await error.count()], [toPast, 0])
   const afterRefusal = await missedOf(owner, rent.id)
   check('(j) after the refusal the API still has 2 missed and the oldest unchanged', [afterRefusal?.unlinked_count, afterRefusal?.oldest_unlinked, afterRefusal?.oldest_effective], [2, oldest, seeded])
   check('(j) after the refusal the row still reads 2 missed since the forced date', await missedText(page, rent.id), `2 missed since ${fmt(seeded)}`)
 
-  const toPast = addDays(today, -10)
-  const saved = await saveInDialog(page, toPast, puts)
+  const saved = await submitDialog(page, puts)
   check('(j) another past day is sent for the oldest day and saved', [saved?.day, saved?.body, saved?.status], [oldest, { effective_date: toPast }, 200])
   await dialog(page).waitFor({ state: 'detached' })
   await settle(page)
