@@ -142,10 +142,18 @@ async function makeUser(tag) {
 }
 const account = (u, name, type = 'checking', balance = 100000) =>
   post(u.token, '/accounts/', { name, account_type: type, balance, currency: 'PHP' })
-/** A PHP card closing on the 28th, due 21 days later, paid from `bank`. */
-const card = (u, bank, name) => post(u.token, '/accounts/', {
+const dom = (day) => Number(day.slice(8, 10))
+/**
+ * The close day that leaves an installment dated `day` where it is. The API stores a new card
+ * installment on the close of the statement holding its date (768a9b9), so a scenario that reads an
+ * installment's own date puts its card's close on that day. A close day is at most the 28th, so on
+ * the 29th to 31st such a date is moved to the 28th and the scenario cannot run that day.
+ */
+const closeOn = (day) => Math.min(28, dom(day))
+/** A PHP card closing on `closeDom`, due 21 days later, paid from `bank`. */
+const card = (u, bank, name, closeDom = 28) => post(u.token, '/accounts/', {
   name, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 100000,
-  billing_cycle_start: 28, days_until_due_date: 21, payment_account_id: bank.id,
+  billing_cycle_start: closeDom, days_until_due_date: 21, payment_account_id: bank.id,
 })
 const entry = (u, fields) => post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
 /** A monthly card installment: `count` payments from `next`. */
@@ -412,10 +420,11 @@ async function installments(browser) {
   const today = manilaToday()
   const u = await makeUser('d')
   const bank = await account(u, 'D Checking')
-  const visa = await card(u, bank, 'D Visa')
-  const on = await installment(u, visa, 'D On', addDays(today, 3), 3)
-  const unreviewed = await installment(u, visa, 'D Unreviewed', addDays(today, 4), 3)
-  const off = await installment(u, visa, 'D Off', addDays(today, 5), 3)
+  // One card per installment: each closes on its own date, which is where the API keeps it.
+  const cardFor = (name, day) => card(u, bank, name, closeOn(day))
+  const on = await installment(u, await cardFor('D Visa On', addDays(today, 3)), 'D On', addDays(today, 3), 3)
+  const unreviewed = await installment(u, await cardFor('D Visa Unreviewed', addDays(today, 4)), 'D Unreviewed', addDays(today, 4), 3)
+  const off = await installment(u, await cardFor('D Visa Off', addDays(today, 5)), 'D Off', addDays(today, 5), 3)
   setReview(on.id, 'on')
   setReview(unreviewed.id, 'unreviewed')
   setReview(off.id, 'off')
