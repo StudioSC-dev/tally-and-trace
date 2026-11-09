@@ -1482,3 +1482,49 @@ def test_a_credit_on_the_loan_keeps_the_flag(world):
     _turn_on(w, loan)
     _on_the_loan(w, loan, "credit")
     assert _is_on(db, loan) is True
+
+
+# More owed through a new transaction -----------------------------------------------------------
+
+def _out_of_the_loan(w, loan, is_posted=True, amount=3_000) -> int:
+    return sw_post(w["client"], w["o"], "/transactions/", {
+        "account_id": loan, "transfer_from_account_id": loan,
+        "transfer_to_account_id": w["checking"], "amount": amount,
+        "transaction_type": "transfer", "transaction_date": "2026-11-20T00:00:00",
+        "description": "Top-up", "is_posted": is_posted})["id"]
+
+
+def test_a_transfer_out_of_the_loan_clears_the_flag(world, monkeypatch):
+    w = world
+    loan, _ = _prepaid_off(w, monkeypatch)
+    _out_of_the_loan(w, loan)
+    _reads_manual_and_confirms(w, loan)
+
+
+def test_a_transfer_into_the_loan_keeps_the_flag(world):
+    """Less owed opens nothing."""
+    w, db = world, world["db"]
+    loan = _loan(w)
+    _turn_on(w, loan)
+    owed = _balance(db, loan)
+    sw_post(w["client"], w["o"], "/transactions/", {
+        "account_id": w["checking"], "transfer_from_account_id": w["checking"],
+        "transfer_to_account_id": loan, "amount": 5_000, "transaction_type": "transfer",
+        "transaction_date": "2026-10-18T00:00:00", "description": "Extra", "is_posted": True})
+    assert _balance(db, loan) > owed
+    assert _is_on(db, loan) is True
+
+
+@pytest.mark.parametrize("kind", ["transfer", "debit"])
+def test_an_unposted_row_that_would_owe_more_keeps_the_flag(world, monkeypatch, kind):
+    w, db = world, world["db"]
+    loan, _ = _prepaid_off(w, monkeypatch)
+    if kind == "transfer":
+        _out_of_the_loan(w, loan, is_posted=False)
+    else:
+        sw_post(w["client"], w["o"], "/transactions/", {
+            "account_id": loan, "amount": 3_000, "transaction_type": "debit",
+            "transaction_date": "2026-11-20T00:00:00", "description": "Bank adjustment",
+            "is_posted": False})
+    assert _balance(db, loan) == 0
+    assert _is_on(db, loan) is True
