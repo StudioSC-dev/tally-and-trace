@@ -404,6 +404,29 @@ def test_apply_refuses_entry_whose_row_would_cross_a_statement(world, monkeypatc
     _refused(db, entry, "a statement balance would change")
 
 
+def test_balance_check_reads_the_statement_a_late_posted_row_sits_on(world, monkeypatch):
+    """A row dated Sep 27 that the bank posted on Oct 3 sits on Card C's Nov 2
+    statement, not the Oct 2 one its date and its new date fall on."""
+    from app.services import installment_redate
+
+    db, me, card = world["db"], world["me"], world["card_c"]
+    entry = _entry(db, me, card, date(2026, 11, 27), payments=4)
+    txn = _txn(db, me, card, date(2026, 9, 27), entry=entry)
+    db.execute(text("UPDATE transactions SET posting_date = :p WHERE id = :t"),
+               {"p": datetime(2026, 10, 3, 2, 0), "t": txn})
+    db.commit()
+    checked = []
+    real = installment_redate._statement_balances
+
+    def spy(session, card_, closes, *, today):
+        checked.append(set(closes))
+        return real(session, card_, closes, today=today)
+
+    monkeypatch.setattr(installment_redate, "_statement_balances", spy)
+    assert _run(True, {entry})[entry].status == "converted"
+    assert checked == [{date(2026, 11, 2)}, {date(2026, 11, 2)}]
+
+
 def test_dry_run_holds_no_lock_into_the_next_entry(world, monkeypatch):
     """While a dry run works on its second entry, another session can lock
     the first entry's row and card: the first entry's transaction has ended."""
