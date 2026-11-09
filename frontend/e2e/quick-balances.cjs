@@ -32,10 +32,11 @@
 //   (k) Cancel sends nothing and restores the tiles
 //   (l) pins saved in one browser context show in a second context of the same user
 //   (m) a refused save shows the server's reason inline, and a later save works
+//   (q) a tab already open shows pins another context saved once it regains focus, with no reload
 //   (n) saving pins does not refetch the dashboard snapshot
 //   (p) the editor at 390px: no horizontal scroll, every control 44px
 //
-// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p]
+// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
 const { startLocalStack } = require('./_local_stack.cjs')
 const dialogs = require('./_dialogs.cjs')
 
@@ -562,6 +563,32 @@ async function secondContext(browser) {
   await two.ctx.close()
 }
 
+// (q) A tab that was already open.
+async function focusRefresh(browser) {
+  console.log('\n=== (q) a tab already open shows pins another context saved once it regains focus, with no reload')
+  const u = await seedPinUser('focus')
+  const a = await openFor(browser, u)
+  const b = await openFor(browser, u, { viewport: { width: 390, height: 844 } })
+  await b.page.evaluate(() => { window.__qbMarker = 1 })
+  check('(q) both contexts start on the defaults', [await tileIds(a.page), await tileIds(b.page)], [u.defaults, u.defaults])
+  await openEditor(a.page)
+  await a.page.locator(tidSel(`quick-balance-move-later-${u.defaults[0]}`)).click()
+  await a.page.locator(tidSel('quick-balances-save')).click()
+  await a.page.locator(tidSel('quick-balances-editor')).waitFor({ state: 'detached' })
+  await settle(a.page)
+  const want = [u.defaults[1], u.defaults[0], u.defaults[2]]
+  check('(q) the API holds the new order', await shownIds(u), want)
+  check('(q) the second tab still shows the old order until it is focused', await tileIds(b.page), u.defaults)
+  await b.page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
+  await b.page.locator(`${tidSel('quick-balance-tile')}[data-account-id="${want[0]}"]`).first().waitFor({ timeout: 5000 }).catch(() => {})
+  await settle(b.page)
+  check('(q) on focus the second tab shows the new order', await tileIds(b.page), want)
+  check('(q) without a reload', await b.page.evaluate(() => window.__qbMarker), 1)
+  noDialog('q')
+  await a.ctx.close()
+  await b.ctx.close()
+}
+
 // (m) A refused save.
 async function refusedSave(browser) {
   console.log('\n=== (m) a refused save shows the server\'s reason inline, and a later save works')
@@ -665,6 +692,7 @@ async function partialGroup(browser) {
   if (run('n')) await noSnapshotRefetch(browser)
   if (run('o')) await partialGroup(browser)
   if (run('p')) await phoneEditor(browser)
+  if (run('q')) await focusRefresh(browser)
   check('no browser dialog fired in the whole run', nativeCount(), 0)
   await browser.close()
   stack.stop()

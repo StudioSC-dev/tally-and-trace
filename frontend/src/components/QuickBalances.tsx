@@ -234,9 +234,10 @@ function PinEditor({ tiles, pinned, onDone }: { tiles: QuickBalanceTile[]; pinne
 /** The dashboard's quick balances: one tile per account, each a link to its page. Own query, so a failure stays in here. */
 export function QuickBalances() {
   const { currencyCode } = useCurrency()
-  const { data, isLoading, isError, refetch } = useGetQuickBalancesQuery()
+  const { data, isLoading, isError, refetch } = useGetQuickBalancesQuery(undefined, { refetchOnFocus: true })
   const [editing, setEditing] = useState(false)
 
+  // refetchOnFocus: a tab left open picks up pins another tab or device saved, when it is next focused.
   // A user with no accounts gets no section.
   if (data !== undefined && data.tiles.length === 0) return null
 
