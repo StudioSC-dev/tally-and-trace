@@ -58,6 +58,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
+const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -730,9 +731,16 @@ async function gifts(browser) {
   const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction' }) })
   if (!(await dialogOpened(modal, '(g) Add Transaction opened the Create Transaction dialog'))) return ctx.close()
   const gifts = modal.getByRole('button', { name: 'Gifts & Donations', exact: true })
+  const categories = modal.locator('[data-field="category_id"]')
   await modal.getByRole('button', { name: 'Expense', exact: true }).click()
+  // Chips outside the quick row are only in the DOM once the picker is expanded; pick() opens it.
+  await pick(categories, 'Gifts & Donations')
   check('(g) the expense categories have Gifts & Donations', await gifts.count(), 1)
   await modal.getByRole('button', { name: 'Income', exact: true }).click()
+  // Expand the income picker too, if it is collapsed, so the absence is checked against the full list.
+  const toggle = categories.locator('[data-picker-toggle][aria-expanded="false"]')
+  await categories.locator('button').first().waitFor({ timeout: 10000 })
+  if ((await toggle.count()) === 1) await toggle.click()
   check('(g) the income categories do not', await gifts.count(), 0)
   await ctx.close()
 }
