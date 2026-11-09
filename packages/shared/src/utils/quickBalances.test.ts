@@ -78,8 +78,15 @@ describe('tileLines', () => {
     expect(three[three.length - 1]?.text).toBe('shared with A and B')
   })
 
-  it('says No limit set on a card with no credit', () => {
-    expect(texts(creditTile({ card: card() }))[1]).toEqual(['available', null, 'No limit set'])
+  it('leaves the available line out when credit is absent, never saying No limit set', () => {
+    // A card with no limit and a card whose shared limit the caller can't see in full both arrive without `credit`.
+    const lines = tileLines(creditTile({ card: card() }))
+    expect(lines.map((l) => l.id)).toEqual(['due'])
+    expect(lines.some((l) => l.text.includes('No limit set'))).toBe(false)
+  })
+
+  it('keeps the unbilled line and drops only Available when credit is absent', () => {
+    expect(tileLines(creditTile({ card: card({ unbilled: 10 }) })).map((l) => l.id)).toEqual(['due', 'unbilled'])
   })
 
   it('shows Owed for a card without the card key (editor or viewer)', () => {

@@ -19,10 +19,11 @@
 //       dashboard renders; Retry loads the tiles
 //   (f) recording a payment from Security Bank to the card updates both tiles without a
 //       reload
+//   (h) an admin of one card in a shared-limit pair sees its Due but no Available and no "No limit set"
 //   (g) a user with no card and no e-wallet sees one tile; a user with no accounts sees
 //       no section
 //
-// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g]
+// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h]
 const { startLocalStack } = require('./_local_stack.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -347,6 +348,22 @@ async function fewAccounts(browser) {
   await b.ctx.close()
 }
 
+// (h) A card whose shared limit the caller can't see in full.
+async function partialGroup(browser) {
+  console.log('\n=== (h) an admin of one card in a shared-limit pair sees no Available line and no "No limit set"')
+  const admin = await makeUser('admin')
+  await post(owner.token, `/accounts/${platinum.id}/shares`, { email: admin.email, role: 'admin' })
+  const t = (await quick(admin)).tiles.find((x) => x.account_id === platinum.id)
+  check('(h) the API gives the admin the card figures and no credit', [t !== undefined, t?.card !== undefined, t?.credit === undefined], [true, true, true])
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, admin)
+  await openDashboard(page)
+  const card = tile(page, platinum.id)
+  check('(h) the tile shows Due', await card.locator('[data-testid="quick-balance-due"]').count(), 1)
+  check('(h) no Available line and no "No limit set"', [await card.locator('[data-testid="quick-balance-available"]').count(), (await text(card)).includes('No limit set')], [0, false])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -360,6 +377,7 @@ async function fewAccounts(browser) {
   if (run('e')) await failure(browser)
   if (run('f')) await payment(browser)
   if (run('g')) await fewAccounts(browser)
+  if (run('h')) await partialGroup(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

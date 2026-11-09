@@ -46,7 +46,7 @@ export function tileGroupLabel(tile: Pick<QuickBalanceTile, 'account_type'>): st
  *   due, "Nothing due" at 0 (with "may be low" when incomplete), "No statement yet" with none, "may be low" when incomplete),
  *   the unbilled charges as a smaller line (omitted when null or 0), then the available
  *   credit ("at most" when incomplete, followed by "shared with ..." on a linked card, or
- *   "No limit set" when no credit is served).
+ *   nothing when no credit is served).
  */
 export function tileLines(tile: QuickBalanceTile): TileLine[] {
   const money = (amount: number) => formatCurrency(amount, tile.currency)
@@ -68,9 +68,10 @@ export function tileLines(tile: QuickBalanceTile): TileLine[] {
     lines.push(line('unbilled', 'Unbilled', money(card.unbilled), 'muted', true))
   }
   const credit = tile.credit
-  if (credit === undefined) {
-    lines.push(line('available', null, 'No limit set', 'muted'))
-  } else {
+  // The API omits `credit` for a card with no limit and for a card whose shared limit the caller
+  // can't see in full (a limit it does not manage every card of), and the two look the same, so
+  // an absent `credit` shows no available-credit line rather than a guess.
+  if (credit !== undefined) {
     const available = money(credit.available_now)
     lines.push(line('available', 'Available', credit.complete ? available : `at most ${available}`))
     if (credit.shared_with.length > 0) {
