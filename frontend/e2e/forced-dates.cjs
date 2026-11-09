@@ -619,6 +619,9 @@ async function missedRowChangeDate(browser) {
   const error = dialog(page).locator('[data-testid="force-date-error"]')
   await error.waitFor()
   check('(j) the dialog stays open with the server\'s reason', [await dialog(page).count(), ((await error.textContent()) ?? '').trim().length > 0], [1, true])
+  const afterRefusal = await missedOf(owner, rent.id)
+  check('(j) after the refusal the API still has 2 missed and the oldest unchanged', [afterRefusal?.unlinked_count, afterRefusal?.oldest_unlinked, afterRefusal?.oldest_effective], [2, oldest, seeded])
+  check('(j) after the refusal the row still reads 2 missed since the forced date', await missedText(page, rent.id), `2 missed since ${fmt(seeded)}`)
 
   const toPast = addDays(today, -10)
   const saved = await saveInDialog(page, toPast, puts)
