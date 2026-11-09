@@ -459,6 +459,26 @@ def test_a_subscription_forced_later_leaves_the_missed_total(world):
     assert _checks(client, me, card, entry)[0] == ("2026-10-20", "2026-10-10")
 
 
+def test_a_missed_item_carries_its_oldest_effective_date(world):
+    """STU-577: ``oldest_effective`` is the oldest unlinked occurrence on its forced date."""
+    client, me = world["client"], world["me"]
+    card = _card(client, me, world["bank"], name="Missed card")
+    entry = _subscription(client, me, card, "2026-10-09", cadence="weekly")
+
+    (item,) = _section(client, me, card)["missed"]
+    assert (item["count"], item["oldest_unlinked"], item["oldest_effective"]) == (
+        2, "2026-10-09", "2026-10-09")
+
+    _force(client, me, entry, "2026-10-09", "2026-10-12")
+    (item,) = _section(client, me, card)["missed"]
+    assert (item["count"], item["oldest"], item["oldest_unlinked"], item["oldest_effective"]) == (
+        2, "2026-10-09", "2026-10-09", "2026-10-12")
+
+    _clear(client, me, entry, "2026-10-09")
+    (item,) = _section(client, me, card)["missed"]
+    assert item["oldest_effective"] == "2026-10-09"
+
+
 def test_a_linked_row_still_consumes_its_nominal_occurrence(world):
     """Criterion 12: Charged on a forced occurrence leaves one line, the row."""
     client, me, db = world["client"], world["me"], world["db"]
