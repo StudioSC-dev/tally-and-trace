@@ -310,6 +310,13 @@ def _overdue_charge(txn: Transaction, card: Account, start: datetime, original: 
                  recurring=txn.budget_entry_id is not None)
 
 
+def _oldest_effective(links: dict, moved) -> Optional[str]:
+    oldest = links["oldest_unlinked"]
+    if oldest is None:
+        return None
+    return effective(moved, date.fromisoformat(oldest)).isoformat()
+
+
 def _missed(db: Session, cards: Dict[int, Account], today: date,
             redactor: Redactor) -> Dict[int, List[dict]]:
     """``{card id: [missed item]}``: each open-ended subscription or bill on a
@@ -317,7 +324,9 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
     posted row records (``count``), also counting today's (``due_count``), both
     on the effective date; ``oldest`` is nominal, as Mark paid sends it back.
     ``unlinked_count``, ``oldest_unlinked`` and ``pending_transaction_ids``
-    split ``count`` by pending linked rows (``missed.split_pending_links``)."""
+    split ``count`` by pending linked rows (``missed.split_pending_links``).
+    ``oldest_effective`` is ``oldest_unlinked`` on its forced date (itself when none),
+    null when every missed occurrence has a pending row."""
     entries = [e for e in db.query(BudgetEntry).filter(
         BudgetEntry.account_id.in_(list(cards)),
         BudgetEntry.is_active.is_(True),
@@ -346,6 +355,7 @@ def _missed(db: Session, cards: Dict[int, Account], today: date,
             "due_count": len(due),
             "oldest": due[0].date().isoformat(),
             **links[entry.id],
+            "oldest_effective": _oldest_effective(links[entry.id], forced.get(entry.id)),
             "can_mark_paid": bool(redactor.access.permissions(entry)["can_post"]),
         })
     return out

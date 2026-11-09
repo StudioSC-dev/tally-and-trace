@@ -463,6 +463,19 @@ describe('dueRecurringRows: a missed row carries what Change date needs', () => 
     expect(older.oldestEffectiveKnown).toBe(false)
   })
 
+  it('reads a card missed row "since" its forced date and hands it to Change date', () => {
+    const cardRow = (m: Partial<MissedCharge>) =>
+      missedRows(dueRecurringRows(snap({ card_charges: [card({ missed: [cardMissed({ entry_id: 7, name: 'Spotify', ...m })] })] }), TODAY))[0]
+    const moved = cardRow({ oldest: '2026-08-20', oldest_unlinked: '2026-08-20', oldest_effective: '2026-08-23' })
+    expect(moved).toMatchObject({ count: 2, oldest: '2026-08-20', oldestEffective: '2026-08-23', oldestEffectiveKnown: true, text: '2 missed since Aug 23rd, 2026' })
+    const plain = cardRow({ oldest_effective: '2026-08-20' })
+    expect(plain).toMatchObject({ oldestEffective: '2026-08-20', oldestEffectiveKnown: true, text: '2 missed since Aug 20th, 2026' })
+    // A pending row covers the oldest day: the effective date belongs to the next, unlinked one.
+    const linked = cardRow({ count: 2, oldest: '2026-08-20', unlinked_count: 1, oldest_unlinked: '2026-09-20', oldest_effective: '2026-09-22' })
+    expect(linked).toMatchObject({ oldest: '2026-09-20', oldestEffective: '2026-09-22', oldestEffectiveKnown: true })
+    expect(cardRow({ oldest_effective: null })).toMatchObject({ oldestEffective: '2026-08-20', oldestEffectiveKnown: false })
+  })
+
   it('reads "since" on the effective date once the oldest is moved to another past day, count unchanged', () => {
     const before = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-20', oldest_unlinked: '2026-09-20', unlinked_count: 2 }))
     const after = oneRow(missed({ entry_id: 2, name: 'Rent', count: 2, oldest: '2026-09-20', oldest_effective: '2026-09-23', oldest_unlinked: '2026-09-20', unlinked_count: 2 }))

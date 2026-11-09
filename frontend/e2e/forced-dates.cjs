@@ -31,10 +31,13 @@
 //       Upcoming row "(moved from ...)"; Clear from that row brings the missed row back
 //   (l) the Subscriptions tab's missed row (a card subscription) has Change date; moved into the future
 //       it leaves the missed row and reads "(moved from ...)" there; Clear restores it
+//   (m) STU-577: a card subscription with 2 missed occurrences; its oldest moved to another past day between
+//       its neighbours reads "2 missed since <new day>" on the Subscriptions tab; Change date opens with the
+//       forced day already in the field and makes no occurrence lookup request; Clear restores the scheduled day
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
+// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -729,7 +732,7 @@ async function missedRowSubscription(browser) {
   await row.locator('[data-testid="row-change-date"]').click()
   await dialog(page).waitFor({ timeout: 10000 })
   await waitQuiet(page)
-  check('(l) the dialog opens for the oldest missed day (the card row carries no forced date, so the dialog looks it up)', (await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), `Scheduled ${fmt(oldest)}`)
+  check('(l) the dialog opens for the oldest missed day ', (await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), `Scheduled ${fmt(oldest)}`)
   const saved = await saveInDialog(page, to, puts)
   check('(l) the PUT names the oldest missed day', [saved?.status, saved?.day, saved?.body], [200, oldest, { effective_date: to }])
   const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
@@ -754,12 +757,71 @@ async function missedRowSubscription(browser) {
   await ctx.close()
 }
 
+// (m) STU-577: a card subscription's missed row reads "since" its forced date and opens Change date on it with no lookup.
+async function missedRowCardEffective(browser) {
+  console.log('\n=== (m) a card subscription\'s missed row reads "since" the forced date; Change date pre-fills it with no lookup')
+  const today = manilaToday()
+  const u = await makeUser('m')
+  const bank = await account(u, 'M Checking')
+  // The close day is at most the 28th, and the open cycle holds both missed days and the forced one.
+  const visa = await card(u, bank, 'M Visa', Math.min(28, dom(addDays(today, 12))), 5)
+  const oldest = addDays(today, -10)
+  const second = addDays(today, -3)
+  const to = addDays(today, -6)
+  const spotify = await entry(u, { name: 'M Spotify', cadence: 'weekly', amount: 500, account_id: visa.id, next_occurrence: wire(oldest) })
+  const m0 = await missedOf(u, spotify.id)
+  check('(m) setup: two missed occurrences, none forced', [m0?.unlinked_count, m0?.oldest_unlinked, m0?.oldest_effective], [2, oldest, oldest])
+  const { ctx, page, native, puts } = await newPage(browser)
+  const lookups = []
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname
+    if (r.method() === 'GET' && path.endsWith(`/budget-entries/${spotify.id}/occurrences`)) lookups.push(r.url())
+  })
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await openDueTab(page, 'subscriptions')
+  const row = await showRow(page, missedRowOf(page, spotify.id))
+  check('(m) before: the row reads 2 missed since the scheduled day', await missedText(page, spotify.id), `2 missed since ${fmt(oldest)}`)
+  await row.locator('[data-testid="row-change-date"]').click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  const saved = await saveInDialog(page, to, puts)
+  check('(m) the PUT names the oldest day, between its neighbours', [saved?.status, saved?.day, saved?.body, to < second], [200, oldest, { effective_date: to }, true])
+  const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
+  if (await confirmation.count()) await dialog(page).locator('[data-testid="force-date-close"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  // A fresh page, so no lookup the first dialog made is still cached.
+  await openTransactions(page)
+  const m1 = await missedOf(u, spotify.id)
+  check('(m) the API carries the forced day', [m1?.unlinked_count, m1?.oldest_unlinked, m1?.oldest_effective], [2, oldest, to])
+  await openDueTab(page, 'subscriptions')
+  await showRow(page, missedRowOf(page, spotify.id))
+  check('(m) the row reads 2 missed since the new day', await missedText(page, spotify.id), `2 missed since ${fmt(to)}`)
+  const lookupsBefore = lookups.length
+  await changeButtonOf(page, spotify.id).click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  await dialog(page).locator('[data-testid="force-date-clear"]').waitFor()
+  await settle(page)
+  check('(m) the dialog opens with the forced day already in the field', [(await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), await dialog(page).locator('[data-testid="force-date-input"]').inputValue()], [`Scheduled ${fmt(oldest)} · now ${fmt(to)}`, to])
+  check('(m) opening it sent no occurrence lookup', lookups.length - lookupsBefore, 0)
+  const before = puts.length
+  await dialog(page).locator('[data-testid="force-date-clear"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(m) Clear sends one DELETE for the oldest day', puts.slice(before).map((p) => [p.method, p.day, p.status]), [['DELETE', oldest, 204]])
+  await openDueTab(page, 'subscriptions')
+  await showRow(page, missedRowOf(page, spotify.id))
+  check('(m) Clear restores the scheduled day', await missedText(page, spotify.id), `2 missed since ${fmt(oldest)}`)
+  checkNoNative('m', native)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement, i: installmentPlanRow, j: missedRowChangeDate, k: missedRowFuture, l: missedRowSubscription }
+  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement, i: installmentPlanRow, j: missedRowChangeDate, k: missedRowFuture, l: missedRowSubscription, m: missedRowCardEffective }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

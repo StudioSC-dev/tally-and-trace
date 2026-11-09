@@ -251,7 +251,7 @@ interface MissedSource {
   account_name: string | null
   count: number
   oldest: string
-  /** `oldest` on its forced date; null when the API does not say (a card's missed charge, an older API). */
+  /** `oldest` on its forced date; null when the API does not say (an older API). */
   oldest_effective: string | null
   unlinked_count: number
   oldest_unlinked: string | null
@@ -273,8 +273,9 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
       capped: false,
       account_name: c.account_name,
       count: m.count,
-      oldest: m.oldest,
-      oldest_effective: null,
+      // A card's `oldest_effective` is already the oldest unlinked day's, so it is known whenever the API sends it.
+      oldest: m.oldest_unlinked ?? m.oldest,
+      oldest_effective: m.oldest_effective ?? null,
       unlinked_count: m.unlinked_count,
       oldest_unlinked: m.oldest_unlinked,
       can_mark_paid: m.can_mark_paid,
