@@ -14,7 +14,7 @@
 //   (b) the card tile shows Due with its date, the Unbilled line, then Available with
 //       "shared with BDO Platinum Mastercard"; the other tiles show their balance
 //   (c) tapping a tile opens /accounts/<id>
-//   (d) at 390px: 2 columns, the credit tile spans the row, no horizontal scroll, 44px targets
+//   (d) at 390px: 2 columns, debit and e-wallet side by side with the credit tile full width below, no horizontal scroll, 44px targets
 //   (e) a failed quick-balances request shows the section's Retry while the rest of the
 //       dashboard renders; Retry loads the tiles
 //   (f) recording a payment from Security Bank to the card updates both tiles without a
@@ -224,11 +224,12 @@ async function phone(browser) {
       const r = document.querySelector(`[data-testid="quick-balance-tile"][data-type="${id}"]`).getBoundingClientRect()
       return { x: r.x, w: r.width, h: r.height }
     }
+    const top = (id) => document.querySelector(`[data-testid="quick-balance-tile"][data-type="${id}"]`).getBoundingClientRect().top
     const g = grid.getBoundingClientRect()
     return {
       columns: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
       gridWidth: g.width,
-      checking: rect('checking'), credit: rect('credit'), wallet: rect('e_wallet'),
+      checking: rect('checking'), checkingTop: top('checking'), walletTop: top('e_wallet'), creditTop: top('credit'), credit: rect('credit'), wallet: rect('e_wallet'),
       scrollW: document.documentElement.scrollWidth, clientW: document.documentElement.clientWidth,
       heights: [...document.querySelectorAll('[data-testid="quick-balance-tile"]')].map((e) => e.getBoundingClientRect().height),
     }
@@ -236,6 +237,8 @@ async function phone(browser) {
   check('(d) the grid has 2 columns', m.columns, 2)
   check('(d) the credit tile spans the row', Math.abs(m.credit.w - m.gridWidth) < 1, true)
   check('(d) the other tiles take one column each', [m.checking.w < m.gridWidth * 0.6, m.wallet.w < m.gridWidth * 0.6], [true, true])
+  check('(d) the debit and e-wallet tiles share the first row', Math.abs(m.checkingTop - m.walletTop) < 1, true)
+  check('(d) the credit tile sits below them', m.creditTop > m.checkingTop + m.checking.h - 1, true)
   check('(d) no horizontal scroll', m.scrollW <= m.clientW, true)
   check('(d) every tile is at least 44px tall', m.heights.every((h) => h >= 44), true)
   await ctx.close()

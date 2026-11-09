@@ -82,7 +82,7 @@ export function QuickBalances() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 grid-flow-row-dense lg:grid-flow-row gap-3">
             {data.tiles.map((tile) => (
               <Tile key={tile.account_id} tile={tile} defaultCurrency={currencyCode} />
             ))}
