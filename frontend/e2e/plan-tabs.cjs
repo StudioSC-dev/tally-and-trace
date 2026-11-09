@@ -54,6 +54,7 @@ const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet, recordTexts, readTexts, resetTexts, sleep } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
+const { seedDays, closeDayOf } = require('./_seed_days.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -149,13 +150,6 @@ async function makeOpener(tag) {
 }
 const account = (u, name, type = 'checking', balance = 100000, extra = {}) =>
   post(u.token, '/accounts/', { name, account_type: type, balance, currency: 'PHP', ...extra })
-/**
- * The close day that leaves an installment dated `day` where it is. The API stores a new card
- * installment on the close of the statement holding its date (768a9b9), so a scenario that reads an
- * installment's own date puts its card's close on that day. A close day is at most the 28th, so
- * pass dates through `safeDay` first.
- */
-const closeOn = (day) => Math.min(28, Number(day.slice(8, 10)))
 /** A PHP card closing on `closeDom` (the 28th by default), due 21 days later, paid from `bank`. */
 const card = (u, bank, name, limit = 100000, closeDom = 28) => post(u.token, '/accounts/', {
   name, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: limit,
@@ -325,21 +319,20 @@ async function installmentPlans(browser) {
   const today = manilaToday()
   const u = await makeOpener('c')
   const bank = await account(u, 'C Checking')
-  // One card per plan: each closes on its plan's own date, which is where the API keeps it.
-  const planCard = (name, day) => card(u, bank, `C Visa ${name}`, 100000, closeOn(safeDay(day)))
-  const bdoStart = safeDay(addDays(today, 7))
+  // One card per plan, each closing on its own date: the API keeps a card installment on its statement
+  // close, and a close is at most the 28th. The four future plans are seeded together where none passes
+  // the 28th, so their dates stay distinct and in order; the past one is moved back to the 28th if need be.
+  const planCard = (name, day) => card(u, bank, `C Visa ${name}`, 100000, closeDayOf(day))
+  const [bdoStart, unrevStart, onStart, pausedStart] = seedDays(today, [7, 8, 9, 10])
   const bdo = await installment(u, await planCard('BDO', bdoStart), 'BDO balance convert', bdoStart, 10, { occurrences_paid_offset: 2 })
   setReview(bdo.id, 'off')
   const oldStart = safeDay(addDays(today, -40))
   const old = await installment(u, await planCard('Old', oldStart), 'Old Plan', oldStart, 5)
   setReview(old.id, 'off')
-  const unrevStart = safeDay(addDays(today, 8))
   const unreviewed = await installment(u, await planCard('Unrev', unrevStart), 'Unrev Plan', unrevStart, 6)
   setReview(unreviewed.id, 'unreviewed')
-  const onStart = safeDay(addDays(today, 9))
   const on = await installment(u, await planCard('On', onStart), 'On Plan', onStart, 6)
   setReview(on.id, 'on')
-  const pausedStart = safeDay(addDays(today, 10))
   const paused = await installment(u, await planCard('Paused', pausedStart), 'Paused Plan', pausedStart, 6, { is_active: false })
 
   const { ctx, page, native } = await newPage(browser)
