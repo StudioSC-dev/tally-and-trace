@@ -15,7 +15,8 @@
 //   (c) the select lists only eligible cards: no other currency, no linked card, not itself
 //   (d) the primary's form shows "Shared with ... Change it on that card" with the select
 //       disabled
-//   (e) the secondary's edit form unlinks: None sends null, the link and the line go, and
+//   (e) the secondary's edit form leaves the link out of an edit that doesn't change it, then
+//       unlinks: None sends null, the link and the line go, and
 //       Credit Limit comes back
 //   (f) a charge on the Platinum drops the Amex row's figure by the same amount
 //   (g) Allocations shows "Available credit on BDO Platinum Mastercard" for a subscription
@@ -197,6 +198,13 @@ async function sameAvailable(browser) {
     (await page.locator('[data-testid="credit-shared-limit"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(), `Shared ${peso(AMEX_LIMIT)} limit with BDO Amex`)
   check('(b) and the opening line covers both cards',
     (await page.locator('[data-testid="card-credit-opening"]').textContent({ timeout: 3000 }).catch(() => null))?.startsWith('Across both cards:'), true)
+  check('(b) the Platinum page says it shares the Amex\'s limit',
+    (await page.locator('[data-testid="account-detail-shared-limit"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(), 'Shares limit with BDO Amex')
+  await page.goto(`${stack.webUrl}/accounts/${amex.id}`)
+  await page.locator('[data-testid="card-credit-panel"]').waitFor()
+  await settle(page)
+  check('(b) the Amex page names the card sharing its limit',
+    (await page.locator('[data-testid="account-detail-shared-limit"]').textContent({ timeout: 3000 }).catch(() => null))?.trim(), 'Limit shared with BDO Platinum Mastercard')
   noDialog('(b)', native)
   await ctx.close()
 }
@@ -252,6 +260,19 @@ async function unlink(browser) {
   await page.getByRole('button', { name: 'Show details' }).click()
   await linkSelect(page).waitFor()
   check('(e) Credit Limit is hidden while linked', await limitLabel(page).count(), 0)
+  // An edit that leaves the link alone (only the description changes) does not send it.
+  await page.locator('textarea').fill('Edited while linked')
+  const kept = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${platinum.id}`))
+  await page.getByRole('button', { name: 'Update Account', exact: true }).click()
+  const keptBody = (await kept).postDataJSON()
+  check('(e) a description-only edit while linked leaves the link out', ['shares_limit_with_account_id' in keptBody, 'credit_limit' in keptBody], [false, false])
+  await page.getByRole('button', { name: 'Update Account', exact: true }).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(e) and the card stays linked', (await get(owner.token, `/accounts/${platinum.id}`)).shares_limit_with_account_id, amex.id)
+  await accountRow(page, platinum.name).locator('[role="button"]').first().click()
+  await page.getByRole('button', { name: 'Edit account' }).click()
+  await page.getByRole('button', { name: 'Show details' }).click()
+  await linkSelect(page).waitFor()
   await linkSelect(page).selectOption('')
   check('(e) None brings Credit Limit back', await limitLabel(page).count(), 1)
   const sent = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname.endsWith(`/accounts/${platinum.id}`))
