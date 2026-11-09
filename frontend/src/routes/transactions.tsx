@@ -25,6 +25,8 @@ import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
+import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
+import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
@@ -589,6 +591,9 @@ export function TransactionsPage() {
     () => accounts.filter((account) => account.permissions.can_add_transactions),
     [accounts]
   )
+  // The form pickers' recent choices on this device, written only after a save succeeds.
+  const recentAccounts = useRecentPicks('account')
+  const recentCategories = useRecentPicks('category')
   // Destinations looked up by id because they are not in `accounts` (inactive,
   // or past its first 100); null when the lookup found no such account.
   const [triggerAccount] = useLazyGetAccountQuery()
@@ -1094,14 +1099,17 @@ export function TransactionsPage() {
   }, [focusRequest, refreshPending])
 
   // One inline error per attempt, on the first invalid field, which takes focus. A chip
-  // group focuses its selected chip, else its first.
+  // group focuses its selected chip, else its first (an open picker's toggle comes first
+  // in the DOM, so it is passed over while there is a chip).
   const fail = (key: TransactionField, message: string) => {
     setDateErrors({})
     setFieldErrors({ [key]: message })
     const field = transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`)
     const target =
       field?.getAttribute('role') === 'group'
-        ? field.querySelector<HTMLElement>('button[data-selected="true"]') ?? field.querySelector<HTMLElement>('button')
+        ? field.querySelector<HTMLElement>('button[data-selected="true"]') ??
+          field.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
+          field.querySelector<HTMLElement>('button')
         : field
     target?.focus()
   }
@@ -1359,6 +1367,12 @@ export function TransactionsPage() {
         } finally {
           if (abandonCurrentSave.current === abandon) abandonCurrentSave.current = null
         }
+        // The source account ends up newest, then the destination.
+        recentAccounts.push([
+          formData.account_id || undefined,
+          formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined,
+        ])
+        if ('category_id' in payload) recentCategories.push([formData.category_id])
         if (editingTransaction) {
           if (owns()) {
             setEditingTransaction(null)
@@ -3033,32 +3047,19 @@ export function TransactionsPage() {
                 <label className="label" id="transaction-account-label">
                   {formData.transaction_type === 'transfer' ? 'From Account' : 'Account'}
                 </label>
-                <div
-                  className="flex flex-wrap gap-2"
-                  role="group"
-                  aria-labelledby="transaction-account-label"
-                  aria-describedby={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
-                  data-field="account_id"
-                >
-                  {writableAccounts.map((account) => {
-                    const isSelected = formData.account_id === account.id
-                    return (
-                      <button
-                        type="button"
-                        key={account.id}
-                        data-selected={isSelected ? 'true' : undefined}
-                        aria-describedby={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
-                        onClick={() => handleAccountSelect(account.id)}
-                        className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                      >
-                        {account.name}
-                        <span className="ml-2 text-xs font-normal">
-                          ({account.currency})
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+                <AccountPicker
+                  mode="single"
+                  accounts={writableAccounts}
+                  value={formData.account_id || undefined}
+                  onChange={(id) => {
+                    if (typeof id === 'number') handleAccountSelect(id)
+                  }}
+                  recentIds={recentAccounts.recentIds}
+                  pinnedId={user?.main_account_id ?? undefined}
+                  dataField="account_id"
+                  labelledBy="transaction-account-label"
+                  describedBy={fieldErrorProps(fieldErrors, 'account_id', fieldErrorId('account_id'))['aria-describedby']}
+                />
                 <FieldErrorText field="account_id" message={fieldErrors.account_id} />
                 <p className="mt-2 text-xs text-muted">
                   {formData.transaction_type === 'transfer'
@@ -3075,42 +3076,29 @@ export function TransactionsPage() {
               {formData.transaction_type === 'transfer' && (
               <div>
                   <label className="label" id="transaction-destination-label">Destination Account</label>
-                  <div
-                    className="flex flex-wrap gap-2"
-                    role="group"
-                    aria-labelledby="transaction-destination-label"
-                    aria-describedby={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
-                    data-field="transfer_to_account_id"
-                  >
-                    {transferDestinationOptions.length === 0 && (
-                      <p className="text-sm text-muted">Select a different source account to see destinations.</p>
-                    )}
-                    {transferDestinationOptions.map((account) => {
-                      const isSelected = formData.transfer_to_account_id === account.id
-                      return (
-                        <button
-                          type="button"
-                          key={account.id}
-                          data-selected={isSelected ? 'true' : undefined}
-                          aria-describedby={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
-                          onClick={() => {
-                            setFieldErrors((prev) => withoutError(prev, 'transfer_to_account_id'))
-                            setFormData((prev) => ({
-                              ...prev,
-                              transfer_to_account_id: isSelected ? undefined : account.id,
-                              transfer_fee: isSelected
-                                ? prev.transfer_fee
-                                : destinationTransferFee(account, prev.transfer_fee),
-                            }))
-                          }}
-                          className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                        >
-                          {account.name}
-                          <span className="ml-2 text-xs font-normal">({account.currency})</span>
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <AccountPicker
+                    mode="single"
+                    deselectable
+                    accounts={transferDestinationOptions}
+                    value={formData.transfer_to_account_id}
+                    onChange={(id) => {
+                      const account = transferDestinationOptions.find((a) => a.id === id)
+                      setFieldErrors((prev) => withoutError(prev, 'transfer_to_account_id'))
+                      setFormData((prev) => ({
+                        ...prev,
+                        transfer_to_account_id: account ? account.id : undefined,
+                        transfer_fee: account
+                          ? destinationTransferFee(account, prev.transfer_fee)
+                          : prev.transfer_fee,
+                      }))
+                    }}
+                    recentIds={recentAccounts.recentIds}
+                    pinnedId={user?.main_account_id ?? undefined}
+                    dataField="transfer_to_account_id"
+                    labelledBy="transaction-destination-label"
+                    describedBy={fieldErrorProps(fieldErrors, 'transfer_to_account_id', fieldErrorId('transfer_to_account_id'))['aria-describedby']}
+                    emptyText="Select a different source account to see destinations."
+                  />
                   <FieldErrorText field="transfer_to_account_id" message={fieldErrors.transfer_to_account_id} />
                 </div>
               )}
@@ -3128,41 +3116,28 @@ export function TransactionsPage() {
                 </div>
               ) : (
               <div>
-                <label className="label">
+                <label className="label" id="transaction-category-label">
                   {formData.transaction_type === 'transfer' ? 'Contribution category' : 'Category'}
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        category_id: undefined,
-                      }))
-                    }
-                    className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ formData.category_id === undefined ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  >
-                    {formData.transaction_type === 'transfer' ? 'None' : 'Uncategorized'}
-                  </button>
-                  {visibleCategories.map((category) => {
-                    const isSelected = formData.category_id === category.id
-                    return (
-                      <button
-                        type="button"
-                        key={category.id}
-                        onClick={() =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            category_id: category.id,
-                          }))
-                        }
-                        className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                      >
-                    {category.name}
-                      </button>
-                    )
-                  })}
-                </div>
+                <CategoryPicker
+                  mode="single"
+                  categories={visibleCategories}
+                  value={formData.category_id}
+                  onChange={(id) => {
+                    if (typeof id === 'number') setFormData((prev) => ({ ...prev, category_id: id }))
+                  }}
+                  leading={[
+                    {
+                      key: 'none',
+                      label: formData.transaction_type === 'transfer' ? 'None' : 'Uncategorized',
+                      selected: formData.category_id === undefined,
+                      onClick: () => setFormData((prev) => ({ ...prev, category_id: undefined })),
+                    },
+                  ]}
+                  recentIds={recentCategories.recentIds}
+                  dataField="category_id"
+                  labelledBy="transaction-category-label"
+                />
                 <p className="mt-2 text-xs text-muted">
                   {formData.transaction_type === 'transfer'
                     ? 'Tag this move (e.g. Savings, Investments) to track contributions. It stays out of income and expense totals.'

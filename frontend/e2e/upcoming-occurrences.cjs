@@ -50,6 +50,7 @@
 //
 // Usage: node frontend/e2e/upcoming-occurrences.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
+const { pick } = require('./_picker.cjs')
 const { useDueCheck, dialogOpened, expectDueTab, DUE_TABS, allDueRows, openDueTab, readTab, showRow, goToPage, pagerLabel, currentPage } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
@@ -558,7 +559,7 @@ async function filters(browser) {
 
   await apply('Income only', () => page.getByRole('button', { name: 'Income', exact: true }).click())
   await reset()
-  await apply('one account', () => page.getByRole('button', { name: 'G Bank B', exact: true }).click())
+  await apply('one account', () => pick(page, /^G Bank B$/))
   await reset()
   await apply('search', async () => { await page.locator('[data-testid="transactions-search"]').fill('Rent'); await page.waitForTimeout(700) })
   await reset()
