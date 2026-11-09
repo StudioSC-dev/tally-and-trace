@@ -54,6 +54,7 @@ The report lists ids, dates and refusal reasons only, never an amount.
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from types import SimpleNamespace
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -68,7 +69,7 @@ from app.models.transaction import RecurrenceFrequency, Transaction, Transaction
 from app.services.payment_dates import load_entry_overrides
 from app.services.recurrence import canon
 from app.services.statements import (
-    iter_cycles_from, resolve_cycle_fields, statement_balance, statement_close)
+    iter_cycles_from, resolve_cycle_fields, statement_balance, statement_close, statement_day)
 
 HELD_HORIZON_DAYS = 62
 
@@ -229,6 +230,15 @@ def _statement_balances(db: Session, card: Account, closes: Iterable[date], *,
     return out
 
 
+def _sits_on(card: Account, row: Transaction, today: date, day: Optional[date] = None) -> date:
+    """The close of the statement ``row`` sits on, read on ``today``
+    (``statements.statement_day``); with ``day``, once re-dated onto it."""
+    placed = row if day is None else SimpleNamespace(
+        transaction_date=_on(row.transaction_date, day), is_posted=row.is_posted,
+        posting_date=row.posting_date)
+    return statement_close(card, statement_day(placed, today))
+
+
 def _window_start(card: Account, close: date) -> datetime:
     """The previous close of the statement closing on ``close``: its cycle's
     ``window_start`` (``statements.iter_cycles_from``), as ``due_in_order`` reads it."""
@@ -320,8 +330,8 @@ def _redate_entry(db: Session, entry_id: int, today: date) -> EntryResult:
     boundaries = sorted({today, *(d for d in old_days if d >= today),
                          *(d for d in day_map.values() if d >= today)})
     billed_before = {start: _billed(db, card, start) for start in boundaries}
-    affected = {close for _, close in plan} | {
-        statement_close(card, _day(row.transaction_date)) for row, _ in plan}
+    affected = {_sits_on(card, row, today) for row, _ in plan} | {
+        _sits_on(card, row, today, close) for row, close in plan}
     balances_before = _statement_balances(db, card, affected, today=today)
 
     def mapped(day: date) -> date:
