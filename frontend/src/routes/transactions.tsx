@@ -518,12 +518,6 @@ export function TransactionsPage() {
     [todayMonthStart]
   )
 
-  const toggleAccountFilter = useCallback((id: number) => {
-    setSelectedAccountIds((prev) =>
-      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
-    )
-  }, [])
-
   const toggleCategoryFilter = useCallback((name: string) => {
     setSelectedCategoryNames((prev) => {
       if (prev.includes(name)) return prev.filter((value) => value !== name)
@@ -600,11 +594,14 @@ export function TransactionsPage() {
   const [resolvedDestinations, setResolvedDestinations] = useState<Record<number, Account | null>>({})
   const destinationLookups = useRef(new Set<number>())
   const categories = useMemo(() => categoriesData ?? [], [categoriesData])
-  // One chip per name: the filter matches by name, so same-name categories are one choice.
-  const categoryFilterNames = useMemo(
-    () => Array.from(new Set(categories.map((category) => category.name))),
-    [categories]
-  )
+  // The category picker's recents (ids) as the names the filter works in.
+  const recentCategoryNames = useMemo(() => {
+    const names = new Map(categories.map((category) => [category.id, category.name]))
+    return recentCategories.recentIds.flatMap((id) => {
+      const name = typeof id === 'number' ? names.get(id) : undefined
+      return name === undefined ? [] : [name]
+    })
+  }, [categories, recentCategories.recentIds])
   // Only the caller's own entries can be linked to a transaction: a shared or limited
   // entry belongs to someone else, whose category and allocation the caller can't use.
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
@@ -2366,30 +2363,28 @@ export function TransactionsPage() {
         {showFilters && (
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-semibold text-body">Accounts</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedAccountIds([])}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedAccountIds.length === 0 ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  disabled={selectedAccountIds.length === 0}
-                >
-                  All accounts
-                </button>
-                {accounts.map((account) => {
-                  const isSelected = selectedAccountIds.includes(account.id)
-                  return (
-                    <button
-                      type="button"
-                      key={account.id}
-                      onClick={() => toggleAccountFilter(account.id)}
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                    >
-                  {account.name}
-                    </button>
-                  )
-                })}
-          </div>
+              <h3 id="filter-accounts-heading" className="text-sm font-semibold text-body">Accounts</h3>
+              <div className="mt-2">
+                <AccountPicker
+                  mode="multi"
+                  accounts={accounts}
+                  value={selectedAccountIds}
+                  onChange={(ids) => setSelectedAccountIds(ids.filter((id): id is number => typeof id === 'number'))}
+                  recentIds={recentAccounts.recentIds}
+                  pinnedId={user?.main_account_id ?? undefined}
+                  dataField="filter_accounts"
+                  labelledBy="filter-accounts-heading"
+                  leading={[
+                    {
+                      key: 'all',
+                      label: 'All accounts',
+                      selected: selectedAccountIds.length === 0,
+                      onClick: () => setSelectedAccountIds([]),
+                      disabled: selectedAccountIds.length === 0,
+                    },
+                  ]}
+                />
+              </div>
             </div>
           <div>
               <h3 className="text-sm font-semibold text-body">Transaction types</h3>
@@ -2418,42 +2413,39 @@ export function TransactionsPage() {
           </div>
         </div>
             <div>
-              <h3 className="text-sm font-semibold text-body">Categories</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-            <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedCategoryNames([])
-                    setFilterUncategorized(false)
-                  }}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ selectedCategoryNames.length === 0 && !filterUncategorized ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                  disabled={selectedCategoryNames.length === 0 && !filterUncategorized}
-                >
-                  All categories
-            </button>
-                <button
-                  type="button"
-                  onClick={() => setFilterUncategorized((prev) => !prev)}
-                  title="Income and expenses with no category"
-                  aria-pressed={filterUncategorized}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium italic transition ${ filterUncategorized ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                >
-                  No category
-                </button>
-                {categoryFilterNames.map((name) => {
-                  const isSelected = selectedCategoryNames.includes(name)
-                  return (
-                    <button
-                      type="button"
-                      key={name}
-                      onClick={() => toggleCategoryFilter(name)}
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                    >
-                      {name}
-                    </button>
-                  )
-                })}
-          </div>
+              <h3 id="filter-categories-heading" className="text-sm font-semibold text-body">Categories</h3>
+              <div className="mt-2">
+                <CategoryPicker
+                  mode="multi"
+                  byName
+                  categories={categories}
+                  value={selectedCategoryNames}
+                  onChange={(ids) => setSelectedCategoryNames(ids.filter((id): id is string => typeof id === 'string'))}
+                  maxSelected={MAX_CATEGORY_NAMES}
+                  recentIds={recentCategoryNames}
+                  dataField="filter_categories"
+                  labelledBy="filter-categories-heading"
+                  leading={[
+                    {
+                      key: 'all',
+                      label: 'All categories',
+                      selected: selectedCategoryNames.length === 0 && !filterUncategorized,
+                      onClick: () => {
+                        setSelectedCategoryNames([])
+                        setFilterUncategorized(false)
+                      },
+                      disabled: selectedCategoryNames.length === 0 && !filterUncategorized,
+                    },
+                    {
+                      key: 'none',
+                      label: 'No category',
+                      selected: filterUncategorized,
+                      onClick: () => setFilterUncategorized((prev) => !prev),
+                      italic: true,
+                    },
+                  ]}
+                />
+              </div>
               {selectedCategoryNames.length >= MAX_CATEGORY_NAMES && (
                 <p className="mt-2 text-xs text-muted">
                   You can filter by up to {MAX_CATEGORY_NAMES} categories at once.

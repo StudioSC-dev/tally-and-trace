@@ -65,6 +65,12 @@ function flatten(groups: readonly PickerGroup[]): PickerOption[] {
   return out
 }
 
+/** Each id once: a category name used in two kinds is listed under both, but is one choice. */
+function uniqueById(options: readonly PickerOption[]): PickerOption[] {
+  const seen = new Set<PickerId>()
+  return options.filter((o) => !seen.has(o.id) && seen.add(o.id) !== undefined)
+}
+
 /**
  * Chips for picking accounts or categories. With `FLAT_LIMIT` options or fewer every chip
  * shows in one row. With more, a quick row (selected, recent, pinned, then group order)
@@ -87,7 +93,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
   const selected: readonly PickerId[] =
     props.mode === 'single' ? (props.value === undefined ? [] : [props.value]) : props.value
   const selectedSet = new Set(selected)
-  const options = useMemo(() => flatten(groups), [groups])
+  const options = useMemo(() => uniqueById(flatten(groups)), [groups])
   const byId = useMemo(() => new Map(options.map((o) => [o.id, o])), [options])
   const quick = quickPicks(groups, { selected, recentIds, pinnedId })
   const flat = quick === null
@@ -306,8 +312,8 @@ export function CategoryPicker({
 }: PickerPassThrough & { categories: readonly PickerCategory[]; all?: readonly PickerCategory[]; byName?: boolean }) {
   const groups = useMemo<PickerGroup[]>(() => {
     const grouped = byName ? categoryNamePickerGroups(categories) : categoryPickerGroups(categories, all)
-    if (flatten(grouped).length > FLAT_LIMIT) return grouped
-    if (byName) return [{ key: 'all', label: null, options: flatten(grouped) }]
+    if (uniqueById(flatten(grouped)).length > FLAT_LIMIT) return grouped
+    if (byName) return [{ key: 'all', label: null, options: uniqueById(flatten(grouped)) }]
     return [{ key: 'all', label: null, options: categories.map((c) => ({ id: c.id, label: c.name })) }]
   }, [categories, all, byName])
   return <GroupedPicker {...rest} groups={groups} noun={{ one: 'category', many: 'categories' }} />
