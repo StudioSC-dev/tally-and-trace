@@ -37,6 +37,8 @@ import {
   withoutError,
 } from '@tally-trace/shared'
 import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
+import { accountPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from '../components/PickerOptGroups'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../hooks/useCurrency'
@@ -2039,11 +2041,7 @@ export function AllocationsPage() {
                   {...fieldProps('account_id')}
                 >
                       <option value={0}>Select account</option>
-                      {ownAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
+                      <PickerOptGroups groups={accountPickerGroups(ownAccounts)} />
                 </select>
                 {renderFieldError('account_id')}
               </div>

@@ -19,6 +19,8 @@ import { HouseholdShares } from '../components/HouseholdShares'
 import { SkeletonRows } from '../components/Loading'
 import { useConfirm } from '../hooks/useConfirm'
 import { localToday } from '@tally-trace/shared'
+import { accountPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from '../components/PickerOptGroups'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -206,9 +208,7 @@ function SettingsPage() {
               {mainAccountId !== null && !pinnable.some((a) => a.id === mainAccountId) && (
                 <option value={String(mainAccountId)} disabled>{accountsPage === undefined ? 'Loading…' : 'Unavailable account'}</option>
               )}
-              {pinnable.map((a) => (
-                <option key={a.id} value={String(a.id)}>{a.name} ({a.currency})</option>
-              ))}
+              <PickerOptGroups groups={accountPickerGroups(pinnable)} text={(o) => `${o.label} (${o.hint})`} />
             </select>
           </div>
         </div>
