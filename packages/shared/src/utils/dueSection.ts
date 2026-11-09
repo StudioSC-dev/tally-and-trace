@@ -13,6 +13,7 @@ import type {
 import { isLimitedEvent } from '../types/api'
 import type { CurrencyCode } from './currency'
 import { formatEntryDate } from './entryDate'
+import { effectiveDay, movedText } from './forcedDate'
 import { unpostedNote } from './cardPay'
 import { autoPostLabel } from './installmentReview'
 import { autopayPostable } from './settlement'
@@ -512,11 +513,11 @@ export function orderSubscriptionRows(
 
 /** How one Installments plan row reads and what it offers. */
 export interface InstallmentPlanView {
-  /** The next charge is before today. */
+  /** The next charge's effective date is before today. */
   overdue: boolean
   /** "{payments_left} of {payments_total} left". */
   leftText: string
-  /** "Next charge {date}", or "All charges recorded" when there is none. */
+  /** "Next charge {date}" (the effective date, "(moved from ...)" when forced), or "All charges recorded" when there is none. */
   nextText: string
   /** "{missed} missed"; null with none. */
   missedText: string | null
@@ -537,9 +538,9 @@ export interface InstallmentPlanView {
 export function installmentPlanView(plan: InstallmentPlan, today: string, scheduled: boolean): InstallmentPlanView {
   const next = plan.next_charge
   return {
-    overdue: next !== null && next < today,
+    overdue: next !== null && effectiveDay(next, plan.effective_date) < today,
     leftText: `${plan.payments_left} of ${plan.payments_total} left`,
-    nextText: next === null ? 'All charges recorded' : `Next charge ${formatEntryDate(next)}`,
+    nextText: next === null ? 'All charges recorded' : `Next charge ${movedText(next, plan.effective_date)}`,
     missedText: plan.missed > 0 ? `${plan.missed} missed` : null,
     autoPostLabel: autoPostLabel(plan.auto_post, scheduled, plan.block_reason),
     actions:

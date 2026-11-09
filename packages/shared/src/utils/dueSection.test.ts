@@ -1419,6 +1419,18 @@ describe('STU-511: Due loses subscription and installment rows', () => {
       })
     })
 
+    it('reads the effective date of a moved next charge, and says where it was moved from', () => {
+      const moved = installmentPlanView(plan({ next_charge: '2026-10-27', effective_date: '2026-10-30' }), TODAY, true)
+      expect(moved.nextText).toBe('Next charge Oct 30th, 2026 (moved from Oct 27th, 2026)')
+      expect(installmentPlanView(plan({ effective_date: '2026-10-27' }), TODAY, true).nextText).toBe('Next charge Oct 27th, 2026')
+      expect(installmentPlanView(plan({ effective_date: null }), TODAY, true).nextText).toBe('Next charge Oct 27th, 2026')
+    })
+
+    it('is overdue by its effective date: a charge moved past today is not, one moved before it is', () => {
+      expect(installmentPlanView(plan({ next_charge: '2026-10-19', effective_date: '2026-10-25' }), TODAY, true).overdue).toBe(false)
+      expect(installmentPlanView(plan({ next_charge: '2026-10-25', effective_date: '2026-10-19' }), TODAY, true).overdue).toBe(true)
+    })
+
     it('is overdue when the next charge is before today, not on it', () => {
       expect(installmentPlanView(plan({ next_charge: '2026-10-19' }), TODAY, true).overdue).toBe(true)
       expect(installmentPlanView(plan({ next_charge: TODAY }), TODAY, true).overdue).toBe(false)
