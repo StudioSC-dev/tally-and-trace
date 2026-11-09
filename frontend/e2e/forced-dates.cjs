@@ -20,10 +20,13 @@
 //   (g) a card subscription moved past the statement close confirms "Now on the statement
 //       closing ..." and the statement total in the dashboard payables moves
 //   (h) a date inside a closed statement shows the server's reason in the dialog
+//   (i) an installment's plan row on the Installments tab reads "Next charge" on the effective date
+//       with "(moved from ...)" once its occurrence is moved (the API's `next_charge` stays the
+//       scheduled day, `effective_date` is the forced one), and back on the scheduled day after Clear
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h]
+// Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -488,12 +491,62 @@ async function closedStatement(browser) {
   await ctx.close()
 }
 
+// (i) An installment's plan row reads its next charge on the effective date.
+async function installmentPlanRow(browser) {
+  console.log('\n=== (i) an installment\'s Next charge reads the effective date once its occurrence is moved')
+  const today = manilaToday()
+  const u = await makeUser('i')
+  const bank = await account(u, 'I Checking')
+  // A card installment is stored on its statement close (768a9b9): close the card on the entry's own day.
+  const start = addDays(today, 3)
+  const visa = await card(u, bank, 'I Visa', Math.min(28, dom(start)), 21)
+  const plan = await entry(u, { name: 'I Sofa', amount: 1000, account_id: visa.id, next_occurrence: wire(start), end_mode: 'after_occurrences', max_occurrences: 4 })
+  const scheduled = plan.next_occurrence.slice(0, 10)
+  const forcedTo = addDays(scheduled, 5)
+  const planOf = async () => (await get(u.token, '/budget-entries/installment-plans')).items.find((p) => p.entry_id === plan.id)
+  check('(i) the API reads the scheduled day before a move', [(await planOf()).next_charge, (await planOf()).effective_date], [scheduled, scheduled])
+  const { ctx, page, native, puts } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  const planRow = async () => {
+    const rows = (await readTab(page, 'installments')).filter((r) => r.kind === 'installment' && r.source === `budget_entry:${plan.id}`)
+    return rows
+  }
+  const nextTextOf = (rows) => rows.map((r) => r.text.match(/Next charge (.*?)(?: · |$)/)?.[1]?.trim())
+  check('(i) before: the plan reads the scheduled day', nextTextOf(await planRow()), [fmt(scheduled)])
+
+  const row = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${plan.id}"]`))
+  const status = await changeDate(page, row.locator('[data-testid="row-change-date"]'), forcedTo, puts)
+  check('(i) Change date on the plan row saved with one PUT for the scheduled day', [status, puts.length, puts[0]?.day], [200, 1, scheduled])
+  const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
+  if (await confirmation.count()) await dialog(page).locator('[data-testid="force-date-close"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  const moved1 = await planOf()
+  check('(i) the API keeps next_charge on the scheduled day and gives the forced one as effective_date', [moved1.next_charge, moved1.effective_date], [scheduled, forcedTo])
+  const rows = await planRow()
+  check('(i) after the move: the plan reads the effective date, as the Due rows do', nextTextOf(rows), [moved(forcedTo, scheduled)])
+  check('(i) the row is still keyed on the scheduled day', rows.map((r) => r.day), [scheduled])
+
+  const reopened = await showRow(page, page.locator(`[data-testid="due-row"][data-kind="installment"][data-source="budget_entry:${plan.id}"]`))
+  await reopened.locator('[data-testid="row-change-date"]').click()
+  await dialog(page).locator('[data-testid="force-date-clear"]').waitFor()
+  const before = puts.length
+  await dialog(page).locator('[data-testid="force-date-clear"]').click()
+  await dialog(page).waitFor({ state: 'detached' })
+  await settle(page)
+  check('(i) Clear sent one DELETE for the scheduled day', puts.slice(before).map((p) => [p.method, p.day, p.status]), [['DELETE', scheduled, 204]])
+  check('(i) after Clear: the plan reads the scheduled day again', nextTextOf(await planRow()), [fmt(scheduled)])
+  checkNoNative('i', native)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement }
+  const steps = { a: dueAndUpcoming, b: refusalAndClear, c: markPaidDate, d: loanPage, e: dashboard, f: roles, g: cardStatement, h: closedStatement, i: installmentPlanRow }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
