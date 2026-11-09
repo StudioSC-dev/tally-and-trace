@@ -1,6 +1,8 @@
 import { LoadingLine } from './Loading'
 import { useState } from 'react'
 import { movedText, RECORD_DATE_MIN, recordDateError, recordDateMax } from '@tally-trace/shared'
+import { accountPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from './PickerOptGroups'
 import {
   Account,
   useGetLoanScheduleQuery,
@@ -322,9 +324,7 @@ export function LoanActions({
               required
             >
               <option value="">Select account</option>
-              {eligibleFunding.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+              <PickerOptGroups groups={accountPickerGroups(eligibleFunding)} />
             </select>
           </div>
           <div>

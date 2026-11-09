@@ -62,6 +62,7 @@ const isCreate = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith('/tran
 
 const formModal = (page, heading) =>
   page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: heading, exact: true }) })
+const field = (form, key) => form.locator(`[data-field="${key}"]`)
 const control = (modal, key) => modal.locator(`[data-field="${key}"]`)
 const toggleOf = (group) => group.locator('[data-picker-toggle]')
 const fieldError = (modal, key) => modal.locator(`[data-testid="field-error-${key}"]`)
@@ -691,6 +692,80 @@ async function scenarioF1(browser) {
   }
 }
 
+// ---- PR 4: the allocation form (C6 tracked categories, C7 accounts to aggregate) ----
+
+const isAllocationCreate = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith('/allocations')
+const budgetForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Budget Envelope' }) })
+const savingsForm = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Savings Tracker' }) })
+const headingsOf = (group) => group.locator('[data-picker-heading]').evaluateAll((els) => els.map((el) => el.textContent.trim()))
+
+async function openAllocationForm(browser, tab, formOf) {
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  const native = d.trackNativeDialogs(page)
+  const creates = []
+  page.on('request', (r) => {
+    if (isAllocationCreate(r)) {
+      try { creates.push(JSON.parse(r.postData() || 'null')) } catch { creates.push(null) }
+    }
+  })
+  await h.uiLogin(page, stack, owner)
+  await page.goto(`${stack.webUrl}/allocations`)
+  await page.getByRole('button', { name: tab, exact: true }).waitFor()
+  await h.waitQuiet(page)
+  await page.getByRole('button', { name: tab, exact: true }).click()
+  await h.waitQuiet(page)
+  await page.getByRole('button', { name: 'Add Allocation' }).click()
+  const form = formOf(page)
+  await form.waitFor()
+  await h.waitQuiet(page)
+  return { ctx, page, native, creates, form }
+}
+
+// (g1) Tracked Categories: grouped by kind, multi select that stays open, ids in the POST body.
+async function scenarioG1(browser) {
+  console.log('\n=== (g1) Tracked Categories: Expense, Income and Transfer headings; the picked category_ids are sent')
+  const { ctx, page, native, creates, form } = await openAllocationForm(browser, 'Budgets', budgetForm)
+  try {
+    const group = control(form, 'category_ids')
+    const cats = await client.get(owner.token, '/categories/')
+    const idOf = (name) => cats.find((c) => c.name === name).id
+    await h.check('g1.collapsed-with-toggle', 'B', async () => {
+      const got = { mode: await group.getAttribute('data-picker'), toggle: await toggleOf(group).textContent() }
+      return (got.mode === 'collapsed' && /^All 23 categories/.test(got.toggle)) || JSON.stringify(got)
+    })
+    await pick(group, 'Utilities')
+    await pick(group, 'Salary')
+    await h.check('g1.headings', 'B', async () => {
+      const got = await headingsOf(group)
+      return JSON.stringify(got) === JSON.stringify(['Expense', 'Income', 'Transfer']) || `headings ${JSON.stringify(got)}`
+    })
+    await h.check('g1.stays-open-multi', 'B', async () => {
+      const got = { mode: await group.getAttribute('data-picker'), expanded: await toggleOf(group).getAttribute('aria-expanded') }
+      return (got.mode === 'expanded' && got.expanded === 'true') || JSON.stringify(got)
+    })
+    await chipOf(group, 'Debt Payments').click()
+    await h.check('g1.selected-marked', 'B', async () => {
+      const got = await group.locator('[data-selected="true"]').evaluateAll((els) => els.map((el) => el.childNodes[0].textContent.trim()).sort())
+      return JSON.stringify(got) === JSON.stringify(['Debt Payments', 'Salary', 'Utilities']) || `selected ${JSON.stringify(got)}`
+    })
+    await chipOf(group, 'Salary').click()
+    await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
+    await field(form, 'name').fill('Picker G1 envelope')
+    await field(form, 'target_amount').fill('1000')
+    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 6000 }).catch(() => null)
+    await h.check('g1.post-body-category-ids', 'B', async () => {
+      const ids = creates.length === 1 ? (creates[0]?.configuration?.category_ids ?? null) : null
+      const want = [idOf('Utilities'), idOf('Debt Payments')].sort((a, b) => a - b)
+      return (Array.isArray(ids) && JSON.stringify([...ids].sort((a, b) => a - b)) === JSON.stringify(want)) || `posts ${creates.length}, body ${JSON.stringify(creates[0])}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'g1', native)
+    await ctx.close()
+  }
+}
+
 // (f2) The Categories filter: a name used in two kinds is one choice, selected once.
 async function scenarioF2(browser) {
   console.log('\n=== (f2) Categories filter: a name shared across kinds is selected once; All categories and No category')
@@ -840,6 +915,80 @@ async function scenarioF5(browser) {
   }
 }
 
+// (g2) Accounts to aggregate: the caller's own accounts, grouped, the picked ids sent as account_ids.
+async function scenarioG2(browser) {
+  console.log('\n=== (g2) Accounts to aggregate: own accounts grouped by type; the picked account_ids are sent')
+  const { ctx, page, native, creates, form } = await openAllocationForm(browser, 'Savings', savingsForm)
+  try {
+    await form.getByRole('button', { name: 'Combined account total' }).click()
+    const group = control(form, 'savings_account_ids')
+    await group.waitFor()
+    await h.check('g2.own-accounts-only', 'B', async () => {
+      const got = { mode: await group.getAttribute('data-picker'), toggle: await toggleOf(group).textContent() }
+      return (got.mode === 'collapsed' && /^All 15 accounts/.test(got.toggle)) || JSON.stringify(got)
+    })
+    await pick(group, 'P Wise USD')
+    await pick(group, 'P Cash')
+    await h.check('g2.headings', 'B', async () => {
+      const got = await headingsOf(group)
+      return JSON.stringify(got) === JSON.stringify(['Debit', 'Credit', 'E-wallet', 'Cash', 'Loan']) || `headings ${JSON.stringify(got)}`
+    })
+    await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
+    await field(form, 'name').fill('Picker G2 tracker')
+    await field(form, 'target_amount').fill('5000')
+    await form.getByRole('button', { name: 'Create Savings Tracker' }).click()
+    await page.getByLabel('Close allocation modal').waitFor({ state: 'detached', timeout: 6000 }).catch(() => null)
+    await h.check('g2.post-body-account-ids', 'B', async () => {
+      const ids = creates.length === 1 ? (creates[0]?.configuration?.account_ids ?? null) : null
+      const want = [acct['P Wise USD'].id, acct['P Cash'].id].sort((a, b) => a - b)
+      return (Array.isArray(ids) && JSON.stringify([...ids].sort((a, b) => a - b)) === JSON.stringify(want)) || `posts ${creates.length}, body ${JSON.stringify(creates[0])}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'g2', native)
+    await ctx.close()
+  }
+}
+
+// (g3) A refused save with the picker open focuses a chip, never the picker's toggle.
+async function scenarioG3(browser) {
+  console.log('\n=== (g3) Error focus with the picker open lands on a chip, not the toggle')
+  const { ctx, page, native, creates, form } = await openAllocationForm(browser, 'Budgets', budgetForm)
+  try {
+    await field(form, 'account_id').selectOption(String(acct['P Bdo Savings'].id))
+    await field(form, 'name').fill('Picker G3 envelope')
+    await field(form, 'target_amount').fill('1000')
+    const group = control(form, 'category_ids')
+    await toggleOf(group).click()
+    await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
+    const err = page.locator('[data-testid="field-error-category_ids"]')
+    await err.waitFor({ timeout: 3000 }).catch(() => null)
+    await h.check('g3.error-shown', 'B', async () => (await err.count()) === 1 || 'no category error')
+    await h.check('g3.group-and-chips-described', 'B', async () => {
+      const got = await group.evaluate((el) => ({
+        role: el.getAttribute('role'),
+        described: el.getAttribute('aria-describedby'),
+        chips: [...el.querySelectorAll('button')].map((b) => b.getAttribute('aria-describedby')),
+      }))
+      return (got.role === 'group' && got.described === 'allocation-category_ids-error' &&
+        got.chips.length > 0 && got.chips.every((c) => c === got.described)) || JSON.stringify(got)
+    })
+    await h.check('g3.focus-on-a-chip', 'B', async () => {
+      const got = await page.evaluate(() => {
+        const el = document.activeElement
+        return { toggle: el?.hasAttribute('data-picker-toggle') ?? null, chip: el?.hasAttribute('data-picker-id') ?? null }
+      })
+      return (got.chip === true && got.toggle === false) || `active ${JSON.stringify(got)}`
+    })
+    await h.check('g3.nothing-sent', 'B', async () => creates.length === 0 || `${creates.length} POST /allocations`)
+    // With a category already chosen, the failing field is elsewhere; a selected chip is what a group error would focus.
+    await pick(group, 'Utilities')
+    await h.check('g3.error-clears-on-pick', 'B', async () => (await err.count()) === 0 || 'the error stayed after a pick')
+  } finally {
+    await d.checkNoNativeDialogs(h, 'g3', native)
+    await ctx.close()
+  }
+}
+
 async function setup() {
   owner = await h.makeUser(stack, 'pickers')
   partner = await h.makeUser(stack, 'pickpart')
@@ -889,6 +1038,9 @@ const SCENARIOS = [
   ['f3', scenarioF3],
   ['f4', scenarioF4],
   ['f5', scenarioF5],
+  ['g1', scenarioG1],
+  ['g2', scenarioG2],
+  ['g3', scenarioG3],
 ]
 
 ;(async () => {

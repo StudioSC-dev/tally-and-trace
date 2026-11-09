@@ -32,6 +32,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
+const { seedDays, closeDayOf } = require('./_seed_days.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -300,10 +301,12 @@ async function installmentDate(browser) {
   const u = await makeUser('c')
   const bank = await checking(u)
   const today = manilaToday()
-  // The card closes between today and the occurrence: today is on the statement
-  // before the one the installment belongs to.
-  const close = Math.min(28, Number(addDays(today, 10).slice(8, 10)))
-  const occurrence = addDays(today, 20)
+  // The API stores a card installment on its statement close (768a9b9), so the card closes on
+  // the occurrence's own day. It sits 10 to 13 days out (seedDays keeps it on the 28th or
+  // earlier), inside the dashboard's 30 days. The occurrence minus a month is the previous
+  // close, on the statement before the installment's own, whatever day it is run.
+  const [occurrence] = seedDays(today, [10])
+  const close = closeDayOf(occurrence)
   console.log(`    card closes on day ${close}; installment occurrence ${occurrence}`)
   const visa = await card(u, bank, 'Visa C', close)
   const phone = await expense(u, {
@@ -344,8 +347,8 @@ async function installmentDate(browser) {
   check('(c) the date defaults to the occurrence date', await date.inputValue(), occurrence)
   check('(c) no cycle warning on the occurrence date', await dialog(page).locator('[data-testid="mark-paid-cycle-warning"]').count(), 0)
   check('(c) opened on Posted, the date is labelled "Posted on"', (await dialog(page).locator('label[for$="-day"]').textContent())?.trim(), 'Posted on')
-  await date.fill(today)
-  check('(c) today, on the earlier statement, shows the cycle warning', await dialog(page).locator('[data-testid="mark-paid-cycle-warning"]').count(), 1)
+  await date.fill(addMonths(occurrence, -1))
+  check('(c) the previous statement\'s close day shows the cycle warning', await dialog(page).locator('[data-testid="mark-paid-cycle-warning"]').count(), 1)
   await date.fill(occurrence)
   check('(c) back on the occurrence date the warning goes', await dialog(page).locator('[data-testid="mark-paid-cycle-warning"]').count(), 0)
   const done = page.waitForResponse((r) => r.url().endsWith(`/budget-entries/${phone.id}/materialize`))

@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react'
 import {
   automaticOffered,
   buildEntryDayFields,
-  categoryOptionLabel,
   dateForDaySetting,
   daySettingOf,
   DEFAULT_SETTLEMENT,
@@ -29,6 +28,8 @@ import {
   withoutError,
 } from '@tally-trace/shared'
 import type { BillingKind, BillingKindChoice, DaySetting, FieldErrors, Settlement } from '@tally-trace/shared'
+import { accountPickerGroups, categoryPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from './PickerOptGroups'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -677,20 +678,19 @@ export function RecurringEntryFormModal({
               {...fieldProps('account_id')}
             >
                     <option value={0}>Select account</option>
-                    {writableAccounts
-                      .filter((account) => account.account_type !== 'loan')
-                      .filter((account) => {
-                        // Paying a loan: only accounts in the loan's currency.
-                        const destination = subscriptionForm.transfer_to_account_id
-                          ? accountsById.get(subscriptionForm.transfer_to_account_id)
-                          : undefined
-                        return destination?.account_type !== 'loan' || account.currency === destination.currency
-                      })
-                      .map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
+                    <PickerOptGroups
+                      groups={accountPickerGroups(
+                        writableAccounts
+                          .filter((account) => account.account_type !== 'loan')
+                          .filter((account) => {
+                            // Paying a loan: only accounts in the loan's currency.
+                            const destination = subscriptionForm.transfer_to_account_id
+                              ? accountsById.get(subscriptionForm.transfer_to_account_id)
+                              : undefined
+                            return destination?.account_type !== 'loan' || account.currency === destination.currency
+                          }),
+                      )}
+                    />
             </select>
             {renderFieldError('account_id')}
                 </div>
@@ -715,11 +715,7 @@ export function RecurringEntryFormModal({
                     className="mt-1 block w-full border border-line px-3 py-2"
                   >
                     <option value={0}>Uncategorized</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {categoryOptionLabel(category, categories)}
-                      </option>
-                    ))}
+                    <PickerOptGroups groups={categoryPickerGroups(categories)} />
                   </select>
                 </div>
                 )}
@@ -734,9 +730,11 @@ export function RecurringEntryFormModal({
                 className="mt-1 block w-full border border-line px-3 py-2"
               >
                 <option value={0}>None</option>
-                {writableAccounts.filter((a) => a.id !== subscriptionForm.account_id && a.account_type !== 'loan' && !a.is_spending_wallet).map((account) => (
-                  <option key={account.id} value={account.id}>{account.name}</option>
-                ))}
+                <PickerOptGroups
+                  groups={accountPickerGroups(
+                    writableAccounts.filter((a) => a.id !== subscriptionForm.account_id && a.account_type !== 'loan' && !a.is_spending_wallet),
+                  )}
+                />
               </select>
               <p className="mt-1 text-xs text-muted">If the primary account can't cover a payment, the shortfall is drawn from here.</p>
             </div>
@@ -752,16 +750,17 @@ export function RecurringEntryFormModal({
                 disabled={accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'}
               >
                 <option value={0}>None (a payment)</option>
-                {writableAccounts
-                  .filter((a) => a.account_type !== 'credit' && a.id !== subscriptionForm.account_id)
-                  .filter((a) => {
-                    // A loan is paid only from an account in its own currency.
-                    const source = accountsById.get(subscriptionForm.account_id)
-                    return a.account_type !== 'loan' || !source || a.currency === source.currency
-                  })
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>{account.name}</option>
-                  ))}
+                <PickerOptGroups
+                  groups={accountPickerGroups(
+                    writableAccounts
+                      .filter((a) => a.account_type !== 'credit' && a.id !== subscriptionForm.account_id)
+                      .filter((a) => {
+                        // A loan is paid only from an account in its own currency.
+                        const source = accountsById.get(subscriptionForm.account_id)
+                        return a.account_type !== 'loan' || !source || a.currency === source.currency
+                      }),
+                  )}
+                />
               </select>
               <p className="mt-1 text-xs text-muted">
                 Makes this a recurring transfer from the account above, e.g. moving money to the account a loan is

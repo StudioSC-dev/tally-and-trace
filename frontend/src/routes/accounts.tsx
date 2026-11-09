@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
 import { groupAccounts, hasCreditLimit, joinNames, queryPhase, sharedLimitTargets } from '@tally-trace/shared'
 import type { CardCredit, MinimumDuePreset, MinimumDueRule, QueryPhase } from '@tally-trace/shared'
+import { accountPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from '../components/PickerOptGroups'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
@@ -1343,9 +1345,7 @@ export function AccountsPage() {
                         >
                           <option value="">Not set</option>
                           {storedRouteOption('payment_account_id')}
-                          {fundingAccounts.map((a) => (
-                            <option key={a.id} value={a.id}>{a.name}</option>
-                          ))}
+                          <PickerOptGroups groups={accountPickerGroups(fundingAccounts)} />
                         </select>
                       </div>
 
@@ -1359,11 +1359,9 @@ export function AccountsPage() {
                         >
                           <option value="">Not set</option>
                           {storedRouteOption('payment_overflow_account_id')}
-                          {fundingAccounts
-                            .filter((a) => a.id !== formData.payment_account_id)
-                            .map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
+                          <PickerOptGroups
+                            groups={accountPickerGroups(fundingAccounts.filter((a) => a.id !== formData.payment_account_id))}
+                          />
                         </select>
                         <p className="mt-1 text-xs text-muted">
                           Used when "Paid From" can't cover the statement on its own.
@@ -1512,11 +1510,9 @@ export function AccountsPage() {
                     >
                       <option value="">Not set</option>
                       {storedRouteOption('payment_account_id')}
-                      {fundingAccounts
-                        .filter((a) => a.currency === formData.currency)
-                        .map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
+                      <PickerOptGroups
+                        groups={accountPickerGroups(fundingAccounts.filter((a) => a.currency === formData.currency))}
+                      />
                     </select>
                     <p className="mt-1 text-xs text-muted">
                       The account each payment is expected to leave in the forecast, in the loan's currency.
