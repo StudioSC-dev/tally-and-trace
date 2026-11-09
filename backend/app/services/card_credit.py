@@ -104,7 +104,8 @@ from app.services.installment_duplicates import held_occurrences
 from app.services.payment_dates import Moved, effective, extend, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
 from app.services.statements import (
-    _card_rows, iter_cycles_from, load_due_overrides, statement_history,
+    _card_rows, _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
+    statement_day, statement_history,
 )
 
 CARD_FX_BUFFER = Decimal("0.03")
@@ -791,3 +792,61 @@ def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
             "unposted_postable": sum(1 for m in months if m.postable),
         })
     return items
+
+
+def amount_due(db: Session, user, cards: List[Account], fx: Optional[FxRates]
+               ) -> Dict[int, dict]:
+    """``{card id: {amount_due, due_date, overdue, incomplete, unbilled}}`` for
+    each of ``cards`` (credit cards the caller manages; the caller checks),
+    unwindowed: the quick balances' card figures (STU-578).
+
+    ``amount_due``, ``due_date``, ``overdue`` and ``incomplete`` are
+    ``statements_due``'s recorded figures over the same selection
+    (``closed_statements``): the latest closed statement's ``clear_through``
+    (0 with nothing owed or no closed statement) and its due date (null with
+    no closed statement), whether an owed statement is overdue, and whether a
+    foreign line with no rate may have left the figure low. Unposted
+    installment months are not counted. Where ``statements_due`` lists the
+    card, ``amount_due`` is its ``clear_through``.
+
+    ``unbilled`` is the charges not yet on a statement: posted line items
+    (charges and cash advances less refunds, in the card's currency) whose
+    ``statement_day`` is after the latest closed statement's close, or every
+    posted line item with no closed statement. Payments are not netted. It is
+    null on a card without cycle settings, which no statement ever bills.
+
+    The viewable accounts and every card's rows are read once, not per card.
+    """
+    if not cards:
+        return {}
+    today = manila_today()
+    ids = [c.id for c in cards]
+    viewable_ids = viewable_account_ids(db, user)
+    card_rows = _card_rows(db, ids, viewable_ids)
+    overrides = load_due_overrides(db, ids)
+    by_card, unbilled_sources = card_rows
+    out = {}
+    for card in cards:
+        closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
+                                   card_rows=card_rows, due_overrides=overrides[card.id])
+        latest_clear = closed[-1]["clear_through"] if closed else _ZERO
+        owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
+        unbilled = None
+        if resolve_cycle_fields(card) is not None:
+            last_close = closed[-1]["close"].date() if closed else None
+            lines, _ = _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources)
+            unbilled = sum(((-Decimal(str(line.amount))
+                             if line.transaction_type == TransactionType.CREDIT
+                             else Decimal(str(line.amount)))
+                            for line in lines
+                            if getattr(line, "is_posted", True)
+                            and (last_close is None or statement_day(line, today) > last_close)),
+                           _ZERO)
+        out[card.id] = {
+            "amount_due": _amount(max(latest_clear, _ZERO)),
+            "due_date": closed[-1]["due"].date().isoformat() if closed else None,
+            "overdue": any(s["status"] == "overdue" for s in owed),
+            "incomplete": closed[-1]["incomplete"] if closed else False,
+            "unbilled": _amount(unbilled),
+        }
+    return out

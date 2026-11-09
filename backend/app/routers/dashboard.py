@@ -22,6 +22,7 @@ from app.services import card_charges as card_charges_svc
 from app.services import card_credit as card_credit_svc
 from app.services import forecast as forecast_svc
 from app.services import missed as missed_svc
+from app.services import quick_balances as quick_balances_svc
 from app.services.fx import FxRates, get_fx
 from app.core.time import manila_today, utc_now
 
@@ -276,3 +277,24 @@ def get_snapshot(
             collector, default),
         "fx": collector.as_dict(),
     }
+
+
+@router.get("/quick-balances")
+def get_quick_balances(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """``QuickBalances``: the dashboard's quick balance tiles (STU-578,
+    services/quick_balances.py).
+
+    ``{pinned, max_tiles, tiles}``. Each tile is ``{account_id, name,
+    account_type, currency, balance, slot}`` in the account's own currency
+    (no conversion, no tag filter), ``slot`` the default slot it fills
+    (``debit``, ``credit`` or ``e_wallet``). A credit card the caller owns
+    or administers adds ``card`` (``{amount_due, due_date, overdue,
+    incomplete, unbilled}``, ``card_credit.amount_due``), and one whose
+    group is served credit adds ``credit`` (``{limit, available_now,
+    complete, shared_with}``, ``card_credit.credit_for_cards``).
+    """
+    return quick_balances_svc.quick_balances(db, current_user, fx)
