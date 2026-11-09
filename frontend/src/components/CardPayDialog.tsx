@@ -17,6 +17,8 @@ import {
   unpostedNote,
 } from '@tally-trace/shared'
 import type { PayChoices } from '@tally-trace/shared'
+import { accountPickerGroups } from '@tally-trace/shared'
+import { PickerOptGroups } from './PickerOptGroups'
 import { useGetAccountsQuery, useGetCardCreditQuery, usePayCardMutation, usePostDueInstallmentsMutation } from '../store/api'
 import { useManilaDay } from '../hooks/useManilaDay'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
@@ -341,9 +343,7 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
                     className="select-field focus-ring"
                     data-testid="card-pay-from"
                   >
-                    {payers.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
+                    <PickerOptGroups groups={accountPickerGroups(payers)} />
                   </select>
                 )}
               </div>
