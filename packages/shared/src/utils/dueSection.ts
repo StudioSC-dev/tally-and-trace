@@ -88,7 +88,9 @@ export interface DueMissedRow {
   oldest: string
   /** `oldest` on its forced date, where the row sorts. */
   oldestEffective: string
-  /** "{count} missed since {oldest}". */
+  /** `oldestEffective` is the API's word for `oldest`, so Change date can pre-fill it; false leaves the dialog to look it up. */
+  oldestEffectiveKnown: boolean
+  /** "{count} missed since {oldestEffective}". */
   text: string
   can_mark_paid: boolean
   actions: RecurringAction[]
@@ -249,7 +251,8 @@ interface MissedSource {
   account_name: string | null
   count: number
   oldest: string
-  oldest_effective: string
+  /** `oldest` on its forced date; null when the API does not say (a card's missed charge, an older API). */
+  oldest_effective: string | null
   unlinked_count: number
   oldest_unlinked: string | null
   can_mark_paid: boolean
@@ -271,7 +274,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
       account_name: c.account_name,
       count: m.count,
       oldest: m.oldest,
-      oldest_effective: m.oldest,
+      oldest_effective: null,
       unlinked_count: m.unlinked_count,
       oldest_unlinked: m.oldest_unlinked,
       can_mark_paid: m.can_mark_paid,
@@ -291,7 +294,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
     account_name: m.account_name,
     count: m.count,
     oldest: m.oldest,
-    oldest_effective: m.oldest_effective ?? m.oldest,
+    oldest_effective: m.oldest_effective ?? null,
     unlinked_count: m.unlinked_count,
     oldest_unlinked: m.oldest_unlinked,
     can_mark_paid: m.can_mark_paid,
@@ -407,6 +410,9 @@ function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKin
     if (m.plan_kind !== plan) continue
     if (m.unlinked_count <= 0 || m.oldest_unlinked === null) continue
     const oldest = day(m.oldest_unlinked)
+    // `oldest_effective` belongs to the oldest missed day; a later unlinked one has no forced date to show.
+    const known = m.oldest_effective !== null && day(m.oldest) === oldest
+    const oldestEffective = known && m.oldest_effective !== null ? day(m.oldest_effective) : oldest
     rows.push({
       kind: 'missed',
       view: m.view,
@@ -419,9 +425,9 @@ function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKin
       accountName: m.account_name,
       count: m.unlinked_count,
       oldest,
-      // `oldest_effective` belongs to the oldest missed day; a later unlinked one has no forced date to show.
-      oldestEffective: day(m.oldest) === oldest ? m.oldest_effective : oldest,
-      text: `${m.unlinked_count} missed since ${formatEntryDate(oldest)}`,
+      oldestEffective,
+      oldestEffectiveKnown: known,
+      text: `${m.unlinked_count} missed since ${formatEntryDate(oldestEffective)}`,
       can_mark_paid: m.can_mark_paid,
       // The oldest unlinked occurrence has no pending link and no posted one.
       actions: recurringActionsFor({ kind: m.kind, entry_type: m.entry_type, can_mark_paid: m.can_mark_paid }),
