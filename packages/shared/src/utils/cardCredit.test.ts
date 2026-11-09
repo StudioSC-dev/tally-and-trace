@@ -216,6 +216,10 @@ describe('sharedLimitText', () => {
     expect(sharedLimitText({ ...base, shared_with: [] })).toBeNull()
   })
 
+  it('is null when an older API sends no shared_with', () => {
+    expect(sharedLimitText(base)).toBeNull()
+  })
+
   it('names the other card with the shared limit', () => {
     expect(sharedLimitText({ ...base, shared_with: [{ account_id: 64, name: 'BDO Amex' }] }))
       .toBe('Shared ₱480,000.00 limit with BDO Amex')

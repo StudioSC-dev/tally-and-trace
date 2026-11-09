@@ -131,8 +131,9 @@ export function joinNames(names: readonly string[]): string {
  * Null when the card shares its limit with none.
  */
 export function sharedLimitText(credit: Pick<CardCredit, 'currency' | 'limit' | 'shared_with'>): string | null {
-  if (credit.shared_with.length === 0) return null
-  return `Shared ${formatCurrency(credit.limit, credit.currency)} limit with ${joinNames(credit.shared_with.map((c) => c.name))}`
+  const others = credit.shared_with ?? []
+  if (others.length === 0) return null
+  return `Shared ${formatCurrency(credit.limit, credit.currency)} limit with ${joinNames(others.map((c) => c.name))}`
 }
 
 /**

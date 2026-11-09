@@ -1904,10 +1904,10 @@ export interface CardCredit {
   fx: CreditFxRate[]
   fx_buffer_pct: number
   /**
-   * The other cards that share this card's limit, by name; empty when it is not linked. On a
+   * The other cards that share this card's limit, by name; empty (or absent from an older API) when it is not linked. On a
    * linked card `limit` is the shared limit and every figure but `checks` covers the whole group.
    */
-  shared_with: CreditSharedCard[]
+  shared_with?: CreditSharedCard[]
 }
 
 export interface CreditSharedCard {
