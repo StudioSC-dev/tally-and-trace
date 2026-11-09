@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef } from 'react'
-import { listBounds, pageWindow, parsePage, parsePositiveId, queryPhase } from '@tally-trace/shared'
+import { joinNames, listBounds, pageWindow, parsePage, parsePositiveId, queryPhase } from '@tally-trace/shared'
+import type { Account } from '@tally-trace/shared'
 import { AccountRoleBadge } from '../components/AccountRoleBadge'
 import { AccountTransactionList } from '../components/AccountTransactionList'
 import { CardCreditPanel } from '../components/CardCreditPanel'
@@ -13,6 +14,7 @@ import { useManilaDay } from '../hooks/useManilaDay'
 import {
   useGetAccountQuery,
   useGetAccountsQuery,
+  useGetCardCreditQuery,
   useGetCategoriesQuery,
   useGetTransactionsQuery,
 } from '../store/api'
@@ -185,6 +187,7 @@ function AccountDetailPage() {
         {account.account_type === 'credit' && account.credit_limit != null && (
           <p className="text-sm text-body">Limit {formatCurrency(account.credit_limit, currency)}</p>
         )}
+        {account.account_type === 'credit' && account.permissions.can_edit_settings && <SharedLimitLine account={account} />}
         {account.my_role === 'tag_viewer' && (
           <p className="border border-line bg-sunken p-3 text-sm text-body" data-testid="tag-viewer-note">
             {account.owner_name ?? 'Its owner'} shares this account through their Household. You can see its balance and
@@ -266,5 +269,20 @@ function BackLink() {
     <Link to="/accounts" className="text-sm text-muted hover:text-ink focus-ring" data-testid="account-detail-back">
       &larr; Accounts
     </Link>
+  )
+}
+
+/**
+ * The shared-limit line under the balance: a linked card says whose limit it uses, and a card
+ * whose limit others use names them. Reads the card's credit, which the panel below loads too.
+ */
+function SharedLimitLine({ account }: { account: Account }) {
+  const { currentData: detail } = useGetCardCreditQuery(account.id)
+  const names = (detail?.credit?.shared_with ?? []).map((c) => c.name)
+  if (names.length === 0) return null
+  return (
+    <p className="text-sm text-body" data-testid="account-detail-shared-limit">
+      {account.shares_limit_with_account_id != null ? 'Shares limit with' : 'Limit shared with'} {joinNames(names)}
+    </p>
   )
 }

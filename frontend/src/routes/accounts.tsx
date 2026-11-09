@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useGetAccountsQuery, useGetCardCreditsQuery, useGetHouseholdViewsQuery, useGetMinimumDuePresetsQuery, useLazyGetAccountsQuery, useCreateAccountMutation, useUpdateAccountMutation, useDeleteAccountMutation } from '../store/api'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Account } from '../store/api'
-import { groupAccounts, queryPhase } from '@tally-trace/shared'
+import { groupAccounts, hasCreditLimit, joinNames, queryPhase, sharedLimitTargets } from '@tally-trace/shared'
 import type { CardCredit, MinimumDuePreset, MinimumDueRule, QueryPhase } from '@tally-trace/shared'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
 import { useAuth } from '../contexts/AuthContext'
@@ -45,7 +45,7 @@ function NotCountedTag() {
 const servesCredit = (account: Account): boolean =>
   account.account_type === 'credit' &&
   account.is_active === true &&
-  account.credit_limit != null &&
+  hasCreditLimit(account) &&
   account.permissions.can_edit_settings
 
 /**
@@ -53,9 +53,11 @@ const servesCredit = (account: Account): boolean =>
  * the card credits query's phase: a row it serves holds the headline's place while it is
  * pending and says so when it fails.
  */
-function AccountCard({ account, credit, creditPhase, onOpen }: {
+function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
   account: Account
   credit?: CardCredit
+  /** The names of the cards this one shares a limit with: the card it points at, or the cards pointing at it. */
+  sharedWith: readonly string[]
   creditPhase: QueryPhase
   onOpen: (account: Account) => void
 }) {
@@ -117,6 +119,12 @@ function AccountCard({ account, credit, creditPhase, onOpen }: {
               {account.account_type === 'credit' && account.credit_limit != null && (
                 <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink">
                   Limit {formatCurrency(account.credit_limit, account.currency as CurrencyCode)}
+                  {sharedWith.length > 0 && ' · shared'}
+                </span>
+              )}
+              {account.account_type === 'credit' && account.shares_limit_with_account_id != null && sharedWith.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-ink" data-testid={`account-shares-limit-${account.id}`}>
+                  Shares limit with {joinNames(sharedWith)}
                 </span>
               )}
               {account.account_type === 'credit' && account.days_until_due_date && (
@@ -320,6 +328,7 @@ const blankForm = (currency: CurrencyCode) => ({
   balance: 0,
   description: '',
   credit_limit: undefined as number | undefined,
+  shares_limit_with_account_id: undefined as number | undefined,
   due_date: undefined as number | undefined,
   billing_cycle_start: undefined as number | undefined,
   currency,
@@ -418,6 +427,22 @@ export function AccountsPage() {
   // Only non-credit, non-loan, non-wallet accounts can fund a statement or a loan payment
   // (a card or loan holds no cash), and an account can't pay itself. Mirrors the backend
   // validation in routers/accounts.py::_validate_payment_routing.
+  // The cards sharing a limit with `account`, by name: the one it points at, or the ones pointing at it.
+  const sharedWithNames = (account: Account): string[] =>
+    account.shares_limit_with_account_id != null
+      ? routingAccounts.filter((a) => a.id === account.shares_limit_with_account_id).map((a) => a.name)
+      : routingAccounts.filter((a) => a.shares_limit_with_account_id === account.id).map((a) => a.name)
+  // The cards the form's card may share its limit with, and, on an edit, the cards already
+  // sharing its own limit (they carry the link, so it is changed on them).
+  const limitTargets = sharedLimitTargets(routingAccounts, {
+    id: editingAccount?.id ?? null,
+    currency: formData.currency,
+    ownerName: editingAccount ? editingAccount.owner_name : null,
+  })
+  const linkedToEditing = editingAccount
+    ? routingAccounts.filter((a) => a.shares_limit_with_account_id === editingAccount.id)
+    : []
+  const sharedTarget = limitTargets.find((a) => a.id === formData.shares_limit_with_account_id)
   const editingOwnAccount = !editingAccount || editingAccount.my_role === 'owner'
   const fundingAccounts = routingAccounts.filter(
     (a) =>
@@ -573,6 +598,12 @@ export function AccountsPage() {
         // A cleared selector is undefined, which JSON drops; send null so "None" saves.
         delete payload.payment_account_id
         delete payload.payment_overflow_account_id
+        // The link, likewise, goes only when it changes; None sends null to unlink. A linked
+        // card has no limit of its own, so a stored one is not sent along with a new link.
+        delete payload.shares_limit_with_account_id
+        const link = isLoan || formData.account_type !== 'credit' ? null : formData.shares_limit_with_account_id ?? null
+        const changedLink = link !== (editingAccount.shares_limit_with_account_id ?? null)
+        if (link !== null) delete payload.credit_limit
         const routing = {
           payment_account_id: formData.payment_account_id ?? null,
           payment_overflow_account_id: isLoan ? null : formData.payment_overflow_account_id ?? null,
@@ -590,6 +621,7 @@ export function AccountsPage() {
             ...(editingAccount.permissions.can_delete ? { is_active: isActive } : {}),
             ...tagIdsIfChanged(selectedTagIds, tagIdsOf(editingAccount.tags)),
             ...changedRouting,
+            ...(changedLink ? { shares_limit_with_account_id: link } : {}),
             ...changedRule(editingAccount),
             ...(isLoan
               ? {
@@ -604,6 +636,7 @@ export function AccountsPage() {
         }).unwrap()
         setEditingAccount(null)
       } else {
+        if (payload.shares_limit_with_account_id !== undefined) delete payload.credit_limit
         await createAccount({
           ...payload,
           is_active: isActive,
@@ -630,6 +663,7 @@ export function AccountsPage() {
       balance: account.balance,
       description: account.description || '',
       credit_limit: account.credit_limit ?? undefined,
+      shares_limit_with_account_id: account.shares_limit_with_account_id ?? undefined,
       due_date: account.due_date,
       billing_cycle_start: account.billing_cycle_start,
       currency: (account.currency as CurrencyCode) || defaultCurrency,
@@ -726,6 +760,7 @@ export function AccountsPage() {
               account={account}
               credit={creditById.get(account.id)}
               creditPhase={creditPhase}
+              sharedWith={sharedWithNames(account)}
               onOpen={openActionModal}
             />
           ))}
@@ -870,6 +905,12 @@ export function AccountsPage() {
                 {actionAccount.account_type === 'credit' && actionAccount.credit_limit != null && (
                   <p className="mt-1 text-sm text-muted">
                     Credit limit {formatCurrency(actionAccount.credit_limit, actionAccount.currency as CurrencyCode)}
+                    {sharedWithNames(actionAccount).length > 0 && `, shared with ${joinNames(sharedWithNames(actionAccount))}`}
+                  </p>
+                )}
+                {actionAccount.account_type === 'credit' && actionAccount.shares_limit_with_account_id != null && (
+                  <p className="mt-1 text-sm text-muted">
+                    Shares limit with {joinNames(sharedWithNames(actionAccount))}
                   </p>
                 )}
               </div>
@@ -1186,6 +1227,11 @@ export function AccountsPage() {
 
                   {showCreditSettings && (
                     <div className="space-y-4">
+                      {sharedTarget ? (
+                        <p className="text-sm text-body" data-testid="account-form-uses-limit">
+                          Uses {sharedTarget.name}'s limit of {formatCurrency(sharedTarget.credit_limit ?? 0, sharedTarget.currency as CurrencyCode)}
+                        </p>
+                      ) : (
                       <div>
                         <label className="label">Credit Limit</label>
                         <div className="relative">
@@ -1201,6 +1247,31 @@ export function AccountsPage() {
                             placeholder="0.00"
                           />
                         </div>
+                      </div>
+                      )}
+
+                      <div>
+                        <label className="label" htmlFor="account-shares-limit-with">Shares credit limit with</label>
+                        <select
+                          id="account-shares-limit-with"
+                          value={formData.shares_limit_with_account_id ?? ''}
+                          disabled={linkedToEditing.length > 0}
+                          onChange={(e) => {
+                            const id = parseInt(e.target.value, 10) || undefined
+                            setFormData({ ...formData, shares_limit_with_account_id: id, ...(id !== undefined ? { credit_limit: undefined } : {}) })
+                          }}
+                          className="select-field focus-ring"
+                        >
+                          <option value="">None</option>
+                          {limitTargets.map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                        </select>
+                        {linkedToEditing.length > 0 && (
+                          <p className="mt-1 text-xs text-muted" data-testid="account-form-shared-with">
+                            Shared with {joinNames(linkedToEditing.map((a) => a.name))}. Change it on that card.
+                          </p>
+                        )}
                       </div>
 
                       <div>
