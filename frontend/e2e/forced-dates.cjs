@@ -38,7 +38,7 @@
 // Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
-const { overlayPhase, waitQuiet } = require('./_smooth.cjs')
+const { gate, overlayPhase, waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -563,7 +563,6 @@ async function submitDialog(page, puts) {
   const before = puts.length
   await dialog(page).locator('[data-testid="force-date-save"]').click()
   await page.waitForResponse((r) => r.request().method() === 'PUT' && /\/date$/.test(new URL(r.url()).pathname))
-  await page.waitForTimeout(200)
   return puts.slice(before)[0] ?? null
 }
 /** Fills the open dialog with `day` once, saves and returns the PUT. */
@@ -609,12 +608,25 @@ async function missedRowChangeDate(browser) {
   check('(j) Clear is offered while it is forced', await dialog(page).locator('[data-testid="force-date-clear"]').count(), 1)
 
   const future = addDays(today, 2)
-  const refused = await saveInDialog(page, future, puts)
-  check('(j) a future date is sent for the oldest day and refused by the server', [refused?.day, refused?.body, refused?.status], [oldest, { effective_date: future }, 422])
+  // STU-576: the refusal's tag invalidation refetches, and the screen loader blocks input until
+  // they settle. Holding them keeps it blocked, so the refusal must wait; once they are let go
+  // the refusal shows with input given back, and one fill takes a new date and clears it.
   const error = dialog(page).locator('[data-testid="force-date-error"]')
+  await input.fill(future)
+  const refetches = await gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.startsWith('/api/v1/'))
+  let refused
+  try {
+    refused = await submitDialog(page, puts)
+    check('(j) the refusal\'s refetches are held', await refetches.waitHits(1), true)
+    // The dialog has taken the refusal: its save is no longer in flight.
+    await dialog(page).locator('[data-testid="force-date-save"]').filter({ hasText: /^Save$/ }).waitFor({ timeout: 5000 })
+    check('(j) while they are held, input is blocked and the refusal is not shown yet', [(await overlayPhase(page)) !== 'hidden', await error.count()], [true, 0])
+  } finally {
+    refetches.release({ disarm: true })
+    await refetches.stop()
+  }
+  check('(j) a future date is sent for the oldest day and refused by the server', [refused?.day, refused?.body, refused?.status], [oldest, { effective_date: future }, 422])
   await error.waitFor()
-  // STU-576: the refusal shows once the screen loader has given input back, so the first date
-  // entered as soon as it shows is taken: one fill updates the field and clears the refusal.
   check('(j) the refusal shows once the screen loader has released input', await overlayPhase(page), 'hidden')
   check('(j) the dialog stays open with the server\'s reason', [await dialog(page).count(), ((await error.textContent()) ?? '').trim().length > 0], [1, true])
   const toPast = addDays(today, -10)
@@ -732,7 +744,9 @@ async function missedRowSubscription(browser) {
   check('(l) the dialog opens for the oldest missed day (the card row carries no forced date, so the dialog looks it up)', (await dialog(page).locator('[data-testid="force-date-scheduled"]').textContent())?.replace(/\s+/g, ' ').trim(), `Scheduled ${fmt(oldest)}`)
   const saved = await saveInDialog(page, to, puts)
   check('(l) the PUT names the oldest missed day', [saved?.status, saved?.day, saved?.body], [200, oldest, { effective_date: to }])
+  // The save either confirms the statement it now falls on or closes the dialog.
   const confirmation = dialog(page).locator('[data-testid="force-date-confirmation"]')
+  await Promise.race([confirmation.waitFor({ timeout: 10000 }), dialog(page).waitFor({ state: 'detached', timeout: 10000 })]).catch(() => {})
   if (await confirmation.count()) await dialog(page).locator('[data-testid="force-date-close"]').click()
   await dialog(page).waitFor({ state: 'detached' })
   await settle(page)
