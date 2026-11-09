@@ -22,6 +22,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const d = require('./_dialogs.cjs')
+const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -73,7 +74,7 @@ async function openAddForm(page, formOf) {
 async function fillValidBudget(form, name) {
   await field(form, 'account_id').selectOption(String(bank.id))
   await field(form, 'name').fill(name)
-  await form.locator('[data-field="category_ids"] button').filter({ hasText: 'Utilities' }).first().click()
+  await pick(field(form, 'category_ids'), 'Utilities')
   await field(form, 'target_amount').fill('1000')
 }
 
@@ -128,7 +129,7 @@ async function checkGroupError(page, form, log, scenario, key, wantText, postsBe
     return ok || `got ${JSON.stringify(got)}`
   })
   await h.check(`${scenario}.focus-on-first-chip`, 'B', async () => {
-    const ok = await field(form, key).evaluate((el) => document.activeElement === el.querySelector('button'))
+    const ok = await field(form, key).evaluate((el) => document.activeElement === el.querySelector('button:not([data-picker-toggle])'))
     return ok || `active ${await d.activeTestId(page)}`
   })
   await checkSentNothing(page, log, scenario, postsBefore)
@@ -178,7 +179,7 @@ async function scenarioB(browser) {
     await form.getByRole('button', { name: 'Create Budget Envelope' }).click()
     await checkGroupError(page, form, log, 'b', 'category_ids', 'Select at least one category for this budget envelope.', before)
     await h.check('b.choosing-clears', 'B', async () => {
-      await form.locator('[data-field="category_ids"] button').first().click()
+      await pick(field(form, 'category_ids'), 'Utilities')
       return (await errorOf(page, 'category_ids').count()) === 0 || 'the error stayed after choosing a category'
     })
   } finally {

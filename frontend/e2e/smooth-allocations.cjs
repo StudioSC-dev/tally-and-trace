@@ -13,6 +13,7 @@
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const d = require('./_dialogs.cjs')
+const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -118,7 +119,7 @@ async function fillEnvelope(page, u, name) {
   await h.waitQuiet(page)
   await form.locator('select').first().selectOption(String(u.bank.id))
   await form.locator('input[type="text"]').first().fill(name)
-  await form.locator('button[type="button"]').filter({ hasText: 'Utilities' }).first().click()
+  await pick(form.locator('[data-field="category_ids"]'), 'Utilities')
   // The spending limit is the form's last number input.
   await form.locator('input[type="number"]').last().fill('1000')
   return form.getByRole('button', { name: 'Create Budget Envelope' })
