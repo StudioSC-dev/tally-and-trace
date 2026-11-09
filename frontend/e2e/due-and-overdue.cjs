@@ -171,10 +171,18 @@ async function uiLogin(page, u) {
  * a select or fill sent then moves the field without the app seeing it: the amount keeps the usual
  * figure, or the typed one is not what is posted. Call it before the first input on a dialog.
  */
-const inputReady = (page) => page.waitForFunction(() => {
-  const dialogField = document.querySelector('[data-testid="mark-paid-occurrence"], [data-testid="mark-paid-amount"]')
-  return dialogField !== null && dialogField.closest('[inert]') === null
-})
+const inputReady = async (page, ms = 10000) => {
+  try {
+    await page.waitForFunction(() => {
+      const field = document.querySelector(
+        '[data-testid="mark-paid-dialog"] [data-testid="mark-paid-occurrence"], [data-testid="mark-paid-dialog"] [data-testid="mark-paid-amount"]',
+      )
+      return field !== null && field.closest('[inert]') === null
+    }, undefined, { timeout: ms })
+  } catch (e) {
+    throw new Error(`the Mark paid dialog's field was still behind the screen loader after ${ms} ms: ${e.message}`)
+  }
+}
 const settle = async (page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500) }
 /** Signs in and opens Transactions with the section loaded. */
 async function openDue(browser, u) {
