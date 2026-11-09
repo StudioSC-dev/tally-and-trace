@@ -149,10 +149,17 @@ async function makeOpener(tag) {
 }
 const account = (u, name, type = 'checking', balance = 100000, extra = {}) =>
   post(u.token, '/accounts/', { name, account_type: type, balance, currency: 'PHP', ...extra })
-/** A PHP card closing on the 28th, due 21 days later, paid from `bank`. */
-const card = (u, bank, name, limit = 100000) => post(u.token, '/accounts/', {
+/**
+ * The close day that leaves an installment dated `day` where it is. The API stores a new card
+ * installment on the close of the statement holding its date (768a9b9), so a scenario that reads an
+ * installment's own date puts its card's close on that day. A close day is at most the 28th, so
+ * pass dates through `safeDay` first.
+ */
+const closeOn = (day) => Math.min(28, Number(day.slice(8, 10)))
+/** A PHP card closing on `closeDom` (the 28th by default), due 21 days later, paid from `bank`. */
+const card = (u, bank, name, limit = 100000, closeDom = 28) => post(u.token, '/accounts/', {
   name, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: limit,
-  billing_cycle_start: 28, days_until_due_date: 21, payment_account_id: bank.id,
+  billing_cycle_start: closeDom, days_until_due_date: 21, payment_account_id: bank.id,
 })
 const entry = (u, fields) => post(u.token, '/budget-entries/', { entry_type: 'expense', currency: 'PHP', cadence: 'monthly', ...fields })
 /** A monthly card installment: `count` payments remaining from `next`. */
@@ -318,18 +325,22 @@ async function installmentPlans(browser) {
   const today = manilaToday()
   const u = await makeOpener('c')
   const bank = await account(u, 'C Checking')
-  const visa = await card(u, bank, 'C Visa')
+  // One card per plan: each closes on its plan's own date, which is where the API keeps it.
+  const planCard = (name, day) => card(u, bank, `C Visa ${name}`, 100000, closeOn(safeDay(day)))
   const bdoStart = safeDay(addDays(today, 7))
-  const bdo = await installment(u, visa, 'BDO balance convert', bdoStart, 10, { occurrences_paid_offset: 2 })
+  const bdo = await installment(u, await planCard('BDO', bdoStart), 'BDO balance convert', bdoStart, 10, { occurrences_paid_offset: 2 })
   setReview(bdo.id, 'off')
   const oldStart = safeDay(addDays(today, -40))
-  const old = await installment(u, visa, 'Old Plan', oldStart, 5)
+  const old = await installment(u, await planCard('Old', oldStart), 'Old Plan', oldStart, 5)
   setReview(old.id, 'off')
-  const unreviewed = await installment(u, visa, 'Unrev Plan', addDays(today, 8), 6)
+  const unrevStart = safeDay(addDays(today, 8))
+  const unreviewed = await installment(u, await planCard('Unrev', unrevStart), 'Unrev Plan', unrevStart, 6)
   setReview(unreviewed.id, 'unreviewed')
-  const on = await installment(u, visa, 'On Plan', addDays(today, 9), 6)
+  const onStart = safeDay(addDays(today, 9))
+  const on = await installment(u, await planCard('On', onStart), 'On Plan', onStart, 6)
   setReview(on.id, 'on')
-  const paused = await installment(u, visa, 'Paused Plan', addDays(today, 10), 6, { is_active: false })
+  const pausedStart = safeDay(addDays(today, 10))
+  const paused = await installment(u, await planCard('Paused', pausedStart), 'Paused Plan', pausedStart, 6, { is_active: false })
 
   const { ctx, page, native } = await newPage(browser)
   const posts = recordMaterialize(page)
@@ -513,7 +524,9 @@ async function emptyPagerCap(browser) {
   {
     const u = await makeOpener('f-cap')
     const bank = await account(u, 'F3 Checking')
-    const visa = await card(u, bank, 'F3 Visa', 100000000)
+    // A card with no statement cycle keeps a weekly installment as sent: one with a cycle is charged
+    // monthly on its close, which cannot put 500 occurrences in the 20 days before the subscription.
+    const visa = await post(u.token, '/accounts/', { name: 'F3 Visa', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 100000000, payment_account_id: bank.id })
     // Weekly from T+1: T+1, T+8 and T+15 fall before T+20, so 175 plans give 525 such months.
     const plans = 175
     const started = Date.now()
