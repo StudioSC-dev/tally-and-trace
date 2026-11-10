@@ -215,6 +215,8 @@ export function GroupedPicker(props: GroupedPickerProps) {
     if (query !== '') {
       setQuery('')
       searchRef.current?.focus()
+    } else if (compact && hasValue) {
+      closeField()
     } else {
       collapse()
       toggleRef.current?.focus()
@@ -298,7 +300,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
       >
         {showLine && (
           <div data-picker-line="" className="flex min-h-11 min-w-0 items-center justify-between gap-2">
-            <span id={valueId} data-picker-value="" className="min-w-0 break-words text-sm font-medium text-body">
+            <span id={valueId} data-picker-value="" className="min-w-0 truncate text-sm font-medium text-body">
               {currentText}
             </span>
             <button

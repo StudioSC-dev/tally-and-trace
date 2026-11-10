@@ -42,6 +42,7 @@ const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile:
 
 let stack, client, user
 /** Seven accounts with long names, so a row of them is wider than a phone. */
+const LONG = 'Cpk Very Long Account Name That Cannot Possibly Fit On One Line Of A Phone Screen'
 const NAMES = ['Cpk Alpha Savings Account', 'Cpk Bravo Checking Account', 'Cpk Charlie Cash Wallet', 'Cpk Delta Checking Account', 'Cpk Echo Savings Account', 'Cpk Foxtrot Cash Wallet', 'Cpk Golf Savings Account']
 
 const formModal = (page) => page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction', exact: true }) })
@@ -204,6 +205,20 @@ async function scenario3(browser) {
       return (text === `${optionName} Change` && (await cat.locator('input[type="search"]').count()) === 0) || `text ${JSON.stringify(text)}`
     })
     await h.check('3.list-pick-focus-on-change', 'B', async () => (await isFocused(changeOf(cat))) || `active ${await activeText(page)}`)
+    // Escape from the search box: the first clears the query, the next collapses the field.
+    await changeOf(cat).click()
+    await cat.locator('[data-picker-toggle]').click()
+    await search.fill('Trans')
+    await search.focus()
+    await page.keyboard.press('Escape')
+    await h.check('3.search-escape-clears-query-only', 'B', async () =>
+      ((await search.inputValue()) === '' && (await changeOf(cat).getAttribute('aria-expanded')) === 'true' && (await isFocused(search))) || `query ${JSON.stringify(await search.inputValue())}, expanded ${await changeOf(cat).getAttribute('aria-expanded')}`)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    await h.check('3.search-escape-empty-collapses-field', 'B', async () => {
+      const got = { expanded: await changeOf(cat).getAttribute('aria-expanded'), search: await cat.locator('input[type="search"]').count(), focus: await isFocused(changeOf(cat)), modal: await modal.count() }
+      return (got.expanded === 'false' && got.search === 0 && got.focus && got.modal === 1) || JSON.stringify(got)
+    })
   } finally {
     await d.checkNoNativeDialogs(h, '3', native)
     await ctx.close()
@@ -237,6 +252,18 @@ async function scenario6(browser) {
       const w = await wide()
       return w.length === 0 || JSON.stringify(w)
     })
+    await h.check('6.long-name-stays-one-line', 'B', async () => {
+      await pick(control(modal, 'account_id'), LONG)
+      const got = await control(modal, 'account_id').evaluate((el, full) => {
+        const v = el.querySelector('[data-picker-value]')
+        const cs = getComputedStyle(v)
+        const doc = document.scrollingElement
+        return { text: v.textContent, lines: Math.round(v.getBoundingClientRect().height / parseFloat(cs.lineHeight)), truncated: v.scrollWidth > v.clientWidth, line: el.getBoundingClientRect().height, doc: doc.scrollWidth <= doc.clientWidth + 1, changeName: el.querySelector('[data-picker-change]').getAttribute('aria-labelledby') }
+      }, LONG)
+      return (got.text.startsWith(LONG) && got.lines === 1 && got.truncated && got.line <= 56 && got.doc) || JSON.stringify(got)
+    })
+    await h.check('6.long-name-in-change-accessible-name', 'B', async () =>
+      (await control(modal, 'account_id').getByRole('button', { name: new RegExp(`^Change Account .*${LONG}`) }).count()) === 1 || 'Change name lacks the full value')
     await changeOf(control(modal, 'account_id')).click()
     await changeOf(control(modal, 'category_id')).click()
     await h.check('6.open-chips-44px', 'B', async () => {
@@ -305,7 +332,7 @@ async function scenario8(browser) {
 
 async function setup() {
   user = await h.makeUser(stack, 'compactpick')
-  for (const name of NAMES) await client.post(user.token, '/accounts/', { name, account_type: 'checking', balance: 1000, currency: 'PHP' })
+  for (const name of [...NAMES, LONG]) await client.post(user.token, '/accounts/', { name, account_type: 'checking', balance: 1000, currency: 'PHP' })
   const cats = (await client.get(user.token, '/categories/')).filter((c) => c.kind === 'expense' && c.is_active !== false)
   if (cats.length < 6) throw new Error(`user has ${cats.length} expense categories, want at least 6`)
   if (!cats.some((c) => c.name === 'Groceries')) throw new Error('no Groceries category')
