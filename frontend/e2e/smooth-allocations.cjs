@@ -368,7 +368,7 @@ async function scenarioD(browser) {
     })
     await h.check('d.no-empty', 'B', async () =>
       (await h.expectAbsentFor(page, page.getByText('No budget envelopes yet', { exact: false }), 1500)) || '"No budget envelopes yet" shown')
-    await page.getByRole('button', { name: 'Subscriptions', exact: true }).click()
+    await page.getByRole('button', { name: 'Recurring', exact: true }).click()
     await page.locator(tid('recurring-retry')).click()
     await h.waitQuiet(page)
     await h.check('d.recurring-retry-lists', 'B', async () =>
