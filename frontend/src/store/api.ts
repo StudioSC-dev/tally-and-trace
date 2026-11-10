@@ -62,7 +62,9 @@ export type {
   QuickBalances,
   BudgetEntryMaterializeInput,
   ForcedDateInput,
+  ForcedDateOptions,
   ForcedDateResult,
+  CascadeUndoInput,
   EntryOccurrence,
   EntryOccurrences,
   MaterializeOutcome,
@@ -127,7 +129,9 @@ import type {
   GoalsSummary,
   BudgetEntryMaterializeInput,
   ForcedDateInput,
+  ForcedDateOptions,
   ForcedDateResult,
+  CascadeUndoInput,
   EntryOccurrences,
   MaterializeOutcome,
   MaterializeDueResult,
@@ -418,6 +422,19 @@ export const accountingApi = createApi({
     }),
     clearOccurrenceDate: builder.mutation<void, { id: number; day: string }>({
       query: ({ id, day }) => ({ url: `budget-entries/${id}/occurrences/${day}/date`, method: 'DELETE' }),
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+    }),
+    // What a refused date can become (Pay together, Delay all). Always fresh: the preview is only valid for the date asked.
+    getForcedDateOptions: builder.query<ForcedDateOptions, { id: number; day: string; effectiveDate: string }>({
+      query: ({ id, day, effectiveDate }) => ({
+        url: `budget-entries/${id}/occurrences/${day}/date-options`,
+        params: { effective_date: effectiveDate },
+      }),
+      keepUnusedDataFor: 0,
+    }),
+    // Undo a Delay all with the token it replied with (not the entry PUT, which would drop auto-post and forced dates).
+    undoCascade: builder.mutation<BudgetEntry, { id: number; data: CascadeUndoInput }>({
+      query: ({ id, data }) => ({ url: `budget-entries/${id}/cascade-undo`, method: 'POST', body: data }),
       invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
     }),
     setLoanDueDate: builder.mutation<ForcedDateResult, { id: number; day: string; data: ForcedDateInput }>({
@@ -872,6 +889,8 @@ export const {
   useMaterializeDueBudgetEntryMutation,
   useSetOccurrenceDateMutation,
   useClearOccurrenceDateMutation,
+  useLazyGetForcedDateOptionsQuery,
+  useUndoCascadeMutation,
   useSetLoanDueDateMutation,
   useClearLoanDueDateMutation,
   useGetEntryOccurrencesQuery,
