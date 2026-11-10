@@ -636,6 +636,38 @@ export type TransactionInput = Partial<
 > &
   TagIdsInput
 
+/**
+ * `repeat` of POST /transactions/repeating: the schedule of the entry the transaction
+ * starts. Its first occurrence is the transaction's date, so no date is sent; the API
+ * refuses any other field and a semi-monthly cadence.
+ */
+export interface RepeatScheduleInput {
+  cadence: RecurrenceFrequency
+  anchor_day?: number | null
+  day_rule?: DayRule | null
+  end_mode: EndMode
+  end_date?: string
+  max_occurrences?: number
+  billing_kind?: BillingKind | null
+  settlement: Settlement
+}
+
+/**
+ * POST /transactions/repeating: add a transaction and start the recurring entry it is the
+ * first occurrence of, in one commit. The transaction carries no `budget_entry_id`, and its
+ * description (required) is the entry's name.
+ */
+export interface RepeatingTransactionInput {
+  transaction: TransactionInput
+  repeat: RepeatScheduleInput
+}
+
+/** POST /transactions/repeating (201): the transaction and the entry it started. */
+export interface RepeatingCreated {
+  transaction: Transaction
+  entry: BudgetEntry
+}
+
 /** POST /budget-entries/{id}/materialize. */
 export interface BudgetEntryMaterializeInput {
   /** The occurrence being recorded. The server reads its day in UTC, so send `YYYY-MM-DDT00:00:00Z`. Defaults to `next_occurrence`. */

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   bankKindOf,
+  cadenceChoices,
+  isLastWeekdayOfMonth,
+  repeatFieldControl,
+  repeatingRefusal,
+  repeatScheduleOf,
   scheduleRequest,
   schedulePreview,
   scheduleState,
@@ -153,6 +158,7 @@ describe('schedulePreview', () => {
     expect(schedulePreview(draft({ next_occurrence: '2026-01-31T00:00', day: { kind: 'day', day: 31 } }), ctx())).toEqual({
       label: 'Monthly · day 31',
       dates: ['Jan 31st, 2026', 'Feb 28th, 2026', 'Mar 31st, 2026'],
+      missed: null,
     })
   })
 
@@ -161,7 +167,7 @@ describe('schedulePreview', () => {
       draft({ end_mode: 'after_occurrences', max_occurrences: 12, kind_choice: 'installment' }),
       ctx({ account: card }),
     )
-    expect(preview).toEqual({ label: 'Monthly · day 20', dates: ['Oct 20th, 2026', 'Nov 20th, 2026', 'Dec 20th, 2026'] })
+    expect(preview).toEqual({ label: 'Monthly · day 20', dates: ['Oct 20th, 2026', 'Nov 20th, 2026', 'Dec 20th, 2026'], missed: null })
   })
 
   it('the API\'s detail for a day off its date', () => {
@@ -171,5 +177,104 @@ describe('schedulePreview', () => {
 
   it('nothing outside the month family', () => {
     expect(schedulePreview(draft({ cadence: 'weekly' }), ctx())).toBeNull()
+  })
+})
+
+// Repeat in Add Transaction: the transaction's date is the first occurrence.
+const fixed = (over: Partial<ScheduleContext> = {}) => ctx({ dateFixed: true, ...over })
+
+describe('a fixed date (Repeat in Add Transaction)', () => {
+  it('offers Last weekday only when the date is its month\'s last weekday', () => {
+    expect(isLastWeekdayOfMonth('2026-10-30T00:00')).toBe(true)
+    expect(isLastWeekdayOfMonth('2026-10-31T00:00')).toBe(false)
+    expect(scheduleState(draft({ next_occurrence: '2026-10-30T00:00' }), fixed()).dayChoices).toEqual(['same_as_date', 'last_weekday'])
+    expect(scheduleState(draft({ next_occurrence: '2026-10-29T00:00' }), fixed()).dayChoices).toEqual(['same_as_date'])
+  })
+
+  it('a Day choice the date no longer satisfies falls back to "Same as date"', () => {
+    const moved = draft({ next_occurrence: '2026-10-29T00:00', day: { kind: 'last_weekday' } })
+    expect(scheduleState(moved, fixed()).day).toEqual({ kind: 'same_as_date' })
+    const result = scheduleRequest(moved, fixed())
+    expect(result.ok && result.fields.anchor_day).toBe(29)
+    expect(result.ok && result.fields.day_rule).toBe(null)
+  })
+
+  it('Last weekday on its date sends the rule', () => {
+    const result = scheduleRequest(draft({ next_occurrence: '2026-10-30T00:00', day: { kind: 'last_weekday' } }), fixed())
+    expect(result.ok && result.fields).toMatchObject({ anchor_day: null, day_rule: 'last_weekday' })
+  })
+
+  it('never offers semi-monthly', () => {
+    expect(cadenceChoices({ dateFixed: true })).not.toContain('semi_monthly')
+    expect(scheduleState(draft(), fixed()).cadenceChoices).toEqual(['monthly', 'quarterly', 'semi_annual', 'annual'])
+  })
+
+  it('a card installment omits anchor_day: the server sets it to the close day', () => {
+    const result = scheduleRequest(
+      draft({ next_occurrence: '2026-11-10T00:00', end_mode: 'after_occurrences', max_occurrences: 12, kind_choice: 'installment' }),
+      fixed({ account: card }),
+    )
+    expect(result.ok).toBe(true)
+    expect(result.ok && repeatScheduleOf(result.fields, 'manual')).toEqual({
+      cadence: 'monthly',
+      end_mode: 'after_occurrences',
+      end_date: undefined,
+      max_occurrences: 12,
+      billing_kind: null,
+      settlement: 'manual',
+    })
+  })
+
+  it('repeat carries no date and the settlement picked', () => {
+    const result = scheduleRequest(draft(), fixed())
+    const repeat = result.ok ? repeatScheduleOf(result.fields, 'autopay') : null
+    expect(repeat).toEqual({
+      cadence: 'monthly', anchor_day: 15, day_rule: null, end_mode: 'indefinite', end_date: undefined,
+      max_occurrences: undefined, billing_kind: null, settlement: 'autopay',
+    })
+    expect(repeat && 'next_occurrence' in repeat).toBe(false)
+  })
+
+  it('the preview counts the payments a past date leaves missed', () => {
+    const preview = schedulePreview(draft({ next_occurrence: '2026-07-15T00:00' }), fixed(), '2026-11-10')
+    expect(preview).toEqual({
+      label: 'Monthly · day 15',
+      dates: ['Jul 15th, 2026', 'Aug 15th, 2026', 'Sep 15th, 2026'],
+      missed: '3 payments between then and today will show as missed',
+    })
+  })
+
+  it('one missed payment reads in the singular; today itself is not missed', () => {
+    expect(schedulePreview(draft({ next_occurrence: '2026-10-10T00:00' }), fixed(), '2026-11-11'))
+      .toMatchObject({ missed: '1 payment between then and today will show as missed' })
+    expect(schedulePreview(draft({ next_occurrence: '2026-10-10T00:00' }), fixed(), '2026-11-10'))
+      .toMatchObject({ missed: null })
+  })
+
+  it('today or a later date misses nothing, and an unfixed date never counts', () => {
+    expect(schedulePreview(draft({ next_occurrence: '2026-11-10T00:00' }), fixed(), '2026-11-10')).toMatchObject({ missed: null })
+    expect(schedulePreview(draft({ next_occurrence: '2026-07-15T00:00' }), ctx(), '2026-11-10')).toMatchObject({ missed: null })
+  })
+})
+
+describe('repeatingRefusal', () => {
+  it('reads the first error\'s request location', () => {
+    expect(repeatingRefusal([{ loc: ['body', 'transaction', 'description'], msg: 'String should have at least 1 character' }]))
+      .toEqual({ part: 'transaction', field: 'description', message: 'String should have at least 1 character' })
+    expect(repeatingRefusal([{ loc: ['body', 'repeat', 'max_occurrences'], msg: 'too many' }]))
+      .toEqual({ part: 'repeat', field: 'max_occurrences', message: 'too many' })
+    expect(repeatingRefusal([{ loc: ['body', 'repeat'], msg: 'ends' }])).toEqual({ part: 'repeat', field: null, message: 'ends' })
+  })
+
+  it('a string detail names no field', () => {
+    expect(repeatingRefusal('Turn autopay on from the recurring entry')).toEqual({ part: null, field: null, message: 'Turn autopay on from the recurring entry' })
+    expect(repeatingRefusal(undefined)).toBeNull()
+  })
+
+  it('maps repeat fields onto their controls', () => {
+    expect(repeatFieldControl('anchor_day')).toBe('day')
+    expect(repeatFieldControl('day_rule')).toBe('day')
+    expect(repeatFieldControl('max_occurrences')).toBe('max_occurrences')
+    expect(repeatFieldControl('settlement')).toBeNull()
   })
 })

@@ -1,4 +1,5 @@
-import type { BillingKind, DayRule, EndMode, RecurrenceFrequency, RecurringKind, Settlement } from '../types/api'
+import type { BillingKind, DayRule, EndMode, RecurrenceFrequency, RecurringKind, RepeatScheduleInput, Settlement } from '../types/api'
+import { manilaToday } from './cardPay'
 import { formatEntryDate, parseEntryDate, toWireWallTime } from './entryDate'
 import {
   buildEntryDayFields,
@@ -9,7 +10,7 @@ import {
   type StoredDayRow,
 } from './entryDayFields'
 import { statementCloseDay, statementCycleClose, type StatementCycleSettings } from './markPaid'
-import { generateOccurrences, isMonthFamily } from './recurrence'
+import { generateOccurrences, isMonthFamily, lastWeekday } from './recurrence'
 import {
   automaticOffered,
   isCappedEnd,
@@ -68,6 +69,12 @@ export interface ScheduleContext {
   /** The account picked, with its type and statement cycle (undefined: none picked). */
   account: (StatementCycleSettings & { account_type: string }) | undefined
   accountId: number
+  /**
+   * The first occurrence is fixed (Repeat in Add Transaction: the transaction's own
+   * date). The Day control offers only what that date satisfies, semi-monthly is not
+   * offered and the preview counts what a past date leaves missed.
+   */
+  dateFixed?: boolean
 }
 
 /** What the schedule controls show for a draft in its context. */
@@ -90,16 +97,23 @@ export interface ScheduleState {
   chargedOnClose: boolean
   /** The Day select's options, in order. */
   dayChoices: DaySetting['kind'][]
-  /** The Day control's value. */
+  /** The Day control's value: `draft.day`, or "Same as date" where a fixed date can't keep it. */
   day: DaySetting
 }
 
 /** The cadences the recurring form offers. */
 const FORM_CADENCES: RecurrenceFrequency[] = ['monthly', 'quarterly', 'semi_annual', 'annual']
 
-/** The cadence select's options. */
-export function cadenceChoices(): RecurrenceFrequency[] {
-  return [...FORM_CADENCES]
+/** The cadence select's options. A fixed date never offers semi-monthly: its two days are not that date. */
+export function cadenceChoices(ctx: Pick<ScheduleContext, 'dateFixed'>): RecurrenceFrequency[] {
+  return ctx.dateFixed ? FORM_CADENCES.filter((cadence) => cadence !== 'semi_monthly') : [...FORM_CADENCES]
+}
+
+/** Whether a `datetime-local` (or wire) value falls on its month's last weekday. */
+export function isLastWeekdayOfMonth(value: string): boolean {
+  const on = parseEntryDate(value)
+  if (Number.isNaN(on.getTime())) return false
+  return lastWeekday(on.getUTCFullYear(), on.getUTCMonth() + 1).getUTCDate() === on.getUTCDate()
 }
 
 export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): ScheduleState {
@@ -132,13 +146,21 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
     !stored.day_rule
   const chargedOnClose = cardInstallmentCreate || onCloseEdit
 
-  // "Same as date" is offered on create and on a row with no stored day (a legacy row).
-  const offersSameAsDate = !stored || daySettingOf(stored).kind === 'same_as_date'
-  const dayChoices: DaySetting['kind'][] = offersSameAsDate ? ['same_as_date', 'day', 'last_weekday'] : ['day', 'last_weekday']
+  let dayChoices: DaySetting['kind'][]
+  let day = draft.day
+  if (ctx.dateFixed) {
+    // The date is the first occurrence: only what it already satisfies.
+    dayChoices = isLastWeekdayOfMonth(draft.next_occurrence) ? ['same_as_date', 'last_weekday'] : ['same_as_date']
+    if (!dayChoices.includes(day.kind)) day = { kind: 'same_as_date' }
+  } else {
+    // "Same as date" is offered on create and on a row with no stored day (a legacy row).
+    const offersSameAsDate = !stored || daySettingOf(stored).kind === 'same_as_date'
+    dayChoices = offersSameAsDate ? ['same_as_date', 'day', 'last_weekday'] : ['day', 'last_weekday']
+  }
 
   return {
     cadence: cardInstallmentCreate ? 'monthly' : draft.cadence,
-    cadenceChoices: cadenceChoices(),
+    cadenceChoices: cadenceChoices(ctx),
     showKindSelect,
     showBankKindSelect,
     kindCapped,
@@ -149,7 +171,7 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
     cardInstallmentCreate,
     chargedOnClose,
     dayChoices,
-    day: draft.day,
+    day,
   }
 }
 
@@ -258,6 +280,8 @@ export function scheduleRequest(draft: ScheduleDraft, ctx: ScheduleContext): Sch
 
 /** Far enough ahead that the schedule preview is bounded by its count alone. */
 const PREVIEW_RANGE_END = new Date(Date.UTC(9999, 11, 31))
+/** Enough steps for a monthly schedule from the earliest record date to today. */
+const MISSED_COUNT_LIMIT = 1000
 
 export type SchedulePreview =
   | { error: string }
@@ -266,6 +290,8 @@ export type SchedulePreview =
       label: string
       /** The next three dates, from the first. */
       dates: string[]
+      /** A fixed past date: the line about the payments between it and today, or null. */
+      missed: string | null
     }
 
 /** A cadence's name: "Monthly", "Semi-Annual". */
@@ -302,9 +328,15 @@ export const formatScheduleLabel = (
 /**
  * The schedule a save would store: its label and next three dates, or the detail the
  * API would refuse its day with. Null when there is nothing to show (a cadence
- * outside the month family, or no readable date).
+ * outside the month family, or no readable date). With a fixed date before `today`
+ * (Manila's), the occurrences after the first and before today are counted: they
+ * will show as missed.
  */
-export function schedulePreview(draft: ScheduleDraft, ctx: ScheduleContext): SchedulePreview | null {
+export function schedulePreview(
+  draft: ScheduleDraft,
+  ctx: ScheduleContext,
+  today: string = manilaToday(),
+): SchedulePreview | null {
   const state = scheduleState(draft, ctx)
   const { cadence } = state
   if (!isMonthFamily(cadence)) return null
@@ -346,9 +378,68 @@ export function schedulePreview(draft: ScheduleDraft, ctx: ScheduleContext): Sch
     end_date: endDate,
     max_occurrences: draft.end_mode === 'after_occurrences' ? draft.max_occurrences ?? null : null,
   }
-  const dates = generateOccurrences(schedule, parseEntryDate(nextOccurrence), PREVIEW_RANGE_END, 3)
+  const first = parseEntryDate(nextOccurrence)
+  const dates = generateOccurrences(schedule, first, PREVIEW_RANGE_END, 3)
+  let missed: string | null = null
+  if (ctx.dateFixed) {
+    // Every step after the first that lands on a day before today is left unrecorded.
+    const beforeToday = new Date(Date.parse(`${today}T00:00:00Z`) - 1)
+    const passed = beforeToday >= first ? generateOccurrences(schedule, first, beforeToday, MISSED_COUNT_LIMIT).length - 1 : 0
+    if (passed > 0) {
+      missed = `${passed} ${passed === 1 ? 'payment' : 'payments'} between then and today will show as missed`
+    }
+  }
   return {
     label: formatScheduleLabel(cadence, resolved),
     dates: dates.map((date) => formatEntryDate(date)),
+    missed,
+  }
+}
+
+/**
+ * `repeat` of `POST /transactions/repeating`: the schedule fields without the date (the
+ * first occurrence is the transaction's own date) and with the settlement picked.
+ */
+export function repeatScheduleOf(fields: ScheduleFields, settlement: Settlement): RepeatScheduleInput {
+  const { next_occurrence: _firstOccurrence, ...repeat } = fields
+  return { ...repeat, settlement }
+}
+
+/** Where a refused `POST /transactions/repeating` points: the first error's request location. */
+export interface RepeatingRefusal {
+  /** `transaction` or `repeat` for a 422 with a request location, else null. */
+  part: 'transaction' | 'repeat' | null
+  /** The field inside that part (`description`, `max_occurrences`), or null (the part as a whole). */
+  field: string | null
+  message: string
+}
+
+/**
+ * The first error of a refused repeating save. A validation list (422) carries
+ * `loc` = `["body", "transaction" | "repeat", field, ...]`; a string detail (a
+ * refusal by a rule) names no field.
+ */
+export function repeatingRefusal(detail: unknown): RepeatingRefusal | null {
+  if (typeof detail === 'string') return { part: null, field: null, message: detail }
+  if (!Array.isArray(detail) || detail.length === 0) return null
+  const first = detail[0] as { loc?: unknown; msg?: unknown }
+  const message = typeof first?.msg === 'string' ? first.msg : ''
+  const loc = Array.isArray(first?.loc) ? first.loc : []
+  const part = loc[0] === 'body' && (loc[1] === 'transaction' || loc[1] === 'repeat') ? loc[1] : null
+  const field = part !== null && typeof loc[2] === 'string' ? loc[2] : null
+  return { part, field, message }
+}
+
+/** The schedule control a refused `repeat` field is shown on, or null (the Repeat section's own line). */
+export function repeatFieldControl(field: string | null): 'day' | 'end_date' | 'max_occurrences' | null {
+  switch (field) {
+    case 'anchor_day':
+    case 'day_rule':
+      return 'day'
+    case 'end_date':
+    case 'max_occurrences':
+      return field
+    default:
+      return null
   }
 }
