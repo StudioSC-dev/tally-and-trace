@@ -5,6 +5,8 @@ import {
   buildEntryDayFields,
   daySettingOf,
   resolveEntryDayFields,
+  weekdayOf,
+  WEEKDAY_NAMES,
   type DaySetting,
   type EntryDayFields,
   type StoredDayRow,
@@ -79,9 +81,11 @@ export interface ScheduleContext {
 
 /** What the schedule controls show for a draft in its context. */
 export interface ScheduleState {
-  /** The cadence a save sends: a card installment on create is always monthly. */
+  /** The cadence a save sends: a card installment is always monthly. */
   cadence: RecurrenceFrequency
   cadenceChoices: RecurrenceFrequency[]
+  /** A card installment (with or without a statement cycle): always monthly, so there is no cadence choice. */
+  cadenceLocked: boolean
   showKindSelect: boolean
   showBankKindSelect: boolean
   kindCapped: boolean
@@ -102,7 +106,7 @@ export interface ScheduleState {
 }
 
 /** The cadences the recurring form offers. */
-const FORM_CADENCES: RecurrenceFrequency[] = ['monthly', 'quarterly', 'semi_annual', 'annual']
+const FORM_CADENCES: RecurrenceFrequency[] = ['weekly', 'biweekly', 'monthly', 'quarterly', 'semi_annual', 'annual']
 
 /** The cadence select's options. A fixed date never offers semi-monthly: its two days are not that date. */
 export function cadenceChoices(ctx: Pick<ScheduleContext, 'dateFixed'>): RecurrenceFrequency[] {
@@ -134,8 +138,9 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
   // its statement's close, so no day fields are sent and the cadence is monthly. An
   // installment already on the close shows the same note in place of the pickers.
   const cardCloseDay = account?.account_type === 'credit' ? statementCloseDay(account) : null
-  const cardInstallmentCreate =
-    !stored && cardCloseDay !== null && isCardExpense && kindCapped && kindValue !== 'bill'
+  // Without a statement cycle there is no close to anchor on, but it is still monthly.
+  const cardInstallment = showKindSelect && kindCapped && kindValue !== 'bill'
+  const cardInstallmentCreate = !stored && cardCloseDay !== null && cardInstallment
   const onCloseEdit =
     stored != null &&
     cardCloseDay !== null &&
@@ -159,8 +164,9 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
   }
 
   return {
-    cadence: cardInstallmentCreate ? 'monthly' : draft.cadence,
-    cadenceChoices: cadenceChoices(ctx),
+    cadence: cardInstallment ? 'monthly' : draft.cadence,
+    cadenceChoices: cardInstallment ? ['monthly'] : cadenceChoices(ctx),
+    cadenceLocked: cardInstallment,
     showKindSelect,
     showBankKindSelect,
     kindCapped,
@@ -301,6 +307,10 @@ export const formatCadenceLabel = (value: string) => {
       return 'Daily'
     case 'weekly':
       return 'Weekly'
+    case 'biweekly':
+      return 'Every 2 weeks'
+    case 'semi_monthly':
+      return 'Twice a month'
     case 'monthly':
       return 'Monthly'
     case 'quarterly':
@@ -314,12 +324,19 @@ export const formatCadenceLabel = (value: string) => {
   }
 }
 
-/** "Monthly · last weekday" / "Monthly · day 31"; a legacy entry is just its cadence. */
+/**
+ * "Monthly · last weekday" / "Monthly · day 31" / "Weekly · Tuesday" (the weekday of
+ * `next_occurrence`); a legacy entry is just its cadence.
+ */
 export const formatScheduleLabel = (
   cadence: string,
-  fields: { anchor_day?: number | null; day_rule?: DayRule | null },
+  fields: { anchor_day?: number | null; day_rule?: DayRule | null; next_occurrence?: string | null },
 ) => {
   const cadenceLabel = formatCadenceLabel(cadence)
+  if ((cadence === 'weekly' || cadence === 'biweekly') && fields.next_occurrence) {
+    const weekday = weekdayOf(fields.next_occurrence)
+    if (weekday !== null) return `${cadenceLabel} · ${WEEKDAY_NAMES[weekday]}`
+  }
   if (fields.day_rule === 'last_weekday') return `${cadenceLabel} · last weekday`
   if (fields.anchor_day) return `${cadenceLabel} · day ${fields.anchor_day}`
   return cadenceLabel
@@ -327,8 +344,7 @@ export const formatScheduleLabel = (
 
 /**
  * The schedule a save would store: its label and next three dates, or the detail the
- * API would refuse its day with. Null when there is nothing to show (a cadence
- * outside the month family, or no readable date). With a fixed date before `today`
+ * API would refuse its day with. Null when there is nothing to show (no readable date). With a fixed date before `today`
  * (Manila's), the occurrences after the first and before today are counted: they
  * will show as missed.
  */
@@ -339,7 +355,6 @@ export function schedulePreview(
 ): SchedulePreview | null {
   const state = scheduleState(draft, ctx)
   const { cadence } = state
-  if (!isMonthFamily(cadence)) return null
   let nextOccurrence: string
   try {
     nextOccurrence = toWireWallTime(draft.next_occurrence)
@@ -390,7 +405,7 @@ export function schedulePreview(
     }
   }
   return {
-    label: formatScheduleLabel(cadence, resolved),
+    label: formatScheduleLabel(cadence, { ...resolved, next_occurrence: nextOccurrence }),
     dates: dates.map((date) => formatEntryDate(date)),
     missed,
   }

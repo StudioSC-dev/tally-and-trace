@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
+import type { RecurrenceFrequency } from '../types/api'
+import { dateForWeekday } from './entryDayFields'
 import {
   bankKindOf,
   cadenceChoices,
+  formatCadenceLabel,
+  formatScheduleLabel,
   isLastWeekdayOfMonth,
   repeatFieldControl,
   repeatingRefusal,
@@ -175,8 +179,9 @@ describe('schedulePreview', () => {
       .toEqual({ error: 'next_occurrence must be the last weekday of its month (2026-10-30)' })
   })
 
-  it('nothing outside the month family', () => {
-    expect(schedulePreview(draft({ cadence: 'weekly' }), ctx())).toBeNull()
+  it('weekly shows its weekday and next dates; no readable date shows nothing', () => {
+    expect(schedulePreview(draft({ cadence: 'weekly' }), ctx())).toMatchObject({ label: 'Weekly · Thursday' })
+    expect(schedulePreview(draft({ cadence: 'weekly', next_occurrence: '' }), ctx())).toBeNull()
   })
 })
 
@@ -206,7 +211,7 @@ describe('a fixed date (Repeat in Add Transaction)', () => {
 
   it('never offers semi-monthly', () => {
     expect(cadenceChoices({ dateFixed: true })).not.toContain('semi_monthly')
-    expect(scheduleState(draft(), fixed()).cadenceChoices).toEqual(['monthly', 'quarterly', 'semi_annual', 'annual'])
+    expect(scheduleState(draft(), fixed()).cadenceChoices).toEqual(['weekly', 'biweekly', 'monthly', 'quarterly', 'semi_annual', 'annual'])
   })
 
   it('a card installment omits anchor_day: the server sets it to the close day', () => {
@@ -286,5 +291,87 @@ describe('repeatingRefusal', () => {
     expect(repeatFieldControl('next_occurrence')).toBeNull()
     expect(repeatFieldControl('lead_time_days')).toBeNull()
     expect(repeatFieldControl(null)).toBeNull()
+  })
+})
+
+describe('weekly and every-two-weeks labels', () => {
+  const all: RecurrenceFrequency[] = ['daily', 'weekly', 'biweekly', 'semi_monthly', 'monthly', 'quarterly', 'semi_annual', 'annual']
+
+  it('names the cadences, and no cadence reads as its raw value', () => {
+    expect(formatCadenceLabel('biweekly')).toBe('Every 2 weeks')
+    expect(formatCadenceLabel('semi_monthly')).toBe('Twice a month')
+    for (const cadence of all) {
+      expect(formatCadenceLabel(cadence)).not.toBe(cadence)
+      expect(formatCadenceLabel(cadence)).toBeTruthy()
+    }
+  })
+
+  it('a weekly schedule label carries the weekday of its date', () => {
+    // 2026-10-13 is a Tuesday.
+    expect(formatScheduleLabel('weekly', { next_occurrence: '2026-10-13T09:00:00Z' })).toBe('Weekly · Tuesday')
+    expect(formatScheduleLabel('biweekly', { next_occurrence: '2026-10-16T00:00' })).toBe('Every 2 weeks · Friday')
+    expect(formatScheduleLabel('biweekly', {})).toBe('Every 2 weeks')
+    expect(formatScheduleLabel('monthly', { anchor_day: 5, next_occurrence: '2026-10-05T00:00:00Z' })).toBe('Monthly · day 5')
+  })
+})
+
+describe('weekday and preview for weekly and every-two-weeks', () => {
+  it('moves a date forward to the picked weekday, never earlier', () => {
+    // 2026-10-12 is a Monday, 2026-10-15 a Thursday.
+    expect(dateForWeekday('2026-10-12T09:30', 4)).toBe('2026-10-15T09:30')
+    expect(dateForWeekday('2026-10-15T09:30', 4)).toBe('2026-10-15T09:30')
+    expect(dateForWeekday('2026-10-15T09:30', 1)).toBe('2026-10-19T09:30')
+    expect(dateForWeekday('2026-10-15T09:30', 0)).toBe('2026-10-18T09:30')
+  })
+
+  it('previews the next three weekly and bi-weekly dates', () => {
+    const weekly = schedulePreview(draft({ cadence: 'weekly', next_occurrence: '2026-10-15T09:00' }), ctx())
+    expect(weekly).toEqual({
+      label: 'Weekly · Thursday',
+      dates: ['Oct 15th, 2026', 'Oct 22nd, 2026', 'Oct 29th, 2026'],
+      missed: null,
+    })
+    const biweekly = schedulePreview(draft({ cadence: 'biweekly', next_occurrence: '2026-10-15T09:00' }), ctx())
+    expect(biweekly).toEqual({
+      label: 'Every 2 weeks · Thursday',
+      dates: ['Oct 15th, 2026', 'Oct 29th, 2026', 'Nov 12th, 2026'],
+      missed: null,
+    })
+  })
+
+  it('a weekly save sends no day fields', () => {
+    const result = scheduleRequest(draft({ cadence: 'biweekly' }), ctx())
+    expect(result.ok && result.fields.cadence).toBe('biweekly')
+    expect(result.ok && 'anchor_day' in result.fields).toBe(false)
+  })
+
+  it('a fixed past date counts the weekly payments left missed', () => {
+    const preview = schedulePreview(draft({ cadence: 'weekly', next_occurrence: '2026-10-01T00:00' }), fixed(), '2026-10-20')
+    expect(preview && !('error' in preview) && preview.missed).toBe('2 payments between then and today will show as missed')
+  })
+
+  it('a card installment on a statement cycle stays monthly whatever the draft holds', () => {
+    const state = scheduleState(
+      draft({ cadence: 'weekly', end_mode: 'after_occurrences', max_occurrences: 12, kind_choice: 'installment' }),
+      fixed({ account: card }),
+    )
+    expect(state.cadence).toBe('monthly')
+    expect(state.chargedOnClose).toBe(true)
+  })
+
+  it('a card installment on a card with no statement cycle is monthly too, with no cadence choice', () => {
+    const noCycle = { account_type: 'credit' }
+    const installment = draft({ cadence: 'weekly', end_mode: 'after_occurrences', max_occurrences: 12, kind_choice: 'installment' })
+    const state = scheduleState(installment, fixed({ account: noCycle }))
+    expect(state.cadence).toBe('monthly')
+    expect(state.cadenceLocked).toBe(true)
+    expect(state.cadenceChoices).toEqual(['monthly'])
+    expect(state.chargedOnClose).toBe(false)
+    const result = scheduleRequest(installment, ctx({ account: noCycle }))
+    expect(result.ok && result.fields.cadence).toBe('monthly')
+    // A bill on the same card keeps the choice, and a weekly card subscription is untouched.
+    const bill = scheduleState({ ...installment, kind_choice: 'bill' }, fixed({ account: noCycle }))
+    expect([bill.cadence, bill.cadenceLocked]).toEqual(['weekly', false])
+    expect(scheduleState(draft({ cadence: 'weekly' }), ctx({ account: noCycle })).cadence).toBe('weekly')
   })
 })

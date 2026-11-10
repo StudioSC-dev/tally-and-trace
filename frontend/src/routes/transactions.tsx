@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { DEFAULT_SETTLEMENT, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import { DEFAULT_SETTLEMENT, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -57,15 +57,6 @@ const categoryKind = (category: { kind?: CategoryKind; is_expense?: boolean }): 
 
 // The API takes at most this many category names per request.
 const MAX_CATEGORY_NAMES = 50
-
-const RECURRENCE_LABELS: Record<string, string> = {
-  daily: 'Daily',
-  weekly: 'Weekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-  semi_annual: 'Semi-Annual',
-  annual: 'Annual',
-}
 
 const getOrdinalSuffix = (day: number) => {
   if (day % 100 >= 11 && day % 100 <= 13) {
@@ -2181,7 +2172,7 @@ export function TransactionsPage() {
         ? budgetEntries.find((entry) => entry.id === transaction.budget_entry_id)
         : undefined
       const scheduleLabel = budgetEntry
-        ? `${budgetEntry.name} • ${RECURRENCE_LABELS[budgetEntry.cadence]}`
+        ? `${budgetEntry.name} • ${formatCadenceLabel(budgetEntry.cadence)}`
         : null
 
       return {
@@ -3065,7 +3056,7 @@ export function TransactionsPage() {
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt>Cadence</dt>
-                        <dd>{RECURRENCE_LABELS[actionSchedule.cadence]}</dd>
+                        <dd>{formatCadenceLabel(actionSchedule.cadence)}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt>Scheduled Amount</dt>
@@ -3829,6 +3820,7 @@ export function TransactionsPage() {
                         finalMonthHelp=""
                         idPrefix="repeat"
                         touch
+                        dateFixed
                       />
                       {repeatPreview && 'missed' in repeatPreview && repeatPreview.missed && (
                         <p className="text-xs text-muted" data-testid="repeat-missed">{repeatPreview.missed}</p>
@@ -3885,7 +3877,7 @@ export function TransactionsPage() {
                       <option value="">None</option>
                       {matchingBudgetEntries.map((entry) => (
                         <option key={entry.id} value={entry.id}>
-                          {entry.name} • {RECURRENCE_LABELS[entry.cadence]} • {formatCurrency(entry.amount, entry.currency)}
+                          {entry.name} • {formatCadenceLabel(entry.cadence)} • {formatCurrency(entry.amount, entry.currency)}
                         </option>
                       ))}
                     </select>
@@ -3893,7 +3885,7 @@ export function TransactionsPage() {
                   {selectedBudgetEntry && (
                     <div className="bg-sunken p-3 text-xs text-body space-y-1">
                       <p className="font-semibold text-ink">{selectedBudgetEntry.name}</p>
-                      <p>Cadence: {RECURRENCE_LABELS[selectedBudgetEntry.cadence]}</p>
+                      <p>Cadence: {formatCadenceLabel(selectedBudgetEntry.cadence)}</p>
                       <p>Next due: {formatEntryDate(selectedBudgetEntry.next_occurrence)}</p>
                       <p>Amount: {formatCurrency(selectedBudgetEntry.amount, selectedBudgetEntry.currency)}</p>
                       {selectedBudgetEntry.settlement === 'autopay' && <p>Autopay enabled</p>}
