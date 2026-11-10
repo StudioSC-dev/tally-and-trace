@@ -302,31 +302,45 @@ def refuse_closed_statement(card: Account, day: date) -> None:
         raise HTTPException(status_code=422, detail=STATEMENT_CLOSED)
 
 
-def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
-                    card: Optional[Account] = None, overlap: bool = False) -> None:
-    """Force the occurrence on the nominal ``day`` to ``forced``, without committing.
+def plan_forced_date(db: Session, entry, day: date, forced: date,
+                     card: Optional[Account] = None, overlap: bool = False) -> bool:
+    """The checks of a forced date, reading and writing nothing: True when
+    ``forced`` is to be stored, False when it equals ``day`` and clears the
+    override instead.
 
-    The caller holds the owner's budget lock and then the entry lock. 422 when
-    ``day`` is not an occurrence of the walk; 409 when a row, posted or pending,
-    is linked to it; 422 past the reach, out of order or outside the record
-    dates, and on ``card`` (a locked credit account) inside a closed statement:
-    that is what the bank printed. ``forced`` equal to ``day`` clears the
-    override instead (``clear_forced_date``), which restores what the schedule
-    says even on a closed statement. ``overlap`` lets ``forced`` equal the next
-    occurrence's effective date (never the previous one's), and only when that
-    occurrence exists: the last of a capped or end-dated schedule stays strict.
-    Every other refusal stands.
+    422 when ``day`` is not an occurrence of the walk; 409 when a row, posted or
+    pending, is linked to it; 422 past the reach, out of order or outside the
+    record dates, and on ``card`` (a locked credit account) inside a closed
+    statement: that is what the bank printed. ``overlap`` lets ``forced`` equal
+    the next occurrence's effective date (never the previous one's), and only
+    when that occurrence exists: the last of a capped or end-dated schedule
+    stays strict. Every other refusal stands. The date options
+    (``date_options``) run it too, so they refuse with the same text.
     """
     previous, following = _neighbours(db, entry, day)
     if occurrence_links(db, entry, day):
         raise HTTPException(status_code=409, detail=ALREADY_RECORDED)
     if forced == day:
-        clear_forced_date(db, entry, day)
-        return
+        return False
     refuse_forced_date(day, forced, previous, following,
                        overlap and _next_is_scheduled(entry, day))
     if card is not None:
         refuse_closed_statement(card, forced)
+    return True
+
+
+def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
+                    card: Optional[Account] = None, overlap: bool = False) -> None:
+    """Force the occurrence on the nominal ``day`` to ``forced``, without committing.
+
+    The caller holds the owner's budget lock and then the entry lock; the
+    refusals are ``plan_forced_date``'s. ``forced`` equal to ``day`` clears the
+    override instead (``clear_forced_date``), which restores what the schedule
+    says even on a closed statement.
+    """
+    if not plan_forced_date(db, entry, day, forced, card, overlap):
+        clear_forced_date(db, entry, day)
+        return
     set_override(db, actor.id, day, forced, budget_entry_id=entry.id)
 
 
@@ -502,6 +516,17 @@ def _schedule_state(entry, moved: Moved) -> dict:
     }
 
 
+def _cascade_plan(db: Session, entry, day: date, chosen: date, account: Optional[Account],
+                  card: Optional[Account]) -> Tuple[CascadePlan, Moved]:
+    """``plan_cascade`` over what the database holds now: ``(plan, moved)``."""
+    links = [(_naive(when).date(), is_posted)
+             for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)]
+    moved = _moved(db, entry)
+    plan = plan_cascade(entry, day, chosen, links=links, moved=moved, card=card,
+                        installment=is_card_installment(entry, account))
+    return plan, moved
+
+
 def cascade(db: Session, entry, actor: User, day: date, chosen: date,
             account: Optional[Account], card: Optional[Account]) -> Tuple[CascadePlan, dict]:
     """Delay the occurrence on ``day`` and every later one to start on ``chosen``,
@@ -515,11 +540,7 @@ def cascade(db: Session, entry, actor: User, day: date, chosen: date,
     left on earlier recorded days was validated against the old walk (a
     schedule edit drops them too). The review and auto-post flags are left as
     they are: the next date only moves later."""
-    links = [(_naive(when).date(), is_posted)
-             for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)]
-    moved = _moved(db, entry)
-    plan = plan_cascade(entry, day, chosen, links=links, moved=moved, card=card,
-                        installment=is_card_installment(entry, account))
+    plan, moved = _cascade_plan(db, entry, day, chosen, account, card)
     previous = _schedule_state(entry, moved)
     entry.next_occurrence = plan.next_occurrence
     entry.anchor_day = plan.anchor_day
@@ -530,6 +551,91 @@ def cascade(db: Session, entry, actor: User, day: date, chosen: date,
     clear_all(db, budget_entry_id=entry.id)
     db.flush()
     return plan, previous
+
+
+CASCADE_PREVIEW_MOVES = 3  # the payments a date option's preview lists
+
+
+def cascade_moves(entry, plan: CascadePlan, moved: Moved,
+                  limit: int = CASCADE_PREVIEW_MOVES) -> List[dict]:
+    """The first ``limit`` payments ``plan`` moves, as ``{occurrence_date, from, to}``:
+    each one's scheduled day and effective date now, and the day it lands on. The
+    new days are the walk of the schedule ``plan`` writes, the old ones the walk
+    of the entry from the moved payment on."""
+    before = len(schedule_walk(entry, plan.start)) - 1
+    old = capped_distinct_days(entry, _naive(entry.next_occurrence), datetime.max,
+                               max_steps=before + limit + 2)[before:before + limit]
+    shape = SimpleNamespace(
+        cadence=entry.cadence, next_occurrence=plan.next_occurrence, anchor_day=plan.anchor_day,
+        day_rule=plan.day_rule, end_date=plan.end_date, end_mode=entry.end_mode,
+        max_occurrences=plan.max_occurrences)
+    new = capped_distinct_days(shape, plan.next_occurrence, datetime.max, max_steps=limit)
+    return [{"occurrence_date": nominal.date(), "from": effective(moved, nominal.date()),
+             "to": to.date()} for nominal, to in zip(old, new)]
+
+
+def _refusal(check) -> Optional[str]:
+    """The text ``check()`` refuses with, None when it passes."""
+    try:
+        check()
+    except HTTPException as exc:
+        return str(exc.detail)
+    return None
+
+
+def date_options(db: Session, entry, day: date, chosen: date, account: Optional[Account],
+                 card: Optional[Account]) -> dict:
+    """What a refused date can become instead, for the occurrence on ``day``
+    and the date ``chosen``: ``{overlap, cascade}``, read-only (no lock, no write).
+
+    Each choice runs the checks of the PUT that would apply it
+    (``plan_forced_date`` with ``overlap``, ``plan_cascade``), so ``available`` is
+    False with the exact text the PUT refuses with, and the cascade's
+    ``moves`` and ``rule`` are the plan's own. A ``day`` that is not an
+    occurrence is the PUT's 422.
+
+    ``overlap`` is joining the next payment: its ``date`` is the next payment's
+    effective date whatever ``chosen`` is (the closest ``day`` can get to it),
+    ``payments`` every payment on that date after the move, ``total`` their sum
+    in the entry's currency, ``statement_close`` that date's on a card.
+    """
+    from app.services.statements import statement_close
+
+    _, following = _neighbours(db, entry, day)
+    moved = _moved(db, entry)
+    reason = _refusal(lambda: plan_forced_date(db, entry, day, following, card, overlap=True))
+    overlap = {"available": reason is None, "reason": reason, "date": following,
+               "payments": [], "total": None, "currency": entry.currency,
+               "statement_close": None}
+    if reason is None:
+        payments = [{"occurrence_date": day, "effective_date": following,
+                     "amount": entry.amount}]
+        payments += [{"occurrence_date": occ.date(), "effective_date": following,
+                      "amount": entry.amount}
+                     for occ in schedule_walk(entry, following + OVERRIDE_REACH)
+                     if occ.date() > day and effective(moved, occ.date()) == following]
+        overlap.update(payments=payments, total=entry.amount * len(payments),
+                       statement_close=statement_close(card, following) if card else None)
+
+    plan = None
+
+    def plan_it():
+        nonlocal plan
+        plan, _ = _cascade_plan(db, entry, day, chosen, account, card)
+
+    reason = _refusal(plan_it)
+    cascade = {"available": reason is None, "reason": reason, "rule": None,
+               "moves": [], "remaining": None}
+    if plan is not None:
+        moves = cascade_moves(entry, plan, moved)
+        if card is not None:
+            for move in moves:
+                move["statement_close"] = statement_close(card, move["to"])
+        else:
+            for move in moves:
+                move["statement_close"] = None
+        cascade.update(rule=plan.rule, moves=moves, remaining=plan.remaining)
+    return {"overlap": overlap, "cascade": cascade}
 
 
 def _undo_signature(body: str) -> str:

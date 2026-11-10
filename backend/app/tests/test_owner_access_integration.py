@@ -36,7 +36,7 @@ API = "/api/v1"
 PASSWORD = "Password123!"
 WHEN = "2026-10-05T00:00:00"
 MARK = "Zq7Owner"  # in every name the owner creates; never in the stranger's responses
-DAY = "2026-10-15"  # a date in a path; the guard test reads it as ``{day}``
+DAY = "2026-10-05"  # the entry's first occurrence, in a path; the guard test reads it as ``{day}``
 
 
 @pytest.fixture(scope="module")
@@ -211,6 +211,8 @@ def _id_routes(w):
          {"json": {"effective_date": "2026-10-20"}}),
         ("put", f"/budget-entries/{w['entry']}/occurrences/{DAY}/date",
          {"json": {"effective_date": "2026-10-20", "mode": "cascade"}}),
+        ("get", f"/budget-entries/{w['entry']}/occurrences/{DAY}/date-options"
+                "?effective_date=2026-10-20", {}),
         ("delete", f"/budget-entries/{w['entry']}/occurrences/{DAY}/date", {}),
         ("post", f"/budget-entries/{w['entry']}/cascade-undo",
          {"json": {"undo_token": "e30." + "0" * 64}}),
@@ -315,7 +317,7 @@ def test_every_route_with_an_id_is_in_the_sweep(client, people):
     w = {k: 0 for k in ("bank", "card", "loan", "transaction", "category", "allocation",
                         "entry", "accountless", "wish", "tag", "stranger_bank", "tag_share",
                         "owner_id")}
-    swept = {(m.upper(), p.replace("/0", "/{id}").replace(DAY, "{day}"))
+    swept = {(m.upper(), p.split("?")[0].replace("/0", "/{id}").replace(DAY, "{day}"))
              for m, p, _ in _id_routes(w)}
     for path, ops in app.openapi()["paths"].items():
         if "{" not in path or not path.startswith(API) or "/entities/" in path:
