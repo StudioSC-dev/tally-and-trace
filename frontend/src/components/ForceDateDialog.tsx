@@ -2,22 +2,28 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  cascadeConfirmation,
+  dateChoiceLines,
   formatEntryDate,
+  hasDateChoice,
   isForced,
   RECORD_DATE_MIN,
   recordDateError,
   recordDateMax,
   statementConfirmation,
 } from '@tally-trace/shared'
+import type { DateChoice, ForcedDateMode, ForcedDateOptions } from '@tally-trace/shared'
 import {
   useClearLoanDueDateMutation,
   useGetEntryOccurrencesQuery,
   useClearOccurrenceDateMutation,
+  useLazyGetForcedDateOptionsQuery,
   useSetLoanDueDateMutation,
   useSetOccurrenceDateMutation,
+  useUndoCascadeMutation,
 } from '../store/api'
 import { useInputBlocked } from '../store/busy'
-import { apiErrorMessage } from '../utils/apiError'
+import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -44,12 +50,52 @@ interface Props {
   onChanged?: () => void
 }
 
+/** One choice for a refused date: its preview and its button, or (greyed) the reason it is unavailable. */
+function ChoiceCard({ id, choice, action, busy, onChoose }: {
+  id: ForcedDateMode
+  choice: DateChoice
+  action: string
+  busy: boolean
+  onChoose: () => void
+}) {
+  if (!choice.available) {
+    return (
+      <div className="border border-line p-3 text-sm text-muted opacity-60" data-testid={`date-choice-${id}`} data-available="false">
+        {choice.unavailable}
+      </div>
+    )
+  }
+  return (
+    <div className="border border-line-strong p-3 space-y-2" data-testid={`date-choice-${id}`} data-available="true">
+      <p className="text-sm font-semibold text-ink">{choice.title}</p>
+      <ul className="space-y-1 text-sm text-ink">
+        {choice.lines.map((line) => <li key={line} data-testid="date-choice-line">{line}</li>)}
+      </ul>
+      {choice.total && <p className="text-sm font-semibold text-ink" data-testid="date-choice-total">{choice.total}</p>}
+      {choice.note && <p className="text-xs text-muted" data-testid="date-choice-note">({choice.note})</p>}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onChoose}
+          disabled={busy}
+          className="btn-secondary focus-ring min-h-[44px] w-full sm:w-auto"
+          data-testid={`date-choice-${id}-button`}
+        >
+          {action}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Changes the date one occurrence of a recurring entry, or one open due date of a loan, falls
  * on, or puts it back (Clear, offered while it is forced). The scheduled day stays its
  * identity; the chosen date decides when it is due, shown, overdue and posted. The server's
  * reason for a refusal (a linked row, a closed statement, out of reach or order) shows
- * inline. A card charge confirms the statement it now falls on before the dialog closes.
+ * inline; for an entry, a refused date also offers what the server says it can do instead
+ * (`date-options`): Pay together with the next payment, or Delay all (the schedule moves, with an
+ * Undo). With neither available, or on an older API, only the refusal shows. A card charge confirms the statement it now falls on before the dialog closes.
  *
  * Rendered through a portal; while it is open the app root is `inert`, and focus returns to
  * the element that opened it.
@@ -65,7 +111,9 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
   const [clearEntry, { isLoading: clearingEntry }] = useClearOccurrenceDateMutation()
   const [setLoan, { isLoading: settingLoan }] = useSetLoanDueDateMutation()
   const [clearLoan, { isLoading: clearingLoan }] = useClearLoanDueDateMutation()
-  const busy = settingEntry || clearingEntry || settingLoan || clearingLoan
+  const [fetchOptions] = useLazyGetForcedDateOptionsQuery()
+  const [undoCascade, { isLoading: undoing }] = useUndoCascadeMutation()
+  const busy = settingEntry || clearingEntry || settingLoan || clearingLoan || undoing
   // The screen loader blocks input a little past the request (STU-576): a refusal shown
   // before it lets go invites a date that is swallowed, so the refusal waits for it.
   const inputBlocked = useInputBlocked()
@@ -82,9 +130,16 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
 
   const [dayInput, setDayInput] = useState<string | null>(null)
   const day = dayInput ?? effectiveDate
+  const dayRef = useRef(day)
+  dayRef.current = day
   const [error, setError] = useState<string | null>(null)
   // The statement a card charge now falls on; the dialog stays open until it is read.
   const [confirmation, setConfirmation] = useState<string | null>(null)
+  // The choices for the date last refused (`choiceDay`), and the Delay all that was applied.
+  const [options, setOptions] = useState<ForcedDateOptions | null>(null)
+  const [choiceDay, setChoiceDay] = useState('')
+  const [cascadeDone, setCascadeDone] = useState<{ text: string; token: string } | null>(null)
+  const optionsRequest = useRef(0)
   const forced = isForced(target.occurrenceDate, effectiveDate)
 
   const openerRef = useRef<Element | null>(null)
@@ -129,9 +184,25 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
     }
   }
 
+  /** Asks what the refused `chosen` date can become; anything but a usable answer shows no choices. */
+  const loadOptions = async (chosen: string) => {
+    const request = ++optionsRequest.current
+    try {
+      const found = await fetchOptions({ id: target.id, day: target.occurrenceDate, effectiveDate: chosen }).unwrap()
+      if (request !== optionsRequest.current) return
+      setOptions(hasDateChoice(found) ? found : null)
+      setChoiceDay(chosen)
+    } catch {
+      // An older API (404, 405, 422) or a failed read: the refusal alone stands.
+      if (request === optionsRequest.current) setOptions(null)
+    }
+  }
+
   const save = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
+    setOptions(null)
+    optionsRequest.current += 1
     if (!day) {
       setError('Choose the date')
       return
@@ -150,6 +221,41 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
       else onClose()
     } catch (err) {
       setError(apiErrorMessage(err) || 'Could not change the date. Try again.')
+      if (target.kind === 'entry' && apiErrorStatus(err) === 422 && dayRef.current === day) void loadOptions(day)
+    }
+  }
+
+  const choose = async (mode: ForcedDateMode) => {
+    // Only a preview of the date now in the field can be chosen.
+    if (!options || choiceDay !== day) return
+    setError(null)
+    const chosen = mode === 'overlap' ? options.overlap.date : choiceDay
+    try {
+      const result = await setEntry({ id: target.id, day: target.occurrenceDate, data: { effective_date: chosen, mode } }).unwrap()
+      onChanged?.()
+      const sentence = statementConfirmation(result)
+      if (mode === 'cascade' && result.cascade) {
+        const moved = cascadeConfirmation(chosen, options.cascade)
+        setCascadeDone({ text: sentence ? `${moved} ${sentence}` : moved, token: result.cascade.undo_token })
+        setOptions(null)
+      } else if (sentence) {
+        setOptions(null)
+        setConfirmation(sentence)
+      } else onClose()
+    } catch (err) {
+      setError(apiErrorMessage(err) || 'Could not change the date. Try again.')
+    }
+  }
+
+  const undo = async () => {
+    if (!cascadeDone) return
+    setError(null)
+    try {
+      await undoCascade({ id: target.id, data: { undo_token: cascadeDone.token } }).unwrap()
+      onChanged?.()
+      onClose()
+    } catch (err) {
+      setError(apiErrorMessage(err) || 'Could not undo. Try again.')
     }
   }
 
@@ -191,7 +297,28 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
             </button>
           </div>
 
-          {confirmation ? (
+          {cascadeDone ? (
+            <div className="space-y-3">
+              <p className="text-sm text-ok" role="status" data-testid="force-date-cascade-confirmation">{cascadeDone.text}</p>
+              {error && !inputBlocked && (
+                <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
+              )}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => void undo()}
+                  disabled={busy}
+                  className="flex-1 btn-secondary focus-ring min-h-[44px]"
+                  data-testid="force-date-undo"
+                >
+                  {undoing ? 'Undoing…' : 'Undo'}
+                </button>
+                <button type="button" onClick={onClose} className="flex-1 btn-primary focus-ring min-h-[44px]" data-testid="force-date-done">
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : confirmation ? (
             <p className="text-sm text-ok" role="status" data-testid="force-date-confirmation">{confirmation}</p>
           ) : (
             <form onSubmit={save} className="space-y-4" noValidate>
@@ -204,9 +331,12 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                   value={day}
                   min={RECORD_DATE_MIN}
                   max={recordDateMax()}
+                  disabled={settingEntry || settingLoan}
                   onChange={(e) => {
                     setDayInput(e.target.value)
                     setError(null)
+                    setOptions(null)
+                    optionsRequest.current += 1
                   }}
                   className="input-field focus-ring"
                   data-testid="force-date-input"
@@ -218,6 +348,15 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
               {error && !inputBlocked && (
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
+              {options && choiceDay === day && !inputBlocked && (() => {
+                const lines = dateChoiceLines(options, choiceDay)
+                return (
+                  <div className="space-y-3" data-testid="date-choices">
+                    <ChoiceCard id="overlap" choice={lines.overlap} action="Pay together" busy={busy} onChoose={() => void choose('overlap')} />
+                    <ChoiceCard id="cascade" choice={lines.cascade} action="Delay all" busy={busy} onChoose={() => void choose('cascade')} />
+                  </div>
+                )
+              })()}
               <div className="flex gap-3">
                 <button type="submit" disabled={busy || loading} className="flex-1 btn-primary focus-ring" data-testid="force-date-save">
                   {busy ? 'Saving…' : 'Save'}

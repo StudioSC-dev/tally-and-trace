@@ -2206,6 +2206,80 @@ export interface DashboardSnapshot {
 /** Body of `PUT /budget-entries/{id}/occurrences/{day}/date` and `PUT /accounts/{id}/loan-due-dates/{day}/date`. */
 export interface ForcedDateInput {
   effective_date: string
+  /** Absent: the strict neighbour rule. `overlap` joins the next payment; `cascade` delays this and every later one. */
+  mode?: ForcedDateMode
+}
+
+/** What a refused date can become: join the next payment (`overlap`) or delay this and every later one (`cascade`). */
+export type ForcedDateMode = 'overlap' | 'cascade'
+
+/** One payment on the day Pay together lands on. `amount` is a decimal string. */
+export interface ForcedDateOverlapPayment {
+  occurrence_date: string
+  effective_date: string
+  amount: string
+}
+
+/** Pay together: the occurrence joins the next payment, on that payment's day. */
+export interface ForcedDateOverlapOption {
+  available: boolean
+  /** The PUT's exact refusal text when unavailable. */
+  reason: string | null
+  /** The next payment's effective date: the day the occurrence lands on. */
+  date: string
+  payments: ForcedDateOverlapPayment[]
+  /** Decimal string; null when unavailable. */
+  total: string | null
+  currency: CurrencyCode
+  statement_close: string | null
+}
+
+/** One payment Delay all moves: its scheduled day, its date now, and where it lands. */
+export interface ForcedDateCascadeMove {
+  occurrence_date: string
+  from: string
+  to: string
+  statement_close: string | null
+}
+
+/** Delay all: this payment and every later one move, the schedule with them. */
+export interface ForcedDateCascadeOption {
+  available: boolean
+  reason: string | null
+  rule: 'day_of_month' | 'days' | null
+  /** The first three payments that move. */
+  moves: ForcedDateCascadeMove[]
+  /** Every payment that moves on a bounded schedule; null when open-ended. */
+  remaining: number | null
+}
+
+/** `GET /budget-entries/{id}/occurrences/{day}/date-options`. */
+export interface ForcedDateOptions {
+  overlap: ForcedDateOverlapOption
+  cascade: ForcedDateCascadeOption
+}
+
+/** The schedule before a cascade, as the server reports it. */
+export interface ForcedDateCascadePrevious {
+  next_occurrence: string
+  anchor_day: number | null
+  day_rule: string | null
+  end_date: string | null
+  max_occurrences: number | null
+}
+
+/** A cascade's reply: how to read what moved and the token that undoes it. */
+export interface ForcedDateCascade {
+  from: string
+  rule: 'day_of_month' | 'days'
+  remaining: number | null
+  previous: ForcedDateCascadePrevious
+  undo_token: string
+}
+
+/** Body of `POST /budget-entries/{id}/cascade-undo`. */
+export interface CascadeUndoInput {
+  undo_token: string
 }
 
 /**
@@ -2217,6 +2291,8 @@ export interface ForcedDateResult {
   effective_date: string
   statement_close?: string | null
   statement_due?: string | null
+  /** Present after `mode: "cascade"`. */
+  cascade?: ForcedDateCascade
 }
 
 // ─── Quick balances ──────────────────────────────────────────────────────────
