@@ -130,6 +130,8 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
 
   const [dayInput, setDayInput] = useState<string | null>(null)
   const day = dayInput ?? effectiveDate
+  const dayRef = useRef(day)
+  dayRef.current = day
   const [error, setError] = useState<string | null>(null)
   // The statement a card charge now falls on; the dialog stays open until it is read.
   const [confirmation, setConfirmation] = useState<string | null>(null)
@@ -219,12 +221,13 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
       else onClose()
     } catch (err) {
       setError(apiErrorMessage(err) || 'Could not change the date. Try again.')
-      if (target.kind === 'entry' && apiErrorStatus(err) === 422) void loadOptions(day)
+      if (target.kind === 'entry' && apiErrorStatus(err) === 422 && dayRef.current === day) void loadOptions(day)
     }
   }
 
   const choose = async (mode: ForcedDateMode) => {
-    if (!options) return
+    // Only a preview of the date now in the field can be chosen.
+    if (!options || choiceDay !== day) return
     setError(null)
     const chosen = mode === 'overlap' ? options.overlap.date : choiceDay
     try {
@@ -328,6 +331,7 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                   value={day}
                   min={RECORD_DATE_MIN}
                   max={recordDateMax()}
+                  disabled={settingEntry || settingLoan}
                   onChange={(e) => {
                     setDayInput(e.target.value)
                     setError(null)
@@ -344,7 +348,7 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
               {error && !inputBlocked && (
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
-              {options && !inputBlocked && (() => {
+              {options && choiceDay === day && !inputBlocked && (() => {
                 const lines = dateChoiceLines(options, choiceDay)
                 return (
                   <div className="space-y-3" data-testid="date-choices">

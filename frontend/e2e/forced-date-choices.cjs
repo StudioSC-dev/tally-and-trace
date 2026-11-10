@@ -20,14 +20,16 @@
 //   (e) a card subscription: the choices carry "statement closing" lines; after Delay all the
 //       confirmation names the new statement and the dashboard payable's total drops the charge
 //   (f) an API that answers date-options with 404, 405 or 422 leaves the original refusal alone
+//   (h) the date field is locked while the save is in flight; a date typed after the refusal, before
+//       its choices arrive (held), never leaves choices for another date and sends nothing for the old date
 //   (g) at 390px the choices stack, their buttons are 44px tall and the page does not scroll sideways
 //
 // Every scenario checks that no browser dialog fired.
 //
-// Usage: node frontend/e2e/forced-date-choices.cjs [a|b|c|d|e|f|g]
+// Usage: node frontend/e2e/forced-date-choices.cjs [a|b|c|d|e|f|g|h]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, rowsOf, showRow } = require('./_due_pages.cjs')
-const { waitQuiet } = require('./_smooth.cjs')
+const { gate, waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -480,6 +482,52 @@ async function oldApi(browser) {
   await ctx.close()
 }
 
+// (h) A date changed while the save, or the choices it asked for, are in flight.
+async function changedWhileSaving(browser) {
+  console.log('\n=== (h) the field is locked while saving; a date changed before the choices arrive leaves none')
+  const u = await makeUser('h')
+  const { sub, d0, d1, past } = await seedMissed(u, 'H')
+  const { ctx, page, native, log } = await newPage(browser)
+  await uiLogin(page, u)
+  await openTransactions(page)
+  await showRow(page, missedRowOf(page, sub.id))
+  await changeButtonOf(page, sub.id).click()
+  await dialog(page).waitFor({ timeout: 10000 })
+  await waitQuiet(page)
+  const input = dialog(page).locator('[data-testid="force-date-input"]')
+  await input.fill(d1)
+  const isDate = (r) => r.method() === 'PUT' && /\/date$/.test(new URL(r.url()).pathname)
+  const heldSave = await gate(page, isDate)
+  const heldOptions = await gate(page, (r) => r.method() === 'GET' && /\/date-options$/.test(new URL(r.url()).pathname))
+  try {
+    await dialog(page).locator('[data-testid="force-date-save"]').click()
+    check('(h) the save is held at the server', await heldSave.waitHits(1), true)
+    check('(h) while it is in flight the date field is locked', await input.isDisabled(), true)
+    heldSave.release({ disarm: true })
+    check('(h) the refused save then asks for the choices of its date, held', await heldOptions.waitHits(1), true)
+    await page.waitForFunction(() => !document.querySelector('[data-testid="force-date-input"]').disabled)
+    await input.fill(past)
+    // The screen loader swallows input while the choices are in flight (STU-576), so this fill may not take.
+    await input.fill(past)
+  } finally {
+    heldSave.release({ disarm: true })
+    heldOptions.release({ disarm: true })
+    await heldSave.stop()
+    await heldOptions.stop()
+  }
+  await settle(page)
+  check('(h) the held save was the old date, refused', ofKind(log, 'date').map((l) => [l.day, l.body, l.status]), [[d0, { effective_date: d1 }, 422]])
+  const shown = await choices(page).count()
+  const value = await input.inputValue()
+  console.log(`    the fill ${value === past ? 'took' : 'was swallowed'}; choices shown: ${shown}`)
+  check('(h) the old date\'s choices were asked for once', ofKind(log, 'options').map((l) => l.query), [`?effective_date=${d1}`])
+  check('(h) choices show only while the field still holds the date they are for', shown === 0 || value === d1, true)
+  check('(h) a refusal left on screen is the date still in the field', [await dialog(page).locator('[data-testid="force-date-error"]').count() === 0 || value === d1], [true])
+  check('(h) nothing was sent for the old date after the refusal', ofKind(log, 'date').length, 1)
+  checkNoNative('h', native)
+  await ctx.close()
+}
+
 // (g) Phone width.
 async function phoneWidth(browser) {
   console.log('\n=== (g) at 390px the choices stack, buttons are 44px and nothing scrolls sideways')
@@ -512,7 +560,7 @@ async function phoneWidth(browser) {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: payTogether, b: delayAll, c: undoDelay, d: noChoice, e: cardChoices, f: oldApi, g: phoneWidth }
+  const steps = { a: payTogether, b: delayAll, c: undoDelay, d: noChoice, e: cardChoices, f: oldApi, g: phoneWidth, h: changedWhileSaving }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()
