@@ -37,7 +37,8 @@ import {
   withoutError,
 } from '@tally-trace/shared'
 import type { CardCredit, FieldErrors, KindGroup, RecurringAction } from '@tally-trace/shared'
-import { accountPickerGroups } from '@tally-trace/shared'
+import { accountPickerGroups, matchesRecurringSearch, parseAllocationsTab } from '@tally-trace/shared'
+import type { AllocationsTab } from '@tally-trace/shared'
 import { PickerOptGroups } from '../components/PickerOptGroups'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
@@ -273,6 +274,10 @@ type AllocationFormState = {
 }
 
 export const Route = createFileRoute('/allocations')({
+  validateSearch: (search: Record<string, unknown>): { tab?: AllocationsTab | 'recurring' } => ({
+    // `recurring` stays as written in the URL; the page maps it to the internal `subscriptions` tab.
+    tab: search.tab === 'recurring' ? 'recurring' : parseAllocationsTab(search.tab),
+  }),
   component: AllocationsPage,
 })
 
@@ -301,7 +306,14 @@ export function AllocationsPage() {
   const [markPaidFor, setMarkPaidFor] = useState<{ entry: FullBudgetEntry | SharedFullBudgetEntry; action: RecurringAction } | null>(null)
   const [isActionModalOpen, setIsActionModalOpen] = useState(false)
   const [actionAllocation, setActionAllocation] = useState<Allocation | null>(null)
-  const [activeTab, setActiveTab] = useState<'subscriptions' | 'budgets' | 'savings' | 'wishlist'>('subscriptions')
+  // `?tab=recurring` (or the older `subscriptions`) opens the recurring tab; its internal id stays `subscriptions`.
+  const { tab: tabParam } = Route.useSearch()
+  const tabFromUrl = parseAllocationsTab(tabParam)
+  const [activeTab, setActiveTab] = useState<AllocationsTab>(tabFromUrl ?? 'subscriptions')
+  useEffect(() => {
+    if (tabFromUrl) setActiveTab(tabFromUrl)
+  }, [tabFromUrl])
+  const [recurringSearch, setRecurringSearch] = useState('')
 
   const createAllocationDefaults = useCallback(
     (type: 'budget' | 'savings'): AllocationFormState => {
@@ -1655,7 +1667,30 @@ export function AllocationsPage() {
         </div>
       )
     }
-    const groups = groupByKind([...recurringExpenses, ...recurringIncome])
+    const matching = [...recurringExpenses, ...recurringIncome].filter((entry) => {
+      if (isLimited(entry)) {
+        return (
+          matchesRecurringSearch(entry, recurringSearch, { accountName: entry.account?.name, categoryName: entry.category_name }) ||
+          matchesRecurringSearch(entry, recurringSearch, { accountName: entry.counterpart?.name })
+        )
+      }
+      const categoryName = isSharedFull(entry)
+        ? entry.category_name
+        : entry.category_id
+        ? categoriesById.get(entry.category_id)?.name
+        : undefined
+      // A transfer card also shows its destination account, so that name is searchable too.
+      return (
+        matchesRecurringSearch(entry, recurringSearch, {
+          accountName: entry.account_id ? accountsById.get(entry.account_id)?.name : undefined,
+          categoryName,
+        }) ||
+        matchesRecurringSearch(entry, recurringSearch, {
+          accountName: entry.transfer_to_account_id ? accountsById.get(entry.transfer_to_account_id)?.name : undefined,
+        })
+      )
+    })
+    const groups = groupByKind(matching)
     const errorAlert = recurringError && (
       <div className="card p-4 space-y-3" role="alert" data-testid="recurring-load-error">
         <p className="text-sm text-danger">Could not load recurring entries.</p>
@@ -1669,6 +1704,16 @@ export function AllocationsPage() {
         </button>
       </div>
     )
+    if (groups.length === 0 && recurringSearch.trim() !== '') {
+      return (
+        <>
+          {errorAlert}
+          <div className="card p-6 text-center text-muted" data-testid="recurring-search-empty">
+            No recurring entries match
+          </div>
+        </>
+      )
+    }
     if (groups.length === 0) {
       return (
         errorAlert || (
@@ -1734,9 +1779,9 @@ export function AllocationsPage() {
         )}
       </div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border border-line p-2 bg-surface">
-          <nav className="flex gap-1">
+          <nav className="flex flex-wrap gap-1">
             {[
-              { value: 'subscriptions' as const, label: 'Subscriptions' },
+              { value: 'subscriptions' as const, label: 'Recurring' },
               { value: 'budgets' as const, label: 'Budgets' },
               { value: 'savings' as const, label: 'Savings' },
               { value: 'wishlist' as const, label: 'Wishlist' },
@@ -1745,6 +1790,7 @@ export function AllocationsPage() {
           return (
                   <button
                   key={tab.value}
+                  aria-pressed={isActive}
                   onClick={() => setActiveTab(tab.value)}
                   className={`px-4 py-2 text-sm font-semibold transition ${ isActive ? 'bg-ink text-paper' : 'text-body hover:bg-sunken' }`}
                 >
@@ -1758,6 +1804,22 @@ export function AllocationsPage() {
           </p>
                 </div>
       </div>
+
+      {activeTab === 'subscriptions' && (
+        <div>
+          <label htmlFor="recurring-search" className="sr-only">Search recurring entries</label>
+          <input
+            id="recurring-search"
+            type="search"
+            value={recurringSearch}
+            onChange={(event) => setRecurringSearch(event.target.value)}
+            placeholder="Search by name, account, category or amount"
+            autoComplete="off"
+            className="input-field focus-ring !h-11"
+            data-testid="recurring-search"
+          />
+        </div>
+      )}
 
       {activeTab === 'subscriptions' && <TagFilter value={selectedTag} onChange={setSelectedTag} />}
 

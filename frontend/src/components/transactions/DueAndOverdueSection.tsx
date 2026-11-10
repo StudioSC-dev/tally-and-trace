@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
+import { Link } from '@tanstack/react-router'
 import {
   CAP_REASON,
   DUE_PAGE_SIZE,
@@ -1289,6 +1290,11 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             />
           </div>
         )}
+        <div className="px-4 py-3">
+          <Link to="/allocations" search={{ tab: 'recurring' }} className="text-sm underline" data-testid="manage-recurring-link">
+            Manage recurring entries
+          </Link>
+        </div>
       </>
     ),
     installments: () => (
