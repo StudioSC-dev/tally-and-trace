@@ -238,3 +238,25 @@ def test_overlap_clear(world):
     _clear(client, me, weekly, "2026-10-04")
     _clear(client, me, weekly, "2026-10-11")
     assert _overrides(db, budget_entry_id=weekly) == []
+
+
+def test_overlap_refuses_the_last_occurrence_of_a_capped_schedule(world):
+    """There is no next payment to join: the strict rule applies."""
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    entry = _entry(client, me, bank, "2026-10-10", end_mode="after_occurrences",
+                   max_occurrences=2)
+
+    _overlap(client, me, entry, "2026-11-10", "2026-12-10", expect=422)  # the last, onto the step past it
+    assert _overrides(db, budget_entry_id=entry) == []
+    _overlap(client, me, entry, "2026-10-10", "2026-11-10")  # the first still joins the last
+    assert _overrides(db, budget_entry_id=entry) == [("2026-10-10", "2026-11-10")]
+
+
+def test_overlap_refuses_the_last_occurrence_of_an_end_dated_schedule(world):
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    entry = _entry(client, me, bank, "2026-10-10", end_mode="on_date",
+                   end_date="2026-11-15T00:00:00")
+
+    _overlap(client, me, entry, "2026-11-10", "2026-12-10", expect=422)
+    assert _overrides(db, budget_entry_id=entry) == []
+    _overlap(client, me, entry, "2026-10-10", "2026-11-10")
