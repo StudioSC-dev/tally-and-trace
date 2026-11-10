@@ -33,18 +33,20 @@ import type { BusyLevel, QuerySliceLike, RequestActionLike } from '@tally-trace/
  *
  * `postDueInstallmentsOnOpen` is the page-open auto-post (STU-343); the refetches it starts when it posts still count.
  * `createTransactionQuiet` is the "Save and add another" save (STU-475); its refetches are quiet too, see below.
+ * `createRepeatingTransactionQuiet` is the same save with Repeat on.
  */
 export const EXEMPT_ENDPOINTS: ReadonlySet<string> = new Set([
   'fetchReceipt',
   'postDueInstallmentsOnOpen',
   'createTransactionQuiet',
+  'createRepeatingTransactionQuiet',
 ])
 
 /**
  * Mutations whose tag-invalidation refetches are quiet as well. Separate from EXEMPT_ENDPOINTS on
  * purpose: the page-open post is exempt but its refetches still count.
  */
-export const QUIET_REFETCH_MUTATIONS: ReadonlySet<string> = new Set(['createTransactionQuiet'])
+export const QUIET_REFETCH_MUTATIONS: ReadonlySet<string> = new Set(['createTransactionQuiet', 'createRepeatingTransactionQuiet'])
 
 /** The two APIs' reducer paths (`store/api.ts`, `store/authApi.ts`). */
 const REDUCER_PATHS = ['accountingApi', 'authApi'] as const

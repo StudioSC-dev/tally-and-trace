@@ -26,6 +26,10 @@ interface RecurringScheduleFieldsProps {
   /** `schedulePreview(draft, ctx)`. */
   preview: SchedulePreview | null
   settlementControl: SettlementControlState
+  /**
+   * Applies an update. Each control reads its event's value before calling this, so an
+   * update the caller queues behind other state (not applied at once) still sees it.
+   */
   onChange: (update: (prev: ScheduleDraft) => ScheduleDraft) => void
   fieldProps: (key: ScheduleFieldKey) => { 'aria-invalid': true | undefined; 'aria-describedby': string | undefined }
   renderFieldError: (key: ScheduleFieldKey) => ReactNode
@@ -37,6 +41,10 @@ interface RecurringScheduleFieldsProps {
   /** The final-month help under the number of runs (a stored active capped entry). */
   showFinalMonthHelp: boolean
   finalMonthHelp: string
+  /** The prefix of the Kind and Settlement controls' ids and test ids (default `recurring`). */
+  idPrefix?: string
+  /** 44px controls and buttons, for a dialog used on a phone (Repeat in Add Transaction). */
+  touch?: boolean
 }
 
 /**
@@ -58,7 +66,10 @@ export function RecurringScheduleFields({
   beforeEnds,
   showFinalMonthHelp,
   finalMonthHelp,
+  idPrefix = 'recurring',
+  touch = false,
 }: RecurringScheduleFieldsProps) {
+  const control = touch ? 'mt-1 block w-full min-h-11 border border-line px-3 py-2' : 'mt-1 block w-full border border-line px-3 py-2'
   const { chargedOnClose, cardCloseDay, cadence } = state
   const chooseDay = (day: DaySetting) =>
     onChange((prev) => ({
@@ -83,13 +94,11 @@ export function RecurringScheduleFields({
             <select
                     value={draft.cadence}
                     data-field="cadence"
-                    onChange={(e) =>
-                      onChange((prev) => ({
-                        ...prev,
-                        cadence: e.target.value as ScheduleDraft['cadence'],
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
+                    onChange={(e) => {
+                      const cadence = e.target.value as ScheduleDraft['cadence']
+                      onChange((prev) => ({ ...prev, cadence }))
+                    }}
+                    className={control}
                   >
                     {state.cadenceChoices.map(
                       (value) => (
@@ -127,7 +136,7 @@ export function RecurringScheduleFields({
                             chooseDay({ kind })
                           }
                         }}
-                        className="mt-1 block w-full border border-line px-3 py-2"
+                        className={control}
                         ref={bindField('day')}
                         data-field="day"
                         {...fieldProps('day')}
@@ -150,7 +159,7 @@ export function RecurringScheduleFields({
                             if (Number.isNaN(day)) return
                             chooseDay({ kind: 'day', day: Math.min(31, Math.max(1, day)) })
                           }}
-                          className="mt-1 block w-full border border-line px-3 py-2"
+                          className={control}
                           ref={bindField('day_of_month')}
                           data-field="day_of_month"
                           {...fieldProps('day_of_month')}
@@ -203,7 +212,7 @@ export function RecurringScheduleFields({
                                   : undefined,
                             }))
                           }
-                          className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
+                          className={`rounded-full px-3 py-1${touch ? ' min-h-11' : ''} text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                         >
                           {label}
                         </button>
@@ -218,13 +227,11 @@ export function RecurringScheduleFields({
                     <input
                       type="datetime-local"
                       value={draft.end_date ?? ''}
-                      onChange={(e) =>
-                        onChange((prev) => ({
-                          ...prev,
-                          end_date: e.target.value || undefined,
-                        }))
-                      }
-                      className="mt-1 block w-full border border-line px-3 py-2"
+                      onChange={(e) => {
+                        const endDate = e.target.value || undefined
+                        onChange((prev) => ({ ...prev, end_date: endDate }))
+                      }}
+                      className={control}
                       ref={bindField('end_date')}
                       data-field="end_date"
                       {...fieldProps('end_date')}
@@ -243,13 +250,11 @@ export function RecurringScheduleFields({
                       type="number"
                       min={1}
                       value={draft.max_occurrences ?? ''}
-                      onChange={(e) =>
-                        onChange((prev) => ({
-                          ...prev,
-                          max_occurrences: e.target.value ? Math.max(1, parseInt(e.target.value, 10)) : undefined,
-                        }))
-                      }
-                      className="mt-1 block w-full border border-line px-3 py-2"
+                      onChange={(e) => {
+                        const count = e.target.value ? Math.max(1, parseInt(e.target.value, 10)) : undefined
+                        onChange((prev) => ({ ...prev, max_occurrences: count }))
+                      }}
+                      className={control}
                       ref={bindField('max_occurrences')}
                       data-field="max_occurrences"
                       {...fieldProps('max_occurrences')}
@@ -271,18 +276,16 @@ export function RecurringScheduleFields({
 
               {state.showKindSelect && (
                 <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-kind">Kind</label>
+                  <label className="block text-sm font-medium text-body" htmlFor={`${idPrefix}-kind`}>Kind</label>
                   <select
-                    id="recurring-kind"
+                    id={`${idPrefix}-kind`}
                     value={state.kindValue}
-                    onChange={(e) =>
-                      onChange((prev) => ({
-                        ...prev,
-                        kind_choice: e.target.value as BillingKindChoice['id'],
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
-                    data-testid="recurring-kind"
+                    onChange={(e) => {
+                      const kindChoice = e.target.value as BillingKindChoice['id']
+                      onChange((prev) => ({ ...prev, kind_choice: kindChoice }))
+                    }}
+                    className={control}
+                    data-testid={`${idPrefix}-kind`}
                   >
                     {state.kindChoices.map((choice) => (
                       <option key={choice.id} value={choice.id}>{choice.label}</option>
@@ -298,18 +301,16 @@ export function RecurringScheduleFields({
 
               {state.showBankKindSelect && (
                 <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-bank-kind">Kind</label>
+                  <label className="block text-sm font-medium text-body" htmlFor={`${idPrefix}-bank-kind`}>Kind</label>
                   <select
-                    id="recurring-bank-kind"
+                    id={`${idPrefix}-bank-kind`}
                     value={draft.bank_kind}
-                    onChange={(e) =>
-                      onChange((prev) => ({
-                        ...prev,
-                        bank_kind: e.target.value === 'subscription' ? 'subscription' : 'other',
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
-                    data-testid="recurring-bank-kind"
+                    onChange={(e) => {
+                      const bankKind = e.target.value === 'subscription' ? 'subscription' : 'other'
+                      onChange((prev) => ({ ...prev, bank_kind: bankKind }))
+                    }}
+                    className={control}
+                    data-testid={`${idPrefix}-bank-kind`}
                   >
                     <option value="subscription">Subscription</option>
                     <option value="other">Other</option>
@@ -322,21 +323,22 @@ export function RecurringScheduleFields({
 
               {settlementControl.shown && (
                 <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-settlement">Settlement</label>
+                  <label className="block text-sm font-medium text-body" htmlFor={`${idPrefix}-settlement`}>Settlement</label>
                   <select
-                    id="recurring-settlement"
+                    id={`${idPrefix}-settlement`}
                     value={settlementControl.disabledReason === null ? draft.settlement : 'manual'}
-                    onChange={(e) =>
-                      onChange((prev) => ({ ...prev, settlement: e.target.value === 'autopay' ? 'autopay' : 'manual' }))
-                    }
+                    onChange={(e) => {
+                      const settlement = e.target.value === 'autopay' ? 'autopay' : 'manual'
+                      onChange((prev) => ({ ...prev, settlement }))
+                    }}
                     disabled={settlementControl.disabledReason !== null}
-                    className="mt-1 block w-full border border-line px-3 py-2 disabled:opacity-60"
-                    data-testid="recurring-settlement"
+                    className={`${control} disabled:opacity-60`}
+                    data-testid={`${idPrefix}-settlement`}
                   >
                     <option value="manual">Manual: I record each payment</option>
                     <option value="autopay">Autopay: post it on its date</option>
                   </select>
-                  <p className="mt-1 text-xs text-muted" data-testid="recurring-settlement-help">
+                  <p className="mt-1 text-xs text-muted" data-testid={`${idPrefix}-settlement-help`}>
                     {settlementControl.disabledReason ?? 'Autopay posts each payment by itself on its date. Manual waits for you.'}
                   </p>
                 </div>

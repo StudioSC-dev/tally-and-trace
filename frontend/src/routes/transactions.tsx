@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useCreateRepeatingTransactionMutation, useCreateRepeatingTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -9,9 +9,9 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
-import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
-import { apiErrorMessage } from '../utils/apiError'
+import { DEFAULT_SETTLEMENT, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import type { FieldErrors, ListRange, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
+import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../hooks/useToast'
 import { useLatestRef, useRequestGeneration } from '../hooks/useRequestGeneration'
@@ -25,6 +25,8 @@ import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
+import { RecurringScheduleFields } from '../components/RecurringScheduleFields'
+import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
@@ -214,6 +216,27 @@ function FieldErrorText({ field, message }: { field: TransactionField; message: 
   )
 }
 
+// Repeat in Add Transaction (STU-584): the schedule the new recurring entry takes. Its first
+// occurrence is the transaction's own date, so the draft holds no date.
+type RepeatDraft = Omit<ScheduleDraft, 'next_occurrence'>
+const createRepeatDraft = (): RepeatDraft => ({
+  cadence: 'monthly',
+  day: { kind: 'same_as_date' },
+  end_mode: 'indefinite',
+  end_date: undefined,
+  max_occurrences: undefined,
+  kind_choice: 'automatic',
+  bank_kind: 'other',
+  settlement: DEFAULT_SETTLEMENT,
+})
+const REPEAT_FIELD_KEYS: readonly string[] = ['day', 'day_of_month', 'end_date', 'max_occurrences'] satisfies ScheduleFieldKey[]
+const isRepeatField = (key: string | undefined): key is ScheduleFieldKey => REPEAT_FIELD_KEYS.includes(key ?? '')
+const repeatErrorId = (key: ScheduleFieldKey) => `repeat-${key}-error`
+const REPEAT_CARD_TRANSFER = "A recurring transfer can't be paid into or funded from a credit card"
+// An API from before POST /transactions/repeating answers 405 (or 404) during a deploy.
+const REPEAT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Repeat off to save it once."
+const noFieldRef = () => () => undefined
+
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
 
@@ -362,6 +385,13 @@ export function TransactionsPage() {
   const askConfirm = useConfirm()
   const showToast = useToast()
   const [formError, setFormError] = useState<string | null>(null)
+  // Repeat (create only): the toggle, its schedule, its fields' errors, a refusal the section
+  // shows on its own line, and an API that does not have the endpoint yet (Retry).
+  const [repeatOn, setRepeatOn] = useState(false)
+  const [repeatDraft, setRepeatDraft] = useState<RepeatDraft>(createRepeatDraft)
+  const [repeatErrors, setRepeatErrors] = useState<FieldErrors<ScheduleFieldKey>>({})
+  const [repeatError, setRepeatError] = useState<string | null>(null)
+  const [repeatUnavailable, setRepeatUnavailable] = useState(false)
   // A save in flight locks the form. The ref is the real guard: two clicks in one tick
   // would both read stale state.
   const [isSaving, setIsSaving] = useState(false)
@@ -595,6 +625,8 @@ export function TransactionsPage() {
   
   const [createTransaction] = useCreateTransactionMutation()
   const [createTransactionQuiet] = useCreateTransactionQuietMutation()
+  const [createRepeatingTransaction] = useCreateRepeatingTransactionMutation()
+  const [createRepeatingTransactionQuiet] = useCreateRepeatingTransactionQuietMutation()
   const [updateTransaction] = useUpdateTransactionMutation()
   const [deleteTransaction] = useDeleteTransactionMutation()
 
@@ -850,6 +882,69 @@ export function TransactionsPage() {
     () => accounts.find((account) => account.id === formData.transfer_to_account_id),
     [accounts, formData.transfer_to_account_id]
   )
+
+  // Repeat: the entry this transaction would start, read through the recurring form's rules
+  // with the transaction's date fixed as its first occurrence (scheduleDraft.ts).
+  const repeatTransferTo = formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined
+  const repeatBlockedReason =
+    formData.transaction_type === 'transfer' &&
+    (selectedFormAccount?.account_type === 'credit' || destinationFormAccount?.account_type === 'credit')
+      ? REPEAT_CARD_TRANSFER
+      : null
+  const repeatActive = repeatOn && !editingTransaction && repeatBlockedReason === null
+  const repeatSchedule: ScheduleDraft = { ...repeatDraft, next_occurrence: `${formData.transaction_date}T00:00` }
+  const repeatContext: ScheduleContext = {
+    stored: null,
+    entryType: formData.transaction_type === 'credit' ? 'income' : 'expense',
+    transferToAccountId: repeatTransferTo,
+    account: selectedFormAccount,
+    accountId: formData.account_id,
+    dateFixed: true,
+  }
+  const repeatState = scheduleState(repeatSchedule, repeatContext)
+  const repeatPreview = repeatActive ? schedulePreview(repeatSchedule, repeatContext) : null
+  // The entry's currency is the transaction's face: a posted row's account currency unless a
+  // foreign projected figure was typed, else the projected currency (as the save sends it).
+  const repeatAccountCurrency = selectedFormAccount?.currency ?? fallbackCurrency
+  const repeatFaceCurrency =
+    formData.is_posted && !((formData.projected_amount ?? 0) > 0)
+      ? repeatAccountCurrency
+      : formData.projected_currency ?? repeatAccountCurrency
+  const repeatSettlement = settlementControlState({
+    entryType: repeatContext.entryType,
+    transferToAccountId: repeatTransferTo,
+    account: selectedFormAccount,
+    currency: repeatFaceCurrency,
+    isActive: true,
+  })
+  const changeRepeat = (update: (prev: ScheduleDraft) => ScheduleDraft) => {
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatDraft((prev) => {
+      // The date stays the transaction's: only the schedule is kept.
+      const next: RepeatDraft & Partial<Pick<ScheduleDraft, 'next_occurrence'>> = update({
+        ...prev,
+        next_occurrence: `${formData.transaction_date}T00:00`,
+      })
+      delete next.next_occurrence
+      return next
+    })
+  }
+  const toggleRepeat = (on: boolean) => {
+    setRepeatOn(on)
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
+    // A transaction that starts its own entry links to no other.
+    if (on) setFormData((prev) => ({ ...prev, budget_entry_id: undefined }))
+  }
+  const resetRepeat = () => {
+    setRepeatOn(false)
+    setRepeatDraft(createRepeatDraft())
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
+  }
   // A stored row is a loan payment when the server marked it one; an unmarked
   // (legacy) transfer is one when its destination is a loan, looked up by id
   // when it is not in `accounts`.
@@ -1122,6 +1217,7 @@ export function TransactionsPage() {
     setFieldErrors({})
     setFormError(null)
     setSavedNotice(null)
+    resetRepeat()
     // A save still in flight no longer owns the form and never locks the next dialog's
     // fields; it is abandoned, and the next dialog's submit buttons wait for it to settle.
     abandonCurrentSave.current?.()
@@ -1155,6 +1251,7 @@ export function TransactionsPage() {
   // in the DOM, so it is passed over while there is a chip).
   const fail = (key: TransactionField, message: string) => {
     setDateErrors({})
+    setRepeatErrors({})
     setFieldErrors({ [key]: message })
     const field = transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`)
     const target =
@@ -1164,6 +1261,14 @@ export function TransactionsPage() {
           field.querySelector<HTMLElement>('button')
         : field
     target?.focus()
+  }
+
+  // A Repeat control's error, shown under it, with focus.
+  const failRepeat = (key: ScheduleFieldKey, message: string) => {
+    setDateErrors({})
+    setFieldErrors({})
+    setRepeatErrors({ [key]: message })
+    transactionForm.current?.querySelector<HTMLElement>(`[data-testid="repeat-fields"] [data-field="${key}"]`)?.focus()
   }
 
   // The app's own words for an empty required field, where it has them.
@@ -1206,6 +1311,8 @@ export function TransactionsPage() {
         first.focus()
       } else if (isTransactionField(key)) {
         fail(key, message)
+      } else if (isRepeatField(key) && first.closest('[data-testid="repeat-fields"]')) {
+        failRepeat(key, message)
       } else {
         setFieldErrors({})
         setDateErrors({})
@@ -1215,6 +1322,41 @@ export function TransactionsPage() {
     }, 0)
   }
 
+  // A refused repeating save: an API without the endpoint gets the Repeat section's Retry; a
+  // field the API names (`body.transaction.<field>`, `body.repeat.<field>`) shows its error
+  // inline on that field. Anything else is left to the form's own error line (false).
+  const showRepeatRefusal = (error: unknown): boolean => {
+    const status = apiErrorStatus(error)
+    if (status === 404 || status === 405) {
+      setRepeatUnavailable(true)
+      return true
+    }
+    const refusal = repeatingRefusal((error as { data?: { detail?: unknown } } | undefined)?.data?.detail)
+    if (!refusal || refusal.part === null || !refusal.message) return false
+    if (refusal.part === 'repeat') {
+      const control = repeatFieldControl(refusal.field)
+      if (control) {
+        failRepeat(control, refusal.message)
+      } else {
+        setRepeatError(refusal.message)
+      }
+      return true
+    }
+    const field = refusal.field
+    if (field === 'transaction_date' || field === 'posting_date') {
+      setDateErrors({ [field]: refusal.message })
+      ;(field === 'transaction_date' ? transactionDateInput : postingDateInput).current?.focus()
+      return true
+    }
+    // The face amount is the one input the form shows: the posted amount, or the planned one.
+    const shown = field === 'amount' || field === 'projected_amount' ? (formData.is_posted ? 'amount' : 'projected_amount') : field
+    if (shown !== null && isTransactionField(shown)) {
+      fail(shown, refusal.message)
+      return true
+    }
+    return false
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     // Enter and requestSubmit reach here even while the buttons are disabled.
@@ -1222,6 +1364,9 @@ export function TransactionsPage() {
     setFormError(null)
     setFieldErrors({})
     setSavedNotice(null)
+    setRepeatErrors({})
+    setRepeatError(null)
+    setRepeatUnavailable(false)
     // The button pressed picks the path, so the browser's own checks run the same for both.
     const submitter = (e.nativeEvent as SubmitEvent).submitter
     submitterRef.current = submitter
@@ -1232,6 +1377,8 @@ export function TransactionsPage() {
     // Set if this save is abandoned: called once its POST has failed or its refresh has settled.
     const abandoned: { release: (() => void) | null } = { release: null }
     let refreshHandedOff = false
+    // A repeating POST is in flight: its refusal is read for the Repeat section and its fields.
+    let repeatPosting = false
     if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
       setFormError('Still checking this transfer\'s destination account. Try again in a moment.')
       return
@@ -1252,6 +1399,10 @@ export function TransactionsPage() {
         return
       }
       setDateErrors({})
+      if (repeatActive && !formData.description.trim()) {
+        fail('description', 'Please enter a description: it names the recurring entry.')
+        return
+      }
       if (!formData.account_id) {
         fail('account_id', 'Please select an account for this transaction.')
         return
@@ -1399,6 +1550,27 @@ export function TransactionsPage() {
         delete payload.exchange_rate
       }
 
+      // Repeat: the same transaction, sent with the schedule of the entry it starts, in one
+      // request that commits both or neither. It links to no other entry.
+      let repeatBody: RepeatingTransactionInput | null = null
+      if (repeatActive) {
+        const schedule = scheduleRequest(repeatSchedule, repeatContext)
+        if (!schedule.ok) {
+          if (schedule.field === 'next_occurrence') {
+            setDateErrors({ transaction_date: schedule.message })
+            transactionDateInput.current?.focus()
+          } else {
+            failRepeat(schedule.field, schedule.message)
+          }
+          return
+        }
+        const transaction = { ...payload }
+        delete transaction.budget_entry_id
+        const settlement =
+          repeatSettlement.shown && repeatSettlement.disabledReason === null ? repeatDraft.settlement : 'manual'
+        repeatBody = { transaction, repeat: repeatScheduleOf(schedule.fields, settlement) }
+      }
+
       // The form stays locked for the whole request, so what is kept after an add-another
       // save is exactly what was sent.
       saveInFlight.current = true
@@ -1406,16 +1578,22 @@ export function TransactionsPage() {
       try {
         const save = editingTransaction
           ? updateTransaction({ id: editingTransaction.id, data: payload })
-          : addAnother
-            ? createTransactionQuiet(payload)
-            : createTransaction(payload)
+          : repeatBody
+            ? addAnother
+              ? createRepeatingTransactionQuiet(repeatBody)
+              : createRepeatingTransaction(repeatBody)
+            : addAnother
+              ? createTransactionQuiet(payload)
+              : createTransaction(payload)
         // A close while the POST is in flight abandons this save (see resetForm).
         const abandon = () => {
           abandoned.release = abandonSave(save.requestId)
         }
         abandonCurrentSave.current = abandon
+        repeatPosting = repeatBody !== null
         try {
           await save.unwrap()
+          repeatPosting = false
         } finally {
           if (abandonCurrentSave.current === abandon) abandonCurrentSave.current = null
         }
@@ -1459,6 +1637,8 @@ export function TransactionsPage() {
               // unseen into the next posted entry. A pending run keeps its visible choice.
               projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
             }))
+            // Repeat and its schedule reset with the form.
+            resetRepeat()
             setSavedNotice(`Saved "${formData.description} ${figure}"`)
             setDateErrors({})
             setFieldErrors({})
@@ -1495,6 +1675,7 @@ export function TransactionsPage() {
     } catch (error) {
       console.error('Error saving transaction:', error)
       if (!owns()) return
+      if (repeatPosting && showRepeatRefusal(error)) return
       // Show the API's reason (e.g. a loan payment rule) in the form, which stays open.
       setFormError(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
       setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
@@ -2031,6 +2212,8 @@ export function TransactionsPage() {
       return
     }
 
+    // A link to an existing entry and Repeat (a new entry) exclude each other.
+    setRepeatOn(false)
     setFormData((prev) => {
       const nextAccountId = entry.account_id ?? prev.account_id
       const nextAccount = nextAccountId ? accounts.find((acc) => acc.id === nextAccountId) : undefined
@@ -3560,7 +3743,78 @@ export function TransactionsPage() {
                 />
               )}
 
-              {formData.transaction_type !== 'transfer' && !(editingTransaction && isSharedFull(editingTransaction)) && (
+              {!editingTransaction && (
+                <div className="space-y-3" data-testid="repeat-section">
+                  <label className="inline-flex min-h-11 items-center gap-2 text-sm text-body cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 border-line text-ink"
+                      checked={repeatActive}
+                      disabled={repeatBlockedReason !== null}
+                      onChange={(e) => toggleRepeat(e.target.checked)}
+                      aria-describedby="repeat-help"
+                      data-testid="repeat-toggle"
+                    />
+                    <span>Repeat</span>
+                  </label>
+                  <p id="repeat-help" className="-mt-2 text-xs text-muted" data-testid="repeat-help">
+                    {repeatBlockedReason ??
+                      (repeatActive && repeatState.cardInstallmentCreate
+                        ? 'This is the first of the payments. The amount is each payment, not the total.'
+                        : 'Starts a recurring entry with this as its first payment.')}
+                  </p>
+                  {repeatActive && (
+                    <fieldset className="min-w-0 space-y-5 border-l-2 border-line pl-3" data-testid="repeat-fields">
+                      <legend className="sr-only">Repeat schedule</legend>
+                      <RecurringScheduleFields
+                        draft={repeatSchedule}
+                        state={repeatState}
+                        preview={repeatPreview}
+                        settlementControl={repeatSettlement}
+                        onChange={changeRepeat}
+                        fieldProps={(key) => fieldErrorProps(repeatErrors, key, repeatErrorId(key))}
+                        renderFieldError={(key) =>
+                          repeatErrors[key] ? (
+                            <p id={repeatErrorId(key)} className="mt-1 text-xs text-danger" role="alert" data-testid={`repeat-error-${key}`}>
+                              {repeatErrors[key]}
+                            </p>
+                          ) : null
+                        }
+                        bindField={noFieldRef}
+                        showFinalMonthHelp={false}
+                        finalMonthHelp=""
+                        idPrefix="repeat"
+                        touch
+                      />
+                      {repeatPreview && 'missed' in repeatPreview && repeatPreview.missed && (
+                        <p className="text-xs text-muted" data-testid="repeat-missed">{repeatPreview.missed}</p>
+                      )}
+                      {repeatError && (
+                        <p className="text-sm text-danger" role="alert" data-testid="repeat-error">{repeatError}</p>
+                      )}
+                      {repeatUnavailable && (
+                        <div className="space-y-2" data-testid="repeat-unavailable">
+                          <p className="text-sm text-danger" role="alert">{REPEAT_UNAVAILABLE}</p>
+                          <button
+                            type="button"
+                            className="btn-secondary focus-ring min-h-11"
+                            disabled={isSaving || refreshPending || abandonedPending}
+                            onClick={() => {
+                              const primary = transactionForm.current?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
+                              transactionForm.current?.requestSubmit(primary ?? undefined)
+                            }}
+                            data-testid="repeat-retry"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      )}
+                    </fieldset>
+                  )}
+                </div>
+              )}
+
+              {formData.transaction_type !== 'transfer' && !repeatActive && !(editingTransaction && isSharedFull(editingTransaction)) && (
                 <div className="space-y-3">
                   <label className="label">Recurring entry (optional)</label>
                   <p className="text-xs text-muted">Link this to one of your recurring income or expenses.</p>
