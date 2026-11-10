@@ -59,6 +59,8 @@ class RepeatingTransaction(TransactionCreate):
     is created by the request, so no ``budget_entry_id`` may be sent."""
     description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
                                                   max_length=150)]
+    # The entry's amount when no ``projected_amount`` is sent: an entry needs more than 0.
+    amount: float = Field(..., gt=0)
 
     @field_validator("budget_entry_id")
     @classmethod

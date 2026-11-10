@@ -277,6 +277,32 @@ def test_repeat_atomic(world, monkeypatch):
                           {"t": tag}).scalar_one() == 0
 
 
+def test_repeat_atomic_after_the_advance(world):
+    """Refused after the row moved both balances, its tags were linked, the
+    schedule advanced and the loan's autopay was cleared: one payment ends the
+    entry, so autopay is refused as ended (409), and nothing stays."""
+    client, db, me, checking = world["client"], world["db"], world["me"], world["checking"]
+    loan = _account(client, me, "Car loan", "loan", balance=-100_000, loan_kind="auto",
+                    loan_annual_rate=12, loan_term_months=24, loan_payment_amount=5_000,
+                    loan_first_payment_date="2026-10-20", payment_account_id=checking)
+    db.execute(text("UPDATE accounts SET auto_post_enabled = true WHERE id = :i"), {"i": loan})
+    db.commit()
+    tag = sw_post(client, me, "/tags/", {"name": "Car"})["id"]
+    before = (_written(db, me), _balance(db, checking), _balance(db, loan))
+    r = _repeat(client, me, _txn(checking, kind="transfer", amount=5_000, description="Car",
+                                 transfer_from_account_id=checking, transfer_to_account_id=loan,
+                                 tag_ids=[tag]),
+                end_mode="after_occurrences", max_occurrences=1, settlement="autopay",
+                expect=409)
+    assert r["detail"] == "This entry has ended"
+    assert (_written(db, me), _balance(db, checking), _balance(db, loan)) == before
+    assert db.execute(text("SELECT auto_post_enabled FROM accounts WHERE id = :i"),
+                      {"i": loan}).scalar_one() is True
+    for table in ("budget_entry_tags", "transaction_tags"):
+        assert db.execute(text(f"SELECT count(*) FROM {table} WHERE tag_id = :t"),
+                          {"t": tag}).scalar_one() == 0
+
+
 # --- 8 ----------------------------------------------------------------------------------------
 
 def test_repeat_autopay(world):
@@ -329,6 +355,26 @@ def test_repeat_refusals(world, case):
     if case == "unknown_field":
         assert any(e["loc"][-1] == "every" for e in r["detail"]), r
     assert _written(db, me) == written and _balance(db, checking) == balance
+
+
+def test_repeat_refusal_locations(world):
+    """A 422 names the field in the request body, so the dialog can show it there."""
+    from app.services.repeat import _request_loc
+    from app.schemas.transaction import TransactionCreate
+
+    client, me, checking = world["client"], world["me"], world["checking"]
+    r = _repeat(client, me, _txn(checking, amount=0), expect=422)
+    assert [e["loc"] for e in r["detail"]] == [["body", "transaction", "amount"]]
+    assert _written(world["db"], me) == (0, 0)
+
+    plain = TransactionCreate(**_txn(checking))
+    face = TransactionCreate(**_txn(checking, projected_amount=10, projected_currency="USD"))
+    assert _request_loc(("name",), plain) == ("body", "transaction", "description")
+    assert _request_loc(("amount",), plain) == ("body", "transaction", "amount")
+    assert _request_loc(("amount",), face) == ("body", "transaction", "projected_amount")
+    assert _request_loc(("tag_ids", 0), plain) == ("body", "transaction", "tag_ids", 0)
+    assert _request_loc(("max_occurrences",), plain) == ("body", "repeat", "max_occurrences")
+    assert _request_loc((), plain) == ("body", "repeat")
 
 
 # --- 10 ---------------------------------------------------------------------------------------

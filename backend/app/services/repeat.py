@@ -91,7 +91,32 @@ def _entry_in(txn_in: TransactionCreate, repeat: RepeatSchedule,
     try:
         return BudgetEntryCreate(**fields)
     except ValidationError as exc:
-        raise RequestValidationError(exc.errors(include_url=False)) from None
+        raise RequestValidationError([
+            {**error, "loc": _request_loc(error["loc"], txn_in)}
+            for error in exc.errors(include_url=False)]) from None
+
+
+# Where each entry field comes from in the request, so a refusal names the field sent.
+TRANSACTION_SOURCES = {
+    "name": "description", "entry_type": "transaction_type", "next_occurrence": "transaction_date",
+    "account_id": "account_id", "transfer_to_account_id": "transfer_to_account_id",
+    "category_id": "category_id", "allocation_id": "allocation_id", "tag_ids": "tag_ids",
+}
+
+
+def _request_loc(loc: tuple, txn_in: TransactionCreate) -> tuple:
+    """An entry-build error's location in the request body: ``("body", "transaction",
+    field)`` for a field taken from the transaction (``amount`` and ``currency`` are
+    ``projected_*`` when the face came from them), else ``("body", "repeat", ...)``,
+    which also takes the entry-level checks (no field: the ends)."""
+    field, rest = (loc[0], tuple(loc[1:])) if loc else (None, ())
+    if field in ("amount", "currency"):
+        projected = (txn_in.projected_amount is not None
+                     and txn_in.transaction_type != TransactionType.TRANSFER)
+        return ("body", "transaction", f"projected_{field}" if projected else field, *rest)
+    if field in TRANSACTION_SOURCES:
+        return ("body", "transaction", TRANSACTION_SOURCES[field], *rest)
+    return ("body", "repeat", *loc)
 
 
 def _turn_on_autopay(db: Session, entry: BudgetEntry, account: Optional[Account]) -> None:
