@@ -11,6 +11,7 @@
 //     sends cadence biweekly with no day fields and the entry's next date is 14 days on;
 // (c) a card installment still shows "Charged monthly on each statement close" with no cadence
 //     choice and no Day of week, even when the form held Weekly, and saves monthly;
+// (c2) the same on a credit account with no statement cycle: monthly, no cadence choice;
 // (d) the link select in Add Transaction and the Transaction Actions modal read "Every 2 weeks";
 // (e) Delay all on a bi-weekly entry's missed payment previews "every 14 days".
 // Every scenario checks that no browser dialog fired.
@@ -21,7 +22,7 @@
 // Check kinds: [B] behavioural, [S] structural, [G] guard. The script ends with RESULT: k/m
 // and exits 0 only when every check passed, 1 when any failed, 2 for setup.
 //
-// Usage: node frontend/e2e/weekly-cadence.cjs [a|b|c|d|e]
+// Usage: node frontend/e2e/weekly-cadence.cjs [a|b|c|c2|d|e]
 const { startLocalStack } = require('./_local_stack.cjs')
 const h = require('./_smooth.cjs')
 const d = require('./_dialogs.cjs')
@@ -275,6 +276,40 @@ async function scenarioC(browser) {
   }
 }
 
+// (c2) A card with no statement cycle.
+async function scenarioC2(browser) {
+  console.log('\n=== (c2) a card installment on a card with no statement cycle is monthly')
+  const user = await h.makeUser(stack, 'wkc2')
+  const cc = await account(user, 'Plain Card', 'credit', { balance: 0, credit_limit: 100000 })
+  const { ctx, page, native, posts } = await onAllocations(browser, user)
+  try {
+    const form = await openRecurringForm(page)
+    await field(form, 'name').fill('Phone')
+    await field(form, 'account_id').selectOption({ label: cc.name })
+    await field(form, 'amount').fill('900')
+    await field(form, 'cadence').selectOption('weekly')
+    await form.getByRole('button', { name: 'After runs', exact: true }).click()
+    await h.check('c2.no-cadence-choice-and-no-day-of-week', 'B', async () => {
+      const note = form.locator('[data-testid="installment-monthly-note"]')
+      await note.waitFor()
+      return ((await field(form, 'cadence').count()) === 0 && (await form.locator('[data-testid="weekday-select"]').count()) === 0 &&
+        (await form.locator('[data-testid="installment-close-note"]').count()) === 0) || 'cadence select or Day of week still shown'
+    })
+    posts.length = 0
+    await form.getByRole('button', { name: 'Save Recurring Entry' }).click()
+    await form.waitFor({ state: 'detached' })
+    await h.waitQuiet(page)
+    await h.check('c2.saved-monthly', 'B', async () => {
+      const body = posts.find((p) => p.path === '/budget-entries')?.body
+      const saved = (await entriesOf(user)).find((e) => e.name === 'Phone')
+      return (body?.cadence === 'monthly' && saved?.cadence === 'monthly') || `sent ${JSON.stringify(body?.cadence)}, stored ${JSON.stringify(saved?.cadence)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'c2', native)
+    await ctx.close()
+  }
+}
+
 // (d) The link select and the action modal.
 async function scenarioD(browser) {
   console.log('\n=== (d) the link select and the Transaction Actions modal read "Every 2 weeks"')
@@ -351,7 +386,7 @@ async function scenarioE(browser) {
   }
 }
 
-const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['d', scenarioD], ['e', scenarioE]]
+const SCENARIOS = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['c2', scenarioC2], ['d', scenarioD], ['e', scenarioE]]
 
 ;(async () => {
   process.on('unhandledRejection', (e) => console.log(`  NOTE unhandled rejection: ${e && e.message ? e.message.split('\n')[0] : e}`))

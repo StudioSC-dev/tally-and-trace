@@ -109,6 +109,13 @@ export function RecurringScheduleFields({
                     {chargedOnCloseLabel(cardCloseDay)}
                   </p>
           </div>
+          ) : state.cadenceLocked ? (
+          <div>
+                  <label className="block text-sm font-medium text-body">Cadence</label>
+                  <p className="mt-1 py-2 text-sm text-body" data-testid="installment-monthly-note">
+                    Monthly
+                  </p>
+          </div>
           ) : (
           <div>
                   <label className="block text-sm font-medium text-body">Cadence</label>

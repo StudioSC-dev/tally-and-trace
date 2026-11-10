@@ -358,4 +358,20 @@ describe('weekday and preview for weekly and every-two-weeks', () => {
     expect(state.cadence).toBe('monthly')
     expect(state.chargedOnClose).toBe(true)
   })
+
+  it('a card installment on a card with no statement cycle is monthly too, with no cadence choice', () => {
+    const noCycle = { account_type: 'credit' }
+    const installment = draft({ cadence: 'weekly', end_mode: 'after_occurrences', max_occurrences: 12, kind_choice: 'installment' })
+    const state = scheduleState(installment, fixed({ account: noCycle }))
+    expect(state.cadence).toBe('monthly')
+    expect(state.cadenceLocked).toBe(true)
+    expect(state.cadenceChoices).toEqual(['monthly'])
+    expect(state.chargedOnClose).toBe(false)
+    const result = scheduleRequest(installment, ctx({ account: noCycle }))
+    expect(result.ok && result.fields.cadence).toBe('monthly')
+    // A bill on the same card keeps the choice, and a weekly card subscription is untouched.
+    const bill = scheduleState({ ...installment, kind_choice: 'bill' }, fixed({ account: noCycle }))
+    expect([bill.cadence, bill.cadenceLocked]).toEqual(['weekly', false])
+    expect(scheduleState(draft({ cadence: 'weekly' }), ctx({ account: noCycle })).cadence).toBe('weekly')
+  })
 })

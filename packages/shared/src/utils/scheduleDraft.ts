@@ -81,9 +81,11 @@ export interface ScheduleContext {
 
 /** What the schedule controls show for a draft in its context. */
 export interface ScheduleState {
-  /** The cadence a save sends: a card installment on create is always monthly. */
+  /** The cadence a save sends: a card installment is always monthly. */
   cadence: RecurrenceFrequency
   cadenceChoices: RecurrenceFrequency[]
+  /** A card installment (with or without a statement cycle): always monthly, so there is no cadence choice. */
+  cadenceLocked: boolean
   showKindSelect: boolean
   showBankKindSelect: boolean
   kindCapped: boolean
@@ -136,8 +138,9 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
   // its statement's close, so no day fields are sent and the cadence is monthly. An
   // installment already on the close shows the same note in place of the pickers.
   const cardCloseDay = account?.account_type === 'credit' ? statementCloseDay(account) : null
-  const cardInstallmentCreate =
-    !stored && cardCloseDay !== null && isCardExpense && kindCapped && kindValue !== 'bill'
+  // Without a statement cycle there is no close to anchor on, but it is still monthly.
+  const cardInstallment = showKindSelect && kindCapped && kindValue !== 'bill'
+  const cardInstallmentCreate = !stored && cardCloseDay !== null && cardInstallment
   const onCloseEdit =
     stored != null &&
     cardCloseDay !== null &&
@@ -161,8 +164,9 @@ export function scheduleState(draft: ScheduleDraft, ctx: ScheduleContext): Sched
   }
 
   return {
-    cadence: cardInstallmentCreate ? 'monthly' : draft.cadence,
-    cadenceChoices: cadenceChoices(ctx),
+    cadence: cardInstallment ? 'monthly' : draft.cadence,
+    cadenceChoices: cardInstallment ? ['monthly'] : cadenceChoices(ctx),
+    cadenceLocked: cardInstallment,
     showKindSelect,
     showBankKindSelect,
     kindCapped,
