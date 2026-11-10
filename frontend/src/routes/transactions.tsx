@@ -347,6 +347,9 @@ export function TransactionsPage() {
   const [fetchReceipt, { isLoading: isReceiptLoading }] = useFetchReceiptMutation()
   const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  // True once the user changes the date or the posted box in this dialog session. The
+  // future-date note waits for it, so Edit never shows it for a row as loaded.
+  const [postedTouched, setPostedTouched] = useState(false)
   const [dateErrors, setDateErrors] = useState<{ transaction_date?: string | undefined; posting_date?: string | undefined }>({})
   const transactionDateInput = useRef<HTMLInputElement>(null)
   const postingDateInput = useRef<HTMLInputElement>(null)
@@ -1060,9 +1063,23 @@ export function TransactionsPage() {
     }
   }
 
+  // The "Mark as posted" box and a future Transaction Date share this: the amount fields
+  // swap with the posted state.
+  const setPostedState = (checked: boolean) => {
+    const today = localToday()
+    setFieldErrors((prev) => withoutErrors(prev, ['amount', 'projected_amount', 'received_amount']))
+    setFormData((prev) => ({
+      ...prev,
+      is_posted: checked,
+      posting_date: checked ? prev.posting_date ?? today : undefined,
+      amount: checked ? prev.amount ?? prev.projected_amount : prev.amount,
+    }))
+  }
+
   const resetForm = () => {
     setFormData(createInitialFormState())
     setEditingTransaction(null)
+    setPostedTouched(false)
     setDateErrors({})
     setFieldErrors({})
     setFormError(null)
@@ -1454,6 +1471,7 @@ export function TransactionsPage() {
       return
     }
     setEditingTransaction(transaction)
+    setPostedTouched(false)
     setDateErrors({})
     setFieldErrors({})
     setFormError(null)
@@ -3340,9 +3358,13 @@ export function TransactionsPage() {
                   type="date"
                   value={formData.transaction_date}
                     onChange={(e) => {
+                      const day = e.target.value
+                      setPostedTouched(true)
+                      // A future date starts the row as not posted. Moving the date back never ticks the box.
+                      if (formData.is_posted && day > localToday()) setPostedState(false)
                       setFormData((prev) => ({
                         ...prev,
-                        transaction_date: e.target.value,
+                        transaction_date: day,
                       }))
                       setDateErrors((prev) => ({ ...prev, transaction_date: undefined }))
                     }}
@@ -3401,21 +3423,18 @@ export function TransactionsPage() {
                     className="border-line text-ink"
                     checked={formData.is_posted}
                     onChange={(e) => {
-                      const checked = e.target.checked
-                      const today = localToday()
-                      // The amount fields swap with the posted state.
-                      setFieldErrors((prev) => withoutErrors(prev, ['amount', 'projected_amount', 'received_amount']))
-                      setFormData((prev) => ({
-                        ...prev,
-                        is_posted: checked,
-                        posting_date: checked ? prev.posting_date ?? today : undefined,
-                        amount: checked ? prev.amount ?? prev.projected_amount : prev.amount,
-                      }))
+                      setPostedTouched(true)
+                      setPostedState(e.target.checked)
                     }}
                   />
                   <span>Mark as posted</span>
                 </label>
               </div>
+              {postedTouched && formData.is_posted && formData.transaction_date > localToday() && (
+                <p className="-mt-2 text-xs text-muted" data-testid="future-posted-note">
+                  This date is in the future. It will be saved as already posted.
+                </p>
+              )}
 
               {(!editingTransaction || editingTransaction.permissions.can_tag) && (
                 <TagPicker
