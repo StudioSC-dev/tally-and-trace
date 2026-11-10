@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import { editFormProjectedAmount, fieldErrorProps, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -28,6 +28,7 @@ import { TagPicker } from '../components/TagPicker'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
+import { ScheduledView } from '../components/transactions/ScheduledView'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
 
@@ -231,11 +232,13 @@ const parseDateInput = (value: string) => {
 export const Route = createFileRoute('/transactions')({
   component: TransactionsPage,
   // `?edit=<id>` opens that transaction; `from=dashboard` goes back there when it closes.
-  validateSearch: (search: Record<string, unknown>): { edit?: number; from?: 'dashboard' } => {
+  // `?view=scheduled` lists what is coming after today instead of the month, so a reload or a link keeps it.
+  validateSearch: (search: Record<string, unknown>): { edit?: number; from?: 'dashboard'; view?: 'scheduled' } => {
     const edit = Number(search.edit)
     return {
       edit: Number.isInteger(edit) && edit > 0 ? edit : undefined,
       from: search.from === 'dashboard' ? 'dashboard' : undefined,
+      view: search.view === 'scheduled' ? 'scheduled' : undefined,
     }
   },
 })
@@ -409,6 +412,15 @@ export function TransactionsPage() {
   const [enteredBy, setEnteredBy] = useState<'everyone' | 'me'>('everyone')
   const [selectedTypes, setSelectedTypes] = useState<Transaction['transaction_type'][]>([])
   const [selectedTag, setSelectedTag] = useState<number | undefined>(undefined)
+  // The Scheduled view's own range: empty means the default (tomorrow, through a year ahead).
+  const { view } = Route.useSearch()
+  // The day every list membership is decided on: Manila's, the server's day. The main list
+  // ends on it, the Due card keeps it and earlier and its Upcoming tab starts after it, so an
+  // item is in one section whatever the viewer's time zone. A new Manila day refetches.
+  const partitionDay = useManilaDay()
+  const isScheduled = view === 'scheduled'
+  const [scheduledFrom, setScheduledFrom] = useState('')
+  const [scheduledThrough, setScheduledThrough] = useState('')
   const resetPostingFormState = useCallback(() => {
     setPostingFormState(emptyPostingForm(fallbackCurrency))
   }, [fallbackCurrency])
@@ -440,6 +452,8 @@ export function TransactionsPage() {
     setEnteredBy('everyone')
     setSelectedTypes((prev) => (prev.length ? [] : prev))
     setSelectedTag(undefined)
+    setScheduledFrom('')
+    setScheduledThrough('')
     setCurrentMonth(freshStart)
     setStartDate(formatDateInput(freshStart))
     setEndDate(formatDateInput(freshEnd))
@@ -463,9 +477,9 @@ export function TransactionsPage() {
           enteredBy !== 'everyone' ||
           selectedTypes.length ||
           selectedTag !== undefined ||
-          isCustomRange ||
-          startDate !== defaultMonthStartString ||
-          endDate !== defaultMonthEndString
+          (isScheduled
+            ? scheduledFrom !== '' || scheduledThrough !== ''
+            : isCustomRange || startDate !== defaultMonthStartString || endDate !== defaultMonthEndString)
       ),
     [
       searchTerm,
@@ -476,6 +490,9 @@ export function TransactionsPage() {
       selectedTypes,
       selectedTag,
       isCustomRange,
+      isScheduled,
+      scheduledFrom,
+      scheduledThrough,
       startDate,
       endDate,
       defaultMonthStartString,
@@ -484,13 +501,17 @@ export function TransactionsPage() {
   )
 
   const dateRangeSummary = useMemo(() => {
+    if (isScheduled) {
+      const scheduled = scheduledRange(partitionDay, scheduledFrom, scheduledThrough)
+      return `${formatDateWithOrdinal(parseDateInput(scheduled.start))} → ${formatDateWithOrdinal(parseDateInput(scheduled.end))}`
+    }
     if (!startDate && !endDate) {
       return 'All dates'
     }
     const startLabel = startDate ? formatDateWithOrdinal(parseDateInput(startDate)) : 'Beginning'
     const endLabel = endDate ? formatDateWithOrdinal(parseDateInput(endDate)) : 'Present'
     return `${startLabel} → ${endLabel}`
-  }, [startDate, endDate])
+  }, [isScheduled, partitionDay, scheduledFrom, scheduledThrough, startDate, endDate])
 
   // The dialog reads the same dates; an open side is "Any date".
   const breakdownRangeLabel = useMemo(() => {
@@ -610,10 +631,6 @@ export function TransactionsPage() {
   const budgetEntries = useMemo(() => (budgetEntriesData?.items ?? []).filter(isOwnerFull), [budgetEntriesData])
   // The viewer's local day, for display only: a row's status, "Today" / "Tomorrow" and the form's defaults.
   const today = useToday()
-  // The day every list membership is decided on: Manila's, the server's day. The main list
-  // ends on it, the Due card keeps it and earlier and its Upcoming tab starts after it, so an
-  // item is in one section whatever the viewer's time zone. A new Manila day refetches.
-  const partitionDay = useManilaDay()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [totalTransactions, setTotalTransactions] = useState(0)
   // The full-page spinner is for the first load only; later loads keep the rows on screen.
@@ -698,6 +715,27 @@ export function TransactionsPage() {
     }
     return params
   }, [selectedAccountIds, selectedTypes, selectedCategoryNames, filterUncategorized, enteredBy, selectedTag, effectiveSearch])
+
+  // The Scheduled view: its range, and the switch between it and the month list (`?view=`).
+  const scheduled = useMemo(
+    () => scheduledRange(partitionDay, scheduledFrom, scheduledThrough),
+    [partitionDay, scheduledFrom, scheduledThrough]
+  )
+  const listCardRef = useRef<HTMLDivElement>(null)
+  const showView = useCallback(
+    (next: 'to_date' | 'scheduled') => {
+      void navigate({
+        to: '/transactions',
+        search: (prev) => ({ ...prev, view: next === 'scheduled' ? 'scheduled' : undefined }),
+      })
+    },
+    [navigate]
+  )
+  // "See everything scheduled" on the Due card: switch the list and bring it into view.
+  const seeScheduled = useCallback(() => {
+    showView('scheduled')
+    requestAnimationFrame(() => listCardRef.current?.scrollIntoView({ block: 'start' }))
+  }, [showView])
 
   const loadTransactions = useCallback(
     async () => {
@@ -1810,7 +1848,7 @@ export function TransactionsPage() {
       if (linkedFrom === 'dashboard') {
         goBackToDashboard()
       } else {
-        navigate({ to: '/transactions', search: {}, replace: true })
+        navigate({ to: '/transactions', search: (prev) => ({ view: prev.view }), replace: true })
       }
       return
     }
@@ -1831,7 +1869,7 @@ export function TransactionsPage() {
     } else {
       openActionModalRef.current(linkedTransaction)
     }
-    navigate({ to: '/transactions', search: {}, replace: true })
+    navigate({ to: '/transactions', search: (prev) => ({ view: prev.view }), replace: true })
   }, [
     accountsData,
     goBackToDashboard,
@@ -2246,11 +2284,31 @@ export function TransactionsPage() {
         }}
         onChanged={() => void refreshListsRef.current()}
         onOpenTransaction={openActionModal}
+        onSeeScheduled={seeScheduled}
         accountCurrencies={accountCurrencies}
       />
 
       {/* Search and Filters */}
-      <div className="card p-4 sm:p-6 space-y-4">
+      <div ref={listCardRef} className="card p-4 sm:p-6 space-y-4" data-testid="transactions-list-card">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="List view">
+          {([['to_date', 'To date'], ['scheduled', 'Scheduled']] as const).map(([value, label]) => {
+            const pressed = (value === 'scheduled') === isScheduled
+            return (
+              <button
+                type="button"
+                key={value}
+                onClick={() => showView(value)}
+                aria-pressed={pressed}
+                data-testid={`view-${value === 'scheduled' ? 'scheduled' : 'to-date'}`}
+                className={`min-h-[44px] px-4 py-2 text-sm font-semibold transition focus-ring ${
+                  pressed ? 'bg-ink text-paper' : 'border border-line bg-surface text-body hover:bg-sunken'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="w-full lg:max-w-md">
             <label className="label">Search transactions</label>
@@ -2272,6 +2330,7 @@ export function TransactionsPage() {
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            {!isScheduled && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -2296,6 +2355,8 @@ export function TransactionsPage() {
                 </svg>
               </button>
             </div>
+            )}
+            {!isScheduled && (
             <button
               type="button"
               onClick={() => setIsBreakdownOpen(true)}
@@ -2308,6 +2369,7 @@ export function TransactionsPage() {
               </svg>
               Spending breakdown
             </button>
+            )}
             <button
               type="button"
               onClick={() => setShowFilters((prev) => !prev)}
@@ -2324,7 +2386,13 @@ export function TransactionsPage() {
           <div>
             <p className="text-sm font-medium text-body">Date range: {dateRangeSummary}</p>
             <p className="text-xs text-muted">
-              {isCustomRange ? 'Custom range selected' : 'Automatically showing whole-month activity'}
+              {isScheduled
+                ? scheduledFrom !== '' || scheduledThrough !== ''
+                  ? 'Custom range selected'
+                  : 'From tomorrow, through a year ahead'
+                : isCustomRange
+                  ? 'Custom range selected'
+                  : 'Automatically showing whole-month activity'}
             </p>
           </div>
           {hasActiveFilters && (
@@ -2495,6 +2563,36 @@ export function TransactionsPage() {
                 <TagFilter value={selectedTag} onChange={setSelectedTag} />
               </div>
             </div>
+            {isScheduled ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className="label" htmlFor="scheduled-from">From</label>
+                <input
+                  id="scheduled-from"
+                  type="date"
+                  data-testid="scheduled-from"
+                  value={scheduled.start}
+                  onChange={(e) => setScheduledFrom(e.target.value)}
+                  className="input-field focus-ring"
+                  min={scheduled.min}
+                  max={scheduled.end}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="scheduled-through">Through</label>
+                <input
+                  id="scheduled-through"
+                  type="date"
+                  data-testid="scheduled-through"
+                  value={scheduled.end}
+                  onChange={(e) => setScheduledThrough(e.target.value)}
+                  className="input-field focus-ring"
+                  min={scheduled.start}
+                  max={scheduled.max}
+                />
+              </div>
+            </div>
+            ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="label">Custom start date</label>
@@ -2517,7 +2615,8 @@ export function TransactionsPage() {
                 />
               </div>
             </div>
-            {isCustomRange && (
+            )}
+            {!isScheduled && isCustomRange && (
               <p className="text-xs text-muted">
                 Month navigation will snap back to calendar months. Use reset to return to the current month view.
               </p>
@@ -2526,6 +2625,22 @@ export function TransactionsPage() {
         )}
       </div>
 
+      {isScheduled ? (
+        <ScheduledView
+          filters={filterParams}
+          range={scheduled}
+          pageSize={pageSize}
+          pageSizes={PAGE_SIZES}
+          onPageSize={(size) => setPageSize(size as PageSize)}
+          today={partitionDay}
+          localDay={today}
+          onOpenTransaction={openActionModal}
+          onChanged={() => void refreshListsRef.current()}
+          accountCurrencies={accountCurrencies}
+          filtered={hasActiveFilters}
+        />
+      ) : (
+      <>
       {/* Always mounted at a fixed height so showing it never moves the list. */}
       <p className="flex h-4 items-center gap-2 text-xs text-muted" role="status">
         {isRefreshing && (
@@ -2597,6 +2712,8 @@ export function TransactionsPage() {
             </nav>
           )}
         </div>
+      )}
+      </>
       )}
 
       {isBreakdownOpen && (

@@ -1713,6 +1713,55 @@ export interface UpcomingOccurrences {
   auto_post_scheduled: boolean
 }
 
+/** A future transaction row of the Scheduled view; `day` is its `transaction_date`'s UTC day. */
+export interface ScheduledTransactionRow {
+  kind: 'transaction'
+  day: string
+  transaction: Transaction
+}
+
+/** An unrecorded occurrence of the Scheduled view; `day` is its `effective_date`. */
+export interface ScheduledOccurrenceRow {
+  kind: 'occurrence'
+  day: string
+  occurrence: UpcomingOccurrence
+}
+
+export type ScheduledRow = ScheduledTransactionRow | ScheduledOccurrenceRow
+
+/**
+ * `GET /transactions/scheduled`: future transactions and unrecorded occurrences merged by day on the
+ * server, transactions first on a day. `total` counts the whole range, whatever the cursor.
+ */
+export interface ScheduledList {
+  items: ScheduledRow[]
+  total: number
+  transactions_total: number
+  occurrences_total: number
+  /** The last day occurrences are listed for: the range end, at most Manila's today plus two years. */
+  occurrences_through: string
+  auto_post_scheduled: boolean
+  /** Asks for the page after this one; null on the last page. */
+  next_cursor: string | null
+}
+
+/** The query of `GET /transactions/scheduled`: the transaction list's filters, a range and a cursor page. */
+export interface ScheduledQuery {
+  start_date?: string
+  end_date?: string
+  account_ids?: number[]
+  transaction_types?: string[]
+  category_names?: string[]
+  uncategorized?: boolean
+  entered_by?: 'me'
+  tag?: number
+  search?: string
+  /** 1 to 100. */
+  limit?: number
+  /** A previous page's `next_cursor`; absent for the first page. */
+  cursor?: string
+}
+
 /** The query of `GET /budget-entries/upcoming-occurrences`; filter names match the transaction list. */
 export interface UpcomingOccurrenceQuery {
   start_date?: string
