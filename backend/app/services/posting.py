@@ -516,6 +516,17 @@ def _schedule_state(entry, moved: Moved) -> dict:
     }
 
 
+def _cascade_plan(db: Session, entry, day: date, chosen: date, account: Optional[Account],
+                  card: Optional[Account]) -> Tuple[CascadePlan, Moved]:
+    """``plan_cascade`` over what the database holds now: ``(plan, moved)``."""
+    links = [(_naive(when).date(), is_posted)
+             for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)]
+    moved = _moved(db, entry)
+    plan = plan_cascade(entry, day, chosen, links=links, moved=moved, card=card,
+                        installment=is_card_installment(entry, account))
+    return plan, moved
+
+
 def cascade(db: Session, entry, actor: User, day: date, chosen: date,
             account: Optional[Account], card: Optional[Account]) -> Tuple[CascadePlan, dict]:
     """Delay the occurrence on ``day`` and every later one to start on ``chosen``,
@@ -529,11 +540,7 @@ def cascade(db: Session, entry, actor: User, day: date, chosen: date,
     left on earlier recorded days was validated against the old walk (a
     schedule edit drops them too). The review and auto-post flags are left as
     they are: the next date only moves later."""
-    links = [(_naive(when).date(), is_posted)
-             for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)]
-    moved = _moved(db, entry)
-    plan = plan_cascade(entry, day, chosen, links=links, moved=moved, card=card,
-                        installment=is_card_installment(entry, account))
+    plan, moved = _cascade_plan(db, entry, day, chosen, account, card)
     previous = _schedule_state(entry, moved)
     entry.next_occurrence = plan.next_occurrence
     entry.anchor_day = plan.anchor_day
