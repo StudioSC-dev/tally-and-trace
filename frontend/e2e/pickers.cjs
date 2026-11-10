@@ -65,6 +65,11 @@ const formModal = (page, heading) =>
 const field = (form, key) => form.locator(`[data-field="${key}"]`)
 const control = (modal, key) => modal.locator(`[data-field="${key}"]`)
 const toggleOf = (group) => group.locator('[data-picker-toggle]')
+// The dialog's pickers are compact (STU-580): a field with a value is one line until Change opens it.
+const changeOf = (group) => group.locator('[data-picker-change]')
+const reopen = async (group) => {
+  if ((await group.locator('[data-picker-change][aria-expanded="false"]').count()) === 1) await changeOf(group).click()
+}
 const fieldError = (modal, key) => modal.locator(`[data-testid="field-error-${key}"]`)
 const isFocused = (locator) => locator.evaluate((el) => el === document.activeElement).catch(() => false)
 const activeText = (page) => page.evaluate(() => (document.activeElement?.textContent || document.activeElement?.tagName || '').trim())
@@ -145,7 +150,8 @@ async function scenario3(browser) {
       await h.check('3.flat.category-transfer-flat', 'B', async () => {
         await modal.getByRole('button', { name: 'Transfer', exact: true }).click()
         const cat = control(modal, 'category_id')
-        const got = { mode: await cat.getAttribute('data-picker'), chips: (await idsIn(cat)).length, first: (await cat.locator('button').first().textContent()).trim() }
+        await reopen(cat)
+        const got = { mode: await cat.getAttribute('data-picker'), chips: (await idsIn(cat)).length, first: (await cat.locator('[data-picker-leading]').first().textContent()).trim() }
         return (got.mode === 'flat' && got.chips === 3 && got.first === 'None') || JSON.stringify(got)
       })
       await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
@@ -201,33 +207,37 @@ async function scenario3(browser) {
     })
     await chipOf(group, 'P Home Loan').click()
     await h.check('3.pick-collapses', 'B', async () => {
-      const got = { mode: await group.getAttribute('data-picker'), chips: (await idsIn(group)).length }
-      return (got.mode === 'collapsed' && got.chips === 5) || JSON.stringify(got)
+      const got = { mode: await group.getAttribute('data-picker'), chips: (await idsIn(group)).length, line: ((await group.locator('[data-picker-value]').textContent()) || '').trim() }
+      return (got.mode === 'line' && got.chips === 0 && got.line === 'P Home Loan (PHP)') || JSON.stringify(got)
     })
+    await h.check('3.focus-on-change', 'B', async () => (await isFocused(changeOf(group))) || `active ${await activeText(page)}`)
+    await changeOf(group).click()
     const picked = chipOf(group, 'P Home Loan')
     await h.check('3.picked-selected-first', 'B', async () => {
       const ids = await idsIn(group)
       return ((await picked.getAttribute('data-selected')) === 'true' && ids[0] === String(acct['P Home Loan'].id)) || `quick row ${JSON.stringify(await namesIn(group))}`
     })
-    await h.check('3.focus-on-picked', 'B', async () => (await isFocused(picked)) || `active ${await activeText(page)}`)
     await h.check('3.recording-in', 'B', async () => {
       const text = await modal.getByText(/^Recording in /).textContent().catch(() => '')
       return text.includes('PHP') || `recording line ${JSON.stringify(text)}`
     })
     // The category picker: 15 expense categories, "Uncategorized" first.
     const cat = control(modal, 'category_id')
+    await reopen(cat)
     await h.check('3.category-collapsed', 'B', async () => {
       const got = {
         mode: await cat.getAttribute('data-picker'),
-        first: (await cat.locator('button').first().textContent()).trim(),
+        first: (await cat.locator('[data-picker-leading]').first().textContent()).trim(),
         toggle: (await toggleOf(cat).textContent()).trim(),
       }
       return (got.mode === 'collapsed' && got.first === 'Uncategorized' && got.toggle.startsWith('All 15 categories')) || JSON.stringify(got)
     })
     await pick(cat, 'Travel')
+    await reopen(cat)
     await h.check('3.category-picked', 'B', async () =>
       (await chipOf(cat, 'Travel').getAttribute('data-selected')) === 'true' && (await cat.getAttribute('data-picker')) === 'collapsed' || 'Travel not selected in the collapsed row')
     await chipOf(cat, 'Uncategorized').click()
+    await reopen(cat)
     await h.check('3.uncategorized-leading', 'B', async () =>
       (await chipOf(cat, 'Uncategorized').getAttribute('data-selected')) === 'true' || 'Uncategorized not selected')
     // The destination: tap again clears.
@@ -240,6 +250,7 @@ async function scenario3(browser) {
       return (names.length === 16 && !names.includes('P Home Loan')) || `destination options ${names.length}: ${JSON.stringify(names)}`
     })
     await pick(dest, 'P Maya')
+    await reopen(dest)
     await h.check('3.destination-picked', 'B', async () => (await chipOf(dest, 'P Maya').getAttribute('data-selected')) === 'true' || 'P Maya not selected')
     await chipOf(dest, 'P Maya').click()
     await h.check('3.destination-cleared-on-retap', 'B', async () => {
@@ -264,6 +275,7 @@ async function scenario4(browser) {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
     await pick(group, 'P Maya')
+    await reopen(group)
     const states = {}
     states.collapsed = await idsIn(group)
     await toggleOf(group).click()
@@ -271,6 +283,7 @@ async function scenario4(browser) {
     await group.locator('input[type="search"]').fill('p')
     states.search = await idsIn(group)
     const cat = control(modal, 'category_id')
+    await reopen(cat)
     await toggleOf(cat).click()
     states.categories = await idsIn(cat)
     for (const [name, ids] of Object.entries(states)) {
@@ -423,10 +436,11 @@ async function scenario7(browser) {
       const doc = document.scrollingElement
       if (doc.scrollWidth > doc.clientWidth + 1) wide.push(`document ${doc.scrollWidth}>${doc.clientWidth}`)
       for (const el of document.querySelectorAll('div.fixed, div.fixed *')) {
+        if (el.closest('[data-picker-row]')) continue // the compact chip row scrolls sideways by design
         const style = getComputedStyle(el)
         if (['auto', 'scroll'].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1) wide.push(`${el.tagName}.${el.className} ${el.scrollWidth}>${el.clientWidth}`)
       }
-      const outside = [...document.querySelectorAll('[data-picker] button')].filter((b) => {
+      const outside = [...document.querySelectorAll('[data-picker] button')].filter((b) => !b.closest('[data-picker-row]')).filter((b) => {
         const r = b.getBoundingClientRect()
         return r.left < -0.5 || r.right > window.innerWidth + 0.5
       }).map((b) => b.textContent.trim())
@@ -439,6 +453,7 @@ async function scenario7(browser) {
     for (const state of ['collapsed', 'expanded']) {
       if (state === 'expanded') {
         await toggleOf(group).click()
+        await reopen(cat)
         await toggleOf(cat).click()
       }
       const got = await measure()
@@ -449,6 +464,7 @@ async function scenario7(browser) {
     }
     await h.check('7.expanded.all-17', 'S', async () => (await idsIn(group)).length === 17 || 'the panel is not open')
     await pick(group, 'P Joint Card')
+    await reopen(group)
     await h.check('7.tap-picks', 'B', async () =>
       (await chipOf(group, 'P Joint Card').getAttribute('data-selected')) === 'true' || 'P Joint Card not selected')
   } finally {
@@ -500,10 +516,10 @@ async function scenario8(browser) {
     })
     await page.keyboard.type('etro')
     await page.keyboard.press('Enter')
-    const picked = chipOf(group, 'P Metrobank MC')
+    const line = group.locator('[data-picker-value]')
     await h.check('8.enter-one-picks', 'B', async () =>
-      ((await picked.getAttribute('data-selected')) === 'true' && (await toggle.getAttribute('aria-expanded')) === 'false') || 'P Metrobank MC not picked')
-    await h.check('8.focus-on-picked', 'B', async () => (await isFocused(picked)) || `active ${await activeText(page)}`)
+      ((await line.textContent()) === 'P Metrobank MC (PHP)' && (await group.getAttribute('data-picker')) === 'line') || 'P Metrobank MC not picked')
+    await h.check('8.focus-on-change', 'B', async () => (await isFocused(changeOf(group))) || `active ${await activeText(page)}`)
     await h.check('8.no-submit', 'B', async () => creates.length === 0 || `${creates.length} POST(s) from Enter`)
   } finally {
     await d.checkNoNativeDialogs(h, '8', native)
@@ -532,8 +548,8 @@ async function scenarioA(browser) {
     })
     await recent.click()
     await h.check('a.one-tap', 'B', async () => {
-      const got = { selected: await recent.getAttribute('data-selected'), expanded: await toggleOf(group).getAttribute('aria-expanded') }
-      return (got.selected === 'true' && got.expanded === 'false') || JSON.stringify(got)
+      const got = { line: ((await group.locator('[data-picker-value]').textContent()) || '').trim(), toggles: await toggleOf(group).count(), mode: await group.getAttribute('data-picker') }
+      return (got.line === 'P Petty Cash (PHP)' && got.toggles === 0 && got.mode === 'line') || JSON.stringify(got)
     })
   } finally {
     await d.checkNoNativeDialogs(h, 'a', native)
@@ -572,6 +588,7 @@ async function scenarioB(browser) {
     })
     await h.check('b.category-no-heading', 'B', async () => {
       const cat = control(modal, 'category_id')
+      await reopen(cat)
       await toggleOf(cat).click()
       const n = await cat.locator('[data-picker-heading]').count()
       return n === 0 || `${n} headings for one kind`

@@ -83,6 +83,11 @@ const cancelOf = (modal) => modal.getByRole('button', { name: 'Cancel', exact: t
 const postedBox = (modal) => modal.getByRole('checkbox', { name: 'Mark as posted' })
 const recurringSelect = (modal) => modal.locator('select:has(option[value=""])')
 const chip = chipOf
+// The dialog's pickers are compact (STU-580): a chosen value shows as one line, 'true' when it starts with `name`.
+const chosen = async (group, name) => {
+  const line = group.locator('[data-picker-value]')
+  return (await line.count()) === 1 && ((await line.textContent()) || '').trim().startsWith(name) ? 'true' : 'false'
+}
 const rowFor = (page, description) => page.locator('article[role="button"]').filter({ hasText: description }).first()
 const textOf = async (locator) => ((await locator.textContent({ timeout: 3000 }).catch(() => null)) || '').trim()
 const isFocused = (locator) => locator.evaluate((el) => el === document.activeElement).catch(() => false)
@@ -258,9 +263,9 @@ async function scenarioA(browser) {
     })
     await h.check('a.kept', 'B', async () => {
       const got = {
-        account: await chip(control(modal, 'account_id'), 'Sav Checking').getAttribute('data-selected'),
+        account: await chosen(control(modal, 'account_id'), 'Sav Checking'),
         type: await chip(modal, 'Expense').evaluate((el) => el.classList.contains('bg-ink')),
-        category: await chip(control(modal, 'category_id'), 'Sav Food').getAttribute('data-selected'),
+        category: await chosen(control(modal, 'category_id'), 'Sav Food'),
         date: await control(modal, 'transaction_date').inputValue(),
         posted: await postedBox(modal).isChecked(),
       }
@@ -352,7 +357,7 @@ async function scenarioB(browser) {
     })
     await h.check('b.kept', 'B', async () => {
       const got = {
-        category: await chip(control(modal, 'category_id'), 'Sav Food').getAttribute('data-selected'),
+        category: await chosen(control(modal, 'category_id'), 'Sav Food'),
         date: await control(modal, 'transaction_date').inputValue(),
         posted: await postedBox(modal).isChecked(),
       }
@@ -396,7 +401,7 @@ async function scenarioC(browser) {
 
     await h.check('c.first-posted', 'S', async () => creates.length === 1 || `${creates.length} POST(s)`)
     await h.check('c.destination-kept', 'B', async () =>
-      (await chip(control(modal, 'transfer_to_account_id'), 'Sav Dollars').getAttribute('data-selected')) === 'true' ||
+      (await chosen(control(modal, 'transfer_to_account_id'), 'Sav Dollars')) === 'true' ||
       'the destination chip is not selected')
     await h.check('c.fee-and-received-empty', 'B', async () => {
       const got = [await control(modal, 'transfer_fee').inputValue(), await control(modal, 'received_amount').inputValue(), await control(modal, 'amount').inputValue()]
@@ -775,7 +780,7 @@ async function scenarioE(browser) {
     })
     await h.check('e.nothing-cleared', 'B', async () => {
       const got = [await control(modal, 'description').inputValue(), await control(modal, 'amount').inputValue(),
-        await chip(control(modal, 'account_id'), 'Sav Checking').getAttribute('data-selected')]
+        await chosen(control(modal, 'account_id'), 'Sav Checking')]
       return (got[0] === 'Err probe' && got[1] === '50' && got[2] === 'true') || `kept ${JSON.stringify(got)}`
     })
     await h.check('e.status-mounted-empty', 'B', async () => {

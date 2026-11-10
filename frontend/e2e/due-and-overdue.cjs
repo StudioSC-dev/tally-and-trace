@@ -735,9 +735,12 @@ async function gifts(browser) {
   await modal.getByRole('button', { name: 'Expense', exact: true }).click()
   // Chips outside the quick row are only in the DOM once the picker is expanded; pick() opens it.
   await pick(categories, 'Gifts & Donations')
+  await categories.locator('[data-picker-change]').click() // the compact picker collapses after a pick
   check('(g) the expense categories have Gifts & Donations', await gifts.count(), 1)
   await modal.getByRole('button', { name: 'Income', exact: true }).click()
   // Expand the income picker too, if it is collapsed, so the absence is checked against the full list.
+  const change = categories.locator('[data-picker-change][aria-expanded="false"]')
+  if ((await change.count()) === 1) await change.click()
   const toggle = categories.locator('[data-picker-toggle][aria-expanded="false"]')
   await categories.locator('button').first().waitFor({ timeout: 10000 })
   if ((await toggle.count()) === 1) await toggle.click()
