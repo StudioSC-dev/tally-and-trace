@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Optional, List, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.core.record_dates import check_record_date
@@ -288,6 +289,51 @@ class ForcedDateSet(BaseModel):
     # occurrence's effective date; "cascade" delays this payment and every later
     # one by moving the schedule (entries only; loans keep the strict rule).
     mode: Optional[Literal["overlap", "cascade"]] = None
+
+
+_Day = date  # OverlapOption has a field named ``date``
+
+
+class DateOptionPayment(BaseModel):
+    occurrence_date: date
+    effective_date: date
+    amount: Decimal
+
+
+class OverlapOption(BaseModel):
+    """Joining the next payment: ``date`` is that payment's effective date."""
+    available: bool
+    reason: Optional[str] = None
+    date: _Day
+    payments: List[DateOptionPayment]
+    total: Optional[Decimal] = None
+    currency: CurrencyType
+    statement_close: Optional[date] = None
+
+
+class CascadeMove(BaseModel):
+    occurrence_date: date  # the payment's scheduled day today
+    from_: date = Field(alias="from")  # its effective date today
+    to: date
+    statement_close: Optional[date] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CascadeOption(BaseModel):
+    """Delay all: ``rule`` is "day_of_month" or "days"; ``remaining`` is every
+    payment that moves on a bounded schedule, None on an open-ended one."""
+    available: bool
+    reason: Optional[str] = None
+    rule: Optional[Literal["day_of_month", "days"]] = None
+    moves: List[CascadeMove]
+    remaining: Optional[int] = None
+
+
+class DateOptions(BaseModel):
+    """``GET .../date-options``: the choices for a refused date, read-only."""
+    overlap: OverlapOption
+    cascade: CascadeOption
 
 
 class CascadeUndo(BaseModel):

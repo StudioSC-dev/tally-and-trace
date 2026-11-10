@@ -41,6 +41,7 @@ from app.core.redaction import (
 )
 from app.schemas.budget_entry import (
     CascadeUndo,
+    DateOptions,
     ForcedDateSet,
     BudgetEntryCreate,
     BudgetEntryUpdate,
@@ -1170,6 +1171,31 @@ def set_occurrence_date(
         result["statement_due"] = due.date() if due is not None else None
     db.commit()
     return result
+
+
+@router.get("/{entry_id}/occurrences/{day}/date-options", response_model=DateOptions)
+def occurrence_date_options(
+    entry_id: int,
+    day: date,
+    effective_date: date = Query(..., description="The date the occurrence was refused (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """What the occurrence on the scheduled ``day`` can do instead of moving to
+    ``effective_date``: join the next payment (``mode: "overlap"``) or delay it
+    and every later one (``mode: "cascade"``), each with the exact text its PUT
+    refuses with when unavailable (``posting.date_options``). Read-only: it takes
+    no lock and writes nothing; the PUT re-validates under the locks. The caller
+    needs the write rule on the entry (404 otherwise); an entry with no account is
+    a 400, as for the PUT."""
+    entry = get_record_or_404(db, BudgetEntry, entry_id, current_user, "Budget entry not found")
+    if not RecordAccess(db, current_user).permissions(entry)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Budget entry not found")
+    if not entry.account_id:
+        raise HTTPException(status_code=400, detail=NO_ACCOUNT_MESSAGE)
+    account = db.get(Account, entry.account_id)
+    card = account if _is_card(account) else None
+    return posting.date_options(db, entry, day, effective_date, account, card)
 
 
 @router.delete("/{entry_id}/occurrences/{day}/date", status_code=204)
