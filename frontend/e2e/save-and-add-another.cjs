@@ -833,6 +833,8 @@ async function scenarioE(browser) {
     await control(modal, 'description').fill('Late')
     await control(modal, 'amount').fill('30')
     await control(modal, 'transaction_date').fill('2099-12-31')
+    // STU-582: a future date unticks Mark as posted; tick it again so this save is the posted one it was.
+    await modal.getByRole('checkbox', { name: 'Mark as posted' }).check()
     before = creates.length
     await clickAnother(page, modal)
     await modal.locator('[data-testid="record-date-error"]').first().waitFor({ timeout: 3000 }).catch(() => {})
