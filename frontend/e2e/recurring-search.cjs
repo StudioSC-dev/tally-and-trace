@@ -101,7 +101,22 @@ async function uiLogin(page, u) {
 const searchBox = (page) => page.getByLabel('Search recurring entries')
 const recurringTab = (page) => page.getByRole('button', { name: 'Recurring', exact: true })
 const cards = (page) => page.locator('[data-testid^="kind-section-"] article')
-const names = async (page) => (await page.waitForTimeout(250), await cards(page).locator('p.text-base.font-semibold').allInnerTexts()).map((t) => t.trim()).sort()
+const NAME = 'p.text-base.font-semibold'
+const namesNow = async (page) => (await cards(page).locator(NAME).allInnerTexts()).map((t) => t.trim()).sort()
+/** The listed entry names, once they equal `expected` (the search is client-side), or what is listed when 5s pass. */
+async function names(page, expected) {
+  await page
+    .waitForFunction(
+      ([sel, want]) => {
+        const got = [...document.querySelectorAll(`[data-testid^="kind-section-"] article ${sel}`)].map((el) => el.textContent.trim()).sort()
+        return JSON.stringify(got) === JSON.stringify(want)
+      },
+      [NAME, expected],
+      { timeout: 5000 },
+    )
+    .catch(() => {})
+  return namesNow(page)
+}
 
 /** Six entries over three accounts and two categories: names, accounts, categories and amounts differ. */
 async function seed(u) {
@@ -169,32 +184,34 @@ async function search(browser) {
   const requests = []
   page.on('request', (r) => { if (r.url().includes('/api/v1/')) requests.push(r.url()) })
   const box = searchBox(page)
-  const all = await names(page)
+  const all = await names(page, ['Meralco', 'Monthly top-up', 'Netflix', 'Salary', 'Spotify', 'Water bill'])
   check('(b) six entries listed', all, ['Meralco', 'Monthly top-up', 'Netflix', 'Salary', 'Spotify', 'Water bill'])
 
   await box.pressSequentially('net')
-  check('(b) by name, as typed', await names(page), ['Netflix'])
+  check('(b) by name, as typed', await names(page, ['Netflix']), ['Netflix'])
   await box.fill('NETFLIX')
-  check('(b) case-insensitive: NETFLIX finds Netflix', await names(page), ['Netflix'])
+  check('(b) case-insensitive: NETFLIX finds Netflix', await names(page, ['Netflix']), ['Netflix'])
   await box.fill('maya')
-  check('(b) by account name', await names(page), ['Netflix', 'Salary', 'Spotify'])
+  check('(b) by account name', await names(page, ['Netflix', 'Salary', 'Spotify']), ['Netflix', 'Salary', 'Spotify'])
   await box.fill('BDO')
-  check('(b) by account name, upper case', await names(page), ['Meralco', 'Monthly top-up', 'Water bill'])
+  check('(b) by account name, upper case', await names(page, ['Meralco', 'Monthly top-up', 'Water bill']), ['Meralco', 'Monthly top-up', 'Water bill'])
   await box.fill('kids fund')
-  check('(b) a transfer by its destination account name', await names(page), ['Monthly top-up'])
+  check('(b) a transfer by its destination account name', await names(page, ['Monthly top-up']), ['Monthly top-up'])
   await box.fill('utilities')
-  check('(b) by category name', await names(page), ['Meralco', 'Water bill'])
+  check('(b) by category name', await names(page, ['Meralco', 'Water bill']), ['Meralco', 'Water bill'])
   await box.fill('3200')
-  check('(b) by amount text', await names(page), ['Meralco'])
+  check('(b) by amount text', await names(page, ['Meralco']), ['Meralco'])
   await box.fill('45,000')
-  check('(b) by grouped amount text', await names(page), ['Salary'])
+  check('(b) by grouped amount text', await names(page, ['Salary']), ['Salary'])
   await box.fill('850.50')
-  check('(b) by decimal amount text', await names(page), ['Water bill'])
+  check('(b) by decimal amount text', await names(page, ['Water bill']), ['Water bill'])
   await box.fill('zzz-no-such')
+  await page.getByText('No recurring entries match').waitFor({ timeout: 5000 }).catch(() => {})
   check('(b) no match shows the empty message', await page.getByText('No recurring entries match').count(), 1)
   check('(b) no match lists no entry', await cards(page).count(), 0)
   await box.fill('')
-  check('(b) clearing restores every entry', await cards(page).count(), 6)
+  const restored = await names(page, ['Meralco', 'Monthly top-up', 'Netflix', 'Salary', 'Spotify', 'Water bill'])
+  check('(b) clearing restores every entry', restored.length, 6)
   check('(b) clearing hides the empty message', await page.getByText('No recurring entries match').count(), 0)
   check('(b) the filter is client-side: no request sent while searching', requests, [])
   check('(b) no browser dialog fired', native.count, 0)
