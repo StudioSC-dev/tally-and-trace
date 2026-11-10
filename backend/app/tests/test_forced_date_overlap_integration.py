@@ -63,7 +63,7 @@ def test_an_unknown_mode_is_a_422(world):
     client, me, bank = world["client"], world["me"], world["bank"]
     entry = _entry(client, me, bank, "2026-10-10")
 
-    _overlap(client, me, entry, "2026-10-10", "2026-11-10", expect=422, mode="cascade")
+    _overlap(client, me, entry, "2026-10-10", "2026-11-10", expect=422, mode="delay")
     _overlap(client, me, entry, "2026-10-10", "2026-11-10", expect=422, mode="strict")
 
 

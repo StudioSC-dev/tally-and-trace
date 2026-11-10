@@ -54,9 +54,10 @@ from app.services.forecast import (
     occurrence_links,
 )
 from app.services.payment_dates import (
-    CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_override, effective, effective_at, extend,
-    in_order, load_entry_overrides, load_loan_overrides, refuse_forced_date, set_override,
+    CLEAR_OUT_OF_ORDER, OVERRIDE_REACH, Moved, clear_all, clear_override, effective, effective_at,
+    extend, in_order, load_entry_overrides, load_loan_overrides, refuse_forced_date, set_override,
 )
+from app.services.recurrence import LAST_WEEKDAY, MONTH_FAMILY
 from app.services.recurring_kinds import (
     auto_posts, entry_kind, is_capped, is_card_installment, settlement_block,
 )
@@ -340,6 +341,268 @@ def clear_forced_date(db: Session, entry, day: date) -> None:
         if not in_order(previous, day, following):
             raise HTTPException(status_code=409, detail=CLEAR_OUT_OF_ORDER)
     clear_override(db, day, budget_entry_id=entry.id)
+
+
+# --- Delay all: a cascade moves the schedule (STU-581) ----------------------------------------
+
+CASCADE_LATER = "A delay moves payments later"
+CASCADE_SEMI_MONTHLY = "Delay all isn't available for a twice-a-month schedule"
+CASCADE_LAST_WEEKDAY = "Delay all isn't available for a last-weekday schedule"
+CASCADE_INSTALLMENT = ("Delay all isn't available for a card installment; "
+                       "change one month's date instead")
+CASCADE_UNDO_GONE = "This delay can no longer be undone"
+CASCADE_UNDO_STALE = "This entry changed after the delay, so it can't be undone"
+
+
+def _short(day: date) -> str:
+    return f"{day:%b} {day.day}"
+
+
+def cascade_not_first(oldest: date) -> str:
+    return f"Only the oldest unpaid payment ({_short(oldest)}) can delay the ones after it"
+
+
+def cascade_forced(day: date) -> str:
+    return f"{_short(day)} has its own date; clear it first"
+
+
+def cascade_recorded(day: date) -> str:
+    return f"{_short(day)} is already recorded"
+
+
+@dataclass(frozen=True)
+class CascadePlan:
+    """What a cascade writes: the schedule from ``chosen`` on.
+
+    ``start`` is the nominal day that moves (the oldest occurrence no posted row
+    stands for). ``rule`` is "day_of_month" for the month family and "days" for
+    weekly and bi-weekly. ``remaining`` counts the payments that move on a
+    bounded schedule (an end date or a cap), None when it is open-ended."""
+    start: date
+    chosen: date
+    rule: str
+    next_occurrence: datetime
+    anchor_day: Optional[int]
+    day_rule: Optional[str]
+    end_date: Optional[datetime]
+    max_occurrences: Optional[int]
+    remaining: Optional[int]
+
+
+def _oldest_unrecorded(entry, posted: Counter) -> Optional[datetime]:
+    """The schedule's first occurrence from ``next_occurrence`` that no posted
+    linked row stands for (``unrecorded_occurrences``' rule: each posted row
+    stands for one occurrence on its day), None when the walk ends first. Only
+    the posted rows can be passed over, so the walk is bounded by their count."""
+    posted = Counter(posted)
+    start = _naive(entry.next_occurrence)
+    for occ in capped_distinct_days(entry, start, datetime.max,
+                                    max_steps=sum(posted.values()) + 2):
+        if posted[occ.date()]:
+            posted[occ.date()] -= 1
+            continue
+        return occ
+    return None
+
+
+def plan_cascade(entry, day: date, chosen: date, *, links: List[Tuple[date, bool]],
+                 moved: Moved, card: Optional[Account] = None,
+                 installment: bool = False) -> CascadePlan:
+    """The schedule after delaying the occurrence on the nominal ``day`` to
+    ``chosen`` and every later one with it; an ``HTTPException`` for a refusal.
+    Reads nothing: ``links`` is ``[(day, is_posted)]`` of the entry's linked rows
+    (``_linked_rows``), ``moved`` its forced dates, ``card`` its credit account
+    and ``installment`` whether it is a card installment.
+
+    Refused: semi-monthly, ``last_weekday`` and card installments; a ``day`` that
+    is not the oldest occurrence no posted row stands for (422, naming it), or
+    that has a linked row itself (409); ``chosen`` on or before the payment's
+    effective date, more than two years ahead or outside the record dates; any
+    later forced date (422) or later linked row (409); on a card, ``chosen``
+    inside a closed statement.
+
+    The month family keeps the day of the month (``anchor_day`` = ``chosen``'s
+    day, ``day_rule`` cleared); weekly and bi-weekly step 7 or 14 days from
+    ``chosen``. An end date keeps the same number of remaining payments: the new
+    one is the m-th new occurrence. A cap keeps ``max_occurrences``, less any
+    occurrence before ``day`` that a posted row already stands for.
+    """
+    if entry.cadence == RecurrenceFrequency.SEMI_MONTHLY:
+        raise HTTPException(status_code=422, detail=CASCADE_SEMI_MONTHLY)
+    if entry.day_rule == LAST_WEEKDAY:
+        raise HTTPException(status_code=422, detail=CASCADE_LAST_WEEKDAY)
+    if installment:
+        raise HTTPException(status_code=422, detail=CASCADE_INSTALLMENT)
+    refuse_far_occurrence(day)
+    walk = schedule_walk(entry, day)
+    scheduled = bool(walk) and walk[-1].date() == day
+    oldest = _oldest_unrecorded(entry, Counter(d for d, is_posted in links if is_posted))
+    if oldest is None or oldest.date() != day:
+        if oldest is not None and (scheduled or day < oldest.date()):
+            raise HTTPException(status_code=422, detail=cascade_not_first(oldest.date()))
+        if scheduled:
+            raise HTTPException(status_code=409, detail=ALREADY_RECORDED)
+        raise HTTPException(status_code=422, detail="Not an occurrence of this schedule")
+    if any(linked == day for linked, _ in links):
+        raise HTTPException(status_code=409, detail=ALREADY_RECORDED)
+    if chosen <= effective(moved, day):
+        raise HTTPException(status_code=422, detail=CASCADE_LATER)
+    refuse_far_occurrence(chosen)
+    refuse_record_date(chosen)
+    later_forced = sorted(d for d in (moved or {}) if d > day)
+    if later_forced:
+        raise HTTPException(status_code=422, detail=cascade_forced(later_forced[0]))
+    later_linked = sorted(linked for linked, _ in links if linked > day)
+    if later_linked:
+        raise HTTPException(status_code=409, detail=cascade_recorded(later_linked[0]))
+    if card is not None:
+        refuse_closed_statement(card, chosen)
+
+    month = entry.cadence in MONTH_FAMILY
+    next_occurrence = datetime.combine(chosen, _naive(entry.next_occurrence).time())
+    anchor_day = chosen.day if month else None
+    before = len(walk) - 1  # occurrences before ``day`` that posted rows stand for
+    max_occurrences = entry.max_occurrences
+    remaining = None
+    if is_capped(entry):
+        max_occurrences = entry.max_occurrences - before
+        remaining = max_occurrences
+    end_date = entry.end_date
+    if entry.end_date is not None:
+        old_end = _naive(entry.end_date)
+        remaining = len(schedule_walk(entry, old_end.date())) - before
+        shape = SimpleNamespace(
+            cadence=entry.cadence, next_occurrence=next_occurrence, anchor_day=anchor_day,
+            day_rule=None, end_date=None, end_mode="indefinite", max_occurrences=None)
+        moved_walk = capped_distinct_days(shape, next_occurrence, datetime.max,
+                                          max_steps=remaining)
+        last = moved_walk[-1]
+        end_date = max(last, datetime.combine(last.date(), old_end.time()))
+    return CascadePlan(start=day, chosen=chosen, rule="day_of_month" if month else "days",
+                       next_occurrence=next_occurrence, anchor_day=anchor_day, day_rule=None,
+                       end_date=end_date, max_occurrences=max_occurrences, remaining=remaining)
+
+
+def _schedule_state(entry, moved: Moved) -> dict:
+    """The columns a cascade changes or an Undo restores, and the entry's forced
+    dates, as JSON values."""
+    def stamp(value):
+        return _naive(value).isoformat() if value is not None else None
+
+    return {
+        "next_occurrence": stamp(entry.next_occurrence),
+        "anchor_day": entry.anchor_day,
+        "day_rule": entry.day_rule,
+        "end_date": stamp(entry.end_date),
+        "max_occurrences": entry.max_occurrences,
+        "auto_post_enabled": bool(entry.auto_post_enabled),
+        "installment_reviewed_at": _iso(entry.installment_reviewed_at),
+        "overrides": sorted([nominal.isoformat(), forced.isoformat()]
+                            for nominal, forced in (moved or {}).items()),
+    }
+
+
+def cascade(db: Session, entry, actor: User, day: date, chosen: date,
+            account: Optional[Account], card: Optional[Account]) -> Tuple[CascadePlan, dict]:
+    """Delay the occurrence on ``day`` and every later one to start on ``chosen``,
+    without committing: ``(plan, previous)``, ``previous`` being the schedule
+    state before it (``_schedule_state``).
+
+    The caller holds the owner's budget lock, the entry lock and the account
+    lock, so the links and forced dates read here stand until it commits. The
+    entry's schedule columns are set from ``plan_cascade`` and every forced date
+    goes: the moved payment's own is replaced by the schedule itself, and any
+    left on earlier recorded days was validated against the old walk (a
+    schedule edit drops them too). The review and auto-post flags are left as
+    they are: the next date only moves later."""
+    links = [(_naive(when).date(), is_posted)
+             for _, when, _, is_posted in _linked_rows(db, [entry.id], occurrence_match=True)]
+    moved = _moved(db, entry)
+    plan = plan_cascade(entry, day, chosen, links=links, moved=moved, card=card,
+                        installment=is_card_installment(entry, account))
+    previous = _schedule_state(entry, moved)
+    entry.next_occurrence = plan.next_occurrence
+    entry.anchor_day = plan.anchor_day
+    entry.day_rule = plan.day_rule
+    entry.end_date = plan.end_date
+    entry.max_occurrences = plan.max_occurrences
+    entry.updated_at = utc_now()
+    clear_all(db, budget_entry_id=entry.id)
+    db.flush()
+    return plan, previous
+
+
+def _undo_signature(body: str) -> str:
+    import hashlib
+    import hmac
+
+    from app.core.config import settings
+
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), f"cascade-undo.{body}".encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+def cascade_undo_token(entry, previous: dict) -> str:
+    """A signed token for Undo: the entry, the schedule state before the
+    cascade (``previous``) and the state it left (the entry as it is now,
+    ``updated_at`` included). Signed with the server's key, so a client can
+    only send back a state the server wrote."""
+    import base64
+    import json
+
+    payload = {"entry_id": entry.id, "previous": previous,
+               "after": _schedule_state(entry, {}), "version": _iso(entry.updated_at)}
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    return f"{body}.{_undo_signature(body)}"
+
+
+def undo_cascade(db: Session, entry, actor: User, token: str) -> None:
+    """Put back the schedule a cascade moved, without committing.
+
+    The caller holds the owner's budget lock and then the entry lock. 422 for a
+    token that is not this entry's or not the server's; 409 when the entry has
+    changed since the cascade (its ``updated_at`` or schedule columns, or any
+    forced date set since). Restores the schedule columns, the review and
+    auto-post flags and the forced dates as they were, writing them directly:
+    the schedule edit would turn auto-post off for a next date moved earlier
+    and drop every forced date."""
+    import base64
+    import binascii
+    import hmac
+    import json
+
+    body, _, signature = token.partition(".")
+    try:
+        if not hmac.compare_digest(signature.encode("utf-8"),
+                                   _undo_signature(body).encode("utf-8")):
+            raise ValueError("signature")
+        payload = json.loads(base64.urlsafe_b64decode(body.encode("ascii")))
+    except (ValueError, binascii.Error, UnicodeError):
+        raise HTTPException(status_code=422, detail=CASCADE_UNDO_GONE) from None
+    if payload.get("entry_id") != entry.id:
+        raise HTTPException(status_code=422, detail=CASCADE_UNDO_GONE)
+    if (payload["version"] != _iso(entry.updated_at)
+            or payload["after"] != _schedule_state(entry, _moved(db, entry))):
+        raise HTTPException(status_code=409, detail=CASCADE_UNDO_STALE)
+
+    previous = payload["previous"]
+
+    def instant(value):
+        return datetime.fromisoformat(value) if value is not None else None
+
+    entry.next_occurrence = instant(previous["next_occurrence"])
+    entry.anchor_day = previous["anchor_day"]
+    entry.day_rule = previous["day_rule"]
+    entry.end_date = instant(previous["end_date"])
+    entry.max_occurrences = previous["max_occurrences"]
+    entry.auto_post_enabled = previous["auto_post_enabled"]
+    entry.installment_reviewed_at = instant(previous["installment_reviewed_at"])
+    entry.updated_at = utc_now()
+    for nominal, forced in previous["overrides"]:
+        set_override(db, actor.id, date.fromisoformat(nominal), date.fromisoformat(forced),
+                     budget_entry_id=entry.id)
+    db.flush()
 
 
 def _create(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
