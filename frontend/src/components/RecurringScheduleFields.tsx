@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { dateForDaySetting, isMonthFamily, parseEntryDate, settleKindChoice } from '@tally-trace/shared'
+import { dateForDaySetting, dateForWeekday, isMonthFamily, parseEntryDate, settleKindChoice, WEEKDAY_NAMES, weekdayOf } from '@tally-trace/shared'
 import type {
   BillingKindChoice,
   DaySetting,
@@ -58,6 +58,8 @@ interface RecurringScheduleFieldsProps {
   idPrefix?: string
   /** 44px controls and buttons, for a dialog used on a phone (Repeat in Add Transaction). */
   touch?: boolean
+  /** The date is fixed (Repeat): the weekday is shown, not changed. */
+  dateFixed?: boolean
 }
 
 /**
@@ -83,6 +85,7 @@ export function RecurringScheduleFields({
   finalMonthHelp,
   idPrefix = 'recurring',
   touch = false,
+  dateFixed = false,
 }: RecurringScheduleFieldsProps) {
   const control = touch ? 'mt-1 block w-full min-h-11 border border-line px-3 py-2' : 'mt-1 block w-full border border-line px-3 py-2'
   const { chargedOnClose, cardCloseDay, cadence } = state
@@ -92,6 +95,9 @@ export function RecurringScheduleFields({
       day,
       next_occurrence: dateForDaySetting(prev.next_occurrence, day),
     }))
+
+  const weekly = (cadence === 'weekly' || cadence === 'biweekly') && !chargedOnClose
+  const weekday = weekdayOf(draft.next_occurrence) ?? 1
 
   return (
     <>
@@ -196,6 +202,37 @@ export function RecurringScheduleFields({
                       {preview.dates.length > 0 && <p>Next: {preview.dates.join(', ')}</p>}
                     </div>
                   ) : null}
+                </div>
+              )}
+
+              {weekly && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-body">Day of week</label>
+                      <select
+                        value={weekday}
+                        disabled={dateFixed}
+                        onChange={(e) => {
+                          // Forward to the next such day on or after the date, never earlier.
+                          const picked = Number(e.target.value)
+                          onChange((prev) => ({ ...prev, next_occurrence: dateForWeekday(prev.next_occurrence, picked) }))
+                        }}
+                        className={`${control} disabled:opacity-60`}
+                        data-testid="weekday-select"
+                      >
+                        {(dateFixed ? [weekday] : [1, 2, 3, 4, 5, 6, 0]).map((day) => (
+                          <option key={day} value={day}>{WEEKDAY_NAMES[day]}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {preview && !('error' in preview) && (
+                    <div className="text-xs text-muted" data-testid="schedule-preview">
+                      <p className="font-medium text-body">{preview.label}</p>
+                      {preview.dates.length > 0 && <p>Next: {preview.dates.join(', ')}</p>}
+                    </div>
+                  )}
                 </div>
               )}
 
