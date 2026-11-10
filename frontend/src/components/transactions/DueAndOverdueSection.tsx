@@ -47,12 +47,9 @@ import {
   tabKeyTarget,
   toggleSelection,
   transactionDescription,
-  transactionStatus,
   UPCOMING_LIMIT,
   upcomingShownText,
   upcomingWindow,
-  wallDay,
-  transactionDate,
 } from '@tally-trace/shared'
 import type {
   BatchFailure,
@@ -70,7 +67,6 @@ import type {
   CreditCheck,
   InstallmentPlan,
   SubscriptionRow,
-  TransactionStatus,
   UpcomingOccurrence,
   UpcomingRow,
 } from '@tally-trace/shared'
@@ -94,12 +90,10 @@ import { apiErrorMessage } from '../../utils/apiError'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
 import { CreditCheckBadge } from '../CreditSummary'
-import { ForceDateDialog } from '../ForceDateDialog'
-import type { ForceDateTarget } from '../ForceDateDialog'
-import { InstallmentReviewDialog } from '../InstallmentReviewDialog'
-import { MarkPaidDialog } from '../MarkPaidDialog'
 import { Pager } from '../Pager'
 import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
+import { UpcomingTransactionRow } from './UpcomingTransactionRow'
+import { useOccurrenceDialogs } from './useOccurrenceDialogs'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -169,8 +163,6 @@ const TABS: readonly TabSpec[] = [
   { id: 'subscriptions', label: 'Subscriptions', slug: 'subscriptions', badgeTestId: 'due-subscriptions-count', usesWindow: false },
   { id: 'installments', label: 'Installments', slug: 'installments', badgeTestId: 'due-installments-count', usesWindow: false },
 ]
-
-const STATUS_LABELS: Record<TransactionStatus, string> = { planned: 'Planned', pending: 'Pending', posted: 'Posted' }
 
 const addDays = (day: string, n: number): string => {
   const d = new Date(`${day}T00:00:00Z`)
@@ -265,23 +257,11 @@ interface Props {
   accountCurrencies?: ReadonlyMap<number, CurrencyCode>
 }
 
-interface ReviewTarget {
-  entryId: number
-  name: string
-}
-
 /** The last batch review's outcome: its line and one failure per entry that was not reviewed, kept for its Manila day. */
 interface BatchResultView {
   day: string
   text: string | null
   failures: BatchFailure[]
-}
-
-interface RecordTarget {
-  entryId: number
-  name: string
-  occurrenceDate: string
-  action: RecurringAction | undefined
 }
 
 const buttonClass =
@@ -295,15 +275,12 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   // The selected tab: Due and overdue on every mount, never stored.
   const [tab, setTab] = useState<DueTab>('due')
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const [target, setTarget] = useState<RecordTarget | null>(null)
-  // The occurrence whose date is being changed.
-  const [forceTarget, setForceTarget] = useState<ForceDateTarget | null>(null)
   // The card whose statement is being paid.
   const [payCardId, setPayCardId] = useState<number | null>(null)
-  // The installment being reviewed, and whether the review notice is expanded.
-  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
+  // Whether the review notice is expanded.
   const [noticeOpen, setNoticeOpen] = useState(false)
   // Batch review: the ticked ids, whether a batch runs, and the last run's result (kept until the next run or the next day).
+  const { openRecord, openChangeDate, openReview, dialogs } = useOccurrenceDialogs(onChanged)
   const askConfirm = useConfirm()
   const [reviewBatch] = useReviewInstallmentsMutation()
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set())
@@ -604,21 +581,16 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     })
   }
 
-  const review = (entryId: number, name: string) => setReviewTarget({ entryId, name })
+  const review = openReview
 
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
-    setTarget({
-      entryId: row.entryId,
-      name: row.name,
-      occurrenceDate: row.kind === 'missed' ? row.oldest : row.occurrenceDate,
-      action,
-    })
+    openRecord(row.entryId, row.name, row.kind === 'missed' ? row.oldest : row.occurrenceDate, action)
 
   // Change date: the occurrence's date, for a caller who can record it (the server's `can_mark_paid`).
   const changeDateButton = (entryId: number, name: string, occurrenceDate: string, effectiveDate?: string) => (
     <button
       type="button"
-      onClick={() => setForceTarget({ kind: 'entry', id: entryId, name, occurrenceDate, ...(effectiveDate ? { effectiveDate } : {}) })}
+      onClick={() => openChangeDate(entryId, name, occurrenceDate, effectiveDate)}
       className={buttonClass}
       data-testid="row-change-date"
     >
@@ -848,44 +820,9 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     )
   }
 
-  // An Upcoming transaction: one button that opens it in the page's action modal.
-  const upcomingTransactionRow = (txn: Transaction) => {
-    // A Limited row has no account id, so it keeps its stored figure.
-    const accountCurrency = txn.view === 'limited' ? undefined : accountCurrencies?.get(txn.account_id)
-    const shown = accountCurrency ? rowAmount(txn, accountCurrency) : { amount: txn.amount, currency: txn.currency }
-    const day = wallDay(transactionDate(txn))
-    return (
-      <li
-        key={`txn:${txn.id}`}
-        data-testid="due-row"
-        data-kind="upcoming"
-        data-view={txn.view}
-        data-source={`transaction:${txn.id}`}
-        data-day={day}
-      >
-        <button
-          type="button"
-          onClick={() => onOpenTransaction(txn)}
-          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-sunken transition-colors focus-ring"
-          data-testid="upcoming-transaction"
-        >
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-ink">{transactionDescription(txn) ?? 'Transaction'}</p>
-            <p className="text-xs text-muted">
-              {formatEntryDate(day)} · {STATUS_LABELS[transactionStatus(txn, localDay)]}
-            </p>
-          </div>
-          <div className="flex-shrink-0 text-right">
-            <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
-          </div>
-        </button>
-      </li>
-    )
-  }
-
   const upcomingRow = (row: UpcomingRow) =>
     row.kind === 'transaction'
-      ? upcomingTransactionRow(row.transaction)
+      ? <UpcomingTransactionRow key={row.key} transaction={row.transaction} localDay={localDay} onOpen={onOpenTransaction} accountCurrencies={accountCurrencies} />
       : occurrenceRow(row.occurrence, row.key, upcomingOccs?.auto_post_scheduled ?? false)
 
   // A future occurrence as a compact row, in Upcoming or Subscriptions; its actions open this card's dialogs.
@@ -895,18 +832,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       occurrence={occurrence}
       scheduled={scheduled}
       credit={credit}
-      onRecord={(action) =>
-        setTarget({ entryId: occurrence.entry_id, name: occurrence.name, occurrenceDate: occurrence.occurrence_date, action })
-      }
+      onRecord={(action) => openRecord(occurrence.entry_id, occurrence.name, occurrence.occurrence_date, action)}
       onReview={() => review(occurrence.entry_id, occurrence.name)}
       onChangeDate={() =>
-        setForceTarget({
-          kind: 'entry',
-          id: occurrence.entry_id,
-          name: occurrence.name,
-          occurrenceDate: occurrence.occurrence_date,
-          ...(occurrence.effective_date ? { effectiveDate: occurrence.effective_date } : {}),
-        })
+        openChangeDate(occurrence.entry_id, occurrence.name, occurrence.occurrence_date, occurrence.effective_date ?? undefined)
       }
     />
   )
@@ -967,7 +896,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                 <button
                   key={action}
                   type="button"
-                  onClick={() => setTarget({ entryId: plan.entry_id, name: plan.name, occurrenceDate: next, action })}
+                  onClick={() => openRecord(plan.entry_id, plan.name, next, action)}
                   className={index === 0 ? primaryButtonClass : buttonClass}
                   data-testid={ACTION_TEST_IDS[action]}
                 >
@@ -1405,34 +1334,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           </button>
         </div>
       )}
-      {target && (
-        <MarkPaidDialog
-          entryId={target.entryId}
-          name={target.name}
-          occurrenceDate={target.occurrenceDate}
-          {...(target.action ? { action: target.action } : {})}
-          onClose={() => setTarget(null)}
-          onPaid={onChanged}
-        />
-      )}
-      {forceTarget && (
-        <ForceDateDialog
-          key={`${forceTarget.kind}:${forceTarget.id}:${forceTarget.occurrenceDate}`}
-          target={forceTarget}
-          onClose={() => setForceTarget(null)}
-          onChanged={onChanged}
-        />
-      )}
       {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} />}
-      {reviewTarget && (
-        <InstallmentReviewDialog
-          key={reviewTarget.entryId}
-          entryId={reviewTarget.entryId}
-          name={reviewTarget.name}
-          onClose={() => setReviewTarget(null)}
-          onReviewed={onChanged}
-        />
-      )}
+      {dialogs}
     </section>
   )
 }
