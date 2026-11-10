@@ -471,3 +471,59 @@ def test_cascade_access_and_stale_day(world):
     for who in (viewer, stranger):
         _undo(client, who, entry, token, expect=404)
     check()
+
+
+@pytest.mark.parametrize("how", ["mark_paid_no_advance", "hand_linked"])
+def test_cascade_undo_refuses_a_row_linked_since(world, how):
+    """A row linked to a new-schedule day without touching the entry: Undo is a 409."""
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    entry = _entry(client, me, bank, "2026-09-10")
+    token = _cascade(client, me, entry, "2026-09-10", "2026-11-12").json()["cascade"]["undo_token"]
+    version = _row(db, entry)["updated_at"]
+
+    if how == "mark_paid_no_advance":
+        r = client.post(f"{API}/budget-entries/{entry}/materialize",
+                        json={"advance": False, "occurrence_date": "2026-12-12T00:00:00"},
+                        headers=me["headers"])
+        assert r.status_code in (200, 201), r.text
+    else:
+        _link(client, me, bank, entry, "2026-12-12", posted=True)
+    assert _row(db, entry)["updated_at"] == version  # the entry itself is untouched
+    assert _txn_count(db, entry) == 1
+
+    check = _unchanged(db, entry)
+    r = _undo(client, me, entry, token, expect=409)
+    assert r.json()["detail"] == "This entry changed after the delay, so it can't be undone"
+    check()
+
+
+def test_cascade_undo_restores_a_capped_count(world):
+    """The capped entry whose first month is posted: 4 becomes 3, and Undo puts back 4."""
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    entry = _entry(client, me, bank, "2026-09-10", name="Desk", end_mode="after_occurrences",
+                   max_occurrences=4)
+    _link(client, me, bank, entry, "2026-09-10", posted=True)
+    walk = _all(db, entry)
+
+    token = _cascade(client, me, entry, "2026-10-10", "2026-11-12").json()["cascade"]["undo_token"]
+    assert _row(db, entry)["max_occurrences"] == 3
+    _undo(client, me, entry, token)
+
+    assert _row(db, entry)["max_occurrences"] == 4
+    assert _all(db, entry) == walk
+
+
+def test_cascade_drops_and_undo_restores_a_forced_date_on_a_posted_day(world):
+    """Sep 10 forced to Sep 12, then recorded by a posted row; Oct 10 cascades."""
+    client, me, bank, db = world["client"], world["me"], world["bank"], world["db"]
+    entry = _entry(client, me, bank, "2026-09-10")
+    _force(client, me, entry, "2026-09-10", "2026-09-12")
+    _link(client, me, bank, entry, "2026-09-10", posted=True)
+    assert _overrides(db, budget_entry_id=entry) == [("2026-09-10", "2026-09-12")]
+
+    token = _cascade(client, me, entry, "2026-10-10", "2026-11-12").json()["cascade"]["undo_token"]
+    assert _overrides(db, budget_entry_id=entry) == []
+    _undo(client, me, entry, token)
+
+    assert _overrides(db, budget_entry_id=entry) == [("2026-09-10", "2026-09-12")]
+    assert _row(db, entry)["next_occurrence"] == datetime(2026, 9, 10, tzinfo=timezone.utc)

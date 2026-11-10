@@ -542,16 +542,27 @@ def _undo_signature(body: str) -> str:
                     hashlib.sha256).hexdigest()
 
 
-def cascade_undo_token(entry, previous: dict) -> str:
+def _links_fingerprint(db: Session, entry) -> list:
+    """``[[transaction id, day, is_posted]]`` of the rows standing for the
+    entry's occurrences (``_linked_rows``), sorted. A row can be linked without
+    touching the entry (Mark paid with ``advance`` false, or a transaction
+    entered by hand), so Undo compares these too."""
+    return sorted([txn_id, _naive(when).date().isoformat(), bool(is_posted)]
+                  for _, when, txn_id, is_posted in _linked_rows(
+                      db, [entry.id], occurrence_match=True))
+
+
+def cascade_undo_token(db: Session, entry, previous: dict) -> str:
     """A signed token for Undo: the entry, the schedule state before the
     cascade (``previous``) and the state it left (the entry as it is now,
-    ``updated_at`` included). Signed with the server's key, so a client can
-    only send back a state the server wrote."""
+    ``updated_at`` included, and its linked rows). Signed with the server's
+    key, so a client can only send back a state the server wrote."""
     import base64
     import json
 
     payload = {"entry_id": entry.id, "previous": previous,
-               "after": _schedule_state(entry, {}), "version": _iso(entry.updated_at)}
+               "after": _schedule_state(entry, {}), "version": _iso(entry.updated_at),
+               "links": _links_fingerprint(db, entry)}
     body = base64.urlsafe_b64encode(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).decode("ascii")
     return f"{body}.{_undo_signature(body)}"
@@ -562,8 +573,8 @@ def undo_cascade(db: Session, entry, actor: User, token: str) -> None:
 
     The caller holds the owner's budget lock and then the entry lock. 422 for a
     token that is not this entry's or not the server's; 409 when the entry has
-    changed since the cascade (its ``updated_at`` or schedule columns, or any
-    forced date set since). Restores the schedule columns, the review and
+    changed since the cascade (its ``updated_at`` or schedule columns, any
+    forced date set since, or any row linked, unlinked or posted since). Restores the schedule columns, the review and
     auto-post flags and the forced dates as they were, writing them directly:
     the schedule edit would turn auto-post off for a next date moved earlier
     and drop every forced date."""
@@ -583,7 +594,8 @@ def undo_cascade(db: Session, entry, actor: User, token: str) -> None:
     if payload.get("entry_id") != entry.id:
         raise HTTPException(status_code=422, detail=CASCADE_UNDO_GONE)
     if (payload["version"] != _iso(entry.updated_at)
-            or payload["after"] != _schedule_state(entry, _moved(db, entry))):
+            or payload["after"] != _schedule_state(entry, _moved(db, entry))
+            or payload["links"] != _links_fingerprint(db, entry)):
         raise HTTPException(status_code=409, detail=CASCADE_UNDO_STALE)
 
     previous = payload["previous"]

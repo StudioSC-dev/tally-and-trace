@@ -1158,7 +1158,7 @@ def set_occurrence_date(
                       "previous": {field: previous[field] for field in (
                           "next_occurrence", "anchor_day", "day_rule", "end_date",
                           "max_occurrences")},
-                      "undo_token": posting.cascade_undo_token(entry, previous)}}
+                      "undo_token": posting.cascade_undo_token(db, entry, previous)}}
     else:
         posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card,
                                 overlap=body.mode == "overlap")
@@ -1205,8 +1205,8 @@ def undo_cascade(
     they were before the cascade (``posting.undo_cascade``), not through the
     schedule edit, which would turn auto-post off and drop the forced dates.
     422 for a token that is not this entry's; 409 once the entry has changed
-    since the cascade (a payment recorded, an edit, a forced date set, or this
-    Undo already applied). Returns the entry.
+    since the cascade (a payment recorded or linked, an edit, a forced date set,
+    or this Undo already applied). Returns the entry.
     """
     entry = _lock_entry_to_post(db, current_user, entry_id)
     posting.undo_cascade(db, entry, current_user, body.undo_token)
