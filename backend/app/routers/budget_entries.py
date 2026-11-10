@@ -40,6 +40,7 @@ from app.core.redaction import (
     Redactor, full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
 )
 from app.schemas.budget_entry import (
+    CascadeUndo,
     ForcedDateSet,
     BudgetEntryCreate,
     BudgetEntryUpdate,
@@ -1128,6 +1129,15 @@ def set_occurrence_date(
     ``mode: "overlap"`` also allows the date of the next occurrence (never the
     previous one's); absent or null keeps the strict rule. Every other refusal stands.
 
+    ``mode: "cascade"`` (Delay all) delays this payment and every later one by
+    moving the schedule itself (``posting.plan_cascade``): ``next_occurrence``
+    becomes ``effective_date``, nothing is forced and every forced date goes.
+    Only the oldest occurrence no posted row stands for may cascade, and only
+    later. Returns ``{occurrence_date, effective_date}`` (both the new scheduled
+    day) and ``cascade: {from, rule, remaining, previous, undo_token}``:
+    ``previous`` is the schedule before it and ``undo_token`` puts it back
+    (``POST /budget-entries/{id}/cascade-undo``).
+
     On a card the date decides which statement bills the charge, by design: a
     charge that posts late falls into the next one. A date inside a closed
     statement is a 422 (``posting.STATEMENT_CLOSED``); an unrecorded occurrence on
@@ -1139,9 +1149,20 @@ def set_occurrence_date(
     entry = _lock_entry_to_post(db, current_user, entry_id)
     account = locking.lock_accounts(db, [entry.account_id]).get(entry.account_id)
     card = account if _is_card(account) else None
-    posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card,
-                            overlap=body.mode == "overlap")
-    result = {"occurrence_date": day, "effective_date": body.effective_date}
+    if body.mode == "cascade":
+        plan, previous = posting.cascade(db, entry, current_user, day, body.effective_date,
+                                         account, card)
+        result = {"occurrence_date": body.effective_date, "effective_date": body.effective_date,
+                  "cascade": {
+                      "from": day, "rule": plan.rule, "remaining": plan.remaining,
+                      "previous": {field: previous[field] for field in (
+                          "next_occurrence", "anchor_day", "day_rule", "end_date",
+                          "max_occurrences")},
+                      "undo_token": posting.cascade_undo_token(db, entry, previous)}}
+    else:
+        posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card,
+                                overlap=body.mode == "overlap")
+        result = {"occurrence_date": day, "effective_date": body.effective_date}
     if card is not None:
         due = statement_due_date(card, body.effective_date,
                                  due_overrides=load_due_overrides(db, [card.id])[card.id])
@@ -1168,6 +1189,30 @@ def clear_occurrence_date(
     posting.clear_forced_date(db, entry, day)
     db.commit()
     return Response(status_code=204)
+
+
+@router.post("/{entry_id}/cascade-undo", response_model=BudgetEntryOut)
+def undo_cascade(
+    entry_id: int,
+    body: CascadeUndo,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Undo a Delay all (``mode: "cascade"``) with the ``undo_token`` it replied with.
+
+    The same access and locks as the PUT (``_lock_entry_to_post``). Restores the
+    schedule columns, the review and auto-post flags and the forced dates as
+    they were before the cascade (``posting.undo_cascade``), not through the
+    schedule edit, which would turn auto-post off and drop the forced dates.
+    422 for a token that is not this entry's; 409 once the entry has changed
+    since the cascade (a payment recorded or linked, an edit, a forced date set,
+    or this Undo already applied). Returns the entry.
+    """
+    entry = _lock_entry_to_post(db, current_user, entry_id)
+    posting.undo_cascade(db, entry, current_user, body.undo_token)
+    db.commit()
+    db.refresh(entry)
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
 
 
 @router.post("/{entry_id}/materialize", response_model=TransactionOut, status_code=201)

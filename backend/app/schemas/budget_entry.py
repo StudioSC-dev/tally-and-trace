@@ -285,8 +285,16 @@ class ForcedDateSet(BaseModel):
 
     effective_date: date
     # Absent or null: the strict neighbour rule. "overlap" also allows the next
-    # occurrence's effective date (entries only; loans keep the strict rule).
-    mode: Optional[Literal["overlap"]] = None
+    # occurrence's effective date; "cascade" delays this payment and every later
+    # one by moving the schedule (entries only; loans keep the strict rule).
+    mode: Optional[Literal["overlap", "cascade"]] = None
+
+
+class CascadeUndo(BaseModel):
+    """``POST /budget-entries/{id}/cascade-undo``: the ``undo_token`` a cascade replied with."""
+    model_config = ConfigDict(extra="forbid")
+
+    undo_token: str = Field(min_length=1, max_length=65536)
 
 
 class MaterializeDueItem(BaseModel):
