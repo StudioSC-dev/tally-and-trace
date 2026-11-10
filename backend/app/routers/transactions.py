@@ -872,37 +872,26 @@ def _recompute_budget_total(db: Session, allocation: Allocation,
     allocation.updated_at = utc_now()  # allocations.updated_at is timestamptz
     db.flush()
 
-@router.get("/", response_model=TransactionListResponse)
-def get_transactions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    account_ids: Optional[List[int]] = Query(None, alias="account_ids", description="Filter by account IDs"),
-    category_ids: Optional[List[int]] = Query(None, alias="category_ids", description="Filter by category IDs"),
-    category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
-        None, max_length=50,
-        description="Filter by category name, matching any creator's category of that name"),
-    uncategorized: bool = Query(
-        False, description="Also match income and expense rows shown with no category; "
-                           "ORed with category_names"),
-    entered_by: Optional[Literal["me"]] = Query(
-        None, description="'me' keeps only rows the caller owns (entered by, or materialised for, them)"),
-    allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),
-    transaction_types: Optional[List[str]] = Query(None, alias="transaction_types", description="Filter by transaction types"),
-    start_date: Optional[datetime] = Query(None, description="Start date for filtering"),
-    end_date: Optional[datetime] = Query(None, description="End date for filtering"),
-    is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
-    is_posted: Optional[bool] = Query(None, description="Filter by posted (true) or pending (false)"),
-    ids: Optional[List[int]] = Query(
-        None, max_length=500, description="Only these transaction ids (unreadable ones match nothing)"),
-    search: Optional[str] = Query(None, description="Search by description"),
-    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
-    limit: int = Query(10, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-    order: Literal["desc", "asc"] = Query(
-        "desc", description="By transaction date, then id: 'desc' (newest first) or 'asc' "
-                            "(soonest first)"),
+def transaction_list_query(
+    db: Session, current_user: User, *,
+    account_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    category_names: Optional[List[str]] = None,
+    uncategorized: bool = False,
+    entered_by: Optional[str] = None,
+    allocation_id: Optional[int] = None,
+    transaction_types: Optional[List[str]] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    is_reconciled: Optional[bool] = None,
+    is_posted: Optional[bool] = None,
+    ids: Optional[List[int]] = None,
+    search: Optional[str] = None,
+    tag: Optional[int] = None,
 ):
-    """Get all transactions with optional filtering"""
+    """The unordered query behind ``GET /transactions``: every transaction the
+    caller may read, narrowed by the list's filters (each as that endpoint
+    documents it). A bad ``transaction_types`` value is a 400."""
     # Every transaction the caller may read: their own, any touching an
     # account they hold a direct role on (including transfers where either leg
     # does), and through a Household tag share rules (b2) and (c).
@@ -996,6 +985,47 @@ def get_transactions(
     tag_id = filter_tag_id(db, current_user, tag)
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(Transaction, tag_id))
+
+    return query
+
+
+@router.get("/", response_model=TransactionListResponse)
+def get_transactions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    account_ids: Optional[List[int]] = Query(None, alias="account_ids", description="Filter by account IDs"),
+    category_ids: Optional[List[int]] = Query(None, alias="category_ids", description="Filter by category IDs"),
+    category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
+        None, max_length=50,
+        description="Filter by category name, matching any creator's category of that name"),
+    uncategorized: bool = Query(
+        False, description="Also match income and expense rows shown with no category; "
+                           "ORed with category_names"),
+    entered_by: Optional[Literal["me"]] = Query(
+        None, description="'me' keeps only rows the caller owns (entered by, or materialised for, them)"),
+    allocation_id: Optional[int] = Query(None, description="Filter by allocation ID"),
+    transaction_types: Optional[List[str]] = Query(None, alias="transaction_types", description="Filter by transaction types"),
+    start_date: Optional[datetime] = Query(None, description="Start date for filtering"),
+    end_date: Optional[datetime] = Query(None, description="End date for filtering"),
+    is_reconciled: Optional[bool] = Query(None, description="Filter by reconciliation status"),
+    is_posted: Optional[bool] = Query(None, description="Filter by posted (true) or pending (false)"),
+    ids: Optional[List[int]] = Query(
+        None, max_length=500, description="Only these transaction ids (unreadable ones match nothing)"),
+    search: Optional[str] = Query(None, description="Search by description"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
+    limit: int = Query(10, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    order: Literal["desc", "asc"] = Query(
+        "desc", description="By transaction date, then id: 'desc' (newest first) or 'asc' "
+                            "(soonest first)"),
+):
+    """Get all transactions with optional filtering"""
+    query = transaction_list_query(
+        db, current_user, account_ids=account_ids, category_ids=category_ids,
+        category_names=category_names, uncategorized=uncategorized, entered_by=entered_by,
+        allocation_id=allocation_id, transaction_types=transaction_types,
+        start_date=start_date, end_date=end_date, is_reconciled=is_reconciled,
+        is_posted=is_posted, ids=ids, search=search, tag=tag)
 
     total = query.count()
     transactions = (
