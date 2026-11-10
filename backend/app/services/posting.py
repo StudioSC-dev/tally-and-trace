@@ -278,6 +278,15 @@ def _neighbours(db: Session, entry, day: date) -> Tuple[Optional[date], date]:
     return previous, effective(moved, advance_occurrence(entry, walk[-1]).date())
 
 
+def _next_is_scheduled(entry, day: date) -> bool:
+    """Whether the step after the nominal ``day`` is a real occurrence: inside the
+    cap and the end date. ``_neighbours``' next is the bare step, which may not be."""
+    walk = schedule_walk(entry, day)
+    following = advance_occurrence(entry, walk[-1]).date()
+    through = schedule_walk(entry, following)
+    return bool(through) and through[-1].date() == following
+
+
 ALREADY_RECORDED = "This occurrence is already recorded; change the transaction's date"
 STATEMENT_CLOSED = "That date is on a statement that has already closed"
 
@@ -293,7 +302,7 @@ def refuse_closed_statement(card: Account, day: date) -> None:
 
 
 def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
-                    card: Optional[Account] = None) -> None:
+                    card: Optional[Account] = None, overlap: bool = False) -> None:
     """Force the occurrence on the nominal ``day`` to ``forced``, without committing.
 
     The caller holds the owner's budget lock and then the entry lock. 422 when
@@ -302,7 +311,10 @@ def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
     dates, and on ``card`` (a locked credit account) inside a closed statement:
     that is what the bank printed. ``forced`` equal to ``day`` clears the
     override instead (``clear_forced_date``), which restores what the schedule
-    says even on a closed statement.
+    says even on a closed statement. ``overlap`` lets ``forced`` equal the next
+    occurrence's effective date (never the previous one's), and only when that
+    occurrence exists: the last of a capped or end-dated schedule stays strict.
+    Every other refusal stands.
     """
     previous, following = _neighbours(db, entry, day)
     if occurrence_links(db, entry, day):
@@ -310,7 +322,8 @@ def set_forced_date(db: Session, entry, actor: User, day: date, forced: date,
     if forced == day:
         clear_forced_date(db, entry, day)
         return
-    refuse_forced_date(day, forced, previous, following)
+    refuse_forced_date(day, forced, previous, following,
+                       overlap and _next_is_scheduled(entry, day))
     if card is not None:
         refuse_closed_statement(card, forced)
     set_override(db, actor.id, day, forced, budget_entry_id=entry.id)
