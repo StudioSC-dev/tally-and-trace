@@ -507,6 +507,40 @@ class UpcomingOccurrences(BaseModel):
     auto_post_scheduled: bool
 
 
+class ScheduledTransactionRow(BaseModel):
+    """A future transaction row; ``day`` is its ``transaction_date``'s UTC day."""
+    kind: Literal["transaction"]
+    day: date
+    transaction: TransactionOut
+
+
+class ScheduledOccurrenceRow(BaseModel):
+    """An unrecorded occurrence; ``day`` is its ``effective_date``."""
+    kind: Literal["occurrence"]
+    day: date
+    occurrence: UpcomingOccurrence
+
+
+ScheduledRow = Annotated[
+    Union[ScheduledTransactionRow, ScheduledOccurrenceRow], Field(discriminator="kind")]
+
+
+class ScheduledList(BaseModel):
+    """GET /transactions/scheduled: future transactions and unrecorded
+    occurrences merged by day, transactions first on a day. ``total`` is
+    ``transactions_total + occurrences_total`` over the whole range, whatever
+    the cursor. ``occurrences_through`` is the last day occurrences are listed
+    for (the range end, at most Manila's today plus two years).
+    ``next_cursor`` asks for the page after this one; null on the last page."""
+    items: List[ScheduledRow]
+    total: int
+    transactions_total: int
+    occurrences_total: int
+    occurrences_through: date
+    auto_post_scheduled: bool
+    next_cursor: Optional[str] = None
+
+
 class InstallmentPlan(BaseModel):
     """One active card installment (services/missed.py ``installment_plans``).
     ``next_charge`` is the first scheduled month no row stands for, posted or

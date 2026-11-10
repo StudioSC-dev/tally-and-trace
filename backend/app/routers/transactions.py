@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, func, or_, tuple_
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Literal, Optional, Set
 from pydantic import Field
@@ -29,6 +29,7 @@ from app.core.tags import (
 )
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
+from app.schemas.budget_entry import ScheduledList
 from app.core.redaction import (
     FULL, Redactor, displayed_description_criterion, full_view_criterion,
     serialize_transaction, serialize_transactions,
@@ -39,6 +40,7 @@ from app.core.attachments import (
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
+from app.services import missed as missed_svc
 from app.services import posting
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
@@ -47,12 +49,18 @@ from app.models.user import User
 from app.models.budget_entry import BudgetEntry
 from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
-from app.core.time import naive_utc_now, utc_now
-from datetime import datetime, timedelta, timezone
+from app.core.record_dates import record_date_max
+from app.core.time import manila_today, naive_utc_now, utc_now
+from app.routers.budget_entries import _wall_day
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from calendar import monthrange
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
+import base64
+import binascii
+import json
 import os
+import sys
 from app.core.config import settings
 
 router = APIRouter()
@@ -1187,6 +1195,174 @@ def add_transaction(db: Session, current_user: User, transaction: TransactionCre
     if tag_ids:
         replace_own_tags(db, Transaction, db_transaction.id, owner, tag_ids)
     return db_transaction
+
+# How far ahead the Scheduled view reaches when no end is sent.
+SCHEDULED_DEFAULT_DAYS = 365
+INVALID_CURSOR = "Invalid cursor"
+
+
+def _wall_time(value: datetime) -> datetime:
+    """A stored ``transaction_date`` as naive UTC wall time (the session may hand it back aware)."""
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _scheduled_key(row: dict) -> dict:
+    """The cursor fields of a merged row: where the next page starts after it."""
+    if row["kind"] == "transaction":
+        txn = row["transaction_row"]
+        return {"k": "t", "d": row["day"].isoformat(),
+                "at": _wall_time(txn.transaction_date).isoformat(), "id": txn.id}
+    occ = row["occurrence"]
+    return {"k": "o", "d": row["day"].isoformat(), "n": occ["name"], "e": occ["entry_id"],
+            "o": occ["occurrence_date"].isoformat()}
+
+
+def _encode_cursor(row: dict) -> str:
+    raw = json.dumps(_scheduled_key(row), separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(value: str) -> SimpleNamespace:
+    """The row a page starts after, from ``next_cursor``; any other value is a 422."""
+    try:
+        data = json.loads(base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)))
+        day = date.fromisoformat(data["d"])
+        if data["k"] == "t" and set(data) == {"k", "d", "at", "id"}:
+            at = datetime.fromisoformat(data["at"])
+            # The id reaches SQL: keep it a positive int in the column's range.
+            if (at.tzinfo is not None or at.date() != day or type(data["id"]) is not int
+                    or not 0 < data["id"] < 2**31):
+                raise ValueError
+            return SimpleNamespace(kind="transaction", day=day, at=at, id=data["id"])
+        if data["k"] == "o" and set(data) == {"k", "d", "n", "e", "o"}:
+            if type(data["n"]) is not str or type(data["e"]) is not int:
+                raise ValueError
+            return SimpleNamespace(kind="occurrence", day=day,
+                                   key=(day, data["n"], data["e"], date.fromisoformat(data["o"])))
+    except (ValueError, TypeError, KeyError, AttributeError, binascii.Error):
+        pass
+    raise HTTPException(status_code=422, detail=INVALID_CURSOR)
+
+
+def _occurrence_key(item: dict) -> tuple:
+    """The occurrences' order (``upcoming_occurrences``'), with the scheduled day
+    last so two moved onto one day still have a strict order."""
+    return (item["effective_date"], item["name"], item["entry_id"], item["occurrence_date"])
+
+
+# Declared before ``/{transaction_id}``, which would otherwise take the path.
+@router.get("/scheduled", response_model=ScheduledList)
+def list_scheduled(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    account_ids: Optional[List[int]] = Query(None, description="Rows and entries touching these accounts"),
+    category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
+        None, max_length=50, description="As GET /transactions, read for entries too"),
+    uncategorized: bool = Query(False, description="As GET /transactions; ORed with category_names"),
+    entered_by: Optional[Literal["me"]] = Query(
+        None, description="'me' keeps only the caller's own rows and entries"),
+    transaction_types: Optional[List[str]] = Query(
+        None, description="debit (expenses), credit (income) or transfer"),
+    search: Optional[str] = Query(None, description="A row's description or an entry's name"),
+    tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
+    start_date: Optional[datetime] = Query(
+        None, description="First day; Manila's tomorrow at the earliest"),
+    end_date: Optional[datetime] = Query(
+        None, description="Last day (default Manila's today + 365); transactions stop at the "
+                          "record maximum and occurrences two years after today"),
+    limit: int = Query(25, ge=1, le=100),
+    cursor: Optional[str] = Query(
+        None, max_length=1000, description="A previous page's next_cursor"),
+):
+    """Everything coming after Manila's today: the transactions ``GET /transactions``
+    lists with the same filters, and the unrecorded occurrences
+    ``GET /budget-entries/upcoming-occurrences`` lists, merged by day. On one day
+    transactions come first (by ``transaction_date``, then id), then occurrences
+    (by name, entry id and scheduled day). Paged by cursor: each page reads only
+    the rows after the cursor's, so every row stays reachable."""
+    after = _decode_cursor(cursor) if cursor is not None else None
+    today = manila_today()
+    first = today + timedelta(days=1)
+    start_day = _wall_day(start_date)
+    if start_day is not None and start_day > first:
+        first = start_day
+    end_day = _wall_day(end_date) or today + timedelta(days=SCHEDULED_DEFAULT_DAYS)
+    transactions_through = min(end_day, record_date_max(today))
+    occurrences_through = min(end_day, today + posting.OCCURRENCE_HORIZON)
+
+    query = transaction_list_query(
+        db, current_user, account_ids=account_ids, category_names=category_names,
+        uncategorized=uncategorized, entered_by=entered_by,
+        transaction_types=transaction_types, search=search, tag=tag,
+        start_date=datetime.combine(first, dt_time.min),
+        end_date=datetime.combine(transactions_through, dt_time.max))
+    transactions_total = query.count()
+    if after is not None and after.kind == "transaction":
+        query = query.filter(tuple_(Transaction.transaction_date, Transaction.id)
+                             > tuple_(after.at, after.id))
+    elif after is not None:
+        query = query.filter(Transaction.transaction_date
+                             >= datetime.combine(after.day + timedelta(days=1), dt_time.min))
+    transactions = (query.order_by(Transaction.transaction_date.asc(), Transaction.id.asc())
+                    .limit(limit + 1).all())
+
+    types = (frozenset(TransactionType(item.lower()) for item in transaction_types)
+             if transaction_types else None)  # already checked by transaction_list_query
+    seen = viewable_account_ids(db, current_user, roles=VIEW_ROLES)
+    filters = missed_svc.UpcomingFilters(
+        account_ids=frozenset(i for i in account_ids if i in seen) if account_ids else None,
+        transaction_types=types,
+        category_names=frozenset(category_names) if category_names else None,
+        uncategorized=uncategorized,
+        entered_by_me=entered_by == "me",
+        search=search or None,
+        tag_id=filter_tag_id(db, current_user, tag),
+    )
+    # Every occurrence in the range: the service builds them all in memory
+    # before its own cut, so the cursor is applied here.
+    upcoming = missed_svc.upcoming_occurrences(
+        db, current_user, redactor=Redactor(db, current_user), start=first,
+        end=occurrences_through, filters=filters, limit=sys.maxsize, plan=None)
+    occurrences = sorted(upcoming["items"], key=_occurrence_key)
+    if after is not None and after.kind == "transaction":
+        occurrences = [o for o in occurrences if o["effective_date"] >= after.day]
+    elif after is not None:
+        occurrences = [o for o in occurrences if _occurrence_key(o) > after.key]
+
+    # Day by day, transactions before occurrences: the first n rows of the
+    # merge need only the first n of each source.
+    rows: List[dict] = []
+    t = o = 0
+    while len(rows) <= limit and (t < len(transactions) or o < len(occurrences)):
+        txn = transactions[t] if t < len(transactions) else None
+        occ = occurrences[o] if o < len(occurrences) else None
+        txn_day = _wall_time(txn.transaction_date).date() if txn is not None else None
+        if txn is not None and (occ is None or txn_day <= occ["effective_date"]):
+            rows.append({"kind": "transaction", "day": txn_day,
+                         "transaction_row": txn})
+            t += 1
+        else:
+            rows.append({"kind": "occurrence", "day": occ["effective_date"], "occurrence": occ})
+            o += 1
+    page = rows[:limit]
+    next_cursor = _encode_cursor(page[-1]) if len(rows) > limit else None
+
+    shown = serialize_transactions(
+        db, current_user, [r["transaction_row"] for r in page if r["kind"] == "transaction"])
+    shown_iter = iter(shown)
+    items = [{"kind": "transaction", "day": r["day"], "transaction": next(shown_iter)}
+             if r["kind"] == "transaction" else
+             {"kind": "occurrence", "day": r["day"], "occurrence": r["occurrence"]}
+             for r in page]
+    occurrences_total = upcoming["total"]
+    return {"items": items, "total": transactions_total + occurrences_total,
+            "transactions_total": transactions_total, "occurrences_total": occurrences_total,
+            "occurrences_through": occurrences_through,
+            "auto_post_scheduled": settings.JOB_TOKEN is not None,
+            "next_cursor": next_cursor}
+
 
 @router.get("/{transaction_id}", response_model=TransactionOut)
 def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
