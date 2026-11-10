@@ -28,11 +28,13 @@ from app.core.tags import (
     replace_own_tags,
 )
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
-from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse
-from app.schemas.budget_entry import ScheduledList
+from app.schemas.transaction import (
+    RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
+)
+from app.schemas.budget_entry import RepeatingCreated, ScheduledList
 from app.core.redaction import (
     FULL, Redactor, displayed_description_criterion, full_view_criterion,
-    serialize_transaction, serialize_transactions,
+    serialize_entry, serialize_transaction, serialize_transactions,
 )
 from app.core.attachments import (
     RECEIPTS, STORED_PREFIX, new_receipt_filename, public_receipt_url, stored_receipt_path,
@@ -42,6 +44,7 @@ from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
 from app.services import missed as missed_svc
 from app.services import posting
+from app.services import repeat as repeat_svc
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
 from app.models.category import Category
@@ -51,7 +54,7 @@ from app.models.allocation import Allocation, AllocationType
 from app.models.allocation import BudgetPeriodFrequency
 from app.core.record_dates import record_date_max
 from app.core.time import manila_today, naive_utc_now, utc_now
-from app.routers.budget_entries import _wall_day
+from app.routers.budget_entries import _attach_occurrence_counts, _wall_day
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from calendar import monthrange
 from decimal import ROUND_HALF_UP, Decimal
@@ -1059,6 +1062,34 @@ def create_transaction(
     db.commit()
     db.refresh(db_transaction)
     return serialize_transaction(db, current_user, db_transaction)
+
+
+@router.post("/repeating", response_model=RepeatingCreated, status_code=201)
+def create_repeating_transaction(
+    body: RepeatingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Add a transaction and start the recurring entry it is the first occurrence of.
+
+    The entry is built from the transaction (name its description, amount and
+    currency its face, its accounts, category, envelope and tags) and from
+    ``repeat`` (cadence, day, ends, card or bank kind, settlement), and is
+    checked as ``POST /budget-entries/`` checks one. It starts on the
+    transaction's date (a card installment on the statement close holding it),
+    and the transaction is linked to that first occurrence. A posted row, or an
+    unposted card expense (Charged), advances the schedule past it; any other
+    unposted row does not, and Mark paid later posts it. ``settlement``
+    "autopay" turns autopay on, refused (422) when anything would still be due
+    through today. The entry, the transaction, their tags, the balance and
+    budget effects, the advance and the flag commit together: any refusal
+    leaves nothing (services/repeat.py)."""
+    txn, entry = repeat_svc.create_repeating(db, current_user, body.transaction, body.repeat)
+    db.commit()
+    db.refresh(txn)
+    db.refresh(entry)
+    return {"transaction": serialize_transaction(db, current_user, txn),
+            "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])}
 
 
 def add_transaction(db: Session, current_user: User, transaction: TransactionCreate,
