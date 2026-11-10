@@ -1,42 +1,33 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  automaticOffered,
-  buildEntryDayFields,
-  dateForDaySetting,
-  daySettingOf,
+  bankKindOf,
   DEFAULT_SETTLEMENT,
-  formatEntryDate,
+  daySettingOf,
   fromWireWallTime,
-  generateOccurrences,
   isCappedEnd,
-  isMonthFamily,
   isOwnerFull,
   isSharedFull,
   kindChoiceFor,
-  offeredKindChoices,
-  parseEntryDate,
-  resolveEntryDayFields,
-  settleKindChoice,
+  scheduleRequest,
+  schedulePreview as previewSchedule,
+  scheduleState,
   settlementControlState,
   settlementFollowUp,
-  statementCloseDay,
-  statementCycleClose,
   finalMonthHelp,
-  toWireWallTime,
   fieldErrorProps,
   withLoadedVersion,
   withoutError,
 } from '@tally-trace/shared'
-import type { BillingKind, BillingKindChoice, DaySetting, FieldErrors, Settlement } from '@tally-trace/shared'
+import type { BankKind, BillingKindChoice, DaySetting, FieldErrors, ScheduleContext, Settlement } from '@tally-trace/shared'
 import { accountPickerGroups, categoryPickerGroups } from '@tally-trace/shared'
 import { PickerOptGroups } from './PickerOptGroups'
+import { RecurringScheduleFields } from './RecurringScheduleFields'
 import { useCreateBudgetEntryMutation, useUpdateBudgetEntryMutation } from '../store/api'
 import type { Account, Allocation, BudgetEntry, Category, FullBudgetEntry, SharedFullBudgetEntry } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
 import { useAutopayActions } from '../hooks/useAutopayActions'
 import { useDeleteRecurringEntry } from '../hooks/useDeleteRecurringEntry'
 import { CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
-import { chargedOnCloseLabel, formatCadenceLabel, formatScheduleLabel } from '../utils/recurringEntry'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { TagPicker } from './TagPicker'
@@ -45,9 +36,6 @@ const toLocalDateTimeInput = (value: Date | string) => {
   const date = typeof value === 'string' ? new Date(value) : value
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
-
-/** Far enough ahead that the schedule preview is bounded by its count alone. */
-const PREVIEW_RANGE_END = new Date(Date.UTC(9999, 11, 31))
 
 type SubscriptionFormState = {
   name: string
@@ -79,11 +67,6 @@ type SubscriptionFormState = {
   // The tags picked in the form; an edit sends them only when they changed.
   tag_ids: number[]
 }
-
-type BankKind = 'subscription' | 'other'
-
-/** The bank-kind pick a stored `billing_kind` reads as: only `subscription` is a subscription. */
-const bankKindOf = (billingKind: BillingKind | null | undefined): BankKind => (billingKind === 'subscription' ? 'subscription' : 'other')
 
 const createSubscriptionDefaults = (currency: CurrencyCode): SubscriptionFormState => ({
   name: '',
@@ -253,21 +236,17 @@ export function RecurringEntryFormModal({
     }
   })
 
-  const showKindSelect =
-    subscriptionForm.entry_type === 'expense' &&
-    !subscriptionForm.transfer_to_account_id &&
-    accountsById.get(subscriptionForm.account_id)?.account_type === 'credit'
-  const kindCapped = isCappedEnd(subscriptionForm.end_mode, subscriptionForm.max_occurrences)
-  // An open-ended expense on a bank (non-card) account: the user marks whether it is a subscription,
-  // which lists it under Transactions' Subscriptions tab. Hidden for cards (their Kind select), income,
-  // transfers, and entries that end on a date or after a number of payments.
-  const selectedAccountType = accountsById.get(subscriptionForm.account_id)?.account_type
-  const showBankKindSelect =
-    subscriptionForm.entry_type === 'expense' &&
-    !subscriptionForm.transfer_to_account_id &&
-    selectedAccountType !== undefined &&
-    selectedAccountType !== 'credit' &&
-    subscriptionForm.end_mode === 'indefinite'
+  const selectedCard = accountsById.get(subscriptionForm.account_id)
+  // The schedule controls' rules (shared with Repeat in Add Transaction): the card Kind,
+  // the bank kind, a card installment on its statement close, and the Day choices.
+  const scheduleContext: ScheduleContext = {
+    stored: editingBudgetEntry,
+    entryType: subscriptionForm.entry_type,
+    transferToAccountId: subscriptionForm.transfer_to_account_id,
+    account: selectedCard,
+    accountId: subscriptionForm.account_id,
+  }
+  const schedule = scheduleState(subscriptionForm, scheduleContext)
   // The Settlement control: only a cash expense has one (a card entry, a transfer and income name no settlement).
   const settlementControl = settlementControlState({
     entryType: subscriptionForm.entry_type,
@@ -279,12 +258,6 @@ export function RecurringEntryFormModal({
   const { turnOn, turnOff } = useAutopayActions()
   // What the save could not finish (autopay refused after the entry was saved); the form then only offers Close.
   const [savedNote, setSavedNote] = useState<string | null>(null)
-  // The pick the form opened on: an edit sends the bank kind only when the pick moved off it.
-  const openingBankKind = editingBudgetEntry ? bankKindOf(editingBudgetEntry.billing_kind) : null
-  // The pick the form opened on: an edit sends the field only when the pick moved off it.
-  const openingKindChoice = editingBudgetEntry
-    ? kindChoiceFor(isCappedEnd(editingBudgetEntry.end_mode, editingBudgetEntry.max_occurrences), editingBudgetEntry.billing_kind)
-    : null
   // The date input as loaded. A paused entry turned active with this date untouched is resumed: the
   // server moves it to the first scheduled date on or after today, so the date is left out of the save.
   const [loadedNextOccurrence] = useState(() => (editingBudgetEntry ? fromWireWallTime(editingBudgetEntry.next_occurrence) : null))
@@ -294,112 +267,9 @@ export function RecurringEntryFormModal({
     subscriptionForm.is_active &&
     subscriptionForm.next_occurrence === loadedNextOccurrence
 
-  // "Automatic" cannot undo a stored kind, so it is offered only to an entry with none stored.
-  const offerAutomatic = automaticOffered(editingBudgetEntry?.billing_kind)
-  const kindChoices = offeredKindChoices(kindCapped, offerAutomatic)
-  // What the select shows and a save sends: always one of the offered choices.
-  const kindValue = settleKindChoice(kindCapped, subscriptionForm.kind_choice, offerAutomatic)
-
-  // A card installment on a card with a statement cycle is charged monthly on the
-  // statement close. On create the server anchors it there and moves the date onto
-  // its statement's close, so the form sends no day fields and forces monthly. An
-  // installment already on the close shows the same note in place of the pickers
-  // (its usual payload still saves). A legacy row looks as it always has.
-  const selectedCard = accountsById.get(subscriptionForm.account_id)
-  const cardCloseDay = selectedCard?.account_type === 'credit' ? statementCloseDay(selectedCard) : null
-  const cardInstallmentCreate =
-    !editingBudgetEntry &&
-    cardCloseDay !== null &&
-    subscriptionForm.entry_type === 'expense' &&
-    !subscriptionForm.transfer_to_account_id &&
-    kindCapped &&
-    kindValue !== 'bill'
-  const onCloseEdit =
-    editingBudgetEntry != null &&
-    cardCloseDay !== null &&
-    editingBudgetEntry.kind === 'installment' &&
-    editingBudgetEntry.account_id === subscriptionForm.account_id &&
-    editingBudgetEntry.cadence === 'monthly' &&
-    editingBudgetEntry.anchor_day === cardCloseDay &&
-    !editingBudgetEntry.day_rule
-  const chargedOnClose = cardInstallmentCreate || onCloseEdit
-  const cadence: BudgetEntry['cadence'] = cardInstallmentCreate ? 'monthly' : subscriptionForm.cadence
-
   // The schedule a save would store: the day fields the API resolves the write to
   // (or the detail it would refuse it with), and the next three dates.
-  const schedulePreview = useMemo(() => {
-    if (!isMonthFamily(cadence)) return null
-    let nextOccurrence: string
-    try {
-      nextOccurrence = toWireWallTime(subscriptionForm.next_occurrence)
-    } catch {
-      return null
-    }
-    if (cardInstallmentCreate && selectedCard) {
-      // What the server stores: the close of the statement the date is on.
-      const close = statementCycleClose(selectedCard, nextOccurrence)
-      if (close !== null) nextOccurrence = `${close}${nextOccurrence.slice(10)}`
-    }
-    const resolved = cardInstallmentCreate && cardCloseDay !== null
-      ? ({ ok: true, anchor_day: cardCloseDay, day_rule: null } as const)
-      : resolveEntryDayFields({
-          cadence,
-          nextOccurrence,
-          sent: buildEntryDayFields({
-            cadence,
-            day: subscriptionForm.day,
-            nextOccurrence,
-            stored: editingBudgetEntry,
-          }),
-          stored: editingBudgetEntry,
-        })
-    if (!resolved.ok) return { error: resolved.error }
-    let endDate: string | null = null
-    if (subscriptionForm.end_mode === 'on_date' && subscriptionForm.end_date) {
-      try {
-        endDate = toWireWallTime(subscriptionForm.end_date)
-      } catch {
-        endDate = null
-      }
-    }
-    const dates = generateOccurrences(
-      {
-        cadence,
-        next_occurrence: nextOccurrence,
-        anchor_day: resolved.anchor_day,
-        day_rule: resolved.day_rule,
-        end_mode: subscriptionForm.end_mode,
-        end_date: endDate,
-        max_occurrences: subscriptionForm.end_mode === 'after_occurrences' ? subscriptionForm.max_occurrences ?? null : null,
-      },
-      parseEntryDate(nextOccurrence),
-      PREVIEW_RANGE_END,
-      3
-    )
-    return {
-      label: formatScheduleLabel(cadence, resolved),
-      dates: dates.map((date) => formatEntryDate(date)),
-    }
-  }, [
-    editingBudgetEntry,
-    cadence,
-    cardInstallmentCreate,
-    cardCloseDay,
-    selectedCard,
-    subscriptionForm.day,
-    subscriptionForm.next_occurrence,
-    subscriptionForm.end_mode,
-    subscriptionForm.end_date,
-    subscriptionForm.max_occurrences,
-  ])
-  // "Same as date" is offered on create and on a row with no stored day (a legacy row).
-  const offersSameAsDate = !editingBudgetEntry || daySettingOf(editingBudgetEntry).kind === 'same_as_date'
-  const chooseDay = (day: DaySetting) =>
-    setSubscriptionForm((prev) => ({
-      ...prev,
-      day,
-      next_occurrence: dateForDaySetting(prev.next_occurrence, day),
-    }))
+  const schedulePreview = previewSchedule(subscriptionForm, scheduleContext)
 
   const handleSubscriptionAccountChange = (accountId: number) => {
     const account = accountsById.get(accountId)
@@ -456,70 +326,13 @@ export function RecurringEntryFormModal({
         fail('amount', 'Please enter an amount greater than zero.')
         return
       }
-      if (!subscriptionForm.next_occurrence) {
-        fail('next_occurrence', 'Please choose the next occurrence date and time.')
+      // The date, the ends and the day, in that order (scheduleRequest).
+      const scheduleFields = scheduleRequest(subscriptionForm, scheduleContext)
+      if (!scheduleFields.ok) {
+        fail(scheduleFields.field, scheduleFields.message)
         return
       }
-
-      // The dates go out as the typed wall time in UTC components.
-      let nextOccurrenceWire: string
-      try {
-        nextOccurrenceWire = toWireWallTime(subscriptionForm.next_occurrence)
-      } catch {
-        fail('next_occurrence', 'Please choose a valid next occurrence date and time.')
-        return
-      }
-
-      let endDateIso: string | undefined
-      let maxOccurrences: number | undefined
-      if (subscriptionForm.end_mode === 'on_date') {
-        if (!subscriptionForm.end_date) {
-          fail('end_date', 'Please select the end date.')
-          return
-        }
-        try {
-          endDateIso = toWireWallTime(subscriptionForm.end_date)
-        } catch {
-          fail('end_date', 'Please choose a valid end date.')
-          return
-        }
-      } else if (subscriptionForm.end_mode === 'after_occurrences') {
-        if (!subscriptionForm.max_occurrences || subscriptionForm.max_occurrences <= 0) {
-          fail('max_occurrences', 'Please specify how many occurrences before the entry stops.')
-          return
-        }
-        maxOccurrences = Math.floor(subscriptionForm.max_occurrences)
-      }
-
-      const dayFields = buildEntryDayFields({
-        cadence,
-        day: subscriptionForm.day,
-        nextOccurrence: nextOccurrenceWire,
-        stored: editingBudgetEntry,
-        cardInstallment: cardInstallmentCreate,
-      })
-      const resolvedDay = resolveEntryDayFields({
-        cadence,
-        nextOccurrence: nextOccurrenceWire,
-        sent: dayFields,
-        stored: editingBudgetEntry,
-      })
-      if (!resolvedDay.ok) {
-        fail(isMonthFamily(cadence) && !chargedOnClose ? 'day' : 'next_occurrence', resolvedDay.error)
-        return
-      }
-
-      const pickedBillingKind =
-        showKindSelect && kindValue !== openingKindChoice
-          ? kindChoices.find((choice) => choice.id === kindValue)?.billingKind
-          : undefined
-
-      const pickedBankKind: BillingKind | null | undefined =
-        showBankKindSelect && subscriptionForm.bank_kind !== openingBankKind
-          ? subscriptionForm.bank_kind === 'subscription'
-            ? 'subscription'
-            : null
-          : undefined
+      const { next_occurrence: nextOccurrenceWire, ...sentSchedule } = scheduleFields.fields
 
       const subscriptionPayload = {
         name: subscriptionForm.name.trim(),
@@ -536,20 +349,13 @@ export function RecurringEntryFormModal({
           (editingBudgetEntry ? null : undefined),
         category_id: subscriptionForm.category_id || undefined,
         allocation_id: subscriptionForm.allocation_id ?? undefined,
-        cadence,
         // Omitted on a resume with the date untouched, so the server skips the paused months.
         ...(resuming ? {} : { next_occurrence: nextOccurrenceWire }),
-        ...dayFields,
+        // The cadence, day fields, ends and card or bank kind (scheduleRequest). The kind is sent
+        // only on a card or open-ended bank expense, and an edit sends it only when the pick moved.
+        ...sentSchedule,
         lead_time_days: subscriptionForm.lead_time_days,
         is_active: subscriptionForm.is_active,
-        end_mode: subscriptionForm.end_mode,
-        end_date: endDateIso,
-        max_occurrences: maxOccurrences,
-        // Card expenses only. "Automatic" sends nothing; Installment sends null, which clears an override.
-        // An edit sends the kind only when the pick moved.
-        ...(pickedBillingKind === undefined ? {} : { billing_kind: pickedBillingKind }),
-        // Open-ended bank expenses only: Subscription or Other (null). An edit sends it only when the pick moved.
-        ...(pickedBankKind === undefined ? {} : { billing_kind: pickedBankKind }),
         // An edit sends the tags only when they changed; omitting them keeps them.
         ...(editingBudgetEntry
           ? tagIdsIfChanged(subscriptionForm.tag_ids, tagIdsOf(editingBudgetEntry.tags))
@@ -819,38 +625,23 @@ export function RecurringEntryFormModal({
             {renderFieldError('amount')}
               </div>
           
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {chargedOnClose && cardCloseDay !== null ? (
-          <div>
-                  <label className="block text-sm font-medium text-body">Cadence</label>
-                  <p className="mt-1 py-2 text-sm text-body" data-testid="installment-close-note">
-                    {chargedOnCloseLabel(cardCloseDay)}
-                  </p>
-          </div>
-          ) : (
-          <div>
-                  <label className="block text-sm font-medium text-body">Cadence</label>
-            <select
-                    value={subscriptionForm.cadence}
-                    data-field="cadence"
-                    onChange={(e) =>
-                      setSubscriptionForm((prev) => ({
-                        ...prev,
-                        cadence: e.target.value as BudgetEntry['cadence'],
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
-                  >
-                    {(['monthly', 'quarterly', 'semi_annual', 'annual'] as BudgetEntry['cadence'][]).map(
-                      (value) => (
-                        <option key={value} value={value}>
-                          {formatCadenceLabel(value)}
-                        </option>
-                      )
-                    )}
-                  </select>
-          </div>
-          )}
+              <RecurringScheduleFields
+                draft={subscriptionForm}
+                state={schedule}
+                preview={schedulePreview}
+                settlementControl={settlementControl}
+                onChange={(update) => setSubscriptionForm((prev) => ({ ...prev, ...update(prev) }))}
+                fieldProps={fieldProps}
+                renderFieldError={renderFieldError}
+                bindField={bindField}
+                showFinalMonthHelp={
+                  !!editingBudgetEntry &&
+                  editingBudgetEntry.is_active &&
+                  editingBudgetEntry.end_mode === 'after_occurrences' &&
+                  (editingBudgetEntry.max_occurrences ?? 0) > 0
+                }
+                finalMonthHelp={finalMonthHelp}
+                dateField={
                 <div>
                   <label className="block text-sm font-medium text-body">Next Occurrence</label>
                   <input
@@ -870,77 +661,8 @@ export function RecurringEntryFormModal({
                   />
                   {renderFieldError('next_occurrence')}
         </div>
-              </div>
-
-              {chargedOnClose && schedulePreview && !('error' in schedulePreview) && (
-                <div className="text-xs text-muted" data-testid="schedule-preview">
-                  <p className="font-medium text-body">{schedulePreview.label}</p>
-                  {schedulePreview.dates.length > 0 && <p>Next: {schedulePreview.dates.join(', ')}</p>}
-                </div>
-              )}
-              {isMonthFamily(cadence) && !chargedOnClose && (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-body">Day</label>
-                      <select
-                        value={subscriptionForm.day.kind}
-                        onChange={(e) => {
-                          const kind = e.target.value as DaySetting['kind']
-                          if (kind === 'day') {
-                            // Start from the date's own day, so the date stays put.
-                            const day = parseEntryDate(subscriptionForm.next_occurrence).getUTCDate()
-                            chooseDay({ kind: 'day', day: Number.isNaN(day) ? 1 : day })
-                          } else {
-                            chooseDay({ kind })
-                          }
-                        }}
-                        className="mt-1 block w-full border border-line px-3 py-2"
-                        ref={bindField('day')}
-                        data-field="day"
-                        {...fieldProps('day')}
-                      >
-                        {offersSameAsDate && <option value="same_as_date">Same as date</option>}
-                        <option value="day">Day of month (1–31)</option>
-                        <option value="last_weekday">Last weekday of month</option>
-                      </select>
-                    </div>
-                    {subscriptionForm.day.kind === 'day' && (
-                      <div>
-                        <label className="block text-sm font-medium text-body">Day of month</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={31}
-                          value={subscriptionForm.day.day}
-                          onChange={(e) => {
-                            const day = parseInt(e.target.value, 10)
-                            if (Number.isNaN(day)) return
-                            chooseDay({ kind: 'day', day: Math.min(31, Math.max(1, day)) })
-                          }}
-                          className="mt-1 block w-full border border-line px-3 py-2"
-                          ref={bindField('day_of_month')}
-                          data-field="day_of_month"
-                          {...fieldProps('day_of_month')}
-                        />
-                        {renderFieldError('day_of_month')}
-                      </div>
-                    )}
-                  </div>
-                  {renderFieldError('day')}
-                  {schedulePreview && 'error' in schedulePreview ? (
-                    <p className="text-xs text-danger" data-testid="schedule-error">
-                      {schedulePreview.error}
-                    </p>
-                  ) : schedulePreview ? (
-                    <div className="text-xs text-muted" data-testid="schedule-preview">
-                      <p className="font-medium text-body">{schedulePreview.label}</p>
-                      {schedulePreview.dates.length > 0 && <p>Next: {schedulePreview.dates.join(', ')}</p>}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
+                }
+                beforeEnds={
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-body">Lead Time (days)</label>
@@ -984,176 +706,8 @@ export function RecurringEntryFormModal({
                 </div>
                 )}
               </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-body">Ends</label>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {[
-                      { value: 'indefinite', label: 'Keep running' },
-                      { value: 'on_date', label: 'On date' },
-                      { value: 'after_occurrences', label: 'After runs' },
-                    ].map(({ value, label }) => {
-                      const isSelected = subscriptionForm.end_mode === value
-                      return (
-                        <button
-                          type="button"
-                          key={value}
-                          onClick={() =>
-                            setSubscriptionForm((prev) => ({
-                              ...prev,
-                              end_mode: value as SubscriptionFormState['end_mode'],
-                              kind_choice: settleKindChoice(value === 'after_occurrences', kindValue, offerAutomatic),
-                              end_date: value === 'on_date' ? prev.end_date : undefined,
-                              max_occurrences:
-                                value === 'after_occurrences'
-                                  ? prev.max_occurrences && prev.max_occurrences > 0
-                                    ? prev.max_occurrences
-                                    : 6
-                                  : undefined,
-                            }))
-                          }
-                          className={`rounded-full px-3 py-1 text-sm font-medium transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-  </div>
-
-                {subscriptionForm.end_mode === 'on_date' && (
-                  <div>
-                    <label className="block text-sm font-medium text-body">End after</label>
-                    <input
-                      type="datetime-local"
-                      value={subscriptionForm.end_date ?? ''}
-                      onChange={(e) =>
-                        setSubscriptionForm((prev) => ({
-                          ...prev,
-                          end_date: e.target.value || undefined,
-                        }))
-                      }
-                      className="mt-1 block w-full border border-line px-3 py-2"
-                      ref={bindField('end_date')}
-                      data-field="end_date"
-                      {...fieldProps('end_date')}
-                    />
-                    {renderFieldError('end_date')}
-                    <p className="mt-1 text-xs text-muted">
-                      No additional transactions will be generated after this date.
-                    </p>
-                  </div>
-                )}
-
-                {subscriptionForm.end_mode === 'after_occurrences' && (
-                  <div>
-                    <label className="block text-sm font-medium text-body">Number of runs</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={subscriptionForm.max_occurrences ?? ''}
-                      onChange={(e) =>
-                        setSubscriptionForm((prev) => ({
-                          ...prev,
-                          max_occurrences: e.target.value ? Math.max(1, parseInt(e.target.value, 10)) : undefined,
-                        }))
-                      }
-                      className="mt-1 block w-full border border-line px-3 py-2"
-                      ref={bindField('max_occurrences')}
-                      data-field="max_occurrences"
-                      {...fieldProps('max_occurrences')}
-                    />
-                    {renderFieldError('max_occurrences')}
-                    <p className="mt-1 text-xs text-muted">
-                      Stop once this many transactions have been created.
-                    </p>
-                    {/* Only a stored active capped entry with payments left has a last payment to keep:
-                        an edit to a paused entry keeps the pause behaviour instead. */}
-                    {editingBudgetEntry &&
-                      editingBudgetEntry.is_active &&
-                      editingBudgetEntry.end_mode === 'after_occurrences' &&
-                      (editingBudgetEntry.max_occurrences ?? 0) > 0 && (
-                      <p className="mt-1 text-xs text-muted" data-testid="final-month-help">
-                        {finalMonthHelp}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {showKindSelect && (
-                <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-kind">Kind</label>
-                  <select
-                    id="recurring-kind"
-                    value={kindValue}
-                    onChange={(e) =>
-                      setSubscriptionForm((prev) => ({
-                        ...prev,
-                        kind_choice: e.target.value as BillingKindChoice['id'],
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
-                    data-testid="recurring-kind"
-                  >
-                    {kindChoices.map((choice) => (
-                      <option key={choice.id} value={choice.id}>{choice.label}</option>
-                    ))}
-                  </select>
-                  <p className="mt-1 text-xs text-muted">
-                    {kindCapped
-                      ? 'An installment has a fixed amount; a bill varies, and you enter the amount charged each time.'
-                      : 'A subscription posts a fixed amount; a bill varies, and you enter the amount charged each time.'}
-                  </p>
-                </div>
-              )}
-
-              {showBankKindSelect && (
-                <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-bank-kind">Kind</label>
-                  <select
-                    id="recurring-bank-kind"
-                    value={subscriptionForm.bank_kind}
-                    onChange={(e) =>
-                      setSubscriptionForm((prev) => ({
-                        ...prev,
-                        bank_kind: e.target.value === 'subscription' ? 'subscription' : 'other',
-                      }))
-                    }
-                    className="mt-1 block w-full border border-line px-3 py-2"
-                    data-testid="recurring-bank-kind"
-                  >
-                    <option value="subscription">Subscription</option>
-                    <option value="other">Other</option>
-                  </select>
-                  <p className="mt-1 text-xs text-muted">
-                    A subscription is listed under Subscriptions on Transactions; anything else, such as rent, stays in Due and overdue.
-                  </p>
-                </div>
-              )}
-
-              {settlementControl.shown && (
-                <div>
-                  <label className="block text-sm font-medium text-body" htmlFor="recurring-settlement">Settlement</label>
-                  <select
-                    id="recurring-settlement"
-                    value={settlementControl.disabledReason === null ? subscriptionForm.settlement : 'manual'}
-                    onChange={(e) =>
-                      setSubscriptionForm((prev) => ({ ...prev, settlement: e.target.value === 'autopay' ? 'autopay' : 'manual' }))
-                    }
-                    disabled={settlementControl.disabledReason !== null}
-                    className="mt-1 block w-full border border-line px-3 py-2 disabled:opacity-60"
-                    data-testid="recurring-settlement"
-                  >
-                    <option value="manual">Manual: I record each payment</option>
-                    <option value="autopay">Autopay: post it on its date</option>
-                  </select>
-                  <p className="mt-1 text-xs text-muted" data-testid="recurring-settlement-help">
-                    {settlementControl.disabledReason ?? 'Autopay posts each payment by itself on its date. Manual waits for you.'}
-                  </p>
-                </div>
-              )}
+                }
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {(!editingBudgetEntry || editingBudgetEntry.permissions.can_tag) && (
