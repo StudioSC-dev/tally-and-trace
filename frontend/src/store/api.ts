@@ -184,6 +184,8 @@ import type {
   AccountInput,
   BudgetEntryInput,
   TransactionInput,
+  RepeatingTransactionInput,
+  RepeatingCreated,
 } from '@tally-trace/shared'
 import { readMaterializeHeaders } from '@tally-trace/shared'
 
@@ -598,6 +600,17 @@ export const accountingApi = createApi({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
     }),
+    // Repeat in Add Transaction: the transaction and the recurring entry it is the first occurrence of,
+    // in one request that commits both or neither (POST /transactions/repeating).
+    createRepeatingTransaction: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
+      query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
+    }),
+    // Its "Save and add another" save, quiet as createTransactionQuiet is (store/busy.ts). Keep the two in step.
+    createRepeatingTransactionQuiet: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
+      query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
+    }),
     updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
@@ -897,6 +910,8 @@ export const {
   useGetTransactionQuery,
   useCreateTransactionMutation,
   useCreateTransactionQuietMutation,
+  useCreateRepeatingTransactionMutation,
+  useCreateRepeatingTransactionQuietMutation,
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
