@@ -7,7 +7,7 @@
 //   (a) the tab reads "Recurring" (no "Subscriptions" tab); `?tab=recurring` and the older
 //       `?tab=subscriptions` both open it; a plain visit opens it too; `?tab=budgets` opens Budgets
 //   (b) the search filters as the user types, with no request sent: by name, by account name, by
-//       category name, by amount text (plain and grouped), "NETFLIX" finds "Netflix", an empty
+//       category name, a transfer by its destination account name, by amount text (plain and grouped), "NETFLIX" finds "Netflix", an empty
 //       result reads "No recurring entries match", and clearing restores every seeded entry
 //   (c) at 390px the box has an accessible label, is 44px tall, and the page does not scroll sideways
 //   (d) the Due card's Subscriptions tab ends with "Manage recurring entries", which opens
@@ -101,9 +101,9 @@ async function uiLogin(page, u) {
 const searchBox = (page) => page.getByLabel('Search recurring entries')
 const recurringTab = (page) => page.getByRole('button', { name: 'Recurring', exact: true })
 const cards = (page) => page.locator('[data-testid^="kind-section-"] article')
-const names = async (page) => (await cards(page).locator('p.text-base.font-semibold').allInnerTexts()).map((t) => t.trim()).sort()
+const names = async (page) => (await page.waitForTimeout(250), await cards(page).locator('p.text-base.font-semibold').allInnerTexts()).map((t) => t.trim()).sort()
 
-/** Five entries over two accounts and two categories: names, accounts, categories and amounts differ. */
+/** Six entries over three accounts and two categories: names, accounts, categories and amounts differ. */
 async function seed(u) {
   const bank = await post(u.token, '/accounts/', { name: 'Maya Savings', account_type: 'checking', balance: 100000, currency: 'PHP' })
   const wallet = await post(u.token, '/accounts/', { name: 'BDO Everyday', account_type: 'checking', balance: 100000, currency: 'PHP' })
@@ -120,7 +120,10 @@ async function seed(u) {
   await mk({ name: 'Meralco', amount: 3200, account_id: wallet.id, category_id: utilities.id })
   await mk({ name: 'Water bill', amount: 850.5, account_id: wallet.id, category_id: utilities.id })
   await mk({ name: 'Salary', entry_type: 'income', amount: 45000, account_id: bank.id })
-  return { bank, wallet, utilities, gift, count: 5 }
+  // A recurring transfer: its card shows the destination account, so a search finds it by that name.
+  const kids = await post(u.token, '/accounts/', { name: 'Kids Fund', account_type: 'savings', balance: 0, currency: 'PHP' })
+  await mk({ name: 'Monthly top-up', amount: 2500, account_id: wallet.id, transfer_to_account_id: kids.id })
+  return { bank, wallet, kids, utilities, gift, count: 6 }
 }
 
 async function openRecurring(page, query = '') {
@@ -144,7 +147,7 @@ async function tabs(browser) {
     await page.goto(`${stack.webUrl}/allocations?tab=${value}`)
     await page.locator('[data-testid^="kind-section-"]').first().waitFor()
     check(`(a) ?tab=${value} selects Recurring`, await recurringTab(page).getAttribute('aria-pressed'), 'true')
-    check(`(a) ?tab=${value} shows the recurring list`, await cards(page).count(), 5)
+    check(`(a) ?tab=${value} shows the recurring list`, await cards(page).count(), 6)
   }
   await page.goto(`${stack.webUrl}/allocations?tab=budgets`)
   await page.getByRole('button', { name: 'Budgets', exact: true }).waitFor()
@@ -167,7 +170,7 @@ async function search(browser) {
   page.on('request', (r) => { if (r.url().includes('/api/v1/')) requests.push(r.url()) })
   const box = searchBox(page)
   const all = await names(page)
-  check('(b) five entries listed', all, ['Meralco', 'Netflix', 'Salary', 'Spotify', 'Water bill'])
+  check('(b) six entries listed', all, ['Meralco', 'Monthly top-up', 'Netflix', 'Salary', 'Spotify', 'Water bill'])
 
   await box.pressSequentially('net')
   check('(b) by name, as typed', await names(page), ['Netflix'])
@@ -176,7 +179,9 @@ async function search(browser) {
   await box.fill('maya')
   check('(b) by account name', await names(page), ['Netflix', 'Salary', 'Spotify'])
   await box.fill('BDO')
-  check('(b) by account name, upper case', await names(page), ['Meralco', 'Water bill'])
+  check('(b) by account name, upper case', await names(page), ['Meralco', 'Monthly top-up', 'Water bill'])
+  await box.fill('kids fund')
+  check('(b) a transfer by its destination account name', await names(page), ['Monthly top-up'])
   await box.fill('utilities')
   check('(b) by category name', await names(page), ['Meralco', 'Water bill'])
   await box.fill('3200')
@@ -189,7 +194,7 @@ async function search(browser) {
   check('(b) no match shows the empty message', await page.getByText('No recurring entries match').count(), 1)
   check('(b) no match lists no entry', await cards(page).count(), 0)
   await box.fill('')
-  check('(b) clearing restores every entry', await cards(page).count(), 5)
+  check('(b) clearing restores every entry', await cards(page).count(), 6)
   check('(b) clearing hides the empty message', await page.getByText('No recurring entries match').count(), 0)
   check('(b) the filter is client-side: no request sent while searching', requests, [])
   check('(b) no browser dialog fired', native.count, 0)

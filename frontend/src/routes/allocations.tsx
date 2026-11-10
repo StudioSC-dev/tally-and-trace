@@ -1669,16 +1669,26 @@ export function AllocationsPage() {
     }
     const matching = [...recurringExpenses, ...recurringIncome].filter((entry) => {
       if (isLimited(entry)) {
-        return matchesRecurringSearch(entry, recurringSearch, { accountName: entry.account?.name, categoryName: entry.category_name })
+        return (
+          matchesRecurringSearch(entry, recurringSearch, { accountName: entry.account?.name, categoryName: entry.category_name }) ||
+          matchesRecurringSearch(entry, recurringSearch, { accountName: entry.counterpart?.name })
+        )
       }
-      return matchesRecurringSearch(entry, recurringSearch, {
-        accountName: entry.account_id ? accountsById.get(entry.account_id)?.name : undefined,
-        categoryName: isSharedFull(entry)
-          ? entry.category_name
-          : entry.category_id
-          ? categoriesById.get(entry.category_id)?.name
-          : undefined,
-      })
+      const categoryName = isSharedFull(entry)
+        ? entry.category_name
+        : entry.category_id
+        ? categoriesById.get(entry.category_id)?.name
+        : undefined
+      // A transfer card also shows its destination account, so that name is searchable too.
+      return (
+        matchesRecurringSearch(entry, recurringSearch, {
+          accountName: entry.account_id ? accountsById.get(entry.account_id)?.name : undefined,
+          categoryName,
+        }) ||
+        matchesRecurringSearch(entry, recurringSearch, {
+          accountName: entry.transfer_to_account_id ? accountsById.get(entry.transfer_to_account_id)?.name : undefined,
+        })
+      )
     })
     const groups = groupByKind(matching)
     const errorAlert = recurringError && (
