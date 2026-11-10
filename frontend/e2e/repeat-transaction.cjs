@@ -108,6 +108,25 @@ async function openAdd(page, accountName) {
   return modal
 }
 
+/**
+ * Answers the next repeating POST with `status` and a JSON `body`, without reaching the
+ * server. Returns { hits }.
+ */
+async function answerRepeating(page, status, body) {
+  const state = { hits: 0 }
+  await page.route((url) => url.pathname.endsWith('/transactions/repeating'), async (route, request) => {
+    state.hits++
+    const origin = request.headers().origin
+    await route.fulfill({
+      status,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': origin || '*', ...(origin ? { 'access-control-allow-credentials': 'true', vary: 'Origin' } : {}) },
+      body: JSON.stringify(body),
+    })
+  }, { times: 1 })
+  return state
+}
+
 /** Clicks a submit button and waits for the POST it sends; returns its response. */
 async function submit(page, modal, name) {
   const [response] = await Promise.all([
@@ -204,6 +223,10 @@ async function scenarioB(browser) {
 
     // Transfers: card to bank, bank to card, bank to bank.
     await modal.getByRole('button', { name: 'Transfer', exact: true }).click()
+    await pick(control(modal, 'account_id'), bank.name)
+    await pick(control(modal, 'transfer_to_account_id'), savings.name)
+    await toggle(modal).check()
+    await h.check('b.transfer-repeat-on', 'S', async () => (await toggle(modal).isChecked()) || 'Repeat off')
     await pick(control(modal, 'account_id'), cc.name)
     await pick(control(modal, 'transfer_to_account_id'), bank.name)
     await h.check('b.card-to-bank-disabled', 'B', async () => (await toggle(modal).isDisabled()) || 'toggle enabled')
@@ -216,6 +239,8 @@ async function scenarioB(browser) {
     await h.check('b.bank-to-card-disabled', 'B', async () => (await toggle(modal).isDisabled()) || 'toggle enabled')
     await pick(control(modal, 'transfer_to_account_id'), savings.name)
     await h.check('b.bank-to-bank-offered', 'B', async () => (!(await toggle(modal).isDisabled())) || 'toggle disabled')
+    await h.check('b.blocked-turns-repeat-off', 'B', async () =>
+      (!(await toggle(modal).isChecked()) && (await fields(modal).count()) === 0) || 'Repeat back on after a blocked pair')
   } finally {
     await d.checkNoNativeDialogs(h, 'b', native)
     await ctx.close()
@@ -311,8 +336,67 @@ async function scenarioD(browser) {
       return (e === 0 && t === 0) || `entries ${e}, transactions ${t}`
     })
 
-    // An API from before the endpoint: 405, then Retry once it answers.
+    // A real 404 (a share revoked mid-form) is a refusal, not a missing endpoint.
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('manual')
+    await answerRepeating(page, 404, { detail: 'Account not found' })
+    await submit(page, modal, 'Create Transaction')
+    await h.waitQuiet(page)
+    await h.check('d.404-reason-inline', 'B', async () => {
+      const line = modal.locator('[data-testid="transaction-form-error"]')
+      await line.waitFor({ timeout: 5000 })
+      return (await line.innerText()).trim() === 'Account not found' || `error ${JSON.stringify(await line.innerText())}`
+    })
+    await h.check('d.404-no-retry', 'B', async () => {
+      const shown = (await modal.locator('[data-testid="repeat-unavailable"]').count()) + (await modal.locator('[data-testid="repeat-retry"]').count())
+      return shown === 0 || 'Repeat shown as unavailable'
+    })
+
+    // A refused Repeat field shows under its own control; an unknown one on the section line.
+    for (const [field, key] of [['settlement', 'settlement'], ['cadence', 'cadence'], ['end_mode', 'end_mode']]) {
+      await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', field], msg: `${field} refused`, type: 'value_error' }] })
+      await submit(page, modal, 'Create Transaction')
+      await h.waitQuiet(page)
+      await h.check(`d.${field}-error-on-control`, 'B', async () => {
+        const error = modal.locator(`[data-testid="repeat-error-${key}"]`)
+        await error.waitFor({ timeout: 5000 })
+        const text = (await error.innerText()).trim()
+        const target = repeatControl(modal, key)
+        const invalid = await target.getAttribute('aria-invalid')
+        const describedBy = await target.getAttribute('aria-describedby')
+        const focused = await target.evaluate((el) => el === document.activeElement || el.contains(document.activeElement))
+        return (text === `${field} refused` && invalid === 'true' && describedBy === `repeat-${key}-error` && focused) ||
+          `text ${JSON.stringify(text)}, aria-invalid ${invalid}, describedby ${describedBy}, focused ${focused}`
+      })
+    }
+    await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', 'lead_time_days'], msg: 'Extra inputs are not permitted', type: 'extra_forbidden' }] })
+    await submit(page, modal, 'Create Transaction')
+    await h.waitQuiet(page)
+    await h.check('d.unknown-field-on-section-line', 'B', async () => {
+      const line = modal.locator('[data-testid="repeat-error"]')
+      await line.waitFor({ timeout: 5000 })
+      return (await line.innerText()).trim() === 'Extra inputs are not permitted' || `error ${JSON.stringify(await line.innerText())}`
+    })
+
+    // An API from before the endpoint: 405, then Retry once it answers, with the button used.
+    const oldAdd = await h.failWith(page, (r) => r.method() === 'POST' && r.url().includes('/transactions/repeating'), 405, { times: 1 })
+    await submit(page, modal, 'Save and add another')
+    await h.waitQuiet(page)
+    await modal.locator('[data-testid="repeat-unavailable"]').waitFor({ timeout: 5000 })
+    const [retriedAdd] = await Promise.all([
+      page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/transactions/repeating')),
+      modal.locator('[data-testid="repeat-retry"]').click(),
+    ])
+    await h.check('d.retry-keeps-add-another', 'B', async () => {
+      if (retriedAdd.status() !== 201 || oldAdd.failed !== 1) return `status ${retriedAdd.status()}, failed ${oldAdd.failed}`
+      await modal.locator('[data-testid="transaction-saved-notice"]').filter({ hasText: 'Saved "Rent past' }).waitFor({ timeout: 10000 })
+      return (await modal.isVisible()) || 'dialog closed'
+    })
+    await oldAdd.stop()
+    await h.waitQuiet(page)
+    await control(modal, 'description').fill('Rent again')
+    await control(modal, 'projected_amount').fill('12000')
+    await toggle(modal).check()
+
     const old = await h.failWith(page, (r) => r.method() === 'POST' && r.url().includes('/transactions/repeating'), 405, { times: 1 })
     await submit(page, modal, 'Create Transaction')
     await h.waitQuiet(page)
@@ -320,7 +404,7 @@ async function scenarioD(browser) {
       await modal.locator('[data-testid="repeat-unavailable"]').waitFor({ timeout: 5000 })
       return true
     })
-    await h.check('d.unavailable-keeps-form', 'B', async () => (await control(modal, 'description').inputValue()) === 'Rent past' || 'form cleared')
+    await h.check('d.unavailable-keeps-form', 'B', async () => (await control(modal, 'description').inputValue()) === 'Rent again' || 'form cleared')
     const [retried] = await Promise.all([
       page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/transactions/repeating')),
       modal.locator('[data-testid="repeat-retry"]').click(),

@@ -271,10 +271,20 @@ describe('repeatingRefusal', () => {
     expect(repeatingRefusal(undefined)).toBeNull()
   })
 
-  it('maps repeat fields onto their controls', () => {
+  it('maps every RepeatSchedule field onto its control', () => {
+    expect(repeatFieldControl('cadence')).toBe('cadence')
     expect(repeatFieldControl('anchor_day')).toBe('day')
     expect(repeatFieldControl('day_rule')).toBe('day')
+    expect(repeatFieldControl('end_mode')).toBe('end_mode')
+    expect(repeatFieldControl('end_date')).toBe('end_date')
     expect(repeatFieldControl('max_occurrences')).toBe('max_occurrences')
-    expect(repeatFieldControl('settlement')).toBeNull()
+    expect(repeatFieldControl('billing_kind')).toBe('kind')
+    expect(repeatFieldControl('settlement')).toBe('settlement')
+  })
+
+  it('leaves an unknown repeat field, or none, to the Repeat section line', () => {
+    expect(repeatFieldControl('next_occurrence')).toBeNull()
+    expect(repeatFieldControl('lead_time_days')).toBeNull()
+    expect(repeatFieldControl(null)).toBeNull()
   })
 })

@@ -430,14 +430,26 @@ export function repeatingRefusal(detail: unknown): RepeatingRefusal | null {
   return { part, field, message }
 }
 
-/** The schedule control a refused `repeat` field is shown on, or null (the Repeat section's own line). */
-export function repeatFieldControl(field: string | null): 'day' | 'end_date' | 'max_occurrences' | null {
+/** A Repeat schedule control that can carry a refused field's error. */
+export type RepeatControl = 'cadence' | 'day' | 'end_mode' | 'end_date' | 'max_occurrences' | 'kind' | 'settlement'
+
+/**
+ * The schedule control a refused `repeat` field is shown on, for every field of the API's
+ * `RepeatSchedule`, or null (an unknown field, or the schedule as a whole: the Repeat
+ * section's own line).
+ */
+export function repeatFieldControl(field: string | null): RepeatControl | null {
   switch (field) {
     case 'anchor_day':
     case 'day_rule':
       return 'day'
+    case 'billing_kind':
+      return 'kind'
+    case 'cadence':
+    case 'end_mode':
     case 'end_date':
     case 'max_occurrences':
+    case 'settlement':
       return field
     default:
       return null

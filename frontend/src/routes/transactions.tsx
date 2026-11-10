@@ -19,14 +19,14 @@ import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
-import { abandonSave, abandonedSavePending, quietPending, releaseQuiet, runQuietSync, useAbandonedSavePending, useQuietPending } from '../store/busy'
+import { abandonSave, abandonedSavePending, quietPending, releaseQuiet, runQuietSync, useAbandonedSavePending, useInputBlocked, useQuietPending } from '../store/busy'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import { RecurringScheduleFields } from '../components/RecurringScheduleFields'
-import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
+import type { ScheduleControlKey, ScheduleControlProps, ScheduleFieldKey } from '../components/RecurringScheduleFields'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
@@ -231,9 +231,25 @@ const createRepeatDraft = (): RepeatDraft => ({
 })
 const REPEAT_FIELD_KEYS: readonly string[] = ['day', 'day_of_month', 'end_date', 'max_occurrences'] satisfies ScheduleFieldKey[]
 const isRepeatField = (key: string | undefined): key is ScheduleFieldKey => REPEAT_FIELD_KEYS.includes(key ?? '')
-const repeatErrorId = (key: ScheduleFieldKey) => `repeat-${key}-error`
+// Focuses a field: a chip group's selected chip, else its first (an open picker's toggle
+// comes first in the DOM, so it is passed over while there is a chip); a button group's first.
+const focusField = (field: HTMLElement | null) => {
+  const target =
+    field?.getAttribute('role') === 'group'
+      ? field.querySelector<HTMLElement>('button[data-selected="true"]') ??
+        field.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
+        field.querySelector<HTMLElement>('button')
+      : field
+  target?.focus()
+}
+
+// A Repeat control that shows a field's error under it.
+type RepeatErrorKey = ScheduleFieldKey | ScheduleControlKey
+const repeatErrorId = (key: RepeatErrorKey) => `repeat-${key}-error`
 const REPEAT_CARD_TRANSFER = "A recurring transfer can't be paid into or funded from a credit card"
-// An API from before POST /transactions/repeating answers 405 (or 404) during a deploy.
+// An API from before POST /transactions/repeating answers 405 during a deploy (its
+// /transactions/{id} routes take no POST), or a bare 404 "Not Found" with no such route. A
+// 404 with any other detail ("Account not found") is a refusal, shown on the form's line.
 const REPEAT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Repeat off to save it once."
 const noFieldRef = () => () => undefined
 
@@ -389,7 +405,7 @@ export function TransactionsPage() {
   // shows on its own line, and an API that does not have the endpoint yet (Retry).
   const [repeatOn, setRepeatOn] = useState(false)
   const [repeatDraft, setRepeatDraft] = useState<RepeatDraft>(createRepeatDraft)
-  const [repeatErrors, setRepeatErrors] = useState<FieldErrors<ScheduleFieldKey>>({})
+  const [repeatErrors, setRepeatErrors] = useState<FieldErrors<RepeatErrorKey>>({})
   const [repeatError, setRepeatError] = useState<string | null>(null)
   const [repeatUnavailable, setRepeatUnavailable] = useState(false)
   // A save in flight locks the form. The ref is the real guard: two clicks in one tick
@@ -399,7 +415,9 @@ export function TransactionsPage() {
   // The line confirming the last "Save and add another".
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
   // Focus to move once the save's result has rendered (disabling the form drops it).
-  const [focusRequest, setFocusRequest] = useState<{ n: number; to: 'description' | 'submitter' } | null>(null)
+  const inputBlocked = useInputBlocked()
+  // `selector`: a refused save's field, focused once the form is unlocked.
+  const [focusRequest, setFocusRequest] = useState<{ n: number; to: 'description' | 'submitter' | { selector: string } } | null>(null)
   const focusSeq = useRef(0)
   const focusHandled = useRef(0)
   // A quiet list refresh is still in flight: a save now would join its stale requests, so
@@ -891,6 +909,8 @@ export function TransactionsPage() {
     (selectedFormAccount?.account_type === 'credit' || destinationFormAccount?.account_type === 'credit')
       ? REPEAT_CARD_TRANSFER
       : null
+  // A blocked pair turns Repeat off for good: picking a pair Repeat can use again leaves it off.
+  if (repeatOn && repeatBlockedReason !== null) setRepeatOn(false)
   const repeatActive = repeatOn && !editingTransaction && repeatBlockedReason === null
   const repeatSchedule: ScheduleDraft = { ...repeatDraft, next_occurrence: `${formData.transaction_date}T00:00` }
   const repeatContext: ScheduleContext = {
@@ -1240,11 +1260,19 @@ export function TransactionsPage() {
       transactionForm.current?.querySelector<HTMLElement>('[data-field="description"]')?.focus()
       return
     }
+    if (typeof focusRequest.to === 'object') {
+      // The fields are disabled while the save is in flight, and the screen loader keeps the
+      // dialog inert a little past it: neither takes focus.
+      if (isSaving || inputBlocked) return
+      focusHandled.current = focusRequest.n
+      focusField(transactionForm.current?.querySelector<HTMLElement>(focusRequest.to.selector) ?? null)
+      return
+    }
     if (refreshPending) return
     focusHandled.current = focusRequest.n
     const active = document.activeElement
     if (active === null || active === document.body) submitterRef.current?.focus()
-  }, [focusRequest, refreshPending])
+  }, [focusRequest, refreshPending, isSaving, inputBlocked])
 
   // One inline error per attempt, on the first invalid field, which takes focus. A chip
   // group focuses its selected chip, else its first (an open picker's toggle comes first
@@ -1253,23 +1281,23 @@ export function TransactionsPage() {
     setDateErrors({})
     setRepeatErrors({})
     setFieldErrors({ [key]: message })
-    const field = transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`)
-    const target =
-      field?.getAttribute('role') === 'group'
-        ? field.querySelector<HTMLElement>('button[data-selected="true"]') ??
-          field.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
-          field.querySelector<HTMLElement>('button')
-        : field
-    target?.focus()
+    focusField(transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`) ?? null)
   }
 
-  // A Repeat control's error, shown under it, with focus.
-  const failRepeat = (key: ScheduleFieldKey, message: string) => {
+  // The Repeat control a field's error is shown on, while it is on screen.
+  const repeatControl = (key: RepeatErrorKey) =>
+    transactionForm.current?.querySelector<HTMLElement>(`[data-testid="repeat-fields"] [data-field="${key}"]`) ?? null
+
+  // A Repeat control's error, shown under it, with focus (a group's first button).
+  const failRepeat = (key: RepeatErrorKey, message: string) => {
     setDateErrors({})
     setFieldErrors({})
     setRepeatErrors({ [key]: message })
-    transactionForm.current?.querySelector<HTMLElement>(`[data-testid="repeat-fields"] [data-field="${key}"]`)?.focus()
+    focusField(repeatControl(key))
   }
+
+  // A refused save's field takes focus once the save has unlocked the form.
+  const focusAfterSave = (selector: string) => setFocusRequest({ n: ++focusSeq.current, to: { selector } })
 
   // The app's own words for an empty required field, where it has them.
   const valueMissingCopy = (key: string | undefined): string | undefined => {
@@ -1322,21 +1350,25 @@ export function TransactionsPage() {
     }, 0)
   }
 
-  // A refused repeating save: an API without the endpoint gets the Repeat section's Retry; a
-  // field the API names (`body.transaction.<field>`, `body.repeat.<field>`) shows its error
-  // inline on that field. Anything else is left to the form's own error line (false).
+  // A refused repeating save: an API without the endpoint (405, or a bare 404 "Not Found")
+  // gets the Repeat section's Retry; a field the API names (`body.transaction.<field>`,
+  // `body.repeat.<field>`) shows its error inline on that field, a Repeat field with no control
+  // on screen on the Repeat section's line. Anything else, such as a 404 "Account not found",
+  // is left to the form's own error line (false).
   const showRepeatRefusal = (error: unknown): boolean => {
     const status = apiErrorStatus(error)
-    if (status === 404 || status === 405) {
+    const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
+    if (status === 405 || (status === 404 && detail === 'Not Found')) {
       setRepeatUnavailable(true)
       return true
     }
-    const refusal = repeatingRefusal((error as { data?: { detail?: unknown } } | undefined)?.data?.detail)
+    const refusal = repeatingRefusal(detail)
     if (!refusal || refusal.part === null || !refusal.message) return false
     if (refusal.part === 'repeat') {
       const control = repeatFieldControl(refusal.field)
-      if (control) {
+      if (control && repeatControl(control)) {
         failRepeat(control, refusal.message)
+        focusAfterSave(`[data-testid="repeat-fields"] [data-field="${control}"]`)
       } else {
         setRepeatError(refusal.message)
       }
@@ -1345,13 +1377,14 @@ export function TransactionsPage() {
     const field = refusal.field
     if (field === 'transaction_date' || field === 'posting_date') {
       setDateErrors({ [field]: refusal.message })
-      ;(field === 'transaction_date' ? transactionDateInput : postingDateInput).current?.focus()
+      focusAfterSave(`[data-field="${field}"]`)
       return true
     }
     // The face amount is the one input the form shows: the posted amount, or the planned one.
     const shown = field === 'amount' || field === 'projected_amount' ? (formData.is_posted ? 'amount' : 'projected_amount') : field
     if (shown !== null && isTransactionField(shown)) {
       fail(shown, refusal.message)
+      focusAfterSave(`[data-field="${shown}"]`)
       return true
     }
     return false
@@ -3781,6 +3814,17 @@ export function TransactionsPage() {
                           ) : null
                         }
                         bindField={noFieldRef}
+                        controlProps={(key): ScheduleControlProps => ({
+                          'data-field': key,
+                          ...fieldErrorProps(repeatErrors, key, repeatErrorId(key)),
+                        })}
+                        renderControlError={(key) =>
+                          repeatErrors[key] ? (
+                            <p id={repeatErrorId(key)} className="mt-1 text-xs text-danger" role="alert" data-testid={`repeat-error-${key}`}>
+                              {repeatErrors[key]}
+                            </p>
+                          ) : null
+                        }
                         showFinalMonthHelp={false}
                         finalMonthHelp=""
                         idPrefix="repeat"
@@ -3800,8 +3844,11 @@ export function TransactionsPage() {
                             className="btn-secondary focus-ring min-h-11"
                             disabled={isSaving || refreshPending || abandonedPending}
                             onClick={() => {
-                              const primary = transactionForm.current?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
-                              transactionForm.current?.requestSubmit(primary ?? undefined)
+                              // Retry the button that was refused: Create, or Save and add another.
+                              const form = transactionForm.current
+                              const used = submitterRef.current
+                              const primary = form?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
+                              form?.requestSubmit((used && form.contains(used) ? used : primary) ?? undefined)
                             }}
                             data-testid="repeat-retry"
                           >

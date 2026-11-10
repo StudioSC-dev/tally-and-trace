@@ -13,6 +13,16 @@ import { chargedOnCloseLabel, formatCadenceLabel } from '../utils/recurringEntry
 /** The schedule controls that carry an inline error. */
 export type ScheduleFieldKey = 'day' | 'day_of_month' | 'end_date' | 'max_occurrences'
 
+/** Further controls that carry an inline error only where a caller wires them (Repeat). */
+export type ScheduleControlKey = 'cadence' | 'end_mode' | 'kind' | 'settlement'
+
+/** What a wired further control carries: its field name, and its error's state. */
+export interface ScheduleControlProps {
+  'data-field': ScheduleControlKey
+  'aria-invalid': true | undefined
+  'aria-describedby': string | undefined
+}
+
 const DAY_LABELS: Record<DaySetting['kind'], string> = {
   same_as_date: 'Same as date',
   day: 'Day of month (1–31)',
@@ -34,6 +44,9 @@ interface RecurringScheduleFieldsProps {
   fieldProps: (key: ScheduleFieldKey) => { 'aria-invalid': true | undefined; 'aria-describedby': string | undefined }
   renderFieldError: (key: ScheduleFieldKey) => ReactNode
   bindField: (key: ScheduleFieldKey) => (el: HTMLElement | null) => void
+  /** Wires the further controls (cadence, Ends, Kind, Settlement) for inline errors; unwired when left out. */
+  controlProps?: (key: ScheduleControlKey) => ScheduleControlProps
+  renderControlError?: (key: ScheduleControlKey) => ReactNode
   /** The date control, beside the cadence. */
   dateField?: ReactNode
   /** Rendered between the Day control and Ends. */
@@ -62,6 +75,8 @@ export function RecurringScheduleFields({
   fieldProps,
   renderFieldError,
   bindField,
+  controlProps,
+  renderControlError,
   dateField,
   beforeEnds,
   showFinalMonthHelp,
@@ -99,6 +114,7 @@ export function RecurringScheduleFields({
                       onChange((prev) => ({ ...prev, cadence }))
                     }}
                     className={control}
+                    {...controlProps?.('cadence')}
                   >
                     {state.cadenceChoices.map(
                       (value) => (
@@ -108,6 +124,7 @@ export function RecurringScheduleFields({
                       )
                     )}
                   </select>
+                  {renderControlError?.('cadence')}
           </div>
           )}
                 {dateField}
@@ -187,7 +204,7 @@ export function RecurringScheduleFields({
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium text-body">Ends</label>
-                  <div className="mt-1 flex flex-wrap gap-2">
+                  <div className="mt-1 flex flex-wrap gap-2" {...(controlProps ? { role: 'group', 'aria-label': 'Ends', ...controlProps('end_mode') } : {})}>
                     {[
                       { value: 'indefinite', label: 'Keep running' },
                       { value: 'on_date', label: 'On date' },
@@ -219,6 +236,7 @@ export function RecurringScheduleFields({
                       )
                     })}
                   </div>
+                  {renderControlError?.('end_mode')}
   </div>
 
                 {draft.end_mode === 'on_date' && (
@@ -286,11 +304,13 @@ export function RecurringScheduleFields({
                     }}
                     className={control}
                     data-testid={`${idPrefix}-kind`}
+                    {...controlProps?.('kind')}
                   >
                     {state.kindChoices.map((choice) => (
                       <option key={choice.id} value={choice.id}>{choice.label}</option>
                     ))}
                   </select>
+                  {renderControlError?.('kind')}
                   <p className="mt-1 text-xs text-muted">
                     {state.kindCapped
                       ? 'An installment has a fixed amount; a bill varies, and you enter the amount charged each time.'
@@ -311,10 +331,12 @@ export function RecurringScheduleFields({
                     }}
                     className={control}
                     data-testid={`${idPrefix}-bank-kind`}
+                    {...controlProps?.('kind')}
                   >
                     <option value="subscription">Subscription</option>
                     <option value="other">Other</option>
                   </select>
+                  {renderControlError?.('kind')}
                   <p className="mt-1 text-xs text-muted">
                     A subscription is listed under Subscriptions on Transactions; anything else, such as rent, stays in Due and overdue.
                   </p>
@@ -334,10 +356,12 @@ export function RecurringScheduleFields({
                     disabled={settlementControl.disabledReason !== null}
                     className={`${control} disabled:opacity-60`}
                     data-testid={`${idPrefix}-settlement`}
+                    {...controlProps?.('settlement')}
                   >
                     <option value="manual">Manual: I record each payment</option>
                     <option value="autopay">Autopay: post it on its date</option>
                   </select>
+                  {renderControlError?.('settlement')}
                   <p className="mt-1 text-xs text-muted" data-testid={`${idPrefix}-settlement-help`}>
                     {settlementControl.disabledReason ?? 'Autopay posts each payment by itself on its date. Manual waits for you.'}
                   </p>
