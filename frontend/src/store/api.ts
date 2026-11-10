@@ -135,6 +135,8 @@ import type {
   UpcomingOccurrenceQuery,
   TransactionListOrder,
   UpcomingOccurrences,
+  ScheduledList,
+  ScheduledQuery,
   InstallmentPlans,
   TransactionSummary,
   CashflowTimeline,
@@ -561,6 +563,26 @@ export const accountingApi = createApi({
       },
       providesTags: ['Transaction'],
     }),
+    // The Transactions page's Scheduled view: future transactions and unrecorded occurrences merged by
+    // day on the server, paged by cursor. The filters are the transaction list's own names.
+    getScheduled: builder.query<ScheduledList, ScheduledQuery>({
+      query: (params) => {
+        const searchParams = new URLSearchParams()
+        params.account_ids?.forEach((id) => searchParams.append('account_ids', String(id)))
+        params.transaction_types?.forEach((v) => searchParams.append('transaction_types', v))
+        params.category_names?.forEach((name) => searchParams.append('category_names', name))
+        if (params.uncategorized) searchParams.set('uncategorized', 'true')
+        if (params.entered_by) searchParams.set('entered_by', params.entered_by)
+        if (typeof params.tag === 'number') searchParams.set('tag', String(params.tag))
+        if (params.search) searchParams.set('search', params.search)
+        if (params.start_date) searchParams.set('start_date', params.start_date)
+        if (params.end_date) searchParams.set('end_date', params.end_date)
+        if (typeof params.limit === 'number') searchParams.set('limit', String(params.limit))
+        if (params.cursor) searchParams.set('cursor', params.cursor)
+        return { url: 'transactions/scheduled', params: searchParams }
+      },
+      providesTags: ['Transaction', 'BudgetEntry', 'Account'],
+    }),
     getTransaction: builder.query<Transaction, number>({
       query: (id) => `transactions/${id}`,
       providesTags: ['Transaction'],
@@ -854,6 +876,7 @@ export const {
   useClearLoanDueDateMutation,
   useGetEntryOccurrencesQuery,
   useGetUpcomingOccurrencesQuery,
+  useGetScheduledQuery,
   useGetInstallmentPlansQuery,
   useGetInstallmentReviewQuery,
   useReviewInstallmentMutation,

@@ -253,6 +253,8 @@ interface Props {
   onChanged: () => void
   /** Open an Upcoming transaction in the page's action modal (Edit, Delete, Post). */
   onOpenTransaction: (transaction: Transaction) => void
+  /** Switch the page's list to the Scheduled view. */
+  onSeeScheduled: () => void
   /** Each account's currency by id, so a pending foreign row shows its face in its own currency; a row whose account is missing keeps its stored figure. */
   accountCurrencies?: ReadonlyMap<number, CurrencyCode>
 }
@@ -269,7 +271,7 @@ const buttonClass =
 const primaryButtonClass =
   'bg-ok px-2.5 py-1 text-xs font-semibold text-paper hover:bg-ok disabled:opacity-50 transition-colors focus-ring'
 
-export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, accountCurrencies }: Props) {
+export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransaction, onSeeScheduled, accountCurrencies }: Props) {
   const panelId = useId()
   const [open, setOpen] = useState(true)
   // The selected tab: Due and overdue on every mount, never stored.
@@ -913,6 +915,18 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     )
   }
 
+  // The Upcoming and Subscriptions panels are a 30-day glance: this opens the browsable list.
+  const seeScheduledLink = (
+    <button
+      type="button"
+      onClick={onSeeScheduled}
+      className="inline-flex min-h-[44px] items-center text-sm underline focus-ring"
+      data-testid="see-scheduled-link"
+    >
+      See everything scheduled
+    </button>
+  )
+
   // The window's through line, and its note when one tab's occurrences pass the request limit.
   const throughLine = (extra: ReactNode) => (
     <p className="px-4 pt-3 text-xs text-muted" data-testid="due-through">
@@ -1189,6 +1203,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             />
           </div>
         )}
+        <div className="px-4 py-3">{seeScheduledLink}</div>
       </>
     ),
     subscriptions: () => (
@@ -1219,10 +1234,11 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             />
           </div>
         )}
-        <div className="px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <Link to="/allocations" search={{ tab: 'recurring' }} className="text-sm underline" data-testid="manage-recurring-link">
             Manage recurring entries
           </Link>
+          {seeScheduledLink}
         </div>
       </>
     ),

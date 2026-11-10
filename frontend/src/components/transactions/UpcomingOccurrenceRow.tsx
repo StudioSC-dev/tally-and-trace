@@ -28,6 +28,8 @@ interface Props {
   onReview: () => void
   /** Open the Change date dialog; the button shows only for a caller who can record the occurrence. */
   onChangeDate?: () => void
+  /** Buttons at least 44px high, for a list that is read on a phone. */
+  touch?: boolean
 }
 
 /**
@@ -36,7 +38,8 @@ interface Props {
  * "{date} · {account}", "Not recorded" with the auto-post label, the amount and the buttons.
  * The buttons come from `upcomingOccurrenceRow` alone: the server decides what can be recorded.
  */
-export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview, onChangeDate }: Props) {
+export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord, onReview, onChangeDate, touch = false }: Props) {
+  const size = touch ? ' min-h-[44px] min-w-[44px]' : ''
   const view = upcomingOccurrenceRow(occurrence, scheduled)
   const amountClass = occurrence.is_transfer ? 'text-ink' : occurrence.entry_type === 'income' ? 'text-ok' : 'text-danger'
   const sign = occurrence.is_transfer ? '' : occurrence.entry_type === 'income' ? '+' : '-'
@@ -82,7 +85,7 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
           {(view.actions.length > 0 || view.review || (onChangeDate && occurrence.can_mark_paid)) && (
             <div className="flex flex-wrap justify-end gap-2">
               {view.review && (
-                <button type="button" onClick={onReview} className={buttonClass} data-testid="upcoming-review">
+                <button type="button" onClick={onReview} className={`${buttonClass}${size}`} data-testid="upcoming-review">
                   Review
                 </button>
               )}
@@ -91,14 +94,14 @@ export function UpcomingOccurrenceRow({ occurrence, scheduled, credit, onRecord,
                   key={action}
                   type="button"
                   onClick={() => onRecord(action)}
-                  className={index === 0 ? primaryButtonClass : buttonClass}
+                  className={`${index === 0 ? primaryButtonClass : buttonClass}${size}`}
                   data-testid={ACTION_TEST_IDS[action]}
                 >
                   {RECURRING_ACTION_LABELS[action]}
                 </button>
               ))}
               {onChangeDate && occurrence.can_mark_paid && (
-                <button type="button" onClick={onChangeDate} className={buttonClass} data-testid="occurrence-change-date">
+                <button type="button" onClick={onChangeDate} className={`${buttonClass}${size}`} data-testid="occurrence-change-date">
                   Change date
                 </button>
               )}
