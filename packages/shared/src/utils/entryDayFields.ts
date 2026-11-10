@@ -170,3 +170,24 @@ export function dateForDaySetting(input: string, day: DaySetting): string {
   date.setUTCDate(target)
   return date.toISOString().slice(0, 16)
 }
+
+/** Weekday names, Sunday first (`Date.getUTCDay()`'s order). */
+export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+/** A `datetime-local` or wire value's weekday (0 Sunday to 6 Saturday), or null when unreadable. */
+export function weekdayOf(value: string): number | null {
+  const date = parseEntryDate(value)
+  return Number.isNaN(date.getTime()) ? null : date.getUTCDay()
+}
+
+/**
+ * A `datetime-local` value moved forward to the next `weekday` (0 Sunday to 6 Saturday) on or
+ * after it, keeping its time of day. Never earlier: a move back could switch auto-post off on
+ * an edit. A value already on that weekday stays.
+ */
+export function dateForWeekday(input: string, weekday: number): string {
+  const date = parseEntryDate(input)
+  if (Number.isNaN(date.getTime())) return input
+  date.setUTCDate(date.getUTCDate() + ((weekday - date.getUTCDay() + 7) % 7))
+  return date.toISOString().slice(0, 16)
+}

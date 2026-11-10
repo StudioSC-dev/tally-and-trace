@@ -96,6 +96,19 @@ describe('dateChoiceLines', () => {
     expect(dateChoiceLines(single).cascade.lines).toEqual(['Sep 10th, 2026 → Nov 12th, 2026'])
   })
 
+  it('reads every 14 days from two moves a fortnight apart', () => {
+    const biweekly = options({
+      cascade: {
+        rule: 'days',
+        moves: [
+          { occurrence_date: '2026-09-10', from: '2026-09-10', to: '2026-11-12', statement_close: null },
+          { occurrence_date: '2026-09-24', from: '2026-09-24', to: '2026-11-26', statement_close: null },
+        ],
+      },
+    })
+    expect(dateChoiceLines(biweekly).cascade.lines.slice(-1)[0]).toBe('…and every later one every 14 days')
+  })
+
   it('counts the payments that move on a bounded schedule', () => {
     expect(dateChoiceLines(options({ cascade: { remaining: 5 } })).cascade.lines.slice(-1)[0]).toBe('5 payments move in all')
     expect(dateChoiceLines(options({ cascade: { remaining: 1 } })).cascade.lines.slice(-1)[0]).toBe('1 payment moves in all')
