@@ -218,6 +218,13 @@ BudgetEntryOut = Annotated[
 ]
 
 
+class RepeatingCreated(BaseModel):
+    """``POST /transactions/repeating``: the transaction and the entry it started.
+    Here, not in schemas/transaction.py, which this module imports."""
+    transaction: TransactionOut
+    entry: BudgetEntryOut
+
+
 class BudgetEntryListResponse(BaseModel):
     items: List[BudgetEntryOut]
     total: int

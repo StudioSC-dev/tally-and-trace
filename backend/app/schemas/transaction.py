@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from typing import Annotated, Literal, Optional, List, Union
 from datetime import datetime
 from app.core.record_dates import check_record_date
@@ -52,6 +52,54 @@ class TransactionCreate(TransactionBase):
     @classmethod
     def _date_in_range(cls, v):
         return check_record_date(v)
+
+class RepeatingTransaction(TransactionCreate):
+    """The transaction ``POST /transactions/repeating`` records as its entry's first
+    occurrence. Its description is the entry's name, so it is required; the entry
+    is created by the request, so no ``budget_entry_id`` may be sent."""
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
+                                                  max_length=150)]
+    # The entry's amount when no ``projected_amount`` is sent: an entry needs more than 0.
+    amount: float = Field(..., gt=0)
+
+    @field_validator("budget_entry_id")
+    @classmethod
+    def _no_entry(cls, v):
+        if v is not None:
+            raise ValueError("budget_entry_id must be absent: this request creates the entry")
+        return v
+
+
+class RepeatSchedule(BaseModel):
+    """The schedule of the entry a repeating transaction starts (services/repeat.py).
+
+    The day fields, ends, ``billing_kind`` and their rules are
+    ``POST /budget-entries/``'s. ``settlement`` "autopay" turns autopay on in the
+    same commit. A semi-monthly cadence is not offered: its two days are not
+    the transaction's date."""
+    model_config = ConfigDict(extra="forbid")
+
+    cadence: RecurrenceFrequency
+    anchor_day: Optional[int] = Field(None, ge=1, le=31)
+    day_rule: Optional[Literal["last_weekday"]] = None
+    end_mode: Literal["indefinite", "on_date", "after_occurrences"]
+    end_date: Optional[datetime] = None
+    max_occurrences: Optional[int] = Field(None, ge=1, le=360)
+    billing_kind: Optional[Literal["subscription", "bill"]] = None
+    settlement: Literal["manual", "autopay"] = "manual"
+
+    @field_validator("cadence")
+    @classmethod
+    def _not_semi_monthly(cls, v):
+        if v == RecurrenceFrequency.SEMI_MONTHLY:
+            raise ValueError("A repeating transaction can't be semi-monthly")
+        return v
+
+
+class RepeatingCreate(BaseModel):
+    transaction: RepeatingTransaction
+    repeat: RepeatSchedule
+
 
 class TransactionUpdate(BaseModel):
     account_id: Optional[int] = Field(None, gt=0)

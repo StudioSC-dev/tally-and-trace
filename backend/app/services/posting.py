@@ -717,6 +717,11 @@ def _advance(entry: BudgetEntry, occurrence: datetime) -> None:
     entry.updated_at = utc_now()
 
 
+def advance_past(entry: BudgetEntry, occurrence: datetime) -> None:
+    """``_advance`` for a caller that has recorded ``occurrence`` itself (services/repeat.py)."""
+    _advance(entry, occurrence)
+
+
 def record_occurrence(db: Session, entry, actor: User, payload: BudgetEntryMaterialize,
                       occurrence: datetime) -> Recorded:
     """Record ``occurrence`` of ``entry`` once, without committing.

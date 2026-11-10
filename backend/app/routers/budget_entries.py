@@ -628,6 +628,18 @@ def create_budget_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    entry = add_budget_entry(db, current_user, entry_in)
+    db.commit()
+    db.refresh(entry)
+    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
+
+
+def add_budget_entry(db: Session, current_user: User, entry_in: BudgetEntryCreate) -> BudgetEntry:
+    """Validate and add a new recurring entry with its tags, flushed and uncommitted.
+
+    The caller commits, so a caller that writes more in the same change (a
+    transaction that repeats, services/repeat.py) commits it all at once.
+    """
     # The caller's own tags only (404 otherwise); linked once the entry exists.
     tag_ids = own_tag_ids(db, current_user, entry_in.tag_ids)
     _ensure_related_resources(
@@ -672,9 +684,7 @@ def create_budget_entry(
     db.flush()
     if tag_ids:
         replace_own_tags(db, BudgetEntry, entry.id, current_user, tag_ids)
-    db.commit()
-    db.refresh(entry)
-    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
+    return entry
 
 
 ENDED_MESSAGE = "This entry has ended"
