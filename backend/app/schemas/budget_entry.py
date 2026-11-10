@@ -284,6 +284,9 @@ class ForcedDateSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     effective_date: date
+    # Absent or null: the strict neighbour rule. "overlap" also allows the next
+    # occurrence's effective date (entries only; loans keep the strict rule).
+    mode: Optional[Literal["overlap"]] = None
 
 
 class MaterializeDueItem(BaseModel):

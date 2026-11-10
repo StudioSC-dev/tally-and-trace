@@ -1125,6 +1125,9 @@ def set_occurrence_date(
     409 when a row, posted or pending, is linked to the occurrence: its date is
     the transaction's. Returns ``{occurrence_date, effective_date}``.
 
+    ``mode: "overlap"`` also allows the date of the next occurrence (never the
+    previous one's); absent or null keeps the strict rule. Every other refusal stands.
+
     On a card the date decides which statement bills the charge, by design: a
     charge that posts late falls into the next one. A date inside a closed
     statement is a 422 (``posting.STATEMENT_CLOSED``); an unrecorded occurrence on
@@ -1136,7 +1139,8 @@ def set_occurrence_date(
     entry = _lock_entry_to_post(db, current_user, entry_id)
     account = locking.lock_accounts(db, [entry.account_id]).get(entry.account_id)
     card = account if _is_card(account) else None
-    posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card)
+    posting.set_forced_date(db, entry, current_user, day, body.effective_date, card=card,
+                            overlap=body.mode == "overlap")
     result = {"occurrence_date": day, "effective_date": body.effective_date}
     if card is not None:
         due = statement_due_date(card, body.effective_date,

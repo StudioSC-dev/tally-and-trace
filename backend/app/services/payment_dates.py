@@ -75,17 +75,21 @@ def extend(end: datetime) -> datetime:
         return datetime.max
 
 
-def in_order(previous: Optional[date], day: date, following: Optional[date]) -> bool:
-    """Whether ``day`` falls strictly between its neighbours (None: no neighbour)."""
-    return (previous is None or previous < day) and (following is None or day < following)
+def in_order(previous: Optional[date], day: date, following: Optional[date],
+             overlap: bool = False) -> bool:
+    """Whether ``day`` falls strictly between its neighbours (None: no neighbour).
+    With ``overlap`` it may also equal the following one's date, never the previous."""
+    return ((previous is None or previous < day)
+            and (following is None or day < following or (overlap and day == following)))
 
 
 def refuse_forced_date(nominal: date, forced: date, previous: Optional[date],
-                       following: Optional[date]) -> None:
-    """422 for a forced date past the reach, out of order or outside the record dates."""
+                       following: Optional[date], overlap: bool = False) -> None:
+    """422 for a forced date past the reach, out of order or outside the record dates.
+    ``overlap`` lets it land on the following occurrence's date."""
     if abs(forced - nominal) > OVERRIDE_REACH:
         raise HTTPException(status_code=422, detail=OUTSIDE_REACH)
-    if not in_order(previous, forced, following):
+    if not in_order(previous, forced, following, overlap):
         raise HTTPException(status_code=422, detail=OUT_OF_ORDER)
     refuse_record_date(forced)
 
