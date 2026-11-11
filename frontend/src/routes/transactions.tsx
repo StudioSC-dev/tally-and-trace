@@ -25,8 +25,9 @@ import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
 import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
-import { RecurringScheduleFields } from '../components/RecurringScheduleFields'
-import type { ScheduleControlKey, ScheduleControlProps, ScheduleFieldKey } from '../components/RecurringScheduleFields'
+import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
+import { RepeatSection } from '../components/transactions/RepeatSection'
+import type { RepeatErrorKey } from '../components/transactions/RepeatSection'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
@@ -234,15 +235,11 @@ const focusField = (field: HTMLElement | null) => {
   target?.focus()
 }
 
-// A Repeat control that shows a field's error under it.
-type RepeatErrorKey = ScheduleFieldKey | ScheduleControlKey
-const repeatErrorId = (key: RepeatErrorKey) => `repeat-${key}-error`
 const REPEAT_CARD_TRANSFER = "A recurring transfer can't be paid into or funded from a credit card"
 // An API from before POST /transactions/repeating answers 405 during a deploy (its
 // /transactions/{id} routes take no POST), or a bare 404 "Not Found" with no such route. A
 // 404 with any other detail ("Account not found") is a refusal, shown on the form's line.
 const REPEAT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Repeat off to save it once."
-const noFieldRef = () => () => undefined
 
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -3768,89 +3765,35 @@ export function TransactionsPage() {
               )}
 
               {!editingTransaction && (
-                <div className="space-y-3" data-testid="repeat-section">
-                  <label className="inline-flex min-h-11 items-center gap-2 text-sm text-body cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="h-5 w-5 border-line text-ink"
-                      checked={repeatActive}
-                      disabled={repeatBlockedReason !== null}
-                      onChange={(e) => toggleRepeat(e.target.checked)}
-                      aria-describedby="repeat-help"
-                      data-testid="repeat-toggle"
-                    />
-                    <span>Repeat</span>
-                  </label>
-                  <p id="repeat-help" className="-mt-2 text-xs text-muted" data-testid="repeat-help">
-                    {repeatBlockedReason ??
-                      (repeatActive && repeatState.cardInstallmentCreate
-                        ? 'This is the first of the payments. The amount is each payment, not the total.'
-                        : 'Starts a recurring entry with this as its first payment.')}
-                  </p>
-                  {repeatActive && (
-                    <fieldset className="min-w-0 space-y-5 border-l-2 border-line pl-3" data-testid="repeat-fields">
-                      <legend className="sr-only">Repeat schedule</legend>
-                      <RecurringScheduleFields
-                        draft={repeatSchedule}
-                        state={repeatState}
-                        preview={repeatPreview}
-                        settlementControl={repeatSettlement}
-                        onChange={changeRepeat}
-                        fieldProps={(key) => fieldErrorProps(repeatErrors, key, repeatErrorId(key))}
-                        renderFieldError={(key) =>
-                          repeatErrors[key] ? (
-                            <p id={repeatErrorId(key)} className="mt-1 text-xs text-danger" role="alert" data-testid={`repeat-error-${key}`}>
-                              {repeatErrors[key]}
-                            </p>
-                          ) : null
-                        }
-                        bindField={noFieldRef}
-                        controlProps={(key): ScheduleControlProps => ({
-                          'data-field': key,
-                          ...fieldErrorProps(repeatErrors, key, repeatErrorId(key)),
-                        })}
-                        renderControlError={(key) =>
-                          repeatErrors[key] ? (
-                            <p id={repeatErrorId(key)} className="mt-1 text-xs text-danger" role="alert" data-testid={`repeat-error-${key}`}>
-                              {repeatErrors[key]}
-                            </p>
-                          ) : null
-                        }
-                        showFinalMonthHelp={false}
-                        finalMonthHelp=""
-                        idPrefix="repeat"
-                        touch
-                        dateFixed
-                      />
-                      {repeatPreview && 'missed' in repeatPreview && repeatPreview.missed && (
-                        <p className="text-xs text-muted" data-testid="repeat-missed">{repeatPreview.missed}</p>
-                      )}
-                      {repeatError && (
-                        <p className="text-sm text-danger" role="alert" data-testid="repeat-error">{repeatError}</p>
-                      )}
-                      {repeatUnavailable && (
-                        <div className="space-y-2" data-testid="repeat-unavailable">
-                          <p className="text-sm text-danger" role="alert">{REPEAT_UNAVAILABLE}</p>
-                          <button
-                            type="button"
-                            className="btn-secondary focus-ring min-h-11"
-                            disabled={isSaving || refreshPending || abandonedPending}
-                            onClick={() => {
-                              // Retry the button that was refused: Create, or Save and add another.
-                              const form = transactionForm.current
-                              const used = submitterRef.current
-                              const primary = form?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
-                              form?.requestSubmit((used && form.contains(used) ? used : primary) ?? undefined)
-                            }}
-                            data-testid="repeat-retry"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      )}
-                    </fieldset>
-                  )}
-                </div>
+                <RepeatSection
+                  label="Repeat"
+                  help={
+                    repeatBlockedReason ??
+                    (repeatActive && repeatState.cardInstallmentCreate
+                      ? 'This is the first of the payments. The amount is each payment, not the total.'
+                      : 'Starts a recurring entry with this as its first payment.')
+                  }
+                  unavailableCopy={REPEAT_UNAVAILABLE}
+                  active={repeatActive}
+                  blocked={repeatBlockedReason !== null}
+                  onToggle={toggleRepeat}
+                  schedule={repeatSchedule}
+                  state={repeatState}
+                  preview={repeatPreview}
+                  settlementControl={repeatSettlement}
+                  onChange={changeRepeat}
+                  errors={repeatErrors}
+                  error={repeatError}
+                  unavailable={repeatUnavailable}
+                  retryDisabled={isSaving || refreshPending || abandonedPending}
+                  onRetry={() => {
+                    // Retry the button that was refused: Create, or Save and add another.
+                    const form = transactionForm.current
+                    const used = submitterRef.current
+                    const primary = form?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
+                    form?.requestSubmit((used && form.contains(used) ? used : primary) ?? undefined)
+                  }}
+                />
               )}
 
               {formData.transaction_type !== 'transfer' && !repeatActive && !(editingTransaction && isSharedFull(editingTransaction)) && (
