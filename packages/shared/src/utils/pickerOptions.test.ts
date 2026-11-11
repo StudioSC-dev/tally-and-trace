@@ -10,6 +10,7 @@ import {
   filterPickerGroups,
   pushRecent,
   quickPicks,
+  stepPickerRow,
   type PickerGroup,
 } from './pickerOptions'
 
@@ -276,5 +277,29 @@ describe('pushRecent', () => {
     const list = [1, 2]
     pushRecent(list, 3)
     expect(list).toEqual([1, 2])
+  })
+})
+
+describe('stepPickerRow', () => {
+  it('moves from the search box to the first row and down to the last', () => {
+    expect(stepPickerRow(-1, 'ArrowDown', 3)).toBe(0)
+    expect(stepPickerRow(0, 'ArrowDown', 3)).toBe(1)
+    expect(stepPickerRow(2, 'ArrowDown', 3)).toBe(2)
+  })
+
+  it('moves up between rows and from the first row back to the search box', () => {
+    expect(stepPickerRow(2, 'ArrowUp', 3)).toBe(1)
+    expect(stepPickerRow(0, 'ArrowUp', 3)).toBe(-1)
+    expect(stepPickerRow(-1, 'ArrowUp', 3)).toBe(-1)
+  })
+
+  it('stays on the search box with no rows', () => {
+    expect(stepPickerRow(-1, 'ArrowDown', 0)).toBe(-1)
+    expect(stepPickerRow(0, 'ArrowUp', 0)).toBe(-1)
+  })
+
+  it('clamps an index past the rows', () => {
+    expect(stepPickerRow(7, 'ArrowUp', 3)).toBe(2)
+    expect(stepPickerRow(7, 'ArrowDown', 3)).toBe(2)
   })
 })

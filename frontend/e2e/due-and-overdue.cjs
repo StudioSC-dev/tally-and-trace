@@ -730,8 +730,9 @@ async function gifts(browser) {
   await page.getByRole('button', { name: 'Add Transaction' }).first().click()
   const modal = page.locator('div.fixed').filter({ has: page.getByRole('heading', { name: 'Create Transaction' }) })
   if (!(await dialogOpened(modal, '(g) Add Transaction opened the Create Transaction dialog'))) return ctx.close()
-  const gifts = modal.getByRole('button', { name: 'Gifts & Donations', exact: true })
   const categories = modal.locator('[data-field="category_id"]')
+  // The compact picker's open panel also lists a recent or chosen category under Recent; count the groups only.
+  const gifts = categories.locator('[data-picker-group]:not([data-picker-group="recent"])').getByRole('button', { name: 'Gifts & Donations', exact: true })
   await modal.getByRole('button', { name: 'Expense', exact: true }).click()
   // Chips outside the quick row are only in the DOM once the picker is expanded; pick() opens it.
   await pick(categories, 'Gifts & Donations')
