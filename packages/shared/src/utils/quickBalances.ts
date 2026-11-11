@@ -1,4 +1,4 @@
-import type { QuickBalanceTile } from '../types/api'
+import type { Account, QuickBalanceTile } from '../types/api'
 import { ACCOUNT_GROUPS, ACCOUNT_TYPE_GROUP } from './accountGroups'
 import { formatCurrency } from './currency'
 import { joinNames } from './cardCredit'
@@ -35,6 +35,20 @@ export function shortDate(day: string): string {
 export function tileGroupLabel(tile: Pick<QuickBalanceTile, 'account_type'>): string {
   const group = ACCOUNT_TYPE_GROUP[tile.account_type]
   return ACCOUNT_GROUPS.find((g) => g.group === group)?.label ?? ''
+}
+
+/**
+ * Whether a tile's card is known to have no credit limit: the tile has `card` (an owner or admin)
+ * and no `credit`, and its `account` (from the accounts list) has no `credit_limit` and shares no
+ * other card's limit. An unknown or not-yet-loaded account is never "no limit", since the API also
+ * omits `credit` for a shared limit the caller can't see in full.
+ */
+export function tileHasNoLimit(
+  tile: Pick<QuickBalanceTile, 'card' | 'credit'>,
+  account: Pick<Account, 'credit_limit' | 'shares_limit_with_account_id'> | undefined,
+): boolean {
+  return tile.card !== undefined && tile.credit === undefined && account !== undefined &&
+    account.credit_limit === null && account.shares_limit_with_account_id === null
 }
 
 /**

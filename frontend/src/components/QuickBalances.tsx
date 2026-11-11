@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { accountPickerGroups, canAddPin, movePin, tileGroupLabel, tileLines } from '@tally-trace/shared'
+import { accountPickerGroups, canAddPin, movePin, tileGroupLabel, tileHasNoLimit, tileLines } from '@tally-trace/shared'
 import type { Account, PickerGroup, QuickBalanceTile, TileLine } from '@tally-trace/shared'
 import { useGetAccountsQuery, useGetQuickBalancesQuery, usePutQuickBalancesMutation } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -278,9 +278,7 @@ export function QuickBalances() {
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-3 grid-flow-row-dense lg:grid-flow-row gap-3">
             {data.tiles.map((tile) => {
-              // Only an account the list shows with no limit and no shared limit; unknown or not loaded is not "no limit".
-              const account = accountsById.get(tile.account_id)
-              const noLimit = tile.card !== undefined && account !== undefined && account.credit_limit === null && account.shares_limit_with_account_id === null
+              const noLimit = tileHasNoLimit(tile, accountsById.get(tile.account_id))
               return <Tile key={tile.account_id} tile={tile} defaultCurrency={currencyCode} noLimit={noLimit} />
             })}
           </div>
