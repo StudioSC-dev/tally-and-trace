@@ -192,6 +192,8 @@ def _id_routes(w):
         ("get", f"/transactions/{w['transaction']}", {}),
         ("put", f"/transactions/{w['transaction']}", {"json": {"amount": 1}}),
         ("delete", f"/transactions/{w['transaction']}", {}),
+        ("post", f"/transactions/{w['transaction']}/repeat",
+         {"json": {"repeat": {"cadence": "monthly", "end_mode": "indefinite"}}}),
         ("post", f"/transactions/{w['transaction']}/upload-receipt",
          {"files": {"file": ("r.png", b"x", "image/png")}}),
         ("get", f"/transactions/{w['transaction']}/receipt", {}),
