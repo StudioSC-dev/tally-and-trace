@@ -139,6 +139,25 @@ class TransactionUpdate(BaseModel):
     def _date_in_range(cls, v):
         return check_record_date(v)
 
+class RepeatEdits(TransactionUpdate):
+    """The Edit dialog's changes to a saved row ``POST /transactions/{id}/repeat``
+    makes repeat, applied as ``PUT`` applies them. The entry is created by the
+    request, so ``budget_entry_id`` may not be sent at all (null included: on
+    ``PUT`` that unlinks); ``is_recurring`` and ``recurrence_frequency`` are
+    ignored, as on ``PUT``."""
+    model_config = ConfigDict(extra="forbid")
+
+    # Runs only when the field is sent (defaults are not validated): a presence check.
+    @field_validator("budget_entry_id", mode="before")
+    @classmethod
+    def _no_entry(cls, v):
+        raise ValueError("budget_entry_id must be absent: this request creates the entry")
+
+
+class RepeatExisting(BaseModel):
+    transaction: RepeatEdits = Field(default_factory=RepeatEdits)
+    repeat: RepeatSchedule
+
 class TransactionFields(TransactionBase):
     """A transaction's stored fields as its creator sees them (no access fields)."""
     id: int

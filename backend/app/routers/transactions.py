@@ -29,7 +29,7 @@ from app.core.tags import (
 )
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.schemas.transaction import (
-    RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
+    RepeatExisting, RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
 )
 from app.schemas.budget_entry import RepeatingCreated, ScheduledList
 from app.core.redaction import (
@@ -1453,6 +1453,33 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     db.commit()
     db.refresh(db_transaction)
     return serialize_transaction(db, current_user, db_transaction)
+
+
+@router.post("/{transaction_id}/repeat", response_model=RepeatingCreated, status_code=201)
+def make_transaction_repeat(
+    transaction_id: int,
+    body: RepeatExisting,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Make a saved transaction repeat: apply the Edit dialog's changes and start
+    the recurring entry the row is the first occurrence of (STU-585).
+
+    ``transaction`` holds the edits, as ``PUT`` takes them (may be empty; no
+    ``budget_entry_id``); ``repeat`` is ``POST /transactions/repeating``'s. No
+    new transaction is written: the row itself is linked to the entry's first
+    occurrence, and the schedule moves as it does there. Only the row's creator
+    with the edit right may do it (404 without the right, 400 for anyone
+    else); a row already linked to an entry is a 409 and a transfer a 400. The
+    edits, the entry, its tags, the link, the advance and the autopay flag
+    commit together: any refusal leaves the row as it was (services/repeat.py)."""
+    txn = _locked_for_edit(db, current_user, transaction_id)
+    txn, entry = repeat_svc.make_repeat(db, current_user, txn, body.transaction, body.repeat)
+    db.commit()
+    db.refresh(txn)
+    db.refresh(entry)
+    return {"transaction": serialize_transaction(db, current_user, txn),
+            "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])}
 
 
 def apply_transaction_update(db: Session, current_user: User, txn: Transaction,

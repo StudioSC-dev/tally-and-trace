@@ -28,10 +28,11 @@ from app.core import locking
 from app.core.time import manila_today
 from app.models.account import Account
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
+from app.models.tag import Tag, transaction_tags
 from app.models.transaction import Transaction, TransactionType
 from app.models.user import User
 from app.schemas.budget_entry import BudgetEntryCreate
-from app.schemas.transaction import RepeatSchedule, TransactionCreate
+from app.schemas.transaction import RepeatEdits, RepeatSchedule, TransactionCreate
 from app.services import loans as loan_svc
 from app.services import posting
 from app.services.recurring_kinds import entry_kind
@@ -39,6 +40,9 @@ from app.services.recurring_kinds import entry_kind
 AUTOPAY_DUE_MESSAGE = ("Turn autopay on from the recurring entry, where you confirm the "
                        "payments it would post")
 CARD_EXPENSE_KINDS = ("subscription", "installment", "bill")
+NOT_CREATOR_MESSAGE = "Only the transaction's creator can make it repeat"
+ALREADY_LINKED_MESSAGE = "This transaction already belongs to a recurring entry"
+TRANSFER_MESSAGE = "A transfer can't be made to repeat; add a recurring transfer instead"
 
 
 def _face(txn_in: TransactionCreate, account: Optional[Account]) -> Tuple[float, object]:
@@ -96,6 +100,32 @@ def _source_from_create(txn_in: TransactionCreate,
         tag_ids=txn_in.tag_ids,
         face_is_projected=(txn_in.projected_amount is not None
                            and txn_in.transaction_type != TransactionType.TRANSFER),
+    )
+
+
+def _source_from_row(db: Session, txn: Transaction, owner: User) -> _EntrySource:
+    """The source of the entry a saved debit or credit starts, read from the row
+    as edited: its stripped description, its face (``projected_*`` when set,
+    else ``amount`` and ``currency``), its account, category and envelope, and
+    only the owner's own tags on it (anyone else's stay off the entry)."""
+    tag_ids = [tag_id for (tag_id,) in (
+        db.query(transaction_tags.c.tag_id)
+        .join(Tag, Tag.id == transaction_tags.c.tag_id)
+        .filter(transaction_tags.c.transaction_id == txn.id, Tag.user_id == owner.id)
+        .order_by(transaction_tags.c.tag_id))]
+    projected = txn.projected_amount is not None
+    return _EntrySource(
+        description=(txn.description or "").strip(),
+        transaction_type=txn.transaction_type,
+        amount=txn.projected_amount if projected else txn.amount,
+        currency=(txn.projected_currency or txn.currency) if projected else txn.currency,
+        date=txn.transaction_date,
+        account_id=txn.account_id,
+        transfer_to_account_id=None,
+        category_id=txn.category_id,
+        allocation_id=txn.allocation_id,
+        tag_ids=tag_ids,
+        face_is_projected=projected,
     )
 
 
@@ -213,6 +243,44 @@ def create_repeating(db: Session, actor: User, txn_in: TransactionCreate,
     account = db.get(Account, txn_in.account_id)
     entry = add_budget_entry(db, actor, _entry_in(_source_from_create(txn_in, account), repeat))
     txn = add_transaction(db, actor, txn_in.model_copy(update={"budget_entry_id": entry.id}))
+    _link_first_occurrence(db, entry, txn, account)
+    # The links and the schedule are read by query; the session does not autoflush.
+    db.flush()
+    if repeat.settlement == "autopay":
+        _turn_on_autopay(db, entry, account)
+        db.flush()
+    return txn, entry
+
+
+def make_repeat(db: Session, actor: User, txn: Transaction, edits: RepeatEdits,
+                repeat: RepeatSchedule) -> Tuple[Transaction, BudgetEntry]:
+    """Apply ``edits`` to a saved row, start the entry it is the first occurrence
+    of and link it, without committing (STU-585, ``POST /transactions/{id}/repeat``).
+
+    The caller holds the row as ``_locked_for_edit`` leaves it: the owner's
+    budget lock, then the row. Checked in this order, so a refused caller learns
+    nothing it could not already read: the edit right (404, as ``PUT``), the
+    creator (400: the entry is the caller's), an existing link (409), a
+    transfer stored or edited to (400). The edits then go through ``PUT``'s own
+    code, the entry is built from the edited row, and the row is linked as
+    ``create_repeating`` links a new one. Any refusal is raised before the
+    caller commits, so the caller's rollback leaves the row as it was."""
+    from app.core.access import RecordAccess
+    from app.routers.budget_entries import add_budget_entry
+    from app.routers.transactions import apply_transaction_update
+
+    if not RecordAccess(db, actor).permissions(txn)["can_edit"]:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if txn.user_id != actor.id:
+        raise HTTPException(status_code=400, detail=NOT_CREATOR_MESSAGE)
+    if txn.budget_entry_id is not None:
+        raise HTTPException(status_code=409, detail=ALREADY_LINKED_MESSAGE)
+    if TransactionType.TRANSFER in (txn.transaction_type, edits.transaction_type):
+        raise HTTPException(status_code=400, detail=TRANSFER_MESSAGE)
+
+    txn = apply_transaction_update(db, actor, txn, edits)
+    account = db.get(Account, txn.account_id)
+    entry = add_budget_entry(db, actor, _entry_in(_source_from_row(db, txn, actor), repeat))
     _link_first_occurrence(db, entry, txn, account)
     # The links and the schedule are read by query; the session does not autoflush.
     db.flush()
