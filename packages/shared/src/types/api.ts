@@ -662,6 +662,16 @@ export interface RepeatingTransactionInput {
   repeat: RepeatScheduleInput
 }
 
+/**
+ * POST /transactions/{id}/repeat: save edits to an existing transaction and start the
+ * recurring entry it becomes the first occurrence of, in one commit. `transaction` holds
+ * only the fields being changed and carries no `budget_entry_id` (not even null).
+ */
+export interface RepeatEditInput {
+  transaction: Partial<TransactionInput>
+  repeat: RepeatScheduleInput
+}
+
 /** POST /transactions/repeating (201): the transaction and the entry it started. */
 export interface RepeatingCreated {
   transaction: Transaction

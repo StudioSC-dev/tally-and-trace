@@ -189,6 +189,7 @@ import type {
   BudgetEntryInput,
   TransactionInput,
   RepeatingTransactionInput,
+  RepeatEditInput,
   RepeatingCreated,
 } from '@tally-trace/shared'
 import { readMaterializeHeaders } from '@tally-trace/shared'
@@ -628,6 +629,11 @@ export const accountingApi = createApi({
       query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
       invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
     }),
+    // Edit's "Make this repeat": the edits and the entry the saved row starts, in one commit.
+    makeTransactionRepeat: builder.mutation<RepeatingCreated, { id: number; body: RepeatEditInput }>({
+      query: ({ id, body }) => ({ url: `transactions/${id}/repeat`, method: 'POST', body }),
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
+    }),
     updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
@@ -931,6 +937,7 @@ export const {
   useCreateTransactionQuietMutation,
   useCreateRepeatingTransactionMutation,
   useCreateRepeatingTransactionQuietMutation,
+  useMakeTransactionRepeatMutation,
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,
   useUploadReceiptMutation,
