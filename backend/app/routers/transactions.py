@@ -1401,6 +1401,23 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     return serialize_transaction(db, current_user, transaction)
 
+def _locked_for_edit(db: Session, current_user: User, transaction_id: int) -> Transaction:
+    """The transaction the caller can read, locked for an edit (404 otherwise).
+
+    The owner's budget lock first (its owner never changes, so the unlocked read
+    is safe), then the row, locked and refreshed before anything reads it: every
+    check after this reads it as it is now, after any concurrent edit or delete
+    commits.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    locking.lock_owner_budgets(db, db_transaction.user_id)
+    db_transaction = locking.lock_transaction(db, transaction_id)
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return db_transaction
+
+
 @router.put("/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance.
@@ -1430,15 +1447,7 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     stored (``_received_amount_for_update``). Reverting leaves ``amount`` as
     posted.
     """
-    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
-                                       "Transaction not found")
-    # The owner's budget lock first (its owner never changes, so the unlocked read
-    # is safe), then the row, locked and refreshed before anything reads it: every
-    # check below reads it as it is now, after any concurrent edit or delete commits.
-    locking.lock_owner_budgets(db, db_transaction.user_id)
-    db_transaction = locking.lock_transaction(db, transaction_id)
-    if db_transaction is None:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = _locked_for_edit(db, current_user, transaction_id)
     db_transaction = apply_transaction_update(db, current_user, db_transaction,
                                               transaction_update)
     db.commit()
