@@ -238,6 +238,31 @@ export function GroupedPicker(props: GroupedPickerProps) {
     if (query.trim() !== '' && matches.length === 1) choose(matches[0].id, true)
   }
 
+  // The search box and its live match count, at the top of the open panel.
+  const searchBox = (
+    <>
+      <input
+        ref={searchRef}
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={onSearchKeyDown}
+        placeholder={`Search ${noun.many}`}
+        aria-label={`Search ${noun.many}`}
+        data-picker-search=""
+        className="input-field focus-ring w-full"
+        autoComplete="off"
+      />
+      <p aria-live="polite" data-picker-matches="" className="text-xs text-muted">
+        {query.trim() === ''
+          ? ''
+          : filtered.count === 0
+            ? 'No matches'
+            : `${filtered.count} ${filtered.count === 1 ? 'match' : 'matches'}`}
+      </p>
+    </>
+  )
+
   const renderGroups = (list: readonly PickerGroup[], depth: number): ReactNode =>
     list.map((g) => {
       const headingId = `${panelId}-${g.key}`
@@ -339,25 +364,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
             </div>
             {open && (
               <div id={panelId} className="w-full min-w-0 basis-full space-y-3" onKeyDown={onPanelKeyDown}>
-                <input
-                  ref={searchRef}
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={onSearchKeyDown}
-                  placeholder={`Search ${noun.many}`}
-                  aria-label={`Search ${noun.many}`}
-                  data-picker-search=""
-                  className="input-field focus-ring w-full"
-                  autoComplete="off"
-                />
-                <p aria-live="polite" data-picker-matches="" className="text-xs text-muted">
-                  {query.trim() === ''
-                    ? ''
-                    : filtered.count === 0
-                      ? 'No matches'
-                      : `${filtered.count} ${filtered.count === 1 ? 'match' : 'matches'}`}
-                </p>
+                {searchBox}
                 {renderGroups(filtered.groups, 0)}
               </div>
             )}
@@ -403,25 +410,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
       )}
       {open && (
         <div id={panelId} className="w-full min-w-0 basis-full space-y-3" onKeyDown={onPanelKeyDown}>
-          <input
-            ref={searchRef}
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onSearchKeyDown}
-            placeholder={`Search ${noun.many}`}
-            aria-label={`Search ${noun.many}`}
-            data-picker-search=""
-            className="input-field focus-ring w-full"
-            autoComplete="off"
-          />
-          <p aria-live="polite" data-picker-matches="" className="text-xs text-muted">
-            {query.trim() === ''
-              ? ''
-              : filtered.count === 0
-                ? 'No matches'
-                : `${filtered.count} ${filtered.count === 1 ? 'match' : 'matches'}`}
-          </p>
+          {searchBox}
           {renderGroups(filtered.groups, 0)}
           {props.mode === 'multi' && nSelected > 0 && (
             <p className="text-xs text-muted" data-picker-count="">{nSelected} selected</p>
