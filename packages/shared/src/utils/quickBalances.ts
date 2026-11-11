@@ -1,4 +1,4 @@
-import type { QuickBalanceTile } from '../types/api'
+import type { Account, QuickBalanceTile } from '../types/api'
 import { ACCOUNT_GROUPS, ACCOUNT_TYPE_GROUP } from './accountGroups'
 import { formatCurrency } from './currency'
 import { joinNames } from './cardCredit'
@@ -38,6 +38,20 @@ export function tileGroupLabel(tile: Pick<QuickBalanceTile, 'account_type'>): st
 }
 
 /**
+ * Whether a tile's card is known to have no credit limit: the tile has `card` (an owner or admin)
+ * and no `credit`, and its `account` (from the accounts list) has no `credit_limit` and shares no
+ * other card's limit. An unknown or not-yet-loaded account is never "no limit", since the API also
+ * omits `credit` for a shared limit the caller can't see in full.
+ */
+export function tileHasNoLimit(
+  tile: Pick<QuickBalanceTile, 'card' | 'credit'>,
+  account: Pick<Account, 'credit_limit' | 'shares_limit_with_account_id'> | undefined,
+): boolean {
+  return tile.card !== undefined && tile.credit === undefined && account !== undefined &&
+    account.credit_limit === null && account.shares_limit_with_account_id === null
+}
+
+/**
  * The figures a tile shows, in order, every one in the account's own currency.
  *
  * - Checking, savings, e-wallet, cash: the balance.
@@ -47,8 +61,11 @@ export function tileGroupLabel(tile: Pick<QuickBalanceTile, 'account_type'>): st
  *   the unbilled charges as a smaller line (omitted when null or 0), then the available
  *   credit ("at most" when incomplete, followed by "shared with ..." on a linked card, or
  *   nothing when no credit is served).
+ * - `options.noLimit`: the caller knows this card has no credit limit of its own and shares none
+ *   (from the account, which the API does not put on the tile), so a card with no `credit` shows a
+ *   muted "No limit set" where Available would be. Without it, an absent `credit` shows nothing.
  */
-export function tileLines(tile: QuickBalanceTile): TileLine[] {
+export function tileLines(tile: QuickBalanceTile, options: { noLimit?: boolean } = {}): TileLine[] {
   const money = (amount: number) => formatCurrency(amount, tile.currency)
   if (tile.account_type === 'loan') return [line('owed', 'Owed', money(-tile.balance))]
   if (tile.account_type !== 'credit') return [line('balance', null, money(tile.balance))]
@@ -70,13 +87,16 @@ export function tileLines(tile: QuickBalanceTile): TileLine[] {
   const credit = tile.credit
   // The API omits `credit` for a card with no limit and for a card whose shared limit the caller
   // can't see in full (a limit it does not manage every card of), and the two look the same, so
-  // an absent `credit` shows no available-credit line rather than a guess.
+  // an absent `credit` shows no available-credit line rather than a guess, unless the caller has
+  // confirmed from the account that there is no limit (`options.noLimit`).
   if (credit !== undefined) {
     const available = money(credit.available_now)
     lines.push(line('available', 'Available', credit.complete ? available : `at most ${available}`))
     if (credit.shared_with.length > 0) {
       lines.push(line('shared', null, `shared with ${joinNames(credit.shared_with.map((c) => c.name))}`, 'muted', true))
     }
+  } else if (options.noLimit === true) {
+    lines.push(line('available', null, 'No limit set', 'muted'))
   }
   return lines
 }
