@@ -29,7 +29,7 @@ from app.core.tags import (
 )
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.schemas.transaction import (
-    RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
+    RepeatExisting, RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
 )
 from app.schemas.budget_entry import RepeatingCreated, ScheduledList
 from app.core.redaction import (
@@ -1401,6 +1401,23 @@ def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_
     transaction = get_record_or_404(db, Transaction, transaction_id, current_user, "Transaction not found")
     return serialize_transaction(db, current_user, transaction)
 
+def _locked_for_edit(db: Session, current_user: User, transaction_id: int) -> Transaction:
+    """The transaction the caller can read, locked for an edit (404 otherwise).
+
+    The owner's budget lock first (its owner never changes, so the unlocked read
+    is safe), then the row, locked and refreshed before anything reads it: every
+    check after this reads it as it is now, after any concurrent edit or delete
+    commits.
+    """
+    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
+                                       "Transaction not found")
+    locking.lock_owner_budgets(db, db_transaction.user_id)
+    db_transaction = locking.lock_transaction(db, transaction_id)
+    if db_transaction is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return db_transaction
+
+
 @router.put("/{transaction_id}", response_model=TransactionOut)
 def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     """Update an existing transaction and recalculate account balance.
@@ -1430,20 +1447,39 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     stored (``_received_amount_for_update``). Reverting leaves ``amount`` as
     posted.
     """
-    db_transaction = get_record_or_404(db, Transaction, transaction_id, current_user,
-                                       "Transaction not found")
-    # The owner's budget lock first (its owner never changes, so the unlocked read
-    # is safe), then the row, locked and refreshed before anything reads it: every
-    # check below reads it as it is now, after any concurrent edit or delete commits.
-    locking.lock_owner_budgets(db, db_transaction.user_id)
-    db_transaction = locking.lock_transaction(db, transaction_id)
-    if db_transaction is None:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    db_transaction = _locked_for_edit(db, current_user, transaction_id)
     db_transaction = apply_transaction_update(db, current_user, db_transaction,
                                               transaction_update)
     db.commit()
     db.refresh(db_transaction)
     return serialize_transaction(db, current_user, db_transaction)
+
+
+@router.post("/{transaction_id}/repeat", response_model=RepeatingCreated, status_code=201)
+def make_transaction_repeat(
+    transaction_id: int,
+    body: RepeatExisting,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Make a saved transaction repeat: apply the Edit dialog's changes and start
+    the recurring entry the row is the first occurrence of (STU-585).
+
+    ``transaction`` holds the edits, as ``PUT`` takes them (may be empty; no
+    ``budget_entry_id``); ``repeat`` is ``POST /transactions/repeating``'s. No
+    new transaction is written: the row itself is linked to the entry's first
+    occurrence, and the schedule moves as it does there. Only the row's creator
+    with the edit right may do it (404 without the right, 400 for anyone
+    else); a row already linked to an entry is a 409 and a transfer a 400. The
+    edits, the entry, its tags, the link, the advance and the autopay flag
+    commit together: any refusal leaves the row as it was (services/repeat.py)."""
+    txn = _locked_for_edit(db, current_user, transaction_id)
+    txn, entry = repeat_svc.make_repeat(db, current_user, txn, body.transaction, body.repeat)
+    db.commit()
+    db.refresh(txn)
+    db.refresh(entry)
+    return {"transaction": serialize_transaction(db, current_user, txn),
+            "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])}
 
 
 def apply_transaction_update(db: Session, current_user: User, txn: Transaction,
