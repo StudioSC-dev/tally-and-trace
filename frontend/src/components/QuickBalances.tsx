@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { accountPickerGroups, canAddPin, movePin, tileGroupLabel, tileLines } from '@tally-trace/shared'
+import { accountPickerGroups, canAddPin, movePin, tileGroupLabel, tileHasNoLimit, tileLines } from '@tally-trace/shared'
 import type { Account, PickerGroup, QuickBalanceTile, TileLine } from '@tally-trace/shared'
 import { useGetAccountsQuery, useGetQuickBalancesQuery, usePutQuickBalancesMutation } from '../store/api'
 import { useCurrency } from '../hooks/useCurrency'
@@ -23,8 +23,8 @@ function LineView({ line, headline }: { line: TileLine; headline: boolean }) {
   )
 }
 
-function Tile({ tile, defaultCurrency }: { tile: QuickBalanceTile; defaultCurrency: string }) {
-  const lines = tileLines(tile)
+function Tile({ tile, defaultCurrency, noLimit }: { tile: QuickBalanceTile; defaultCurrency: string; noLimit: boolean }) {
+  const lines = tileLines(tile, { noLimit })
   const isCredit = tile.account_type === 'credit'
   return (
     <Link
@@ -236,6 +236,8 @@ export function QuickBalances() {
   const { currencyCode } = useCurrency()
   const { data, isLoading, isError, refetch } = useGetQuickBalancesQuery(undefined, { refetchOnFocus: true })
   const [editing, setEditing] = useState(false)
+  const { data: accountsPage } = useGetAccountsQuery({ is_active: true, limit: 1000 })
+  const accountsById = useMemo(() => new Map((accountsPage?.items ?? []).map((a) => [a.id, a])), [accountsPage])
 
   // refetchOnFocus: a tab left open picks up pins another tab or device saved, when it is next focused.
   // A user with no accounts gets no section.
@@ -275,9 +277,10 @@ export function QuickBalances() {
           <PinEditor tiles={data.tiles} pinned={data.pinned} onDone={() => setEditing(false)} />
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-3 grid-flow-row-dense lg:grid-flow-row gap-3">
-            {data.tiles.map((tile) => (
-              <Tile key={tile.account_id} tile={tile} defaultCurrency={currencyCode} />
-            ))}
+            {data.tiles.map((tile) => {
+              const noLimit = tileHasNoLimit(tile, accountsById.get(tile.account_id))
+              return <Tile key={tile.account_id} tile={tile} defaultCurrency={currencyCode} noLimit={noLimit} />
+            })}
           </div>
         )}
       </div>

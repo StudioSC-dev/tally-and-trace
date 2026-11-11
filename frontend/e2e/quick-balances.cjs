@@ -22,6 +22,8 @@
 //   (g) a user with no card and no e-wallet sees one tile; a user with no accounts sees
 //       no section
 //   (o) an admin of one card in a shared-limit pair sees its Due but no Available and no "No limit set"
+//   (r) an owner's unshared card with no limit shows a muted "No limit set" where Available would be; the
+//       Amex (a limit) does not (the shared-limit card is (o))
 //
 // Pinning (PR 4), each with a fresh user; every scenario also checks no browser dialog fired:
 //   (h) Edit starts from the shown tiles; Move later, Move earlier, Remove and Save send the
@@ -36,7 +38,7 @@
 //   (n) saving pins does not refetch the dashboard snapshot
 //   (p) the editor at 390px: no horizontal scroll, every control 44px
 //
-// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q]
+// Usage: node frontend/e2e/quick-balances.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r]
 const { startLocalStack } = require('./_local_stack.cjs')
 const dialogs = require('./_dialogs.cjs')
 
@@ -666,8 +668,37 @@ async function partialGroup(browser) {
   await openDashboard(page)
   const card = tile(page, platinum.id)
   check('(o) the tile shows Due', await card.locator('[data-testid="quick-balance-due"]').count(), 1)
+  // The accounts list has loaded (openDashboard waits for the network to go idle), so an absent line is not a race.
   check('(o) no Available line and no "No limit set"', [await card.locator('[data-testid="quick-balance-available"]').count(), (await text(card)).includes('No limit set')], [0, false])
   await ctx.close()
+}
+
+// (r) A card with no credit limit and no shared limit.
+async function noLimitCard(browser) {
+  console.log('\n=== (r) an owner\'s unshared card with no limit shows "No limit set"; a card with a limit does not')
+  const u = await makeUser('nolimit')
+  const plain = await post(u.token, '/accounts/', { name: 'Plain Card', account_type: 'credit', balance: 0, currency: 'PHP' })
+  const t = (await quick(u)).tiles.find((x) => x.account_id === plain.id)
+  check('(r) the API gives the owner the card figures and no credit', [t !== undefined, t?.card !== undefined, t?.credit === undefined], [true, true, true])
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await openDashboard(page)
+  const card = tile(page, plain.id)
+  const noLimit = card.locator('[data-testid="quick-balance-available"]')
+  await noLimit.waitFor()
+  check('(r) the tile reads "No limit set", with no caption', [await noLimit.count(), await text(noLimit)], [1, 'No limit set'])
+  check('(r) the line is muted', await noLimit.evaluate((el) => el.classList.contains('text-muted')), true)
+  check('(r) the Due line stays first', await card.locator('[data-testid^="quick-balance-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')).filter((id) => id === 'quick-balance-due' || id === 'quick-balance-available')),
+    ['quick-balance-due', 'quick-balance-available'])
+
+  // The Amex has a limit (the Platinum sharing it is covered by (o)), so it does not say "No limit set".
+  const pair = await newPage(browser)
+  await uiLogin(pair.page, owner)
+  await pair.page.locator('[data-testid="quick-balance-tile"]').first().waitFor()
+  await pair.page.waitForLoadState('networkidle')
+  check('(r) the Amex shows its Available figure, not "No limit set"', (await text(tile(pair.page, amex.id))).includes('No limit set'), false)
+  await ctx.close()
+  await pair.ctx.close()
 }
 
 ;(async () => {
@@ -693,6 +724,7 @@ async function partialGroup(browser) {
   if (run('o')) await partialGroup(browser)
   if (run('p')) await phoneEditor(browser)
   if (run('q')) await focusRefresh(browser)
+  if (run('r')) await noLimitCard(browser)
   check('no browser dialog fired in the whole run', nativeCount(), 0)
   await browser.close()
   stack.stop()

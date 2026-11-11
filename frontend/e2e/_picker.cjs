@@ -1,7 +1,9 @@
 // Shared helper for the account and category chip pickers (GroupedPicker). A picker with
 // more than 8 options shows a quick row and a toggle; the rest of its chips are only in
 // the DOM once the toggle has opened the full list. A compact field (the Add Transaction
-// dialog) with a value is one line until its Change button is clicked. `pick` hides both.
+// dialog) with a value is one line until its Change button opens its panel of rows (each
+// row a button; a recent option is listed twice, in Recent and in its group, and `pick`
+// clicks the first). `pick` hides both.
 //
 // Usage:
 //   const { pick, chipOf } = require('./_picker.cjs')
@@ -27,7 +29,7 @@ async function pick(scope, name, { timeout = 10000 } = {}) {
   const toggle = scope.locator('[data-picker-toggle][aria-expanded="false"]')
   const change = scope.locator('[data-picker-change][aria-expanded="false"]')
   await chip.or(toggle).or(change).first().waitFor({ timeout })
-  // A compact field with a value is one line; its Change button opens the chip row.
+  // A compact field with a value is one line; its Change button opens the panel of rows.
   if ((await chip.count()) === 0 && (await change.count()) === 1) {
     await change.click()
     await chip.or(toggle).first().waitFor({ timeout })

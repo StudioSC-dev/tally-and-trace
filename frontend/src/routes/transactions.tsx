@@ -223,12 +223,14 @@ const createRepeatDraft = (): RepeatDraft => ({
 })
 const REPEAT_FIELD_KEYS: readonly string[] = ['day', 'day_of_month', 'end_date', 'max_occurrences'] satisfies ScheduleFieldKey[]
 const isRepeatField = (key: string | undefined): key is ScheduleFieldKey => REPEAT_FIELD_KEYS.includes(key ?? '')
-// Focuses a field: a chip group's selected chip, else its first (an open picker's toggle
-// comes first in the DOM, so it is passed over while there is a chip); a button group's first.
+// Focuses a field: an open compact picker's search box; else a chip group's selected chip,
+// else its first (an open picker's toggle comes first in the DOM, so it is passed over while
+// there is a chip); a button group's first.
 const focusField = (field: HTMLElement | null) => {
   const target =
     field?.getAttribute('role') === 'group'
-      ? field.querySelector<HTMLElement>('button[data-selected="true"]') ??
+      ? field.querySelector<HTMLElement>('[data-picker-panel] input[data-picker-search]') ??
+        field.querySelector<HTMLElement>('button[data-selected="true"]') ??
         field.querySelector<HTMLElement>('button:not([data-picker-toggle])') ??
         field.querySelector<HTMLElement>('button')
       : field

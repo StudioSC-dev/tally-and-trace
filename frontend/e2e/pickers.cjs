@@ -1,16 +1,18 @@
 // Browser checks for the account and category pickers (STU-573, PR 2): the transaction
-// form's Account, Destination Account and Category chips. A list of 8 or fewer shows flat
-// as before; a longer one shows a quick row (selected, recent, then group order) and a
-// toggle that opens the whole list inline, grouped, with a search box.
+// form's Account, Destination Account and Category fields. They are compact (STU-580): a
+// field with a value is one line until Change opens its panel, and one with no value is
+// its open panel: a search box, then rows. A list of 8 or fewer shows its rows flat; a
+// longer one shows a Recent group (selected, recent, then group order) ahead of the
+// grouped list.
 //
-// (3) flat at 8, collapsed at 9; quick row, toggle, panel, search, collapse on a pick and
-// focus on the picked chip; (4) each option in the DOM once; (5) a failed save focuses
-// the first chip and keeps `aria-describedby` on the group and its buttons; (6) a saved
-// create or edit writes the recents, a refused save writes nothing; (7) at 360 x 740 with
-// the panel open nothing scrolls sideways and every chip is at least 44 px tall; (8) a
-// non-recent account picked by keyboard only; (a) a recent account is one tap with no
-// expansion; (b) group headings in ACCOUNT_GROUPS order with Shared last; (c) "No
-// matches" and the live count. PR 3, the transaction list's filters: (f1) the Accounts filter
+// (3) flat at 8, a Recent group at 9; the panel, a pick that closes it with focus on
+// Change; (4) each option once in the groups, in Recent, and while searching; (5) a failed
+// save focuses the search box and keeps `aria-describedby` on the group, the search box
+// and its rows; (6) a saved create or edit writes the recents, a refused save writes
+// nothing; (7) at 360 x 740 with the panels open nothing scrolls sideways and every button
+// is at least 44 px tall; (8) a non-recent account picked by keyboard only; (a) a recent
+// account is one tap; (b) group headings, Recent first, then ACCOUNT_GROUPS order with
+// Shared last; (c) "No matches" and the live count. PR 3, the transaction list's filters: (f1) the Accounts filter
 // is multi select behind an "All accounts" chip and sends the picked account_ids; (f2) a
 // category name used in two kinds is one choice, selected once, with "All categories" and
 // "No category" ahead of the chips; (f3) a selected non-recent account stays in the
@@ -77,6 +79,11 @@ const activeText = (page) => page.evaluate(() => (document.activeElement?.textCo
 const idsIn = (group) => group.locator('[data-picker-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-picker-id')))
 const namesIn = (group) => group.locator('[data-picker-id]').evaluateAll((els) => els.map((el) => el.childNodes[0]?.textContent?.trim() ?? ''))
 const dupes = (ids) => ids.filter((id, i) => ids.indexOf(id) !== i)
+// A compact panel lists a recent option twice, in Recent and in its group.
+const recentOf = (group) => group.locator('[data-picker-group="recent"]')
+const groupIdsIn = (group) => group.locator('[data-picker-group]:not([data-picker-group="recent"]) [data-picker-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-picker-id')))
+const groupNamesIn = (group) => group.locator('[data-picker-group]:not([data-picker-group="recent"]) [data-picker-id]').evaluateAll((els) => els.map((el) => el.childNodes[0]?.textContent?.trim() ?? ''))
+const searchOf = (group) => group.locator('input[data-picker-search]')
 
 const loanBody = (name) => ({
   name, account_type: 'loan', loan_kind: 'auto', balance: -100000, currency: 'PHP',
@@ -127,18 +134,18 @@ const readRecent = (page, kind) =>
 const writeRecent = (page, kind, ids) =>
   page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [recentKey(kind), ids])
 
-// (3) Flat at 8, collapsed at 9; the quick row, the toggle, the panel and a pick from it.
+// (3) Flat at 8, a Recent group at 9; the panel and a pick from it.
 async function scenario3(browser) {
-  console.log('\n=== (3) 8 or fewer stay flat; more get a quick row, a toggle and an inline panel')
+  console.log('\n=== (3) 8 or fewer stay flat; more get a Recent group ahead of the groups')
   {
     const { ctx, page, native } = await openTransactions(browser, small.user)
     try {
       let modal = await openAddForm(page)
       let group = control(modal, 'account_id')
       await h.check('3.flat.mode', 'B', async () => (await group.getAttribute('data-picker')) === 'flat' || `data-picker ${await group.getAttribute('data-picker')}`)
-      await h.check('3.flat.no-toggle-no-search', 'B', async () => {
-        const n = [await toggleOf(group).count(), await group.locator('input[type="search"]').count()]
-        return (n[0] === 0 && n[1] === 0) || `toggle, search ${JSON.stringify(n)}`
+      await h.check('3.flat.no-toggle-no-recent', 'B', async () => {
+        const n = [await toggleOf(group).count(), await recentOf(group).count(), await searchOf(group).count()]
+        return (n[0] === 0 && n[1] === 0 && n[2] === 1) || `toggle, recent, search ${JSON.stringify(n)}`
       })
       await h.check('3.flat.all-eight-in-api-order', 'B', async () => {
         const list = await client.get(small.user.token, '/accounts/?is_active=true&limit=100')
@@ -152,7 +159,7 @@ async function scenario3(browser) {
         const cat = control(modal, 'category_id')
         await reopen(cat)
         const got = { mode: await cat.getAttribute('data-picker'), chips: (await idsIn(cat)).length, first: (await cat.locator('[data-picker-leading]').first().textContent()).trim() }
-        return (got.mode === 'flat' && got.chips === 3 && got.first === 'None') || JSON.stringify(got)
+        return (got.mode === 'flat' && got.chips === 3 && got.first.startsWith('None')) || JSON.stringify(got)
       })
       await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
       await client.post(small.user.token, '/accounts/', accountBody('S Ninth', 'cash'))
@@ -161,9 +168,9 @@ async function scenario3(browser) {
       await h.waitQuiet(page)
       modal = await openAddForm(page)
       group = control(modal, 'account_id')
-      await h.check('3.nine.collapsed', 'B', async () => {
-        const got = { mode: await group.getAttribute('data-picker'), toggle: (await toggleOf(group).textContent().catch(() => '')).trim() }
-        return (got.mode === 'collapsed' && got.toggle.startsWith('All 9 accounts')) || JSON.stringify(got)
+      await h.check('3.nine.recent-group', 'B', async () => {
+        const got = { mode: await group.getAttribute('data-picker'), toggle: await toggleOf(group).count(), recent: await recentOf(group).locator('[data-picker-id]').count(), groups: (await groupIdsIn(group)).length }
+        return (got.mode === 'expanded' && got.toggle === 0 && got.recent === 5 && got.groups === 9) || JSON.stringify(got)
       })
     } finally {
       await d.checkNoNativeDialogs(h, '3.small', native)
@@ -175,36 +182,19 @@ async function scenario3(browser) {
   try {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
-    const toggle = toggleOf(group)
-    await h.check('3.collapsed', 'B', async () => {
+    await h.check('3.open-with-recent', 'B', async () => {
       const got = {
         mode: await group.getAttribute('data-picker'),
-        chips: (await idsIn(group)).length,
-        toggle: (await toggle.textContent()).trim(),
-        expanded: await toggle.getAttribute('aria-expanded'),
-        search: await group.locator('input[type="search"]').count(),
+        recent: await recentOf(group).locator('[data-picker-id]').count(),
+        groups: (await groupIdsIn(group)).length,
+        toggle: await toggleOf(group).count(),
+        search: await searchOf(group).count(),
+        panel: await group.locator('[data-picker-panel][id]').count(),
       }
-      return (got.mode === 'collapsed' && got.chips === 5 && got.toggle.startsWith('All 17 accounts') && got.expanded === 'false' && got.search === 0) || JSON.stringify(got)
+      return (got.mode === 'expanded' && got.recent === 5 && got.groups === 17 && got.toggle === 0 && got.search === 1 && got.panel === 1) || JSON.stringify(got)
     })
-    await h.check('3.toggle-controls', 'B', async () => {
-      const controls = await toggle.getAttribute('aria-controls')
-      return !!controls || 'no aria-controls'
-    })
-    await h.check('3.target-not-in-quick-row', 'S', async () =>
-      (await chipOf(group, 'P Home Loan').count()) === 0 || 'P Home Loan is already in the quick row')
-    await toggle.click()
-    await h.check('3.expanded', 'B', async () => {
-      const controls = await toggle.getAttribute('aria-controls')
-      const got = {
-        mode: await group.getAttribute('data-picker'),
-        chips: (await idsIn(group)).length,
-        toggle: (await toggle.textContent()).trim(),
-        expanded: await toggle.getAttribute('aria-expanded'),
-        search: await group.locator('input[type="search"]').count(),
-        panel: await group.locator(`[id="${controls}"]`).count(),
-      }
-      return (got.mode === 'expanded' && got.chips === 17 && got.toggle.startsWith('Show fewer') && got.expanded === 'true' && got.search === 1 && got.panel === 1) || JSON.stringify(got)
-    })
+    await h.check('3.target-not-in-recent', 'S', async () =>
+      (await chipOf(recentOf(group), 'P Home Loan').count()) === 0 || 'P Home Loan is already in Recent')
     await chipOf(group, 'P Home Loan').click()
     await h.check('3.pick-collapses', 'B', async () => {
       const got = { mode: await group.getAttribute('data-picker'), chips: (await idsIn(group)).length, line: ((await group.locator('[data-picker-value]').textContent()) || '').trim() }
@@ -212,10 +202,10 @@ async function scenario3(browser) {
     })
     await h.check('3.focus-on-change', 'B', async () => (await isFocused(changeOf(group))) || `active ${await activeText(page)}`)
     await changeOf(group).click()
-    const picked = chipOf(group, 'P Home Loan')
+    const picked = chipOf(group, 'P Home Loan').first()
     await h.check('3.picked-selected-first', 'B', async () => {
       const ids = await idsIn(group)
-      return ((await picked.getAttribute('data-selected')) === 'true' && ids[0] === String(acct['P Home Loan'].id)) || `quick row ${JSON.stringify(await namesIn(group))}`
+      return ((await picked.getAttribute('data-selected')) === 'true' && ids[0] === String(acct['P Home Loan'].id)) || `rows ${JSON.stringify(await namesIn(group))}`
     })
     await h.check('3.recording-in', 'B', async () => {
       const text = await modal.getByText(/^Recording in /).textContent().catch(() => '')
@@ -224,18 +214,19 @@ async function scenario3(browser) {
     // The category picker: 15 expense categories, "Uncategorized" first.
     const cat = control(modal, 'category_id')
     await reopen(cat)
-    await h.check('3.category-collapsed', 'B', async () => {
+    await h.check('3.category-open', 'B', async () => {
       const got = {
         mode: await cat.getAttribute('data-picker'),
         first: (await cat.locator('[data-picker-leading]').first().textContent()).trim(),
-        toggle: (await toggleOf(cat).textContent()).trim(),
+        recent: await recentOf(cat).count(),
+        groups: (await groupIdsIn(cat)).length,
       }
-      return (got.mode === 'collapsed' && got.first === 'Uncategorized' && got.toggle.startsWith('All 15 categories')) || JSON.stringify(got)
+      return (got.mode === 'expanded' && got.first.startsWith('Uncategorized') && got.recent === 1 && got.groups === 15) || JSON.stringify(got)
     })
     await pick(cat, 'Travel')
     await reopen(cat)
     await h.check('3.category-picked', 'B', async () =>
-      (await chipOf(cat, 'Travel').getAttribute('data-selected')) === 'true' && (await cat.getAttribute('data-picker')) === 'collapsed' || 'Travel not selected in the collapsed row')
+      (await chipOf(cat, 'Travel').first().getAttribute('data-selected')) === 'true' && (await cat.getAttribute('data-picker')) === 'expanded' || 'Travel not selected in the open panel')
     await chipOf(cat, 'Uncategorized').click()
     await reopen(cat)
     await h.check('3.uncategorized-leading', 'B', async () =>
@@ -244,15 +235,13 @@ async function scenario3(browser) {
     await modal.getByRole('button', { name: 'Transfer', exact: true }).click()
     const dest = control(modal, 'transfer_to_account_id')
     await h.check('3.destination-excludes-source', 'B', async () => {
-      await toggleOf(dest).click()
-      const names = await namesIn(dest)
-      await toggleOf(dest).click()
+      const names = await groupNamesIn(dest)
       return (names.length === 16 && !names.includes('P Home Loan')) || `destination options ${names.length}: ${JSON.stringify(names)}`
     })
     await pick(dest, 'P Maya')
     await reopen(dest)
-    await h.check('3.destination-picked', 'B', async () => (await chipOf(dest, 'P Maya').getAttribute('data-selected')) === 'true' || 'P Maya not selected')
-    await chipOf(dest, 'P Maya').click()
+    await h.check('3.destination-picked', 'B', async () => (await chipOf(dest, 'P Maya').first().getAttribute('data-selected')) === 'true' || 'P Maya not selected')
+    await chipOf(dest, 'P Maya').first().click()
     await h.check('3.destination-cleared-on-retap', 'B', async () => {
       const n = await dest.locator('[data-selected="true"]').count()
       return n === 0 || `${n} selected`
@@ -263,9 +252,9 @@ async function scenario3(browser) {
   }
 }
 
-// (4) Each option is in the DOM once: collapsed, expanded and while searching.
+// (4) Each option is once in the groups, once in Recent, and once while searching (Recent hidden).
 async function scenario4(browser) {
-  console.log('\n=== (4) Each option is rendered exactly once')
+  console.log('\n=== (4) Each option is rendered once per list')
   const { ctx, page, native } = await openTransactions(browser)
   try {
     await writeRecent(page, 'account', [acct['P Maya'].id, acct['P Cash'].id])
@@ -277,23 +266,22 @@ async function scenario4(browser) {
     await pick(group, 'P Maya')
     await reopen(group)
     const states = {}
-    states.collapsed = await idsIn(group)
-    await toggleOf(group).click()
-    states.expanded = await idsIn(group)
-    await group.locator('input[type="search"]').fill('p')
+    states.recent = await recentOf(group).locator('[data-picker-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-picker-id')))
+    states.expanded = await groupIdsIn(group)
+    await searchOf(group).fill('p')
     states.search = await idsIn(group)
     const cat = control(modal, 'category_id')
     await reopen(cat)
-    await toggleOf(cat).click()
-    states.categories = await idsIn(cat)
+    states.categories = await groupIdsIn(cat)
     for (const [name, ids] of Object.entries(states)) {
       await h.check(`4.${name}.unique`, 'B', async () => dupes(ids).length === 0 || `duplicates ${JSON.stringify(dupes(ids))}`)
     }
     await h.check('4.expanded.complete', 'B', async () => states.expanded.length === 17 || `${states.expanded.length} chips`)
     await h.check('4.categories.complete', 'B', async () => states.categories.length === 15 || `${states.categories.length} chips`)
-    await h.check('4.collapsed.selected-and-recents-once', 'B', async () => {
+    await h.check('4.search.complete-without-recent', 'B', async () => states.search.length === 17 || `${states.search.length} rows while searching "p"`)
+    await h.check('4.recent.selected-and-recents-once', 'B', async () => {
       const [maya, cash] = [String(acct['P Maya'].id), String(acct['P Cash'].id)]
-      return (states.collapsed[0] === maya && states.collapsed[1] === cash && states.collapsed.length === 5) || `quick row ${JSON.stringify(states.collapsed)}`
+      return (states.recent[0] === maya && states.recent[1] === cash && states.recent.length === 5) || `recent ${JSON.stringify(states.recent)}`
     })
   } finally {
     await d.checkNoNativeDialogs(h, '4', native)
@@ -301,46 +289,40 @@ async function scenario4(browser) {
   }
 }
 
-// (5) A failed save focuses the first chip; aria-describedby on the group and its buttons.
+// (5) A failed save focuses the search box; aria-describedby on the group, the search box and its rows.
 async function scenario5(browser) {
-  console.log('\n=== (5) No account: the error focuses the first chip, collapsed and expanded')
+  console.log('\n=== (5) No account: the error focuses the account search box')
   const { ctx, page, native, creates } = await openTransactions(browser)
   try {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
     await control(modal, 'description').fill('Picker five')
     await control(modal, 'amount').fill('12')
-    for (const state of ['collapsed', 'expanded']) {
-      if (state === 'expanded') await toggleOf(group).click()
+    for (const state of ['first', 'again']) {
       await submit(page, modal)
       await fieldError(modal, 'account_id').waitFor({ timeout: 3000 }).catch(() => {})
       await h.check(`5.${state}.message`, 'B', async () => {
         const text = ((await fieldError(modal, 'account_id').textContent().catch(() => '')) || '').trim()
         return text === 'Please select an account for this transaction.' || `error ${JSON.stringify(text)}`
       })
-      await h.check(`5.${state}.focus-first-chip`, 'B', async () => {
-        const first = group.locator('button:not([data-picker-toggle])').first()
-        const got = await first.evaluate((el) => ({ id: el.getAttribute('data-picker-id'), active: el === document.activeElement }))
-        return (got.id !== null && got.active) || `first button ${JSON.stringify(got)}, active ${await activeText(page)}`
-      })
+      await h.check(`5.${state}.focus-search`, 'B', async () => (await isFocused(searchOf(group))) || `active ${await activeText(page)}`)
       await h.check(`5.${state}.described`, 'B', async () => {
         const errorId = await fieldError(modal, 'account_id').getAttribute('id')
         const groupDesc = await group.getAttribute('aria-describedby')
+        const searchDesc = await searchOf(group).getAttribute('aria-describedby')
         const buttons = await group.locator('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-describedby')))
-        return (!!errorId && groupDesc === errorId && buttons.length > 0 && buttons.every((id) => id === errorId)) || `group ${groupDesc}, buttons ${JSON.stringify(buttons)}, error ${errorId}`
+        return (!!errorId && groupDesc === errorId && searchDesc === errorId && buttons.length > 0 && buttons.every((id) => id === errorId)) || `group ${groupDesc}, search ${searchDesc}, buttons ${JSON.stringify(buttons)}, error ${errorId}`
       })
+      if (state === 'first') await control(modal, 'description').focus()
     }
     await h.check('5.no-post', 'B', async () => creates.length === 0 || `${creates.length} POST(s)`)
-    // A transfer with no destination focuses the destination's first chip.
+    // A transfer with no destination focuses the destination's search box.
     await pick(group, 'P Bpi Checking')
     await modal.getByRole('button', { name: 'Transfer', exact: true }).click()
     await submit(page, modal)
     const dest = control(modal, 'transfer_to_account_id')
     await fieldError(modal, 'transfer_to_account_id').waitFor({ timeout: 3000 }).catch(() => {})
-    await h.check('5.destination.focus-first-chip', 'B', async () => {
-      const got = await dest.locator('button').first().evaluate((el) => ({ id: el.getAttribute('data-picker-id'), active: el === document.activeElement }))
-      return (got.id !== null && got.active) || `first button ${JSON.stringify(got)}, active ${await activeText(page)}`
-    })
+    await h.check('5.destination.focus-search', 'B', async () => (await isFocused(searchOf(dest))) || `active ${await activeText(page)}`)
     await pick(dest, 'P Maya')
     await h.check('5.destination.cleared-on-pick', 'B', async () =>
       (await fieldError(modal, 'transfer_to_account_id').count()) === 0 || 'the destination error is still shown')
@@ -423,9 +405,9 @@ async function scenario6(browser) {
   }
 }
 
-// (7) Phone: 360 x 740, panel open, no sideways scroll, every chip at least 44 px tall.
+// (7) Phone: 360 x 740, panels open, no sideways scroll, every button at least 44 px tall.
 async function scenario7(browser) {
-  console.log('\n=== (7) 360 x 740: no sideways scroll and 44 px chips with the panel open')
+  console.log('\n=== (7) 360 x 740: no sideways scroll and 44 px buttons with the panels open')
   const { ctx, page, native } = await openTransactions(browser, owner, { viewport: { width: 360, height: 740 }, hasTouch: true, isMobile: true })
   try {
     const modal = await openAddForm(page)
@@ -436,11 +418,10 @@ async function scenario7(browser) {
       const doc = document.scrollingElement
       if (doc.scrollWidth > doc.clientWidth + 1) wide.push(`document ${doc.scrollWidth}>${doc.clientWidth}`)
       for (const el of document.querySelectorAll('div.fixed, div.fixed *')) {
-        if (el.closest('[data-picker-row]')) continue // the compact chip row scrolls sideways by design
         const style = getComputedStyle(el)
         if (['auto', 'scroll'].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1) wide.push(`${el.tagName}.${el.className} ${el.scrollWidth}>${el.clientWidth}`)
       }
-      const outside = [...document.querySelectorAll('[data-picker] button')].filter((b) => !b.closest('[data-picker-row]')).filter((b) => {
+      const outside = [...document.querySelectorAll('[data-picker] button')].filter((b) => {
         const r = b.getBoundingClientRect()
         return r.left < -0.5 || r.right > window.innerWidth + 0.5
       }).map((b) => b.textContent.trim())
@@ -450,69 +431,59 @@ async function scenario7(browser) {
       const n = document.querySelectorAll('[data-picker] button').length
       return { wide, outside, short, n }
     })
-    for (const state of ['collapsed', 'expanded']) {
-      if (state === 'expanded') {
-        await toggleOf(group).click()
-        await reopen(cat)
-        await toggleOf(cat).click()
-      }
+    // The account (no value) starts open; the category opens with Change.
+    for (const state of ['account-open', 'both-open']) {
+      if (state === 'both-open') await reopen(cat)
       const got = await measure()
       await h.check(`7.${state}.no-sideways-scroll`, 'B', async () =>
         (got.wide.length === 0 && got.outside.length === 0) || `wide ${JSON.stringify(got.wide)}, outside ${JSON.stringify(got.outside)}`)
-      await h.check(`7.${state}.chips-44px`, 'B', async () =>
+      await h.check(`7.${state}.buttons-44px`, 'B', async () =>
         (got.n > 0 && got.short.length === 0) || `${got.short.length} of ${got.n} below 44 px: ${JSON.stringify(got.short.slice(0, 5))}`)
     }
-    await h.check('7.expanded.all-17', 'S', async () => (await idsIn(group)).length === 17 || 'the panel is not open')
+    await h.check('7.both-open.all-17', 'S', async () => (await groupIdsIn(group)).length === 17 || 'the panel is not open')
     await pick(group, 'P Joint Card')
     await reopen(group)
     await h.check('7.tap-picks', 'B', async () =>
-      (await chipOf(group, 'P Joint Card').getAttribute('data-selected')) === 'true' || 'P Joint Card not selected')
+      (await chipOf(group, 'P Joint Card').first().getAttribute('data-selected')) === 'true' || 'P Joint Card not selected')
   } finally {
     await d.checkNoNativeDialogs(h, '7', native)
     await ctx.close()
   }
 }
 
-// (8) Keyboard only: Tab to the toggle, Enter, Tab to search, type, Enter on the one match.
+// (8) Keyboard only: Tab to the open panel's search box, type, Enter on the one match.
 async function scenario8(browser) {
   console.log('\n=== (8) Keyboard only: a non-recent account by Tab, Enter and typing')
   const { ctx, page, native, creates } = await openTransactions(browser)
   try {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
-    const toggle = toggleOf(group)
-    await h.check('8.target-not-in-quick-row', 'S', async () =>
-      (await chipOf(group, 'P Metrobank MC').count()) === 0 || 'P Metrobank MC is already in the quick row')
+    await h.check('8.target-not-in-recent', 'S', async () =>
+      (await chipOf(recentOf(group), 'P Metrobank MC').count()) === 0 || 'P Metrobank MC is already in Recent')
     await control(modal, 'description').focus()
     await page.keyboard.type('Picker keys')
+    const search = searchOf(group)
     let reached = false
     for (let i = 0; i < 12 && !reached; i++) {
       await page.keyboard.press('Tab')
-      reached = await isFocused(toggle)
+      reached = await isFocused(search)
     }
-    await h.check('8.tab-reaches-toggle', 'B', async () => reached || `active ${await activeText(page)}`)
-    await page.keyboard.press('Enter')
-    await h.check('8.enter-expands', 'B', async () => (await toggle.getAttribute('aria-expanded')) === 'true' || 'not expanded')
-    await h.check('8.focus-stays-on-toggle', 'B', async () => (await isFocused(toggle)) || `active ${await activeText(page)}`)
-    await page.keyboard.press('Tab')
-    const search = group.locator('input[type="search"]')
-    await h.check('8.tab-to-search', 'B', async () => (await isFocused(search)) || `active ${await activeText(page)}`)
-    // Escape clears the search, then collapses and returns focus to the toggle.
+    await h.check('8.tab-reaches-search', 'B', async () => reached || `active ${await activeText(page)}`)
+    // Escape clears the search; with no value the panel is the field and stays open.
     await page.keyboard.type('zz')
     await page.keyboard.press('Escape')
     await h.check('8.escape-clears', 'B', async () =>
       ((await search.inputValue()) === '' && (await isFocused(search))) || `search ${JSON.stringify(await search.inputValue())}`)
     await page.keyboard.press('Escape')
-    await h.check('8.escape-collapses', 'B', async () =>
-      ((await toggle.getAttribute('aria-expanded')) === 'false' && (await isFocused(toggle)) && (await modal.count()) === 1) || `expanded ${await toggle.getAttribute('aria-expanded')}, active ${await activeText(page)}`)
-    await page.keyboard.press('Enter')
-    await page.keyboard.press('Tab')
+    await h.check('8.escape-keeps-panel-without-value', 'B', async () =>
+      ((await search.count()) === 1 && (await group.getAttribute('data-picker')) === 'expanded' && (await modal.count()) === 1) || `mode ${await group.getAttribute('data-picker')}, modal ${await modal.count()}`)
+    await search.focus()
     // Two matches: Enter picks nothing.
     await page.keyboard.type('m')
     await page.keyboard.press('Enter')
     await h.check('8.enter-many-no-pick', 'B', async () => {
       const n = await group.locator('[data-selected="true"]').count()
-      return (n === 0 && creates.length === 0 && (await toggle.getAttribute('aria-expanded')) === 'true') || `${n} selected, ${creates.length} POST(s)`
+      return (n === 0 && creates.length === 0 && (await search.count()) === 1) || `${n} selected, ${creates.length} POST(s)`
     })
     await page.keyboard.type('etro')
     await page.keyboard.press('Enter')
@@ -541,10 +512,10 @@ async function scenarioA(browser) {
     await h.waitQuiet(page)
     modal = await openAddForm(page)
     const group = control(modal, 'account_id')
-    const recent = chipOf(group, 'P Petty Cash')
-    await h.check('a.recent-in-quick-row', 'B', async () => {
+    const recent = chipOf(recentOf(group), 'P Petty Cash')
+    await h.check('a.recent-first-in-recent', 'B', async () => {
       const got = { mode: await group.getAttribute('data-picker'), n: await recent.count(), first: (await namesIn(group))[0] }
-      return (got.mode === 'collapsed' && got.n === 1 && got.first === 'P Petty Cash') || JSON.stringify(got)
+      return (got.mode === 'expanded' && got.n === 1 && got.first === 'P Petty Cash') || JSON.stringify(got)
     })
     await recent.click()
     await h.check('a.one-tap', 'B', async () => {
@@ -557,17 +528,16 @@ async function scenarioA(browser) {
   }
 }
 
-// (b) Group headings in ACCOUNT_GROUPS order, Shared last with its own type groups; names sorted.
+// (b) Group headings: Recent, then ACCOUNT_GROUPS order, Shared last with its own type groups; names sorted.
 async function scenarioB(browser) {
-  console.log('\n=== (b) Group headings in order, Shared last, names sorted inside a group')
+  console.log('\n=== (b) Group headings in order, Recent first, Shared last, names sorted inside a group')
   const { ctx, page, native } = await openTransactions(browser)
   try {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
-    await toggleOf(group).click()
     await h.check('b.headings', 'B', async () => {
       const got = await group.locator('[data-picker-heading]').evaluateAll((els) => els.map((el) => el.textContent.trim()))
-      return JSON.stringify(got) === JSON.stringify(WANT_HEADINGS) || `headings ${JSON.stringify(got)}`
+      return JSON.stringify(got) === JSON.stringify(['Recent', ...WANT_HEADINGS]) || `headings ${JSON.stringify(got)}`
     })
     await h.check('b.shared-nested', 'B', async () => {
       const got = await group.locator('[data-picker-group="shared"] [data-picker-id]').evaluateAll((els) => els.map((el) => el.childNodes[0].textContent.trim()))
@@ -583,14 +553,13 @@ async function scenarioB(browser) {
       return label === 'Credit' || `credit group label ${label}`
     })
     await h.check('b.currency-hint', 'B', async () => {
-      const text = (await chipOf(group, 'P Wise USD').textContent()).trim()
+      const text = (await chipOf(group, 'P Wise USD').first().textContent()).trim()
       return text === 'P Wise USD(USD)' || `chip ${JSON.stringify(text)}`
     })
     await h.check('b.category-no-heading', 'B', async () => {
       const cat = control(modal, 'category_id')
       await reopen(cat)
-      await toggleOf(cat).click()
-      const n = await cat.locator('[data-picker-heading]').count()
+      const n = await cat.locator('[data-picker-heading]:not([data-picker-heading="recent"])').count()
       return n === 0 || `${n} headings for one kind`
     })
   } finally {
@@ -606,8 +575,7 @@ async function scenarioC(browser) {
   try {
     const modal = await openAddForm(page)
     const group = control(modal, 'account_id')
-    await toggleOf(group).click()
-    const search = group.locator('input[type="search"]')
+    const search = searchOf(group)
     const live = group.locator('[data-picker-matches]')
     await h.check('c.live-polite', 'B', async () => (await live.getAttribute('aria-live')) === 'polite' || 'not aria-live=polite')
     const cases = [
@@ -630,8 +598,8 @@ async function scenarioC(browser) {
     }
     await search.fill('')
     await h.check('c.cleared', 'B', async () => {
-      const got = { text: ((await live.textContent()) || '').trim(), n: (await idsIn(group)).length }
-      return (got.text === '' && got.n === 17) || JSON.stringify(got)
+      const got = { text: ((await live.textContent()) || '').trim(), n: (await groupIdsIn(group)).length, recent: await recentOf(group).count() }
+      return (got.text === '' && got.n === 17 && got.recent === 1) || JSON.stringify(got)
     })
   } finally {
     await d.checkNoNativeDialogs(h, 'c', native)

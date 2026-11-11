@@ -191,3 +191,14 @@ export function filterPickerGroups(
 export function pushRecent(list: readonly PickerId[], id: PickerId, max: number = RECENT_MAX): PickerId[] {
   return [...new Set<PickerId>([id, ...list])].slice(0, max)
 }
+
+/**
+ * Where an arrow key moves in a picker's list of rows. -1 is the search box above the
+ * rows: ArrowDown from it goes to the first row and stops at the last; ArrowUp from the
+ * first row goes back to it. With no rows it stays on the search box.
+ */
+export function stepPickerRow(index: number, key: 'ArrowDown' | 'ArrowUp', count: number): number {
+  if (count <= 0) return -1
+  if (key === 'ArrowDown') return Math.min(Math.max(index, -1) + 1, count - 1)
+  return Math.max(Math.min(index, count) - 1, -1)
+}
