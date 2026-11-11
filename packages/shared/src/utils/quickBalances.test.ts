@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { QuickBalanceCard, QuickBalanceCredit, QuickBalanceTile } from '../types/api'
-import { canAddPin, MAX_QUICK_BALANCE_PINS, movePin, shortDate, tileGroupLabel, tileLines } from './quickBalances'
+import { canAddPin, MAX_QUICK_BALANCE_PINS, movePin, shortDate, tileGroupLabel, tileHasNoLimit, tileLines } from './quickBalances'
 
 function tile(over: Partial<QuickBalanceTile> = {}): QuickBalanceTile {
   return { account_id: 1, name: 'Security Bank', account_type: 'checking', currency: 'PHP', balance: 84210.55, slot: 'debit', ...over }
@@ -57,6 +57,14 @@ describe('tileLines', () => {
     expect(tileLines(creditTile({ card: card(), credit: credit() }), { noLimit: true })).toEqual(
       tileLines(creditTile({ card: card(), credit: credit() })),
     )
+  })
+
+  it('does not change the tile it is given', () => {
+    const t = creditTile({ card: card({ unbilled: 10 }), credit: credit({ shared_with: [{ account_id: 2, name: 'Platinum' }] }) })
+    const before = structuredClone(t)
+    tileLines(Object.freeze(t))
+    tileLines(Object.freeze(creditTile({ card: card() })), { noLimit: true })
+    expect(t).toEqual(before)
   })
 
   it('reads Overdue in the danger tone when an owed statement is past due', () => {
@@ -180,5 +188,34 @@ describe('canAddPin', () => {
   it('takes the limit the API reports', () => {
     expect(canAddPin(3, 3)).toBe(false)
     expect(canAddPin(2, 3)).toBe(true)
+  })
+})
+
+describe('tileHasNoLimit', () => {
+  const unlimited = { credit_limit: null, shares_limit_with_account_id: null }
+  const owned = creditTile({ card: card() })
+
+  it('is true for an owner\'s card with no credit, no limit and no shared limit', () => {
+    expect(tileHasNoLimit(owned, unlimited)).toBe(true)
+  })
+
+  it('is false for a card that shares another card\'s limit', () => {
+    expect(tileHasNoLimit(owned, { credit_limit: null, shares_limit_with_account_id: 7 })).toBe(false)
+  })
+
+  it('is false when the account is unknown or not loaded', () => {
+    expect(tileHasNoLimit(owned, undefined)).toBe(false)
+  })
+
+  it('is false for a tile without card (editor or viewer)', () => {
+    expect(tileHasNoLimit(creditTile(), unlimited)).toBe(false)
+  })
+
+  it('is false for a tile with credit', () => {
+    expect(tileHasNoLimit(creditTile({ card: card(), credit: credit() }), unlimited)).toBe(false)
+  })
+
+  it('is false when the account has a credit limit', () => {
+    expect(tileHasNoLimit(owned, { credit_limit: 50000, shares_limit_with_account_id: null })).toBe(false)
   })
 })
