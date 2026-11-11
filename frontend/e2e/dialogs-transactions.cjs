@@ -169,8 +169,9 @@ async function scenarioA(browser) {
     from = log.length
     await submit(page, modal)
     const group = control(modal, 'account_id')
-    const firstChip = group.getByRole('button').first()
-    await checkFieldError(page, modal, 'a.account', 'account_id', 'Please select an account for this transaction.', firstChip)
+    // The account field has no value, so its panel is open; the error focuses its search box (STU-580).
+    const search = group.locator('input[data-picker-search]')
+    await checkFieldError(page, modal, 'a.account', 'account_id', 'Please select an account for this transaction.', search)
     await h.check('a.account.group', 'B', async () => {
       const got = await group.evaluate((el) => ({
         role: el.getAttribute('role'),
@@ -179,10 +180,9 @@ async function scenarioA(browser) {
       }))
       return (got.role === 'group' && got.label === 'Account' && got.invalid === null) || `group ${JSON.stringify(got)}`
     })
-    // The first button the error focuses is an account chip, never the picker's toggle.
-    await h.check('a.account.focus-is-chip', 'B', async () => {
-      const got = await firstChip.evaluate((el) => ({ id: el.getAttribute('data-picker-id'), toggle: el.hasAttribute('data-picker-toggle') }))
-      return (got.id !== null && !got.toggle) || `first button ${JSON.stringify(got)}`
+    await h.check('a.account.search-described', 'B', async () => {
+      const id = await search.getAttribute('aria-describedby')
+      return id === 'transaction-account_id-error' || `search aria-describedby ${id}`
     })
     await h.check('a.account.chips-described', 'B', async () => {
       const ids = await group.getByRole('button').evaluateAll((els) => els.map((el) => el.getAttribute('aria-describedby')))

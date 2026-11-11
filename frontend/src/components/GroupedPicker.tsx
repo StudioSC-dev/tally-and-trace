@@ -7,6 +7,7 @@ import {
   filterPickerGroups,
   FLAT_LIMIT,
   quickPicks,
+  stepPickerRow,
 } from '@tally-trace/shared'
 import type { Account, Category, PickerGroup, PickerId, PickerOption } from '@tally-trace/shared'
 
@@ -35,8 +36,9 @@ interface PickerCommon {
   emptyText?: string
   /**
    * Single mode only. With a value the field is one line (the choice and a Change button);
-   * Change opens one sideways-scrolling chip row, and a pick or Escape collapses it again.
-   * With no value it starts open.
+   * Change opens a panel under it: a search box, then one full-width row per option (any
+   * leading options, a Recent group, then the groups). A pick, Escape or a click outside
+   * closes it again. With no value the panel is the field and stays open.
    */
   compact?: boolean
 }
@@ -77,13 +79,17 @@ function uniqueById(options: readonly PickerOption[]): PickerOption[] {
   return options.filter((o) => !seen.has(o.id) && seen.add(o.id) !== undefined)
 }
 
+/** A full-width row in the compact panel; the ✓ sits in the right padding. */
+const rowClass = (selected: boolean, italic = false): string =>
+  `focus-ring relative block w-full min-h-11 rounded-lg py-3 pl-3 pr-9 text-left text-sm font-medium break-words transition disabled:opacity-50 ${italic ? 'italic ' : ''}${selected ? 'bg-sunken text-ink' : 'text-body hover:bg-sunken'}`
+
 /**
  * Chips for picking accounts or categories. With `FLAT_LIMIT` options or fewer every chip
  * shows in one row. With more, a quick row (selected, recent, pinned, then group order)
  * and a toggle that opens the full list inline, grouped, with a search box. Each option is
  * in the DOM at most once. The root is a `role="group"` carrying `data-field`, and every
  * chip a `<button>` with `data-selected`, so a form can focus the selected chip, else the
- * first, on an error.
+ * first, on an error. A compact field lists its options as rows instead (see `compact`).
  */
 export function GroupedPicker(props: GroupedPickerProps) {
   const { groups, recentIds, pinnedId, leading = [], noun, dataField, labelledBy, describedBy, emptyText } = props
@@ -101,9 +107,9 @@ export function GroupedPicker(props: GroupedPickerProps) {
   // Compact: the user has opened a field that has a value. Only a click on Change sets it.
   const [fieldOpen, setFieldOpen] = useState(false)
   const changeRef = useRef<HTMLButtonElement>(null)
-  const rowRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const focusChange = useRef(false)
-  const focusRow = useRef(false)
+  const focusSearch = useRef(false)
 
   const selected: readonly PickerId[] =
     props.mode === 'single' ? (props.value === undefined ? [] : [props.value]) : props.value
@@ -113,19 +119,37 @@ export function GroupedPicker(props: GroupedPickerProps) {
   const quick = quickPicks(groups, { selected, recentIds, pinnedId })
   const flat = quick === null
   const open = !flat && expanded
-  const filtered = useMemo(() => filterPickerGroups(groups, open ? query : ''), [groups, open, query])
+  // A compact panel is searchable whenever it is open, flat or not.
+  const searchable = compact || open
+  const filtered = useMemo(() => filterPickerGroups(groups, searchable ? query : ''), [groups, searchable, query])
+  const hasValue = selected.length > 0 || leading.some((l) => l.selected)
+  const fieldIsOpen = compact && hasValue && fieldOpen
 
   useEffect(() => {
     if (focusChange.current) {
       focusChange.current = false
-      changeRef.current?.focus()
+      // A pick that cleared the value leaves no Change button: the open panel's search instead.
+      ;(changeRef.current ?? searchRef.current)?.focus()
     }
-    if (focusRow.current && rowRef.current) {
-      focusRow.current = false
-      const target = rowRef.current.querySelector<HTMLElement>('[data-selected="true"]') ?? rowRef.current.querySelector<HTMLElement>('button:not(:disabled)')
-      target?.focus()
+    if (focusSearch.current && searchRef.current) {
+      focusSearch.current = false
+      searchRef.current.focus()
     }
   })
+
+  // Compact, with a value: a click or tap outside the field closes it and changes nothing.
+  // On click, not pointerdown, so the panel closing cannot move what is being tapped.
+  useEffect(() => {
+    if (!fieldIsOpen) return
+    const onClick = (event: MouseEvent) => {
+      const root = rootRef.current
+      if (root === null || !(event.target instanceof Node) || root.contains(event.target)) return
+      setFieldOpen(false)
+      setQuery('')
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [fieldIsOpen])
 
   useEffect(() => {
     const id = focusAfterPick.current
@@ -181,7 +205,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
         aria-pressed={isSelected}
         aria-describedby={describedBy}
         onClick={() => choose(option.id, fromPanel)}
-        className={`${chipClass(isSelected)}${compact ? ' shrink-0 whitespace-nowrap' : ''}`}
+        className={chipClass(isSelected)}
       >
         {option.label}
         {option.hint !== undefined && <span className="ml-2 text-xs font-normal">({option.hint})</span>}
@@ -198,15 +222,79 @@ export function GroupedPicker(props: GroupedPickerProps) {
       aria-pressed={l.selected}
       aria-describedby={describedBy}
       disabled={l.disabled}
-      onClick={() => {
-        l.onClick()
-        if (compact) closeField()
-      }}
-      className={`${chipClass(l.selected, l.italic)}${compact ? ' shrink-0 whitespace-nowrap' : ''}`}
+      onClick={l.onClick}
+      className={chipClass(l.selected, l.italic)}
     >
       {l.label}
     </button>
   ))
+
+  // Compact: the panel's enabled rows, in order.
+  const panelRows = (): HTMLButtonElement[] => [
+    ...(listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-picker-option]:not(:disabled)') ?? []),
+  ]
+
+  // Compact: ArrowUp and ArrowDown move between the rows, and from the first row to the search box.
+  const moveFocus = (from: number, key: 'ArrowDown' | 'ArrowUp') => {
+    const rows = panelRows()
+    const to = stepPickerRow(from, key, rows.length)
+    ;(to === -1 ? searchRef.current : rows[to])?.focus()
+  }
+
+  const onRowKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    moveFocus(panelRows().indexOf(event.currentTarget), event.key)
+  }
+
+  const row = (option: PickerOption, section: string): ReactNode => {
+    const isSelected = selectedSet.has(option.id)
+    const text = option.hint !== undefined ? `${option.label} (${option.hint})` : option.label
+    return (
+      <button
+        type="button"
+        key={`${section}:${String(option.id)}`}
+        data-picker-id={String(option.id)}
+        data-picker-option=""
+        data-selected={isSelected ? 'true' : undefined}
+        aria-pressed={isSelected}
+        aria-describedby={describedBy}
+        title={text}
+        onClick={() => choose(option.id, true)}
+        onKeyDown={onRowKeyDown}
+        className={rowClass(isSelected)}
+      >
+        {option.label}
+        {option.hint !== undefined && <span className="ml-2 text-xs font-normal text-muted">({option.hint})</span>}
+        {isSelected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
+      </button>
+    )
+  }
+
+  const leadingRows = compact
+    ? leading.map((l) => (
+        <button
+          type="button"
+          key={`leading:${l.key}`}
+          data-picker-leading={l.key}
+          data-picker-option=""
+          data-selected={l.selected ? 'true' : undefined}
+          aria-pressed={l.selected}
+          aria-describedby={describedBy}
+          title={l.label}
+          disabled={l.disabled}
+          onClick={() => {
+            l.onClick()
+            closeField()
+          }}
+          onKeyDown={onRowKeyDown}
+          className={rowClass(l.selected, l.italic)}
+        >
+          {l.label}
+          {l.selected && <span aria-hidden="true" data-picker-check="" className="absolute right-3 top-3">✓</span>}
+        </button>
+      ))
+    : []
 
   const onPanelKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Escape') return
@@ -215,8 +303,6 @@ export function GroupedPicker(props: GroupedPickerProps) {
     if (query !== '') {
       setQuery('')
       searchRef.current?.focus()
-    } else if (compact && hasValue) {
-      closeField()
     } else {
       collapse()
       toggleRef.current?.focus()
@@ -230,7 +316,28 @@ export function GroupedPicker(props: GroupedPickerProps) {
     closeField()
   }
 
+  // Compact: Escape clears the search, then closes a field that has a value. With no value
+  // the panel is the field, so an empty search lets Escape through to the dialog.
+  const onCompactPanelKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return
+    if (query !== '') {
+      event.preventDefault()
+      event.stopPropagation()
+      setQuery('')
+      searchRef.current?.focus()
+    } else if (hasValue) {
+      event.preventDefault()
+      event.stopPropagation()
+      closeField()
+    }
+  }
+
   const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (compact && event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveFocus(-1, 'ArrowDown')
+      return
+    }
     if (event.key !== 'Enter') return
     // Never submits the surrounding form.
     event.preventDefault()
@@ -250,6 +357,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
         placeholder={`Search ${noun.many}`}
         aria-label={`Search ${noun.many}`}
         data-picker-search=""
+        aria-describedby={compact ? describedBy : undefined}
         className="input-field focus-ring w-full"
         autoComplete="off"
       />
@@ -285,10 +393,32 @@ export function GroupedPicker(props: GroupedPickerProps) {
       )
     })
 
+  // The compact panel's groups: headings as in `renderGroups`, options as stacked rows.
+  const renderRowGroups = (list: readonly PickerGroup[], depth: number): ReactNode =>
+    list.map((g) => {
+      const headingId = `${panelId}-${g.key}`
+      return (
+        <div
+          key={g.key}
+          role={g.label ? 'group' : undefined}
+          aria-labelledby={g.label ? headingId : undefined}
+          data-picker-group={g.key}
+          className={depth > 0 ? 'pl-3' : undefined}
+        >
+          {g.label && (
+            <p id={headingId} data-picker-heading={g.key} className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted">
+              {g.label}
+            </p>
+          )}
+          {g.options.length > 0 && <div className="space-y-1">{g.options.map((o) => row(o, g.key))}</div>}
+          {g.children && g.children.length > 0 && <div className="mt-2 space-y-2">{renderRowGroups(g.children, depth + 1)}</div>}
+        </div>
+      )
+    })
+
   const nSelected = selected.length
   const quickOptions = (quick ?? []).map((id) => byId.get(id)).filter((o): o is PickerOption => o !== undefined)
 
-  const hasValue = selected.length > 0 || leading.some((l) => l.selected)
   if (compact) {
     const showLine = hasValue
     const isOpen = !hasValue || fieldOpen
@@ -297,21 +427,8 @@ export function GroupedPicker(props: GroupedPickerProps) {
       current !== undefined
         ? current.hint !== undefined ? `${current.label} (${current.hint})` : current.label
         : (leading.find((l) => l.selected)?.label ?? '')
-    const toggle = !flat && (
-      <button
-        type="button"
-        ref={toggleRef}
-        data-picker-toggle=""
-        aria-expanded={open}
-        aria-controls={panelId}
-        aria-describedby={describedBy}
-        onClick={() => (open ? collapse() : setExpanded(true))}
-        className={`${CHIP} shrink-0 whitespace-nowrap border border-line text-body hover:bg-sunken`}
-      >
-        {open ? 'Show fewer' : `All ${options.length} ${noun.many}`}
-        <span aria-hidden="true" className="ml-1">{open ? '▴' : '▾'}</span>
-      </button>
-    )
+    const searching = query.trim() !== ''
+    const recentHeadingId = `${panelId}-recent`
     return (
       <div
         ref={rootRef}
@@ -320,12 +437,12 @@ export function GroupedPicker(props: GroupedPickerProps) {
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
         data-field={dataField}
-        data-picker={!isOpen ? 'line' : flat ? 'flat' : open ? 'expanded' : 'collapsed'}
+        data-picker={!isOpen ? 'line' : flat ? 'flat' : 'expanded'}
         onKeyDown={showLine && isOpen ? onFieldKeyDown : undefined}
       >
         {showLine && (
           <div data-picker-line="" className="flex min-h-11 min-w-0 items-center justify-between gap-2">
-            <span id={valueId} data-picker-value="" className="min-w-0 truncate text-sm font-medium text-body">
+            <span id={valueId} data-picker-value="" title={currentText} className="min-w-0 truncate text-sm font-medium text-body">
               {currentText}
             </span>
             <button
@@ -334,6 +451,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
               ref={changeRef}
               data-picker-change=""
               aria-expanded={isOpen}
+              aria-controls={isOpen ? panelId : undefined}
               aria-labelledby={`${changeId} ${labelledBy} ${valueId}`}
               aria-describedby={describedBy}
               onClick={() => {
@@ -341,7 +459,7 @@ export function GroupedPicker(props: GroupedPickerProps) {
                   closeField()
                 } else {
                   setFieldOpen(true)
-                  focusRow.current = true
+                  focusSearch.current = true
                 }
               }}
               className="focus-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-line px-3 text-sm font-medium text-body hover:bg-sunken"
@@ -351,24 +469,33 @@ export function GroupedPicker(props: GroupedPickerProps) {
           </div>
         )}
         {isOpen && (
-          <>
+          <div
+            id={panelId}
+            data-picker-panel=""
+            className="flex w-full min-w-0 flex-col gap-2 rounded-xl border border-line p-2"
+            onKeyDown={onCompactPanelKeyDown}
+          >
             {options.length === 0 && leading.length === 0 && emptyText !== undefined && (
-              <p className="text-sm text-muted">{emptyText}</p>
+              <p className="px-1 text-sm text-muted">{emptyText}</p>
             )}
-            <div className="flex min-w-0 items-center gap-2">
-              <div ref={rowRef} data-picker-row="" className="flex min-w-0 flex-1 flex-nowrap gap-2 overflow-x-auto">
-                {leadingChips}
-                {!open && (flat ? options.map((o) => chip(o, false)) : quickOptions.map((o) => chip(o, false)))}
-              </div>
-              {toggle}
+            {searchBox}
+            <div
+              ref={listRef}
+              data-picker-list=""
+              className="max-h-72 min-w-0 space-y-3 overflow-y-auto overflow-x-hidden"
+            >
+              {leadingRows.length > 0 && <div className="space-y-1">{leadingRows}</div>}
+              {!flat && !searching && quickOptions.length > 0 && (
+                <div role="group" aria-labelledby={recentHeadingId} data-picker-group="recent">
+                  <p id={recentHeadingId} data-picker-heading="recent" className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted">
+                    Recent
+                  </p>
+                  <div className="space-y-1">{quickOptions.map((o) => row(o, 'recent'))}</div>
+                </div>
+              )}
+              {renderRowGroups(filtered.groups, 0)}
             </div>
-            {open && (
-              <div id={panelId} className="w-full min-w-0 basis-full space-y-3" onKeyDown={onPanelKeyDown}>
-                {searchBox}
-                {renderGroups(filtered.groups, 0)}
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     )
