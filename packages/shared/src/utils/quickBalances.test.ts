@@ -34,6 +34,31 @@ describe('tileLines', () => {
     ])
   })
 
+  it('shows a muted "No limit set" for a card with no credit when noLimit is set', () => {
+    const lines = tileLines(creditTile({ card: card() }), { noLimit: true })
+    expect(lines.map((l) => [l.id, l.label, l.text, l.tone])).toEqual([
+      ['due', 'Due', '₱12,340.00 · Nov 25', 'normal'],
+      ['available', null, 'No limit set', 'muted'],
+    ])
+  })
+
+  it('shows no Available line and no "No limit set" for a card with no credit and no noLimit', () => {
+    expect(texts(creditTile({ card: card() }))).toEqual([['due', 'Due', '₱12,340.00 · Nov 25']])
+    expect(texts(creditTile({ card: card() }))).toEqual(tileLines(creditTile({ card: card() }), { noLimit: false }).map((l) => [l.id, l.label, l.text]))
+  })
+
+  it('leaves a tile without card as Owed only, even with noLimit', () => {
+    expect(texts(creditTile({}))).toEqual([['owed', 'Owed', '₱70,000.00']])
+    expect(texts(creditTile({ credit: credit() }))).toEqual([['owed', 'Owed', '₱70,000.00']])
+    expect(tileLines(creditTile({}), { noLimit: true }).map((l) => l.id)).toEqual(['owed'])
+  })
+
+  it('keeps Available for a card with credit, ignoring noLimit', () => {
+    expect(tileLines(creditTile({ card: card(), credit: credit() }), { noLimit: true })).toEqual(
+      tileLines(creditTile({ card: card(), credit: credit() })),
+    )
+  })
+
   it('reads Overdue in the danger tone when an owed statement is past due', () => {
     const [due] = tileLines(creditTile({ card: card({ overdue: true }), credit: credit() }))
     expect([due?.label, due?.text, due?.tone]).toEqual(['Overdue', '₱12,340.00 · Nov 25', 'danger'])
