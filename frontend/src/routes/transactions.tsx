@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useCreateRepeatingTransactionMutation, useCreateRepeatingTransactionQuietMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useCreateRepeatingTransactionMutation, useCreateRepeatingTransactionQuietMutation, useMakeTransactionRepeatMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import type {
   Account,
@@ -9,7 +9,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { DEFAULT_SETTLEMENT, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
+import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -240,6 +240,8 @@ const REPEAT_CARD_TRANSFER = "A recurring transfer can't be paid into or funded 
 // /transactions/{id} routes take no POST), or a bare 404 "Not Found" with no such route. A
 // 404 with any other detail ("Account not found") is a refusal, shown on the form's line.
 const REPEAT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Repeat off to save it once."
+// The same for Edit's "Make this repeat" (POST /transactions/{id}/repeat, STU-585).
+const REPEAT_EDIT_UNAVAILABLE = "Repeat isn't available right now; the app may be updating. Try again, or turn Make this repeat off to save your changes."
 
 const formatMonthYear = (date: Date) =>
   date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -389,7 +391,7 @@ export function TransactionsPage() {
   const askConfirm = useConfirm()
   const showToast = useToast()
   const [formError, setFormError] = useState<string | null>(null)
-  // Repeat (create only): the toggle, its schedule, its fields' errors, a refusal the section
+  // Repeat (Add, and Edit's "Make this repeat"): the toggle, its schedule, its fields' errors, a refusal the section
   // shows on its own line, and an API that does not have the endpoint yet (Retry).
   const [repeatOn, setRepeatOn] = useState(false)
   const [repeatDraft, setRepeatDraft] = useState<RepeatDraft>(createRepeatDraft)
@@ -633,6 +635,7 @@ export function TransactionsPage() {
   const [createTransactionQuiet] = useCreateTransactionQuietMutation()
   const [createRepeatingTransaction] = useCreateRepeatingTransactionMutation()
   const [createRepeatingTransactionQuiet] = useCreateRepeatingTransactionQuietMutation()
+  const [makeTransactionRepeat] = useMakeTransactionRepeatMutation()
   const [updateTransaction] = useUpdateTransactionMutation()
   const [deleteTransaction] = useDeleteTransactionMutation()
 
@@ -899,7 +902,10 @@ export function TransactionsPage() {
       : null
   // A blocked pair turns Repeat off for good: picking a pair Repeat can use again leaves it off.
   if (repeatOn && repeatBlockedReason !== null) setRepeatOn(false)
-  const repeatActive = repeatOn && !editingTransaction && repeatBlockedReason === null
+  // Edit offers it only on the owner's own unlinked, non-transfer row (STU-585): the stored row
+  // decides, so picking "None" in the link select of a linked row does not reveal it.
+  const offerRepeat = !editingTransaction || canMakeRepeat(editingTransaction, formData.transaction_type)
+  const repeatActive = repeatOn && offerRepeat && repeatBlockedReason === null
   const repeatSchedule: ScheduleDraft = { ...repeatDraft, next_occurrence: `${formData.transaction_date}T00:00` }
   const repeatContext: ScheduleContext = {
     stored: null,
@@ -1572,7 +1578,8 @@ export function TransactionsPage() {
       }
 
       // Repeat: the same transaction, sent with the schedule of the entry it starts, in one
-      // request that commits both or neither. It links to no other entry.
+      // request that commits both or neither. It links to no other entry. In Edit the row
+      // itself becomes the first occurrence: POST /transactions/{id}/repeat replaces the PUT.
       let repeatBody: RepeatingTransactionInput | null = null
       if (repeatActive) {
         const schedule = scheduleRequest(repeatSchedule, repeatContext)
@@ -1598,7 +1605,9 @@ export function TransactionsPage() {
       setIsSaving(true)
       try {
         const save = editingTransaction
-          ? updateTransaction({ id: editingTransaction.id, data: payload })
+          ? repeatBody
+            ? makeTransactionRepeat({ id: editingTransaction.id, body: repeatBody })
+            : updateTransaction({ id: editingTransaction.id, data: payload })
           : repeatBody
             ? addAnother
               ? createRepeatingTransactionQuiet(repeatBody)
@@ -1715,6 +1724,8 @@ export function TransactionsPage() {
     setDateErrors({})
     setFieldErrors({})
     setFormError(null)
+    // "Make this repeat" starts off, with a fresh schedule, for every row opened.
+    resetRepeat()
     // A loan payment's form amount is the whole payment (principal + interest).
     const intoLoan = isLoanPayment(transaction)
     const total = intoLoan
@@ -3764,16 +3775,16 @@ export function TransactionsPage() {
                 />
               )}
 
-              {!editingTransaction && (
+              {offerRepeat && (
                 <RepeatSection
-                  label="Repeat"
+                  label={editingTransaction ? 'Make this repeat' : 'Repeat'}
                   help={
                     repeatBlockedReason ??
                     (repeatActive && repeatState.cardInstallmentCreate
                       ? 'This is the first of the payments. The amount is each payment, not the total.'
                       : 'Starts a recurring entry with this as its first payment.')
                   }
-                  unavailableCopy={REPEAT_UNAVAILABLE}
+                  unavailableCopy={editingTransaction ? REPEAT_EDIT_UNAVAILABLE : REPEAT_UNAVAILABLE}
                   active={repeatActive}
                   blocked={repeatBlockedReason !== null}
                   onToggle={toggleRepeat}
@@ -3787,7 +3798,7 @@ export function TransactionsPage() {
                   unavailable={repeatUnavailable}
                   retryDisabled={isSaving || refreshPending || abandonedPending}
                   onRetry={() => {
-                    // Retry the button that was refused: Create, or Save and add another.
+                    // Retry the button that was refused: Create (or Update), or Save and add another.
                     const form = transactionForm.current
                     const used = submitterRef.current
                     const primary = form?.querySelector<HTMLElement>('button[type="submit"]:not([data-testid])')
