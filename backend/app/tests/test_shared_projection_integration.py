@@ -600,7 +600,9 @@ def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
     from app.models.account import Account
 
     a, joint, card = sw["a"], sw["joint"], sw["a_card"]
-    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    # Dated from REF, not the wall clock, so the transfer stays inside the projection
+    # window [REF, END) that ``_events`` reads on any day.
+    soon = (REF + timedelta(days=5)).isoformat()
     frm, to = (joint, card) if direction == "into_card" else (card, joint)
     _transfer(sw_client, a, frm, to, 100, soon, description=f"{PRIVATE} card move")
     expected = -100.0 if direction == "into_card" else 100.0
@@ -651,10 +653,13 @@ def test_a_hidden_cards_billing_settings_change_no_shared_statement(sw, sw_clien
     card = _card(sw_client, sw, sw_db, payment=sw["joint"], share=("b",))
     sw_share(sw_db, card, sw["v"]["id"], "viewer", a["id"])
     sw_share(sw_db, card, sw["d"]["id"], "admin", a["id"])
-    today = datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
-    _txn(sw_client, a, card, 1000, today.isoformat(), posted=True,
+    # Dated from the shared card's cycle, not the wall clock: the card closes on the
+    # 10th, as REF does, so a charge five days after REF is on the statement closing
+    # a month after REF, due inside the projection window [REF, END) on any day.
+    charged = REF + timedelta(days=5, hours=12)
+    _txn(sw_client, a, card, 1000, charged.isoformat(), posted=True,
          description="Groceries")
-    _transfer(sw_client, a, private_card, card, 100, today.isoformat(), posted=True,
+    _transfer(sw_client, a, private_card, card, 100, charged.isoformat(), posted=True,
               description=f"{PRIVATE} card payment")
 
     def shown(who):
@@ -679,7 +684,7 @@ def test_a_hidden_cards_billing_settings_change_no_shared_statement(sw, sw_clien
 
     def payable(who):
         return [e["amount"] for e in _events(sw_db, sw[who])
-                if e["counts_as_cash"] and e["date"] > today]
+                if e["counts_as_cash"] and e["date"] > charged]
 
     for who in ("b", "v", "d"):
         cycle(True)
