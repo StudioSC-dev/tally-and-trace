@@ -600,7 +600,9 @@ def test_a_hidden_cards_billing_settings_change_nothing_the_sharee_is_shown(
     from app.models.account import Account
 
     a, joint, card = sw["a"], sw["joint"], sw["a_card"]
-    soon = (datetime.utcnow() + timedelta(days=5)).replace(microsecond=0).isoformat()
+    # Dated from REF, not the wall clock, so the transfer stays inside the projection
+    # window [REF, END) that ``_events`` reads on any day.
+    soon = (REF + timedelta(days=5)).isoformat()
     frm, to = (joint, card) if direction == "into_card" else (card, joint)
     _transfer(sw_client, a, frm, to, 100, soon, description=f"{PRIVATE} card move")
     expected = -100.0 if direction == "into_card" else 100.0
