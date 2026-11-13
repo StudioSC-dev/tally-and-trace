@@ -33,7 +33,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const titleId = useId()
   const messageId = useId()
 
-  // The opener is read at the request itself: the screen loader may blur it later.
+  // The opener is read at the request itself: a running action may blur it later.
   const ask = useCallback(
     (req: ConfirmRequest) => {
       if (!flow.get().open) openerRef.current = document.activeElement
@@ -69,7 +69,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     if (!open) return
     const made: Element[] = []
     for (const child of Array.from(document.body.children)) {
-      if (child === host || child.hasAttribute('data-busy-host') || NEVER_INERT.has(child.tagName)) continue
+      if (child === host || NEVER_INERT.has(child.tagName)) continue
       if (child.hasAttribute('inert')) continue
       child.setAttribute('inert', '')
       made.push(child)
@@ -89,12 +89,22 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       for (const el of made) el.removeAttribute('inert')
       const opener = openerRef.current
       openerRef.current = null
-      // Otherwise the screen loader's restore (its #main-content fallback) places focus.
       if (opener instanceof HTMLElement && opener.isConnected && opener.closest('[inert]') === null) {
         opener.focus()
       }
     }
   }, [open, host, flow])
+
+  // A running action disables both buttons, which drops focus to the body; when a refusal
+  // re-enables them, focus goes back inside the dialog (to Cancel).
+  const pending = open && view.pending
+  const wasPending = useRef(false)
+  useEffect(() => {
+    if (wasPending.current && !pending && open && !dialogRef.current?.contains(document.activeElement)) {
+      cancelRef.current?.focus()
+    }
+    wasPending.current = pending
+  }, [pending, open])
 
   const trapTab = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab') return

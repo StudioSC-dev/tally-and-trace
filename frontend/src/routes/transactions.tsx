@@ -1,6 +1,7 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useCreateTransactionMutation, useCreateTransactionQuietMutation, useCreateRepeatingTransactionMutation, useCreateRepeatingTransactionQuietMutation, useMakeTransactionRepeatMutation, useUpdateTransactionMutation, useDeleteTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 import type {
   Account,
   Transaction,
@@ -9,8 +10,8 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError } from '@tally-trace/shared'
-import type { FieldErrors, ListRange, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
+import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../hooks/useToast'
@@ -19,7 +20,9 @@ import { useManilaDay } from '../hooks/useManilaDay'
 import { useToday } from '../hooks/useToday'
 import { useAuth } from '../contexts/AuthContext'
 import { currentSessionGeneration } from '../store/baseQuery'
-import { abandonSave, abandonedSavePending, quietPending, releaseQuiet, runQuietSync, useAbandonedSavePending, useInputBlocked, useQuietPending } from '../store/busy'
+import type { AppDispatch, RootState } from '../store'
+import { newOutboxId, outboxActions } from '../store/outbox'
+import { TRANSACTION_TAGS, transactionDelete } from '../store/outboxForms'
 import { formatCurrency, getCurrencySymbol, CurrencyCode, CURRENCY_CONFIGS } from '../utils/currency'
 import { SpendingBreakdownDialog } from '../components/SpendingBreakdownDialog'
 import { TagChips } from '../components/TagChips'
@@ -34,6 +37,7 @@ import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSe
 import { ScheduledView } from '../components/transactions/ScheduledView'
 import { tagIdsIfChanged, tagIdsOf } from '../utils/tags'
 import { keepsRetainedActual } from '../utils/retainedActual'
+import { SlowReload, Spinner } from '../components/Loading'
 
 const TRANSACTION_TYPE_LABELS: Record<Transaction['transaction_type'], string> = {
   credit: 'Income',
@@ -322,6 +326,48 @@ type PostingFormState = {
   dateError: string | null
 }
 
+/** A transaction save as the outbox keeps it for Edit (STU-605): the form as the user left it. */
+type TransactionDraft = {
+  formData: TransactionFormState
+  repeatOn: boolean
+  repeatDraft: RepeatDraft
+  editing: DetailedTransaction | null
+  postedTouched: boolean
+}
+
+/** A display-only "Saving…" row in the main list: built from what was typed, it feeds no total. */
+type PendingListRow = {
+  key: string
+  date: string
+  description: string
+  amount: string
+  account: string
+  /** `failed`: refused or not confirmed; a refusal's row reopens its form on click. */
+  state: 'saving' | 'failed'
+  editClientId: string | null
+}
+
+/**
+ * Places the "Saving…" rows among a date-descending page of rows: before the first row dated
+ * earlier. A row dated before the whole page goes at its end only on the last page, and one
+ * dated after it only on page 1, so it shows on the page it will land on.
+ */
+function withPendingRows(rows: Transaction[], pending: PendingListRow[], page: number, lastPage: boolean) {
+  type Item = { kind: 'row'; row: Transaction } | { kind: 'pending'; row: PendingListRow }
+  const items: Item[] = rows.map((row) => ({ kind: 'row', row }))
+  const firstDay = rows.length > 0 ? transactionDate(rows[0]) : null
+  for (const p of pending) {
+    if (firstDay !== null && p.date > firstDay && page !== 1) continue
+    const at = items.findIndex((item) => item.kind === 'row' && transactionDate(item.row) < p.date)
+    if (at === -1) {
+      if (lastPage || rows.length === 0) items.push({ kind: 'pending', row: p })
+      continue
+    }
+    items.splice(at, 0, { kind: 'pending', row: p })
+  }
+  return items
+}
+
 const emptyPostingForm = (currency: CurrencyCode): PostingFormState => ({
   visible: false,
   amount: '',
@@ -400,32 +446,20 @@ export function TransactionsPage() {
   const [repeatErrors, setRepeatErrors] = useState<FieldErrors<RepeatErrorKey>>({})
   const [repeatError, setRepeatError] = useState<string | null>(null)
   const [repeatUnavailable, setRepeatUnavailable] = useState(false)
-  // A save in flight locks the form. The ref is the real guard: two clicks in one tick
-  // would both read stale state.
-  const [isSaving, setIsSaving] = useState(false)
+  // A save is queued in the save outbox (STU-605) and runs in the background: the dialog closes
+  // at once, or clears for the next entry. The ref guards a second submit in the same tick.
   const saveInFlight = useRef(false)
+  const dispatch = useDispatch<AppDispatch>()
   // The line confirming the last "Save and add another".
   const [savedNotice, setSavedNotice] = useState<string | null>(null)
-  // Focus to move once the save's result has rendered (disabling the form drops it).
-  const inputBlocked = useInputBlocked()
-  // `selector`: a refused save's field, focused once the form is unlocked.
+  // `selector`: a refused save's field, focused once its form has reopened (the toast's Edit).
   const [focusRequest, setFocusRequest] = useState<{ n: number; to: 'description' | 'submitter' | { selector: string } } | null>(null)
   const focusSeq = useRef(0)
   const focusHandled = useRef(0)
-  // A quiet list refresh is still in flight: a save now would join its stale requests, so
-  // the submit buttons wait for it. The fields and Cancel stay usable.
-  const refreshPending = useQuietPending()
-  // A save abandoned mid-POST (its dialog closed) is still settling: a save now would race it
-  // and its refresh, so the submit buttons wait for that too. Kept outside the dialog's state.
-  const abandonedPending = useAbandonedSavePending()
-  // Marks the save whose POST is in flight abandoned; set only while that POST is in flight.
-  const abandonCurrentSave = useRef<(() => void) | null>(null)
   // The submit button the current attempt was made with.
   const submitterRef = useRef<HTMLElement | null>(null)
-  // A save's late result applies only while its dialog and its attempt are still current:
-  // every close resets the form, which starts a new generation.
-  const dialogGen = useRef(0)
-  const attemptSeq = useRef(0)
+  // A refused save reopened by the toast's Edit: its error is shown once the form has rendered.
+  const [pendingRefusal, setPendingRefusal] = useState<{ error: unknown; repeat: boolean; superseded: boolean } | null>(null)
   const transactionForm = useRef<HTMLFormElement>(null)
   // The controls the browser flagged in one submit attempt, in tree order.
   const invalidControls = useRef<Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>>([])
@@ -633,13 +667,7 @@ export function TransactionsPage() {
     isLoading: budgetEntriesLoading,
   } = useGetBudgetEntriesQuery({ is_active: true, limit: 200 }, { skip: !isAuthenticated })
   
-  const [createTransaction] = useCreateTransactionMutation()
-  const [createTransactionQuiet] = useCreateTransactionQuietMutation()
-  const [createRepeatingTransaction] = useCreateRepeatingTransactionMutation()
-  const [createRepeatingTransactionQuiet] = useCreateRepeatingTransactionQuietMutation()
-  const [makeTransactionRepeat] = useMakeTransactionRepeatMutation()
   const [updateTransaction] = useUpdateTransactionMutation()
-  const [deleteTransaction] = useDeleteTransactionMutation()
 
   const accounts = useMemo(() => accountsData?.items ?? [], [accountsData])
   const accountCurrencies = useMemo(
@@ -685,6 +713,35 @@ export function TransactionsPage() {
   const listError = mainError
   const listsCurrent = mainCurrent
   const [isMainLoading, setIsMainLoading] = useState(false)
+  // The filter, page and outbox drain the rows on screen were loaded under. Rows from another
+  // filter or page are stale: dimmed, and their actions wait for the fresh ones.
+  const [loadedKey, setLoadedKey] = useState('')
+  const outbox = useSelector((state: RootState) => state.outbox)
+  // The picks each queued save will record as recent once it succeeds, by client id. A refused
+  // or discarded save records nothing.
+  const recentsOnSave = useRef(
+    new Map<string, { accounts: Array<number | null | undefined>; categories: Array<number | null | undefined> | null }>(),
+  )
+  const pushRecentAccounts = recentAccounts.push
+  const pushRecentCategories = recentCategories.push
+  useEffect(() => {
+    const waiting = recentsOnSave.current
+    if (waiting.size === 0) return
+    for (const completion of outbox.completions) {
+      const picks = waiting.get(completion.clientId)
+      if (!picks) continue
+      waiting.delete(completion.clientId)
+      pushRecentAccounts(picks.accounts)
+      if (picks.categories) pushRecentCategories(picks.categories)
+    }
+    // A save discarded from its toast settles without a completion.
+    const queued = new Set(outbox.entries.map((entry) => entry.clientId))
+    for (const clientId of waiting.keys()) {
+      if (!queued.has(clientId)) waiting.delete(clientId)
+    }
+  }, [outbox.completions, outbox.entries, pushRecentAccounts, pushRecentCategories])
+  const drainSeqRef = useLatestRef(outbox.drainSeq)
+  const [listDrainSeq, setListDrainSeq] = useState(outbox.drainSeq)
   const isInitialLoading = !mainSettled
   const isRefreshing = isMainLoading
 
@@ -786,6 +843,8 @@ export function TransactionsPage() {
         return
       }
       const isCurrent = beginTransactionsRequest(true)
+      const requestKey = `${filterKey}|${page}`
+      const drainAtStart = drainSeqRef.current
       let refetching = false
       try {
         setIsMainLoading(true)
@@ -795,6 +854,8 @@ export function TransactionsPage() {
           setTotalTransactions(0)
           setMainError(false)
           setMainCurrent(true)
+          setLoadedKey(requestKey)
+          setListDrainSeq(drainAtStart)
           return
         }
         const offset = (page - 1) * pageSize
@@ -810,6 +871,8 @@ export function TransactionsPage() {
         setTotalTransactions(result.total)
         setMainError(false)
         setMainCurrent(true)
+        setLoadedKey(requestKey)
+        setListDrainSeq(drainAtStart)
       } catch (error) {
         if (!isCurrent()) return
         console.error('Error loading transactions:', error)
@@ -821,16 +884,40 @@ export function TransactionsPage() {
         }
       }
     },
-    [beginTransactionsRequest, bounds.main, filterParams, goToPage, isAuthenticated, page, pageSize, triggerTransactions]
+    [beginTransactionsRequest, bounds.main, drainSeqRef, filterKey, filterParams, goToPage, isAuthenticated, page, pageSize, triggerTransactions]
   )
 
-  // After every create, edit, delete, post or un-post the main list is fetched again under the
-  // filters and page now on screen; the Due card's queries refetch on their own (the
-  // `Transaction` tag). Its one request starts synchronously, so `runQuietSync` keeps it quiet.
+  // After a change the main list is fetched again under the filters and page now on screen; the
+  // Due card's queries refetch on their own (the `Transaction` tag).
   const refreshLists = useCallback(async () => {
     await loadTransactions()
   }, [loadTransactions])
   const refreshListsRef = useLatestRef(refreshLists)
+
+  // Background saves (STU-605): once the outbox drains, the main list is fetched once again.
+  const seenDrain = useRef(outbox.drainSeq)
+  useEffect(() => {
+    if (outbox.drainSeq === seenDrain.current) return
+    seenDrain.current = outbox.drainSeq
+    void refreshListsRef.current()
+  }, [outbox.drainSeq, refreshListsRef])
+
+  // The success toast's View: once the list is current, its row is scrolled to and marked.
+  const [highlightedId, setHighlightedId] = useState<number | null>(null)
+  useEffect(() => {
+    const highlight = outbox.highlight
+    if (!highlight || highlight.form !== 'transaction' || !mainCurrent || isScheduled) return
+    dispatch(outboxActions.highlightHandled(highlight.seq))
+    const row = document.querySelector(`[data-transaction-id="${highlight.id}"]`)
+    if (!row) return
+    row.scrollIntoView({ block: 'center' })
+    setHighlightedId(highlight.id)
+  }, [outbox.highlight, mainCurrent, isScheduled, transactions, dispatch])
+  useEffect(() => {
+    if (highlightedId === null) return
+    const timer = setTimeout(() => setHighlightedId(null), 2500)
+    return () => clearTimeout(timer)
+  }, [highlightedId])
 
   useEffect(() => {
     if (authLoading || !isAuthenticated) {
@@ -1234,21 +1321,12 @@ export function TransactionsPage() {
     setFormError(null)
     setSavedNotice(null)
     resetRepeat()
-    // A save still in flight no longer owns the form and never locks the next dialog's
-    // fields; it is abandoned, and the next dialog's submit buttons wait for it to settle.
-    abandonCurrentSave.current?.()
-    abandonCurrentSave.current = null
-    dialogGen.current += 1
     saveInFlight.current = false
-    setIsSaving(false)
     setFocusRequest(null)
-    // Quiet requests still in flight show the screen loader until they settle.
-    releaseQuiet()
   }
 
-  // Each request is applied once. The used button stays disabled while the refresh a refused
-  // save started is in flight, so its focus waits for that, and is dropped if the user has
-  // put focus somewhere meanwhile.
+  // Each request is applied once; a submitter's focus is dropped if the user has put focus
+  // somewhere meanwhile.
   useEffect(() => {
     if (!focusRequest || focusRequest.n === focusHandled.current) return
     if (focusRequest.to === 'description') {
@@ -1257,18 +1335,14 @@ export function TransactionsPage() {
       return
     }
     if (typeof focusRequest.to === 'object') {
-      // The fields are disabled while the save is in flight, and the screen loader keeps the
-      // dialog inert a little past it: neither takes focus.
-      if (isSaving || inputBlocked) return
       focusHandled.current = focusRequest.n
       focusField(transactionForm.current?.querySelector<HTMLElement>(focusRequest.to.selector) ?? null)
       return
     }
-    if (refreshPending) return
     focusHandled.current = focusRequest.n
     const active = document.activeElement
     if (active === null || active === document.body) submitterRef.current?.focus()
-  }, [focusRequest, refreshPending, isSaving, inputBlocked])
+  }, [focusRequest])
 
   // One inline error per attempt, on the first invalid field, which takes focus. A chip
   // group focuses its selected chip, else its first (an open picker's toggle comes first
@@ -1292,7 +1366,7 @@ export function TransactionsPage() {
     focusField(repeatControl(key))
   }
 
-  // A refused save's field takes focus once the save has unlocked the form.
+  // A refused save's field takes focus once its form has reopened.
   const focusAfterSave = (selector: string) => setFocusRequest({ n: ++focusSeq.current, to: { selector } })
 
   // The app's own words for an empty required field, where it has them.
@@ -1388,8 +1462,8 @@ export function TransactionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Enter and requestSubmit reach here even while the buttons are disabled.
-    if (saveInFlight.current || quietPending() || abandonedSavePending()) return
+    // A second submit in the same tick (the first already queued this save).
+    if (saveInFlight.current) return
     setFormError(null)
     setFieldErrors({})
     setSavedNotice(null)
@@ -1400,14 +1474,6 @@ export function TransactionsPage() {
     const submitter = (e.nativeEvent as SubmitEvent).submitter
     submitterRef.current = submitter
     const addAnother = !editingTransaction && submitter?.dataset.testid === 'save-and-add-another'
-    const gen = dialogGen.current
-    const attempt = ++attemptSeq.current
-    const owns = () => dialogGen.current === gen && attemptSeq.current === attempt
-    // Set if this save is abandoned: called once its POST has failed or its refresh has settled.
-    const abandoned: { release: (() => void) | null } = { release: null }
-    let refreshHandedOff = false
-    // A repeating POST is in flight: its refusal is read for the Repeat section and its fields.
-    let repeatPosting = false
     if (editingTransaction && loanPaymentStatus(editingTransaction) === 'pending') {
       setFormError('Still checking this transfer\'s destination account. Try again in a moment.')
       return
@@ -1601,120 +1667,143 @@ export function TransactionsPage() {
         repeatBody = { transaction, repeat: repeatScheduleOf(schedule.fields, settlement) }
       }
 
-      // The form stays locked for the whole request, so what is kept after an add-another
-      // save is exactly what was sent.
+      // The save leaves the dialog now and runs in the background (STU-605): it is queued in the
+      // outbox, the dialog closes (or clears for the next entry), and a toast and a "Saving…" row
+      // follow it. A refusal comes back as a failed toast whose Edit reopens this form.
       saveInFlight.current = true
-      setIsSaving(true)
-      try {
-        const save = editingTransaction
-          ? repeatBody
-            ? makeTransactionRepeat({ id: editingTransaction.id, body: repeatBody })
-            : updateTransaction({ id: editingTransaction.id, data: payload })
-          : repeatBody
-            ? addAnother
-              ? createRepeatingTransactionQuiet(repeatBody)
-              : createRepeatingTransaction(repeatBody)
-            : addAnother
-              ? createTransactionQuiet(payload)
-              : createTransaction(payload)
-        // A close while the POST is in flight abandons this save (see resetForm).
-        const abandon = () => {
-          abandoned.release = abandonSave(save.requestId)
-        }
-        abandonCurrentSave.current = abandon
-        repeatPosting = repeatBody !== null
-        try {
-          await save.unwrap()
-          repeatPosting = false
-        } finally {
-          if (abandonCurrentSave.current === abandon) abandonCurrentSave.current = null
-        }
-        // The source account ends up newest, then the destination.
-        recentAccounts.push([
+      // The entered figure, not the server's principal (a loan payment's differs).
+      const figure = formData.is_posted
+        ? formatCurrency(formData.amount ?? 0, accountCurrency)
+        : formatCurrency(projectedAmount ?? 0, projectedCurrency)
+      const accountName = selectedAccount?.name ?? 'the account'
+      const description = formData.description.trim() || `${TRANSACTION_TYPE_LABELS[formData.transaction_type]} ${figure}`
+      const editingRow = editingTransaction
+      const kind: OutboxKind = repeatBody ? 'repeat' : editingRow ? 'update' : 'create'
+      const request: OutboxRequest = editingRow
+        ? repeatBody
+          ? { method: 'POST', url: `transactions/${editingRow.id}/repeat`, body: repeatBody }
+          : { method: 'PUT', url: `transactions/${editingRow.id}`, body: payload }
+        : repeatBody
+          ? { method: 'POST', url: 'transactions/repeating', body: repeatBody }
+          : { method: 'POST', url: 'transactions/', body: payload }
+      const clientId = newOutboxId()
+      const draft: TransactionDraft = { formData, repeatOn: repeatActive, repeatDraft, editing: editingRow, postedTouched }
+      dispatch(
+        outboxActions.enqueued({
+          clientId,
+          kind,
+          form: 'transaction',
+          draft,
+          ...(editingRow ? { targetId: editingRow.id } : {}),
+          label: `Saving ${figure} to ${accountName}…`,
+          description,
+          request,
+          // Every POST here is an idempotent create (PERF-9); the PUT is idempotent by body.
+          ...(request.method === 'POST' ? { idempotencyKey: clientId } : {}),
+          tags: repeatBody ? [...TRANSACTION_TAGS, 'BudgetEntry'] : TRANSACTION_TAGS,
+          ...(editingRow
+            ? {}
+            : {
+                display: {
+                  date: formData.transaction_date,
+                  description,
+                  amount: figure,
+                  account: accountName,
+                  transactionType: formData.transaction_type,
+                },
+              }),
+          viewable: true,
+          undoable: kind === 'create',
+        }),
+      )
+      // Recorded as recent picks once the save succeeds (the effect on completions below).
+      // The source account ends up newest, then the destination.
+      recentsOnSave.current.set(clientId, {
+        accounts: [
           formData.account_id || undefined,
           formData.transaction_type === 'transfer' ? formData.transfer_to_account_id : undefined,
-        ])
-        if ('category_id' in payload) recentCategories.push([formData.category_id])
-        if (editingTransaction) {
-          if (owns()) {
-            setEditingTransaction(null)
-            resetForm()
-            setIsCreateModalOpen(false)
-          }
-        } else if (addAnother) {
-          if (owns()) {
-            // The entered figure, not the server's principal (a loan payment's differs).
-            const figure = formData.is_posted
-              ? formatCurrency(formData.amount ?? 0, accountCurrency)
-              : formatCurrency(projectedAmount ?? 0, projectedCurrency)
-            const fresh = createInitialFormState()
-            // Per-entry fields clear to the fresh dialog's values; the account, type,
-            // category, date, posted mode and transfer accounts are kept. The form was
-            // locked, so `prev` is the state that was saved.
-            setFormData((prev) => ({
-              ...prev,
-              description: fresh.description,
-              amount: fresh.amount,
-              projected_amount: fresh.projected_amount,
-              received_amount: fresh.received_amount,
-              transfer_fee: fresh.transfer_fee,
-              tag_ids: fresh.tag_ids,
-              budget_entry_id: fresh.budget_entry_id,
-              allocation_id: fresh.allocation_id,
-              posting_date: fresh.posting_date,
-              exchange_rate: fresh.exchange_rate,
-              original_amount: fresh.original_amount,
-              original_currency: fresh.original_currency,
-              // Its select is hidden once posted: a foreign currency must not ride along
-              // unseen into the next posted entry. A pending run keeps its visible choice.
-              projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
-            }))
-            // Repeat and its schedule reset with the form.
-            resetRepeat()
-            setSavedNotice(`Saved "${formData.description} ${figure}"`)
-            setDateErrors({})
-            setFieldErrors({})
-            setFormError(null)
-            setFocusRequest({ n: ++focusSeq.current, to: 'description' })
-          }
-        } else {
-          if (owns()) {
-            resetForm()
-            setIsCreateModalOpen(false)
-          }
-        }
-      } finally {
-        if (owns()) {
-          saveInFlight.current = false
-          setIsSaving(false)
-        }
-      }
+        ],
+        categories: 'category_id' in payload ? [formData.category_id] : null,
+      })
       if (addAnother) {
-        // The lists are page-level, so they refresh even for a dialog since closed. Quietly,
-        // and outside the save: a failed refresh shows the lists' own alert, never
-        // "Could not save".
-        refreshHandedOff = true
-        void runQuietSync(() => refreshListsRef.current())
-          .catch((error: unknown) => {
-            console.error('Error refreshing transactions:', error)
-          })
-          .finally(() => {
-            abandoned.release?.()
-          })
+        const fresh = createInitialFormState()
+        // Per-entry fields clear to the fresh dialog's values; the account, type,
+        // category, date, posted mode and transfer accounts are kept.
+        setFormData((prev) => ({
+          ...prev,
+          description: fresh.description,
+          amount: fresh.amount,
+          projected_amount: fresh.projected_amount,
+          received_amount: fresh.received_amount,
+          transfer_fee: fresh.transfer_fee,
+          tag_ids: fresh.tag_ids,
+          budget_entry_id: fresh.budget_entry_id,
+          allocation_id: fresh.allocation_id,
+          posting_date: fresh.posting_date,
+          exchange_rate: fresh.exchange_rate,
+          original_amount: fresh.original_amount,
+          original_currency: fresh.original_currency,
+          // Its select is hidden once posted: a foreign currency must not ride along
+          // unseen into the next posted entry. A pending run keeps its visible choice.
+          projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
+        }))
+        // Repeat and its schedule reset with the form.
+        resetRepeat()
+        setSavedNotice(`Saving "${formData.description} ${figure}"…`)
+        setDateErrors({})
+        setFieldErrors({})
+        setFormError(null)
+        setFocusRequest({ n: ++focusSeq.current, to: 'description' })
+        // The cleared form renders before the next event, so the guard can go now.
+        saveInFlight.current = false
         return
       }
-      await refreshListsRef.current()
+      resetForm()
+      setIsCreateModalOpen(false)
     } catch (error) {
       console.error('Error saving transaction:', error)
-      if (!owns()) return
-      if (repeatPosting && showRepeatRefusal(error)) return
-      // Show the API's reason (e.g. a loan payment rule) in the form, which stays open.
       setFormError(apiErrorMessage(error) || 'Could not save the transaction. Please try again.')
-      setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
-    } finally {
-      if (!refreshHandedOff) abandoned.release?.()
     }
   }
+
+  // The toast's Edit on a refused transaction save: the form reopens with what the user typed,
+  // and the refusal is shown on its field as the dialog showed it before saves went background.
+  const editRequest = useSelector((state: RootState) => state.outbox.editRequest)
+  const editEntry = useSelector((state: RootState) =>
+    state.outbox.editRequest === null ? undefined : state.outbox.entries.find((e) => e.clientId === state.outbox.editRequest),
+  )
+  useEffect(() => {
+    if (editRequest === null || !editEntry || editEntry.form !== 'transaction' || editEntry.draft === null) return
+    if (isAccountsLoading || isCategoriesLoading) return
+    const draft = editEntry.draft as TransactionDraft
+    dispatch(outboxActions.editHandled(editEntry.clientId))
+    resetForm()
+    closeActionModal()
+    setEditingTransaction(draft.editing)
+    setFormData(draft.formData)
+    setPostedTouched(draft.postedTouched)
+    if (draft.repeatOn) {
+      setRepeatOn(true)
+      setRepeatDraft(draft.repeatDraft)
+    }
+    setIsCreateModalOpen(true)
+    setPendingRefusal({ error: editEntry.error?.raw, repeat: editEntry.kind === 'repeat', superseded: editEntry.error?.superseded === true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per request; the form setters are stable
+  }, [editRequest, editEntry, isAccountsLoading, isCategoriesLoading, dispatch])
+  useEffect(() => {
+    if (!pendingRefusal || !isCreateModalOpen) return
+    setPendingRefusal(null)
+    if (pendingRefusal.superseded) {
+      // Not a refusal: a newer change to this row was made after it. Saving now applies these values.
+      setFormError('This transaction was changed again after this edit. Saving applies these values over that change.')
+      setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+      return
+    }
+    if (pendingRefusal.repeat && showRepeatRefusal(pendingRefusal.error)) return
+    setFormError(apiErrorMessage(pendingRefusal.error) || 'Could not save the transaction. Please try again.')
+    setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applied once, after the reopened form renders
+  }, [pendingRefusal, isCreateModalOpen])
 
   const handleEdit = (transaction: Transaction) => {
     // A Limited row has no fields to edit.
@@ -1778,14 +1867,34 @@ export function TransactionsPage() {
       title: 'Delete transaction?',
       message: description ? `Delete the transaction "${description}"?` : 'Delete this transaction?',
       confirmLabel: 'Delete transaction',
-      action: () => deleteTransaction(transaction.id).unwrap(),
-      errorFallback: 'Could not delete the transaction. Please try again.',
     })
     if (!deleted) return
     if (actionTransaction?.id === transaction.id) {
       closeActionModal()
     }
-    await refreshListsRef.current()
+    // In the background (STU-605): the row is dimmed until the delete settles.
+    dispatch(outboxActions.enqueued(transactionDelete(transaction.id, description?.trim() || 'Untitled transaction')))
+  }
+
+  // Posting a row (the action modal's form, and the Due card's Post, which opens it) goes
+  // through the save outbox: the modal closes and the row reads "Saving…" until it settles.
+  const queuePost = (transaction: Transaction, data: Record<string, unknown>) => {
+    const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
+    dispatch(
+      outboxActions.enqueued({
+        clientId: newOutboxId(),
+        kind: 'due-action',
+        targetId: transaction.id,
+        form: 'transaction',
+        draft: null,
+        label: `Posting "${description}"…`,
+        description,
+        request: { method: 'PUT', url: `transactions/${transaction.id}`, body: data },
+        tags: TRANSACTION_TAGS,
+        viewable: true,
+      }),
+    )
+    closeActionModal()
   }
 
   const handleMarkPostedFromModal = async (
@@ -1814,11 +1923,7 @@ export function TransactionsPage() {
       // A transfer between currencies posts with what the destination received.
       ...(receivedAmount !== undefined ? { received_amount: receivedAmount } : {}),
     }
-    // The response carries the row's fresh permissions (posting changes what may be reverted).
-    const updatedTransaction = await updateTransaction({ id: transaction.id, data: payload }).unwrap()
-    setActionTransaction(updatedTransaction)
-    resetPostingFormState()
-    void refreshListsRef.current()
+    queuePost(transaction, payload)
   }
 
   // Posting or reverting a record the caller may not edit (the account owner resolving
@@ -1830,15 +1935,7 @@ export function TransactionsPage() {
     transaction: Transaction,
     figure: { amount: number } | { received_amount: number } | null = null,
   ): Promise<string | null> => {
-    let updatedTransaction: Transaction
-    try {
-      updatedTransaction = await updateTransaction({ id: transaction.id, data: { is_posted: true, ...(figure ?? {}) } }).unwrap()
-    } catch (error) {
-      return apiErrorMessage(error) || 'Could not mark the transaction as posted. Please try again.'
-    }
-    setActionTransaction(updatedTransaction)
-    resetPostingFormState()
-    void refreshListsRef.current()
+    queuePost(transaction, { is_posted: true, ...(figure ?? {}) })
     return null
   }
 
@@ -2292,6 +2389,35 @@ export function TransactionsPage() {
     return null // Will redirect
   }
 
+  // Background saves (STU-605): rows with a save of their own pending, and display-only
+  // "Saving…" rows for creates, kept until the list has refetched with the server row.
+  const rowTargets = pendingTargets(outbox, 'transaction')
+  const rowsStale = mainSettled && loadedKey !== `${filterKey}|${page}`
+  const listedIds = new Set(transactions.map((transaction) => transaction.id))
+  const inRange = (day: string) =>
+    bounds.main !== null && (bounds.main.start === undefined || day >= bounds.main.start) && (bounds.main.end === undefined || day <= bounds.main.end)
+  const pendingRows: PendingListRow[] = []
+  for (const entry of outbox.entries) {
+    if (entry.form !== 'transaction' || !entry.display || entry.targetId !== undefined) continue
+    if (!inRange(entry.display.date)) continue
+    const failed = entry.status === 'failed'
+    pendingRows.push({
+      key: `pending-${entry.clientId}`,
+      ...entry.display,
+      state: failed ? 'failed' : 'saving',
+      editClientId: failed && entry.error && !entry.error.retryable ? entry.clientId : null,
+    })
+  }
+  for (const completion of outbox.completions) {
+    if (completion.form !== 'transaction' || !completion.display || completion.targetId !== undefined) continue
+    if (completion.kind === 'delete' || !inRange(completion.display.date)) continue
+    if (!completionShown(completion, listDrainSeq)) continue
+    if (completion.serverId !== undefined && listedIds.has(completion.serverId)) continue
+    pendingRows.push({ key: `pending-${completion.clientId}`, ...completion.display, state: 'saving', editClientId: null })
+  }
+  const lastPage = page >= pageWindow(totalTransactions, page, pageSize).pages
+  const listItems = withPendingRows(transactions, pendingRows, page, lastPage)
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-96">
@@ -2331,18 +2457,29 @@ export function TransactionsPage() {
     const typeLabel = TRANSACTION_TYPE_LABELS[transaction.transaction_type]
     const cardStateClasses = transaction.is_posted ? '' : 'bg-sunken border border-line'
     const description = transactionDescription(transaction)?.trim() || 'Untitled transaction'
+    // A row with a save of its own in the outbox is read-only until it settles (STU-605); rows
+    // from another filter or page wait for the fresh ones.
+    const pendingKind = rowTargets.get(transaction.id)
+    const actionable = pendingKind === undefined && !rowsStale
+    const open = () => {
+      if (actionable) openActionModal(transaction)
+    }
 
     return (
       <article
         key={transaction.id}
-        className={`card p-4 sm:p-5 transition-colors duration-200 hover:bg-sunken cursor-pointer ${cardStateClasses}`}
-        onClick={() => openActionModal(transaction)}
+        data-transaction-id={transaction.id}
+        data-pending={pendingKind}
+        data-highlighted={highlightedId === transaction.id ? 'true' : undefined}
+        className={`card p-4 sm:p-5 transition-colors duration-200 ${actionable ? 'hover:bg-sunken cursor-pointer' : 'cursor-default'} ${pendingKind === 'delete' ? 'opacity-50' : ''} ${highlightedId === transaction.id ? 'ring-2 ring-ink' : ''} ${cardStateClasses}`}
+        onClick={open}
         role="button"
         tabIndex={0}
+        aria-disabled={actionable ? undefined : 'true'}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            openActionModal(transaction)
+            open()
           }
         }}
       >
@@ -2413,6 +2550,12 @@ export function TransactionsPage() {
               )}
               {postedDate && <p className="text-xs text-muted">Posted {postedDate}</p>}
               <div className="flex flex-wrap justify-end gap-2">
+                {pendingKind !== undefined && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted" data-testid="row-saving">
+                    <Spinner size="xs" />
+                    {pendingKind === 'delete' ? 'Deleting…' : 'Saving…'}
+                  </span>
+                )}
                 <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${typeBadgeStyles}`}>
                   {typeLabel}
                 </span>
@@ -2428,6 +2571,57 @@ export function TransactionsPage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      </article>
+    )
+  }
+
+  const renderPendingRow = (row: PendingListRow) => {
+    const editable = row.editClientId !== null
+    const edit = () => {
+      if (row.editClientId !== null) dispatch(outboxActions.editRequested(row.editClientId))
+    }
+    return (
+      <article
+        key={row.key}
+        data-testid="pending-row"
+        data-state={row.state}
+        className={`card border border-dashed border-line p-4 sm:p-5 ${editable ? 'cursor-pointer hover:bg-sunken' : 'opacity-70'}`}
+        {...(editable
+          ? {
+              role: 'button',
+              tabIndex: 0,
+              onClick: edit,
+              onKeyDown: (event: React.KeyboardEvent) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  edit()
+                }
+              },
+            }
+          : {})}
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted">{formatEntryDate(row.date)}</div>
+            <p className="text-base font-semibold text-ink">{row.description}</p>
+            <p className="text-xs text-body">{row.account}</p>
+          </div>
+          <div className="space-y-2 text-right">
+            <p className="text-lg font-bold text-muted">{row.amount}</p>
+            <span className="inline-flex items-center gap-1 rounded-full bg-sunken px-2 py-1 text-xs font-semibold text-muted">
+              {row.state === 'saving' ? (
+                <>
+                  <Spinner size="xs" />
+                  Saving…
+                </>
+              ) : editable ? (
+                'Not saved — tap to edit'
+              ) : (
+                'Not saved'
+              )}
+            </span>
           </div>
         </div>
       </article>
@@ -2866,15 +3060,16 @@ export function TransactionsPage() {
             Updating...
           </>
         )}
+        <SlowReload active={isRefreshing} />
       </p>
-      {transactions.length === 0 ? (
+      {listItems.length === 0 ? (
         // Not before the first load settles; after that the previous state stays up while refreshing.
         isInitialLoading ? null : listError ? loadErrorAlert : emptyState
       ) : (
-        <div className={`space-y-6 transition-opacity ${isRefreshing ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
+        <div className={`space-y-6 transition-opacity ${isRefreshing || rowsStale ? 'opacity-60' : ''}`} aria-busy={isRefreshing}>
           {listError && !listsCurrent && loadErrorAlert}
           <div className="grid grid-cols-1 gap-3">
-            {transactions.map(renderTransactionRow)}
+            {listItems.map((item) => (item.kind === 'row' ? renderTransactionRow(item.row) : renderPendingRow(item.row)))}
           </div>
           {totalTransactions > 0 && (
             <nav className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between" aria-label="Transactions pages" data-testid="transactions-pager">
@@ -3364,9 +3559,8 @@ export function TransactionsPage() {
               </button>
             </div>
 
-            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5" aria-busy={isSaving}>
-              {/* Locked while a save is in flight; Cancel and the header close stay outside. */}
-              <fieldset disabled={isSaving} className="space-y-5 min-w-0">
+            <form ref={transactionForm} onSubmit={handleSubmit} onInvalidCapture={handleInvalidCapture} className="space-y-5">
+              <fieldset className="space-y-5 min-w-0">
               <div>
                 <label className="label">Description</label>
                 <input
@@ -3798,7 +3992,7 @@ export function TransactionsPage() {
                   errors={repeatErrors}
                   error={repeatError}
                   unavailable={repeatUnavailable}
-                  retryDisabled={isSaving || refreshPending || abandonedPending}
+                  retryDisabled={false}
                   onRetry={() => {
                     // Retry the button that was refused: Create (or Update), or Save and add another.
                     const form = transactionForm.current
@@ -3863,14 +4057,13 @@ export function TransactionsPage() {
               )}
               </fieldset>
               <div className="flex flex-wrap gap-3 pt-2">
-                <button type="submit" className="flex-1 btn-primary focus-ring" disabled={isSaving || refreshPending || abandonedPending}>
+                <button type="submit" className="flex-1 btn-primary focus-ring">
                   {editingTransaction ? 'Update Transaction' : 'Create Transaction'}
                 </button>
                 {!editingTransaction && (
                   <button
                     type="submit"
                     className="flex-1 btn-secondary focus-ring"
-                    disabled={isSaving || refreshPending || abandonedPending}
                     data-testid="save-and-add-another"
                   >
                     Save and add another

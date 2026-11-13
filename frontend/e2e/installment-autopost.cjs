@@ -49,16 +49,16 @@
 //       "Posted 1 due payment", the API has the linked row, the due-today line
 //       is gone, leaving and coming back sends no page-open request, and a viewer opening
 //       Transactions sends none
-//   (i) the screen loader stays hidden while the page-open POST is held and input works;
-//       the refetches the post starts do block (the known limit)
+//   (i) no screen loader ever exists (STU-605): input works while the page-open POST is
+//       held and while the snapshot refetch it starts is held, and the Due count stays
 //   (j) the page-open POST is decided by a fresh snapshot, never a cached one: reached by
 //       client-side navigation from the dashboard, which shares the snapshot cache entry
 //       (j.1 cached 0 / fresh 1 posts; j.2 cached 1 / fresh 0 does not; j.3 the same JSON
 //       twice still posts, which fails an effect keyed on the snapshot alone)
 //
-// Every request-starting action is followed by waitQuiet(page) (the screen loader
-// blocks input while a request is in flight; see ./README.md). Nothing is clicked or
-// typed while a request is held, except in (i), which holds the exempt page-open POST.
+// Every request-starting action is followed by waitQuiet(page), so each step reads
+// settled data (see ./README.md). Nothing is clicked or typed while a request is held,
+// except in (i), which clicks the section toggle while the page-open POST is held.
 //
 // From commit 11, opening Transactions fires the page-open POST. Every scenario that
 // opens Transactions therefore takes each user's 15-minute claim BEFORE it creates its
@@ -71,7 +71,7 @@
 const util = require('node:util')
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, showRow, openDueTab } = require('./_due_pages.cjs')
-const { gate, logRequests, overlayPhase, readTexts, recordTexts, resetTexts, sleep, waitPhase, waitQuiet } = require('./_smooth.cjs')
+const { gate, logRequests, readTexts, recordTexts, sleep, waitQuiet } = require('./_smooth.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
 let chromium
@@ -749,9 +749,9 @@ async function postOnOpen(browser) {
   await ctx.close()
 }
 
-// ─── (i) the screen loader stays hidden for the page-open POST ───────────────
+// ─── (i) nothing blocks the page around the page-open POST (STU-605) ────────
 async function pageOpenIsQuiet(browser) {
-  console.log('(i) the page-open POST does not block input or gray the screen')
+  console.log('(i) the page-open POST and its refetch never block input; no screen loader exists')
   // No consumePageOpen: the POST must be sent.
   const me = await makeUser('i')
   const { card } = await makeCard(me, 'Visa I', closeOn(manilaToday()))
@@ -761,8 +761,18 @@ async function pageOpenIsQuiet(browser) {
   const { ctx, page } = await newPage(browser)
   let openGate = null
   let snapGate = null
+  // Every busy-overlay element the page ever shows, from the first document on (there must be none).
+  const overlaysSeen = async () => ((await readTexts(page))['busy-overlay'] || { texts: [] }).texts.length
+  const overlays = () => page.locator('[data-testid="busy-overlay"]').count()
+  const toggles = async () => {
+    const toggle = testId(page, 'due-section-toggle')
+    await toggle.click()
+    const collapsed = await toggle.getAttribute('aria-expanded')
+    await toggle.click()
+    return [collapsed, await toggle.getAttribute('aria-expanded')]
+  }
   try {
-    await recordTexts(page, ['busy-overlay'], { attributes: ['data-phase'] })
+    await recordTexts(page, ['busy-overlay'])
     await uiLogin(page, me)
     openGate = await gate(page, isPostDue)
     await page.goto(`${stack.webUrl}/transactions`)
@@ -771,30 +781,23 @@ async function pageOpenIsQuiet(browser) {
     const hit = await openGate.waitHits(1)
     check('(i) the page-open POST was sent and is held', [hit, hit ? JSON.parse(openGate.bodies[0] || '{}') : null], [true, { trigger: 'page_open' }])
 
-    // The POST is held and exempt: the overlay never leaves hidden.
-    await resetTexts(page)
+    // The POST is held: no screen loader, and input works.
     await page.waitForTimeout(1200)
-    const phases = ((await readTexts(page))['busy-overlay'] || { attrs: {} }).attrs['data-phase'] || []
-    check('(i.no-block) no shield or visible phase while the POST is held', phases.filter((p) => p === 'shield' || p === 'visible'), [])
-    check('(i.no-block) the overlay is hidden', await overlayPhase(page), 'hidden')
+    check('(i.no-block) no screen loader appears while the POST is held', [await overlaysSeen(), await overlays()], [0, 0])
+    check('(i.input-works) the section toggles while the POST is held', await toggles(), ['false', 'true'])
 
-    // The one permitted click during a hold: the held request is exempt, so input works.
-    // (Post now is not clicked here: that request is not exempt and would block input.)
-    const toggle = testId(page, 'due-section-toggle')
-    await toggle.click()
-    const collapsed = await toggle.getAttribute('aria-expanded')
-    await toggle.click()
-    const expanded = await toggle.getAttribute('aria-expanded')
-    check('(i.input-works) the section toggles while the POST is held', [collapsed, expanded], ['false', 'true'])
-
-    // Release the POST while its refetch is held: the refetches are not exempt, so they block (the known limit).
+    // Release the POST while its snapshot refetch is held: the refetch does not block either,
+    // and the Due figures already on screen stay while it is held.
+    const countBefore = (await testId(page, 'due-count').textContent())?.trim()
     snapGate = await gate(page, isSnapshot)
     openGate.release({ disarm: true })
     const snapHit = await snapGate.waitHits(1)
-    const visibleNow = snapHit ? await waitPhase(page, 'visible') : false
-    check('(i.refetch-blocks) the post\'s snapshot refetch grays the screen', [snapHit, visibleNow], [true, true])
+    check('(i.refetch-no-block) the post\'s snapshot refetch is held', snapHit, true)
+    check('(i.refetch-no-block) while it is held the section toggles and keeps its count, and no screen loader exists',
+      [await toggles(), (await testId(page, 'due-count').textContent())?.trim(), await overlays()], [['false', 'true'], countBefore, 0])
     snapGate.release({ disarm: true })
     await waitQuiet(page)
+    check('(i.no-block) no screen loader appeared at any point', await overlaysSeen(), 0)
     check('(i) the posted line is shown', await waitText(openResult(page), POSTED_ONE), POSTED_ONE)
     check('(i) the API has the month\'s row', (await linkedRows(me, card, entry.id)).length, 1)
   } finally {

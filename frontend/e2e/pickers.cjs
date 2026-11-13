@@ -349,17 +349,18 @@ async function scenario6(browser) {
     await control(modal, 'amount').fill('30')
     const fail = await h.failWith(page, isCreate, 500, { times: 1 })
     await submit(page, modal)
-    await modal.locator('[data-testid="transaction-form-error"]').waitFor({ timeout: 5000 }).catch(() => {})
+    // STU-605: the save runs in the background; the refusal comes back as a failed toast.
+    const failed = page.locator('[data-testid="save-toast"][data-state="failed"]').filter({ hasText: 'Picker refused' })
+    await failed.waitFor({ timeout: 10000 }).catch(() => {})
     await fail.stop()
     await h.check('6.refused.sent', 'S', async () => fail.failed === 1 || `${fail.failed} refused`)
     await h.check('6.refused.nothing-written', 'B', async () => {
       const got = [await readRecent(page, 'account'), await readRecent(page, 'category')]
       return (got[0] === null && got[1] === null) || JSON.stringify(got)
     })
-    // The same form saved: account and category written.
-    await h.waitQuiet(page)
-    await modal.getByRole('button', { name: 'Create Transaction', exact: true }).click()
-    await modal.waitFor({ state: 'detached', timeout: 6000 }).catch(() => {})
+    // The same save sent again (the toast's Retry): account and category written.
+    await failed.locator('[data-testid="save-toast-retry"]').click()
+    await page.locator('[data-testid="save-toast"][data-state="saved"]').filter({ hasText: 'Picker refused' }).waitFor({ timeout: 10000 }).catch(() => {})
     await h.waitQuiet(page)
     await h.check('6.create.written', 'B', async () => {
       const got = [await readRecent(page, 'account'), await readRecent(page, 'category')]

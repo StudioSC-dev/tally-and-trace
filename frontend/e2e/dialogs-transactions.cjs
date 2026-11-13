@@ -2,8 +2,10 @@
 // never in a browser popup. (a) an empty description (the browser's own required check,
 // shown inline) and then no account selected; (b) the amount: zero, empty, the planned
 // amount and the amount received on a transfer between currencies; (c) a refused save
-// keeps the form open with the server's reason; (d) a delete from the action modal asks
-// through the in-app Confirm dialog, which keeps a refusal and closes both on success;
+// comes back as a failed toast whose Edit reopens the form with the server's reason inline
+// (STU-605: saves run in the background); (d) a delete from the action modal asks through
+// the in-app Confirm dialog, which closes both at once; a refusal comes back as a failed
+// toast whose Retry deletes;
 // (e) a refused "Mark as not posted" shows in the action modal's error line; (f) a link
 // to a transaction that no longer exists shows the in-app toast, here and after the
 // move back to the dashboard.
@@ -304,21 +306,34 @@ async function scenarioB(browser) {
   }
 }
 
-// (c) A refused save: the server's reason in the form, which stays open.
+const saveToast = (page, description) => page.locator('[data-testid="save-toast"]').filter({ hasText: description })
+/** Waits (bounded) for the save toast naming `description` to be in `state`; true on arrival. */
+const waitSaveToast = (page, description, state, ms = 10000) =>
+  saveToast(page, description).and(page.locator(`[data-state="${state}"]`)).first().waitFor({ timeout: ms }).then(() => true, () => false)
+
+// (c) A refused save (STU-605: saves run in the background): the form closes, a failed toast
+// carries the server's reason, and its Edit reopens the form with the input and the reason.
 async function scenarioC(browser) {
-  console.log('\n=== (c) Add Transaction: a refused save keeps the form open with the reason')
+  console.log('\n=== (c) Add Transaction: a refused save comes back as a failed toast; Edit reopens the form with the reason')
   const { ctx, page, native } = await openTransactions(browser)
   let fail = null
   try {
     const modal = await openAddForm(page)
     await fillValid(modal, 'Dialog C probe')
-    fail = await h.failWith(page, isCreate, 500)
+    fail = await h.failWith(page, isCreate, 400)
     await submit(page, modal)
+    await h.check('c.failed-toast', 'B', async () => {
+      const failed = await waitSaveToast(page, 'Dialog C probe', 'failed')
+      const text = await textOf(saveToast(page, 'Dialog C probe').locator('[data-testid="save-toast-message"]'))
+      return (failed && text.includes('stu335 injected failure 400')) || `failed ${failed}, toast ${JSON.stringify(text)}`
+    })
+    await h.check('c.form-closed', 'B', async () => (await modal.count()) === 0 || 'the form stayed open')
+    await saveToast(page, 'Dialog C probe').locator('[data-testid="save-toast-edit"]').click()
     const error = modal.locator('[data-testid="transaction-form-error"]')
     await error.waitFor({ timeout: 5000 })
     await h.check('c.error-shown', 'B', async () => {
       const text = await textOf(error)
-      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
+      return text.includes('stu335 injected failure 400') || `error ${JSON.stringify(text)}`
     })
     await h.check('c.error-role', 'B', async () =>
       (await error.getAttribute('role').catch(() => null)) === 'alert' || 'error line is not role=alert')
@@ -336,9 +351,11 @@ async function scenarioC(browser) {
   }
 }
 
-// (d) Delete from the action modal: the Confirm keeps a refusal; a delete closes both.
+// (d) Delete from the action modal: the in-app Confirm; Cancel keeps the action modal; an
+// accepted delete closes both at once, a refusal comes back as a failed toast whose Retry
+// deletes the row.
 async function scenarioD(browser) {
-  console.log('\n=== (d) delete from the action modal: the in-app Confirm; a refusal stays in it; Confirm deletes')
+  console.log('\n=== (d) delete from the action modal: the in-app Confirm; a refusal comes back as a toast; Retry deletes')
   const row = await seedTransaction('Dialog D row')
   const { ctx, page, native, log } = await openTransactions(browser)
   const cd = d.confirmDialog(page)
@@ -359,16 +376,6 @@ async function scenarioD(browser) {
       const active = await d.activeTestId(page)
       return active === 'confirm-dialog-cancel' || `active ${active}`
     })
-
-    await cd.accept.click()
-    await cd.error.waitFor({ timeout: 5000 })
-    await h.waitQuiet(page)
-    await h.check('d.refusal-in-dialog', 'B', async () => {
-      const text = await textOf(cd.error)
-      return text.includes('stu335 injected failure 500') || `error ${JSON.stringify(text)}`
-    })
-    await h.check('d.refusal-keeps-both', 'B', async () =>
-      ((await cd.dialog.isVisible()) && (await modal.isVisible())) || 'a dialog closed after the refusal')
     await cd.cancel.click()
     await cd.dialog.waitFor({ state: 'detached', timeout: 3000 })
     await h.check('d.cancel-keeps-actions', 'B', async () =>
@@ -379,7 +386,18 @@ async function scenarioD(browser) {
     await opener.click()
     await cd.dialog.waitFor({ timeout: 3000 })
     await cd.accept.click()
-    await cd.dialog.waitFor({ state: 'detached', timeout: 5000 })
+    await h.check('d.closes-at-once', 'B', async () => {
+      const closed = await cd.dialog.waitFor({ state: 'detached', timeout: 3000 }).then(() => true, () => false)
+      return (closed && (await modal.count()) === 0) || `confirm closed ${closed}, action modal open ${(await modal.count()) > 0}`
+    })
+    await h.check('d.refusal-in-toast', 'B', async () => {
+      const failed = await waitSaveToast(page, 'Dialog D row', 'failed')
+      const text = await textOf(saveToast(page, 'Dialog D row').locator('[data-testid="save-toast-message"]'))
+      return (failed && text.startsWith('Couldn\'t delete "Dialog D row"') && text.includes('stu335 injected failure 500')) || `failed ${failed}, toast ${JSON.stringify(text)}`
+    })
+    await h.check('d.refusal-keeps-row', 'B', async () => (await rowFor(page, row.description).count()) > 0 || 'the row left the list')
+    await saveToast(page, 'Dialog D row').locator('[data-testid="save-toast-retry"]').click()
+    await waitSaveToast(page, 'Dialog D row', 'saved')
     await h.waitQuiet(page)
     await h.check('d.two-deletes', 'B', async () => {
       const n = deletesIn(log, row.id)

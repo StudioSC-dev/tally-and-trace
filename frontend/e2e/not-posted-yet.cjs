@@ -223,11 +223,9 @@ async function savePosted(page, txnId) {
   await page.getByRole('button', { name: 'Save Posted Amount' }).click()
   return put
 }
-/** Posting keeps the actions modal open, and its overlay blocks later clicks: close it. */
+/** Posting closes the actions modal at once and saves in the background (STU-605): wait for it to be gone. */
 async function closeActions(page) {
-  const close = page.getByRole('button', { name: 'Close actions modal' })
-  await close.click()
-  await close.waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: 'Close actions modal' }).waitFor({ state: 'hidden', timeout: 5000 })
 }
 const gone = (locator) => locator.first().waitFor({ state: 'detached', timeout: 15000 }).catch(() => {})
 const rowByName = (page, name) =>

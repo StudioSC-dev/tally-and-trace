@@ -167,10 +167,9 @@ async function uiLogin(page, u) {
   await page.waitForURL((url) => url.pathname === '/')
 }
 /**
- * Waits until the screen loader lets go of the open Mark paid dialog. While any request is in flight
- * the loader swallows input events (`change`, `input`, clicks) and makes the dialog's host inert, so
- * a select or fill sent then moves the field without the app seeing it: the amount keeps the usual
- * figure, or the typed one is not what is posted. Call it before the first input on a dialog.
+ * Waits until the open Mark paid dialog's field is on screen and not inside an inert host, so a
+ * select or fill reaches the app. No screen loader makes anything inert since STU-605; the guard
+ * stays so a regression fails here, by name. Call it before the first input on a dialog.
  */
 const inputReady = async (page, ms = 10000) => {
   try {
@@ -181,7 +180,7 @@ const inputReady = async (page, ms = 10000) => {
       return field !== null && field.closest('[inert]') === null
     }, undefined, { timeout: ms })
   } catch (e) {
-    throw new Error(`the Mark paid dialog's field was still behind the screen loader after ${ms} ms: ${e.message}`)
+    throw new Error(`the Mark paid dialog's field was still missing or inert after ${ms} ms: ${e.message}`)
   }
 }
 const settle = async (page) => { await page.waitForLoadState('networkidle'); await page.waitForTimeout(500) }
@@ -598,8 +597,8 @@ async function postingDefaultDay(browser) {
     await ctx.close()
   }
 
-  // Step 2: the page loads at Manila 23:59:45 on D-1 with its clock paused. Controlled ticks settle the
-  // loader, then 20 s pass in all: the day has turned, but the day hook (30 s poll) has not looked yet.
+  // Step 2: the page loads at Manila 23:59:45 on D-1 with its clock paused. Controlled ticks load the
+  // section, then 20 s pass in all: the day has turned, but the day hook (30 s poll) has not looked yet.
   {
     const lastDay = addDays(D, -1)
     const start = new Date(`${lastDay}T15:59:45Z`)
@@ -610,20 +609,17 @@ async function postingDefaultDay(browser) {
     await page.goto(`${stack.webUrl}/transactions`)
     const startedAt = await page.evaluate(() => Date.now())
     // The page cannot finish loading without ticks: release it 100 ms at a time (capped at 3 s)
-    // until the section has its count and the loader no longer shields input.
-    const phase = () => page.evaluate(() => document.querySelector('[data-testid="busy-overlay"]')?.getAttribute('data-phase') ?? null)
-    const ready = () => page.evaluate(() => {
-      const count = document.querySelector('[data-testid="due-count"]')?.textContent ?? '…'
-      return count !== '…' && document.querySelector('[data-testid="busy-overlay"]')?.getAttribute('data-phase') === 'hidden'
-    })
+    // until the section has its count. No screen loader ever shields input (STU-605).
+    const overlays = () => page.locator('[data-testid="busy-overlay"]').count()
+    const ready = () => page.evaluate(() => (document.querySelector('[data-testid="due-count"]')?.textContent ?? '…') !== '…')
     let settled = 0
     while (!(await ready()) && settled < 3000) {
       await page.waitForTimeout(40)
       await page.clock.runFor(100)
       settled += 100
     }
-    console.log(`    loader settled after ${settled} ms of virtual time`)
-    check('(e5) the loader clears within 3 s of virtual time', [await ready(), await phase()], [true, 'hidden'])
+    console.log(`    section loaded after ${settled} ms of virtual time`)
+    check('(e5) the section loads within 3 s of virtual time and no screen loader exists', [await ready(), await overlays()], [true, 0])
     await openDueTab(page, 'not-posted')
     // The page's day is still D-1: Eve (dated D-1) is dated today, so it is listed as logged today; Stale is 3 days back.
     const listed = async (name) => (await rowsOf(page, name, 'pending')).map((r) => r.logged)
@@ -1091,11 +1087,9 @@ const loadMoreButton = (page) => page.locator('[data-testid="due-load-more"]')
 /** A pending row whose description is exactly `name`, on the page on screen (pendRows matches any substring, ignoring case). */
 const pendRow = (page, name) =>
   page.locator('[data-testid="due-row"][data-kind="pending"]').filter({ has: page.locator('p', { hasText: new RegExp(`^${name}$`) }) })
-/** Posting keeps the actions modal open, and its overlay blocks later clicks: close it. */
+/** Posting closes the actions modal at once and saves in the background (STU-605): wait for it to be gone. */
 async function closeActions(page) {
-  const close = page.getByRole('button', { name: 'Close actions modal' })
-  await close.click()
-  await close.waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: 'Close actions modal' }).waitFor({ state: 'hidden', timeout: 5000 })
 }
 /** Mark posted on the pending row named `name` (on the page on screen), then save: the PUT's status. */
 async function postFromSection(page, name, txnId) {
@@ -1228,8 +1222,8 @@ async function outOfOrderRefetch(browser) {
   }
 
   /**
-   * Mark posted on `name`, a row of the page on screen: opens the form, waits for the screen loader to
-   * clear, arms the hold, then saves, so the hold catches the window refetch that this post starts.
+   * Mark posted on `name`, a row of the page on screen: opens the form, waits for the page to be
+   * quiet, arms the hold, then saves, so the hold catches the window refetch that this post starts.
    * Returns { held, status }.
    */
   const postHeld = async (name, txnId) => {

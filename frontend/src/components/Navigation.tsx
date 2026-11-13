@@ -2,10 +2,31 @@ import { Link } from '@tanstack/react-router'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../hooks/useTheme'
 import { useState } from 'react'
+import { useSelector } from 'react-redux'
+import { useConfirm } from '../hooks/useConfirm'
+import type { RootState } from '../store'
 import { getCurrencyLogoSymbol } from '../utils/currency'
 
 export function Navigation() {
-  const { user, logout } = useAuth()
+  const { user, logout: signOut } = useAuth()
+  const askConfirm = useConfirm()
+  const queued = useSelector((state: RootState) => state.outbox.entries.length)
+  // Saves still queued or failed are asked about first (STU-605); they stay on this device,
+  // under this user, and come back at the next sign-in as "not confirmed".
+  const logout = () => {
+    if (queued === 0) {
+      signOut()
+      return
+    }
+    void askConfirm({
+      title: 'Sign out with unsaved changes?',
+      message: `${queued === 1 ? 'One save is' : `${queued} saves are`} not confirmed yet. They are kept on this device and come back when you sign in again.`,
+      confirmLabel: 'Sign out',
+      tone: 'default',
+    }).then((accepted) => {
+      if (accepted) signOut()
+    })
+  }
   const { theme, toggleTheme } = useTheme()
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)

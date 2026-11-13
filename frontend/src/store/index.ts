@@ -2,15 +2,16 @@ import { configureStore } from '@reduxjs/toolkit'
 import { setupListeners } from '@reduxjs/toolkit/query'
 import { accountingApi } from './api'
 import { authApi } from './authApi'
-import { busyMiddleware } from './busy'
+import { outboxListener, outboxReducer } from './outbox'
 
 export const store = configureStore({
   reducer: {
     [accountingApi.reducerPath]: accountingApi.reducer,
     [authApi.reducerPath]: authApi.reducer,
+    outbox: outboxReducer,
   },
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(busyMiddleware, accountingApi.middleware, authApi.middleware),
+    getDefaultMiddleware().prepend(outboxListener.middleware).concat(accountingApi.middleware, authApi.middleware),
 })
 
 setupListeners(store.dispatch)
