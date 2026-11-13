@@ -673,6 +673,8 @@ def test_entry_writes_recheck_the_caller_after_the_locks(world, monkeypatch, act
     """A demotion committed while the caller waited for the owner lock is seen."""
     from app.core import locking
     from app.core.database import SessionLocal
+    from sqlalchemy.orm import selectinload
+
     from app.models.account import Account
 
     w, db = world, world["db"]
@@ -688,7 +690,8 @@ def test_entry_writes_recheck_the_caller_after_the_locks(world, monkeypatch, act
         if not calls:
             # The request's session holds Card C and its shares as read before
             # the lock (a strong reference keeps them in its identity map).
-            account = session.get(Account, w["card"])
+            account = (session.query(Account).options(selectinload(Account.shares))
+                       .filter(Account.id == w["card"]).one())
             assert [s.role for s in account.shares if s.user_id == w["e"]["id"]] == ["editor"]
             cached.append(account)
             other = SessionLocal()

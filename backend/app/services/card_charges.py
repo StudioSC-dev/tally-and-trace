@@ -42,7 +42,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.access import DIRECT_ROLES, account_role
+from app.core.access import DIRECT_ROLES, access_map
 from app.core.redaction import LIMITED, Redactor
 from app.core.time import manila_midnight, manila_today
 from app.models.account import Account, AccountType
@@ -101,8 +101,9 @@ def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
     credit = credit or {}
     user_id = user.id
     accounts = fc.get_account_balances(db, user_id)
+    held = access_map(db, user_id)
     cards = {a.id: a for a in accounts
-             if a.account_type == AccountType.CREDIT and account_role(user_id, a) in DIRECT_ROLES}
+             if a.account_type == AccountType.CREDIT and held.of(a) in DIRECT_ROLES}
     if not cards:
         return []
     start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())

@@ -456,17 +456,20 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
     shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
     (every permission false) and ``tags``. ``is_shared`` is the owner's alone
     (null for other direct roles, absent for ``tag_viewer``)."""
-    from app.core.access import (MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER, _owner_shares_out,
-                                 account_role)
+    from app.core.access import (MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER, access_map,
+                                 shared_out_ids)
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
     attach_visible_tags(db, user, accounts)
     owners = {u.id: u for u in db.query(User).filter(
         User.id.in_({a.user_id for a in accounts}))} if accounts else {}
+    held = access_map(db, user, [a.id for a in accounts]) if accounts else None
+    roles = {a.id: held.of(a) for a in accounts}
+    shared_out = shared_out_ids(db, [a for a in accounts if roles[a.id] == OWNER])
     out = []
     for account in accounts:
-        role = account_role(user, account)
+        role = roles[account.id]
         data = AccountFields.model_validate(account).model_dump()
         if role == TAG_VIEWER:
             data = {k: data[k] for k in (*TAG_VIEWER_ACCOUNT_FIELDS, "tags")}
@@ -484,7 +487,7 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
             "owner_name": display_name(owners.get(account.user_id)),
         })
         if role != TAG_VIEWER:
-            data["is_shared"] = _owner_shares_out(account) if role == OWNER else None
+            data["is_shared"] = account.id in shared_out if role == OWNER else None
         out.append(data)
     return out
 

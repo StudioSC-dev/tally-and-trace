@@ -1,0 +1,1943 @@
+{
+ "body": {
+  "account_closings": [
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -877190.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -877190.0,
+        "currency": "PHP"
+       }
+      ],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-13T00:00:00",
+    "unassigned_closing": 0.0
+   },
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -972921.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -972921.0,
+        "currency": "PHP"
+       }
+      ],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2027-01-01T00:00:00",
+    "period_label": "December 2026",
+    "period_start": "2026-12-01T00:00:00",
+    "unassigned_closing": 0.0
+   },
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -1028389.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -1028389.0,
+        "currency": "PHP"
+       }
+      ],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2027-02-01T00:00:00",
+    "period_label": "January 2027",
+    "period_start": "2027-01-01T00:00:00",
+    "unassigned_closing": 0.0
+   }
+  ],
+  "auto_post_scheduled": false,
+  "autopay_due": [],
+  "available_cash": 150000.0,
+  "balances": {
+   "by_account": [
+    {
+     "balance": 0.0,
+     "currency": "PHP",
+     "id": "accounts#11",
+     "is_spending_wallet": false,
+     "name": "Card D"
+    },
+    {
+     "balance": 150000.0,
+     "currency": "PHP",
+     "id": "accounts#1",
+     "is_spending_wallet": false,
+     "name": "Joint bank"
+    }
+   ],
+   "by_currency": [
+    {
+     "available_cash": 150000.0,
+     "currency": "PHP",
+     "total": 150000.0
+    }
+   ],
+   "total": 150000.0
+  },
+  "card_charges": [
+   {
+    "account_id": "accounts#11",
+    "account_name": "Card D",
+    "charges": [
+     {
+      "date": "2026-11-13",
+      "display_name": "Txn 1069",
+      "original_date": "2026-05-09",
+      "overdue": true,
+      "public_id": "e43",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-13",
+      "display_name": "Txn 228",
+      "original_date": "2026-04-26",
+      "overdue": true,
+      "public_id": "e42",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-13",
+      "display_name": "Txn 2395",
+      "original_date": "2026-10-01",
+      "overdue": true,
+      "public_id": "e44",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-13",
+      "display_name": "Txn 254",
+      "original_date": "2026-04-03",
+      "overdue": true,
+      "public_id": "e41",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-17",
+      "display_name": "Txn 1099",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e24",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-19",
+      "display_name": "Txn 1147",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e26",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-23",
+      "display_name": "Bill 6",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e28",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-24",
+      "display_name": "Txn 1782",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e30",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-24",
+      "display_name": "Txn 755",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e29",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-25",
+      "display_name": "Txn 1085",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e31",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-27",
+      "display_name": "Txn 185",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e33",
+      "view": "limited"
+     },
+     {
+      "date": "2026-11-30",
+      "display_name": "Installment 3",
+      "original_date": null,
+      "overdue": false,
+      "public_id": "e36",
+      "view": "limited"
+     }
+    ],
+    "currency": "PHP",
+    "missed": [],
+    "statement_cycle": true
+   }
+  ],
+  "card_statements_due": [],
+  "currencies": [
+   "PHP"
+  ],
+  "forecast_next_3_months": [
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -877190.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -877190.0,
+        "currency": "PHP"
+       }
+      ],
+      "closing_balance": -877190.0,
+      "currency": "PHP",
+      "expenses": 2050.0,
+      "income": 0.0,
+      "loan_payables": -12000.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": -1027190.0,
+      "opening_balance": 150000.0,
+      "overflow_moves": [],
+      "statement_payables": 996217.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 16923.0
+     }
+    ],
+    "closing_balance": -877190.0,
+    "expenses": 2050.0,
+    "income": 0.0,
+    "net": -1027190.0,
+    "opening_balance": 150000.0,
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-13T00:00:00",
+    "statement_payables": 996217.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 16923.0
+   },
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -972921.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -972921.0,
+        "currency": "PHP"
+       }
+      ],
+      "closing_balance": -972921.0,
+      "currency": "PHP",
+      "expenses": 3050.0,
+      "income": 0.0,
+      "loan_payables": -12000.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": -95731.0,
+      "opening_balance": -877190.0,
+      "overflow_moves": [],
+      "statement_payables": 73549.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 7132.0
+     }
+    ],
+    "closing_balance": -972921.0,
+    "expenses": 3050.0,
+    "income": 0.0,
+    "net": -95731.0,
+    "opening_balance": -877190.0,
+    "overflow_moves": [],
+    "period_end": "2027-01-01T00:00:00",
+    "period_label": "December 2026",
+    "period_start": "2026-12-01T00:00:00",
+    "statement_payables": 73549.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 7132.0
+   },
+   {
+    "by_account": [
+     {
+      "account_id": "accounts#1",
+      "account_name": "Joint bank",
+      "closing_balance": -1028389.0,
+      "currency": "PHP"
+     }
+    ],
+    "by_currency": [
+     {
+      "by_account": [
+       {
+        "account_id": "accounts#1",
+        "account_name": "Joint bank",
+        "closing_balance": -1028389.0,
+        "currency": "PHP"
+       }
+      ],
+      "closing_balance": -1028389.0,
+      "currency": "PHP",
+      "expenses": 3050.0,
+      "income": 0.0,
+      "loan_payables": -12000.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": -55468.0,
+      "opening_balance": -972921.0,
+      "overflow_moves": [],
+      "statement_payables": 40418.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 0.0
+     }
+    ],
+    "closing_balance": -1028389.0,
+    "expenses": 3050.0,
+    "income": 0.0,
+    "net": -55468.0,
+    "opening_balance": -972921.0,
+    "overflow_moves": [],
+    "period_end": "2027-02-01T00:00:00",
+    "period_label": "January 2027",
+    "period_start": "2027-01-01T00:00:00",
+    "statement_payables": 40418.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 0.0
+   }
+  ],
+  "fx": {
+   "rates": [],
+   "unconverted_count": 0
+  },
+  "goals_progress": [],
+  "installment_auto_post": [],
+  "installment_review": [],
+  "missed": [],
+  "monthly_summary": {
+   "by_currency": [
+    {
+     "currency": "PHP",
+     "monthly_disposable": -8650.0,
+     "monthly_expenses": 8650.0,
+     "monthly_income": 0.0,
+     "moved_in": 0.0,
+     "moved_out": 0.0
+    }
+   ],
+   "monthly_disposable": -8650.0,
+   "monthly_expenses": 8650.0,
+   "monthly_income": 0.0
+  },
+  "payables": [
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -16188.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 16188.0,
+    "kind": "card_payment",
+    "original_date": "2025-09-02",
+    "overdue": true,
+    "public_id": "e8",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -17571.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 17571.0,
+    "kind": "card_payment",
+    "original_date": "2025-12-03",
+    "overdue": true,
+    "public_id": "e11",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -19946.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 19946.0,
+    "kind": "card_payment",
+    "original_date": "2026-09-02",
+    "overdue": true,
+    "public_id": "e20",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -22594.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 22594.0,
+    "kind": "card_payment",
+    "original_date": "2026-03-05",
+    "overdue": true,
+    "public_id": "e14",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -23586.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 23586.0,
+    "kind": "card_payment",
+    "original_date": "2025-11-03",
+    "overdue": true,
+    "public_id": "e10",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2519.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2769",
+    "face_amount": 2519.0,
+    "kind": "expense",
+    "original_date": "2025-08-12",
+    "overdue": true,
+    "public_id": "e7",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -26905.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 26905.0,
+    "kind": "card_payment",
+    "original_date": "2026-02-02",
+    "overdue": true,
+    "public_id": "e13",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2725.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 627",
+    "face_amount": 2725.0,
+    "kind": "expense",
+    "original_date": "2026-09-22",
+    "overdue": true,
+    "public_id": "e1",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -300.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2617",
+    "face_amount": 300.0,
+    "kind": "expense",
+    "original_date": "2025-06-28",
+    "overdue": true,
+    "public_id": "e6",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -30083.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 30083.0,
+    "kind": "card_payment",
+    "original_date": "2026-01-02",
+    "overdue": true,
+    "public_id": "e12",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -32236.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 32236.0,
+    "kind": "card_payment",
+    "original_date": "2026-06-02",
+    "overdue": true,
+    "public_id": "e17",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -32851.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 32851.0,
+    "kind": "card_payment",
+    "original_date": "2025-10-03",
+    "overdue": true,
+    "public_id": "e9",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -34594.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 34594.0,
+    "kind": "card_payment",
+    "original_date": "2026-08-03",
+    "overdue": true,
+    "public_id": "e19",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -34768.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 34768.0,
+    "kind": "card_payment",
+    "original_date": "2026-04-06",
+    "overdue": true,
+    "public_id": "e15",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4526.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 1005",
+    "face_amount": 4526.0,
+    "kind": "expense",
+    "original_date": "2025-06-28",
+    "overdue": true,
+    "public_id": "e2",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -47745.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 47745.0,
+    "kind": "card_payment",
+    "original_date": "2026-05-04",
+    "overdue": true,
+    "public_id": "e16",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4798.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 1060",
+    "face_amount": 4798.0,
+    "kind": "expense",
+    "original_date": "2025-12-18",
+    "overdue": true,
+    "public_id": "e3",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -48952.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 48952.0,
+    "kind": "card_payment",
+    "original_date": "2026-07-03",
+    "overdue": true,
+    "public_id": "e18",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -49251.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 49251.0,
+    "kind": "card_payment",
+    "original_date": "2026-11-05",
+    "overdue": true,
+    "public_id": "e22",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -57018.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 57018.0,
+    "kind": "card_payment",
+    "original_date": "2026-10-05",
+    "overdue": true,
+    "public_id": "e21",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -731.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2329",
+    "face_amount": 731.0,
+    "kind": "expense",
+    "original_date": "2026-05-20",
+    "overdue": true,
+    "public_id": "e5",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -799.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2311",
+    "face_amount": 799.0,
+    "kind": "expense",
+    "original_date": "2026-06-01",
+    "overdue": true,
+    "public_id": "e4",
+    "view": "limited"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 13430.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-01-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-12-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 16736.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2025-11-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-10-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 17469.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-02-23",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-01-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 24735.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-08-24",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-07-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 28295.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2025-10-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-09-30"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 28638.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2025-08-22",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-07-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 28997.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-07-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-06-30"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 30410.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2025-12-22",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-11-30"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 31187.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-09-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-08-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 35558.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-10-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-09-30"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 35636.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-05-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-04-30"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 41534.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-06-22",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-05-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 46773.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2025-09-22",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2025-08-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 55410.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-04-21",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-03-31"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 8927.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "name": "Card D statement",
+    "original_date": "2026-03-23",
+    "overdue": true,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-02-28"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -309.0,
+    "currency": "PHP",
+    "date": "2026-11-18",
+    "display_name": "Txn 353",
+    "face_amount": 309.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e25",
+    "view": "limited"
+   },
+   {
+    "account_id": "accounts#1",
+    "account_name": "Joint bank",
+    "amount": 58194.0,
+    "currency": "PHP",
+    "due_date": "2026-11-23",
+    "name": "Card D statement",
+    "overdue": false,
+    "overflow_account_id": null,
+    "overflow_account_name": null,
+    "source": "statement",
+    "source_id": "accounts#11",
+    "statement_close": "2026-10-31"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2050.0,
+    "currency": "PHP",
+    "date": "2026-11-26",
+    "display_name": "Bill 7",
+    "face_amount": 2050.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e32",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -3244.0,
+    "currency": "PHP",
+    "date": "2026-11-28",
+    "display_name": "Txn 1506",
+    "face_amount": 3244.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e34",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -12000.0,
+    "currency": "PHP",
+    "date": "2026-11-30",
+    "display_name": "Loan payment",
+    "face_amount": 12000.0,
+    "kind": "loan_payment",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e35",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -1000.0,
+    "currency": "PHP",
+    "date": "2026-12-05",
+    "display_name": "Bill 0",
+    "face_amount": 1000.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e37",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -27543.0,
+    "currency": "PHP",
+    "date": "2026-12-06",
+    "display_name": "Card payment",
+    "face_amount": 27543.0,
+    "kind": "card_payment",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e38",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4119.0,
+    "currency": "PHP",
+    "date": "2026-12-10",
+    "display_name": "Txn 2480",
+    "face_amount": 4119.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e39",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -3013.0,
+    "currency": "PHP",
+    "date": "2026-12-12",
+    "display_name": "Txn 1073",
+    "face_amount": 3013.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e40",
+    "view": "limited"
+   }
+  ],
+  "today": "2026-11-13",
+  "upcoming_this_month": [
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -16188.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 16188.0,
+    "kind": "card_payment",
+    "original_date": "2025-09-02",
+    "overdue": true,
+    "public_id": "e8",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -17571.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 17571.0,
+    "kind": "card_payment",
+    "original_date": "2025-12-03",
+    "overdue": true,
+    "public_id": "e11",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -19946.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 19946.0,
+    "kind": "card_payment",
+    "original_date": "2026-09-02",
+    "overdue": true,
+    "public_id": "e20",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -22594.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 22594.0,
+    "kind": "card_payment",
+    "original_date": "2026-03-05",
+    "overdue": true,
+    "public_id": "e14",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -23586.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 23586.0,
+    "kind": "card_payment",
+    "original_date": "2025-11-03",
+    "overdue": true,
+    "public_id": "e10",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2519.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2769",
+    "face_amount": 2519.0,
+    "kind": "expense",
+    "original_date": "2025-08-12",
+    "overdue": true,
+    "public_id": "e7",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -26905.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 26905.0,
+    "kind": "card_payment",
+    "original_date": "2026-02-02",
+    "overdue": true,
+    "public_id": "e13",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2725.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 627",
+    "face_amount": 2725.0,
+    "kind": "expense",
+    "original_date": "2026-09-22",
+    "overdue": true,
+    "public_id": "e1",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -300.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2617",
+    "face_amount": 300.0,
+    "kind": "expense",
+    "original_date": "2025-06-28",
+    "overdue": true,
+    "public_id": "e6",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -30083.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 30083.0,
+    "kind": "card_payment",
+    "original_date": "2026-01-02",
+    "overdue": true,
+    "public_id": "e12",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -32236.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 32236.0,
+    "kind": "card_payment",
+    "original_date": "2026-06-02",
+    "overdue": true,
+    "public_id": "e17",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -32851.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 32851.0,
+    "kind": "card_payment",
+    "original_date": "2025-10-03",
+    "overdue": true,
+    "public_id": "e9",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -34594.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 34594.0,
+    "kind": "card_payment",
+    "original_date": "2026-08-03",
+    "overdue": true,
+    "public_id": "e19",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -34768.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 34768.0,
+    "kind": "card_payment",
+    "original_date": "2026-04-06",
+    "overdue": true,
+    "public_id": "e15",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4526.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 1005",
+    "face_amount": 4526.0,
+    "kind": "expense",
+    "original_date": "2025-06-28",
+    "overdue": true,
+    "public_id": "e2",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -47745.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 47745.0,
+    "kind": "card_payment",
+    "original_date": "2026-05-04",
+    "overdue": true,
+    "public_id": "e16",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4798.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 1060",
+    "face_amount": 4798.0,
+    "kind": "expense",
+    "original_date": "2025-12-18",
+    "overdue": true,
+    "public_id": "e3",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -48952.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 48952.0,
+    "kind": "card_payment",
+    "original_date": "2026-07-03",
+    "overdue": true,
+    "public_id": "e18",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -49251.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 49251.0,
+    "kind": "card_payment",
+    "original_date": "2026-11-05",
+    "overdue": true,
+    "public_id": "e22",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -57018.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Card payment",
+    "face_amount": 57018.0,
+    "kind": "card_payment",
+    "original_date": "2026-10-05",
+    "overdue": true,
+    "public_id": "e21",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -731.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2329",
+    "face_amount": 731.0,
+    "kind": "expense",
+    "original_date": "2026-05-20",
+    "overdue": true,
+    "public_id": "e5",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -799.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 2311",
+    "face_amount": 799.0,
+    "kind": "expense",
+    "original_date": "2026-06-01",
+    "overdue": true,
+    "public_id": "e4",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": 3028.0,
+    "currency": "PHP",
+    "date": "2026-11-13",
+    "display_name": "Txn 1852",
+    "face_amount": 3028.0,
+    "kind": "income",
+    "original_date": "2026-08-01",
+    "overdue": true,
+    "public_id": "e23",
+    "view": "limited"
+   },
+   {
+    "amount": 13430.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-01-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 16736.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2025-11-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 17469.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-02-23",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 24735.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-08-24",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 28295.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2025-10-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 28638.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2025-08-22",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 28997.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-07-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 30410.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2025-12-22",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 31187.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-09-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 35558.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-10-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 35636.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-05-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 41534.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-06-22",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 46773.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2025-09-22",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 55410.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-04-21",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "amount": 8927.0,
+    "currency": "PHP",
+    "due_date": "2026-11-13",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "original_date": "2026-03-23",
+    "overdue": true,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-17",
+    "display_name": "Txn 1099",
+    "face_amount": 4632.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e24",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -309.0,
+    "currency": "PHP",
+    "date": "2026-11-18",
+    "display_name": "Txn 353",
+    "face_amount": 309.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e25",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-19",
+    "display_name": "Txn 1147",
+    "face_amount": 220.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e26",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-22",
+    "display_name": "Txn 574",
+    "face_amount": 208.0,
+    "kind": "income",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e27",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-23",
+    "display_name": "Bill 6",
+    "face_amount": 1900.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e28",
+    "view": "limited"
+   },
+   {
+    "amount": 58194.0,
+    "currency": "PHP",
+    "due_date": "2026-11-23",
+    "entry_type": "expense",
+    "name": "Card D statement",
+    "overdue": false,
+    "source": "statement",
+    "source_id": "accounts#11"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-24",
+    "display_name": "Txn 1782",
+    "face_amount": 3276.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e30",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-24",
+    "display_name": "Txn 755",
+    "face_amount": 2808.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e29",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-25",
+    "display_name": "Txn 1085",
+    "face_amount": 766.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e31",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -2050.0,
+    "currency": "PHP",
+    "date": "2026-11-26",
+    "display_name": "Bill 7",
+    "face_amount": 2050.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e32",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-27",
+    "display_name": "Txn 185",
+    "face_amount": 4802.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e33",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -3244.0,
+    "currency": "PHP",
+    "date": "2026-11-28",
+    "display_name": "Txn 1506",
+    "face_amount": 3244.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e34",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -12000.0,
+    "currency": "PHP",
+    "date": "2026-11-30",
+    "display_name": "Loan payment",
+    "face_amount": 12000.0,
+    "kind": "loan_payment",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e35",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#11",
+     "name": "Card D"
+    },
+    "cash_delta": 0.0,
+    "currency": "PHP",
+    "date": "2026-11-30",
+    "display_name": "Installment 3",
+    "face_amount": 3700.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e36",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -1000.0,
+    "currency": "PHP",
+    "date": "2026-12-05",
+    "display_name": "Bill 0",
+    "face_amount": 1000.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e37",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -27543.0,
+    "currency": "PHP",
+    "date": "2026-12-06",
+    "display_name": "Card payment",
+    "face_amount": 27543.0,
+    "kind": "card_payment",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e38",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -4119.0,
+    "currency": "PHP",
+    "date": "2026-12-10",
+    "display_name": "Txn 2480",
+    "face_amount": 4119.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e39",
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": "accounts#1",
+     "name": "Joint bank"
+    },
+    "cash_delta": -3013.0,
+    "currency": "PHP",
+    "date": "2026-12-12",
+    "display_name": "Txn 1073",
+    "face_amount": 3013.0,
+    "kind": "expense",
+    "original_date": null,
+    "overdue": false,
+    "public_id": "e40",
+    "view": "limited"
+   }
+  ],
+  "wishlist_next_up": []
+ },
+ "status": 200
+}

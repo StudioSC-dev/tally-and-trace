@@ -35,8 +35,9 @@ class Tag(Base):
     )
 
     # Who holds a share of this tag (only ever a Household system tag; see
-    # app/models/tag_share.py). app/core/access.py reads it.
-    shares = relationship("TagShare", back_populates="tag", lazy="selectin",
+    # app/models/tag_share.py). app/core/access.py queries tag_shares as data, so a
+    # lazy load raises; load it explicitly (selectinload) where it is rendered.
+    shares = relationship("TagShare", back_populates="tag", lazy="raise",
                           cascade="all, delete-orphan", passive_deletes=True)
 
 
