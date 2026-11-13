@@ -1,5 +1,7 @@
 // Shared loading markup: skeleton placeholders and one spinner. Tokens only.
 
+import { useEffect, useState } from 'react'
+
 function join(...parts: Array<string | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
@@ -111,4 +113,32 @@ interface LoadingLineProps {
 /** A one-line muted loading message. */
 export function LoadingLine({ children, size = 'sm', className }: LoadingLineProps) {
   return <p role="status" className={join(size === 'xs' ? 'text-xs' : 'text-sm', 'text-muted', className)}>{children}</p>
+}
+
+/** How long an area may load before it offers a reload (STU-605: was the screen loader's offer). */
+export const SLOW_RELOAD_MS = 20_000
+
+/**
+ * Inline "Still loading. Reload" for one slow area: shown once `active` has held for
+ * SLOW_RELOAD_MS, gone when it ends. Nothing else is blocked meanwhile.
+ */
+export function SlowReload({ active, className }: { active: boolean; className?: string }) {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!active) {
+      setSlow(false)
+      return
+    }
+    const timer = setTimeout(() => setSlow(true), SLOW_RELOAD_MS)
+    return () => clearTimeout(timer)
+  }, [active])
+  if (!active || !slow) return null
+  return (
+    <span className={join('inline-flex items-center gap-1 text-xs text-muted', className)} data-testid="slow-reload">
+      Still loading.
+      <button type="button" onClick={() => window.location.reload()} className="underline focus-ring" data-testid="slow-reload-button">
+        Reload
+      </button>
+    </span>
+  )
 }

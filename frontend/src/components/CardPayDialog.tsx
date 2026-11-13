@@ -21,6 +21,10 @@ import { accountPickerGroups } from '@tally-trace/shared'
 import { PickerOptGroups } from './PickerOptGroups'
 import { useGetAccountsQuery, useGetCardCreditQuery, usePayCardMutation, usePostDueInstallmentsMutation } from '../store/api'
 import { useManilaDay } from '../hooks/useManilaDay'
+import { useDispatch } from 'react-redux'
+import type { AppDispatch } from '../store'
+import { outboxActions } from '../store/outbox'
+import { CARD_PAY_FORM, dueAction } from '../store/outboxForms'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency, getCurrencySymbol } from '../utils/currency'
 
@@ -46,6 +50,11 @@ interface Props {
   onClose: () => void
   /** Called after the payment is recorded, before the dialog closes. */
   onPaid?: () => void
+  /**
+   * Save in the background (STU-605): the payment is queued in the outbox and the dialog closes
+   * at once; its toast reports the outcome and `onPaid` is not called (the queue's drain reloads).
+   */
+  background?: boolean
 }
 
 /**
@@ -63,7 +72,8 @@ interface Props {
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
-export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
+export function CardPayDialog({ cardId, onClose, onPaid, background = false }: Props) {
+  const dispatch = useDispatch<AppDispatch>()
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -87,7 +97,7 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   // The opener, read once per instance in a layout effect: that runs before the passive
-  // query subscriptions, which can make the screen loader blur it. StrictMode's replay
+  // query subscriptions, so a load can't have moved focus yet. StrictMode's replay
   // keeps the first value.
   const openerRef = useRef<Element | null>(null)
   useLayoutEffect(() => {
@@ -201,6 +211,13 @@ export function CardPayDialog({ cardId, onClose, onPaid }: Props) {
       return
     }
     setError(null)
+    if (background) {
+      const cardName = detail?.name ?? 'card'
+      const body = cardPaymentBody({ amount, fromAccountId: payerId, paymentDate })
+      dispatch(outboxActions.enqueued(dueAction(CARD_PAY_FORM, cardId, `Paying ${formatCurrency(amount, currency)} to ${cardName}…`, `Pay ${cardName}`, `cards/${cardId}/payments`, body)))
+      onClose()
+      return
+    }
     try {
       await payCard({
         accountId: cardId,

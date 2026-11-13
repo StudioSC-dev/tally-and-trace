@@ -32,9 +32,10 @@ export interface OccurrenceDialogs {
 /**
  * The dialogs a recurring occurrence's actions open: Mark paid (`MarkPaidDialog`), Change date
  * (`ForceDateDialog`) and installment Review (`InstallmentReviewDialog`). The Due card and the
- * Scheduled view both host them; `onChanged` runs after any of them changes a record.
+ * Scheduled view both host them; `onChanged` runs after any of them changes a record. With
+ * `background` (the Due card, STU-605) Mark paid saves through the outbox and closes at once.
  */
-export function useOccurrenceDialogs(onChanged: () => void): OccurrenceDialogs {
+export function useOccurrenceDialogs(onChanged: () => void, { background = false }: { background?: boolean } = {}): OccurrenceDialogs {
   const [target, setTarget] = useState<RecordTarget | null>(null)
   // The occurrence whose date is being changed.
   const [forceTarget, setForceTarget] = useState<ForceDateTarget | null>(null)
@@ -65,6 +66,7 @@ export function useOccurrenceDialogs(onChanged: () => void): OccurrenceDialogs {
           {...(target.action ? { action: target.action } : {})}
           onClose={() => setTarget(null)}
           onPaid={onChanged}
+          background={background}
         />
       )}
       {forceTarget && (

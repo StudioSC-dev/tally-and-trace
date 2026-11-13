@@ -4,6 +4,7 @@ import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import { Link } from '@tanstack/react-router'
 import {
   CAP_REASON,
+  pendingTargets,
   DUE_PAGE_SIZE,
   atCap,
   batchConfirmMessage,
@@ -90,10 +91,12 @@ import { apiErrorMessage } from '../../utils/apiError'
 import { estimateText, estimateTitle } from '../../utils/fx'
 import { CardPayDialog } from '../CardPayDialog'
 import { CreditCheckBadge } from '../CreditSummary'
+import { SlowReload } from '../Loading'
 import { Pager } from '../Pager'
 import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
 import { UpcomingTransactionRow } from './UpcomingTransactionRow'
 import { useOccurrenceDialogs } from './useOccurrenceDialogs'
+import { CARD_PAY_FORM, DUE_ENTRY_FORM } from '../../store/outboxForms'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -282,7 +285,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   // Whether the review notice is expanded.
   const [noticeOpen, setNoticeOpen] = useState(false)
   // Batch review: the ticked ids, whether a batch runs, and the last run's result (kept until the next run or the next day).
-  const { openRecord, openChangeDate, openReview, dialogs } = useOccurrenceDialogs(onChanged)
+  const { openRecord, openChangeDate, openReview, dialogs } = useOccurrenceDialogs(onChanged, { background: true })
   const askConfirm = useConfirm()
   const [reviewBatch] = useReviewInstallmentsMutation()
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set())
@@ -396,7 +399,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
   const loading = snapshotLoading || windowResult.loading
-  // First-load flags only: a refetch is not gated, it runs under the screen loader. A linked batch that lands adds rows, so the count waits for it.
+  // First-load flags only: a refetch keeps the previous rows. A linked batch that lands adds rows, so the count waits for it.
   const countPending = loading || linkedLoading
   const view = useClampedPage(count, 'due', pageStates.due, setPageState, today, !countPending && !windowResult.fetching)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
@@ -585,6 +588,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
 
   const review = openReview
 
+  // Stale-data guard (STU-605): while the Due data refetches, or while a row's own save is still
+  // queued, its record, post and pay actions wait, so nothing is recorded from figures about to change.
+  const outbox = useSelector((state: RootState) => state.outbox)
+  const pendingEntries = useMemo(() => pendingTargets(outbox, DUE_ENTRY_FORM), [outbox])
+  const pendingCards = useMemo(() => pendingTargets(outbox, CARD_PAY_FORM), [outbox])
+  const pendingTransactions = useMemo(() => pendingTargets(outbox, 'transaction'), [outbox])
+  const entryActionsOff = (entryId: number) => snapshotFetching || pendingEntries.has(entryId)
+
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
     openRecord(row.entryId, row.name, row.kind === 'missed' ? row.oldest : row.occurrenceDate, action)
 
@@ -606,6 +617,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         key={action}
         type="button"
         onClick={() => record(row, action)}
+        disabled={entryActionsOff(row.entryId)}
         className={index === 0 ? primaryButtonClass : buttonClass}
         data-testid={ACTION_TEST_IDS[action]}
       >
@@ -639,6 +651,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             <button
               type="button"
               onClick={() => onPost(txn)}
+              disabled={snapshotFetching || pendingTransactions.has(txn.id)}
               className={primaryButtonClass}
               data-testid={row.action === 'posted' ? 'due-posted' : 'due-mark-posted'}
             >
@@ -674,7 +687,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div className="flex-shrink-0 space-y-1 text-right">
           <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
           {row.action && (
-            <button type="button" onClick={() => onPost(txn)} className={primaryButtonClass} data-testid="due-mark-posted">
+            <button type="button" onClick={() => onPost(txn)} disabled={snapshotFetching || pendingTransactions.has(txn.id)} className={primaryButtonClass} data-testid="due-mark-posted">
               {PENDING_POST_LABELS[row.action]}
             </button>
           )}
@@ -812,7 +825,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           <div className="flex flex-wrap justify-end gap-2">
             {postButton}
             {shown.pay && (
-              <button type="button" onClick={() => setPayCardId(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
+              <button type="button" onClick={() => setPayCardId(row.cardId)} disabled={snapshotFetching || pendingCards.has(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
                 Pay
               </button>
             )}
@@ -899,6 +912,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                   key={action}
                   type="button"
                   onClick={() => openRecord(plan.entry_id, plan.name, next, action)}
+                  disabled={entryActionsOff(plan.entry_id)}
                   className={index === 0 ? primaryButtonClass : buttonClass}
                   data-testid={ACTION_TEST_IDS[action]}
                 >
@@ -1103,6 +1117,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             ))}
           </ul>
         )}
+        <SlowReload active={snapshotFetching} className="px-4 pt-3" />
         {openPostedText !== null && (
           <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
         )}
@@ -1350,7 +1365,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           </button>
         </div>
       )}
-      {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} />}
+      {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} background />}
       {dialogs}
     </section>
   )

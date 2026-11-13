@@ -26,7 +26,7 @@
 //   (j) a missed row's Change date: an owner and an editor have it, a view-only viewer gets no missed row
 //       and no button; it opens on the oldest unlinked missed day with its forced date pre-filled; a future
 //       date is refused (the server keeps the occurrences in order, so the count stays); the refusal shows
-//       once the screen loader releases input and one fill then takes a new date and clears it (STU-576);
+//       as soon as it lands, its refetches still held, nothing blocking input (STU-605), and one fill then takes a new date and clears it (STU-576);
 //       another past day keeps the row missed and "since" reads that day; Clear restores the original row
 //   (k) a missed row with one occurrence: moved into the future it leaves the missed list and is an
 //       Upcoming row "(moved from ...)"; Clear from that row brings the missed row back
@@ -41,7 +41,7 @@
 // Usage: node frontend/e2e/forced-dates.cjs [a|b|c|d|e|f|g|h|i|j|k|l|m]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, openDueTab, readTab, rowsOf, showRow } = require('./_due_pages.cjs')
-const { gate, overlayPhase, waitQuiet } = require('./_smooth.cjs')
+const { gate, waitQuiet } = require('./_smooth.cjs')
 const { trackNativeDialogs } = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -611,9 +611,9 @@ async function missedRowChangeDate(browser) {
   check('(j) Clear is offered while it is forced', await dialog(page).locator('[data-testid="force-date-clear"]').count(), 1)
 
   const future = addDays(today, 2)
-  // STU-576: the refusal's tag invalidation refetches, and the screen loader blocks input until
-  // they settle. Holding them keeps it blocked, so the refusal must wait; once they are let go
-  // the refusal shows with input given back, and one fill takes a new date and clears it.
+  // STU-576: the refusal's tag invalidation refetches. Since STU-605 nothing blocks input while
+  // they run, so the refusal shows as soon as the response lands, even with the refetches held;
+  // once they are let go one fill takes a new date and clears it.
   const error = dialog(page).locator('[data-testid="force-date-error"]')
   await input.fill(future)
   const refetches = await gate(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.startsWith('/api/v1/'))
@@ -623,14 +623,15 @@ async function missedRowChangeDate(browser) {
     check('(j) the refusal\'s refetches are held', await refetches.waitHits(1), true)
     // The dialog has taken the refusal: its save is no longer in flight.
     await dialog(page).locator('[data-testid="force-date-save"]').filter({ hasText: /^Save$/ }).waitFor({ timeout: 5000 })
-    check('(j) while they are held, input is blocked and the refusal is not shown yet', [(await overlayPhase(page)) !== 'hidden', await error.count()], [true, 0])
+    const shown = await error.waitFor({ timeout: 5000 }).then(() => true, () => false)
+    check('(j) while they are held, the refusal already shows and no screen loader exists', [shown, await page.locator('[data-testid="busy-overlay"]').count()], [true, 0])
   } finally {
     refetches.release({ disarm: true })
     await refetches.stop()
   }
   check('(j) a future date is sent for the oldest day and refused by the server', [refused?.day, refused?.body, refused?.status], [oldest, { effective_date: future }, 422])
   await error.waitFor()
-  check('(j) the refusal shows once the screen loader has released input', await overlayPhase(page), 'hidden')
+  await waitQuiet(page)
   check('(j) the dialog stays open with the server\'s reason', [await dialog(page).count(), ((await error.textContent()) ?? '').trim().length > 0], [1, true])
   const toPast = addDays(today, -10)
   await input.fill(toPast)
