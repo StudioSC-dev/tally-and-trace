@@ -320,7 +320,13 @@ def build_realistic(client, db, today: date, tag: str = "perf") -> Realistic:
         close = statement_close(card_c, today - timedelta(days=30 * back + 2))
         row(card_c.id, TransactionType.DEBIT, 1_500, _at(close - timedelta(days=6), 12),
             "Small purchase")
-        row(card_c.id, TransactionType.CREDIT, 22_000, _at(close - timedelta(days=4), 12),
+        # More than every debit on the card in the 32 days to the close (a cycle is shorter),
+        # so the statement is a credit whatever else was drawn (30,000 covers the projected
+        # entries the engine adds to the open cycle).
+        charges = sum(t.amount for t in rows if t.account_id == card_c.id
+                      and t.transaction_type == TransactionType.DEBIT
+                      and _at(close - timedelta(days=32)) <= t.transaction_date <= _at(close, 23))
+        row(card_c.id, TransactionType.CREDIT, charges + 30_000, _at(close - timedelta(days=4), 12),
             "Refund above the charges", category_id=rng.choice(cat_ids))
 
     # A cash advance with a fee (settled and planned), a payment into a card in its

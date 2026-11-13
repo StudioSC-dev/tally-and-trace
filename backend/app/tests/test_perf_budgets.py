@@ -45,7 +45,7 @@ class Budget(NamedTuple):
 
 # (caller, endpoint) -> ceilings. Equal to the measured values at the commit above.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
-    ("owner", "snapshot"): Budget(609, 112_157, 496_424, 4, 9_280),
+    ("owner", "snapshot"): Budget(609, 111_157, 496_424, 4, 9_280),
     ("owner", "installment-plans"): Budget(79, 1_963, 0, 0, 33),
     ("owner", "budget-entries"): Budget(20, 14_408, 0, 0, 31),
     ("owner", "accounts"): Budget(12, 9_876, 0, 0, 19),
@@ -176,3 +176,117 @@ def test_owner_cpu_is_not_a_catastrophe(measured, endpoint):
     limit = max(CPU_FACTOR * CPU_BASELINE_MS[endpoint], CPU_FLOOR_MS)
     assert cpu <= limit, (f"owner {endpoint}: {cpu:.0f} ms CPU against a baseline of "
                           f"{CPU_BASELINE_MS[endpoint]} ms (limit {limit:.0f} ms)")
+
+
+# --- the awkward cases and the access relationships the budgets depend on --------------------
+# The ceilings are upper bounds, so a fixture that quietly lost one of these would still
+# pass them. These fail instead.
+
+API = "/api/v1"
+
+
+def _statements(client, world, caller, card):
+    r = client.get(f"{API}/accounts/{card}/statements", headers=world.callers[caller].headers)
+    assert r.status_code == 200, (caller, r.status_code, r.text[:200])
+    return r.json()
+
+
+def _items(body):
+    return body if isinstance(body, list) else body.get("items", body.get("statements", []))
+
+
+@needs_db
+def test_fixture_contains_the_awkward_statement_cases(realistic, sw_db, sw_client):
+    from app.models.account import Account
+    from app.models.budget_entry import BudgetEntry
+    from app.models.card_statement_due_override import CardStatementDueOverride
+    from app.models.transaction import Transaction, TransactionType
+    from app.services.statements import statement_close
+
+    w, acc, today = realistic, realistic.accounts, realistic.today
+    owner = w.callers["owner"].id
+
+    # Posted late: the bank posted the charge after the statement its own day belongs to closed.
+    late = 0
+    for t in sw_db.query(Transaction).filter(Transaction.user_id == owner,
+                                              Transaction.posting_date.isnot(None)):
+        card = sw_db.get(Account, t.account_id)
+        if t.posting_date.date() > statement_close(card, t.transaction_date.date()):
+            late += 1
+    assert late >= 15
+
+    # Refunds exceeding charges: the engine itself reports credit (negative) statements on the
+    # card the refunds were put on, one closed and one still open.
+    credits = [s for s in _items(_statements(sw_client, w, "owner", acc["card_c"]))
+               if s["statement_balance"] < 0]
+    assert len(credits) >= 2
+
+    # A cash advance (a transfer out of a card, with a fee), settled and planned.
+    advances = sw_db.query(Transaction).filter(
+        Transaction.transfer_from_account_id == acc["card_b"],
+        Transaction.transaction_type == TransactionType.TRANSFER, Transaction.transfer_fee > 0)
+    assert {a.is_posted for a in advances} == {True, False}
+
+    # A payment into a card, in the cycle that is still open on today.
+    card_d = sw_db.get(Account, acc["card_d"])
+    payments = sw_db.query(Transaction).filter(Transaction.transfer_to_account_id == card_d.id,
+                                               Transaction.is_posted.is_(True)).all()
+    assert any(statement_close(card_d, p.transaction_date.date()) == statement_close(card_d, today)
+               for p in payments)
+
+    # An unposted foreign-currency charge on a card.
+    foreign = sw_db.query(Transaction).filter(
+        Transaction.user_id == owner, Transaction.is_posted.is_(False),
+        Transaction.projected_currency.isnot(None),
+        Transaction.account_id.in_([acc[k] for k in ("card_a", "card_b", "card_c", "card_d")]))
+    assert foreign.count() >= 1
+
+    # Due-date overrides on two cards.
+    overridden = {o.account_id for o in sw_db.query(CardStatementDueOverride).filter(
+        CardStatementDueOverride.account_id.in_(
+            [acc[k] for k in ("card_a", "card_b", "card_c", "card_d")]))}
+    assert overridden == {acc["card_a"], acc["card_c"]}
+
+    # The legacy (due_date only) and close-day-31 cards.
+    legacy = sw_db.get(Account, acc["card_c"])
+    assert legacy.due_date and not legacy.billing_cycle_start
+    assert sw_db.get(Account, acc["card_d"]).billing_cycle_start == 31
+
+    # Installments on cards.
+    cards = [acc[k] for k in ("card_a", "card_b", "card_c", "card_d")]
+    assert sw_db.query(BudgetEntry).filter(
+        BudgetEntry.user_id == owner, BudgetEntry.end_mode == "after_occurrences",
+        BudgetEntry.account_id.in_(cards)).count() >= 6
+
+
+@needs_db
+def test_fixture_access_relationships(realistic, sw_client, sw_people):
+    w, acc = realistic, realistic.accounts
+    mine = set(acc.values())
+
+    def visible(who_headers):
+        r = sw_client.get(f"{API}/accounts/?limit=100", headers=who_headers)
+        assert r.status_code == 200, r.text
+        return {a["id"] for a in _items(r.json())}
+
+    # The editor sees the shared card and reads its statements in full.
+    assert acc["card_a"] in visible(w.callers["editor"].headers)
+    full = _items(_statements(sw_client, w, "editor", acc["card_a"]))
+    assert full and all("statement_balance" in s for s in full)
+
+    # The viewer sees the card shared to it, as the limited view: no balance, no row ids.
+    assert acc["card_d"] in visible(w.callers["viewer"].headers)
+    limited = _items(_statements(sw_client, w, "viewer", acc["card_d"]))
+    assert limited and not any("statement_balance" in s for s in limited)
+    assert not any("transaction_id" in line for s in limited for line in s["lines"])
+
+    # The household member sees the household-tagged card, and not the untagged ones.
+    seen = visible(w.callers["household"].headers)
+    assert acc["card_b"] in seen
+    assert acc["card_a"] not in seen and acc["card_c"] not in seen
+
+    # A stranger sees none of it.
+    stranger = sw_people("Sam", "Stranger")
+    assert not (visible(stranger["headers"]) & mine)
+    r = sw_client.get(f"{API}/accounts/{acc['card_a']}/statements", headers=stranger["headers"])
+    assert r.status_code == 404
