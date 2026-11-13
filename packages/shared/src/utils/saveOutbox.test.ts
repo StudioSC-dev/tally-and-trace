@@ -166,6 +166,12 @@ describe('persistence', () => {
     expect(restored[0]!.draft).toEqual({ description: 'a' })
   })
 
+  it('a failure with an unknown outcome comes back not confirmed', () => {
+    const s = failEntry(markSending(queue('a'), 'a'), 'a', { message: 'No connection to the server.', retryable: true })
+    const [restored] = restoreOutbox(persistOutbox(s))
+    expect(restored).toMatchObject({ status: 'failed', error: { message: NOT_CONFIRMED, retryable: true, notConfirmed: true } })
+  })
+
   it('a restored entry retried is sent once with its key', () => {
     const restored = restoreOutbox(persistOutbox(markSending(queue('a'), 'a')))
     let s = hydrateOutbox(emptyOutbox, restored)

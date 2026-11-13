@@ -288,8 +288,9 @@ function isEntry(value: unknown): value is OutboxEntry {
 
 /**
  * Reads a mirrored queue back after a reload. Nothing is resent on its own: an entry that was
- * pending or in flight comes back failed and "not confirmed" (Retry is safe: same key), and a
- * failed one keeps its error. Anything unreadable gives an empty queue.
+ * pending or in flight, or failed with an unknown outcome (a network drop, a timeout, a server
+ * error; a reload aborts the request in flight with one), comes back failed and "not confirmed"
+ * (Retry is safe: same key), and a refused one keeps its error. Anything unreadable gives an empty queue.
  */
 export function restoreOutbox(json: string | null): OutboxEntry[] {
   if (!json) return []
@@ -302,7 +303,7 @@ export function restoreOutbox(json: string | null): OutboxEntry[] {
   const record = parsed as { v?: unknown; entries?: unknown } | null
   if (!record || record.v !== STORAGE_VERSION || !Array.isArray(record.entries)) return []
   return record.entries.filter(isEntry).map((e) =>
-    e.status === 'failed' && e.error
+    e.status === 'failed' && e.error && !e.error.retryable
       ? e
       : { ...e, status: 'failed' as const, error: { message: NOT_CONFIRMED, retryable: true, notConfirmed: true } },
   )
