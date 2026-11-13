@@ -1,0 +1,45 @@
+{
+ "body": {
+  "auto_post_scheduled": false,
+  "items": [
+   {
+    "account_name": "Card A",
+    "amount": 2500.0,
+    "auto_post": "unreviewed",
+    "block_reason": null,
+    "can_mark_paid": true,
+    "can_review": true,
+    "currency": "PHP",
+    "effective_date": "2026-11-12",
+    "entry_id": 100000,
+    "missed": 1,
+    "name": "Installment 0",
+    "next_charge": "2026-11-12",
+    "payments_left": 12,
+    "payments_total": 15,
+    "recordable": true,
+    "view": "shared_full"
+   },
+   {
+    "account_name": "Card A",
+    "amount": 4100.0,
+    "auto_post": "on",
+    "block_reason": null,
+    "can_mark_paid": true,
+    "can_review": true,
+    "currency": "PHP",
+    "effective_date": "2026-12-12",
+    "entry_id": 100000,
+    "missed": 0,
+    "name": "Installment 4",
+    "next_charge": "2026-12-12",
+    "payments_left": 12,
+    "payments_total": 12,
+    "recordable": false,
+    "view": "shared_full"
+   }
+  ],
+  "today": "2026-11-13"
+ },
+ "status": 200
+}

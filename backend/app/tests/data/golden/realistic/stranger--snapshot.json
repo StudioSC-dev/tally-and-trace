@@ -1,0 +1,200 @@
+{
+ "body": {
+  "account_closings": [
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-13T00:00:00",
+    "unassigned_closing": 0.0
+   },
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2027-01-01T00:00:00",
+    "period_label": "December 2026",
+    "period_start": "2026-12-01T00:00:00",
+    "unassigned_closing": 0.0
+   },
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "currency": "PHP",
+      "overflow_moves": [],
+      "unassigned_closing": 0.0
+     }
+    ],
+    "overflow_moves": [],
+    "period_end": "2027-02-01T00:00:00",
+    "period_label": "January 2027",
+    "period_start": "2027-01-01T00:00:00",
+    "unassigned_closing": 0.0
+   }
+  ],
+  "auto_post_scheduled": false,
+  "autopay_due": [],
+  "available_cash": 0.0,
+  "balances": {
+   "by_account": [],
+   "by_currency": [
+    {
+     "available_cash": 0.0,
+     "currency": "PHP",
+     "total": 0
+    }
+   ],
+   "total": 0
+  },
+  "card_charges": [],
+  "card_statements_due": [],
+  "currencies": [],
+  "forecast_next_3_months": [
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "closing_balance": 0.0,
+      "currency": "PHP",
+      "expenses": 0.0,
+      "income": 0.0,
+      "loan_payables": 0.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": 0.0,
+      "opening_balance": 0.0,
+      "overflow_moves": [],
+      "statement_payables": 0.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 0.0
+     }
+    ],
+    "closing_balance": 0.0,
+    "expenses": 0.0,
+    "income": 0.0,
+    "net": 0.0,
+    "opening_balance": 0.0,
+    "overflow_moves": [],
+    "period_end": "2026-12-01T00:00:00",
+    "period_label": "November 2026",
+    "period_start": "2026-11-13T00:00:00",
+    "statement_payables": 0.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 0.0
+   },
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "closing_balance": 0.0,
+      "currency": "PHP",
+      "expenses": 0.0,
+      "income": 0.0,
+      "loan_payables": 0.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": 0.0,
+      "opening_balance": 0.0,
+      "overflow_moves": [],
+      "statement_payables": 0.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 0.0
+     }
+    ],
+    "closing_balance": 0.0,
+    "expenses": 0.0,
+    "income": 0.0,
+    "net": 0.0,
+    "opening_balance": 0.0,
+    "overflow_moves": [],
+    "period_end": "2027-01-01T00:00:00",
+    "period_label": "December 2026",
+    "period_start": "2026-12-01T00:00:00",
+    "statement_payables": 0.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 0.0
+   },
+   {
+    "by_account": [],
+    "by_currency": [
+     {
+      "by_account": [],
+      "closing_balance": 0.0,
+      "currency": "PHP",
+      "expenses": 0.0,
+      "income": 0.0,
+      "loan_payables": 0.0,
+      "moved_in": 0.0,
+      "moved_out": 0.0,
+      "net": 0.0,
+      "opening_balance": 0.0,
+      "overflow_moves": [],
+      "statement_payables": 0.0,
+      "unassigned_closing": 0.0,
+      "unposted_expenses": 0.0
+     }
+    ],
+    "closing_balance": 0.0,
+    "expenses": 0.0,
+    "income": 0.0,
+    "net": 0.0,
+    "opening_balance": 0.0,
+    "overflow_moves": [],
+    "period_end": "2027-02-01T00:00:00",
+    "period_label": "January 2027",
+    "period_start": "2027-01-01T00:00:00",
+    "statement_payables": 0.0,
+    "unassigned_closing": 0.0,
+    "unposted_expenses": 0.0
+   }
+  ],
+  "fx": {
+   "rates": [],
+   "unconverted_count": 0
+  },
+  "goals_progress": [],
+  "installment_auto_post": [],
+  "installment_review": [],
+  "missed": [],
+  "monthly_summary": {
+   "by_currency": [
+    {
+     "currency": "PHP",
+     "monthly_disposable": 0.0,
+     "monthly_expenses": 0.0,
+     "monthly_income": 0.0,
+     "moved_in": 0.0,
+     "moved_out": 0.0
+    }
+   ],
+   "monthly_disposable": 0.0,
+   "monthly_expenses": 0.0,
+   "monthly_income": 0.0
+  },
+  "payables": [],
+  "today": "2026-11-13",
+  "upcoming_this_month": [],
+  "wishlist_next_up": []
+ },
+ "status": 200
+}

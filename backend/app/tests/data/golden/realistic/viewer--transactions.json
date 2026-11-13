@@ -1,0 +1,246 @@
+{
+ "body": {
+  "has_more": false,
+  "items": [
+   {
+    "account": {
+     "id": 100000,
+     "name": "Joint bank"
+    },
+    "amount": 4000.0,
+    "category_name": null,
+    "counterpart": {
+     "id": 100000,
+     "name": "Card D"
+    },
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-11T10:00:00Z",
+    "display_description": "Payment in the open cycle",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "transfer",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Joint bank"
+    },
+    "amount": 2491.0,
+    "category_name": "Utilities",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-10T13:14:00Z",
+    "display_description": "Txn 1172",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Card D"
+    },
+    "amount": 3481.0,
+    "category_name": "Travel",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-10T08:06:00Z",
+    "display_description": "Txn 1817",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Card D"
+    },
+    "amount": 4054.0,
+    "category_name": "Subscriptions",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-09T19:00:00Z",
+    "display_description": "Txn 2720",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Card D"
+    },
+    "amount": 4541.0,
+    "category_name": "Travel",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-07T04:37:00Z",
+    "display_description": "Txn 322",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Joint bank"
+    },
+    "amount": 83.0,
+    "category_name": "Shopping",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-06T19:15:00Z",
+    "display_description": "Txn 2705",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Joint bank"
+    },
+    "amount": 2312.0,
+    "category_name": "Groceries",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-06T01:06:00Z",
+    "display_description": "Txn 2049",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Joint bank"
+    },
+    "amount": 2331.0,
+    "category_name": "Groceries",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-05T20:14:00Z",
+    "display_description": "Txn 1403",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   },
+   {
+    "account": {
+     "id": 100000,
+     "name": "Card D"
+    },
+    "amount": 298.0,
+    "category_name": "Transport",
+    "counterpart": null,
+    "created_by": "Owner P.",
+    "currency": "PHP",
+    "date": "2026-11-04T19:31:00Z",
+    "display_description": "Txn 1134",
+    "id": 100000,
+    "is_posted": true,
+    "permissions": {
+     "can_delete": false,
+     "can_edit": false,
+     "can_post": false,
+     "can_revert": false,
+     "can_tag": false
+    },
+    "tags": [],
+    "transaction_type": "debit",
+    "transfer_fee": 0.0,
+    "view": "limited"
+   }
+  ],
+  "total": 9
+ },
+ "status": 200
+}
