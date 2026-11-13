@@ -196,8 +196,11 @@ def main_account_or_none(db: Session, user) -> Optional[int]:
 
 def get_account_balances(db: Session, user_id: int):
     """The projection's scope: every active account the user sees (any role,
-    ``tag_viewer`` included: a sharer's Household-tagged accounts)."""
-    return viewable_accounts(db, user_id, active_only=True, roles=VIEW_ROLES).all()
+    ``tag_viewer`` included: a sharer's Household-tagged accounts), by id: the
+    snapshot's per-account lists follow this order, and a query with no ORDER BY
+    returns rows in storage order, which moves as the table is updated."""
+    return (viewable_accounts(db, user_id, active_only=True, roles=VIEW_ROLES)
+            .order_by(Account.id).all())
 
 
 def project_cashflow(
