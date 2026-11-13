@@ -127,18 +127,21 @@ class Account(Base):
     
     # Relationships
     user = relationship("User", back_populates="accounts", foreign_keys=[user_id])
+    # Loaded on access (``select``); app/models/__init__.py redeclares it the same way.
     transactions = relationship(
         "Transaction",
         back_populates="account",
         foreign_keys="Transaction.account_id",
-        lazy="selectin",
+        lazy="select",
     )
     allocations = relationship("Allocation", back_populates="account")
     budget_entries = relationship("BudgetEntry", back_populates="account")
-    # Who else holds a role on the account (app/core/access.py reads it).
-    shares = relationship("AccountShare", back_populates="account", lazy="selectin",
+    # Who else holds a role on the account. Access never reads it (app/core/access.py
+    # queries account_shares as data), so it is never loaded implicitly: a lazy
+    # load raises; load it explicitly (selectinload) where it is rendered.
+    shares = relationship("AccountShare", back_populates="account", lazy="raise",
                           cascade="all, delete-orphan", passive_deletes=True)
-    # Every tag on the account, whoever's: app/core/access.py reads the owner's
-    # shared Household tag from it (``tag_viewer``). Never serialized; responses
-    # read ``visible_tags``.
-    tag_links = relationship("Tag", secondary="account_tags", viewonly=True, lazy="selectin")
+    # Every tag on the account, whoever's. Never serialized (responses read
+    # ``visible_tags``) and never read for access (app/core/access.py queries
+    # account_tags), so a lazy load raises.
+    tag_links = relationship("Tag", secondary="account_tags", viewonly=True, lazy="raise")

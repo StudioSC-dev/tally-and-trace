@@ -20,7 +20,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, account_role, readable_criterion,
+    DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, readable_criterion,
     tag_shared_account_ids, touches_accounts, viewable_account_ids, viewable_accounts,
 )
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
@@ -1407,7 +1407,7 @@ def collect_events(
         outside_loans.update(
             (a.id, a) for a in db.query(Account).filter(Account.id.in_(missing)).all())
     hidden_loan_ids = frozenset(
-        lid for lid, a in outside_loans.items() if account_role(user_id, a) == NONE)
+        lid for lid, a in outside_loans.items() if access.access_map().of(a) == NONE)
 
     # Active billed cards outside the scope whose statement payment (primary or
     # overflow) comes from an in-scope account: internal liability discovery.
@@ -1422,7 +1422,7 @@ def collect_events(
                 Account.payment_overflow_account_id.in_(scoped_ids)),
         ).all()
         if a.id not in card_ids and resolve_cycle_fields(a) is not None
-        and (household is not None or account_role(user_id, a) == NONE)
+        and (household is not None or access.access_map().of(a) == NONE)
     ] if scoped_ids else []
     # Cards outside the scope that transfers pay into (or draw from): a payment
     # into a billed one is a card payment; one without cycle settings moves no cash.
@@ -1637,7 +1637,7 @@ def collect_events(
             origin=(Account, p["source_id"]),  # the card
             **extra,
         ), leg_currencies, rows, card.currency)
-        if account_role(user_id, card) == TAG_VIEWER:
+        if access.access_map().of(card) == TAG_VIEWER:
             # Seen through a tag share: no statement detail (as a hidden card's).
             _limit(statement, redactor, name=p["name"], currency=card.currency,
                    kind="card_payment")
@@ -1762,7 +1762,7 @@ def collect_events(
         if hidden:
             event = _limit(event, redactor, name=LOAN_PAYMENT,
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")
-        elif account_role(user_id, loans_by_id[p["source_id"]]) == TAG_VIEWER:
+        elif access.access_map().of(loans_by_id[p["source_id"]]) == TAG_VIEWER:
             # Seen through a tag share: the loan's name, no schedule detail.
             event = _limit(event, redactor, name=p["name"],
                            currency=loans_by_id[p["source_id"]].currency, kind="loan_payment")

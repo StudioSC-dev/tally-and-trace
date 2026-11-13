@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.access import (
-    MANAGE_ROLES, VIEW_ROLES, account_role, editable_account_ids, readable_criterion,
+    MANAGE_ROLES, VIEW_ROLES, access_map, editable_account_ids, readable_criterion,
     record_account_ids, touches_accounts, viewable_account_ids,
 )
 from app.core.redaction import FULL, LIMITED, Redactor
@@ -310,9 +310,10 @@ def _autopay_due_loans(db: Session, user, redactor: Redactor) -> List[dict]:
         Account.account_type == AccountType.LOAN, Account.is_active.is_(True),
         Account.auto_post_enabled.is_(True),
         Account.id.in_(editable_account_ids(db, user))).order_by(Account.id).all()
+    held = access_map(db, user, [loan.id for loan in loans])
     out = []
     for loan in loans:
-        if account_role(user, loan) not in MANAGE_ROLES:
+        if held.of(loan) not in MANAGE_ROLES:
             continue
         plan = loan_plan(db, loan, today, user)
         if not plan.due:
@@ -391,7 +392,8 @@ def loan_row_fields(db: Session, rows: List[dict], redactor: Redactor) -> None:
     for row in rows:
         loan = loans.get(row["source_id"])
         row["settlement"] = (loan_settlement(loan)
-                             if account_role(redactor.user, loan) in MANAGE_ROLES else None)
+                             if redactor.access.access_map().of(loan) in MANAGE_ROLES
+                             else None)
 
 
 def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
