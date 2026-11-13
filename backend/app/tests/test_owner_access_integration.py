@@ -150,7 +150,13 @@ def world(client, db, people, tmp_path, monkeypatch):
     tag_share = TagShare(tag_id=ensure_household_tag(db, owner["id"]).id, user_id=people()["id"])
     db.add(tag_share)
     db.commit()
+    _post(client, owner, "/transactions/", {
+        "account_id": card["id"], "amount": 555, "transaction_type": "debit",
+        "transaction_date": WHEN, "description": f"{MARK} card charge"})
+    statements = client.get(f"{API}/cards/{card['id']}/statements",
+                            headers=owner["headers"]).json()["statements"]
     return {
+        "close": statements[-1]["close_date"],
         "owner": owner, "stranger": stranger, "bank": bank["id"], "card": card["id"],
         "loan": loan["id"], "category": category["id"], "allocation": allocation["id"],
         "transaction": txn["id"], "entry": entry["id"], "accountless": accountless["id"],
@@ -169,6 +175,9 @@ def _id_routes(w):
         ("get", f"/accounts/{w['bank']}/balance", {}),
         ("get", f"/accounts/{w['card']}/statements", {}),
         ("get", f"/cards/{w['card']}/credit", {}),
+        ("get", f"/cards/{w['card']}/statements", {}),
+        # The open cycle's close (the guard test reads the placeholder).
+        ("get", f"/cards/{w['card']}/statements/{w.get('close', '{close_date}')}", {}),
         # close_date is read as text after the access check, so the literal
         # placeholder reaches the 404 like any date would.
         ("put", f"/cards/{w['card']}/statements/{{close_date}}/minimum-due",
