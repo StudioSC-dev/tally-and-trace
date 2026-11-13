@@ -1,0 +1,526 @@
+"""Stored card statements: write-through, races, billing changes, bulk paths, the read
+API and the command (STU-601, PERF-6: AC2, AC3, AC3b, AC4, AC5, AC6, the kill switch).
+
+On the realistic dataset (``app/tests/fixtures/realistic.py``, clock pinned to its
+day). ``statements_store.verify_card`` is the check throughout: the stored rows
+equal the rows, and the summaries read from the store equal the full replay.
+Skips without a database.
+"""
+import calendar
+import os
+import subprocess
+import sys
+import threading
+import time as clock
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+from sqlalchemy import text
+
+from app.tests.conftest import sw_db_reachable
+
+pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
+
+API = "/api/v1"
+BACKEND = Path(__file__).resolve().parents[2]
+
+
+# --- helpers ---------------------------------------------------------------------------------
+
+def _card(db, card_id):
+    from app.models.account import Account
+
+    db.expire_all()
+    return db.get(Account, card_id)
+
+
+def _owner_view(db, card):
+    from app.core.access import viewable_account_ids
+    from app.models.user import User
+
+    return viewable_account_ids(db, db.get(User, card.user_id))
+
+
+def _verify(db, card_id, today):
+    from app.services import statements_store
+
+    card = _card(db, card_id)
+    got = statements_store.verify_card(db, card, _owner_view(db, card), today)
+    db.rollback()
+    return got
+
+
+def _read(db, card_id, today):
+    """A read through the store (it catches the card up)."""
+    from app.services import statements
+
+    card = _card(db, card_id)
+    out = statements.statement_summaries(db, card, datetime.combine(today, time()),
+                                         _owner_view(db, card))
+    db.rollback()
+    return out
+
+
+def _stored(db, card_id):
+    """``{close: (balance, count)}`` straight from the table."""
+    db.rollback()
+    return {r.close: (Decimal(r.line_balance), r.line_count) for r in db.execute(text(
+        "SELECT close, line_balance, line_count FROM card_statements WHERE card_id = :c"),
+        {"c": card_id})}
+
+
+def _state(db, card_id):
+    db.rollback()
+    return db.execute(text("SELECT materialized_through, close_day FROM card_statement_state "
+                           "WHERE card_id = :c"), {"c": card_id}).first()
+
+
+def _closed_cycles(card, today, count):
+    """The last ``count`` closed cycles of ``card`` on ``today``, oldest first."""
+    from app.services.statements import iter_cycles_from
+
+    cycles = list(iter_cycles_from(card, today - timedelta(days=40 * count), datetime.min,
+                                   through=today, due_overrides={}))
+    return [c for c in cycles if c["close"].date() < today][-count:]
+
+
+def _free_to_rekey(db, card_id):
+    """Clear what makes the API refuse a close-day change (installments with payments
+    left, printed dues): the fixture gives every card both."""
+    db.execute(text("UPDATE budget_entries SET max_occurrences = 0 WHERE account_id = :c"),
+               {"c": card_id})
+    db.execute(text("DELETE FROM card_statement_due_overrides WHERE account_id = :c"),
+               {"c": card_id})
+    db.commit()
+
+
+def _good(got):
+    return got["materialized"] and got["rows_equal"] and got["summaries_equal"]
+
+
+# --- AC3: write-through is synchronous --------------------------------------------------------
+
+def test_a_back_dated_edit_is_stored_before_the_call_returns(realistic, sw_client, sw_db):
+    w, today = realistic, realistic.today
+    card_id = w.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    card = _card(sw_db, card_id)
+    cycle = _closed_cycles(card, today, 3)[0]
+    close = cycle["close"].date()
+    before = _stored(sw_db, card_id)[close]
+    when = datetime.combine(close - timedelta(days=2), time(10))
+    r = sw_client.post(f"{API}/transactions/", headers=w.callers["owner"].headers, json={
+        "account_id": card_id, "amount": 1234.56, "transaction_type": "debit",
+        "description": "Back-dated", "transaction_date": when.isoformat(), "is_posted": True})
+    assert r.status_code in (200, 201), r.text
+    # No read in between: the row was written in the create's own transaction.
+    assert _stored(sw_db, card_id)[close] == (before[0] + Decimal("1234.56"), before[1] + 1)
+    txn = r.json()["id"]
+    r = sw_client.put(f"{API}/transactions/{txn}", headers=w.callers["owner"].headers,
+                      json={"amount": 34.56})
+    assert r.status_code == 200, r.text
+    assert _stored(sw_db, card_id)[close] == (before[0] + Decimal("34.56"), before[1] + 1)
+    r = sw_client.delete(f"{API}/transactions/{txn}", headers=w.callers["owner"].headers)
+    assert r.status_code in (200, 204), r.text
+    assert _stored(sw_db, card_id)[close] == before
+    assert _good(_verify(sw_db, card_id, today))
+
+
+# --- AC3b: a billing change re-keys the card's stored statements -----------------------------
+
+def test_a_close_day_change_rekeys_the_stored_statements(realistic, sw_client, sw_db):
+    w, today = realistic, realistic.today
+    headers = w.callers["owner"].headers
+    card_id = w.accounts["card_a"]
+    _free_to_rekey(sw_db, card_id)
+    _read(sw_db, card_id, today)
+    assert {c.day for c in _stored(sw_db, card_id)} == {12}
+    r = sw_client.put(f"{API}/accounts/{card_id}", headers=headers,
+                      json={"billing_cycle_start": 28})
+    assert r.status_code == 200, r.text
+    stored = _stored(sw_db, card_id)  # no read in between
+    assert stored and {c.day for c in stored} == {28}
+    assert _state(sw_db, card_id).close_day == 28
+    r = sw_client.get(f"{API}/cards/{card_id}/statements?from=2000-01-01&to=2100-01-01",
+                      headers=headers)
+    assert r.status_code == 200, r.text
+    assert {date.fromisoformat(s["close_date"]).day for s in r.json()["statements"]} == {28}
+    assert _good(_verify(sw_db, card_id, today))
+    r = sw_client.put(f"{API}/accounts/{card_id}", headers=headers,
+                      json={"billing_cycle_start": 12})
+    assert r.status_code == 200, r.text
+    assert {c.day for c in _stored(sw_db, card_id)} == {12}
+    assert _good(_verify(sw_db, card_id, today))
+
+
+def test_a_legacy_due_day_change_rekeys_the_stored_statements(realistic, sw_client, sw_db):
+    from app.services.statements import resolve_cycle_fields
+
+    w, today = realistic, realistic.today
+    card_id = w.accounts["card_c"]
+    _free_to_rekey(sw_db, card_id)
+    _read(sw_db, card_id, today)
+    old_day = resolve_cycle_fields(_card(sw_db, card_id))[0]
+    r = sw_client.put(f"{API}/accounts/{card_id}", headers=w.callers["owner"].headers,
+                      json={"due_date": 20})
+    assert r.status_code == 200, r.text
+    new_day = resolve_cycle_fields(_card(sw_db, card_id))[0]
+    assert new_day != old_day
+    stored = _stored(sw_db, card_id)
+    # The closes the new settings give (a day past a month's end is clamped).
+    want = {c["close"].date() for c in _closed_cycles(_card(sw_db, card_id), today, 200)}
+    assert stored and set(stored) <= want
+    assert all(c.day == min(new_day, calendar.monthrange(c.year, c.month)[1]) for c in stored)
+    assert _good(_verify(sw_db, card_id, today))
+    r = sw_client.put(f"{API}/accounts/{card_id}", headers=w.callers["owner"].headers,
+                      json={"due_date": 5})
+    assert r.status_code == 200, r.text
+    assert _good(_verify(sw_db, card_id, today))
+
+
+def test_a_failure_mid_repopulate_rolls_back_to_the_old_rows(realistic, sw_db, monkeypatch):
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.services import statements_store
+
+    w, today = realistic, realistic.today
+    card_id = w.accounts["card_d"]
+    _read(sw_db, card_id, today)
+    before, state = _stored(sw_db, card_id), _state(sw_db, card_id)
+    assert before
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(statements_store, "cycle_rows", broken)
+    db = SessionLocal()
+    try:
+        db.get(Account, card_id).billing_cycle_start = 15
+        with pytest.raises(RuntimeError, match="injected"):
+            db.commit()  # the repopulate deleted the rows, then failed
+        db.rollback()
+    finally:
+        db.close()
+    monkeypatch.undo()
+    assert _card(sw_db, card_id).billing_cycle_start == 31
+    assert _stored(sw_db, card_id) == before
+    assert tuple(_state(sw_db, card_id)) == tuple(state)
+    assert _good(_verify(sw_db, card_id, today))
+
+
+# --- AC2: a catch-up racing a back-dated write -------------------------------------------------
+
+def _behind(db, card_id, close):
+    """Make the card's state one cycle behind, so a catch-up recomputes ``close``."""
+    from app.services.statements_store import last_close_before
+
+    card = _card(db, card_id)
+    db.execute(text("UPDATE card_statement_state SET materialized_through = :t "
+                    "WHERE card_id = :c"), {"t": last_close_before(card, close), "c": card_id})
+    db.commit()
+
+
+def _back_date(card_id, close, amount, gate=None):
+    """A writer: a posted charge on the cycle closing on ``close``, committed."""
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.models.transaction import Transaction, TransactionType
+
+    db = SessionLocal()
+    try:
+        card = db.get(Account, card_id)
+        db.add(Transaction(user_id=card.user_id, created_by_actor=card.user_id,
+                           account_id=card_id, amount=amount, description="Race",
+                           transaction_type=TransactionType.DEBIT, is_posted=True,
+                           transfer_fee=Decimal("0"),
+                           transaction_date=datetime.combine(close, time(9))))
+        db.flush()  # the hook locks the card here
+        if gate is not None:
+            gate()
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_a_catch_up_computed_before_a_write_is_overwritten_by_it(realistic, sw_db,
+                                                                    monkeypatch):
+    """Catch-up first: it computes the cycle from the old rows and holds the lock;
+    the writer's recompute waits for it, then overwrites it."""
+    from app.core.database import SessionLocal
+    from app.services import statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_b"]
+    _read(sw_db, card_id, today)
+    close = _closed_cycles(_card(sw_db, card_id), today, 1)[0]["close"].date()
+    _behind(sw_db, card_id, close)
+    computed, go = threading.Event(), threading.Event()
+    original = statements_store.materialize
+
+    def paused(*args, **kwargs):
+        original(*args, **kwargs)
+        computed.set()
+        assert go.wait(20)
+
+    monkeypatch.setattr(statements_store, "materialize", paused)
+    errors = []
+
+    def catch_up():
+        db = SessionLocal()
+        try:
+            statements_store.catch_up(db, [_card(db, card_id)], today)
+        except Exception as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+        finally:
+            db.close()
+
+    reader = threading.Thread(target=catch_up)
+    reader.start()
+    assert computed.wait(20)
+    writer = threading.Thread(target=_back_date, args=(card_id, close, Decimal("777.00")))
+    writer.start()
+    clock.sleep(0.5)
+    assert writer.is_alive(), "the writer did not wait for the catch-up's lock"
+    go.set()
+    reader.join(20)
+    writer.join(20)
+    monkeypatch.undo()
+    assert not errors and not reader.is_alive() and not writer.is_alive()
+    assert _good(_verify(sw_db, card_id, today))
+
+
+def test_a_catch_up_during_an_open_write_leaves_the_cycle_to_it(realistic, sw_db):
+    """Writer first: it holds the card's lock until it commits, so the catch-up
+    skips the card (no stale cycle); the next read catches up from the new rows."""
+    from app.core.database import SessionLocal
+    from app.services import statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_b"]
+    _read(sw_db, card_id, today)
+    close = _closed_cycles(_card(sw_db, card_id), today, 1)[0]["close"].date()
+    _behind(sw_db, card_id, close)
+    behind = _state(sw_db, card_id)
+
+    def catch_up_meanwhile():
+        db = SessionLocal()
+        try:
+            statements_store.catch_up(db, [_card(db, card_id)], today)
+        finally:
+            db.close()
+        assert tuple(_state(sw_db, card_id)) == tuple(behind)  # skipped, nothing stale
+
+    _back_date(card_id, close, Decimal("555.00"), gate=catch_up_meanwhile)
+    _read(sw_db, card_id, today)
+    assert _state(sw_db, card_id).materialized_through == close
+    assert _good(_verify(sw_db, card_id, today))
+
+
+# --- time-based closing ------------------------------------------------------------------------
+
+def test_a_read_after_a_close_catches_up_once(realistic, sw_db, monkeypatch):
+    from app.services import statements_store
+    from app.tests.fixtures.realistic import REF, pin_clock
+
+    card_id = realistic.accounts["card_a"]
+    _read(sw_db, card_id, realistic.today)
+    first = _state(sw_db, card_id).materialized_through
+    later = REF + timedelta(days=45)
+    pin_clock(monkeypatch, later)
+    day = (later + timedelta(hours=8)).date()
+    _read(sw_db, card_id, day)
+    assert _state(sw_db, card_id).materialized_through == statements_store.last_close_before(
+        _card(sw_db, card_id), day) > first
+    assert _good(_verify(sw_db, card_id, day))
+
+
+# --- the kill switch -----------------------------------------------------------------------------
+
+def test_with_the_store_off_reads_replay_and_writes_still_go_through(realistic, sw_client,
+                                                                     sw_db, monkeypatch):
+    from app.services import statements_store
+
+    w, today = realistic, realistic.today
+    card_id = w.accounts["card_d"]
+    _read(sw_db, card_id, today)
+    monkeypatch.setenv("STATEMENTS_STORE", "off")
+    card = _card(sw_db, card_id)
+    assert statements_store.read_card_rows(sw_db, [card], [card_id], today)[1] == {}
+    close = _closed_cycles(card, today, 2)[0]["close"].date()
+    before = _stored(sw_db, card_id)[close]
+    r = sw_client.post(f"{API}/transactions/", headers=w.callers["owner"].headers, json={
+        "account_id": card_id, "amount": 10, "transaction_type": "debit",
+        "description": "While off", "transaction_date": f"{close}T08:00:00", "is_posted": True})
+    assert r.status_code in (200, 201), r.text
+    assert _stored(sw_db, card_id)[close] == (before[0] + 10, before[1] + 1)
+    monkeypatch.delenv("STATEMENTS_STORE")
+    assert _good(_verify(sw_db, card_id, today))
+
+
+# --- AC4: bulk paths ----------------------------------------------------------------------------
+
+def _foreign_row(db, card_id, user_id, close):
+    """A posted charge by ``user_id`` on another user's card, in a stored cycle."""
+    from app.models.transaction import Transaction, TransactionType
+
+    db.add(Transaction(user_id=user_id, created_by_actor=user_id, account_id=card_id,
+                       amount=Decimal("4321.00"), description="Bulk-deleted",
+                       transaction_type=TransactionType.DEBIT, is_posted=True,
+                       transfer_fee=Decimal("0"), transaction_date=datetime.combine(close, time())))
+    db.commit()
+
+
+def test_the_cutover_reset_leaves_stored_equal_to_replay(realistic, sw_db, sw_people):
+    from app.core.tags import ensure_household_tag
+    from app.cutover_load.reset import delete_owner_rows
+
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    other = sw_people("Cutover", "Owner")
+    household = ensure_household_tag(sw_db, other["id"]).id
+    sw_db.commit()
+    close = _closed_cycles(_card(sw_db, card_id), today, 2)[0]["close"].date()
+    _foreign_row(sw_db, card_id, other["id"], close)
+    _read(sw_db, card_id, today)
+    assert _good(_verify(sw_db, card_id, today))
+    delete_owner_rows(sw_db, other["id"], household)  # raw DELETE FROM transactions
+    sw_db.commit()
+    _read(sw_db, card_id, today)
+    assert _good(_verify(sw_db, card_id, today))
+
+
+def test_the_demo_reset_leaves_stored_equal_to_replay(realistic, sw_db, monkeypatch):
+    from app.core import seed
+    from app.models.account import Account, AccountType
+    from app.models.user import User
+
+    today, card_id = realistic.today, realistic.accounts["card_b"]
+    seed.seed_database()
+    demo = sw_db.query(User).filter(User.email == seed.DEMO_EMAIL).one()
+    close = _closed_cycles(_card(sw_db, card_id), today, 2)[0]["close"].date()
+    _foreign_row(sw_db, card_id, demo.id, close)
+    _read(sw_db, card_id, today)
+    demo_cards = [a.id for a in sw_db.query(Account).filter(
+        Account.user_id == demo.id, Account.account_type == AccountType.CREDIT)]
+    for cid in demo_cards:
+        _read(sw_db, cid, today)
+    monkeypatch.setattr(seed, "DEMO_SHAPE_VERSION", seed.DEMO_SHAPE_VERSION + 1)
+    seed.seed_database()  # query(Transaction).delete() over the demo users' rows
+    monkeypatch.undo()
+    seed.seed_database()
+    sw_db.rollback()
+    assert not sw_db.execute(text("SELECT count(*) FROM card_statements WHERE card_id = ANY(:c)"),
+                             {"c": demo_cards}).scalar()  # the old demo cards' rows went
+    _read(sw_db, card_id, today)
+    assert _good(_verify(sw_db, card_id, today))
+    for cid in [a.id for a in sw_db.query(Account).filter(
+            Account.user_id == demo.id, Account.account_type == AccountType.CREDIT)]:
+        _read(sw_db, cid, today)
+        assert _good(_verify(sw_db, cid, today))
+
+
+# --- AC5: the read API ---------------------------------------------------------------------------
+
+def test_the_statements_api_by_role(realistic, sw_client, sw_people):
+    w, acc = realistic, realistic.accounts
+    full_keys = {"balance", "clear_through", "outstanding", "paid_since_close"}
+
+    def get(caller_headers, card, suffix=""):
+        return sw_client.get(f"{API}/cards/{card}/statements{suffix}", headers=caller_headers)
+
+    for caller, card in (("owner", acc["card_a"]), ("editor", acc["card_a"])):
+        r = get(w.callers[caller].headers, card)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["view"] == "full" and body["card_id"] == card
+        statements = body["statements"]
+        assert statements and all(full_keys <= set(s) for s in statements)
+        assert [s["is_closed"] for s in statements][-1] is False  # the open cycle last
+        closed = [s for s in statements if s["is_closed"]][-1]
+        detail = get(w.callers[caller].headers, card, f"/{closed['close_date']}").json()
+        assert detail["statement"] == closed
+        assert len(detail["lines"]) == closed["line_count"]
+        assert all("transaction_id" in line for line in detail["lines"])
+        assert round(sum(line["amount"] for line in detail["lines"]), 2) == closed["balance"]
+
+    for caller, card in (("viewer", acc["card_d"]),):
+        r = get(w.callers[caller].headers, card)
+        assert r.status_code == 200, (caller, r.text)
+        body = r.json()
+        assert body["view"] == "limited" and "card_id" not in body
+        assert body["statements"] and not any(full_keys & set(s) for s in body["statements"])
+        close = body["statements"][0]["close_date"]
+        detail = get(w.callers[caller].headers, card, f"/{close}").json()
+        assert "unconverted_lines" not in detail
+        assert not any("transaction_id" in line for line in detail["lines"])
+
+    # A tag viewer is not on the card, as with GET /accounts/{id}/statements.
+    assert get(w.callers["household"].headers, acc["card_b"]).status_code == 404
+    assert sw_client.get(f"{API}/accounts/{acc['card_b']}/statements",
+                         headers=w.callers["household"].headers).status_code == 404
+    stranger = sw_people("Sam", "Stranger")["headers"]
+    assert get(stranger, acc["card_a"]).status_code == 404
+    assert get(stranger, acc["card_a"], "/2026-10-12").status_code == 404
+    assert get(w.callers["viewer"].headers, acc["card_a"]).status_code == 404
+    # A close that is not one of the card's statements, or not a date.
+    assert get(w.callers["owner"].headers, acc["card_a"], "/2026-10-13").status_code == 404
+    assert get(w.callers["owner"].headers, acc["card_a"], "/latest").status_code == 404
+
+
+def test_the_statements_api_range(realistic, sw_client):
+    w, card = realistic, realistic.accounts["card_a"]
+    headers = w.callers["owner"].headers
+    every = sw_client.get(f"{API}/cards/{card}/statements", headers=headers).json()["statements"]
+    lo, hi = every[3]["close_date"], every[6]["close_date"]
+    some = sw_client.get(f"{API}/cards/{card}/statements?from={lo}&to={hi}",
+                         headers=headers).json()["statements"]
+    assert some == every[3:7]
+
+
+# --- AC6: the migration and the command ---------------------------------------------------------
+
+def test_the_dry_run_reports_all_equal_and_writes_nothing(realistic, sw_db):
+    from app.services import statements_store
+
+    today = realistic.today
+    for key in ("card_a", "card_b", "card_c", "card_d"):
+        _read(sw_db, realistic.accounts[key], today)
+    sw_db.rollback()
+    counts = "SELECT (SELECT count(*) FROM card_statements), " \
+             "(SELECT count(*) FROM card_statement_state), " \
+             "(SELECT coalesce(max(computed_at), 'epoch') FROM card_statements)"
+    before = tuple(sw_db.execute(text(counts)).one())
+    url = sw_db.get_bind().url
+    env = {**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False)}
+    result = subprocess.run(
+        [sys.executable, "-m", "app.scripts.statements_store", "--expect-host", url.host,
+         "--expect-db", url.database, "--dry-run",
+         *[a for key in ("card_a", "card_b", "card_c", "card_d")
+           for a in ("--card", str(realistic.accounts[key]))]],
+        cwd=BACKEND, env=env, capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout
+    assert "mode: dry run" in out and "all_equal: yes (4/4)" in out
+    assert "rows_equal=no" not in out and "summaries_equal=no" not in out
+    sw_db.rollback()
+    assert tuple(sw_db.execute(text(counts)).one()) == before
+    # The report carries ids, counts and yes/no only: no amount.
+    for line in out.splitlines():
+        if line.startswith("card "):
+            assert "." not in line, line
+    # The reads above caught the card up, and the dry run left it so.
+    card = _card(sw_db, realistic.accounts["card_a"])
+    assert statements_store.verify_card(sw_db, card, _owner_view(sw_db, card),
+                                        today)["behind"] is False
+    sw_db.rollback()
+
+
+def test_the_apply_is_idempotent(realistic, sw_db):
+    from app.scripts.statements_store import run
+
+    card_id = realistic.accounts["card_c"]
+    sw_db.rollback()
+    first = run(sw_db, [card_id], apply=True)
+    rows = _stored(sw_db, card_id)
+    second = run(sw_db, [card_id], apply=True)
+    assert _stored(sw_db, card_id) == rows
+    assert first[1:] == second[1:] and first[-1] == "all_equal: yes (1/1)"
