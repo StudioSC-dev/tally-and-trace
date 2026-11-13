@@ -407,9 +407,12 @@ def _statements(db, user_id) -> dict:
     from app.services import forecast
 
     db.expire_all()
-    return {p["due_date"]: p["amount"]
-            for p in forecast.payables_by_currency(db, user_id, days=60)
-            if p.get("source") == "statement"}
+    out = {p["due_date"]: p["amount"]
+           for p in forecast.payables_by_currency(db, user_id, days=60)
+           if p.get("source") == "statement"}
+    # End the read: it holds the cards' statement locks shared (STU-601) until then.
+    db.rollback()
+    return out
 
 
 @pytest.mark.parametrize("paid_on, expected", [

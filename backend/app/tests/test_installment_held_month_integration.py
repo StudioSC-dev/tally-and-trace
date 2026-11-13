@@ -133,9 +133,12 @@ def _statements(db, who, days=60):
 
     db.rollback()
     db.expire_all()
-    return [(p["due_date"], p["statement_close"], Decimal(str(p["amount"])))
-            for p in payables_by_currency(db, who["id"], days=days, reference=WALL)
-            if p["source"] == "statement"]
+    out = [(p["due_date"], p["statement_close"], Decimal(str(p["amount"])))
+           for p in payables_by_currency(db, who["id"], days=days, reference=WALL)
+           if p["source"] == "statement"]
+    # End the read: it holds the cards' statement locks shared (STU-601) until then.
+    db.rollback()
+    return out
 
 
 def _opening(client, who, card):
