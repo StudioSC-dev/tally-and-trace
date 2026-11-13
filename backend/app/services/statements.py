@@ -63,6 +63,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -79,6 +80,35 @@ from app.services.banking_days import next_banking_day
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 
 DEFAULT_DAYS_UNTIL_DUE = 21
+
+
+@dataclass(frozen=True)
+class StoredCycles:
+    """A card's stored closed statements, as a read uses them (STU-601, PERF-6).
+
+    ``cycles`` maps each stored close to ``(line balance, line count)``; every
+    key is on or before ``through``, and every line item whose ``statement_day``
+    is on or before ``through`` is counted in exactly one of them (a close with
+    no key holds nothing). The reader replays only the rows placed after
+    ``through``; see ``app/services/statements_store.py``.
+    """
+    through: date
+    cycles: Mapping[date, Tuple[Decimal, int]]
+
+    def filled(self) -> List[date]:
+        """The stored closes holding at least one line item."""
+        return [close for close, (_, count) in self.cycles.items() if count > 0]
+
+    def add(self, cycles: Sequence[Mapping], figures: Sequence, slot: int) -> list:
+        """``figures`` (one per cycle) plus each cycle's stored figure ``slot``
+        (0 balance, 1 count). An empty stored cycle adds nothing, so a figure
+        keeps the exact ``Decimal`` the rows give (``0``, not ``0.00``)."""
+        out = []
+        for cycle, figure in zip(cycles, figures):
+            found = self.cycles.get(cycle["close"].date())
+            out.append(figure + found[slot] if found is not None and found[1] else figure)
+        return out
+
 
 
 def _clamp_day(year: int, month: int, day: int) -> int:
@@ -625,8 +655,14 @@ def build_statement_payables(
     projected_by_card: Optional[dict] = None,
     normalise=None,
     due_overrides_by_card: Optional[Mapping[int, Mapping[date, date]]] = None,
+    stored_by_card: Optional[Mapping[int, StoredCycles]] = None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
+
+    ``stored_by_card`` holds a card's stored closed statements (``StoredCycles``,
+    STU-601): its rows then need only the payments and the line items placed
+    after ``through``, and each stored cycle's balance is added to what those
+    rows put on it. The events are the same as from every row.
 
     ``due_overrides_by_card`` is ``load_due_overrides``'s result: each
     statement with a printed due is payable on it (none by default).
@@ -691,6 +727,16 @@ def build_statement_payables(
     for card in cards:
         lines, payments = _split_card_rows(
             card.id, transactions_by_card.get(card.id, []), unbilled_ids)
+        stored = (stored_by_card or {}).get(card.id)
+        known: Dict[int, date] = {}
+        filled: List[date] = []
+        if stored is not None:
+            # Only the line items placed after the stored statements are replayed.
+            placed_lines = [(row, statement_day(row, today)) for row in lines]
+            lines = [row for row, day in placed_lines if day > stored.through]
+            known = {id(row): day for row, day in placed_lines if day > stored.through}
+            filled = stored.filled()
+            payments = sorted(payments, key=lambda p: p[0].date())
         projected = (projected_by_card or {}).get(card.id, [])
         lines = [*lines, *(row for row in projected
                            if getattr(row, "settles_as_recorded", False))]
@@ -701,22 +747,30 @@ def build_statement_payables(
             lines, amount_of, estimates, _ = normalise(card, lines)
             estimates = {**estimates, **{id(row): row.estimate for row in projected
                                          if getattr(row, "estimate", None) is not None}}
-        if not lines and not projected:
+        if not lines and not projected and not filled:
             continue  # no charges -> nothing owed, whatever was paid in
         # Calendar dates: rows may mix naive and aware datetimes. Each row's
         # statement day is read once and placed once (``place_days``).
         every = [*lines, *projected]
-        days = [statement_day(row, today) for row in every]
+        days = [known[id(row)] if id(row) in known else statement_day(row, today)
+                for row in every]
+        # A stored cycle with line items stands in for them by its close: it
+        # starts and ends the walk on the same cycle as any of its lines would.
+        bounds = [*days, *filled]
         cycles = list(iter_cycles_from(
-            card, min(days), end, through=max(days),
+            card, min(bounds), end, through=max(bounds),
             due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
         placed = place_days(days, cycles)
         recorded = cycle_balances(lines, placed[:len(lines)], len(cycles), amount_of)
+        if stored is not None:
+            recorded = stored.add(cycles, recorded, 0)
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
         remaining = settle_projected(
             cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
         balances = cycle_balances(every, placed, len(cycles), amount_of)
+        if stored is not None:
+            balances = stored.add(cycles, balances, 0)
         on_cycle: List[list] = [[] for _ in cycles]
         if estimates:
             for row, i in zip(every, placed):
@@ -750,7 +804,8 @@ def build_statement_payables(
     return events
 
 
-def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
+def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int],
+               lines_after: Optional[date] = None):
     """Every row touching each card (whoever entered it) and the unbilled payment sources.
 
     ``viewable_ids`` are the accounts the caller can view: a source card outside
@@ -758,21 +813,29 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
     nets the statement and those hidden settings change nothing the caller is
     shown (as ``collect_events`` treats it). For a user with no shares every
     source card is their own, so nothing changes.
+
+    With ``lines_after`` (STU-601) only the rows that can be a line item placed
+    after that day are read, plus every payment into the cards: a superset
+    (an unposted row, or a posted one whose own day or posting day may be
+    later), which the reader narrows by ``statement_day``. Every other line
+    item is in the stored statements (``statements_store``).
     """
-    txns = (
-        db.query(Transaction)
-        .filter(or_(
-            Transaction.account_id.in_(card_ids),
-            and_(
-                Transaction.transaction_type == TransactionType.TRANSFER,
-                or_(
-                    Transaction.transfer_to_account_id.in_(card_ids),
-                    Transaction.transfer_from_account_id.in_(card_ids),
-                ),
-            ),
-        ))
-        .all()
+    touches_line = or_(
+        Transaction.account_id.in_(card_ids),
+        and_(Transaction.transaction_type == TransactionType.TRANSFER,
+             Transaction.transfer_from_account_id.in_(card_ids)),
     )
+    payment_in = and_(Transaction.transaction_type == TransactionType.TRANSFER,
+                      Transaction.transfer_to_account_id.in_(card_ids))
+    if lines_after is not None:
+        after = datetime.combine(lines_after, time())
+        touches_line = and_(touches_line, or_(
+            Transaction.is_posted.isnot(True),
+            Transaction.transaction_date >= after + timedelta(days=1),
+            # A posting instant's Manila day can be a day past its UTC day.
+            Transaction.posting_date >= after - timedelta(days=1),
+        ))
+    txns = db.query(Transaction).filter(or_(touches_line, payment_in)).all()
     by_card: dict = {cid: [] for cid in card_ids}
     for txn in txns:
         touched = {txn.account_id}
@@ -803,7 +866,9 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
 
 def _cycles_of(db: Optional[Session], card: Account, today: datetime,
                viewable_ids: Iterable[int], fx, card_rows,
-               due_overrides: Optional[Mapping[date, date]], *, with_lines: bool) -> List[dict]:
+               due_overrides: Optional[Mapping[date, date]], *, with_lines: bool,
+               stored: Optional[StoredCycles] = None, with_counts: bool = False
+               ) -> List[dict]:
     """The single pass behind ``statement_summaries`` and ``statement_history``.
 
     Every line is read once: its ``statement_day`` is computed once and it is
@@ -811,7 +876,15 @@ def _cycles_of(db: Optional[Session], card: Account, today: datetime,
     is O(rows log cycles + cycles), not O(rows x cycles). Each cycle's figures
     come from ``summarise_cycles``; with ``with_lines`` each also carries its
     ``lines`` and ``unconverted`` (see ``statement_history``).
+
+    With ``stored`` (figures only) the lines placed on or before
+    ``stored.through`` are taken from the stored statements instead of the
+    rows, and only the later ones are replayed: the same figures, with
+    ``card_rows`` needing only those rows and the payments
+    (``statements_store.read_card_rows``). With ``with_counts`` each statement
+    also carries ``window_start`` and ``line_count`` (its line items).
     """
+    assert not (with_lines and stored is not None), "stored statements carry no lines"
     if resolve_cycle_fields(card) is None:
         return []
     by_card, unbilled_sources = (card_rows if card_rows is not None
@@ -819,12 +892,21 @@ def _cycles_of(db: Optional[Session], card: Account, today: datetime,
     rows = by_card.get(card.id, [])
     lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
     lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
-    if not lines and not unconverted:
-        return []
     day = today.date()
     line_days = [statement_day(row, day) for row in lines]
+    filled: List[date] = []
+    if stored is not None:
+        kept = [(row, d) for row, d in zip(lines, line_days) if d > stored.through]
+        lines, line_days = [row for row, _ in kept], [d for _, d in kept]
+        filled = stored.filled()
+        # summarise_cycles needs the payments in date order (``_split_card_rows``).
+        payments = sorted(payments, key=lambda p: p[0].date())
+    if not lines and not unconverted and not filled:
+        return []
     unconverted_days = [statement_day(line, day) for line, _, _ in unconverted]
-    days = [*line_days, *unconverted_days]
+    # A stored cycle with line items stands in for them by its close: it
+    # starts the walk on the same cycle as any of its lines would.
+    days = [*line_days, *unconverted_days, *filled]
     last = max(max(days), day)
     if due_overrides is None:
         due_overrides = load_due_overrides(db, [card.id])[card.id]
@@ -836,8 +918,20 @@ def _cycles_of(db: Optional[Session], card: Account, today: datetime,
     for i in unconverted_at:
         if i is not None:
             has_unconverted[i] = True
-    out = summarise_cycles(cycles, cycle_balances(lines, line_at, len(cycles), amount_of),
-                           payments, has_unconverted, day)
+    balances = cycle_balances(lines, line_at, len(cycles), amount_of)
+    if stored is not None:
+        balances = stored.add(cycles, balances, 0)
+    out = summarise_cycles(cycles, balances, payments, has_unconverted, day)
+    if with_counts:
+        counts = [0] * len(cycles)
+        for i in line_at:
+            if i is not None:
+                counts[i] += 1
+        if stored is not None:
+            counts = stored.add(cycles, counts, 1)
+        for statement, cycle, count in zip(out, cycles, counts):
+            statement["window_start"] = cycle["window_start"]
+            statement["line_count"] = count
     if not with_lines:
         return out
     on_cycle: List[list] = [[] for _ in cycles]
@@ -877,9 +971,31 @@ def _unconverted_items(left_out: list) -> List[dict]:
     } for line, face, currency in sorted(left_out, key=lambda u: u[0].transaction_date)]
 
 
+def open_cycle_summary(db: Session, card: Account, today: datetime,
+                       viewable_ids: Iterable[int]) -> Optional[dict]:
+    """The cycle open on ``today`` as a statement with no line items (balance 0),
+    in ``statement_summaries(..., with_counts=True)``'s shape, with the payments
+    into the card counted as there. For a card with no line item at all, where
+    ``statement_summaries`` lists nothing; None when the card has no cycle."""
+    if resolve_cycle_fields(card) is None:
+        return None
+    by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
+    _, payments = _split_card_rows(card.id, by_card.get(card.id, []), unbilled)
+    payments = sorted(payments, key=lambda p: p[0].date())
+    day = today.date()
+    cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+                                  due_overrides=load_due_overrides(db, [card.id])[card.id]))
+    statement = summarise_cycles([cycle], [Decimal("0")], payments, [False], day)[0]
+    statement["window_start"] = cycle["window_start"]
+    statement["line_count"] = 0
+    return statement
+
+
 def statement_summaries(db: Optional[Session], card: Account, today: datetime,
                         viewable_ids: Iterable[int], fx=None, card_rows=None,
-                        due_overrides: Optional[Mapping[date, date]] = None) -> List[dict]:
+                        due_overrides: Optional[Mapping[date, date]] = None,
+                        stored: Optional[StoredCycles] = None, *,
+                        with_counts: bool = False) -> List[dict]:
     """The card's recorded statements without their lines, oldest first.
 
     Exactly ``statement_history`` (same arguments, same statements, same
@@ -891,9 +1007,22 @@ def statement_summaries(db: Optional[Session], card: Account, today: datetime,
     ``statement_lines``. ``incomplete`` is True on the first statement with a
     line left out for want of a rate and every one after it, so "some
     statement has an unconverted line" is ``any(s["incomplete"] ...)``.
+
+    Read from the stored closed statements (STU-601): with no ``card_rows``
+    the card's rows and stored statements are read here
+    (``statements_store.read_card_rows``, which falls back to every row when
+    the store is off); a caller passing ``card_rows`` passes the matching
+    ``stored`` (None: ``card_rows`` holds every row). ``with_counts`` as for
+    ``_cycles_of``.
     """
+    if card_rows is None and db is not None and resolve_cycle_fields(card) is not None:
+        from app.services import statements_store
+
+        card_rows, stored_by_card = statements_store.read_card_rows(
+            db, [card], viewable_ids, today.date())
+        stored = stored_by_card.get(card.id)
     return _cycles_of(db, card, today, viewable_ids, fx, card_rows, due_overrides,
-                      with_lines=False)
+                      with_lines=False, stored=stored, with_counts=with_counts)
 
 
 def statement_lines(db: Optional[Session], card: Account, close: date, today: datetime,
@@ -1004,7 +1133,12 @@ def get_statement_payables(
     # is already in the caller's scope, and a statement must include every
     # charge on it and every payment into it, whoever entered it, including a
     # transfer from an account outside the caller's scope.
-    by_card, unbilled_sources = _card_rows(db, [c.id for c in cards], viewable_ids)
+    # Closed statements come from the store (STU-601): only the later rows
+    # and the payments are read (every row when the store is off).
+    from app.services import statements_store
+
+    (by_card, unbilled_sources), stored_by_card = statements_store.read_card_rows(
+        db, cards, viewable_ids, start.date())
     if fx is None:
         from app.services.fx import FxRates
 
@@ -1014,4 +1148,5 @@ def get_statement_payables(
                                     normalise=lambda card, lines: normalise_lines(
                                         db, card, lines, fx),
                                     due_overrides_by_card=load_due_overrides(
-                                        db, [c.id for c in cards]))
+                                        db, [c.id for c in cards]),
+                                    stored_by_card=stored_by_card)

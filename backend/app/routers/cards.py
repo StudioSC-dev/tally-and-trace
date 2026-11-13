@@ -2,13 +2,17 @@
 statements' printed due dates, Pay.
 
 Owner and admin only (``card_credit.can_see_credit``); anyone else gets a 404,
-so no credit-derived figure reaches an editor, viewer or tag viewer.
+so no credit-derived figure reaches an editor, viewer or tag viewer. The one
+exception is the statements read API (``GET /{account_id}/statements`` and
+``GET /{account_id}/statements/{close_date}``, STU-601): any direct role on the
+card (not a tag viewer), as ``GET /accounts/{account_id}/statements``, with a
+viewer's limited view.
 """
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
@@ -16,18 +20,22 @@ from sqlalchemy.sql import func
 from app.core import locking
 from app.core.access import (
     EDIT_ROLES, MANAGE_ROLES, NONE, account_role, get_account_or_404, role_map,
+    viewable_account_ids,
 )
 from app.core.auth import get_current_active_user
 from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.database import get_db
 from app.core.redaction import Redactor, serialize_transaction
-from app.core.time import manila_today
+from app.core.time import manila_day, manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.card_statement_due_override import CardStatementDueOverride
 from app.models.card_statement_minimum import CardStatementMinimum
 from app.models.transaction import TransactionType
 from app.models.user import User
-from app.schemas.card import CardPaymentCreate, StatementDueSet, StatementMinimumSet
+from app.schemas.card import (
+    CardPaymentCreate, CardStatementDetailOut, CardStatementListOut, StatementDueSet,
+    StatementMinimumSet,
+)
 from app.schemas.minimum_due import MinimumDueRule
 from app.schemas.transaction import TransactionCreate, TransactionOut
 from app.services import card_credit
@@ -36,6 +44,7 @@ from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
 from app.services.statements import (
     computed_due, due_in_order, load_due_overrides, resolve_cycle_fields, statement_close,
+    open_cycle_summary, statement_lines, statement_summaries,
 )
 
 router = APIRouter()
@@ -196,6 +205,142 @@ def get_card_credit(
             card, manila_today(), due_overrides=load_due_overrides(db, [card.id])[card.id]),
         "unposted": card_credit.unposted_summary(unposted),
     }
+
+
+# --- Statements read API (STU-601, PERF-6; docs/statements-store.md) ------------------
+
+def _readable_card(db: Session, user: User, account_id: int) -> tuple:
+    """``(card, limited)``: a direct role on the card (404 otherwise, a tag viewer
+    included), 400 when it is not a credit card; ``limited`` for a viewer, as
+    ``GET /accounts/{account_id}/statements``."""
+    card = get_account_or_404(db, user, account_id)
+    if card.account_type != AccountType.CREDIT:
+        raise HTTPException(status_code=400, detail="Account is not a credit card")
+    return card, account_role(user, card) not in EDIT_ROLES
+
+
+def _statement_rows(db: Session, user: User, card: Account, fx: Optional[FxRates]
+                    ) -> List[dict]:
+    """The card's closed statements and the cycle open on Manila's today, oldest
+    first, read from the stored statements (``statement_summaries``)."""
+    today = manila_today()
+    viewable = viewable_account_ids(db, user)
+    summaries = statement_summaries(db, card, manila_midnight(), viewable, fx=fx,
+                                    with_counts=True)
+    if not summaries:  # no line item yet: the open cycle, at zero
+        open_cycle = open_cycle_summary(db, card, manila_midnight(), viewable)
+        summaries = [open_cycle] if open_cycle is not None else []
+    return [s for s in summaries if s["window_start"].date() < today]
+
+
+def _summary_out(statement: dict, limited: bool) -> dict:
+    close = statement["close"].date()
+    out = {
+        "close_date": close,
+        "window_start": statement["window_start"].date(),
+        "due_date": statement["due"].date(),
+        "computed_due_date": statement["computed_due"].date(),
+        "due_overridden": statement["due_overridden"],
+        "is_closed": close < manila_today(),
+        "status": statement["status"],
+        "owed": _amount(statement["owed"]),
+        "line_count": statement["line_count"],
+        "incomplete": statement["incomplete"],
+    }
+    if not limited:
+        out.update({key: _amount(statement[key]) for key in (
+            "balance", "clear_through", "outstanding", "paid_since_close")})
+    return out
+
+
+def _card_head(card: Account, limited: bool) -> dict:
+    head = {"view": "limited" if limited else "full", "name": card.name,
+            "currency": fc._code(card.currency)}
+    if not limited:
+        head["card_id"] = card.id
+    return head
+
+
+@router.get("/{account_id}/statements", response_model=CardStatementListOut,
+            response_model_exclude_none=True)
+def list_card_statements(
+    account_id: int,
+    from_: Optional[date] = Query(None, alias="from"),
+    to: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """A card's statements: every closed one (close before Manila's today) and
+    the cycle open today, oldest first, optionally those closing in
+    ``[from, to]``. Closed ones are read from the stored statements.
+
+    Any direct role on the card; 404 otherwise (a tag viewer too). An owner, admin or editor gets every
+    figure; a viewer the limited view (no ``balance``, ``clear_through``,
+    ``outstanding``, ``paid_since_close`` or ``card_id``). A statement's key is
+    its ``close_date``.
+    """
+    card, limited = _readable_card(db, current_user, account_id)
+    rows = [s for s in _statement_rows(db, current_user, card, fx)
+            if (from_ is None or s["close"].date() >= from_)
+            and (to is None or s["close"].date() <= to)]
+    return {**_card_head(card, limited),
+            "statements": [_summary_out(s, limited) for s in rows]}
+
+
+@router.get("/{account_id}/statements/{close_date}", response_model=CardStatementDetailOut,
+            response_model_exclude_none=True)
+def get_card_statement(
+    account_id: int,
+    close_date: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    fx: FxRates = Depends(get_fx),
+):
+    """One statement of the list above, with its lines (by date). 404 when
+    ``close_date`` is not one of them (read as text after the access check, so
+    a caller without a role gets the same 404 whatever they send).
+
+    Line descriptions follow the description rule (app/core/redaction.py). A
+    full line carries ``transaction_id`` and, when its row is posted on a
+    day other than its own, ``posted_date``; the full view also lists the
+    lines left out for want of a rate under ``unconverted_lines``.
+    """
+    card, limited = _readable_card(db, current_user, account_id)
+    try:
+        close = date.fromisoformat(close_date)
+    except ValueError:
+        close = None
+    statement = next((s for s in _statement_rows(db, current_user, card, fx)
+                      if s["close"].date() == close), None)
+    if statement is None:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    found = statement_lines(db, card, close, manila_midnight(),
+                            viewable_account_ids(db, current_user), fx=fx)
+    redactor = Redactor(db, current_user)
+    redactor.prepare([line["transaction"] for line in [*found["lines"], *found["unconverted"]]])
+    lines = []
+    for line in found["lines"]:
+        txn = line["transaction"]
+        item = {"date": line["date"], "amount": float(line["amount"]),
+                "display_description": redactor.display_description(txn)}
+        if not limited:
+            item["transaction_id"] = txn.id
+            posted = manila_day(txn.posting_date) if txn.is_posted and txn.posting_date else None
+            if posted is not None and posted != txn.transaction_date.date():
+                item["posted_date"] = posted
+        lines.append(item)
+    body = {**_card_head(card, limited), "statement": _summary_out(statement, limited),
+            "lines": lines}
+    if not limited:
+        body["unconverted_lines"] = [{
+            "date": line["date"],
+            "original_amount": float(line["original_amount"]),
+            "original_currency": fc._code(line["original_currency"]),
+            "display_description": redactor.display_description(line["transaction"]),
+            "transaction_id": line["transaction"].id,
+        } for line in found["unconverted"]]
+    return body
 
 
 def _closed_statement(card: Account, close_date: str) -> date:

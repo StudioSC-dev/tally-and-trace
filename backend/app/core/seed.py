@@ -192,6 +192,11 @@ def _delete_demo_data(db: Session, users) -> None:
     since the partner's deposit lands on the owner's joint account.
     """
     ids = [u.id for u in users]
+    # The bulk deletes below bypass the ORM, so the stored card statements they
+    # change are forgotten explicitly (STU-601; rebuilt on the next read).
+    from app.services import statements_store
+
+    statements_store.reset_cards(db, statements_store.user_card_ids(db, ids))
     for model in (Transaction, BudgetEntry, WishlistItem, Allocation, Category):
         db.query(model).filter(model.user_id.in_(ids)).delete(synchronize_session=False)
     db.query(Tag).filter(Tag.user_id.in_(ids), Tag.is_system.is_(False)).delete(

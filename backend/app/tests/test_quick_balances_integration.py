@@ -486,6 +486,8 @@ def test_quick_balances_query_count(world):
             event.remove(engine, "before_cursor_execute", record)
         return body, len(seen)
 
+    # The first read stores the card's closed statements (STU-601); counted from the next.
+    _quick(client, me)
     before, n_before = count()
     _rows(db, me, bank, 20)
     _rows(db, me, card, 15, day="2027-03-10")

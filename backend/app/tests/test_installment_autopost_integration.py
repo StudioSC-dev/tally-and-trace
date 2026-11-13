@@ -227,6 +227,8 @@ def _statement_events(db, user_id):
 
     db.rollback()
     r = project_running_balance(db, user_id, days=90)
+    # End the read: it holds the cards' statement locks shared (STU-601) until then.
+    db.rollback()
     return [(e["date"].isoformat(), e["name"], e["amount"]) for e in r["events"]
             if e["name"].endswith("statement")]
 
