@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from app.core.conditional import conditional_get
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import get_owned_or_404, owned_criterion
@@ -53,7 +54,7 @@ def _name_taken_error(kind: CategoryKind) -> HTTPException:
         detail=f"A category of kind '{kind.value}' with this name already exists",
     )
 
-@router.get("/", response_model=List[CategoryResponse])
+@router.get("/", response_model=List[CategoryResponse], dependencies=[Depends(conditional_get)])
 def get_categories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

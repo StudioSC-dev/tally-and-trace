@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import Field
 from sqlalchemy.orm import Session
 
+from app.core.conditional import conditional_get
 from app.core import locking
 from app.core.config import settings
 from app.core.auth import get_current_active_user
@@ -484,7 +485,7 @@ def _keep_final_month(entry: BudgetEntry, prospective_data: dict) -> None:
         prospective_data["occurrences_paid_offset"] = new_offset
 
 
-@router.get("/", response_model=BudgetEntryListResponse)
+@router.get("/", response_model=BudgetEntryListResponse, dependencies=[Depends(conditional_get)])
 def list_budget_entries(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -547,7 +548,7 @@ def _wall_day(value: Optional[datetime]) -> Optional[date]:
 
 
 # Declared before ``/{entry_id}``, which would otherwise take the path.
-@router.get("/upcoming-occurrences", response_model=UpcomingOccurrences)
+@router.get("/upcoming-occurrences", response_model=UpcomingOccurrences, dependencies=[Depends(conditional_get)])
 def list_upcoming_occurrences(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -603,7 +604,7 @@ def list_upcoming_occurrences(
 
 
 # Declared before ``/{entry_id}``, which would otherwise take the path.
-@router.get("/installment-plans", response_model=InstallmentPlans)
+@router.get("/installment-plans", response_model=InstallmentPlans, dependencies=[Depends(conditional_get)])
 def list_installment_plans(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

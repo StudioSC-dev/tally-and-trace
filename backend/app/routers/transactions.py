@@ -4,6 +4,7 @@ from sqlalchemy import and_, case, func, or_, tuple_
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Literal, Optional, Set
 from pydantic import Field
+from app.core.conditional import conditional_get
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -1001,7 +1002,7 @@ def transaction_list_query(
     return query
 
 
-@router.get("/", response_model=TransactionListResponse)
+@router.get("/", response_model=TransactionListResponse, dependencies=[Depends(conditional_get)])
 def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

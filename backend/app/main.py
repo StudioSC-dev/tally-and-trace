@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from app.core import idempotency
+from app.core import conditional, idempotency
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.routers import api_router
@@ -104,6 +104,9 @@ app.add_middleware(
         "X-Occurrence-Recorded",
         "X-Occurrences-Skipped-Count",
         "X-Occurrences-Skipped",
+        # Conditional GETs (core/conditional.py). The browser's cache sends
+        # If-None-Match itself; allow_headers already admits it.
+        "ETag",
     ],
 )
 
@@ -114,6 +117,7 @@ app.add_middleware(
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 idempotency.install(app)
+conditional.install(app)
 
 
 @app.get("/")
