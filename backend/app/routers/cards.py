@@ -44,7 +44,7 @@ from app.services.fx import FxRates, get_fx
 from app.services.minimum_due import statement_minimums
 from app.services.statements import (
     computed_due, due_in_order, load_due_overrides, resolve_cycle_fields, statement_close,
-    statement_lines, statement_summaries,
+    open_cycle_summary, statement_lines, statement_summaries,
 )
 
 router = APIRouter()
@@ -224,8 +224,12 @@ def _statement_rows(db: Session, user: User, card: Account, fx: Optional[FxRates
     """The card's closed statements and the cycle open on Manila's today, oldest
     first, read from the stored statements (``statement_summaries``)."""
     today = manila_today()
-    summaries = statement_summaries(db, card, manila_midnight(),
-                                    viewable_account_ids(db, user), fx=fx, with_counts=True)
+    viewable = viewable_account_ids(db, user)
+    summaries = statement_summaries(db, card, manila_midnight(), viewable, fx=fx,
+                                    with_counts=True)
+    if not summaries:  # no line item yet: the open cycle, at zero
+        open_cycle = open_cycle_summary(db, card, manila_midnight(), viewable)
+        summaries = [open_cycle] if open_cycle is not None else []
     return [s for s in summaries if s["window_start"].date() < today]
 
 

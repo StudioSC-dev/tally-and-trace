@@ -971,6 +971,26 @@ def _unconverted_items(left_out: list) -> List[dict]:
     } for line, face, currency in sorted(left_out, key=lambda u: u[0].transaction_date)]
 
 
+def open_cycle_summary(db: Session, card: Account, today: datetime,
+                       viewable_ids: Iterable[int]) -> Optional[dict]:
+    """The cycle open on ``today`` as a statement with no line items (balance 0),
+    in ``statement_summaries(..., with_counts=True)``'s shape, with the payments
+    into the card counted as there. For a card with no line item at all, where
+    ``statement_summaries`` lists nothing; None when the card has no cycle."""
+    if resolve_cycle_fields(card) is None:
+        return None
+    by_card, unbilled = _card_rows(db, [card.id], viewable_ids)
+    _, payments = _split_card_rows(card.id, by_card.get(card.id, []), unbilled)
+    payments = sorted(payments, key=lambda p: p[0].date())
+    day = today.date()
+    cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+                                  due_overrides=load_due_overrides(db, [card.id])[card.id]))
+    statement = summarise_cycles([cycle], [Decimal("0")], payments, [False], day)[0]
+    statement["window_start"] = cycle["window_start"]
+    statement["line_count"] = 0
+    return statement
+
+
 def statement_summaries(db: Optional[Session], card: Account, today: datetime,
                         viewable_ids: Iterable[int], fx=None, card_rows=None,
                         due_overrides: Optional[Mapping[date, date]] = None,

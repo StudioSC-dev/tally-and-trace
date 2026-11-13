@@ -524,3 +524,34 @@ def test_the_apply_is_idempotent(realistic, sw_db):
     second = run(sw_db, [card_id], apply=True)
     assert _stored(sw_db, card_id) == rows
     assert first[1:] == second[1:] and first[-1] == "all_equal: yes (1/1)"
+
+
+def test_an_unused_card_lists_its_open_cycle_at_zero(realistic, sw_client):
+    """A card with no line item still has the cycle open today (balance 0); a
+    payment into it shows as there (nothing owed either way)."""
+    w, today = realistic, realistic.today
+    headers = w.callers["owner"].headers
+    r = sw_client.post(f"{API}/accounts/", headers=headers, json={
+        "name": "Unused card", "account_type": "credit", "balance": 0,
+        "billing_cycle_start": 12, "days_until_due_date": 21,
+        "payment_account_id": w.accounts["bank0"]})
+    assert r.status_code in (200, 201), r.text
+    card_id = r.json()["id"]
+    statements = sw_client.get(f"{API}/cards/{card_id}/statements",
+                               headers=headers).json()["statements"]
+    assert len(statements) == 1, statements
+    (s,) = statements
+    assert s["is_closed"] is False and s["line_count"] == 0
+    assert s["balance"] == 0 and s["owed"] == 0 and s["outstanding"] == 0
+    assert date.fromisoformat(s["window_start"]) < today <= date.fromisoformat(s["close_date"])
+    detail = sw_client.get(f"{API}/cards/{card_id}/statements/{s['close_date']}",
+                           headers=headers).json()
+    assert detail["statement"] == s and detail["lines"] == []
+    r = sw_client.post(f"{API}/transactions/", headers=headers, json={
+        "account_id": w.accounts["bank0"], "amount": 500, "transaction_type": "transfer",
+        "transfer_from_account_id": w.accounts["bank0"], "transfer_to_account_id": card_id,
+        "description": "Prepay", "transaction_date": f"{today}T01:00:00", "is_posted": True})
+    assert r.status_code in (200, 201), r.text
+    (s,) = sw_client.get(f"{API}/cards/{card_id}/statements",
+                         headers=headers).json()["statements"]
+    assert s["balance"] == 0 and s["owed"] == 0 and s["outstanding"] == -500
