@@ -3,7 +3,7 @@
   "has_more": false,
   "items": [
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 1465.0,
     "category_name": "Travel",
     "created_at": "<stamped>",
@@ -11,7 +11,7 @@
     "currency": "PHP",
     "description": "Posted late card_a 1",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#2916",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -41,7 +41,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 4000.0,
@@ -54,7 +54,7 @@
     "currency": "PHP",
     "date": "2026-11-11T10:00:00Z",
     "display_description": "Card payment",
-    "id": 100000,
+    "id": "transactions#2937",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -69,7 +69,7 @@
     "view": "limited"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 1319.0,
     "category_name": "Utilities",
     "created_at": "<stamped>",
@@ -77,7 +77,7 @@
     "currency": "PHP",
     "description": "Txn 1735",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#1736",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -106,7 +106,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 2491.0,
     "category_name": "Utilities",
     "created_at": "<stamped>",
@@ -114,7 +114,7 @@
     "currency": "PHP",
     "description": "Txn 1172",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#1173",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -143,7 +143,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 2886.0,
     "category_name": "Travel",
     "created_at": "<stamped>",
@@ -151,7 +151,7 @@
     "currency": "PHP",
     "description": "Txn 929",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#930",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -180,7 +180,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 3915.0,
     "category_name": "Transport",
     "created_at": "<stamped>",
@@ -188,7 +188,7 @@
     "currency": "PHP",
     "description": "Txn 1192",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#1193",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -217,7 +217,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 83.0,
     "category_name": "Shopping",
     "created_at": "<stamped>",
@@ -225,7 +225,7 @@
     "currency": "PHP",
     "description": "Txn 2705",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#2706",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -254,7 +254,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 2707.0,
     "category_name": "Travel",
     "created_at": "<stamped>",
@@ -262,7 +262,7 @@
     "currency": "PHP",
     "description": "Txn 523",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#524",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -291,7 +291,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 2312.0,
     "category_name": "Groceries",
     "created_at": "<stamped>",
@@ -299,7 +299,7 @@
     "currency": "PHP",
     "description": "Txn 2049",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#2050",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -328,7 +328,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 2331.0,
     "category_name": "Groceries",
     "created_at": "<stamped>",
@@ -336,7 +336,7 @@
     "currency": "PHP",
     "description": "Txn 1403",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#1404",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -365,7 +365,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 3428.0,
     "category_name": "Subscriptions",
     "created_at": "<stamped>",
@@ -373,7 +373,7 @@
     "currency": "PHP",
     "description": "Txn 1790",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#1791",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,
@@ -402,7 +402,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 2730.0,
     "category_name": "Health",
     "created_at": "<stamped>",
@@ -410,7 +410,7 @@
     "currency": "PHP",
     "description": "Txn 2104",
     "exchange_rate": null,
-    "id": 100000,
+    "id": "transactions#2105",
     "is_posted": true,
     "is_reconciled": false,
     "is_recurring": false,

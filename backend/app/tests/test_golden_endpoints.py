@@ -5,7 +5,9 @@ e28b69c, the parent of the access-map change, on the realistic dataset with the
 clock pinned to ``realistic.REF``. Each request of ``golden.golden_paths`` is made as
 the owner, the SharedFull editor, the viewer, the household member and a stranger,
 and its canonical text (``golden.canonical``) must equal the file byte for byte: a
-difference in what any caller may see, or in any figure, fails here.
+difference in what any caller may see, in any figure, or in which account, entry or
+user a record links to (every id is labelled by its table and creation order,
+``golden.IdBands``) fails here.
 
 ``GOLDEN_UPDATE=1`` rewrites the files instead (only on purpose, at a reference commit).
 """
@@ -22,28 +24,20 @@ UPDATE = os.environ.get("GOLDEN_UPDATE") == "1"
 
 
 @pytest.fixture(scope="module")
-def captured(realistic, sw_client):
-    """Every golden response, ``{(caller, endpoint): text}``, made once."""
-    from app.core.database import SessionLocal
-
-    db = SessionLocal()
-    stranger = golden.make_stranger(sw_client, db)
-    try:
-        callers = dict(realistic.callers, stranger=stranger)
+def captured(sw_client):
+    """Every golden response, ``{(caller, endpoint): text}``, made once on a banded build."""
+    with golden.golden_world(sw_client) as (world, callers, ids):
         out = {}
         for key in golden.GOLDEN_CALLERS:
-            for name, text in golden.capture(sw_client, realistic, callers[key], key).items():
+            for name, text in golden.capture(sw_client, world, callers[key], key, ids).items():
                 out[(key, name)] = text
-        if UPDATE:
-            golden.GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
-            for old in golden.GOLDEN_DIR.glob("*.json"):
-                old.unlink()
-            for (key, name), text in out.items():
-                golden.golden_file(key, name).write_text(text, encoding="utf-8")
-        return out
-    finally:
-        golden.remove_stranger(db, stranger)
-        db.close()
+    if UPDATE:
+        golden.GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
+        for old in golden.GOLDEN_DIR.glob("*.json"):
+            old.unlink()
+        for (key, name), text in out.items():
+            golden.golden_file(key, name).write_text(text, encoding="utf-8")
+    return out
 
 
 def _expected():

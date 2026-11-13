@@ -3,7 +3,7 @@
   "has_more": false,
   "items": [
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "allocation_id": null,
     "amount": 1000.0,
     "anchor_day": 5,
@@ -19,7 +19,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#1",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -46,7 +46,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#2",
     "allocation_id": null,
     "amount": 1150.0,
     "anchor_day": 8,
@@ -62,7 +62,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#2",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -89,7 +89,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#3",
     "allocation_id": null,
     "amount": 1300.0,
     "anchor_day": 11,
@@ -105,7 +105,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#3",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -129,7 +129,7 @@
     "tags": [
      {
       "color": null,
-      "id": 100000,
+      "id": "tags#1",
       "is_system": true,
       "name": "Household"
      }
@@ -139,7 +139,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "allocation_id": null,
     "amount": 2500.0,
     "anchor_day": 12,
@@ -155,7 +155,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#12",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "installment",
@@ -182,7 +182,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "allocation_id": null,
     "amount": 1450.0,
     "anchor_day": 14,
@@ -198,7 +198,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#4",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "subscription",
@@ -225,7 +225,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#2",
     "allocation_id": null,
     "amount": 65000.0,
     "anchor_day": null,
@@ -241,7 +241,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "income",
-    "id": 100000,
+    "id": "budget_entries#11",
     "installment_reviewed": false,
     "is_active": true,
     "kind": null,
@@ -268,7 +268,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#10",
     "allocation_id": null,
     "amount": 3300.0,
     "anchor_day": 15,
@@ -284,7 +284,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#14",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",
@@ -311,7 +311,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#9",
     "allocation_id": null,
     "amount": 1600.0,
     "anchor_day": 17,
@@ -327,7 +327,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#5",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "subscription",
@@ -354,7 +354,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#10",
     "allocation_id": null,
     "amount": 1750.0,
     "anchor_day": 20,
@@ -370,7 +370,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#6",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "subscription",
@@ -397,7 +397,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#9",
     "allocation_id": null,
     "amount": 2900.0,
     "anchor_day": 20,
@@ -413,7 +413,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#13",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",
@@ -440,7 +440,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#11",
     "allocation_id": null,
     "amount": 1900.0,
     "anchor_day": 23,
@@ -456,7 +456,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#7",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "subscription",
@@ -483,7 +483,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "allocation_id": null,
     "amount": 2050.0,
     "anchor_day": 26,
@@ -499,7 +499,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#8",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -526,7 +526,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#2",
     "allocation_id": null,
     "amount": 2200.0,
     "anchor_day": 29,
@@ -542,7 +542,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#9",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -569,7 +569,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#11",
     "allocation_id": null,
     "amount": 3700.0,
     "anchor_day": 31,
@@ -585,7 +585,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#15",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",
@@ -612,7 +612,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#3",
     "allocation_id": null,
     "amount": 2350.0,
     "anchor_day": 2,
@@ -628,7 +628,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#10",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -655,7 +655,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "allocation_id": null,
     "amount": 4100.0,
     "anchor_day": 12,
@@ -671,7 +671,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#16",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",
@@ -698,7 +698,7 @@
     "view": "full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#9",
     "allocation_id": null,
     "amount": 4500.0,
     "anchor_day": 20,
@@ -714,7 +714,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#17",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",

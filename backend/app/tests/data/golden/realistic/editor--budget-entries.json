@@ -3,7 +3,7 @@
   "has_more": false,
   "items": [
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 1000.0,
     "anchor_day": 5,
     "auto_post_enabled": false,
@@ -18,7 +18,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#1",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -45,7 +45,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 2500.0,
     "anchor_day": 12,
     "auto_post_enabled": false,
@@ -60,7 +60,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#12",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "installment",
@@ -87,7 +87,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 1450.0,
     "anchor_day": 14,
     "auto_post_enabled": false,
@@ -102,7 +102,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#4",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "subscription",
@@ -129,7 +129,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "amount": 2050.0,
     "anchor_day": 26,
     "auto_post_enabled": false,
@@ -144,7 +144,7 @@
     "end_date": null,
     "end_mode": "indefinite",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#8",
     "installment_reviewed": false,
     "is_active": true,
     "kind": "cash",
@@ -171,7 +171,7 @@
     "view": "shared_full"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "amount": 4100.0,
     "anchor_day": 12,
     "auto_post_enabled": true,
@@ -186,7 +186,7 @@
     "end_date": null,
     "end_mode": "after_occurrences",
     "entry_type": "expense",
-    "id": 100000,
+    "id": "budget_entries#16",
     "installment_reviewed": true,
     "is_active": true,
     "kind": "installment",

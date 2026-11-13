@@ -4,20 +4,20 @@
   "items": [
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 4000.0,
     "category_name": null,
     "counterpart": {
-     "id": 100000,
+     "id": "accounts#11",
      "name": "Card D"
     },
     "created_by": "Owner P.",
     "currency": "PHP",
     "date": "2026-11-11T10:00:00Z",
     "display_description": "Payment in the open cycle",
-    "id": 100000,
+    "id": "transactions#2937",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -33,7 +33,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 2491.0,
@@ -43,7 +43,7 @@
     "currency": "PHP",
     "date": "2026-11-10T13:14:00Z",
     "display_description": "Txn 1172",
-    "id": 100000,
+    "id": "transactions#1173",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -59,7 +59,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#11",
      "name": "Card D"
     },
     "amount": 3481.0,
@@ -69,7 +69,7 @@
     "currency": "PHP",
     "date": "2026-11-10T08:06:00Z",
     "display_description": "Txn 1817",
-    "id": 100000,
+    "id": "transactions#1818",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -85,7 +85,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#11",
      "name": "Card D"
     },
     "amount": 4054.0,
@@ -95,7 +95,7 @@
     "currency": "PHP",
     "date": "2026-11-09T19:00:00Z",
     "display_description": "Txn 2720",
-    "id": 100000,
+    "id": "transactions#2721",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -111,7 +111,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#11",
      "name": "Card D"
     },
     "amount": 4541.0,
@@ -121,7 +121,7 @@
     "currency": "PHP",
     "date": "2026-11-07T04:37:00Z",
     "display_description": "Txn 322",
-    "id": 100000,
+    "id": "transactions#323",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -137,7 +137,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 83.0,
@@ -147,7 +147,7 @@
     "currency": "PHP",
     "date": "2026-11-06T19:15:00Z",
     "display_description": "Txn 2705",
-    "id": 100000,
+    "id": "transactions#2706",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -163,7 +163,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 2312.0,
@@ -173,7 +173,7 @@
     "currency": "PHP",
     "date": "2026-11-06T01:06:00Z",
     "display_description": "Txn 2049",
-    "id": 100000,
+    "id": "transactions#2050",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -189,7 +189,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "amount": 2331.0,
@@ -199,7 +199,7 @@
     "currency": "PHP",
     "date": "2026-11-05T20:14:00Z",
     "display_description": "Txn 1403",
-    "id": 100000,
+    "id": "transactions#1404",
     "is_posted": true,
     "permissions": {
      "can_delete": false,
@@ -215,7 +215,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#11",
      "name": "Card D"
     },
     "amount": 298.0,
@@ -225,7 +225,7 @@
     "currency": "PHP",
     "date": "2026-11-04T19:31:00Z",
     "display_description": "Txn 1134",
-    "id": 100000,
+    "id": "transactions#1135",
     "is_posted": true,
     "permissions": {
      "can_delete": false,

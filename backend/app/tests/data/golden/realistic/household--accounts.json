@@ -6,7 +6,7 @@
     "account_type": "credit",
     "balance": 0.0,
     "currency": "PHP",
-    "id": 100000,
+    "id": "accounts#9",
     "my_role": "tag_viewer",
     "name": "Card B",
     "owner_name": "Owner P.",
@@ -19,7 +19,7 @@
     "tags": [
      {
       "color": null,
-      "id": 100000,
+      "id": "tags#1",
       "is_system": true,
       "name": "Household"
      }

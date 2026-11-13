@@ -4,7 +4,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -877190.0,
       "currency": "PHP"
@@ -14,7 +14,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -877190.0,
         "currency": "PHP"
@@ -34,7 +34,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -972921.0,
       "currency": "PHP"
@@ -44,7 +44,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -972921.0,
         "currency": "PHP"
@@ -64,7 +64,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -1028389.0,
       "currency": "PHP"
@@ -74,7 +74,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -1028389.0,
         "currency": "PHP"
@@ -100,14 +100,14 @@
     {
      "balance": 0.0,
      "currency": "PHP",
-     "id": 100000,
+     "id": "accounts#8",
      "is_spending_wallet": false,
      "name": "Card A"
     },
     {
      "balance": 150000.0,
      "currency": "PHP",
-     "id": 100000,
+     "id": "accounts#1",
      "is_spending_wallet": false,
      "name": "Joint bank"
     }
@@ -123,7 +123,7 @@
   },
   "card_charges": [
    {
-    "account_id": 100000,
+    "account_id": "accounts#8",
     "account_name": "Card A",
     "charges": [
      {
@@ -139,7 +139,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2492",
       "view": "shared_full"
      },
      {
@@ -155,7 +155,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1388",
       "view": "shared_full"
      },
      {
@@ -171,7 +171,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2573",
       "view": "shared_full"
      },
      {
@@ -187,7 +187,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1784",
       "view": "shared_full"
      },
      {
@@ -203,7 +203,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1500",
       "view": "shared_full"
      },
      {
@@ -219,7 +219,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1375",
       "view": "shared_full"
      },
      {
@@ -235,7 +235,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2625",
       "view": "shared_full"
      },
      {
@@ -251,7 +251,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1219",
       "view": "shared_full"
      },
      {
@@ -267,7 +267,7 @@
       "plan_kind": "subscription",
       "recurring": false,
       "source": "budget_entry",
-      "source_id": 100000,
+      "source_id": "budget_entries#4",
       "view": "shared_full"
      },
      {
@@ -289,7 +289,7 @@
       "rate_stale": false,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2938",
       "view": "shared_full"
      },
      {
@@ -305,7 +305,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#557",
       "view": "shared_full"
      },
      {
@@ -321,7 +321,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2399",
       "view": "shared_full"
      },
      {
@@ -337,7 +337,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1103",
       "view": "shared_full"
      },
      {
@@ -353,7 +353,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#2436",
       "view": "shared_full"
      },
      {
@@ -369,7 +369,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#1870",
       "view": "shared_full"
      },
      {
@@ -385,7 +385,7 @@
       "plan_kind": null,
       "recurring": false,
       "source": "transaction",
-      "source_id": 100000,
+      "source_id": "transactions#506",
       "view": "shared_full"
      },
      {
@@ -401,7 +401,7 @@
       "plan_kind": "installment",
       "recurring": false,
       "source": "budget_entry",
-      "source_id": 100000,
+      "source_id": "budget_entries#12",
       "view": "shared_full"
      },
      {
@@ -417,7 +417,7 @@
       "plan_kind": "installment",
       "recurring": false,
       "source": "budget_entry",
-      "source_id": 100000,
+      "source_id": "budget_entries#16",
       "view": "shared_full"
      }
     ],
@@ -434,7 +434,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -877190.0,
       "currency": "PHP"
@@ -444,7 +444,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -877190.0,
         "currency": "PHP"
@@ -481,7 +481,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -972921.0,
       "currency": "PHP"
@@ -491,7 +491,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -972921.0,
         "currency": "PHP"
@@ -528,7 +528,7 @@
    {
     "by_account": [
      {
-      "account_id": 100000,
+      "account_id": "accounts#1",
       "account_name": "Joint bank",
       "closing_balance": -1028389.0,
       "currency": "PHP"
@@ -538,7 +538,7 @@
      {
       "by_account": [
        {
-        "account_id": 100000,
+        "account_id": "accounts#1",
         "account_name": "Joint bank",
         "closing_balance": -1028389.0,
         "currency": "PHP"
@@ -592,7 +592,7 @@
    {
     "account_name": "Card A",
     "clean_review": null,
-    "entry_id": 100000,
+    "entry_id": "budget_entries#12",
     "missed_count": 1,
     "name": "Installment 0"
    }
@@ -603,7 +603,7 @@
     "can_mark_paid": true,
     "capped": false,
     "count": 1,
-    "entry_id": 100000,
+    "entry_id": "budget_entries#1",
     "entry_type": "expense",
     "is_transfer": false,
     "kind": "cash",
@@ -624,7 +624,7 @@
     "can_review": true,
     "capped": true,
     "count": 1,
-    "entry_id": 100000,
+    "entry_id": "budget_entries#12",
     "entry_type": "expense",
     "is_transfer": false,
     "kind": "installment",
@@ -656,7 +656,7 @@
   "payables": [
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -13430.0,
@@ -672,7 +672,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -16736.0,
@@ -688,7 +688,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -17469.0,
@@ -704,7 +704,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -24735.0,
@@ -720,7 +720,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28295.0,
@@ -736,7 +736,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28638.0,
@@ -752,7 +752,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28997.0,
@@ -768,7 +768,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -30410.0,
@@ -784,7 +784,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -31187.0,
@@ -800,7 +800,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -35558.0,
@@ -816,7 +816,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -35636.0,
@@ -832,7 +832,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -41534.0,
@@ -848,7 +848,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -46773.0,
@@ -864,7 +864,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -55410.0,
@@ -880,7 +880,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -8927.0,
@@ -895,7 +895,7 @@
     "view": "limited"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 16188.0,
     "currency": "PHP",
@@ -906,11 +906,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2025-08-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 17571.0,
     "currency": "PHP",
@@ -921,11 +921,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2025-11-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 19946.0,
     "currency": "PHP",
@@ -936,11 +936,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-08-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 22594.0,
     "currency": "PHP",
@@ -951,11 +951,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-02-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 23586.0,
     "currency": "PHP",
@@ -966,11 +966,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2025-10-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 2519.0,
     "currency": "PHP",
@@ -981,10 +981,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2770"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 26905.0,
     "currency": "PHP",
@@ -995,11 +995,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-01-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 2725.0,
     "currency": "PHP",
@@ -1010,10 +1010,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#628"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 300.0,
     "currency": "PHP",
@@ -1024,10 +1024,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2618"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 30083.0,
     "currency": "PHP",
@@ -1038,11 +1038,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2025-12-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 32236.0,
     "currency": "PHP",
@@ -1053,11 +1053,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-05-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 32851.0,
     "currency": "PHP",
@@ -1068,11 +1068,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2025-09-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 34594.0,
     "currency": "PHP",
@@ -1083,11 +1083,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-07-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 34768.0,
     "currency": "PHP",
@@ -1098,11 +1098,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-03-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 4526.0,
     "currency": "PHP",
@@ -1113,10 +1113,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1006"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 47745.0,
     "currency": "PHP",
@@ -1127,11 +1127,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-04-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 4798.0,
     "currency": "PHP",
@@ -1142,10 +1142,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1061"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 48952.0,
     "currency": "PHP",
@@ -1156,11 +1156,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-06-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 49251.0,
     "currency": "PHP",
@@ -1171,11 +1171,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-10-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 57018.0,
     "currency": "PHP",
@@ -1186,11 +1186,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-09-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 731.0,
     "currency": "PHP",
@@ -1201,10 +1201,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2330"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 799.0,
     "currency": "PHP",
@@ -1215,10 +1215,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2312"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 309.0,
     "currency": "PHP",
@@ -1228,11 +1228,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#354"
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -58194.0,
@@ -1247,7 +1247,7 @@
     "view": "limited"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 2050.0,
     "can_mark_paid": true,
@@ -1262,10 +1262,10 @@
     "plan_kind": null,
     "settlement": "manual",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#8"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 3244.0,
     "currency": "PHP",
@@ -1275,11 +1275,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1507"
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -12000.0,
@@ -1294,7 +1294,7 @@
     "view": "limited"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 1000.0,
     "can_mark_paid": true,
@@ -1309,10 +1309,10 @@
     "plan_kind": null,
     "settlement": "manual",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#1"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 27543.0,
     "currency": "PHP",
@@ -1322,11 +1322,11 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "statement",
-    "source_id": 100000,
+    "source_id": "accounts#8",
     "statement_close": "2026-11-12"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 4119.0,
     "currency": "PHP",
@@ -1336,10 +1336,10 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2481"
    },
    {
-    "account_id": 100000,
+    "account_id": "accounts#1",
     "account_name": "Joint bank",
     "amount": 3013.0,
     "currency": "PHP",
@@ -1349,14 +1349,14 @@
     "overflow_account_id": null,
     "overflow_account_name": null,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1074"
    }
   ],
   "today": "2026-11-13",
   "upcoming_this_month": [
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -13430.0,
@@ -1372,7 +1372,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -16736.0,
@@ -1388,7 +1388,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -17469.0,
@@ -1404,7 +1404,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -24735.0,
@@ -1420,7 +1420,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28295.0,
@@ -1436,7 +1436,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28638.0,
@@ -1452,7 +1452,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -28997.0,
@@ -1468,7 +1468,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -30410.0,
@@ -1484,7 +1484,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -31187.0,
@@ -1500,7 +1500,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -35558.0,
@@ -1516,7 +1516,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -35636.0,
@@ -1532,7 +1532,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -41534.0,
@@ -1548,7 +1548,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -46773.0,
@@ -1564,7 +1564,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -55410.0,
@@ -1580,7 +1580,7 @@
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -8927.0,
@@ -1603,7 +1603,7 @@
     "original_date": "2025-09-02",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 17571.0,
@@ -1614,7 +1614,7 @@
     "original_date": "2025-12-03",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 19946.0,
@@ -1625,7 +1625,7 @@
     "original_date": "2026-09-02",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 22594.0,
@@ -1636,7 +1636,7 @@
     "original_date": "2026-03-05",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 23586.0,
@@ -1647,7 +1647,7 @@
     "original_date": "2025-11-03",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 2519.0,
@@ -1658,7 +1658,7 @@
     "original_date": "2025-08-12",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2770"
    },
    {
     "amount": 26905.0,
@@ -1669,7 +1669,7 @@
     "original_date": "2026-02-02",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 2725.0,
@@ -1680,7 +1680,7 @@
     "original_date": "2026-09-22",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#628"
    },
    {
     "amount": 300.0,
@@ -1691,7 +1691,7 @@
     "original_date": "2025-06-28",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2618"
    },
    {
     "amount": 30083.0,
@@ -1702,7 +1702,7 @@
     "original_date": "2026-01-02",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 3028.0,
@@ -1713,7 +1713,7 @@
     "original_date": "2026-08-01",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1853"
    },
    {
     "amount": 32236.0,
@@ -1724,7 +1724,7 @@
     "original_date": "2026-06-02",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 32851.0,
@@ -1735,7 +1735,7 @@
     "original_date": "2025-10-03",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 34594.0,
@@ -1746,7 +1746,7 @@
     "original_date": "2026-08-03",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 34768.0,
@@ -1757,7 +1757,7 @@
     "original_date": "2026-04-06",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 4526.0,
@@ -1768,7 +1768,7 @@
     "original_date": "2025-06-28",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1006"
    },
    {
     "amount": 47745.0,
@@ -1779,7 +1779,7 @@
     "original_date": "2026-05-04",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 4798.0,
@@ -1790,7 +1790,7 @@
     "original_date": "2025-12-18",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1061"
    },
    {
     "amount": 48952.0,
@@ -1801,7 +1801,7 @@
     "original_date": "2026-07-03",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 49251.0,
@@ -1812,7 +1812,7 @@
     "original_date": "2026-11-05",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 57018.0,
@@ -1823,7 +1823,7 @@
     "original_date": "2026-10-05",
     "overdue": true,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 731.0,
@@ -1834,7 +1834,7 @@
     "original_date": "2026-05-20",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2330"
    },
    {
     "amount": 799.0,
@@ -1845,7 +1845,7 @@
     "original_date": "2026-06-01",
     "overdue": true,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2312"
    },
    {
     "amount": 1450.0,
@@ -1860,7 +1860,7 @@
     "plan_kind": "subscription",
     "settlement": null,
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#4"
    },
    {
     "amount": 1160.0,
@@ -1876,7 +1876,7 @@
     "rate_as_of": "2026-11-01",
     "rate_stale": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2938"
    },
    {
     "amount": 309.0,
@@ -1886,7 +1886,7 @@
     "name": "Txn 353",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#354"
    },
    {
     "amount": 1318.0,
@@ -1896,7 +1896,7 @@
     "name": "Txn 556",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#557"
    },
    {
     "amount": 3675.0,
@@ -1906,11 +1906,11 @@
     "name": "Txn 2398",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2399"
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -58194.0,
@@ -1937,7 +1937,7 @@
     "plan_kind": null,
     "settlement": "manual",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#8"
    },
    {
     "amount": 1104.0,
@@ -1947,7 +1947,7 @@
     "name": "Txn 1102",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1103"
    },
    {
     "amount": 3244.0,
@@ -1957,11 +1957,11 @@
     "name": "Txn 1506",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1507"
    },
    {
     "account": {
-     "id": 100000,
+     "id": "accounts#1",
      "name": "Joint bank"
     },
     "cash_delta": -12000.0,
@@ -1983,7 +1983,7 @@
     "name": "Txn 2402",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2403"
    },
    {
     "amount": 1445.0,
@@ -1993,7 +1993,7 @@
     "name": "Txn 2435",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2436"
    },
    {
     "amount": 4183.0,
@@ -2003,7 +2003,7 @@
     "name": "Txn 1869",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1870"
    },
    {
     "amount": 124.0,
@@ -2013,7 +2013,7 @@
     "name": "Txn 505",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#506"
    },
    {
     "amount": 1000.0,
@@ -2028,7 +2028,7 @@
     "plan_kind": null,
     "settlement": "manual",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#1"
    },
    {
     "amount": 27543.0,
@@ -2038,7 +2038,7 @@
     "name": "Card A statement",
     "overdue": false,
     "source": "statement",
-    "source_id": 100000
+    "source_id": "accounts#8"
    },
    {
     "amount": 130.0,
@@ -2048,7 +2048,7 @@
     "name": "Txn 1002",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1003"
    },
    {
     "amount": 4119.0,
@@ -2058,7 +2058,7 @@
     "name": "Txn 2480",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#2481"
    },
    {
     "amount": 2500.0,
@@ -2073,7 +2073,7 @@
     "plan_kind": "installment",
     "settlement": "manual",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#12"
    },
    {
     "amount": 3013.0,
@@ -2083,7 +2083,7 @@
     "name": "Txn 1073",
     "overdue": false,
     "source": "transaction",
-    "source_id": 100000
+    "source_id": "transactions#1074"
    },
    {
     "amount": 4100.0,
@@ -2098,7 +2098,7 @@
     "plan_kind": "installment",
     "settlement": "autopay",
     "source": "budget_entry",
-    "source_id": 100000
+    "source_id": "budget_entries#16"
    }
   ],
   "wishlist_next_up": []

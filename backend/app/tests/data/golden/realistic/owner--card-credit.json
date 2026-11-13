@@ -1,8 +1,8 @@
 {
  "body": {
-  "account_id": 100000,
+  "account_id": "accounts#8",
   "credit": {
-   "account_id": 100000,
+   "account_id": "accounts#8",
    "as_of": "2026-11-13",
    "available_now": 52635.0,
    "available_with_planned": 52635.0,
@@ -16,7 +16,7 @@
      "occurrence_date": "2026-11-14",
      "relies_on_planned": null,
      "source": "budget_entry",
-     "source_id": 100000,
+     "source_id": "budget_entries#4",
      "status": "ok"
     },
     {
@@ -28,7 +28,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#2938",
      "status": "ok"
     },
     {
@@ -40,7 +40,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#557",
      "status": "ok"
     },
     {
@@ -52,7 +52,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#2399",
      "status": "ok"
     },
     {
@@ -64,7 +64,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#1103",
      "status": "ok"
     },
     {
@@ -76,7 +76,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#2436",
      "status": "ok"
     },
     {
@@ -88,7 +88,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#1870",
      "status": "ok"
     },
     {
@@ -100,7 +100,7 @@
      "occurrence_date": null,
      "relies_on_planned": null,
      "source": "transaction",
-     "source_id": 100000,
+     "source_id": "transactions#506",
      "status": "ok"
     },
     {
@@ -112,7 +112,7 @@
      "occurrence_date": "2026-12-12",
      "relies_on_planned": null,
      "source": "budget_entry",
-     "source_id": 100000,
+     "source_id": "budget_entries#12",
      "status": "installment"
     },
     {
@@ -124,7 +124,7 @@
      "occurrence_date": "2026-12-12",
      "relies_on_planned": null,
      "source": "budget_entry",
-     "source_id": 100000,
+     "source_id": "budget_entries#16",
      "status": "installment"
     }
    ],
