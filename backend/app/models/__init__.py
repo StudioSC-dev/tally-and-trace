@@ -19,6 +19,7 @@ from app.models.card_statement_due_override import (
     CardStatementDueOverride as CardStatementDueOverride,
 )
 from app.models.payment_date_override import PaymentDateOverride as PaymentDateOverride
+from app.models.idempotency_key import IdempotencyKey as IdempotencyKey
 
 # ---------------------------------------------------------------------------
 # User relationships
