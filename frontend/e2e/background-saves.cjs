@@ -23,6 +23,9 @@
 //   (k) a refused Due-card Mark paid: failed toast with Edit; Edit reopens Mark paid with the
 //       typed day and the server's reason; saving again records it once.
 //   (l) a refused Due-card card payment: Edit reopens Pay with the typed amount and the reason.
+//   (m) an edit that failed is superseded by a newer edit of the same row: its toast offers no
+//       Retry (resent, it would undo the newer one), the server keeps the newer values, and Edit
+//       still reopens the older values.
 // AC4 and AC6 need the API's Idempotency-Key support (STU-604) to hold: without it a retried
 // create that had landed would make a second row.
 //
@@ -655,7 +658,64 @@ async function scenarioL(browser) {
   }
 }
 
-const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI, j: scenarioJ, k: scenarioK, l: scenarioL }
+async function scenarioM(browser) {
+  console.log('\n(m) a failed edit superseded by a newer edit of the same row')
+  const { user, checking } = await seedUser('bgm')
+  const row0 = await client.post(user.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'debit', amount: 90, currency: 'PHP', description: 'BG M Row',
+    transaction_date: wire(manilaToday()), is_posted: true,
+  })
+  const { ctx, page } = await openPage(browser, user)
+  const editTo = async (from, to) => {
+    await rowFor(page, from).first().click()
+    await page.getByRole('heading', { name: 'Transaction Actions' }).waitFor()
+    await page.getByRole('button', { name: /^Edit/ }).first().click()
+    const form = formOf(page)
+    await form.waitFor()
+    await form.locator('input[placeholder="Add notes about this transaction"]').fill(to)
+    await form.getByRole('button', { name: 'Update Transaction', exact: true }).click()
+  }
+  try {
+    const isPut = (r) => r.method() === 'PUT' && pathOf(r.url()).endsWith(`/api/v1/transactions/${row0.id}`)
+    let dropped = 0
+    const drop = async (route, request) => {
+      if (!isPut(request) || dropped > 0) return route.fallback()
+      dropped++
+      return route.abort('connectionreset')
+    }
+    await page.route('**/api/v1/transactions/**', drop)
+    await editTo('BG M Row', 'BG M First')
+    await h.check('m.first-failed', 'B', async () => (await waitToast(page, 'BG M First', 'failed')) || 'no failed toast for the first edit')
+    const first = toastFor(page, 'BG M First')
+    await h.check('m.retry-before', 'S', async () => (await first.locator(tid('save-toast-retry')).count()) === 1 || 'no Retry before the newer edit')
+    await editTo('BG M Row', 'BG M Second')
+    await h.check('m.second-saved', 'B', async () => (await waitToast(page, 'BG M Second', 'saved')) || 'no Saved toast for the second edit')
+    await h.check('m.no-retry', 'B', async () => (await first.locator(tid('save-toast-retry')).count()) === 0 || 'Retry still offered on the superseded edit')
+    await h.check('m.message', 'B', async () => {
+      const t = await text(first.locator(tid('save-toast-message')))
+      return t.includes('A newer change') || `toast reads "${t}"`
+    })
+    await shot(page, 'm-superseded')
+    await h.check('m.server-newer', 'B', async () => {
+      const t = await client.get(user.token, `/transactions/${row0.id}`)
+      return t.description === 'BG M Second' || `server has "${t.description}"`
+    })
+    await h.check('m.edit-older', 'B', async () => {
+      await first.locator(tid('save-toast-edit')).click()
+      const form = formOf(page)
+      await form.waitFor({ timeout: 5000 })
+      const description = await form.locator('input[placeholder="Add notes about this transaction"]').inputValue()
+      const note = await text(form.locator(tid('transaction-form-error')))
+      await form.getByRole('button', { name: 'Cancel', exact: true }).click()
+      return (description === 'BG M First' && note.includes('changed again')) || `description "${description}", note "${note}"`
+    })
+    await page.unroute('**/api/v1/transactions/**', drop)
+  } finally {
+    await ctx.close()
+  }
+}
+
+const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI, j: scenarioJ, k: scenarioK, l: scenarioL, m: scenarioM }
 
 async function main() {
   try {

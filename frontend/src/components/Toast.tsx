@@ -55,7 +55,7 @@ const verb = (kind: OutboxEntry['kind']) => (kind === 'delete' ? 'delete' : 'sav
 
 function failureMessage(entry: OutboxEntry): string {
   const error = entry.error
-  if (error?.notConfirmed) return `"${entry.description}": ${error.message}`
+  if (error?.notConfirmed || error?.superseded) return `"${entry.description}": ${error.message}`
   return `Couldn't ${verb(entry.kind)} "${entry.description}": ${error?.message ?? 'Something went wrong.'}`
 }
 

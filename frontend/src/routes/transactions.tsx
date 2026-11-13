@@ -459,7 +459,7 @@ export function TransactionsPage() {
   // The submit button the current attempt was made with.
   const submitterRef = useRef<HTMLElement | null>(null)
   // A refused save reopened by the toast's Edit: its error is shown once the form has rendered.
-  const [pendingRefusal, setPendingRefusal] = useState<{ error: unknown; repeat: boolean } | null>(null)
+  const [pendingRefusal, setPendingRefusal] = useState<{ error: unknown; repeat: boolean; superseded: boolean } | null>(null)
   const transactionForm = useRef<HTMLFormElement>(null)
   // The controls the browser flagged in one submit attempt, in tree order.
   const invalidControls = useRef<Array<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>>([])
@@ -1787,12 +1787,18 @@ export function TransactionsPage() {
       setRepeatDraft(draft.repeatDraft)
     }
     setIsCreateModalOpen(true)
-    setPendingRefusal({ error: editEntry.error?.raw, repeat: editEntry.kind === 'repeat' })
+    setPendingRefusal({ error: editEntry.error?.raw, repeat: editEntry.kind === 'repeat', superseded: editEntry.error?.superseded === true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per request; the form setters are stable
   }, [editRequest, editEntry, isAccountsLoading, isCategoriesLoading, dispatch])
   useEffect(() => {
     if (!pendingRefusal || !isCreateModalOpen) return
     setPendingRefusal(null)
+    if (pendingRefusal.superseded) {
+      // Not a refusal: a newer change to this row was made after it. Saving now applies these values.
+      setFormError('This transaction was changed again after this edit. Saving applies these values over that change.')
+      setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
+      return
+    }
     if (pendingRefusal.repeat && showRepeatRefusal(pendingRefusal.error)) return
     setFormError(apiErrorMessage(pendingRefusal.error) || 'Could not save the transaction. Please try again.')
     setFocusRequest({ n: ++focusSeq.current, to: 'submitter' })
