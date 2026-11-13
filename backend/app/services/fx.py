@@ -307,6 +307,13 @@ class FxRates:
         """Stored rates for a service called without a request; never fetches."""
         return _offline_factory(db)
 
+    def has_stale_row(self) -> bool:
+        """Whether any stored rate is older than ``STALE_AFTER`` now (missing ones are
+        not counted). Read by conditional GETs (core/conditional.py): such a row turns
+        ``stale`` true with no write, so the answer must be recomputed."""
+        now = self.clock()
+        return any(_is_stale(row, now) for row in self.store.all().values())
+
     def _stale(self) -> None:
         if not self._signalled:
             self._signalled = True

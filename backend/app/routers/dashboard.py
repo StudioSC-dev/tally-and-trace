@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.core.conditional import conditional_get
 from app.core.config import settings
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
@@ -44,7 +45,7 @@ class QuickBalancePins(BaseModel):
 SAVINGS_RATE_FACTOR = 0.5
 
 
-@router.get("/snapshot")
+@router.get("/snapshot", dependencies=[Depends(conditional_get)])
 def get_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
