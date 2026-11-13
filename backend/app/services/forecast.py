@@ -23,7 +23,8 @@ from app.core.access import (
     DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, readable_criterion,
     tag_shared_account_ids, touches_accounts, viewable_account_ids, viewable_accounts,
 )
-from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
+from app.core.context import context_of
+from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, redactor_for
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
 from app.core.time import manila_today, manila_wall_now
 # Unused here since the window moved to Manila, but tests pin the clock by
@@ -198,7 +199,15 @@ def get_account_balances(db: Session, user_id: int):
     """The projection's scope: every active account the user sees (any role,
     ``tag_viewer`` included: a sharer's Household-tagged accounts), by id: the
     snapshot's per-account lists follow this order, and a query with no ORDER BY
-    returns rows in storage order, which moves as the table is updated."""
+    returns rows in storage order, which moves as the table is updated.
+    Read once per request with a context (``RequestContext.accounts``)."""
+    ctx = context_of(db)
+    if ctx is not None:
+        return list(ctx.memo(("accounts", user_id), lambda: _scope_accounts(db, user_id)))
+    return _scope_accounts(db, user_id)
+
+
+def _scope_accounts(db: Session, user_id: int):
     return (viewable_accounts(db, user_id, active_only=True, roles=VIEW_ROLES)
             .order_by(Account.id).all())
 
@@ -1342,7 +1351,7 @@ def collect_events(
     scoped_ids = cash_ids | card_ids | scoped_wallet_ids
 
     events: List[dict] = []
-    redactor = Redactor(db, user_id)
+    redactor = redactor_for(db, user_id)
 
     # Every record of any type the caller created or that touches an account
     # in the scope (loans included), kept only when the caller may read it
@@ -2034,25 +2043,26 @@ def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List
     entry_ids = list(entry_ids)
     if not entry_ids:
         return []
-    rows = (
-        db.query(Transaction.budget_entry_id,
-                 func.coalesce(Transaction.occurrence_date, Transaction.transaction_date),
-                 Transaction.transaction_type, Transaction.account_id,
-                 Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
-                 BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
-                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
-                 Transaction.id, Transaction.is_posted)
-        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
-        .filter(Transaction.budget_entry_id.in_(entry_ids),
-                Transaction.user_id == BudgetEntry.user_id)
-        .order_by(Transaction.id)
-        .all()
-    )
-    touched = {acc for row in rows for acc in row[6:9] if acc is not None}
-    shared = {acc for (acc,) in db.query(Account.id).filter(
-        Account.id.in_(touched),
-        or_(Account.id.in_(select(AccountShare.account_id)),
-            Account.id.in_(tag_shared_account_ids())))} if touched else set()
+    ctx = context_of(db)
+    if ctx is None:
+        rows = _linked_query(db, entry_ids)
+        touched = {acc for row in rows for acc in row[6:9] if acc is not None}
+        shared = _shared_accounts(db, touched) if touched else set()
+    else:
+        # Read once per request, for every entry it may walk (``RequestContext``).
+        def load(ids):
+            grouped: Dict[int, list] = {}
+            for row in _linked_query(db, ids):
+                grouped.setdefault(row[0], []).append(row)
+            return grouped
+
+        found = ctx.by_id("linked_rows", entry_ids, load, universe=ctx.entry_ids)
+        rows = sorted((row for group in found.values() if group for row in group),
+                      key=lambda row: row[10])
+        touched = {acc for row in rows for acc in row[6:9] if acc is not None}
+        shared = {acc for acc, is_shared in ctx.by_id(
+            "shared_account", touched,
+            lambda ids: {acc: True for acc in _shared_accounts(db, ids)}).items() if is_shared}
 
     def on_entry_accounts(row) -> bool:
         _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row[:10]
@@ -2067,6 +2077,33 @@ def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List
         return not shared.intersection(row[6:9]) or on_entry_accounts(row)
 
     return [(row[0], row[1], row[10], bool(row[11])) for row in rows if counts(row)]
+
+
+def _linked_query(db: Session, entry_ids) -> list:
+    """The rows naming the entries, with what ``_linked_rows`` decides on, by id."""
+    return (
+        db.query(Transaction.budget_entry_id,
+                 func.coalesce(Transaction.occurrence_date, Transaction.transaction_date),
+                 Transaction.transaction_type, Transaction.account_id,
+                 Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
+                 BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
+                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
+                 Transaction.id, Transaction.is_posted)
+        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+        .filter(Transaction.budget_entry_id.in_(entry_ids),
+                Transaction.user_id == BudgetEntry.user_id)
+        .order_by(Transaction.id)
+        .all()
+    )
+
+
+def _shared_accounts(db: Session, account_ids) -> set:
+    """The accounts among ``account_ids`` with any share (an account share, or the
+    owner's Household tag on it shared with anyone)."""
+    return {acc for (acc,) in db.query(Account.id).filter(
+        Account.id.in_(list(account_ids)),
+        or_(Account.id.in_(select(AccountShare.account_id)),
+            Account.id.in_(tag_shared_account_ids())))}
 
 
 def occurrence_links(db: Session, entry, day: date) -> List[tuple]:

@@ -37,7 +37,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core import locking
-from app.core.access import MANAGE_ROLES, RecordAccess, access_map, account_role
+from app.core.access import MANAGE_ROLES, RecordAccess, access_map, account_role, record_access_for
 from app.core.record_dates import refuse_record_date
 from app.core.tags import copy_explicit_tags
 from app.core.time import manila_today, utc_now
@@ -1096,7 +1096,7 @@ def post_plan(db: Session, entry, actor: User, through: date, held: Counter,
         creator = db.get(User, entry.user_id)
         if any(links[day] > 1 for day in days):
             blocker = "blocked:ambiguous"
-        elif creator is None or not RecordAccess(db, creator).permissions(entry)["can_edit"]:
+        elif creator is None or not record_access_for(db, creator).permissions(entry)["can_edit"]:
             blocker = "creator_no_access"
         elif not access.permissions(entry)["can_edit"]:
             blocker = "caller_no_access"

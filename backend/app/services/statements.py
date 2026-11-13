@@ -162,9 +162,22 @@ def statement_close(card: Account, day: date) -> Optional[date]:
 def load_due_overrides(db: Session, card_ids: Iterable[int]) -> Dict[int, Dict[date, date]]:
     """``{card id: {statement close: printed due}}`` for ``card_ids``, in one query.
 
-    Every id asked for is a key, with ``{}`` when the card has no override.
+    Every id asked for is a key, with ``{}`` when the card has no override. In a
+    request with a context (``app/core/context.py``) every account the caller
+    holds a role on is read with the first card.
     """
+    from app.core.context import context_of
+
     ids = list(dict.fromkeys(card_ids))
+    ctx = context_of(db)
+    if ctx is not None and ids:
+        found = ctx.by_id("due_overrides", ids, lambda wanted: _read_due_overrides(db, wanted),
+                          universe=lambda: sorted(ctx.access.roles))
+        return {cid: dict(found[cid] or {}) for cid in ids}
+    return _read_due_overrides(db, ids)
+
+
+def _read_due_overrides(db: Session, ids: List[int]) -> Dict[int, Dict[date, date]]:
     out: Dict[int, Dict[date, date]] = {cid: {} for cid in ids}
     if not ids:
         return out

@@ -92,7 +92,10 @@ from typing import Dict, Iterable, List, Optional, Set
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.access import MANAGE_ROLES, account_role, viewable_account_ids, viewable_accounts
+from app.core.access import (
+    MANAGE_ROLES, account_role, record_access_for, viewable_account_ids, viewable_accounts,
+)
+from app.core.context import context_of
 from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.time import manila_midnight, manila_today
 from app.models.account import Account, AccountType
@@ -693,15 +696,10 @@ def unposted_months(db: Session, card: Account, caller,
     ``due`` is the cycle's printed due when one was entered; ``due_overrides``
     is the card's ``statements.load_due_overrides`` entry, read when None.
     """
-    from app.core.access import RecordAccess
     from app.services.posting import post_plan
 
     today = manila_today()
-    entries = [e for e in db.query(BudgetEntry).filter(
-        BudgetEntry.account_id == card.id,
-        BudgetEntry.is_active.is_(True),
-        BudgetEntry.installment_reviewed_at.isnot(None),
-    ).order_by(BudgetEntry.id).all() if is_card_installment(e, card)]
+    entries = [e for e in _reviewed_entries(db, card.id) if is_card_installment(e, card)]
     if not entries:
         return []
     if due_overrides is None:
@@ -712,7 +710,7 @@ def unposted_months(db: Session, card: Account, caller,
                for entry_id, when, _, is_posted in fc._linked_rows(
                    db, [e.id for e in entries], occurrence_match=True)
                if not is_posted}
-    access = RecordAccess(db, caller)
+    access = record_access_for(db, caller)
     out: List[UnpostedMonth] = []
     for entry in entries:
         plan = post_plan(db, entry, caller, today, held, access)
@@ -729,6 +727,27 @@ def unposted_months(db: Session, card: Account, caller,
             out.append(UnpostedMonth(entry_id=entry.id, day=day, close=cycle["close"].date(),
                                      due=cycle["due"].date(), postable=day in postable))
     out.sort(key=lambda m: (m.close, m.day, m.entry_id))
+    return out
+
+
+def _reviewed_entries(db: Session, card_id: int) -> List[BudgetEntry]:
+    """The card's active, reviewed recurring entries, by id: inside a request with
+    a context, read once for every account the caller holds a role on."""
+    ctx = context_of(db)
+    if ctx is None:
+        return _read_reviewed(db, [card_id]).get(card_id, [])
+    return ctx.by_id("reviewed_entries", [card_id], lambda ids: _read_reviewed(db, ids),
+                     universe=lambda: sorted(ctx.access.roles))[card_id] or []
+
+
+def _read_reviewed(db: Session, card_ids) -> Dict[int, List[BudgetEntry]]:
+    out: Dict[int, List[BudgetEntry]] = {}
+    for e in db.query(BudgetEntry).filter(
+            BudgetEntry.account_id.in_(list(card_ids)),
+            BudgetEntry.is_active.is_(True),
+            BudgetEntry.installment_reviewed_at.isnot(None),
+    ).order_by(BudgetEntry.id):
+        out.setdefault(e.account_id, []).append(e)
     return out
 
 
