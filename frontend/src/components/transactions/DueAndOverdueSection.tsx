@@ -97,6 +97,8 @@ import { UpcomingOccurrenceRow } from './UpcomingOccurrenceRow'
 import { UpcomingTransactionRow } from './UpcomingTransactionRow'
 import { useOccurrenceDialogs } from './useOccurrenceDialogs'
 import { CARD_PAY_FORM, DUE_ENTRY_FORM } from '../../store/outboxForms'
+import type { CardPayDraft } from '../../store/outboxForms'
+import { outboxActions } from '../../store/outbox'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
@@ -282,6 +284,20 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
   // The card whose statement is being paid.
   const [payCardId, setPayCardId] = useState<number | null>(null)
+  // Edit on a refused background payment: Pay reopens with its input and the server's reason.
+  const [payRestore, setPayRestore] = useState<{ draft: CardPayDraft; error: string } | null>(null)
+  const payEditEntry = useSelector((state: RootState) =>
+    state.outbox.editRequest === null ? undefined : state.outbox.entries.find((e) => e.clientId === state.outbox.editRequest),
+  )
+  const payDispatch = useDispatch<AppDispatch>()
+  useEffect(() => {
+    if (!payEditEntry || payEditEntry.form !== CARD_PAY_FORM || payEditEntry.draft === null) return
+    const draft = payEditEntry.draft as CardPayDraft
+    const error = apiErrorMessage(payEditEntry.error?.raw) || payEditEntry.error?.message || 'Could not record the payment.'
+    payDispatch(outboxActions.editHandled(payEditEntry.clientId))
+    setPayRestore({ draft, error })
+    setPayCardId(draft.cardId)
+  }, [payEditEntry, payDispatch])
   // Whether the review notice is expanded.
   const [noticeOpen, setNoticeOpen] = useState(false)
   // Batch review: the ticked ids, whether a batch runs, and the last run's result (kept until the next run or the next day).
@@ -1365,7 +1381,17 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           </button>
         </div>
       )}
-      {payCardId !== null && <CardPayDialog cardId={payCardId} onClose={() => setPayCardId(null)} onPaid={onChanged} background />}
+      {payCardId !== null && <CardPayDialog
+          key={payCardId}
+          cardId={payCardId}
+          onClose={() => {
+            setPayCardId(null)
+            setPayRestore(null)
+          }}
+          onPaid={onChanged}
+          background
+          {...(payRestore ? { restore: payRestore } : {})}
+        />}
       {dialogs}
     </section>
   )

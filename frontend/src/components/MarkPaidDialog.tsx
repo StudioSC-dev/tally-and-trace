@@ -51,6 +51,7 @@ import { useDispatch } from 'react-redux'
 import type { AppDispatch } from '../store'
 import { outboxActions } from '../store/outbox'
 import { DUE_ENTRY_FORM, dueAction } from '../store/outboxForms'
+import type { MarkPaidDraft } from '../store/outboxForms'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -78,6 +79,8 @@ interface Props {
    * once; its toast reports the outcome and `onPaid` is not called (the queue's drain reloads).
    */
   background?: boolean
+  /** Edit on a refused background save: the input it was sent with and the server's reason. */
+  restore?: { draft: MarkPaidDraft; error: string }
 }
 
 /** One line of the occurrence select: an occurrence, or a run of walked ones the API left out. */
@@ -130,7 +133,7 @@ const occurrenceLabel = (occurrence: EntryOccurrence, today: string): string => 
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
-export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, onClose, onPaid, background = false }: Props) {
+export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, onClose, onPaid, background = false, restore }: Props) {
   const dispatch = useDispatch<AppDispatch>()
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -173,11 +176,11 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const busy = submitting || postingAll
   const [submittingAction, setSubmittingAction] = useState<RecurringAction | null>(null)
 
-  const [selectedInput, setSelectedInput] = useState<string | null>(null)
-  const [dayInput, setDayInput] = useState<string | null>(null)
-  const [amountInput, setAmountInput] = useState<string | null>(null)
-  const [received, setReceived] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [selectedInput, setSelectedInput] = useState<string | null>(restore?.draft.occurrenceDate ?? null)
+  const [dayInput, setDayInput] = useState<string | null>(restore?.draft.day ?? null)
+  const [amountInput, setAmountInput] = useState<string | null>(restore?.draft.amount ?? null)
+  const [received, setReceived] = useState(restore?.draft.received ?? '')
+  const [error, setError] = useState<string | null>(restore?.error ?? null)
 
   // The opener, read once per instance in a layout effect: that runs before the passive
   // query subscriptions, so a load can't have moved focus yet. StrictMode's replay
@@ -333,7 +336,10 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
     }
     setError(null)
     if (background) {
-      dispatch(outboxActions.enqueued(dueAction(DUE_ENTRY_FORM, entryId, `Recording "${name}"…`, name, `budget-entries/${entryId}/materialize`, data)))
+      const draft: MarkPaidDraft = {
+        entryId, name, occurrenceDate: selected.occurrence_date, action: submitted, day: dayInput, amount: amountInput, received,
+      }
+      dispatch(outboxActions.enqueued(dueAction(DUE_ENTRY_FORM, entryId, `Recording "${name}"…`, name, `budget-entries/${entryId}/materialize`, draft, data)))
       onClose()
       return
     }
@@ -351,7 +357,10 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const handlePostAll = async () => {
     setError(null)
     if (background) {
-      dispatch(outboxActions.enqueued(dueAction(DUE_ENTRY_FORM, entryId, `Posting "${name}"…`, name, `budget-entries/${entryId}/materialize-due`)))
+      const draft: MarkPaidDraft = {
+        entryId, name, occurrenceDate: null, action: action ?? null, day: dayInput, amount: amountInput, received,
+      }
+      dispatch(outboxActions.enqueued(dueAction(DUE_ENTRY_FORM, entryId, `Posting "${name}"…`, name, `budget-entries/${entryId}/materialize-due`, draft)))
       onClose()
       return
     }

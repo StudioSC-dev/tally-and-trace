@@ -20,6 +20,9 @@
 //   (j) the Due card's Mark paid saves in the background: the dialog closes at once with its
 //       POST held, a pending toast shows, the row's actions are disabled until it settles, the
 //       request carries an Idempotency-Key; released → "Saved" and the row leaves Due.
+//   (k) a refused Due-card Mark paid: failed toast with Edit; Edit reopens Mark paid with the
+//       typed day and the server's reason; saving again records it once.
+//   (l) a refused Due-card card payment: Edit reopens Pay with the typed amount and the reason.
 // AC4 and AC6 need the API's Idempotency-Key support (STU-604) to hold: without it a retried
 // create that had landed would make a second row.
 //
@@ -47,6 +50,11 @@ let stack, client
 
 const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 const wire = (day) => `${day}T00:00:00`
+const addDays = (day, n) => {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
 const pathOf = (url) => new URL(url).pathname.replace(/\/$/, '')
 const isCreate = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith('/api/v1/transactions')
 const tid = (id) => `[data-testid="${id}"]`
@@ -543,7 +551,111 @@ async function scenarioJ(browser) {
   }
 }
 
-const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI, j: scenarioJ }
+async function scenarioK(browser) {
+  console.log('\n(k) refused Due Mark paid: Edit reopens it with the typed day and the reason')
+  const { user, checking } = await seedUser('bgk')
+  const entry = await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'BG K Rent', amount: 1500,
+    account_id: checking.id, next_occurrence: wire(manilaToday()),
+  })
+  const { ctx, page } = await openPage(browser, user)
+  try {
+    const isMaterialize = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith(`/budget-entries/${entry.id}/materialize`)
+    const dueRow = page.locator(tid('due-row')).filter({ hasText: 'BG K Rent' })
+    await dueRow.locator(tid('due-mark-paid')).click()
+    const dialog = page.locator(tid('mark-paid-dialog'))
+    await dialog.locator(tid('mark-paid-occurrence')).waitFor()
+    const typedDay = addDays(manilaToday(), -1)
+    await dialog.locator(tid('mark-paid-date')).fill(typedDay)
+    const refused = await h.failWith(page, isMaterialize, 422, { times: 1 })
+    await dialog.locator(tid('mark-paid-submit')).click()
+    await h.check('k.dialog-closed', 'B', async () => {
+      try { await dialog.waitFor({ state: 'detached', timeout: 3000 }); return true } catch { return 'Mark paid stayed open' }
+    })
+    await h.check('k.failed-toast', 'B', async () => (await waitToast(page, 'BG K Rent', 'failed')) || 'no failed toast')
+    const toast = toastFor(page, 'BG K Rent')
+    await h.check('k.no-retry', 'B', async () => (await toast.locator(tid('save-toast-retry')).count()) === 0 || 'Retry offered for a refusal')
+    await h.check('k.edit-offered', 'B', async () => (await toast.locator(tid('save-toast-edit')).count()) === 1 || 'no Edit on the refused Mark paid')
+    await shot(page, 'k-due-refused')
+    await toast.locator(tid('save-toast-edit')).click().catch(() => {})
+    await h.check('k.reopened', 'B', async () => {
+      try { await dialog.locator(tid('mark-paid-occurrence')).waitFor({ timeout: 5000 }); return true } catch { return 'Mark paid did not reopen' }
+    })
+    await h.check('k.day-kept', 'B', async () => {
+      const v = await dialog.locator(tid('mark-paid-date')).inputValue().catch(() => null)
+      return v === typedDay || `date reads ${v}, typed ${typedDay}`
+    })
+    await h.check('k.reason-shown', 'B', async () => {
+      const t = await text(dialog.locator(tid('mark-paid-error')))
+      return t.includes('injected failure 422') || `error reads "${t}"`
+    })
+    await h.check('k.toast-gone', 'B', async () => (await toast.count()) === 0 || 'the failed toast stayed after Edit')
+    await refused.stop()
+    await dialog.locator(tid('mark-paid-submit')).click().catch(() => {})
+    await h.check('k.saved', 'B', async () => (await waitToast(page, 'BG K Rent', 'saved')) || 'no Saved toast after the second save')
+    await h.check('k.one-posted', 'B', async () => {
+      const list = await client.get(user.token, '/transactions/?limit=100')
+      const rows = list.items.filter((t) => t.budget_entry_id === entry.id)
+      return (rows.length === 1 && rows[0].transaction_date.startsWith(typedDay)) || `server rows ${JSON.stringify(rows.map((t) => t.transaction_date))}`
+    })
+  } finally {
+    await ctx.close()
+  }
+}
+
+async function scenarioL(browser) {
+  console.log('\n(l) refused Due card payment: Edit reopens Pay with the typed amount and the reason')
+  const { user, checking } = await seedUser('bgl')
+  const today = manilaToday()
+  const anchor = addDays(today, -5)
+  const closeDom = Math.min(Number(anchor.slice(8, 10)), 28)
+  const close = `${anchor.slice(0, 8)}${String(closeDom).padStart(2, '0')}`
+  const presets = await client.get(user.token, '/accounts/minimum-due-presets')
+  const card = await client.post(user.token, '/accounts/', {
+    name: 'BG L Card', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 50000,
+    billing_cycle_start: closeDom, days_until_due_date: 21, minimum_due_rule: presets.find((p) => p.key === 'bdo').rule,
+    payment_account_id: checking.id,
+  })
+  await client.post(user.token, '/transactions/', {
+    account_id: card.id, transaction_type: 'debit', amount: 2000, description: 'BG L purchase',
+    transaction_date: wire(addDays(close, -3)), is_posted: true,
+  })
+  const { ctx, page } = await openPage(browser, user)
+  try {
+    const isPay = (r) => r.method() === 'POST' && pathOf(r.url()).endsWith(`/cards/${card.id}/payments`)
+    const dueRow = page.locator(tid('due-row')).filter({ hasText: 'BG L Card' })
+    await dueRow.locator(tid('due-pay')).click()
+    const dialog = page.locator(tid('card-pay-dialog'))
+    await dialog.locator(tid('card-pay-amount')).waitFor()
+    await dialog.locator(tid('card-pay-amount')).fill('1234.5')
+    const refused = await h.failWith(page, isPay, 422, { times: 1 })
+    await dialog.locator(tid('card-pay-submit')).click()
+    await h.check('l.dialog-closed', 'B', async () => {
+      try { await dialog.waitFor({ state: 'detached', timeout: 3000 }); return true } catch { return 'Pay stayed open' }
+    })
+    await h.check('l.failed-toast', 'B', async () => (await waitToast(page, 'BG L Card', 'failed')) || 'no failed toast')
+    const toast = toastFor(page, 'BG L Card')
+    await h.check('l.edit-offered', 'B', async () => (await toast.locator(tid('save-toast-edit')).count()) === 1 || 'no Edit on the refused payment')
+    await toast.locator(tid('save-toast-edit')).click().catch(() => {})
+    await h.check('l.reopened', 'B', async () => {
+      try { await dialog.locator(tid('card-pay-amount')).waitFor({ timeout: 5000 }); return true } catch { return 'Pay did not reopen' }
+    })
+    await h.check('l.amount-kept', 'B', async () => {
+      const v = await dialog.locator(tid('card-pay-amount')).inputValue().catch(() => null)
+      return v === '1234.5' || `amount reads ${v}`
+    })
+    await h.check('l.reason-shown', 'B', async () => {
+      const t = await text(dialog.locator(tid('card-pay-error')))
+      return t.includes('injected failure 422') || `error reads "${t}"`
+    })
+    await shot(page, 'l-card-pay-edit')
+    await refused.stop()
+  } finally {
+    await ctx.close()
+  }
+}
+
+const SCENARIOS = { a: scenarioA, b: scenarioB, c: scenarioC, d: scenarioD, e: scenarioE, f: scenarioF, g: scenarioG, h: scenarioH, i: scenarioI, j: scenarioJ, k: scenarioK, l: scenarioL }
 
 async function main() {
   try {

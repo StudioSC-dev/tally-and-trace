@@ -1,6 +1,6 @@
 // What each outbox form offers in its toasts: where View and Edit go, and how Undo is queued.
 // A form missing here still saves in the background; its toasts offer Retry and Discard only.
-import type { NewOutboxEntry, OutboxCompletion } from '@tally-trace/shared'
+import type { NewOutboxEntry, OutboxCompletion, RecurringAction } from '@tally-trace/shared'
 import { newOutboxId } from './outbox'
 
 export interface OutboxFormHandlers {
@@ -32,22 +32,53 @@ export function transactionDelete(id: number, description: string): NewOutboxEnt
 export const DUE_TAGS = ['BudgetEntry', 'Transaction', 'Account', 'Allocation']
 
 /** The outbox form of a recurring entry's Due-card action; its targetId is the entry id. */
-export const DUE_ENTRY_FORM = 'due-entry'
+export const DUE_ENTRY_FORM = 'due-entry' as const
 /** The outbox form of a card payment from the Due card; its targetId is the card id. */
-export const CARD_PAY_FORM = 'card-pay'
+export const CARD_PAY_FORM = 'card-pay' as const
+
+/** What Mark paid (or Post all due) was sent with: Edit on a refusal reopens the dialog with it. */
+export interface MarkPaidDraft {
+  entryId: number
+  name: string
+  /** The occurrence it recorded (`YYYY-MM-DD`), or null for Post all due. */
+  occurrenceDate: string | null
+  /** The action that opened the dialog. */
+  action: RecurringAction | null
+  /** The typed day, amount and received amount; null where the dialog's default was kept. */
+  day: string | null
+  amount: string | null
+  received: string
+}
+
+/** What a card payment was sent with: Edit on a refusal reopens Pay with it. */
+export interface CardPayDraft {
+  cardId: number
+  amount: string
+  payerId: number
+  paymentDate: string
+}
 
 /**
  * Queues a Due-card POST (Mark paid, Post all due, Pay card): sent with its own client id as the
- * idempotency key, so Retry after an unknown outcome cannot record it twice.
+ * idempotency key, so Retry after an unknown outcome cannot record it twice. `draft` is the
+ * dialog's input, for Edit after a refusal.
  */
-export function dueAction(form: string, targetId: number, label: string, description: string, url: string, body?: unknown): NewOutboxEntry {
+export function dueAction(
+  form: typeof DUE_ENTRY_FORM | typeof CARD_PAY_FORM,
+  targetId: number,
+  label: string,
+  description: string,
+  url: string,
+  draft: MarkPaidDraft | CardPayDraft,
+  body?: unknown,
+): NewOutboxEntry {
   const clientId = newOutboxId()
   return {
     clientId,
     kind: 'due-action',
     targetId,
     form,
-    draft: null,
+    draft,
     label,
     description,
     request: body === undefined ? { method: 'POST', url } : { method: 'POST', url, body },
@@ -62,4 +93,7 @@ export const OUTBOX_FORMS: Record<string, OutboxFormHandlers> = {
     undo: (completion) =>
       completion.serverId === undefined ? null : transactionDelete(completion.serverId, completion.description),
   },
+  // The Due card's dialogs: Edit reopens them on Transactions (DueAndOverdueSection).
+  [DUE_ENTRY_FORM]: { path: '/transactions' },
+  [CARD_PAY_FORM]: { path: '/transactions' },
 }

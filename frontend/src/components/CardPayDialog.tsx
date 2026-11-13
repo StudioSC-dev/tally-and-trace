@@ -25,6 +25,7 @@ import { useDispatch } from 'react-redux'
 import type { AppDispatch } from '../store'
 import { outboxActions } from '../store/outbox'
 import { CARD_PAY_FORM, dueAction } from '../store/outboxForms'
+import type { CardPayDraft } from '../store/outboxForms'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { formatCurrency, getCurrencySymbol } from '../utils/currency'
 
@@ -55,6 +56,8 @@ interface Props {
    * at once; its toast reports the outcome and `onPaid` is not called (the queue's drain reloads).
    */
   background?: boolean
+  /** Edit on a refused background payment: the input it was sent with and the server's reason. */
+  restore?: { draft: CardPayDraft; error: string }
 }
 
 /**
@@ -72,7 +75,7 @@ interface Props {
  * Rendered through a portal; while it is open the app root is `inert`, and focus
  * returns to the element that opened it.
  */
-export function CardPayDialog({ cardId, onClose, onPaid, background = false }: Props) {
+export function CardPayDialog({ cardId, onClose, onPaid, background = false, restore }: Props) {
   const dispatch = useDispatch<AppDispatch>()
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -91,10 +94,10 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false }: P
   const [postDue, { isLoading: posting }] = usePostDueInstallmentsMutation()
   const [posted, setPosted] = useState<number | null>(null)
 
-  const [amountInput, setAmountInput] = useState<string | null>(null)
-  const [payerInput, setPayerInput] = useState<number | null>(null)
-  const [dateInput, setDateInput] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [amountInput, setAmountInput] = useState<string | null>(restore?.draft.amount ?? null)
+  const [payerInput, setPayerInput] = useState<number | null>(restore?.draft.payerId ?? null)
+  const [dateInput, setDateInput] = useState<string | null>(restore?.draft.paymentDate ?? null)
+  const [error, setError] = useState<string | null>(restore?.error ?? null)
 
   // The opener, read once per instance in a layout effect: that runs before the passive
   // query subscriptions, so a load can't have moved focus yet. StrictMode's replay
@@ -214,7 +217,8 @@ export function CardPayDialog({ cardId, onClose, onPaid, background = false }: P
     if (background) {
       const cardName = detail?.name ?? 'card'
       const body = cardPaymentBody({ amount, fromAccountId: payerId, paymentDate })
-      dispatch(outboxActions.enqueued(dueAction(CARD_PAY_FORM, cardId, `Paying ${formatCurrency(amount, currency)} to ${cardName}…`, `Pay ${cardName}`, `cards/${cardId}/payments`, body)))
+      const draft: CardPayDraft = { cardId, amount: amountShown, payerId, paymentDate }
+      dispatch(outboxActions.enqueued(dueAction(CARD_PAY_FORM, cardId, `Paying ${formatCurrency(amount, currency)} to ${cardName}…`, `Pay ${cardName}`, `cards/${cardId}/payments`, draft, body)))
       onClose()
       return
     }
