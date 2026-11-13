@@ -99,12 +99,13 @@ from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.services import forecast as fc
+from app.services import statements_store
 from app.services.fx import FxRates, convert
 from app.services.installment_duplicates import held_occurrences
 from app.services.payment_dates import Moved, effective, extend, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
 from app.services.statements import (
-    _card_rows, _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
+    _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
     statement_day, statement_history, statement_summaries,
 )
 
@@ -627,7 +628,7 @@ def open_cycle(card: Account, today: date, *, due_overrides) -> Optional[dict]:
 def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
                       viewable_ids: Optional[Iterable[int]] = None,
                       card_rows=None, due_overrides=None, *,
-                      with_lines: bool = False) -> List[dict]:
+                      with_lines: bool = False, stored=None) -> List[dict]:
     """The card's closed statements, oldest first: ``statement_summaries`` on
     Manila's midnight over the caller's viewable accounts, kept while the close
     is before Manila's today (a statement closing today can still take
@@ -642,13 +643,22 @@ def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
 
     Figures only by default; ``with_lines`` reads ``statement_history``
     instead, so each statement also carries its ``lines`` and ``unconverted``
-    (the minimum amount due needs them)."""
+    (the minimum amount due needs them).
+
+    Figures come from the stored closed statements (STU-601): ``stored`` is
+    the card's ``statements_store.read_card_rows`` entry matching
+    ``card_rows`` (None with every row, or when ``card_rows`` is None and the
+    store is read here)."""
     today = manila_today()
     if viewable_ids is None:
         viewable_ids = viewable_account_ids(db, user)
-    read = statement_history if with_lines else statement_summaries
-    history = read(db, card, manila_midnight(), viewable_ids, fx=fx,
-                   card_rows=card_rows, due_overrides=due_overrides)
+    if with_lines:
+        history = statement_history(db, card, manila_midnight(), viewable_ids, fx=fx,
+                                    card_rows=card_rows, due_overrides=due_overrides)
+    else:
+        history = statement_summaries(db, card, manila_midnight(), viewable_ids, fx=fx,
+                                      card_rows=card_rows, due_overrides=due_overrides,
+                                      stored=stored)
     return [s for s in history if s["close"].date() < today]
 
 
@@ -763,12 +773,14 @@ def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
         Account.account_type == AccountType.CREDIT).all()
     # The viewable accounts and every card's rows are read once, not per card.
     viewable_ids = viewable_account_ids(db, user)
-    card_rows = _card_rows(db, [c.id for c in cards], viewable_ids) if cards else None
+    card_rows, stored = (statements_store.read_card_rows(db, cards, viewable_ids, today)
+                         if cards else (None, {}))
     overrides = load_due_overrides(db, [c.id for c in cards])
     items = []
     for card in sorted(cards, key=lambda a: (a.name, a.id)):
         closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
-                                   card_rows=card_rows, due_overrides=overrides[card.id])
+                                   card_rows=card_rows, due_overrides=overrides[card.id],
+                                   stored=stored.get(card.id))
         months = unposted_months(db, card, user, due_overrides=overrides[card.id])
         latest_clear = closed[-1]["clear_through"] if closed else _ZERO
         owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
@@ -828,13 +840,16 @@ def amount_due(db: Session, user, cards: List[Account], fx: Optional[FxRates]
     today = manila_today()
     ids = [c.id for c in cards]
     viewable_ids = viewable_account_ids(db, user)
-    card_rows = _card_rows(db, ids, viewable_ids)
+    # With stored statements the rows are those placed after the stored ones:
+    # every row ``unbilled`` sums is among them (it is after the latest close).
+    card_rows, stored = statements_store.read_card_rows(db, cards, viewable_ids, today)
     overrides = load_due_overrides(db, ids)
     by_card, unbilled_sources = card_rows
     out = {}
     for card in cards:
         closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
-                                   card_rows=card_rows, due_overrides=overrides[card.id])
+                                   card_rows=card_rows, due_overrides=overrides[card.id],
+                                   stored=stored.get(card.id))
         latest_clear = closed[-1]["clear_through"] if closed else _ZERO
         owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
         unbilled = None

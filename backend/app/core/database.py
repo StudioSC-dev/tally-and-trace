@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 
 # Every session on UTC (STU-315): the date columns are timestamptz, so a naive
@@ -35,6 +35,26 @@ engine = make_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
+
+
+# Stored card statements are write-through (STU-601, docs/statements-store.md):
+# every ORM session, the app's and any script's, runs the hook. Registered here,
+# where every database user passes, and resolved at call time, so importing
+# this module imports no model or service.
+def _statements_before_flush(session, flush_context, instances):
+    from app.services import statements_store
+
+    statements_store.before_flush(session, flush_context, instances)
+
+
+def _statements_after_flush(session, flush_context):
+    from app.services import statements_store
+
+    statements_store.after_flush(session, flush_context)
+
+
+event.listen(Session, "before_flush", _statements_before_flush)
+event.listen(Session, "after_flush", _statements_after_flush)
 
 # Dependency
 def get_db():
