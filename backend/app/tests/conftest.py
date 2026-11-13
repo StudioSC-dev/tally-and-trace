@@ -91,6 +91,10 @@ def fx_fixture_rates():
         fx._offline_factory, fx._refresher.provider, fx._refresher.clock = saved
 
 
+# The realistic dataset (STU-596) as the module-scoped ``realistic`` fixture.
+from app.tests.fixtures.realistic import realistic  # noqa: E402,F401
+
+
 def sw_db_reachable() -> bool:
     url = os.getenv("DATABASE_URL", "")
     if not url:
