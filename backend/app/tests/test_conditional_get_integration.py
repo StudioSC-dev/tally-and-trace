@@ -276,6 +276,23 @@ def test_a_stale_exchange_rate_is_never_revalidated(sw_client, sw):
 
 # --- self-invalidation by a GET's own writes ----------------------------------------------
 
+def test_a_throttled_page_open_run_does_not_bump(sw_client, sw, sw_db):
+    """The Transactions page posts ``page_open`` on every open; inside the 15-minute
+    slot it writes nothing, so the next open still revalidates with 304s."""
+    a = sw["a"]
+
+    def page_open():
+        r = sw_client.post(f"{API}/budget-entries/post-due-installments",
+                           json={"trigger": "page_open"}, headers=a["headers"])
+        assert r.status_code == 200, r.text
+        return r.json()["throttled"]
+
+    assert page_open() is False  # takes the slot: a real write
+    v = version(sw_db)
+    assert page_open() is True
+    assert version(sw_db) == v
+
+
 def _page_open_cases():
     from app.tests.fixtures.realistic import CALLERS
 

@@ -1632,9 +1632,19 @@ def _claim_page_open_sql(db: Session, user: User, now: datetime) -> bool:
     """Take ``user``'s page-open slot at ``now``, without committing: one atomic
     ``UPDATE … RETURNING`` that succeeds only when the last claim is older than
     15 minutes (or there is none). A second claim made meanwhile waits on the
-    row lock, re-reads the row once the first commits, and returns no row."""
+    row lock, re-reads the row once the first commits, and returns no row.
+
+    A slot not yet free is answered from a plain read, with no UPDATE: an UPDATE
+    statement bumps the data version even when it matches no row
+    (core/data_version.py), which would make every repeat page open a full reload."""
     from sqlalchemy import text
 
+    free = db.execute(text(
+        "SELECT 1 FROM users WHERE id = :uid AND (installments_page_posted_at IS NULL "
+        "OR installments_page_posted_at <= CAST(:now AS timestamptz) - interval '15 minutes')"),
+        {"now": now, "uid": user.id}).first()
+    if free is None:
+        return False
     row = db.execute(text(
         "UPDATE users SET installments_page_posted_at = :now "
         "WHERE id = :uid AND (installments_page_posted_at IS NULL "
