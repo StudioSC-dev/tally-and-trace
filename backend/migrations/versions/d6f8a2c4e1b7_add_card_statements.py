@@ -8,8 +8,12 @@ New tables only, created empty: purely additive, so the code serving during the
 build never reads or writes them, and nothing needs a backfill (reads fill them
 lazily). The downgrade drops both (nothing references them).
 
+No data-version trigger (STU-602, ``app/core/data_version.py``): both tables are in
+``EXCLUDED_TABLES``. They are derived from rows that do bump, and a read that
+catches up writes them, so a trigger would change the version on a GET.
+
 Revision ID: d6f8a2c4e1b7
-Revises: c3d5e7a9b1f4
+Revises: a7c2e4f6b8d1
 Create Date: 2026-11-13
 
 """
@@ -17,7 +21,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "d6f8a2c4e1b7"
-down_revision = "c3d5e7a9b1f4"
+down_revision = "a7c2e4f6b8d1"
 branch_labels = None
 depends_on = None
 

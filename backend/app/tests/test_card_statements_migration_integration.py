@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REVISION = "d6f8a2c4e1b7"
-PARENT = "c3d5e7a9b1f4"
+PARENT = "a7c2e4f6b8d1"  # the data version (STU-602)
 TABLES = ("card_statements", "card_statement_state")
 
 
@@ -71,6 +71,12 @@ def test_upgrade_downgrade_upgrade(scratch_url):
         assert _tables(engine) == set()
         _alembic(scratch_url, "upgrade", REVISION)
         assert _tables(engine) == set(TABLES)
+        with engine.connect() as c:
+            # Excluded from the data version (STU-602): no bump trigger on either.
+            assert not c.execute(text(
+                "SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                "WHERE t.tgname = 'data_version_bump' AND c.relname = ANY(:t)"),
+                {"t": list(TABLES)}).scalar()
         assert _primary_key(engine, "card_statements") == ["card_id", "close"]
         assert _primary_key(engine, "card_statement_state") == ["card_id"]
         with engine.connect() as c:
