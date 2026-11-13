@@ -61,7 +61,29 @@ jobs:
       - name: Run tests
         run: |
           pip install pytest pytest-cov httpx
-          pytest --tb=short -q
+          pytest --tb=short -q --ignore=app/tests/test_perf_budgets.py
+
+      # Part of the Backend job, so the "Backend" merge gate covers it. Hard gates on SQL
+      # statements, response bytes and work counters; CPU time is reported and gated only
+      # at 3x the committed baseline (app/tests/test_perf_budgets.py).
+      - name: Performance budgets
+        env:
+          PERF_BUDGETS_REPORT: ${{ github.workspace }}/perf-budgets.md
+        run: pytest --tb=short -q app/tests/test_perf_budgets.py
+
+      - name: Performance budgets summary
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f perf-budgets.md ]; then cat perf-budgets.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload performance budgets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-budgets
+          path: perf-budgets.md
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
   # Frontend – build check
