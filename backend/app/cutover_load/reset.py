@@ -275,6 +275,11 @@ def delete_owner_rows(db, owner_id: int, household_id: int) -> None:
         "DELETE FROM accounts WHERE user_id = :owner",
         "DELETE FROM tags WHERE user_id = :owner AND NOT is_system",
     )
+    # Raw SQL bypasses the ORM: forget the stored card statements these deletes
+    # change (STU-601; rebuilt on the next read).
+    from app.services import statements_store
+
+    statements_store.reset_cards(db, statements_store.user_card_ids(db, [owner_id]))
     for statement in statements:
         db.execute(text(statement), p)
 
