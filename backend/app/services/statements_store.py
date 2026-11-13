@@ -20,7 +20,10 @@ The design and the operating notes are in ``docs/statements-store.md``. In short
   settings deletes and repopulates that card's rows. Bulk writes that bypass the
   ORM call ``reset_cards`` (a guard test keeps that list complete).
 - Every writer and the catch-up serialise per card on
-  ``pg_advisory_xact_lock(LOCK_NS, card_id)``, taken in card-id order.
+  ``pg_advisory_xact_lock(LOCK_NS, card_id)``, taken in card-id order. A read
+  holds the same lock shared (``pg_try_advisory_xact_lock_shared``, to the end of
+  its transaction) while it reads the stored rows and then the rows after them,
+  so no write commits in between; a card it cannot lock at once is replayed.
 - ``STATEMENTS_STORE=off`` makes reads replay every row, as before; the write
   hook always runs, so turning the store back on is safe.
 """
@@ -106,6 +109,31 @@ def _states(conn, ids: Iterable[int]) -> Dict[int, object]:
     if not ids:
         return {}
     return {row.card_id: row for row in conn.execute(select(_ST).where(_ST.c.card_id.in_(ids)))}
+
+
+def _held(db: Session) -> Set[int]:
+    """The cards whose lock ``db``'s current transaction holds shared (``load``);
+    a new transaction starts with none (the locks went with the last one)."""
+    tx = db.get_transaction()
+    entry = db.info.get("statements_store_held")
+    if entry is None or entry[0] is not tx:
+        entry = (tx, set())
+        db.info["statements_store_held"] = entry
+    return entry[1]
+
+
+def _try_lock_shared_all(conn, card_ids: Iterable[int]) -> List[int]:
+    """The cards whose lock this transaction now holds shared (a reader's), in one
+    statement and without waiting; held to the transaction's end. A card whose
+    lock a writer or a catch-up holds is left out."""
+    ids = sorted(set(card_ids))
+    if not ids:
+        return []
+    rows = conn.execute(text(
+        "SELECT id FROM unnest(CAST(:ids AS integer[])) WITH ORDINALITY AS t(id, n) "
+        "WHERE pg_try_advisory_xact_lock_shared(:ns, id) ORDER BY n"),
+        {"ns": LOCK_NS, "ids": ids})
+    return [row.id for row in rows]
 
 
 def _lock(conn, card_ids: Iterable[int]) -> None:
@@ -284,30 +312,50 @@ def load(db: Session, cards: Sequence, day: date, *, catch_up_first: bool = True
     if not cards or db is None:
         return {}
     conn = db.connection()
-    ids = [c.id for c in cards]
     today = manila_today()
-    states = _states(conn, ids)
+    held = _held(db)
 
-    def usable(card) -> bool:
+    def usable(card, states) -> bool:
         state = states.get(card.id)
         return (state is not None and state.materialized_through is not None
                 and state.close_day == _close_day(card))
 
-    behind = [c for c in cards if not usable(c)
-              or states[c.id].materialized_through < last_close_before(c, today)]
-    if behind and catch_up_first:
-        catch_up(db, behind, today)
-        states.update(_states(conn, [c.id for c in behind]))
-    bounds = {c.id: min(states[c.id].materialized_through, last_close_before(c, day))
-              for c in cards if usable(c)}
-    if not bounds:
+    # The stored rows and the rows the read then takes (``_card_rows``) must be one
+    # view: a writer committing between the two would leave a cycle it changed
+    # stale here, its rows dropped there. A writer holds the card's lock to its
+    # commit, so a shared hold (to this transaction's end) keeps one out until the
+    # read is done; a card whose lock a writer holds now is replayed instead.
+    # Taken without waiting, so a read never joins a lock wait. Once per card per
+    # transaction: a card already held is read at once (no catch-up can take it).
+    fresh = [c for c in cards if c.id not in held]
+    if fresh:
+        first = _states(conn, [c.id for c in fresh])
+        behind = [c for c in fresh if not usable(c, first)
+                  or first[c.id].materialized_through < last_close_before(c, today)]
+        if behind and catch_up_first:
+            catch_up(db, behind, today)
+        held.update(_try_lock_shared_all(conn, [c.id for c in fresh]))
+    locked = [c.id for c in cards if c.id in held]
+    if not locked:
         return {}
-    found: Dict[int, Dict[date, Tuple[Decimal, int]]] = {cid: {} for cid in bounds}
-    for row in conn.execute(select(_S.c.card_id, _S.c.close, _S.c.line_balance,
-                                   _S.c.line_count).where(_S.c.card_id.in_(list(bounds)))):
-        if row.close <= bounds[row.card_id]:
-            found[row.card_id][row.close] = (Decimal(row.line_balance), row.line_count)
-    return {cid: StoredCycles(through=bounds[cid], cycles=found[cid]) for cid in bounds}
+    states = {}
+    found: Dict[int, Dict[date, Tuple[Decimal, int]]] = {}
+    # The state and its rows read again in one statement, under the lock.
+    joined = (select(_ST.c.card_id, _ST.c.materialized_through, _ST.c.close_day, _S.c.close,
+                     _S.c.line_balance, _S.c.line_count)
+              .select_from(_ST.outerjoin(_S, _S.c.card_id == _ST.c.card_id))
+              .where(_ST.c.card_id.in_(locked)))
+    for row in conn.execute(joined):
+        states[row.card_id] = row
+        if row.close is not None:
+            found.setdefault(row.card_id, {})[row.close] = (Decimal(row.line_balance),
+                                                            row.line_count)
+    bounds = {c.id: min(states[c.id].materialized_through, last_close_before(c, day))
+              for c in cards if usable(c, states)}
+    return {cid: StoredCycles(through=bounds[cid],
+                              cycles={close: v for close, v in found.get(cid, {}).items()
+                                      if close <= bounds[cid]})
+            for cid in bounds}
 
 
 def read_card_rows(db: Session, cards: Sequence, viewable_ids: Iterable[int], day: date, *,

@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import text
 
 from app.tests.conftest import sw_db_reachable
+from app.tests.statements_store_checks import first_difference
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable")
 
@@ -604,3 +605,58 @@ def test_a_write_through_bumps_the_data_version_with_the_stored_rows(realistic, 
     assert r.status_code in (200, 201), r.text
     assert _version(sw_db) == before + 1
     assert _stored(sw_db, card_id)[close] == (stored[0] + 42, stored[1] + 1)
+
+
+# --- one view: a write committing between the stored rows and the rows ------------------------
+
+def test_a_write_between_the_stored_rows_and_the_rows_is_not_half_seen(realistic, sw_db,
+                                                                       monkeypatch):
+    """A back-dated edit committed after the read took the stored cycles and before
+    it took the rows: the read sees the world before the edit or after it, never
+    the stored cycle before it and the moved row after it (counted twice)."""
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction, TransactionType
+    from app.services import statements, statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    through = _state(sw_db, card_id).materialized_through
+    sw_db.rollback()
+    moved = (sw_db.query(Transaction)
+             .filter(Transaction.account_id == card_id, Transaction.is_posted.is_(True),
+                     Transaction.transaction_type == TransactionType.DEBIT,
+                     Transaction.posting_date.is_(None),
+                     Transaction.transaction_date < datetime.combine(through, time()))
+             .order_by(Transaction.transaction_date.desc()).first()).id
+    card = _card(sw_db, card_id)
+    midnight, viewable = datetime.combine(today, time()), _owner_view(sw_db, card)
+    monkeypatch.setenv("STATEMENTS_STORE", "off")
+    before = statements.statement_summaries(sw_db, card, midnight, viewable)
+    monkeypatch.delenv("STATEMENTS_STORE")
+    sw_db.rollback()
+
+    def move_to_today():
+        db = SessionLocal()
+        try:
+            db.get(Transaction, moved).transaction_date = datetime.combine(today, time(9))
+            db.commit()  # the hook waits for the card's lock
+        finally:
+            db.close()
+
+    writer = threading.Thread(target=move_to_today)
+    original = statements_store._card_rows
+
+    def rows_after_a_write(*args, **kwargs):
+        writer.start()
+        writer.join(1.5)  # committed unless the read holds the card
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(statements_store, "_card_rows", rows_after_a_write)
+    card = _card(sw_db, card_id)
+    got = statements.statement_summaries(sw_db, card, midnight, viewable)
+    monkeypatch.undo()
+    sw_db.rollback()  # the read's transaction ends: the writer goes on
+    writer.join(20)
+    assert not writer.is_alive()
+    assert repr(got) == repr(before), first_difference(got, before)
+    assert _good(_verify(sw_db, card_id, today))
