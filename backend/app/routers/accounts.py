@@ -543,7 +543,7 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
       event on the card, it is any occurrence from today on that no linked
       transaction stands for. Once the card is inactive their legs drop, so
       either is refused.
-    - A card with an open statement: any statement in ``statement_history``
+    - A card with an open statement: any statement in ``statement_summaries``
       that still owes something after payments ("open" or "overdue"). That
       includes the cycle open today and later ones, posted and unposted
       recorded charges alike; recurring occurrences not yet recorded are not
@@ -566,7 +566,7 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
     """
     from app.models.budget_entry import BudgetEntry
     from app.services.forecast import card_entries_still_bill, has_unsuppressed_occurrence
-    from app.services.statements import statement_history
+    from app.services.statements import statement_summaries
 
     if not (data.get("is_active") is False and account.is_active):
         return
@@ -588,9 +588,11 @@ def _validate_deactivation(db: Session, current_user: User, data: dict,
         ).all()
         if card_entries_still_bill(db, account, entries, _start_of_today()):
             raise HTTPException(status_code=400, detail=CARD_RECURRING_ENTRY_DETAIL)
-        history = statement_history(db, account, manila_midnight(),
-                                    viewable_account_ids(db, current_user))
-        if any(statement["owed"] > 0 or statement["unconverted"] for statement in history):
+        # ``incomplete`` is True from the first statement with an unconverted
+        # line onward, so any() over it is "some statement left a line out".
+        history = statement_summaries(db, account, manila_midnight(),
+                                      viewable_account_ids(db, current_user))
+        if any(statement["owed"] > 0 or statement["incomplete"] for statement in history):
             raise HTTPException(status_code=400, detail=CARD_OPEN_STATEMENT_DETAIL)
     elif account.account_type == AccountType.LOAN:
         pending = db.query(Transaction.id).filter(

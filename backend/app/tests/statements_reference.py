@@ -1,0 +1,875 @@
+"""Frozen reference copy of the card statement replay (STU-600, PERF-5).
+
+This module is a verbatim copy of ``backend/app/services/statements.py`` at
+commit 1b2d92c (origin/main when the single-pass engine was written). Only
+this docstring was added; every line of code below it is unchanged. It is the
+oracle the single-pass engine (``app.services.statements``) is tested against
+(``test_statement_engine_oracle.py``) and that later work on stored
+statements (PERF-6) compares with. Do not edit it to follow a behaviour
+change: a deliberate change to statement figures replaces this file with a
+new verbatim copy, citing the new commit.
+
+It is a test module: nothing under ``app/`` outside ``app/tests`` imports it.
+
+The original module docstring follows.
+
+---
+Credit-card statement modelling for Tally & Trace.
+
+A credit card doesn't spend cash when you swipe it -- it spends cash when you pay
+the statement. This module turns a card's transactions into the thing that actually
+hits your bank account: **one dated payable per billing cycle**.
+
+The cycle contract (see HANDOVER Session 14 for why):
+
+    billing_cycle_start   day-of-month the statement CLOSES
+    days_until_due_date   days from close to payment due (default 21)
+
+    close  = <billing_cycle_start> of month M      e.g. Jul 24
+    window = (previous close, close], whole days   e.g. Jun 25 .. Jul 24
+    due    = close + days_until_due_date,          e.g. Aug 14
+             rolled to the next PH banking day
+             (a weekend or PH holiday moves it to the day the bank opens;
+             the close itself never moves; see app/services/banking_days.py)
+
+A statement is identified by its close. When the owner enters the due date the
+bank printed on a statement (``card_statement_due_overrides``), that date
+replaces the rolled due for that statement and is used as it is, never rolled.
+The close and the window never move. Every cycle walk takes the card's
+overrides (``load_due_overrides``) explicitly.
+
+Legacy fallback: a card with only ``due_date`` (day-of-month) set is read as
+closing ``days_until_due_date`` days *before* that due day, which collapses to the
+same (close, due) pair without a second code path. A card with neither field can't
+be modelled and is skipped.
+
+The statement balance is derived from the card's own transactions in the window --
+matching how the owner keeps per-card SOA ledgers, where line items sum to the
+statement balance. DEBIT (a purchase) increases what's owed; CREDIT (a refund or
+payment) decreases it. A line item is placed by its ``statement_day``, read on a
+given today: a posted row by the later of its own day and the Manila day of its
+``posting_date`` (a charge the bank posts after the close is on the next
+statement), an unposted row by the later of its own day and today (it is
+planned spending that will land on the statement still open, never on one
+already closed). Both posted and unposted transactions count. A cycle whose
+balance is <= 0 owes nothing; a negative balance (refunds exceeding charges) is
+a credit that pays other statements like a payment does.
+
+Payments are transfers INTO the card (``transfer_to_account_id``), posted or
+planned. They are netted against statements, not against the cycle they are dated
+in: each payment is consumed exactly once, oldest outstanding statement first,
+whether it was made before the close, early, on time or late. A statement's
+payable is what remains of its line-item balance after that allocation, so a
+fully paid statement has no payable and a partly paid one owes the remainder.
+The cash side of a payment is modelled on the paying account by the forecast
+engine (a posted one is in its balance, a planned one is a dated outflow), so
+each peso of a statement leaves cash exactly once: as payment or as payable.
+
+A transfer OUT of the card (a cash advance or balance transfer) is a line item:
+the card is charged the amount plus the transfer fee, placed by the transfer's
+``statement_day``, so the cash it brought in is repaid through that statement.
+Payments keep their ``transaction_date``: when money was paid decides what it
+pays and whether it was on time.
+
+All money is Decimal end to end; dates are naive UTC to match the naive
+transaction_date column (see app/core/time.py for the naive/aware split).
+"""
+
+from __future__ import annotations
+
+from calendar import monthrange
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
+from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
+
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+
+from app.core.time import manila_day
+from app.models.account import Account, AccountType
+from app.models.card_statement_due_override import CardStatementDueOverride
+from app.services.banking_days import next_banking_day
+from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
+
+DEFAULT_DAYS_UNTIL_DUE = 21
+
+
+def _clamp_day(year: int, month: int, day: int) -> int:
+    """Clamp a day-of-month to the month's length (day 31 -> 30 or 28/29)."""
+    return min(day, monthrange(year, month)[1])
+
+
+def _month_step(year: int, month: int, delta: int) -> Tuple[int, int]:
+    index = (year * 12 + (month - 1)) + delta
+    return index // 12, index % 12 + 1
+
+
+def resolve_cycle_fields(card: Account) -> Optional[Tuple[int, int]]:
+    """Return ``(close_day, days_until_due)`` for a card, or ``None`` if unmodellable.
+
+    Prefers ``billing_cycle_start`` (the statement close day). Falls back to the
+    legacy ``due_date`` day-of-month by working backwards from the due day.
+    """
+    days_until_due = card.days_until_due_date
+    if days_until_due is None:
+        days_until_due = DEFAULT_DAYS_UNTIL_DUE
+
+    if card.billing_cycle_start:
+        return card.billing_cycle_start, days_until_due
+
+    if card.due_date:
+        # Only the due day is known: treat the statement as closing
+        # `days_until_due` days earlier, so the (close, due) pair still holds.
+        anchor = datetime(2000, 1, _clamp_day(2000, 1, card.due_date))
+        return (anchor - timedelta(days=days_until_due)).day, days_until_due
+
+    return None
+
+
+def statement_close(card: Account, day: date) -> Optional[date]:
+    """Close of the card's statement whose cycle contains calendar day ``day``.
+
+    ``None`` for a card without cycle settings. No due override moves a close,
+    so none is needed here.
+    """
+    fields = resolve_cycle_fields(card)
+    if fields is None:
+        return None
+    close_day = fields[0]
+    y, m = day.year, day.month
+    if day.day > _clamp_day(y, m, close_day):
+        y, m = _month_step(y, m, 1)
+    return date(y, m, _clamp_day(y, m, close_day))
+
+
+def load_due_overrides(db: Session, card_ids: Iterable[int]) -> Dict[int, Dict[date, date]]:
+    """``{card id: {statement close: printed due}}`` for ``card_ids``, in one query.
+
+    Every id asked for is a key, with ``{}`` when the card has no override.
+    """
+    ids = list(dict.fromkeys(card_ids))
+    out: Dict[int, Dict[date, date]] = {cid: {} for cid in ids}
+    if not ids:
+        return out
+    rows = db.query(CardStatementDueOverride.account_id, CardStatementDueOverride.statement_close,
+                    CardStatementDueOverride.due_date).filter(
+        CardStatementDueOverride.account_id.in_(ids))
+    for account_id, close, due in rows:
+        out[account_id][close] = due
+    return out
+
+
+def computed_due(close: date, days_until_due: int) -> date:
+    """A statement's due without an override: ``close + days``, rolled to the
+    next PH banking day."""
+    return next_banking_day(close + timedelta(days=days_until_due))
+
+
+def iter_cycles_from(card: Account, first: date, end: datetime,
+                     through: Optional[date] = None, *,
+                     due_overrides: Mapping[date, date]) -> Iterator[dict]:
+    """Yield every cycle from the one containing day ``first`` up to those due before ``end``.
+
+    Each cycle is ``{window_start, close, due, computed_due, due_overridden}``.
+    Walking from the card's first line item, not from the window start, reaches
+    back through its history, which is what allocating payments
+    oldest-statement-first needs.
+
+    ``due_overrides`` is the card's ``{close: printed due}`` (a
+    ``load_due_overrides`` entry). It is required, so a caller cannot forget
+    it and show a wrong due. ``due`` is the override when there is one, else
+    ``computed_due``; ``due_overridden`` says which. Overrides keep dues
+    strictly increasing (they are validated against their neighbours), so the
+    stop below still holds.
+
+    With ``through``, the walk also continues past ``end`` until it has yielded
+    the cycle containing day ``through``, so a line item dated after the window
+    (a refund whose credit pays an earlier statement) still gets its cycle.
+    """
+    fields = resolve_cycle_fields(card)
+    if fields is None:
+        return
+    close_day, days_until_due = fields
+
+    y, m = first.year, first.month
+    if first.day > _clamp_day(y, m, close_day):
+        y, m = _month_step(y, m, 1)
+    while True:
+        close = datetime(y, m, _clamp_day(y, m, close_day))
+        computed = datetime.combine(computed_due(close.date(), days_until_due), time())
+        override = due_overrides.get(close.date())
+        due = datetime.combine(override, time()) if override is not None else computed
+        py, pm = _month_step(y, m, -1)
+        window_start = datetime(py, pm, _clamp_day(py, pm, close_day))
+        if due >= end and (through is None or window_start.date() >= through):
+            return
+        yield {
+            "window_start": window_start,
+            "close": close,
+            "due": due,
+            "computed_due": computed,
+            "due_overridden": override is not None,
+        }
+        y, m = _month_step(y, m, 1)
+
+
+def statement_due_date(card: Account, day: date, *,
+                       due_overrides: Mapping[date, date]) -> Optional[datetime]:
+    """Due date of the card's statement whose cycle contains calendar day ``day``.
+
+    ``None`` for a card without cycle settings. ``due_overrides`` as for
+    ``iter_cycles_from``.
+    """
+    # end=datetime.min stops the walk right after the cycle containing ``day``.
+    cycle = next(iter_cycles_from(card, day, datetime.min, through=day,
+                                  due_overrides=due_overrides), None)
+    return cycle["due"] if cycle else None
+
+
+def due_in_order(card: Account, close: date, due_overrides: Mapping[date, date]) -> bool:
+    """Whether the due of the statement closing on ``close`` keeps the order.
+
+    Under ``due_overrides`` its due (the override, else the computed one) is
+    after its close and strictly between the dues of the statements before
+    and after it (each the override, else the computed due). Strictly
+    increasing dues keep the walk's stop, ``settle_projected``'s
+    first-cycle-due-on-or-after rule and the overdue carry correct. False when
+    ``close`` is not a close of the card.
+    """
+    if statement_close(card, close) != close:
+        return False
+    # The previous close is this cycle's window start (a close of the card).
+    previous = next(iter_cycles_from(card, close, datetime.min, through=close,
+                                     due_overrides={}))["window_start"].date()
+    following = statement_close(card, close + timedelta(days=1))
+    cycles = list(iter_cycles_from(card, previous, datetime.min, through=following,
+                                   due_overrides=due_overrides))
+    by_close = {c["close"].date(): c["due"].date() for c in cycles}
+    due = by_close[close]
+    return close < due and by_close[previous] < due < by_close[following]
+
+
+def due_override_conflicts(card: Account, due_overrides: Mapping[date, date]) -> List[date]:
+    """The closes in ``due_overrides`` whose due is out of order (``due_in_order``)
+    under ``card``'s cycle settings, oldest first. Every pair of neighbouring
+    statements with an override between them is checked."""
+    return [close for close in sorted(due_overrides)
+            if not due_in_order(card, close, due_overrides)]
+
+
+def allocate_payments(balances: List[Decimal], payments: List[Decimal]) -> List[Decimal]:
+    """What each statement still owes after the payments, oldest statement first.
+
+    ``balances`` are statement balances in close order; ``payments`` in date order.
+    Each payment is consumed exactly once: it pays down the oldest statement with
+    something outstanding and spills any excess into the next one. Payments left
+    over after the last statement are a credit on the card and pay nothing here.
+
+    A statement with a negative balance (refunds exceeding charges) owes nothing,
+    and its net credit is consumed exactly like a payment: oldest outstanding
+    statement first, any excess carrying forward. Payments and credits form one
+    pool spent oldest-statement-first, so their order does not change the result.
+    """
+    remaining = [max(b, Decimal("0")) for b in balances]
+    credits = [-b for b in balances if b < 0]
+    i = 0
+    for amount in [*payments, *credits]:
+        left = amount
+        while left > 0 and i < len(remaining):
+            paid = min(left, remaining[i])
+            remaining[i] -= paid
+            left -= paid
+            if remaining[i] == 0:
+                i += 1
+    return remaining
+
+
+def unspent_pool(balances: List[Decimal], payments: List[Decimal],
+                 remaining: List[Decimal]) -> Decimal:
+    """What ``allocate_payments`` left of its pool: payments and net credits it
+    did not spend because no statement was left owing anything."""
+    pool = sum(payments, Decimal("0")) + sum((-b for b in balances if b < 0), Decimal("0"))
+    spent = sum((max(b, Decimal("0")) for b in balances), Decimal("0")) - sum(
+        remaining, Decimal("0"))
+    return pool - spent
+
+
+def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
+                     projected: list) -> List[Decimal]:
+    """Apply projected line items on top of the settled recorded ledger.
+
+    ``owed`` is what each cycle still owes after ``allocate_payments`` ran over
+    the recorded rows alone, and ``pool`` what that left unspent. Projected rows
+    never reopen that settlement, so they cannot change what a recorded payment
+    or credit already paid:
+
+    - a projected charge adds to the cycle containing it;
+    - the unspent recorded pool then pays outstanding cycles oldest first;
+    - a projected credit (an income scheduled on the card) pays, in date order,
+      the oldest outstanding statement due on or after its date. It never
+      reaches a statement already due before it was credited, so one dated
+      after a window cannot change a payable inside it.
+    """
+    owed = list(owed)
+
+    def spend(amount: Decimal, i: int) -> None:
+        while amount > 0 and i < len(owed):
+            paid = min(amount, owed[i])
+            owed[i] -= paid
+            amount -= paid
+            i += 1
+
+    credits = []
+    for row in projected:
+        day = row.transaction_date.date()
+        amount = Decimal(str(row.amount))
+        if row.transaction_type == TransactionType.CREDIT:
+            credits.append((day, amount))
+            continue
+        if row.transaction_type != TransactionType.DEBIT:
+            continue
+        for i, cycle in enumerate(cycles):
+            if cycle["window_start"].date() < day <= cycle["close"].date():
+                owed[i] += amount
+                break
+    spend(pool, 0)
+    for day, amount in sorted(credits, key=lambda c: c[0]):
+        first = next((i for i, c in enumerate(cycles) if c["due"].date() >= day), len(cycles))
+        spend(amount, first)
+    return owed
+
+
+def _split_card_rows(card_id: int, rows: list, unbilled_ids: frozenset = frozenset(),
+                     keep_source: bool = False, payment_sources: bool = False
+                     ) -> Tuple[list, List[tuple]]:
+    """Separate a card's rows into statement line items and payments into the card.
+
+    Only a transfer's ``transfer_*`` fields are meaningful (a row edited from a
+    transfer into a debit may keep stale ones). A transfer into the card is a
+    payment; a transfer out of it is a charge of its amount plus fee.
+
+    A transfer from a card in ``unbilled_ids`` (no cycle settings) is not a
+    payment: no statement of that card bills it, so no cash ever leaves for it
+    (the forecast treats it as moving no cash, see ``forecast._transfer_event``),
+    and netting it would make the debt it moved disappear.
+
+    With ``keep_source`` a cash advance's line keeps its row as ``source``.
+    With ``payment_sources`` each payment is ``(date, amount, paying account id, row)``.
+    """
+    lines: list = []
+    payments: List[Tuple[datetime, Decimal]] = []
+    for row in rows:
+        if row.transaction_type == TransactionType.TRANSFER:
+            amount = Decimal(str(row.amount))
+            if getattr(row, "transfer_to_account_id", None) == card_id:
+                source = getattr(row, "transfer_from_account_id", None) or row.account_id
+                # What the card received (card payments are same-currency by
+                # rule; a legacy row's stored received amount still wins).
+                received = transfer_sides(row)[1]
+                if source not in unbilled_ids:
+                    payments.append((row.transaction_date, received, source, row)
+                                    if payment_sources else (row.transaction_date, received))
+            elif (getattr(row, "transfer_from_account_id", None) or row.account_id) == card_id:
+                fee = Decimal(str(getattr(row, "transfer_fee", None) or 0))
+                extra = {"source": row} if keep_source else {}
+                lines.append(SimpleNamespace(
+                    transaction_date=row.transaction_date,
+                    is_posted=getattr(row, "is_posted", True),
+                    posting_date=getattr(row, "posting_date", None),
+                    amount=amount + fee,
+                    transaction_type=TransactionType.DEBIT,
+                    **extra,
+                ))
+            continue
+        lines.append(row)
+    payments.sort(key=lambda p: p[0].date())
+    return lines, payments
+
+
+def _row_amount(row) -> Decimal:
+    return Decimal(str(row.amount))
+
+
+def normalise_lines(db: Optional[Session], card: Account, lines: list, fx=None):
+    """A card's line items in the card's currency (STU-236, plan D5).
+
+    Returns ``(kept, amount_of, estimates, unconverted)``. A pending debit or
+    credit whose face (``pending_face``) is in another currency is estimated
+    at the stored rate (``fx``, offline when None); one with no stored rate is
+    left out of ``kept`` (so out of every balance) and listed in
+    ``unconverted`` as ``(line, face, face currency)``. Every other line keeps
+    its stored ``amount``, read in the card's currency (posted rows are actual
+    figures; a cash advance is the card's own). ``amount_of(line)`` is the
+    figure to use, and ``estimates`` maps ``id(line)`` to
+    ``{original_amount, original_currency, rate}`` for an estimated line.
+    Lines keep their identity, so callers can still key on them.
+    """
+    from app.services.fx import FxRates, convert
+
+    card_currency = getattr(card.currency, "value", card.currency)
+    amounts: dict = {}
+    estimates: dict = {}
+    kept: list = []
+    unconverted: list = []
+    rates = fx
+    for line in lines:
+        estimate = getattr(line, "estimate", None)
+        if estimate is not None:
+            estimates[id(line)] = estimate
+        if (isinstance(line, Transaction) and not line.is_posted
+                and line.transaction_type in (TransactionType.DEBIT, TransactionType.CREDIT)):
+            face, currency = pending_face(line)
+            currency = getattr(currency, "value", currency)
+            if currency is not None and currency != card_currency and face is not None:
+                if rates is None:
+                    rates = FxRates.offline(db)
+                rate = rates.rate(currency, card_currency)
+                if rate is None:
+                    unconverted.append((line, face, currency))
+                    continue
+                amounts[id(line)] = convert(face, rate.rate)
+                estimates[id(line)] = {"original_amount": face, "original_currency": currency,
+                                       "rate": rate}
+        kept.append(line)
+
+    def amount_of(row) -> Decimal:
+        figure = amounts.get(id(row))
+        return figure if figure is not None else _row_amount(row)
+
+    return kept, amount_of, estimates, unconverted
+
+
+def statement_estimate(lines: list, estimates: dict) -> Optional[dict]:
+    """A statement's estimate label from its estimated lines, or None.
+
+    ``rates`` keeps every contributing rate (one per currency pair), so each
+    pair can be reported and the label's freshness is that of all of them.
+    ``original_amount`` is the sum of the estimated lines' faces when they
+    share one currency (a credit line's face subtracted, as a refund lowers
+    the balance), with that conversion's ``rate``. Lines in several
+    currencies have no single original figure or rate: the label then
+    carries no ``original_*`` or ``rate`` keys at all, only ``rates`` (the
+    statement is still an estimate).
+    """
+    estimated = [line for line in lines if id(line) in estimates]
+    if not estimated:
+        return None
+    found = [estimates[id(line)] for line in estimated]
+    rates = list({(e["rate"].base, e["rate"].quote): e["rate"] for e in found}.values())
+    currencies = {e["original_currency"] for e in found}
+    if len(currencies) != 1:
+        return {"rates": rates}
+    original = sum((-e["original_amount"]
+                    if getattr(line, "transaction_type", None) == TransactionType.CREDIT
+                    else e["original_amount"] for line, e in zip(estimated, found)),
+                   Decimal("0"))
+    return {"original_amount": original,
+            "original_currency": currencies.pop(), "rate": found[0]["rate"], "rates": rates}
+
+
+def statement_day(row, today: date) -> date:
+    """The calendar day that places a line item on a statement, read on ``today``.
+
+    - A posted row is billed on the later of its own day and the Manila day of
+      its ``posting_date`` (``manila_day``): a charge the bank posts after the
+      close is on the next statement. It never bills before it happened, so
+      an earlier ``posting_date`` is ignored; with none, its own day.
+    - An unposted row is billed on the later of its own day and ``today``: it
+      has not reached any statement that has already closed, so it sits on the
+      cycle open on ``today``, exactly where posting it today would put it.
+      A stale ``posting_date`` on it is ignored.
+    - A row without ``is_posted`` (a projected line, a ``settles_as_recorded``
+      month) counts as posted with no ``posting_date``: its own day.
+    """
+    own = row.transaction_date.date()
+    if not getattr(row, "is_posted", True):
+        return max(own, today)
+    posted = getattr(row, "posting_date", None)
+    return max(own, manila_day(posted)) if posted is not None else own
+
+
+def on_statement(row, cycle: Mapping, today: date) -> bool:
+    """Whether line item ``row`` is on the statement of ``cycle`` (an
+    ``iter_cycles_from`` cycle): its ``statement_day`` is in the cycle's
+    calendar days ``(window_start, close]``."""
+    return (cycle["window_start"].date() < statement_day(row, today)
+            <= cycle["close"].date())
+
+
+def statement_balance(transactions: List[Transaction], window_start: datetime, close: datetime,
+                      amount_of=_row_amount, *, today: date) -> Decimal:
+    """Sum a card's charges over the calendar days ``(window_start, close]``.
+
+    Days, not instants: ``close`` is midnight of the closing day, but a charge at
+    any time ON that day belongs to this statement, and one at any time on the
+    previous closing day belongs to the previous statement. A row's day is its
+    ``statement_day`` on ``today``; ``today`` is required, so no caller can
+    forget it.
+
+    This is the LINE-ITEM balance: purchases add to what's owed, refunds subtract.
+    Transfers are not line items -- a card payment (a transfer into the card) is
+    netted against statements by ``allocate_payments`` instead.
+    """
+    first_excluded, last_included = window_start.date(), close.date()
+    total = Decimal("0")
+    for txn in transactions:
+        if not (first_excluded < statement_day(txn, today) <= last_included):
+            continue
+        if txn.transaction_type == TransactionType.DEBIT:
+            total += amount_of(txn)
+        elif txn.transaction_type == TransactionType.CREDIT:
+            total -= amount_of(txn)
+    return total
+
+
+def build_statement_payables(
+    cards: List[Account],
+    transactions_by_card: dict,
+    start: datetime,
+    end: datetime,
+    unbilled_sources: frozenset = frozenset(),
+    projected_by_card: Optional[dict] = None,
+    normalise=None,
+    due_overrides_by_card: Optional[Mapping[int, Mapping[date, date]]] = None,
+) -> List[dict]:
+    """Pure core: turn cards + their transactions into dated payable events.
+
+    ``due_overrides_by_card`` is ``load_due_overrides``'s result: each
+    statement with a printed due is payable on it (none by default).
+
+    ``normalise(card, lines)`` (``normalise_lines``) puts each card's line
+    items in the card's currency; by default every stored amount is used as
+    it is. A payable whose cycle holds an estimated line carries
+    ``line_estimate`` (``statement_estimate``); the key is absent otherwise.
+
+    ``transactions_by_card`` holds every row touching each card: its own charges
+    and refunds, transfers out of it (cash advances, billed as charges) and
+    transfers into it (payments; one from a card without cycle settings is
+    ignored, see ``_split_card_rows``). Such a source is any card in ``cards``
+    without cycle settings, plus the ids in ``unbilled_sources``: the caller
+    names those from the source account itself, so a card outside ``cards``
+    (an inactive one) counts too. ``_card_rows`` names only cards the caller
+    can view: one they can't view counts as billed.
+
+    ``projected_by_card`` holds line items that have no transaction yet (budget
+    entries scheduled on the card), which the caller projects only up to ``end``.
+    The recorded ledger is settled first: every cycle from the card's first line
+    item onward is balanced from recorded rows alone and the payments are
+    allocated across them (see ``allocate_payments``). Projected rows are applied
+    to that result (see ``settle_projected``), so they never change what a
+    recorded payment or credit did for an earlier statement. A cycle still owing
+    something and due in ``[start, end)`` becomes a payable for the remainder.
+
+    A projected line carrying ``settles_as_recorded`` (a reviewed card
+    installment's month dated on or before ``start``'s day, STU-343 Plan B, see
+    ``forecast._card_entry_charges``) is moved into the recorded lines first:
+    it is balanced and paid with them, exactly as the row any recorder writes
+    for that day would be, so recording it moves no payable. The set depends
+    on ``start`` alone, so the invariant below still holds.
+
+    The allocation runs over every cycle up to the one holding the card's last
+    line item, even when that cycle is due on or after ``end``: a net-credit cycle
+    beyond the window still pays older statements. Only the emitted events are
+    limited to the window. So, given the same recorded rows, a payable inside a
+    window is the same for any longer window with the same start, whatever
+    projected rows the longer window adds: a projected charge dated on or after
+    ``end`` lands in a cycle due after ``end`` and only draws on what the earlier
+    cycles left of the pool, and a projected credit dated on or after ``end`` only
+    pays statements due on or after its date.
+
+    Line items are placed by their ``statement_day`` on ``start``'s day, which
+    never reads ``end``, so the invariant above holds for unposted rows too.
+    What does move with ``start`` is membership: an unposted row leaves a
+    statement the day after it closes (it rolls to the open one), and returns
+    if it is later posted with a ``posting_date`` before that close.
+
+    A cycle still owing something whose due date is before ``start`` is overdue:
+    like an overdue unposted transaction, it is emitted dated ``start`` with
+    ``overdue`` True and its due date as ``original_date``.
+
+    Returns timeline events shaped like the ones ``build_timeline`` /
+    ``route_accounts`` already consume (negative amount = outflow).
+    """
+    events: List[dict] = []
+    today = start.date()
+    unbilled_ids = unbilled_sources | frozenset(
+        c.id for c in cards if resolve_cycle_fields(c) is None)
+    for card in cards:
+        lines, payments = _split_card_rows(
+            card.id, transactions_by_card.get(card.id, []), unbilled_ids)
+        projected = (projected_by_card or {}).get(card.id, [])
+        lines = [*lines, *(row for row in projected
+                           if getattr(row, "settles_as_recorded", False))]
+        projected = [row for row in projected
+                     if not getattr(row, "settles_as_recorded", False)]
+        amount_of, estimates = _row_amount, {}
+        if normalise is not None:
+            lines, amount_of, estimates, _ = normalise(card, lines)
+            estimates = {**estimates, **{id(row): row.estimate for row in projected
+                                         if getattr(row, "estimate", None) is not None}}
+        if not lines and not projected:
+            continue  # no charges -> nothing owed, whatever was paid in
+        # Calendar dates: rows may mix naive and aware datetimes.
+        days = [statement_day(row, today) for row in [*lines, *projected]]
+        cycles = list(iter_cycles_from(
+            card, min(days), end, through=max(days),
+            due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
+        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of,
+                                      today=today)
+                    for c in cycles]
+        paid_in = [amount for _, amount in payments]
+        settled = allocate_payments(recorded, paid_in)
+        remaining = settle_projected(
+            cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
+        balances = [statement_balance([*lines, *projected], c["window_start"], c["close"],
+                                      amount_of, today=today)
+                    for c in cycles]
+        for cycle, balance, owed in zip(cycles, balances, remaining):
+            if owed <= 0 or cycle["due"] >= end:
+                continue  # nothing owed, or due after the window
+            overdue = {}
+            if cycle["due"] < start:
+                overdue = {"overdue": True, "original_date": cycle["due"]}
+            labels = {}
+            if estimates:
+                estimate = statement_estimate(
+                    [row for row in [*lines, *projected]
+                     if on_statement(row, cycle, today)], estimates)
+                if estimate is not None:
+                    labels = {"line_estimate": estimate}
+            events.append({
+                "date": start if overdue else cycle["due"],
+                "name": f"{card.name} statement",
+                "amount": -owed,
+                "type": "expense",
+                "source": "statement",
+                "source_id": card.id,
+                "funding_account_id": card.payment_account_id,
+                "overflow_account_id": card.payment_overflow_account_id,
+                "statement_close": cycle["close"],
+                "statement_balance": balance,
+                **overdue,
+                **labels,
+            })
+    return events
+
+
+def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
+    """Every row touching each card (whoever entered it) and the unbilled payment sources.
+
+    ``viewable_ids`` are the accounts the caller can view: a source card outside
+    them counts as billed whatever its cycle settings, so its payment always
+    nets the statement and those hidden settings change nothing the caller is
+    shown (as ``collect_events`` treats it). For a user with no shares every
+    source card is their own, so nothing changes.
+    """
+    txns = (
+        db.query(Transaction)
+        .filter(or_(
+            Transaction.account_id.in_(card_ids),
+            and_(
+                Transaction.transaction_type == TransactionType.TRANSFER,
+                or_(
+                    Transaction.transfer_to_account_id.in_(card_ids),
+                    Transaction.transfer_from_account_id.in_(card_ids),
+                ),
+            ),
+        ))
+        .all()
+    )
+    by_card: dict = {cid: [] for cid in card_ids}
+    for txn in txns:
+        touched = {txn.account_id}
+        if txn.transaction_type == TransactionType.TRANSFER:
+            touched |= {txn.transfer_to_account_id, txn.transfer_from_account_id}
+        for cid in touched & set(card_ids):
+            by_card[cid].append(txn)
+
+    # Whether a payment's source card is billed is a fact about that account, not
+    # about this view: it is loaded by id, outside the card scope above, so a
+    # payment from an out-of-scope or inactive card without cycle settings
+    # still does not net the statement it was paid into.
+    viewable = set(viewable_ids)
+    source_ids = {
+        txn.transfer_from_account_id or txn.account_id
+        for txn in txns
+        if txn.transaction_type == TransactionType.TRANSFER
+        and txn.transfer_to_account_id in card_ids
+    } & viewable
+    unbilled_sources = frozenset()
+    if source_ids:
+        unbilled_sources = frozenset(
+            a.id for a in db.query(Account).filter(Account.id.in_(source_ids))
+            if a.account_type == AccountType.CREDIT and resolve_cycle_fields(a) is None
+        )
+    return by_card, unbilled_sources
+
+
+def statement_history(db: Session, card: Account, today: datetime,
+                      viewable_ids: Iterable[int], fx=None, card_rows=None,
+                      due_overrides: Optional[Mapping[date, date]] = None) -> List[dict]:
+    """The card's recorded statements, oldest first, through the cycle open on ``today``.
+
+    Each is ``{close, due, balance, owed, status, lines}``: ``balance`` is the
+    line-item balance, ``owed`` what is left of it after payments (allocated
+    oldest statement first, as for payables), ``status`` "paid" (nothing owed),
+    "overdue" (owed and due before ``today``) or "open", and ``lines`` the
+    charges and refunds in its window as ``{date, amount, transaction}``
+    (a refund negative; a cash advance its amount plus fee), each placed by
+    its ``statement_day`` read on ``today``'s day, so the listed lines always
+    sum to ``balance``. Recorded rows only: nothing is projected.
+    ``viewable_ids`` are the caller's viewable accounts (see ``_card_rows``).
+
+    Four more keys feed the minimum amount due (STU-343 Plan C, 2.5):
+    ``outstanding`` is every line whose ``statement_day`` is on or before the
+    close (debits less credits) less every payment dated on or before it;
+    ``paid_since_close`` every payment dated after the close; ``clear_through`` the sum of
+    ``owed`` over this statement and every one before it (what clears it,
+    since payments settle oldest first); and ``incomplete`` whether this or
+    an earlier statement left a line out for want of a rate. Posted and
+    planned rows count alike, as for every other figure here.
+
+    Lines are in the card's currency (``normalise_lines``, at the stored rates
+    of ``fx``, offline when None): a line estimated from a foreign face carries
+    ``estimate``, and one with no stored rate is left out of ``balance`` and
+    ``owed`` and listed in its statement's ``unconverted`` as
+    ``{date, original_amount, original_currency, transaction}``.
+
+    ``card_rows`` is a ``_card_rows`` result already read for this card (and
+    possibly others), so a caller walking many cards reads them once; None
+    reads this card's own. ``due_overrides`` is the card's
+    ``load_due_overrides`` entry, read for this card when None; each
+    statement's ``due`` is its printed due when it has one, and it also
+    carries ``computed_due`` and ``due_overridden`` (``iter_cycles_from``).
+    """
+    if resolve_cycle_fields(card) is None:
+        return []
+    by_card, unbilled_sources = (card_rows if card_rows is not None
+                                 else _card_rows(db, [card.id], viewable_ids))
+    rows = by_card.get(card.id, [])
+    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
+    lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
+    if not lines and not unconverted:
+        return []
+    day = today.date()
+    days = [statement_day(row, day) for row in [*lines, *(u[0] for u in unconverted)]]
+    last = max(max(days), day)
+    if due_overrides is None:
+        due_overrides = load_due_overrides(db, [card.id])[card.id]
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
+                                   due_overrides=due_overrides))
+    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of, today=day)
+                for c in cycles]
+    owed = allocate_payments(balances, [amount for _, amount in payments])
+    history = []
+    clear_through = Decimal("0")
+    incomplete = False
+    for cycle, balance, left in zip(cycles, balances, owed):
+        last_included = cycle["close"].date()
+        window = [row for row in lines if on_statement(row, cycle, day)]
+        charged = sum(((-amount_of(row) if row.transaction_type == TransactionType.CREDIT
+                        else amount_of(row))
+                       for row in lines
+                       if statement_day(row, day) <= last_included
+                       and row.transaction_type in (TransactionType.DEBIT,
+                                                    TransactionType.CREDIT)),
+                      Decimal("0"))
+        paid_by_close = sum((amount for when, amount in payments
+                             if when.date() <= last_included), Decimal("0"))
+        paid_since_close = sum((amount for when, amount in payments
+                                if when.date() > last_included), Decimal("0"))
+        clear_through += left
+        incomplete = incomplete or any(
+            on_statement(line, cycle, day) for line, _, _ in unconverted)
+        if left <= 0:
+            status = "paid"
+        elif cycle["due"].date() < day:
+            status = "overdue"
+        else:
+            status = "open"
+        history.append({
+            "close": cycle["close"],
+            "due": cycle["due"],
+            "computed_due": cycle["computed_due"],
+            "due_overridden": cycle["due_overridden"],
+            "balance": balance,
+            "owed": left,
+            "status": status,
+            "outstanding": charged - paid_by_close,
+            "paid_since_close": paid_since_close,
+            "clear_through": clear_through,
+            "incomplete": incomplete,
+            "lines": [{
+                "date": row.transaction_date,
+                "amount": (-amount_of(row)
+                           if row.transaction_type == TransactionType.CREDIT
+                           else amount_of(row)),
+                "transaction": getattr(row, "source", row),
+                **({"estimate": estimates[id(row)]} if id(row) in estimates else {}),
+            } for row in sorted(window, key=lambda r: r.transaction_date)],
+            "unconverted": [{
+                "date": line.transaction_date,
+                "original_amount": (-face if line.transaction_type == TransactionType.CREDIT
+                                    else face),
+                "original_currency": currency,
+                "transaction": line,
+            } for line, face, currency in sorted(unconverted, key=lambda u: u[0].transaction_date)
+                if on_statement(line, cycle, day)],
+        })
+    return history
+
+
+def card_payments(db: Session, card: Account, viewable_ids: Iterable[int]
+                  ) -> List[Tuple[datetime, Decimal]]:
+    """Every payment into the card, posted or planned, as ``(date, received amount)``
+    in date order: the payments ``statement_history`` nets (one from a card
+    without cycle settings is not a payment, see ``_split_card_rows``)."""
+    by_card, unbilled_sources = _card_rows(db, [card.id], viewable_ids)
+    return _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources)[1]
+
+
+def get_statement_payables(
+    db: Session,
+    cards: List[Account],
+    start: datetime,
+    end: datetime,
+    projected_charges: Optional[dict] = None,
+    *,
+    viewable_ids: Iterable[int],
+    fx=None,
+) -> List[dict]:
+    """DB wrapper: build the statement payables of ``cards``.
+
+    ``cards`` are the credit cards in the caller's projection scope (active
+    accounts the caller holds a role on, see ``collect_events``); access is
+    decided there, through ``app.core.access``.
+
+    ``projected_charges`` is ``{card_id: [line items]}`` for charges that have no
+    transaction yet (budget entries scheduled on a card); each is billed on the
+    cycle containing its date, after the recorded rows are settled (see
+    ``build_statement_payables``). ``viewable_ids`` are the caller's viewable
+    accounts (see ``_card_rows``). Lines are normalised into each card's
+    currency at the stored rates of ``fx`` (``normalise_lines``). Each card's
+    printed dues (``load_due_overrides``) date its payables.
+    """
+    cards = [c for c in cards if c.account_type == AccountType.CREDIT]
+    if not cards:
+        return []
+
+    # Rows are filtered by card id ALONE, not re-scoped by user: the card itself
+    # is already in the caller's scope, and a statement must include every
+    # charge on it and every payment into it, whoever entered it, including a
+    # transfer from an account outside the caller's scope.
+    by_card, unbilled_sources = _card_rows(db, [c.id for c in cards], viewable_ids)
+    if fx is None:
+        from app.services.fx import FxRates
+
+        fx = FxRates.offline(db)
+    return build_statement_payables(cards, by_card, start, end, unbilled_sources,
+                                    projected_by_card=projected_charges,
+                                    normalise=lambda card, lines: normalise_lines(
+                                        db, card, lines, fx),
+                                    due_overrides_by_card=load_due_overrides(
+                                        db, [c.id for c in cards]))
