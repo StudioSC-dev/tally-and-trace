@@ -114,9 +114,16 @@ def _lock(conn, card_ids: Iterable[int]) -> None:
                      {"ns": LOCK_NS, "id": card_id})
 
 
-def _try_lock(conn, card_id: int) -> bool:
-    return bool(conn.execute(text("SELECT pg_try_advisory_xact_lock(:ns, :id)"),
-                             {"ns": LOCK_NS, "id": card_id}).scalar())
+def _try_lock_all(conn, card_ids: Iterable[int]) -> List[int]:
+    """The cards whose lock this transaction got (in id order, one statement);
+    a card whose lock is held elsewhere is left out, without waiting."""
+    ids = sorted(set(card_ids))
+    if not ids:
+        return []
+    rows = conn.execute(text(
+        "SELECT id FROM unnest(CAST(:ids AS integer[])) WITH ORDINALITY AS t(id, n) "
+        "WHERE pg_try_advisory_xact_lock(:ns, id) ORDER BY n"), {"ns": LOCK_NS, "ids": ids})
+    return [row.id for row in rows]
 
 
 # --- materialising ---------------------------------------------------------------------------
@@ -257,13 +264,12 @@ def catch_up(db: Session, cards: Sequence, today: date) -> None:
         return
     with Session(bind) as own:
         conn = own.connection()
-        for card_id in sorted({c.id for c in cards}):
-            if not _try_lock(conn, card_id):
-                continue
-            card = _cards(conn, [card_id]).get(card_id)
-            if not _is_card(card):
-                continue
-            materialize(conn, card, _states(conn, [card_id]).get(card_id), today)
+        locked = _try_lock_all(conn, {c.id for c in cards})
+        fresh, states = _cards(conn, locked), _states(conn, locked)
+        for card_id in locked:
+            card = fresh.get(card_id)
+            if _is_card(card):
+                materialize(conn, card, states.get(card_id), today)
         own.commit()
 
 
