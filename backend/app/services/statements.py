@@ -61,11 +61,12 @@ transaction_date column (see app/core/time.py for the naive/aware split).
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
-from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -508,6 +509,113 @@ def statement_balance(transactions: List[Transaction], window_start: datetime, c
     return total
 
 
+
+def place_days(days: Sequence[date], cycles: Sequence[Mapping]) -> List[Optional[int]]:
+    """The index in ``cycles`` of the statement holding each of ``days``, or None.
+
+    ``cycles`` are consecutive ``iter_cycles_from`` cycles, oldest first, so
+    each one's ``window_start`` is the close before it and their windows
+    ``(window_start, close]`` tile the calendar from the first window start
+    to the last close. A day is placed by bisecting the closes: O(log n) per
+    day, the same answer as testing ``on_statement`` against every cycle. A
+    day outside every window is None.
+    """
+    if not cycles:
+        return [None] * len(days)
+    closes = [c["close"].date() for c in cycles]
+    first_excluded = cycles[0]["window_start"].date()
+    out: List[Optional[int]] = []
+    for day in days:
+        i = bisect_left(closes, day)
+        out.append(i if i < len(closes) and day > first_excluded else None)
+    return out
+
+
+def cycle_balances(rows: Sequence, placed: Sequence[Optional[int]], count: int,
+                   amount_of=_row_amount) -> List[Decimal]:
+    """Each cycle's line-item balance from rows already placed (``place_days``).
+
+    ``placed[k]`` is the cycle index of ``rows[k]`` (None: on no cycle). A
+    debit adds ``amount_of(row)``, a credit subtracts it and any other type
+    is not a line item, exactly as ``statement_balance`` sums one window, so
+    ``cycle_balances(...)[i]`` equals ``statement_balance`` over cycle ``i``,
+    computed in one pass over the rows instead of one pass per cycle.
+    """
+    balances = [Decimal("0")] * count
+    for row, i in zip(rows, placed):
+        if i is None:
+            continue
+        if row.transaction_type == TransactionType.DEBIT:
+            balances[i] += amount_of(row)
+        elif row.transaction_type == TransactionType.CREDIT:
+            balances[i] -= amount_of(row)
+    return balances
+
+
+def summarise_cycles(cycles: Sequence[Mapping], balances: Sequence[Decimal],
+                     payments: Sequence[Tuple[datetime, Decimal]],
+                     has_unconverted: Sequence[bool], today: date) -> List[dict]:
+    """The figures of each statement, without its lines (``statement_summaries``).
+
+    ``cycles`` are a card's consecutive cycles, oldest first, starting with the
+    one holding its earliest line item; ``balances`` their line-item balances
+    (``cycle_balances``); ``payments`` every payment into the card as
+    ``(date, amount)`` in date order (``_split_card_rows``); ``has_unconverted``
+    whether a line on each cycle was left out for want of a rate. Every figure
+    is computed from these alone, in one pass:
+
+    - ``owed``: ``allocate_payments`` over the balances;
+    - ``outstanding``: every line on or before the close (the balances so far,
+      since the first cycle holds the earliest line) less every payment dated
+      on or before the close; ``paid_since_close``: every payment after it;
+    - ``clear_through``: ``owed`` summed so far; ``incomplete``: whether this
+      or an earlier cycle has an unconverted line;
+    - ``status``: "paid" (nothing owed), "overdue" (owed, due before
+      ``today``) or "open".
+
+    So a caller holding per-cycle balances from elsewhere (stored statements)
+    gets the same figures without the rows.
+    """
+    owed = allocate_payments(list(balances), [amount for _, amount in payments])
+    pay_days = [when.date() for when, _ in payments]
+    paid_before = [Decimal("0")]
+    for _, amount in payments:
+        paid_before.append(paid_before[-1] + amount)
+    paid_after = [Decimal("0")] * (len(payments) + 1)
+    for k in range(len(payments) - 1, -1, -1):
+        paid_after[k] = paid_after[k + 1] + payments[k][1]
+    out = []
+    charged = Decimal("0")
+    clear_through = Decimal("0")
+    incomplete = False
+    for cycle, balance, left, unconverted in zip(cycles, balances, owed, has_unconverted):
+        last_included = cycle["close"].date()
+        charged += balance
+        k = bisect_right(pay_days, last_included)
+        clear_through += left
+        incomplete = incomplete or unconverted
+        if left <= 0:
+            status = "paid"
+        elif cycle["due"].date() < today:
+            status = "overdue"
+        else:
+            status = "open"
+        out.append({
+            "close": cycle["close"],
+            "due": cycle["due"],
+            "computed_due": cycle["computed_due"],
+            "due_overridden": cycle["due_overridden"],
+            "balance": balance,
+            "owed": left,
+            "status": status,
+            "outstanding": charged - paid_before[k],
+            "paid_since_close": paid_after[k],
+            "clear_through": clear_through,
+            "incomplete": incomplete,
+        })
+    return out
+
+
 def build_statement_payables(
     cards: List[Account],
     transactions_by_card: dict,
@@ -595,22 +703,26 @@ def build_statement_payables(
                                          if getattr(row, "estimate", None) is not None}}
         if not lines and not projected:
             continue  # no charges -> nothing owed, whatever was paid in
-        # Calendar dates: rows may mix naive and aware datetimes.
-        days = [statement_day(row, today) for row in [*lines, *projected]]
+        # Calendar dates: rows may mix naive and aware datetimes. Each row's
+        # statement day is read once and placed once (``place_days``).
+        every = [*lines, *projected]
+        days = [statement_day(row, today) for row in every]
         cycles = list(iter_cycles_from(
             card, min(days), end, through=max(days),
             due_overrides=(due_overrides_by_card or {}).get(card.id, {})))
-        recorded = [statement_balance(lines, c["window_start"], c["close"], amount_of,
-                                      today=today)
-                    for c in cycles]
+        placed = place_days(days, cycles)
+        recorded = cycle_balances(lines, placed[:len(lines)], len(cycles), amount_of)
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
         remaining = settle_projected(
             cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
-        balances = [statement_balance([*lines, *projected], c["window_start"], c["close"],
-                                      amount_of, today=today)
-                    for c in cycles]
-        for cycle, balance, owed in zip(cycles, balances, remaining):
+        balances = cycle_balances(every, placed, len(cycles), amount_of)
+        on_cycle: List[list] = [[] for _ in cycles]
+        if estimates:
+            for row, i in zip(every, placed):
+                if i is not None:
+                    on_cycle[i].append(row)
+        for i, (cycle, balance, owed) in enumerate(zip(cycles, balances, remaining)):
             if owed <= 0 or cycle["due"] >= end:
                 continue  # nothing owed, or due after the window
             overdue = {}
@@ -618,9 +730,7 @@ def build_statement_payables(
                 overdue = {"overdue": True, "original_date": cycle["due"]}
             labels = {}
             if estimates:
-                estimate = statement_estimate(
-                    [row for row in [*lines, *projected]
-                     if on_statement(row, cycle, today)], estimates)
+                estimate = statement_estimate(on_cycle[i], estimates)
                 if estimate is not None:
                     labels = {"line_estimate": estimate}
             events.append({
@@ -691,6 +801,127 @@ def _card_rows(db: Session, card_ids: List[int], viewable_ids: Iterable[int]):
     return by_card, unbilled_sources
 
 
+def _cycles_of(db: Optional[Session], card: Account, today: datetime,
+               viewable_ids: Iterable[int], fx, card_rows,
+               due_overrides: Optional[Mapping[date, date]], *, with_lines: bool) -> List[dict]:
+    """The single pass behind ``statement_summaries`` and ``statement_history``.
+
+    Every line is read once: its ``statement_day`` is computed once and it is
+    placed on its cycle by bisecting the closes (``place_days``), so the work
+    is O(rows log cycles + cycles), not O(rows x cycles). Each cycle's figures
+    come from ``summarise_cycles``; with ``with_lines`` each also carries its
+    ``lines`` and ``unconverted`` (see ``statement_history``).
+    """
+    if resolve_cycle_fields(card) is None:
+        return []
+    by_card, unbilled_sources = (card_rows if card_rows is not None
+                                 else _card_rows(db, [card.id], viewable_ids))
+    rows = by_card.get(card.id, [])
+    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
+    lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
+    if not lines and not unconverted:
+        return []
+    day = today.date()
+    line_days = [statement_day(row, day) for row in lines]
+    unconverted_days = [statement_day(line, day) for line, _, _ in unconverted]
+    days = [*line_days, *unconverted_days]
+    last = max(max(days), day)
+    if due_overrides is None:
+        due_overrides = load_due_overrides(db, [card.id])[card.id]
+    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
+                                   due_overrides=due_overrides))
+    line_at = place_days(line_days, cycles)
+    unconverted_at = place_days(unconverted_days, cycles)
+    has_unconverted = [False] * len(cycles)
+    for i in unconverted_at:
+        if i is not None:
+            has_unconverted[i] = True
+    out = summarise_cycles(cycles, cycle_balances(lines, line_at, len(cycles), amount_of),
+                           payments, has_unconverted, day)
+    if not with_lines:
+        return out
+    on_cycle: List[list] = [[] for _ in cycles]
+    for row, i in zip(lines, line_at):
+        if i is not None:
+            on_cycle[i].append(row)
+    unconverted_on: List[list] = [[] for _ in cycles]
+    for item, i in zip(unconverted, unconverted_at):
+        if i is not None:
+            unconverted_on[i].append(item)
+    for statement, window, left_out in zip(out, on_cycle, unconverted_on):
+        statement["lines"] = _line_items(window, amount_of, estimates)
+        statement["unconverted"] = _unconverted_items(left_out)
+    return out
+
+
+def _line_items(window: list, amount_of, estimates: dict) -> List[dict]:
+    """A statement's ``lines`` from the line items on it, by date."""
+    return [{
+        "date": row.transaction_date,
+        "amount": (-amount_of(row)
+                   if row.transaction_type == TransactionType.CREDIT
+                   else amount_of(row)),
+        "transaction": getattr(row, "source", row),
+        **({"estimate": estimates[id(row)]} if id(row) in estimates else {}),
+    } for row in sorted(window, key=lambda r: r.transaction_date)]
+
+
+def _unconverted_items(left_out: list) -> List[dict]:
+    """A statement's ``unconverted`` from its ``(line, face, currency)`` triples, by date."""
+    return [{
+        "date": line.transaction_date,
+        "original_amount": (-face if line.transaction_type == TransactionType.CREDIT
+                            else face),
+        "original_currency": currency,
+        "transaction": line,
+    } for line, face, currency in sorted(left_out, key=lambda u: u[0].transaction_date)]
+
+
+def statement_summaries(db: Optional[Session], card: Account, today: datetime,
+                        viewable_ids: Iterable[int], fx=None, card_rows=None,
+                        due_overrides: Optional[Mapping[date, date]] = None) -> List[dict]:
+    """The card's recorded statements without their lines, oldest first.
+
+    Exactly ``statement_history`` (same arguments, same statements, same
+    figures) less each statement's ``lines`` and ``unconverted``: every
+    statement is ``{close, due, computed_due, due_overridden, balance, owed,
+    status, outstanding, paid_since_close, clear_through, incomplete}``. For
+    the callers that need figures only (closed statements, statements due,
+    amount due, the deactivation check); a statement's lines are
+    ``statement_lines``. ``incomplete`` is True on the first statement with a
+    line left out for want of a rate and every one after it, so "some
+    statement has an unconverted line" is ``any(s["incomplete"] ...)``.
+    """
+    return _cycles_of(db, card, today, viewable_ids, fx, card_rows, due_overrides,
+                      with_lines=False)
+
+
+def statement_lines(db: Optional[Session], card: Account, close: date, today: datetime,
+                    viewable_ids: Iterable[int], fx=None, card_rows=None) -> Optional[dict]:
+    """``{lines, unconverted}`` of the card's statement closing on ``close``, read on ``today``.
+
+    The same two lists ``statement_history`` gives that statement (same
+    shapes, same order), from the rows whose ``statement_day`` is in its
+    window ``(window_start, close]``; only those rows are normalised. Both
+    are empty for a close with nothing on it. None when the card has no
+    cycle settings or ``close`` is not one of its closes. ``card_rows`` as
+    for ``statement_history``. Due overrides change no line, so none is read.
+    """
+    if resolve_cycle_fields(card) is None or statement_close(card, close) != close:
+        return None
+    cycle = next(iter_cycles_from(card, close, datetime.min, through=close, due_overrides={}))
+    first_excluded = cycle["window_start"].date()
+    by_card, unbilled_sources = (card_rows if card_rows is not None
+                                 else _card_rows(db, [card.id], viewable_ids))
+    lines, _ = _split_card_rows(card.id, by_card.get(card.id, []), unbilled_sources,
+                                keep_source=True)
+    day = today.date()
+    window = [row for row in lines if first_excluded < statement_day(row, day) <= close]
+    kept, amount_of, estimates, unconverted = normalise_lines(db, card, window, fx)
+    return {"lines": _line_items(kept, amount_of, estimates),
+            "unconverted": _unconverted_items(unconverted)}
+
+
 def statement_history(db: Session, card: Account, today: datetime,
                       viewable_ids: Iterable[int], fx=None, card_rows=None,
                       due_overrides: Optional[Mapping[date, date]] = None) -> List[dict]:
@@ -728,81 +959,8 @@ def statement_history(db: Session, card: Account, today: datetime,
     statement's ``due`` is its printed due when it has one, and it also
     carries ``computed_due`` and ``due_overridden`` (``iter_cycles_from``).
     """
-    if resolve_cycle_fields(card) is None:
-        return []
-    by_card, unbilled_sources = (card_rows if card_rows is not None
-                                 else _card_rows(db, [card.id], viewable_ids))
-    rows = by_card.get(card.id, [])
-    lines, payments = _split_card_rows(card.id, rows, unbilled_sources, keep_source=True)
-    lines, amount_of, estimates, unconverted = normalise_lines(db, card, lines, fx)
-    if not lines and not unconverted:
-        return []
-    day = today.date()
-    days = [statement_day(row, day) for row in [*lines, *(u[0] for u in unconverted)]]
-    last = max(max(days), day)
-    if due_overrides is None:
-        due_overrides = load_due_overrides(db, [card.id])[card.id]
-    cycles = list(iter_cycles_from(card, min(days), datetime.min, through=last,
-                                   due_overrides=due_overrides))
-    balances = [statement_balance(lines, c["window_start"], c["close"], amount_of, today=day)
-                for c in cycles]
-    owed = allocate_payments(balances, [amount for _, amount in payments])
-    history = []
-    clear_through = Decimal("0")
-    incomplete = False
-    for cycle, balance, left in zip(cycles, balances, owed):
-        last_included = cycle["close"].date()
-        window = [row for row in lines if on_statement(row, cycle, day)]
-        charged = sum(((-amount_of(row) if row.transaction_type == TransactionType.CREDIT
-                        else amount_of(row))
-                       for row in lines
-                       if statement_day(row, day) <= last_included
-                       and row.transaction_type in (TransactionType.DEBIT,
-                                                    TransactionType.CREDIT)),
-                      Decimal("0"))
-        paid_by_close = sum((amount for when, amount in payments
-                             if when.date() <= last_included), Decimal("0"))
-        paid_since_close = sum((amount for when, amount in payments
-                                if when.date() > last_included), Decimal("0"))
-        clear_through += left
-        incomplete = incomplete or any(
-            on_statement(line, cycle, day) for line, _, _ in unconverted)
-        if left <= 0:
-            status = "paid"
-        elif cycle["due"].date() < day:
-            status = "overdue"
-        else:
-            status = "open"
-        history.append({
-            "close": cycle["close"],
-            "due": cycle["due"],
-            "computed_due": cycle["computed_due"],
-            "due_overridden": cycle["due_overridden"],
-            "balance": balance,
-            "owed": left,
-            "status": status,
-            "outstanding": charged - paid_by_close,
-            "paid_since_close": paid_since_close,
-            "clear_through": clear_through,
-            "incomplete": incomplete,
-            "lines": [{
-                "date": row.transaction_date,
-                "amount": (-amount_of(row)
-                           if row.transaction_type == TransactionType.CREDIT
-                           else amount_of(row)),
-                "transaction": getattr(row, "source", row),
-                **({"estimate": estimates[id(row)]} if id(row) in estimates else {}),
-            } for row in sorted(window, key=lambda r: r.transaction_date)],
-            "unconverted": [{
-                "date": line.transaction_date,
-                "original_amount": (-face if line.transaction_type == TransactionType.CREDIT
-                                    else face),
-                "original_currency": currency,
-                "transaction": line,
-            } for line, face, currency in sorted(unconverted, key=lambda u: u[0].transaction_date)
-                if on_statement(line, cycle, day)],
-        })
-    return history
+    return _cycles_of(db, card, today, viewable_ids, fx, card_rows, due_overrides,
+                      with_lines=True)
 
 
 def card_payments(db: Session, card: Account, viewable_ids: Iterable[int]
