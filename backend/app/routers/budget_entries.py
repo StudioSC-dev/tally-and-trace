@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core import locking
 from app.core.config import settings
 from app.core.auth import get_current_active_user
+from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.database import get_db
 from app.core.time import manila_midnight, manila_today, utc_now
 from app.core.access import (
@@ -628,11 +629,13 @@ def create_budget_entry(
     entry_in: BudgetEntryCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
     entry = add_budget_entry(db, current_user, entry_in)
-    db.commit()
+    db.flush()
     db.refresh(entry)
-    return serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])
+    return finish(idem, db, serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0]),
+                  model=BudgetEntryOut, status_code=201)
 
 
 def add_budget_entry(db: Session, current_user: User, entry_in: BudgetEntryCreate) -> BudgetEntry:
@@ -1260,6 +1263,7 @@ def materialize_budget_entry(
     # Last, so a direct call (entry_id, payload, db=, current_user=) still works;
     # FastAPI injects it by its type.
     response: Response = None,
+    idem: Idempotency = Depends(idempotency),
 ):
     """
     Record one occurrence of a recurring entry (Mark paid) and advance its schedule.
@@ -1357,13 +1361,13 @@ def materialize_budget_entry(
     recorded = posting.record_occurrence(db, entry, current_user, payload, occurrence)
     # The transaction, its balance and budget effects, its tags and the schedule's
     # advance commit together: a failure anywhere leaves none of them.
-    db.commit()
+    db.flush()
     db.refresh(recorded.transaction)
-
-    if response is not None:
-        response.status_code = 201 if recorded.outcome == posting.Outcome.CREATED else 200
-        response.headers.update(_occurrence_headers(recorded.outcome, occurrence, skipped))
-    return serialize_transaction(db, current_user, recorded.transaction)
+    return finish(
+        idem, db, serialize_transaction(db, current_user, recorded.transaction),
+        model=TransactionOut,
+        status_code=201 if recorded.outcome == posting.Outcome.CREATED else 200,
+        headers=_occurrence_headers(recorded.outcome, occurrence, skipped), response=response)
 
 
 @router.post("/{entry_id}/materialize-due", response_model=MaterializeDueResult)
@@ -1371,6 +1375,7 @@ def materialize_due_budget_entry(
     entry_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
     """Post every due occurrence of a recurring expense at once (Post N due).
 
@@ -1404,18 +1409,18 @@ def materialize_due_budget_entry(
         raise HTTPException(status_code=400, detail="Post N due is for recurring expenses")
 
     recorded = posting.materialize_due(db, entry, current_user)
-    db.commit()
+    db.flush()
     for item in recorded:
         db.refresh(item.transaction)
     db.refresh(entry)
-    return {
+    return finish(idem, db, {
         "entry_id": entry.id,
         "results": [{"occurrence_date": item.occurrence.date(), "outcome": item.outcome.value,
                      "transaction": serialize_transaction(db, current_user, item.transaction)}
                     for item in recorded],
         "next_occurrence": entry.next_occurrence,
         "is_active": entry.is_active,
-    }
+    }, model=MaterializeDueResult, status_code=200)
 
 
 # --- Card installment review and turn off (STU-343 Plan B) ------------------------------------

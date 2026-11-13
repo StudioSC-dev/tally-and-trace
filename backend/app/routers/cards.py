@@ -18,6 +18,7 @@ from app.core.access import (
     EDIT_ROLES, MANAGE_ROLES, NONE, account_role, get_account_or_404, role_map,
 )
 from app.core.auth import get_current_active_user
+from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.database import get_db
 from app.core.redaction import Redactor, serialize_transaction
 from app.core.time import manila_today
@@ -419,6 +420,7 @@ def record_card_payment(
     payment: CardPaymentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
     """Pay a card: one transfer from a same-currency account into the card (201).
 
@@ -458,6 +460,7 @@ def record_card_payment(
         transaction_date=datetime.combine(payment.payment_date, time()),
         is_posted=payment.payment_date <= manila_today(),
     ))
-    db.commit()
+    db.flush()
     db.refresh(txn)
-    return serialize_transaction(db, current_user, txn)
+    return finish(idem, db, serialize_transaction(db, current_user, txn),
+                  model=TransactionOut, status_code=201)
