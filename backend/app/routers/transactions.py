@@ -7,6 +7,7 @@ from pydantic import Field
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
+from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.access import (
     VIEW_ROLES,
     RecordAccess,
@@ -1056,12 +1057,16 @@ def create_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
-    """Create a new transaction and update account balance"""
+    """Create a new transaction and update account balance.
+
+    With an ``Idempotency-Key`` header a repeat returns the first answer (core/idempotency.py)."""
     db_transaction = add_transaction(db, current_user, transaction)
-    db.commit()
+    db.flush()
     db.refresh(db_transaction)
-    return serialize_transaction(db, current_user, db_transaction)
+    return finish(idem, db, serialize_transaction(db, current_user, db_transaction),
+                  model=TransactionOut, status_code=200)
 
 
 @router.post("/repeating", response_model=RepeatingCreated, status_code=201)
@@ -1069,6 +1074,7 @@ def create_repeating_transaction(
     body: RepeatingCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
     """Add a transaction and start the recurring entry it is the first occurrence of.
 
@@ -1085,11 +1091,13 @@ def create_repeating_transaction(
     budget effects, the advance and the flag commit together: any refusal
     leaves nothing (services/repeat.py)."""
     txn, entry = repeat_svc.create_repeating(db, current_user, body.transaction, body.repeat)
-    db.commit()
+    db.flush()
     db.refresh(txn)
     db.refresh(entry)
-    return {"transaction": serialize_transaction(db, current_user, txn),
-            "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])}
+    return finish(idem, db, {
+        "transaction": serialize_transaction(db, current_user, txn),
+        "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])},
+        model=RepeatingCreated, status_code=201)
 
 
 def add_transaction(db: Session, current_user: User, transaction: TransactionCreate,
@@ -1461,6 +1469,7 @@ def make_transaction_repeat(
     body: RepeatExisting,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    idem: Idempotency = Depends(idempotency),
 ):
     """Make a saved transaction repeat: apply the Edit dialog's changes and start
     the recurring entry the row is the first occurrence of (STU-585).
@@ -1475,11 +1484,13 @@ def make_transaction_repeat(
     commit together: any refusal leaves the row as it was (services/repeat.py)."""
     txn = _locked_for_edit(db, current_user, transaction_id)
     txn, entry = repeat_svc.make_repeat(db, current_user, txn, body.transaction, body.repeat)
-    db.commit()
+    db.flush()
     db.refresh(txn)
     db.refresh(entry)
-    return {"transaction": serialize_transaction(db, current_user, txn),
-            "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])}
+    return finish(idem, db, {
+        "transaction": serialize_transaction(db, current_user, txn),
+        "entry": serialize_entry(db, current_user, _attach_occurrence_counts(db, [entry])[0])},
+        model=RepeatingCreated, status_code=201)
 
 
 def apply_transaction_update(db: Session, current_user: User, txn: Transaction,

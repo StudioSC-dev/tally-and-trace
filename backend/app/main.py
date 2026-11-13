@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from app.core import idempotency
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.routers import api_router
@@ -112,6 +113,7 @@ app.add_middleware(
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
+idempotency.install(app)
 
 
 @app.get("/")
