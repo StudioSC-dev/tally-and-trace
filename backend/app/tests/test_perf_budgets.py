@@ -43,35 +43,39 @@ class Budget(NamedTuple):
     instances: int
 
 
-# (caller, endpoint) -> ceilings. Equal to the measured values at the commit above.
+# (caller, endpoint) -> ceilings. Equal to the measured values at the commit above, except:
+# STU-601 (PERF-6, stored closed statements) lowered statement_day and instances to the
+# measured value plus 10%, and raised the SQL count of the snapshot and household views to
+# the measured value (2 to 16 more: each statement read loads the cards' stored state and
+# rows, and tries the catch-up lock, instead of replaying every row).
 BUDGETS: Dict[Tuple[str, str], Budget] = {
-    ("owner", "snapshot"): Budget(609, 111_157, 496_424, 4, 9_280),
+    ("owner", "snapshot"): Budget(619, 111_157, 807, 4, 2_030),
     ("owner", "installment-plans"): Budget(79, 1_963, 0, 0, 33),
     ("owner", "budget-entries"): Budget(20, 14_408, 0, 0, 31),
     ("owner", "accounts"): Budget(12, 9_876, 0, 0, 19),
     ("owner", "transactions"): Budget(17, 20_829, 0, 0, 50),
-    ("owner", "statements"): Budget(17, 47_893, 29_716, 0, 435),
-    ("owner", "card-credit"): Budget(63, 9_374, 29_716, 0, 491),
-    ("editor", "snapshot"): Budget(347, 36_062, 188_635, 4, 3_540),
+    ("owner", "statements"): Budget(17, 47_893, 431, 0, 435),
+    ("owner", "card-credit"): Budget(63, 9_374, 431, 0, 491),
+    ("editor", "snapshot"): Budget(363, 36_062, 190, 4, 621),
     ("editor", "installment-plans"): Budget(40, 713, 0, 0, 11),
     ("editor", "budget-entries"): Budget(17, 4_187, 0, 0, 12),
     ("editor", "accounts"): Budget(9, 1_665, 0, 0, 7),
     ("editor", "transactions"): Budget(15, 8_878, 0, 0, 28),
-    ("editor", "statements"): Budget(17, 47_875, 29_716, 0, 436),
-    ("viewer", "snapshot"): Budget(304, 31_604, 188_635, 4, 3_527),
+    ("editor", "statements"): Budget(17, 47_875, 431, 0, 436),
+    ("viewer", "snapshot"): Budget(320, 31_604, 190, 4, 607),
     ("viewer", "installment-plans"): Budget(11, 61, 0, 0, 9),
     ("viewer", "budget-entries"): Budget(11, 39, 0, 0, 1),
     ("viewer", "accounts"): Budget(9, 1_667, 0, 0, 7),
     ("viewer", "transactions"): Budget(15, 3_824, 0, 0, 22),
-    ("viewer", "statements"): Budget(17, 36_670, 29_488, 0, 434),
-    ("household", "snapshot"): Budget(293, 10_590, 66_503, 3, 1_338),
+    ("viewer", "statements"): Budget(17, 36_670, 427, 0, 434),
+    ("household", "snapshot"): Budget(299, 10_590, 119, 3, 222),
     ("household", "installment-plans"): Budget(16, 61, 0, 0, 9),
     ("household", "budget-entries"): Budget(17, 39, 0, 0, 1),
     ("household", "accounts"): Budget(14, 358, 0, 0, 5),
     ("household", "transactions"): Budget(24, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(84, 7_353, 21_837, 1, 446),
-    ("household", "household-monthly"): Budget(112, 138, 21_837, 1, 455),
-    ("household", "household-dashboard"): Budget(201, 7_740, 43_674, 2, 897),
+    ("household", "household-upcoming"): Budget(86, 7_353, 38, 1, 74),
+    ("household", "household-monthly"): Budget(114, 138, 38, 1, 84),
+    ("household", "household-dashboard"): Budget(205, 7_740, 75, 2, 153),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full
@@ -290,3 +294,45 @@ def test_fixture_access_relationships(realistic, sw_client, sw_people):
     assert not (visible(stranger["headers"]) & mine)
     r = sw_client.get(f"{API}/accounts/{acc['card_a']}/statements", headers=stranger["headers"])
     assert r.status_code == 404
+
+
+# --- stored statements: the snapshot does not grow with history (STU-601, PERF-6, AC7) -------
+
+HISTORY_SLACK = 5
+
+
+def _snapshot_with_history(client, db, today, years: int) -> perf.Sample:
+    from app.tests.fixtures import realistic as fixture
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(fixture, "HISTORY_DAYS", 365 * years)
+    patch.setattr(fixture, "BASE_ROWS", 1400 * years)
+    world = None
+    try:
+        world = fixture.build_realistic(client, db, today, tag=f"h{years}y")
+        return perf.measure(client, world.callers["owner"].headers, "/dashboard/snapshot",
+                            runs=1)
+    finally:
+        patch.undo()
+        if world is not None:
+            world.remove(db)
+
+
+@needs_db
+def test_the_snapshot_does_not_grow_with_history(realistic, sw_client):
+    """With closed statements stored, the snapshot runs the same number of SQL
+    statements over four years of history as over one (within ``HISTORY_SLACK``), and
+    its ``statement_day`` calls stay bounded by the rows not yet in a stored statement
+    (open cycles and unposted rows): at most 2,000. The clock is pinned by
+    ``realistic``. Replaying every row (``STATEMENTS_STORE=off``) makes 16,158 calls."""
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        one = _snapshot_with_history(sw_client, db, realistic.today, 1)
+        four = _snapshot_with_history(sw_client, db, realistic.today, 4)
+    finally:
+        db.close()
+    assert abs(four.statements - one.statements) <= HISTORY_SLACK, (one.statements,
+                                                                    four.statements)
+    assert four.statement_day <= 2_000, four.statement_day
