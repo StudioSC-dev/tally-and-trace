@@ -1636,14 +1636,17 @@ def _claim_page_open_sql(db: Session, user: User, now: datetime) -> bool:
     15 minutes (or there is none). A second claim made meanwhile waits on the
     row lock, re-reads the row once the first commits, and returns no row.
 
-    A slot not yet free is answered from a plain read, with no UPDATE: an UPDATE
+    A slot not yet free is answered from a read, with no UPDATE: an UPDATE
     statement bumps the data version even when it matches no row
-    (core/data_version.py), which would make every repeat page open a full reload."""
+    (core/data_version.py), which would make every repeat page open a full reload.
+    The read takes the row lock (``FOR UPDATE``), so a claim racing another waits
+    for it to commit, re-checks the row, sees the slot taken and writes nothing."""
     from sqlalchemy import text
 
     free = db.execute(text(
         "SELECT 1 FROM users WHERE id = :uid AND (installments_page_posted_at IS NULL "
-        "OR installments_page_posted_at <= CAST(:now AS timestamptz) - interval '15 minutes')"),
+        "OR installments_page_posted_at <= CAST(:now AS timestamptz) - interval '15 minutes') "
+        "FOR UPDATE"),
         {"now": now, "uid": user.id}).first()
     if free is None:
         return False

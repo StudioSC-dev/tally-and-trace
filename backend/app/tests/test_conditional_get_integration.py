@@ -293,6 +293,66 @@ def test_a_throttled_page_open_run_does_not_bump(sw_client, sw, sw_db):
     assert version(sw_db) == v
 
 
+def test_two_concurrent_page_open_claims_bump_once(sw, sw_db):
+    """Two claims at the same moment: the second waits on the first's row lock, then sees
+    the slot taken and writes nothing, so the version moves once. Without the lock both
+    pass the slot check and the loser's zero-row UPDATE bumps a second time."""
+    import os
+    import threading
+    import time
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from app.core.time import utc_now
+    from app.models.user import User
+    from app.services import posting
+
+    uid = sw["a"]["id"]
+    sw_db.execute(text("UPDATE users SET installments_page_posted_at = NULL WHERE id = :u"),
+                  {"u": uid})
+    sw_db.commit()
+    now = utc_now()
+    engine = create_engine(os.environ["DATABASE_URL"])
+    loser = {}
+    try:
+        with Session(engine) as one, Session(engine) as two:
+            before = version(sw_db)
+            assert posting._claim_page_open_sql(one, one.get(User, uid), now) is True
+            user_two = two.get(User, uid)
+            loser["statements"] = []
+            event.listen(two.connection(), "before_cursor_execute",
+                         lambda *a: loser["statements"].append(a[2].split()[0].upper()))
+            pid_two = two.execute(text("SELECT pg_backend_pid()")).scalar_one()
+
+            def claim():
+                loser["statements"].clear()  # only the claim's own statements
+                try:
+                    loser["claimed"] = posting._claim_page_open_sql(two, user_two, now)
+                except BaseException as exc:  # recorded for the test thread
+                    loser["error"] = exc
+
+            worker = threading.Thread(target=claim, daemon=True)
+            worker.start()
+            deadline, waiting = time.monotonic() + 10, False
+            with engine.connect() as probe:
+                while not waiting and time.monotonic() < deadline:
+                    waiting = probe.execute(text(
+                        "SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = :p"),
+                        {"p": pid_two}).scalar() or False
+                    time.sleep(0.02)
+            one.commit()
+            worker.join(30)
+            assert not worker.is_alive()
+            two.commit()
+            assert waiting, "the second claim did not wait on the first"
+    finally:
+        engine.dispose()
+    sw_db.expire_all()
+    # The loser sends no UPDATE, and the version moves once (the winner's commit).
+    assert (loser, version(sw_db) - before) == ({"claimed": False, "statements": ["SELECT"]}, 1)
+
+
 def _page_open_cases():
     from app.tests.fixtures.realistic import CALLERS
 
