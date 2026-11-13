@@ -14,8 +14,9 @@
 //     linked to it;
 // (d) the row then reads "Name • Monthly", the Scheduled view lists the entry's next date,
 //     and Edit shows the link select on the entry and no toggle, also after picking "None";
-// (e) a refused save (autopay over a past date) shows the server's reason on the form's line
-//     and changes nothing; a refused `settlement` shows under its control with aria-invalid,
+// (e) a refused save (autopay over a past date) comes back as a failed toast whose Edit
+//     reopens the form (STU-605: saves run in the background) with the server's reason on
+//     the form's line, and changes nothing; a refused `settlement` shows under its control with aria-invalid,
 //     aria-describedby and focus, a refused description under Description; a 404
 //     "Transaction not found" stays on the form's line with no Retry; an API without the
 //     endpoint (bare 404 "Not Found") shows the Edit copy with Retry, and Retry saves;
@@ -364,6 +365,21 @@ async function scenarioC(browser) {
   }
 }
 
+const failedToast = (page, description) =>
+  page.locator('[data-testid="save-toast"][data-state="failed"]').filter({ hasText: description })
+/**
+ * STU-605: a refusal arrives after the dialog closed, as a failed toast; its Edit reopens
+ * the form with the typed values and the refusal shown where the dialog used to show it.
+ * Waits for the toast naming `description`, clicks Edit and waits for the Edit dialog.
+ */
+async function editRefused(page, modal, description) {
+  const toast = failedToast(page, description).last()
+  await toast.waitFor({ timeout: 10000 })
+  await toast.locator('[data-testid="save-toast-edit"]').click()
+  await modal.waitFor({ timeout: 5000 })
+  await h.waitQuiet(page)
+}
+
 // (e) Refusals: nothing changes, and each reason shows where it belongs.
 async function scenarioE(browser) {
   console.log('\n=== (e) a refused save changes nothing; reasons inline; an old API offers Retry')
@@ -381,7 +397,7 @@ async function scenarioE(browser) {
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('autopay')
     writes.length = 0
     const refused = await update(page, modal)
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'MRE Water')
     await h.check('e.refused-422', 'B', async () => refused.status() === 422 || `status ${refused.status()}`)
     await h.check('e.reason-on-form-line', 'B', async () => {
       const line = modal.locator('[data-testid="transaction-form-error"]')
@@ -414,7 +430,7 @@ async function scenarioE(browser) {
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('manual')
     await answerRepeat(page, 422, { detail: [{ loc: ['body', 'repeat', 'settlement'], msg: 'settlement refused', type: 'value_error' }] })
     await update(page, modal)
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'MRE Water')
     await h.check('e.settlement-error-on-control', 'B', async () => {
       const error = modal.locator('[data-testid="repeat-error-settlement"]')
       await error.waitFor({ timeout: 5000 })
@@ -428,7 +444,7 @@ async function scenarioE(browser) {
     })
     await answerRepeat(page, 422, { detail: [{ loc: ['body', 'transaction', 'description'], msg: 'description refused', type: 'value_error' }] })
     await update(page, modal)
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'MRE Water')
     await h.check('e.description-error-on-field', 'B', async () => {
       const error = modal.locator('[data-testid="field-error-description"]')
       await error.waitFor({ timeout: 5000 })
@@ -439,7 +455,7 @@ async function scenarioE(browser) {
     })
     await answerRepeat(page, 404, { detail: 'Transaction not found' })
     await update(page, modal)
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'MRE Water')
     await h.check('e.404-reason-no-retry', 'B', async () => {
       const line = modal.locator('[data-testid="transaction-form-error"]')
       await line.filter({ hasText: 'Transaction not found' }).waitFor({ timeout: 5000 })
@@ -450,7 +466,7 @@ async function scenarioE(browser) {
     // An API from before the endpoint: a bare 404, then Retry once it answers.
     const old = await answerRepeat(page, 404, { detail: 'Not Found' })
     await update(page, modal)
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'MRE Water')
     await h.check('e.unavailable-edit-copy', 'B', async () => {
       const box = modal.locator('[data-testid="repeat-unavailable"]')
       await box.waitFor({ timeout: 5000 })

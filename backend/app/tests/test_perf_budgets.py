@@ -43,37 +43,41 @@ class Budget(NamedTuple):
     instances: int
 
 
-# (caller, endpoint) -> ceilings. Equal to the measured values at the commit above.
-# The conditional GETs (STU-602, core/conditional.py) add one statement, the data
+# (caller, endpoint) -> ceilings. Set at the measured values at the commit above, then
+# lowered by STU-597 (access as data) to its measured result plus 10% (the owner's
+# snapshot to the epic's 350 target); a figure already within 10% stays. The household
+# snapshot's instances rose by one there: accounts load when a response names them,
+# not when roles are checked, so one account is loaded again after it was released.
+# The conditional GETs (STU-602, core/conditional.py) then add one statement, the data
 # version read, to snapshot, installment-plans, budget-entries, accounts and transactions.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
-    ("owner", "snapshot"): Budget(610, 111_157, 496_424, 4, 9_280),
-    ("owner", "installment-plans"): Budget(80, 1_963, 0, 0, 33),
-    ("owner", "budget-entries"): Budget(21, 14_408, 0, 0, 31),
-    ("owner", "accounts"): Budget(13, 9_876, 0, 0, 19),
-    ("owner", "transactions"): Budget(18, 20_829, 0, 0, 50),
-    ("owner", "statements"): Budget(17, 47_893, 29_716, 0, 435),
-    ("owner", "card-credit"): Budget(63, 9_374, 29_716, 0, 491),
-    ("editor", "snapshot"): Budget(348, 36_062, 188_635, 4, 3_540),
-    ("editor", "installment-plans"): Budget(41, 713, 0, 0, 11),
-    ("editor", "budget-entries"): Budget(18, 4_187, 0, 0, 12),
-    ("editor", "accounts"): Budget(10, 1_665, 0, 0, 7),
-    ("editor", "transactions"): Budget(16, 8_878, 0, 0, 28),
-    ("editor", "statements"): Budget(17, 47_875, 29_716, 0, 436),
-    ("viewer", "snapshot"): Budget(305, 31_604, 188_635, 4, 3_527),
-    ("viewer", "installment-plans"): Budget(12, 61, 0, 0, 9),
+    ("owner", "snapshot"): Budget(351, 111_157, 8_985, 4, 9_280),
+    ("owner", "installment-plans"): Budget(70, 1_963, 0, 0, 26),
+    ("owner", "budget-entries"): Budget(20, 14_408, 0, 0, 29),
+    ("owner", "accounts"): Budget(12, 9_876, 0, 0, 16),
+    ("owner", "transactions"): Budget(17, 20_829, 0, 0, 38),
+    ("owner", "statements"): Budget(13, 47_893, 431, 0, 435),
+    ("owner", "card-credit"): Budget(54, 9_374, 431, 0, 491),
+    ("editor", "snapshot"): Budget(292, 36_062, 3_463, 4, 3_540),
+    ("editor", "installment-plans"): Budget(41, 713, 0, 0, 8),
+    ("editor", "budget-entries"): Budget(18, 4_187, 0, 0, 10),
+    ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
+    ("editor", "transactions"): Budget(16, 8_878, 0, 0, 27),
+    ("editor", "statements"): Budget(17, 47_875, 431, 0, 436),
+    ("viewer", "snapshot"): Budget(251, 31_604, 3_463, 4, 3_527),
+    ("viewer", "installment-plans"): Budget(10, 61, 0, 0, 5),
     ("viewer", "budget-entries"): Budget(12, 39, 0, 0, 1),
-    ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 7),
-    ("viewer", "transactions"): Budget(16, 3_824, 0, 0, 22),
-    ("viewer", "statements"): Budget(17, 36_670, 29_488, 0, 434),
-    ("household", "snapshot"): Budget(294, 10_590, 66_503, 3, 1_338),
-    ("household", "installment-plans"): Budget(17, 61, 0, 0, 9),
+    ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
+    ("viewer", "transactions"): Budget(16, 3_824, 0, 0, 21),
+    ("viewer", "statements"): Budget(17, 36_670, 427, 0, 434),
+    ("household", "snapshot"): Budget(233, 10_590, 1_370, 3, 1_339),
+    ("household", "installment-plans"): Budget(14, 61, 0, 0, 5),
     ("household", "budget-entries"): Budget(18, 39, 0, 0, 1),
-    ("household", "accounts"): Budget(15, 358, 0, 0, 5),
+    ("household", "accounts"): Budget(14, 358, 0, 0, 5),
     ("household", "transactions"): Budget(25, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(84, 7_353, 21_837, 1, 446),
-    ("household", "household-monthly"): Budget(112, 138, 21_837, 1, 455),
-    ("household", "household-dashboard"): Budget(201, 7_740, 43_674, 2, 897),
+    ("household", "household-upcoming"): Budget(71, 7_353, 455, 1, 446),
+    ("household", "household-monthly"): Budget(100, 138, 455, 1, 455),
+    ("household", "household-dashboard"): Budget(173, 7_740, 909, 2, 897),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full

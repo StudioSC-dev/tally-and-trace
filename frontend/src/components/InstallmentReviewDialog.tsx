@@ -106,7 +106,7 @@ function ReviewShell({ entryId, name, review, loadError, refetch, onClose, onRev
   const [error, setError] = useState<string | null>(null)
 
   // The opener, read once per instance in a layout effect: that runs before the passive
-  // query subscriptions, which can make the screen loader blur it. StrictMode's replay
+  // query subscriptions, so a load can't have moved focus yet. StrictMode's replay
   // keeps the first value.
   const openerRef = useRef<Element | null>(null)
   useLayoutEffect(() => {

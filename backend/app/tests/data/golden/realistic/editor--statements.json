@@ -1,0 +1,2643 @@
+{
+ "body": {
+  "account_id": "accounts#8",
+  "currency": "PHP",
+  "name": "Card A",
+  "statements": [
+   {
+    "amount_due": 0.0,
+    "close_date": "2024-12-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-01-02T00:00:00",
+    "lines": [
+     {
+      "amount": 6978.0,
+      "date": "2024-11-13T04:02:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1199"
+     },
+     {
+      "amount": 3336.0,
+      "date": "2024-11-13T21:33:00+00:00",
+      "display_description": "Txn 1460",
+      "transaction_id": "transactions#1461"
+     },
+     {
+      "amount": 4174.0,
+      "date": "2024-11-14T01:53:00+00:00",
+      "display_description": "Txn 1975",
+      "transaction_id": "transactions#1976"
+     },
+     {
+      "amount": 1153.0,
+      "date": "2024-11-15T20:27:00+00:00",
+      "display_description": "Txn 1507",
+      "transaction_id": "transactions#1508"
+     },
+     {
+      "amount": 2108.0,
+      "date": "2024-11-24T03:04:00+00:00",
+      "display_description": "Txn 1751",
+      "transaction_id": "transactions#1752"
+     },
+     {
+      "amount": 2393.0,
+      "date": "2024-11-28T11:10:00+00:00",
+      "display_description": "Txn 1181",
+      "transaction_id": "transactions#1182"
+     },
+     {
+      "amount": 623.0,
+      "date": "2024-11-28T19:34:00+00:00",
+      "display_description": "Txn 573",
+      "transaction_id": "transactions#574"
+     },
+     {
+      "amount": 1961.0,
+      "date": "2024-12-02T16:53:00+00:00",
+      "display_description": "Txn 966",
+      "transaction_id": "transactions#967"
+     },
+     {
+      "amount": 2559.0,
+      "date": "2024-12-03T21:55:00+00:00",
+      "display_description": "Txn 813",
+      "transaction_id": "transactions#814"
+     },
+     {
+      "amount": 2408.0,
+      "date": "2024-12-08T05:59:00+00:00",
+      "display_description": "Txn 1541",
+      "transaction_id": "transactions#1542"
+     },
+     {
+      "amount": -3782.0,
+      "date": "2024-12-08T08:29:00+00:00",
+      "display_description": "Txn 1694",
+      "transaction_id": "transactions#1695"
+     },
+     {
+      "amount": -4296.0,
+      "date": "2024-12-10T16:19:00+00:00",
+      "display_description": "Txn 22",
+      "transaction_id": "transactions#23"
+     }
+    ],
+    "statement_balance": 19615.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-01-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-02-03T00:00:00",
+    "lines": [
+     {
+      "amount": 407.0,
+      "date": "2024-12-13T12:17:00+00:00",
+      "display_description": "Txn 2775",
+      "transaction_id": "transactions#2776"
+     },
+     {
+      "amount": 2171.0,
+      "date": "2024-12-20T15:49:00+00:00",
+      "display_description": "Txn 842",
+      "transaction_id": "transactions#843"
+     },
+     {
+      "amount": 467.0,
+      "date": "2024-12-21T10:12:00+00:00",
+      "display_description": "Txn 231",
+      "transaction_id": "transactions#232"
+     },
+     {
+      "amount": 3757.0,
+      "date": "2024-12-21T22:33:00+00:00",
+      "display_description": "Txn 2239",
+      "transaction_id": "transactions#2240"
+     },
+     {
+      "amount": 3911.0,
+      "date": "2024-12-22T04:22:00+00:00",
+      "display_description": "Txn 2465",
+      "transaction_id": "transactions#2466"
+     },
+     {
+      "amount": 4448.0,
+      "date": "2024-12-24T08:25:00+00:00",
+      "display_description": "Txn 1417",
+      "transaction_id": "transactions#1418"
+     },
+     {
+      "amount": 2187.0,
+      "date": "2024-12-26T17:01:00+00:00",
+      "display_description": "Txn 2595",
+      "transaction_id": "transactions#2596"
+     },
+     {
+      "amount": 63.0,
+      "date": "2024-12-26T18:44:00+00:00",
+      "display_description": "Txn 2476",
+      "transaction_id": "transactions#2477"
+     },
+     {
+      "amount": -2619.0,
+      "date": "2025-01-03T07:46:00+00:00",
+      "display_description": "Txn 1263",
+      "transaction_id": "transactions#1264"
+     },
+     {
+      "amount": 3578.0,
+      "date": "2025-01-07T04:00:00+00:00",
+      "display_description": "Txn 54",
+      "transaction_id": "transactions#55"
+     },
+     {
+      "amount": 1492.0,
+      "date": "2025-01-07T13:10:00+00:00",
+      "display_description": "Txn 1640",
+      "transaction_id": "transactions#1641"
+     },
+     {
+      "amount": 377.0,
+      "date": "2025-01-07T19:24:00+00:00",
+      "display_description": "Txn 2426",
+      "transaction_id": "transactions#2427"
+     },
+     {
+      "amount": 1669.0,
+      "date": "2025-01-08T04:48:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1671"
+     },
+     {
+      "amount": -4494.0,
+      "date": "2025-01-08T11:57:00+00:00",
+      "display_description": "Txn 602",
+      "transaction_id": "transactions#603"
+     },
+     {
+      "amount": 4933.0,
+      "date": "2025-01-09T19:09:00+00:00",
+      "display_description": "Txn 96",
+      "transaction_id": "transactions#97"
+     },
+     {
+      "amount": 4397.0,
+      "date": "2025-01-10T02:52:00+00:00",
+      "display_description": "Txn 192",
+      "transaction_id": "transactions#193"
+     },
+     {
+      "amount": 496.0,
+      "date": "2025-01-12T09:27:00+00:00",
+      "display_description": "Txn 1718",
+      "transaction_id": "transactions#1719"
+     }
+    ],
+    "statement_balance": 27240.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-02-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-03-05T00:00:00",
+    "lines": [
+     {
+      "amount": 4424.0,
+      "date": "2025-01-16T13:06:00+00:00",
+      "display_description": "Txn 118",
+      "transaction_id": "transactions#119"
+     },
+     {
+      "amount": 178.0,
+      "date": "2025-01-16T13:31:00+00:00",
+      "display_description": "Txn 1449",
+      "transaction_id": "transactions#1450"
+     },
+     {
+      "amount": 439.0,
+      "date": "2025-01-19T12:23:00+00:00",
+      "display_description": "Txn 2563",
+      "transaction_id": "transactions#2564"
+     },
+     {
+      "amount": -1973.0,
+      "date": "2025-01-19T23:47:00+00:00",
+      "display_description": "Txn 64",
+      "transaction_id": "transactions#65"
+     },
+     {
+      "amount": -1295.0,
+      "date": "2025-01-19T23:59:00+00:00",
+      "display_description": "Txn 1165",
+      "transaction_id": "transactions#1166"
+     },
+     {
+      "amount": 4526.0,
+      "date": "2025-01-21T15:20:00+00:00",
+      "display_description": "Txn 366",
+      "transaction_id": "transactions#367"
+     },
+     {
+      "amount": 1932.0,
+      "date": "2025-01-23T05:57:00+00:00",
+      "display_description": "Txn 727",
+      "transaction_id": "transactions#728"
+     },
+     {
+      "amount": 4850.0,
+      "date": "2025-01-24T04:18:00+00:00",
+      "display_description": "Txn 765",
+      "transaction_id": "transactions#766"
+     },
+     {
+      "amount": 3447.0,
+      "date": "2025-01-28T22:45:00+00:00",
+      "display_description": "Txn 2387",
+      "transaction_id": "transactions#2388"
+     },
+     {
+      "amount": 3559.0,
+      "date": "2025-01-30T03:37:00+00:00",
+      "display_description": "Txn 1661",
+      "transaction_id": "transactions#1662"
+     },
+     {
+      "amount": -2802.0,
+      "date": "2025-01-31T16:26:00+00:00",
+      "display_description": "Txn 2502",
+      "transaction_id": "transactions#2503"
+     },
+     {
+      "amount": 4721.0,
+      "date": "2025-02-01T16:09:00+00:00",
+      "display_description": "Txn 2309",
+      "transaction_id": "transactions#2310"
+     },
+     {
+      "amount": 1619.0,
+      "date": "2025-02-04T14:13:00+00:00",
+      "display_description": "Txn 552",
+      "transaction_id": "transactions#553"
+     },
+     {
+      "amount": 433.0,
+      "date": "2025-02-04T15:02:00+00:00",
+      "display_description": "Txn 1111",
+      "transaction_id": "transactions#1112"
+     },
+     {
+      "amount": 179.0,
+      "date": "2025-02-05T16:45:00+00:00",
+      "display_description": "Txn 862",
+      "transaction_id": "transactions#863"
+     },
+     {
+      "amount": 2203.0,
+      "date": "2025-02-05T21:31:00+00:00",
+      "display_description": "Txn 2192",
+      "transaction_id": "transactions#2193"
+     },
+     {
+      "amount": 4889.0,
+      "date": "2025-02-07T23:10:00+00:00",
+      "display_description": "Txn 29",
+      "transaction_id": "transactions#30"
+     },
+     {
+      "amount": 3622.0,
+      "date": "2025-02-08T13:26:00+00:00",
+      "display_description": "Txn 2786",
+      "transaction_id": "transactions#2787"
+     },
+     {
+      "amount": 4316.0,
+      "date": "2025-02-10T02:17:00+00:00",
+      "display_description": "Txn 2648",
+      "transaction_id": "transactions#2649"
+     },
+     {
+      "amount": 819.0,
+      "date": "2025-02-10T07:04:00+00:00",
+      "display_description": "Txn 974",
+      "transaction_id": "transactions#975"
+     },
+     {
+      "amount": 759.0,
+      "date": "2025-02-10T09:09:00+00:00",
+      "display_description": "Txn 1126",
+      "transaction_id": "transactions#1127"
+     }
+    ],
+    "statement_balance": 40845.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-03-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-04-02T00:00:00",
+    "lines": [
+     {
+      "amount": 2191.0,
+      "date": "2025-02-17T12:56:00+00:00",
+      "display_description": "Txn 1919",
+      "transaction_id": "transactions#1920"
+     },
+     {
+      "amount": 5270.0,
+      "date": "2025-02-18T11:24:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#662"
+     },
+     {
+      "amount": -1910.0,
+      "date": "2025-02-23T03:20:00+00:00",
+      "display_description": "Txn 604",
+      "transaction_id": "transactions#605"
+     },
+     {
+      "amount": 4120.0,
+      "date": "2025-02-23T13:04:00+00:00",
+      "display_description": "Txn 767",
+      "transaction_id": "transactions#768"
+     },
+     {
+      "amount": -1584.0,
+      "date": "2025-02-25T12:48:00+00:00",
+      "display_description": "Txn 2212",
+      "transaction_id": "transactions#2213"
+     },
+     {
+      "amount": 1058.0,
+      "date": "2025-02-26T11:55:00+00:00",
+      "display_description": "Txn 257",
+      "transaction_id": "transactions#258"
+     },
+     {
+      "amount": 694.0,
+      "date": "2025-02-27T04:38:00+00:00",
+      "display_description": "Txn 1563",
+      "transaction_id": "transactions#1564"
+     },
+     {
+      "amount": 480.0,
+      "date": "2025-02-28T08:14:00+00:00",
+      "display_description": "Txn 151",
+      "transaction_id": "transactions#152"
+     },
+     {
+      "amount": 4733.0,
+      "date": "2025-02-28T14:02:00+00:00",
+      "display_description": "Txn 2565",
+      "transaction_id": "transactions#2566"
+     },
+     {
+      "amount": 3849.0,
+      "date": "2025-02-28T19:36:00+00:00",
+      "display_description": "Txn 1020",
+      "transaction_id": "transactions#1021"
+     },
+     {
+      "amount": 4040.0,
+      "date": "2025-03-01T14:48:00+00:00",
+      "display_description": "Txn 2061",
+      "transaction_id": "transactions#2062"
+     },
+     {
+      "amount": 3318.0,
+      "date": "2025-03-02T08:13:00+00:00",
+      "display_description": "Txn 176",
+      "transaction_id": "transactions#177"
+     },
+     {
+      "amount": 4158.0,
+      "date": "2025-03-03T10:22:00+00:00",
+      "display_description": "Txn 1453",
+      "transaction_id": "transactions#1454"
+     },
+     {
+      "amount": 885.0,
+      "date": "2025-03-08T19:05:00+00:00",
+      "display_description": "Txn 1406",
+      "transaction_id": "transactions#1407"
+     },
+     {
+      "amount": 3736.0,
+      "date": "2025-03-08T23:31:00+00:00",
+      "display_description": "Txn 533",
+      "transaction_id": "transactions#534"
+     },
+     {
+      "amount": -716.0,
+      "date": "2025-03-09T19:55:00+00:00",
+      "display_description": "Txn 648",
+      "transaction_id": "transactions#649"
+     },
+     {
+      "amount": 887.0,
+      "date": "2025-03-11T15:29:00+00:00",
+      "display_description": "Txn 20",
+      "transaction_id": "transactions#21"
+     },
+     {
+      "amount": 1534.0,
+      "date": "2025-03-11T18:25:00+00:00",
+      "display_description": "Txn 2225",
+      "transaction_id": "transactions#2226"
+     },
+     {
+      "amount": 2622.0,
+      "date": "2025-03-12T00:03:00+00:00",
+      "display_description": "Txn 2538",
+      "transaction_id": "transactions#2539"
+     }
+    ],
+    "statement_balance": 39365.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-04-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-05-05T00:00:00",
+    "lines": [
+     {
+      "amount": 2388.0,
+      "date": "2025-03-15T05:53:00+00:00",
+      "display_description": "Txn 2221",
+      "transaction_id": "transactions#2222"
+     },
+     {
+      "amount": 3902.0,
+      "date": "2025-03-15T17:20:00+00:00",
+      "display_description": "Txn 659",
+      "transaction_id": "transactions#660"
+     },
+     {
+      "amount": 4320.0,
+      "date": "2025-03-16T01:38:00+00:00",
+      "display_description": "Move 267",
+      "transaction_id": "transactions#268"
+     },
+     {
+      "amount": 2629.0,
+      "date": "2025-03-19T10:00:00+00:00",
+      "display_description": "Txn 2776",
+      "transaction_id": "transactions#2777"
+     },
+     {
+      "amount": 1690.0,
+      "date": "2025-03-20T17:40:00+00:00",
+      "display_description": "Txn 2168",
+      "transaction_id": "transactions#2169"
+     },
+     {
+      "amount": 1979.0,
+      "date": "2025-03-26T07:20:00+00:00",
+      "display_description": "Txn 2141",
+      "transaction_id": "transactions#2142"
+     },
+     {
+      "amount": 4369.0,
+      "date": "2025-03-26T13:17:00+00:00",
+      "display_description": "Txn 1174",
+      "transaction_id": "transactions#1175"
+     },
+     {
+      "amount": 7971.0,
+      "date": "2025-03-28T22:18:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2337"
+     },
+     {
+      "amount": 1068.0,
+      "date": "2025-03-31T12:57:00+00:00",
+      "display_description": "Txn 1210",
+      "transaction_id": "transactions#1211"
+     },
+     {
+      "amount": 928.0,
+      "date": "2025-03-31T21:20:00+00:00",
+      "display_description": "Txn 1848",
+      "transaction_id": "transactions#1849"
+     },
+     {
+      "amount": 2695.0,
+      "date": "2025-04-01T00:12:00+00:00",
+      "display_description": "Txn 369",
+      "transaction_id": "transactions#370"
+     },
+     {
+      "amount": 546.0,
+      "date": "2025-04-03T14:29:00+00:00",
+      "display_description": "Txn 1978",
+      "transaction_id": "transactions#1979"
+     },
+     {
+      "amount": 1442.0,
+      "date": "2025-04-03T17:35:00+00:00",
+      "display_description": "Txn 739",
+      "transaction_id": "transactions#740"
+     },
+     {
+      "amount": 4965.0,
+      "date": "2025-04-05T20:53:00+00:00",
+      "display_description": "Txn 1235",
+      "transaction_id": "transactions#1236"
+     },
+     {
+      "amount": 2973.0,
+      "date": "2025-04-09T08:24:00+00:00",
+      "display_description": "Txn 358",
+      "transaction_id": "transactions#359"
+     },
+     {
+      "amount": 778.0,
+      "date": "2025-04-09T15:06:00+00:00",
+      "display_description": "Txn 537",
+      "transaction_id": "transactions#538"
+     },
+     {
+      "amount": 2985.0,
+      "date": "2025-04-10T12:29:00+00:00",
+      "display_description": "Txn 2634",
+      "transaction_id": "transactions#2635"
+     },
+     {
+      "amount": 3234.0,
+      "date": "2025-04-12T21:36:00+00:00",
+      "display_description": "Txn 259",
+      "transaction_id": "transactions#260"
+     }
+    ],
+    "statement_balance": 50862.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-05-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-06-02T00:00:00",
+    "lines": [
+     {
+      "amount": 496.0,
+      "date": "2025-04-13T13:23:00+00:00",
+      "display_description": "Txn 671",
+      "transaction_id": "transactions#672"
+     },
+     {
+      "amount": 1657.0,
+      "date": "2025-04-16T04:50:00+00:00",
+      "display_description": "Txn 175",
+      "transaction_id": "transactions#176"
+     },
+     {
+      "amount": 93.0,
+      "date": "2025-04-16T12:48:00+00:00",
+      "display_description": "Txn 397",
+      "transaction_id": "transactions#398"
+     },
+     {
+      "amount": 1598.0,
+      "date": "2025-04-16T20:14:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#378"
+     },
+     {
+      "amount": 2080.0,
+      "date": "2025-04-18T00:16:00+00:00",
+      "display_description": "Txn 1500",
+      "transaction_id": "transactions#1501"
+     },
+     {
+      "amount": 1954.0,
+      "date": "2025-04-21T21:14:00+00:00",
+      "display_description": "Txn 2085",
+      "transaction_id": "transactions#2086"
+     },
+     {
+      "amount": 2674.0,
+      "date": "2025-04-22T06:31:00+00:00",
+      "display_description": "Txn 1821",
+      "transaction_id": "transactions#1822"
+     },
+     {
+      "amount": -2490.0,
+      "date": "2025-05-02T15:24:00+00:00",
+      "display_description": "Txn 1550",
+      "transaction_id": "transactions#1551"
+     },
+     {
+      "amount": -209.0,
+      "date": "2025-05-03T03:19:00+00:00",
+      "display_description": "Txn 255",
+      "transaction_id": "transactions#256"
+     },
+     {
+      "amount": 1410.0,
+      "date": "2025-05-04T04:37:00+00:00",
+      "display_description": "Txn 2195",
+      "transaction_id": "transactions#2196"
+     },
+     {
+      "amount": 2013.0,
+      "date": "2025-05-10T11:24:00+00:00",
+      "display_description": "Txn 1737",
+      "transaction_id": "transactions#1738"
+     },
+     {
+      "amount": -2936.0,
+      "date": "2025-05-11T03:15:00+00:00",
+      "display_description": "Txn 467",
+      "transaction_id": "transactions#468"
+     }
+    ],
+    "statement_balance": 8340.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-06-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-07-03T00:00:00",
+    "lines": [
+     {
+      "amount": 2923.0,
+      "date": "2025-05-13T23:54:00+00:00",
+      "display_description": "Txn 379",
+      "transaction_id": "transactions#380"
+     },
+     {
+      "amount": -3486.0,
+      "date": "2025-05-14T13:39:00+00:00",
+      "display_description": "Txn 2287",
+      "transaction_id": "transactions#2288"
+     },
+     {
+      "amount": 736.0,
+      "date": "2025-05-19T14:09:00+00:00",
+      "display_description": "Txn 1050",
+      "transaction_id": "transactions#1051"
+     },
+     {
+      "amount": 5224.0,
+      "date": "2025-05-24T23:23:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1038"
+     },
+     {
+      "amount": 1604.0,
+      "date": "2025-05-27T05:22:00+00:00",
+      "display_description": "Txn 2674",
+      "transaction_id": "transactions#2675"
+     },
+     {
+      "amount": 1594.0,
+      "date": "2025-05-27T05:29:00+00:00",
+      "display_description": "Txn 2330",
+      "transaction_id": "transactions#2331"
+     },
+     {
+      "amount": 2686.0,
+      "date": "2025-05-29T10:42:00+00:00",
+      "display_description": "Txn 2667",
+      "transaction_id": "transactions#2668"
+     },
+     {
+      "amount": 2910.0,
+      "date": "2025-05-31T16:52:00+00:00",
+      "display_description": "Txn 2115",
+      "transaction_id": "transactions#2116"
+     },
+     {
+      "amount": 6741.0,
+      "date": "2025-06-11T13:43:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#318"
+     }
+    ],
+    "statement_balance": 20932.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-07-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-08-04T00:00:00",
+    "lines": [
+     {
+      "amount": -3513.0,
+      "date": "2025-06-22T09:17:00+00:00",
+      "display_description": "Txn 1339",
+      "transaction_id": "transactions#1340"
+     },
+     {
+      "amount": 2943.0,
+      "date": "2025-06-22T09:49:00+00:00",
+      "display_description": "Txn 2130",
+      "transaction_id": "transactions#2131"
+     },
+     {
+      "amount": 2673.0,
+      "date": "2025-06-26T22:14:00+00:00",
+      "display_description": "Txn 2217",
+      "transaction_id": "transactions#2218"
+     },
+     {
+      "amount": -2427.0,
+      "date": "2025-06-27T19:21:00+00:00",
+      "display_description": "Txn 2562",
+      "transaction_id": "transactions#2563"
+     },
+     {
+      "amount": 4376.0,
+      "date": "2025-06-28T10:01:00+00:00",
+      "display_description": "Txn 920",
+      "transaction_id": "transactions#921"
+     },
+     {
+      "amount": 4977.0,
+      "date": "2025-06-28T16:46:00+00:00",
+      "display_description": "Txn 1466",
+      "transaction_id": "transactions#1467"
+     },
+     {
+      "amount": 3027.0,
+      "date": "2025-06-29T06:04:00+00:00",
+      "display_description": "Txn 1881",
+      "transaction_id": "transactions#1882"
+     },
+     {
+      "amount": 1284.0,
+      "date": "2025-06-30T15:05:00+00:00",
+      "display_description": "Txn 989",
+      "transaction_id": "transactions#990"
+     },
+     {
+      "amount": 1708.0,
+      "date": "2025-07-03T01:08:00+00:00",
+      "display_description": "Txn 2500",
+      "transaction_id": "transactions#2501"
+     },
+     {
+      "amount": 4353.0,
+      "date": "2025-07-04T08:47:00+00:00",
+      "display_description": "Txn 1476",
+      "transaction_id": "transactions#1477"
+     },
+     {
+      "amount": -4007.0,
+      "date": "2025-07-04T17:24:00+00:00",
+      "display_description": "Txn 1977",
+      "transaction_id": "transactions#1978"
+     },
+     {
+      "amount": -3572.0,
+      "date": "2025-07-04T23:21:00+00:00",
+      "display_description": "Txn 2728",
+      "transaction_id": "transactions#2729"
+     },
+     {
+      "amount": -3523.0,
+      "date": "2025-07-05T02:48:00+00:00",
+      "display_description": "Txn 448",
+      "transaction_id": "transactions#449"
+     },
+     {
+      "amount": 3223.0,
+      "date": "2025-07-10T15:42:00+00:00",
+      "display_description": "Txn 550",
+      "transaction_id": "transactions#551"
+     }
+    ],
+    "statement_balance": 11522.0,
+    "status": "paid",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 16188.0,
+    "close_date": "2025-08-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-09-02T00:00:00",
+    "lines": [
+     {
+      "amount": 1228.0,
+      "date": "2025-07-13T01:38:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1528"
+     },
+     {
+      "amount": 651.0,
+      "date": "2025-07-13T15:56:00+00:00",
+      "display_description": "Txn 2227",
+      "transaction_id": "transactions#2228"
+     },
+     {
+      "amount": 1111.0,
+      "date": "2025-07-14T08:09:00+00:00",
+      "display_description": "Txn 2796",
+      "transaction_id": "transactions#2797"
+     },
+     {
+      "amount": 723.0,
+      "date": "2025-07-15T01:38:00+00:00",
+      "display_description": "Txn 677",
+      "transaction_id": "transactions#678"
+     },
+     {
+      "amount": 2014.0,
+      "date": "2025-07-16T07:57:00+00:00",
+      "display_description": "Txn 1520",
+      "transaction_id": "transactions#1521"
+     },
+     {
+      "amount": 2507.0,
+      "date": "2025-07-19T05:54:00+00:00",
+      "display_description": "Txn 1468",
+      "transaction_id": "transactions#1469"
+     },
+     {
+      "amount": 2259.0,
+      "date": "2025-07-20T22:09:00+00:00",
+      "display_description": "Txn 145",
+      "transaction_id": "transactions#146"
+     },
+     {
+      "amount": 4089.0,
+      "date": "2025-07-21T19:42:00+00:00",
+      "display_description": "Txn 2269",
+      "transaction_id": "transactions#2270"
+     },
+     {
+      "amount": 2905.0,
+      "date": "2025-07-25T11:36:00+00:00",
+      "display_description": "Txn 737",
+      "transaction_id": "transactions#738"
+     },
+     {
+      "amount": 4759.0,
+      "date": "2025-07-25T19:07:00+00:00",
+      "display_description": "Txn 1501",
+      "transaction_id": "transactions#1502"
+     },
+     {
+      "amount": 4993.0,
+      "date": "2025-07-29T03:38:00+00:00",
+      "display_description": "Txn 1897",
+      "transaction_id": "transactions#1898"
+     },
+     {
+      "amount": 51.0,
+      "date": "2025-08-01T08:53:00+00:00",
+      "display_description": "Txn 747",
+      "transaction_id": "transactions#748"
+     },
+     {
+      "amount": 1599.0,
+      "date": "2025-08-01T11:59:00+00:00",
+      "display_description": "Txn 1787",
+      "transaction_id": "transactions#1788"
+     },
+     {
+      "amount": 3493.0,
+      "date": "2025-08-01T21:19:00+00:00",
+      "display_description": "Txn 1023",
+      "transaction_id": "transactions#1024"
+     },
+     {
+      "amount": 938.0,
+      "date": "2025-08-02T06:51:00+00:00",
+      "display_description": "Txn 1534",
+      "transaction_id": "transactions#1535"
+     },
+     {
+      "amount": 1474.0,
+      "date": "2025-08-04T23:12:00+00:00",
+      "display_description": "Txn 2448",
+      "transaction_id": "transactions#2449"
+     },
+     {
+      "amount": 3177.0,
+      "date": "2025-08-06T12:36:00+00:00",
+      "display_description": "Txn 971",
+      "transaction_id": "transactions#972"
+     },
+     {
+      "amount": 2998.0,
+      "date": "2025-08-06T21:15:00+00:00",
+      "display_description": "Txn 965",
+      "transaction_id": "transactions#966"
+     },
+     {
+      "amount": 4631.0,
+      "date": "2025-08-12T10:14:00+00:00",
+      "display_description": "Txn 2527",
+      "transaction_id": "transactions#2528"
+     },
+     {
+      "amount": 2991.0,
+      "date": "2025-08-12T21:00:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1712"
+     }
+    ],
+    "statement_balance": 48591.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 32851.0,
+    "close_date": "2025-09-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-10-03T00:00:00",
+    "lines": [
+     {
+      "amount": 1725.0,
+      "date": "2025-08-14T09:16:00+00:00",
+      "display_description": "Txn 1745",
+      "transaction_id": "transactions#1746"
+     },
+     {
+      "amount": 4456.0,
+      "date": "2025-08-15T18:38:00+00:00",
+      "display_description": "Txn 1106",
+      "transaction_id": "transactions#1107"
+     },
+     {
+      "amount": -1667.0,
+      "date": "2025-08-15T20:53:00+00:00",
+      "display_description": "Txn 1488",
+      "transaction_id": "transactions#1489"
+     },
+     {
+      "amount": 215.0,
+      "date": "2025-08-18T14:32:00+00:00",
+      "display_description": "Txn 704",
+      "transaction_id": "transactions#705"
+     },
+     {
+      "amount": 4147.0,
+      "date": "2025-08-23T15:33:00+00:00",
+      "display_description": "Txn 623",
+      "transaction_id": "transactions#624"
+     },
+     {
+      "amount": 2193.0,
+      "date": "2025-08-24T18:34:00+00:00",
+      "display_description": "Txn 1772",
+      "transaction_id": "transactions#1773"
+     },
+     {
+      "amount": 3600.0,
+      "date": "2025-08-26T01:36:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1540"
+     },
+     {
+      "amount": 2040.0,
+      "date": "2025-08-28T08:38:00+00:00",
+      "display_description": "Txn 1323",
+      "transaction_id": "transactions#1324"
+     },
+     {
+      "amount": 2653.0,
+      "date": "2025-08-29T10:24:00+00:00",
+      "display_description": "Txn 662",
+      "transaction_id": "transactions#663"
+     },
+     {
+      "amount": -1468.0,
+      "date": "2025-08-30T13:38:00+00:00",
+      "display_description": "Txn 1482",
+      "transaction_id": "transactions#1483"
+     },
+     {
+      "amount": 2993.0,
+      "date": "2025-09-04T03:13:00+00:00",
+      "display_description": "Txn 1938",
+      "transaction_id": "transactions#1939"
+     },
+     {
+      "amount": 4118.0,
+      "date": "2025-09-05T21:12:00+00:00",
+      "display_description": "Txn 2010",
+      "transaction_id": "transactions#2011"
+     },
+     {
+      "amount": 1370.0,
+      "date": "2025-09-10T07:41:00+00:00",
+      "display_description": "Txn 2335",
+      "transaction_id": "transactions#2336"
+     },
+     {
+      "amount": 2930.0,
+      "date": "2025-09-11T01:38:00+00:00",
+      "display_description": "Txn 652",
+      "transaction_id": "transactions#653"
+     },
+     {
+      "amount": 3546.0,
+      "date": "2025-09-11T23:48:00+00:00",
+      "display_description": "Txn 1325",
+      "transaction_id": "transactions#1326"
+     }
+    ],
+    "statement_balance": 32851.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 23586.0,
+    "close_date": "2025-10-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-11-03T00:00:00",
+    "lines": [
+     {
+      "amount": 1142.0,
+      "date": "2025-09-13T21:01:00+00:00",
+      "display_description": "Txn 387",
+      "transaction_id": "transactions#388"
+     },
+     {
+      "amount": 1871.0,
+      "date": "2025-09-15T17:31:00+00:00",
+      "display_description": "Txn 2468",
+      "transaction_id": "transactions#2469"
+     },
+     {
+      "amount": 5880.0,
+      "date": "2025-09-16T13:45:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#755"
+     },
+     {
+      "amount": 2201.0,
+      "date": "2025-09-18T03:29:00+00:00",
+      "display_description": "Txn 2625",
+      "transaction_id": "transactions#2626"
+     },
+     {
+      "amount": 3903.0,
+      "date": "2025-09-19T19:37:00+00:00",
+      "display_description": "Txn 438",
+      "transaction_id": "transactions#439"
+     },
+     {
+      "amount": 72.0,
+      "date": "2025-09-20T01:38:00+00:00",
+      "display_description": "Txn 799",
+      "transaction_id": "transactions#800"
+     },
+     {
+      "amount": 3623.0,
+      "date": "2025-09-21T12:31:00+00:00",
+      "display_description": "Txn 2006",
+      "transaction_id": "transactions#2007"
+     },
+     {
+      "amount": 924.0,
+      "date": "2025-09-23T08:22:00+00:00",
+      "display_description": "Txn 2210",
+      "transaction_id": "transactions#2211"
+     },
+     {
+      "amount": 4709.0,
+      "date": "2025-09-27T22:18:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1932"
+     },
+     {
+      "amount": 546.0,
+      "date": "2025-09-30T04:41:00+00:00",
+      "display_description": "Txn 702",
+      "transaction_id": "transactions#703"
+     },
+     {
+      "amount": 719.0,
+      "date": "2025-10-01T21:01:00+00:00",
+      "display_description": "Txn 1596",
+      "transaction_id": "transactions#1597"
+     },
+     {
+      "amount": -2530.0,
+      "date": "2025-10-05T06:33:00+00:00",
+      "display_description": "Txn 1786",
+      "transaction_id": "transactions#1787"
+     },
+     {
+      "amount": 526.0,
+      "date": "2025-10-05T15:02:00+00:00",
+      "display_description": "Txn 1634",
+      "transaction_id": "transactions#1635"
+     }
+    ],
+    "statement_balance": 23586.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 17571.0,
+    "close_date": "2025-11-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-12-03T00:00:00",
+    "lines": [
+     {
+      "amount": 2585.0,
+      "date": "2025-10-15T08:07:00+00:00",
+      "display_description": "Txn 2416",
+      "transaction_id": "transactions#2417"
+     },
+     {
+      "amount": 688.0,
+      "date": "2025-10-25T02:34:00+00:00",
+      "display_description": "Txn 931",
+      "transaction_id": "transactions#932"
+     },
+     {
+      "amount": -1479.0,
+      "date": "2025-10-25T10:44:00+00:00",
+      "display_description": "Txn 1260",
+      "transaction_id": "transactions#1261"
+     },
+     {
+      "amount": 4222.0,
+      "date": "2025-10-26T20:29:00+00:00",
+      "display_description": "Txn 961",
+      "transaction_id": "transactions#962"
+     },
+     {
+      "amount": 1951.0,
+      "date": "2025-10-27T22:10:00+00:00",
+      "display_description": "Txn 617",
+      "transaction_id": "transactions#618"
+     },
+     {
+      "amount": 1948.0,
+      "date": "2025-10-28T21:12:00+00:00",
+      "display_description": "Txn 597",
+      "transaction_id": "transactions#598"
+     },
+     {
+      "amount": 4505.0,
+      "date": "2025-10-30T01:51:00+00:00",
+      "display_description": "Txn 2678",
+      "transaction_id": "transactions#2679"
+     },
+     {
+      "amount": -1256.0,
+      "date": "2025-10-30T02:05:00+00:00",
+      "display_description": "Txn 1440",
+      "transaction_id": "transactions#1441"
+     },
+     {
+      "amount": -3928.0,
+      "date": "2025-11-02T19:40:00+00:00",
+      "display_description": "Txn 1294",
+      "transaction_id": "transactions#1295"
+     },
+     {
+      "amount": 3464.0,
+      "date": "2025-11-10T23:48:00+00:00",
+      "display_description": "Txn 274",
+      "transaction_id": "transactions#275"
+     },
+     {
+      "amount": 2144.0,
+      "date": "2025-11-11T05:23:00+00:00",
+      "display_description": "Txn 348",
+      "transaction_id": "transactions#349"
+     },
+     {
+      "amount": 2727.0,
+      "date": "2025-11-11T10:26:00+00:00",
+      "display_description": "Txn 1648",
+      "transaction_id": "transactions#1649"
+     }
+    ],
+    "statement_balance": 17571.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 30083.0,
+    "close_date": "2025-12-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-01-02T00:00:00",
+    "lines": [
+     {
+      "amount": 609.0,
+      "date": "2025-11-14T01:38:00+00:00",
+      "display_description": "Txn 283",
+      "transaction_id": "transactions#284"
+     },
+     {
+      "amount": 2381.0,
+      "date": "2025-11-16T17:16:00+00:00",
+      "display_description": "Txn 2286",
+      "transaction_id": "transactions#2287"
+     },
+     {
+      "amount": 4622.0,
+      "date": "2025-11-18T16:33:00+00:00",
+      "display_description": "Txn 376",
+      "transaction_id": "transactions#377"
+     },
+     {
+      "amount": 2536.0,
+      "date": "2025-11-19T06:00:00+00:00",
+      "display_description": "Txn 2772",
+      "transaction_id": "transactions#2773"
+     },
+     {
+      "amount": 464.0,
+      "date": "2025-11-22T07:41:00+00:00",
+      "display_description": "Txn 541",
+      "transaction_id": "transactions#542"
+     },
+     {
+      "amount": 1055.0,
+      "date": "2025-11-24T17:15:00+00:00",
+      "display_description": "Txn 304",
+      "transaction_id": "transactions#305"
+     },
+     {
+      "amount": 4948.0,
+      "date": "2025-11-24T21:57:00+00:00",
+      "display_description": "Txn 551",
+      "transaction_id": "transactions#552"
+     },
+     {
+      "amount": 4674.0,
+      "date": "2025-11-25T01:23:00+00:00",
+      "display_description": "Txn 1748",
+      "transaction_id": "transactions#1749"
+     },
+     {
+      "amount": 182.0,
+      "date": "2025-11-26T21:49:00+00:00",
+      "display_description": "Txn 2494",
+      "transaction_id": "transactions#2495"
+     },
+     {
+      "amount": 4817.0,
+      "date": "2025-11-26T23:39:00+00:00",
+      "display_description": "Txn 924",
+      "transaction_id": "transactions#925"
+     },
+     {
+      "amount": -4983.0,
+      "date": "2025-11-29T02:01:00+00:00",
+      "display_description": "Txn 899",
+      "transaction_id": "transactions#900"
+     },
+     {
+      "amount": 916.0,
+      "date": "2025-11-29T16:55:00+00:00",
+      "display_description": "Txn 115",
+      "transaction_id": "transactions#116"
+     },
+     {
+      "amount": 4093.0,
+      "date": "2025-11-30T09:39:00+00:00",
+      "display_description": "Txn 1691",
+      "transaction_id": "transactions#1692"
+     },
+     {
+      "amount": 2529.0,
+      "date": "2025-12-03T18:37:00+00:00",
+      "display_description": "Txn 738",
+      "transaction_id": "transactions#739"
+     },
+     {
+      "amount": 476.0,
+      "date": "2025-12-07T13:54:00+00:00",
+      "display_description": "Txn 424",
+      "transaction_id": "transactions#425"
+     },
+     {
+      "amount": 764.0,
+      "date": "2025-12-11T12:41:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#85"
+     }
+    ],
+    "statement_balance": 30083.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 26905.0,
+    "close_date": "2026-01-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-02-02T00:00:00",
+    "lines": [
+     {
+      "amount": 2309.0,
+      "date": "2025-12-15T02:23:00+00:00",
+      "display_description": "Txn 631",
+      "transaction_id": "transactions#632"
+     },
+     {
+      "amount": 405.0,
+      "date": "2025-12-15T15:31:00+00:00",
+      "display_description": "Txn 1922",
+      "transaction_id": "transactions#1923"
+     },
+     {
+      "amount": 1715.0,
+      "date": "2025-12-18T16:31:00+00:00",
+      "display_description": "Txn 944",
+      "transaction_id": "transactions#945"
+     },
+     {
+      "amount": 4142.0,
+      "date": "2025-12-18T16:35:00+00:00",
+      "display_description": "Txn 279",
+      "transaction_id": "transactions#280"
+     },
+     {
+      "amount": -319.0,
+      "date": "2025-12-18T19:37:00+00:00",
+      "display_description": "Txn 156",
+      "transaction_id": "transactions#157"
+     },
+     {
+      "amount": 2315.0,
+      "date": "2025-12-31T14:49:00+00:00",
+      "display_description": "Txn 308",
+      "transaction_id": "transactions#309"
+     },
+     {
+      "amount": 3671.0,
+      "date": "2026-01-01T13:55:00+00:00",
+      "display_description": "Txn 1705",
+      "transaction_id": "transactions#1706"
+     },
+     {
+      "amount": 3848.0,
+      "date": "2026-01-03T22:18:00+00:00",
+      "display_description": "Txn 2581",
+      "transaction_id": "transactions#2582"
+     },
+     {
+      "amount": 4823.0,
+      "date": "2026-01-05T15:00:00+00:00",
+      "display_description": "Txn 1479",
+      "transaction_id": "transactions#1480"
+     },
+     {
+      "amount": 2334.0,
+      "date": "2026-01-05T20:10:00+00:00",
+      "display_description": "Txn 479",
+      "transaction_id": "transactions#480"
+     },
+     {
+      "amount": 220.0,
+      "date": "2026-01-06T12:42:00+00:00",
+      "display_description": "Txn 382",
+      "transaction_id": "transactions#383"
+     },
+     {
+      "amount": 527.0,
+      "date": "2026-01-10T07:33:00+00:00",
+      "display_description": "Txn 1584",
+      "transaction_id": "transactions#1585"
+     },
+     {
+      "amount": 915.0,
+      "date": "2026-01-12T10:42:00+00:00",
+      "display_description": "Txn 1954",
+      "transaction_id": "transactions#1955"
+     }
+    ],
+    "statement_balance": 26905.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 22594.0,
+    "close_date": "2026-02-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-03-05T00:00:00",
+    "lines": [
+     {
+      "amount": 1542.0,
+      "date": "2026-01-13T12:24:00+00:00",
+      "display_description": "Txn 2613",
+      "transaction_id": "transactions#2614"
+     },
+     {
+      "amount": 363.0,
+      "date": "2026-01-15T09:58:00+00:00",
+      "display_description": "Txn 2727",
+      "transaction_id": "transactions#2728"
+     },
+     {
+      "amount": 936.0,
+      "date": "2026-01-15T21:26:00+00:00",
+      "display_description": "Txn 1979",
+      "transaction_id": "transactions#1980"
+     },
+     {
+      "amount": 5831.0,
+      "date": "2026-01-16T01:16:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1799"
+     },
+     {
+      "amount": 3837.0,
+      "date": "2026-01-23T05:03:00+00:00",
+      "display_description": "Txn 1980",
+      "transaction_id": "transactions#1981"
+     },
+     {
+      "amount": -2982.0,
+      "date": "2026-01-23T21:11:00+00:00",
+      "display_description": "Txn 190",
+      "transaction_id": "transactions#191"
+     },
+     {
+      "amount": 3292.0,
+      "date": "2026-01-31T23:25:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2720"
+     },
+     {
+      "amount": -551.0,
+      "date": "2026-02-01T22:26:00+00:00",
+      "display_description": "Txn 1045",
+      "transaction_id": "transactions#1046"
+     },
+     {
+      "amount": 3518.0,
+      "date": "2026-02-03T22:27:00+00:00",
+      "display_description": "Txn 1824",
+      "transaction_id": "transactions#1825"
+     },
+     {
+      "amount": 1330.0,
+      "date": "2026-02-08T23:12:00+00:00",
+      "display_description": "Txn 2427",
+      "transaction_id": "transactions#2428"
+     },
+     {
+      "amount": -2910.0,
+      "date": "2026-02-10T12:44:00+00:00",
+      "display_description": "Txn 1473",
+      "transaction_id": "transactions#1474"
+     },
+     {
+      "amount": 4738.0,
+      "date": "2026-02-11T15:26:00+00:00",
+      "display_description": "Txn 1789",
+      "transaction_id": "transactions#1790"
+     },
+     {
+      "amount": 3650.0,
+      "date": "2026-02-12T00:12:00+00:00",
+      "display_description": "Txn 1605",
+      "transaction_id": "transactions#1606"
+     }
+    ],
+    "statement_balance": 22594.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 34768.0,
+    "close_date": "2026-03-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-04-06T00:00:00",
+    "lines": [
+     {
+      "amount": -1686.0,
+      "date": "2026-02-14T04:18:00+00:00",
+      "display_description": "Txn 2059",
+      "transaction_id": "transactions#2060"
+     },
+     {
+      "amount": 1206.0,
+      "date": "2026-02-14T08:47:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2780"
+     },
+     {
+      "amount": 4898.0,
+      "date": "2026-02-15T18:36:00+00:00",
+      "display_description": "Txn 2137",
+      "transaction_id": "transactions#2138"
+     },
+     {
+      "amount": 600.0,
+      "date": "2026-02-17T01:57:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1466"
+     },
+     {
+      "amount": -383.0,
+      "date": "2026-02-18T17:20:00+00:00",
+      "display_description": "Txn 2209",
+      "transaction_id": "transactions#2210"
+     },
+     {
+      "amount": 2558.0,
+      "date": "2026-02-20T05:04:00+00:00",
+      "display_description": "Txn 2109",
+      "transaction_id": "transactions#2110"
+     },
+     {
+      "amount": 1050.0,
+      "date": "2026-02-24T21:13:00+00:00",
+      "display_description": "Txn 967",
+      "transaction_id": "transactions#968"
+     },
+     {
+      "amount": 883.0,
+      "date": "2026-02-26T03:05:00+00:00",
+      "display_description": "Txn 419",
+      "transaction_id": "transactions#420"
+     },
+     {
+      "amount": 171.0,
+      "date": "2026-02-28T20:13:00+00:00",
+      "display_description": "Txn 1623",
+      "transaction_id": "transactions#1624"
+     },
+     {
+      "amount": 3252.0,
+      "date": "2026-03-01T22:13:00+00:00",
+      "display_description": "Txn 1188",
+      "transaction_id": "transactions#1189"
+     },
+     {
+      "amount": 3203.0,
+      "date": "2026-03-04T22:13:00+00:00",
+      "display_description": "Txn 225",
+      "transaction_id": "transactions#226"
+     },
+     {
+      "amount": 1928.0,
+      "date": "2026-03-06T09:31:00+00:00",
+      "display_description": "Txn 1652",
+      "transaction_id": "transactions#1653"
+     },
+     {
+      "amount": 4329.0,
+      "date": "2026-03-07T14:15:00+00:00",
+      "display_description": "Txn 86",
+      "transaction_id": "transactions#87"
+     },
+     {
+      "amount": 7692.0,
+      "date": "2026-03-08T17:24:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#713"
+     },
+     {
+      "amount": 2399.0,
+      "date": "2026-03-09T20:54:00+00:00",
+      "display_description": "Txn 2512",
+      "transaction_id": "transactions#2513"
+     },
+     {
+      "amount": 2668.0,
+      "date": "2026-03-10T18:46:00+00:00",
+      "display_description": "Txn 2708",
+      "transaction_id": "transactions#2709"
+     }
+    ],
+    "statement_balance": 34768.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 47745.0,
+    "close_date": "2026-04-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-05-04T00:00:00",
+    "lines": [
+     {
+      "amount": 2186.0,
+      "date": "2026-03-15T16:13:00+00:00",
+      "display_description": "Txn 303",
+      "transaction_id": "transactions#304"
+     },
+     {
+      "amount": 3807.0,
+      "date": "2026-03-17T16:17:00+00:00",
+      "display_description": "Txn 981",
+      "transaction_id": "transactions#982"
+     },
+     {
+      "amount": 2915.0,
+      "date": "2026-03-19T14:31:00+00:00",
+      "display_description": "Txn 629",
+      "transaction_id": "transactions#630"
+     },
+     {
+      "amount": 3206.0,
+      "date": "2026-03-24T08:12:00+00:00",
+      "display_description": "Txn 1742",
+      "transaction_id": "transactions#1743"
+     },
+     {
+      "amount": 2993.0,
+      "date": "2026-03-28T13:31:00+00:00",
+      "display_description": "Txn 327",
+      "transaction_id": "transactions#328"
+     },
+     {
+      "amount": 4175.0,
+      "date": "2026-03-31T05:09:00+00:00",
+      "display_description": "Txn 867",
+      "transaction_id": "transactions#868"
+     },
+     {
+      "amount": 289.0,
+      "date": "2026-04-03T15:25:00+00:00",
+      "display_description": "Txn 1766",
+      "transaction_id": "transactions#1767"
+     },
+     {
+      "amount": 3901.0,
+      "date": "2026-04-04T22:02:00+00:00",
+      "display_description": "Txn 979",
+      "transaction_id": "transactions#980"
+     },
+     {
+      "amount": 1527.0,
+      "date": "2026-04-06T03:25:00+00:00",
+      "display_description": "Txn 2681",
+      "transaction_id": "transactions#2682"
+     },
+     {
+      "amount": 1168.0,
+      "date": "2026-04-07T06:36:00+00:00",
+      "display_description": "Txn 384",
+      "transaction_id": "transactions#385"
+     },
+     {
+      "amount": 4486.0,
+      "date": "2026-04-09T08:07:00+00:00",
+      "display_description": "Txn 258",
+      "transaction_id": "transactions#259"
+     },
+     {
+      "amount": 3143.0,
+      "date": "2026-04-10T10:25:00+00:00",
+      "display_description": "Txn 2222",
+      "transaction_id": "transactions#2223"
+     },
+     {
+      "amount": 1924.0,
+      "date": "2026-04-10T13:33:00+00:00",
+      "display_description": "Txn 582",
+      "transaction_id": "transactions#583"
+     },
+     {
+      "amount": 1041.0,
+      "date": "2026-04-11T12:39:00+00:00",
+      "display_description": "Txn 1973",
+      "transaction_id": "transactions#1974"
+     },
+     {
+      "amount": 7520.0,
+      "date": "2026-04-11T14:01:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2023"
+     },
+     {
+      "amount": 2014.0,
+      "date": "2026-04-11T19:12:00+00:00",
+      "display_description": "Txn 1676",
+      "transaction_id": "transactions#1677"
+     },
+     {
+      "amount": 1450.0,
+      "date": "2026-04-12T13:26:00+00:00",
+      "display_description": "Txn 1928",
+      "transaction_id": "transactions#1929"
+     }
+    ],
+    "statement_balance": 47745.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 32236.0,
+    "close_date": "2026-05-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-06-02T00:00:00",
+    "lines": [
+     {
+      "amount": 1704.0,
+      "date": "2026-04-11T16:00:00+00:00",
+      "display_description": "Posted late card_a 8",
+      "posted_date": "2026-04-14",
+      "transaction_id": "transactions#2920"
+     },
+     {
+      "amount": 4834.0,
+      "date": "2026-04-14T04:58:00+00:00",
+      "display_description": "Txn 61",
+      "transaction_id": "transactions#62"
+     },
+     {
+      "amount": 3902.0,
+      "date": "2026-04-18T00:40:00+00:00",
+      "display_description": "Txn 549",
+      "transaction_id": "transactions#550"
+     },
+     {
+      "amount": 4341.0,
+      "date": "2026-04-18T03:19:00+00:00",
+      "display_description": "Txn 2525",
+      "transaction_id": "transactions#2526"
+     },
+     {
+      "amount": 2793.0,
+      "date": "2026-04-18T05:39:00+00:00",
+      "display_description": "Txn 2702",
+      "transaction_id": "transactions#2703"
+     },
+     {
+      "amount": 4430.0,
+      "date": "2026-04-19T14:04:00+00:00",
+      "display_description": "Txn 1031",
+      "transaction_id": "transactions#1032"
+     },
+     {
+      "amount": 610.0,
+      "date": "2026-04-20T17:57:00+00:00",
+      "display_description": "Txn 1079",
+      "transaction_id": "transactions#1080"
+     },
+     {
+      "amount": 3458.0,
+      "date": "2026-04-23T21:24:00+00:00",
+      "display_description": "Txn 468",
+      "transaction_id": "transactions#469"
+     },
+     {
+      "amount": -3337.0,
+      "date": "2026-04-26T14:27:00+00:00",
+      "display_description": "Txn 337",
+      "transaction_id": "transactions#338"
+     },
+     {
+      "amount": 759.0,
+      "date": "2026-04-27T00:11:00+00:00",
+      "display_description": "Txn 422",
+      "transaction_id": "transactions#423"
+     },
+     {
+      "amount": 106.0,
+      "date": "2026-04-28T18:56:00+00:00",
+      "display_description": "Txn 2715",
+      "transaction_id": "transactions#2716"
+     },
+     {
+      "amount": -4414.0,
+      "date": "2026-05-07T00:45:00+00:00",
+      "display_description": "Txn 1857",
+      "transaction_id": "transactions#1858"
+     },
+     {
+      "amount": 3333.0,
+      "date": "2026-05-07T08:23:00+00:00",
+      "display_description": "Txn 1233",
+      "transaction_id": "transactions#1234"
+     },
+     {
+      "amount": 4913.0,
+      "date": "2026-05-09T02:24:00+00:00",
+      "display_description": "Txn 2593",
+      "transaction_id": "transactions#2594"
+     },
+     {
+      "amount": 1728.0,
+      "date": "2026-05-10T00:26:00+00:00",
+      "display_description": "Txn 1935",
+      "transaction_id": "transactions#1936"
+     },
+     {
+      "amount": -603.0,
+      "date": "2026-05-11T14:01:00+00:00",
+      "display_description": "Txn 951",
+      "transaction_id": "transactions#952"
+     },
+     {
+      "amount": 3679.0,
+      "date": "2026-05-11T14:40:00+00:00",
+      "display_description": "Txn 1827",
+      "transaction_id": "transactions#1828"
+     }
+    ],
+    "statement_balance": 32236.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 48952.0,
+    "close_date": "2026-06-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-07-03T00:00:00",
+    "lines": [
+     {
+      "amount": 4633.0,
+      "date": "2026-05-13T15:32:00+00:00",
+      "display_description": "Txn 38",
+      "transaction_id": "transactions#39"
+     },
+     {
+      "amount": 2292.0,
+      "date": "2026-05-14T04:45:00+00:00",
+      "display_description": "Txn 723",
+      "transaction_id": "transactions#724"
+     },
+     {
+      "amount": 1485.0,
+      "date": "2026-05-14T07:24:00+00:00",
+      "display_description": "Txn 2256",
+      "transaction_id": "transactions#2257"
+     },
+     {
+      "amount": 3128.0,
+      "date": "2026-05-15T20:54:00+00:00",
+      "display_description": "Txn 139",
+      "transaction_id": "transactions#140"
+     },
+     {
+      "amount": 5263.0,
+      "date": "2026-05-18T03:38:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1361"
+     },
+     {
+      "amount": 4999.0,
+      "date": "2026-05-19T16:22:00+00:00",
+      "display_description": "Txn 1144",
+      "transaction_id": "transactions#1145"
+     },
+     {
+      "amount": 4292.0,
+      "date": "2026-05-22T02:32:00+00:00",
+      "display_description": "Txn 2569",
+      "transaction_id": "transactions#2570"
+     },
+     {
+      "amount": 2185.0,
+      "date": "2026-05-23T23:27:00+00:00",
+      "display_description": "Txn 690",
+      "transaction_id": "transactions#691"
+     },
+     {
+      "amount": 3469.0,
+      "date": "2026-05-25T14:27:00+00:00",
+      "display_description": "Txn 2048",
+      "transaction_id": "transactions#2049"
+     },
+     {
+      "amount": 2306.0,
+      "date": "2026-05-28T07:29:00+00:00",
+      "display_description": "Txn 2663",
+      "transaction_id": "transactions#2664"
+     },
+     {
+      "amount": 4218.0,
+      "date": "2026-06-01T20:01:00+00:00",
+      "display_description": "Txn 1028",
+      "transaction_id": "transactions#1029"
+     },
+     {
+      "amount": 4869.0,
+      "date": "2026-06-03T09:55:00+00:00",
+      "display_description": "Txn 352",
+      "transaction_id": "transactions#353"
+     },
+     {
+      "amount": 697.0,
+      "date": "2026-06-07T05:24:00+00:00",
+      "display_description": "Txn 1140",
+      "transaction_id": "transactions#1141"
+     },
+     {
+      "amount": 1594.0,
+      "date": "2026-06-08T06:02:00+00:00",
+      "display_description": "Txn 2501",
+      "transaction_id": "transactions#2502"
+     },
+     {
+      "amount": 3522.0,
+      "date": "2026-06-09T06:09:00+00:00",
+      "display_description": "Txn 615",
+      "transaction_id": "transactions#616"
+     }
+    ],
+    "statement_balance": 48952.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 34594.0,
+    "close_date": "2026-07-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-08-03T00:00:00",
+    "lines": [
+     {
+      "amount": 735.0,
+      "date": "2026-06-14T10:44:00+00:00",
+      "display_description": "Txn 1185",
+      "transaction_id": "transactions#1186"
+     },
+     {
+      "amount": 3259.0,
+      "date": "2026-06-17T01:37:00+00:00",
+      "display_description": "Txn 1258",
+      "transaction_id": "transactions#1259"
+     },
+     {
+      "amount": -904.0,
+      "date": "2026-06-17T17:28:00+00:00",
+      "display_description": "Txn 1282",
+      "transaction_id": "transactions#1283"
+     },
+     {
+      "amount": -71.0,
+      "date": "2026-06-21T09:55:00+00:00",
+      "display_description": "Txn 2547",
+      "transaction_id": "transactions#2548"
+     },
+     {
+      "amount": 1421.0,
+      "date": "2026-06-23T10:58:00+00:00",
+      "display_description": "Txn 1358",
+      "transaction_id": "transactions#1359"
+     },
+     {
+      "amount": 3888.0,
+      "date": "2026-06-23T23:50:00+00:00",
+      "display_description": "Txn 1439",
+      "transaction_id": "transactions#1440"
+     },
+     {
+      "amount": 525.0,
+      "date": "2026-06-24T03:35:00+00:00",
+      "display_description": "Txn 674",
+      "transaction_id": "transactions#675"
+     },
+     {
+      "amount": 2577.0,
+      "date": "2026-06-24T05:43:00+00:00",
+      "display_description": "Txn 1795",
+      "transaction_id": "transactions#1796"
+     },
+     {
+      "amount": 1711.0,
+      "date": "2026-06-24T13:17:00+00:00",
+      "display_description": "Txn 2586",
+      "transaction_id": "transactions#2587"
+     },
+     {
+      "amount": 1874.0,
+      "date": "2026-07-01T23:55:00+00:00",
+      "display_description": "Txn 1633",
+      "transaction_id": "transactions#1634"
+     },
+     {
+      "amount": 2998.0,
+      "date": "2026-07-03T06:04:00+00:00",
+      "display_description": "Txn 553",
+      "transaction_id": "transactions#554"
+     },
+     {
+      "amount": 7462.0,
+      "date": "2026-07-05T03:31:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#278"
+     },
+     {
+      "amount": 762.0,
+      "date": "2026-07-06T18:44:00+00:00",
+      "display_description": "Txn 2444",
+      "transaction_id": "transactions#2445"
+     },
+     {
+      "amount": -4471.0,
+      "date": "2026-07-06T22:31:00+00:00",
+      "display_description": "Txn 784",
+      "transaction_id": "transactions#785"
+     },
+     {
+      "amount": 4413.0,
+      "date": "2026-07-08T10:22:00+00:00",
+      "display_description": "Txn 2114",
+      "transaction_id": "transactions#2115"
+     },
+     {
+      "amount": 1373.0,
+      "date": "2026-07-10T10:43:00+00:00",
+      "display_description": "Txn 2612",
+      "transaction_id": "transactions#2613"
+     },
+     {
+      "amount": 2455.0,
+      "date": "2026-07-10T17:59:00+00:00",
+      "display_description": "Txn 268",
+      "transaction_id": "transactions#269"
+     },
+     {
+      "amount": -1987.0,
+      "date": "2026-07-12T08:36:00+00:00",
+      "display_description": "Txn 563",
+      "transaction_id": "transactions#564"
+     },
+     {
+      "amount": 1618.0,
+      "date": "2026-07-12T10:46:00+00:00",
+      "display_description": "Txn 2171",
+      "transaction_id": "transactions#2172"
+     },
+     {
+      "amount": 4956.0,
+      "date": "2026-07-12T21:56:00+00:00",
+      "display_description": "Txn 936",
+      "transaction_id": "transactions#937"
+     }
+    ],
+    "statement_balance": 34594.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 19946.0,
+    "close_date": "2026-08-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-09-02T00:00:00",
+    "lines": [
+     {
+      "amount": 3638.0,
+      "date": "2026-07-11T16:00:00+00:00",
+      "display_description": "Posted late card_a 5",
+      "posted_date": "2026-07-14",
+      "transaction_id": "transactions#2919"
+     },
+     {
+      "amount": 2952.0,
+      "date": "2026-07-23T03:02:00+00:00",
+      "display_description": "Txn 350",
+      "transaction_id": "transactions#351"
+     },
+     {
+      "amount": 1636.0,
+      "date": "2026-07-24T09:48:00+00:00",
+      "display_description": "Txn 595",
+      "transaction_id": "transactions#596"
+     },
+     {
+      "amount": 789.0,
+      "date": "2026-07-30T06:20:00+00:00",
+      "display_description": "Txn 1880",
+      "transaction_id": "transactions#1881"
+     },
+     {
+      "amount": 4455.0,
+      "date": "2026-08-02T23:01:00+00:00",
+      "display_description": "Txn 499",
+      "transaction_id": "transactions#500"
+     },
+     {
+      "amount": 2649.0,
+      "date": "2026-08-03T06:43:00+00:00",
+      "display_description": "Txn 1349",
+      "transaction_id": "transactions#1350"
+     },
+     {
+      "amount": 3436.0,
+      "date": "2026-08-11T04:11:00+00:00",
+      "display_description": "Txn 824",
+      "transaction_id": "transactions#825"
+     },
+     {
+      "amount": 391.0,
+      "date": "2026-08-11T05:22:00+00:00",
+      "display_description": "Txn 157",
+      "transaction_id": "transactions#158"
+     }
+    ],
+    "statement_balance": 19946.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 57018.0,
+    "close_date": "2026-09-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-10-05T00:00:00",
+    "lines": [
+     {
+      "amount": 1481.0,
+      "date": "2026-08-13T07:29:00+00:00",
+      "display_description": "Txn 1684",
+      "transaction_id": "transactions#1685"
+     },
+     {
+      "amount": 2775.0,
+      "date": "2026-08-17T01:24:00+00:00",
+      "display_description": "Txn 464",
+      "transaction_id": "transactions#465"
+     },
+     {
+      "amount": 4610.0,
+      "date": "2026-08-17T01:54:00+00:00",
+      "display_description": "Txn 2041",
+      "transaction_id": "transactions#2042"
+     },
+     {
+      "amount": 4937.0,
+      "date": "2026-08-19T07:05:00+00:00",
+      "display_description": "Txn 59",
+      "transaction_id": "transactions#60"
+     },
+     {
+      "amount": 6156.0,
+      "date": "2026-08-20T14:35:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1043"
+     },
+     {
+      "amount": 3010.0,
+      "date": "2026-08-21T00:17:00+00:00",
+      "display_description": "Txn 2622",
+      "transaction_id": "transactions#2623"
+     },
+     {
+      "amount": -2535.0,
+      "date": "2026-08-21T03:33:00+00:00",
+      "display_description": "Txn 855",
+      "transaction_id": "transactions#856"
+     },
+     {
+      "amount": 6387.0,
+      "date": "2026-08-21T04:11:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2461"
+     },
+     {
+      "amount": 1696.0,
+      "date": "2026-08-24T11:58:00+00:00",
+      "display_description": "Txn 1081",
+      "transaction_id": "transactions#1082"
+     },
+     {
+      "amount": 4488.0,
+      "date": "2026-08-25T03:56:00+00:00",
+      "display_description": "Txn 2213",
+      "transaction_id": "transactions#2214"
+     },
+     {
+      "amount": 3027.0,
+      "date": "2026-08-27T21:53:00+00:00",
+      "display_description": "Txn 1394",
+      "transaction_id": "transactions#1395"
+     },
+     {
+      "amount": 3377.0,
+      "date": "2026-08-30T06:56:00+00:00",
+      "display_description": "Txn 568",
+      "transaction_id": "transactions#569"
+     },
+     {
+      "amount": 1020.0,
+      "date": "2026-08-31T04:43:00+00:00",
+      "display_description": "Txn 1178",
+      "transaction_id": "transactions#1179"
+     },
+     {
+      "amount": 367.0,
+      "date": "2026-09-01T16:35:00+00:00",
+      "display_description": "Txn 2611",
+      "transaction_id": "transactions#2612"
+     },
+     {
+      "amount": 2845.0,
+      "date": "2026-09-01T17:11:00+00:00",
+      "display_description": "Txn 1865",
+      "transaction_id": "transactions#1866"
+     },
+     {
+      "amount": 3460.0,
+      "date": "2026-09-01T21:23:00+00:00",
+      "display_description": "Txn 1264",
+      "transaction_id": "transactions#1265"
+     },
+     {
+      "amount": 3151.0,
+      "date": "2026-09-05T21:48:00+00:00",
+      "display_description": "Txn 2380",
+      "transaction_id": "transactions#2381"
+     },
+     {
+      "amount": 1074.0,
+      "date": "2026-09-06T20:51:00+00:00",
+      "display_description": "Txn 1244",
+      "transaction_id": "transactions#1245"
+     },
+     {
+      "amount": 866.0,
+      "date": "2026-09-08T23:01:00+00:00",
+      "display_description": "Txn 1571",
+      "transaction_id": "transactions#1572"
+     },
+     {
+      "amount": 3325.0,
+      "date": "2026-09-09T15:29:00+00:00",
+      "display_description": "Txn 2133",
+      "transaction_id": "transactions#2134"
+     },
+     {
+      "amount": 1501.0,
+      "date": "2026-09-12T07:30:00+00:00",
+      "display_description": "Txn 2649",
+      "transaction_id": "transactions#2650"
+     }
+    ],
+    "statement_balance": 57018.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 49251.0,
+    "close_date": "2026-10-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-11-05T00:00:00",
+    "lines": [
+     {
+      "amount": 2564.0,
+      "date": "2026-09-11T16:00:00+00:00",
+      "display_description": "Posted late card_a 3",
+      "posted_date": "2026-09-14",
+      "transaction_id": "transactions#2918"
+     },
+     {
+      "amount": 2990.0,
+      "date": "2026-09-13T12:10:00+00:00",
+      "display_description": "Txn 672",
+      "transaction_id": "transactions#673"
+     },
+     {
+      "amount": 565.0,
+      "date": "2026-09-13T16:43:00+00:00",
+      "display_description": "Txn 2138",
+      "transaction_id": "transactions#2139"
+     },
+     {
+      "amount": 2022.0,
+      "date": "2026-09-14T17:39:00+00:00",
+      "display_description": "Txn 1068",
+      "transaction_id": "transactions#1069"
+     },
+     {
+      "amount": 1562.0,
+      "date": "2026-09-16T05:00:00+00:00",
+      "display_description": "Txn 1211",
+      "transaction_id": "transactions#1212"
+     },
+     {
+      "amount": 217.0,
+      "date": "2026-09-17T16:50:00+00:00",
+      "display_description": "Txn 2383",
+      "transaction_id": "transactions#2384"
+     },
+     {
+      "amount": 405.0,
+      "date": "2026-09-19T01:22:00+00:00",
+      "display_description": "Txn 2578",
+      "transaction_id": "transactions#2579"
+     },
+     {
+      "amount": 4006.0,
+      "date": "2026-09-20T15:39:00+00:00",
+      "display_description": "Txn 2760",
+      "transaction_id": "transactions#2761"
+     },
+     {
+      "amount": 2376.0,
+      "date": "2026-09-20T16:58:00+00:00",
+      "display_description": "Txn 1392",
+      "transaction_id": "transactions#1393"
+     },
+     {
+      "amount": 4413.0,
+      "date": "2026-09-20T23:10:00+00:00",
+      "display_description": "Txn 1475",
+      "transaction_id": "transactions#1476"
+     },
+     {
+      "amount": -2949.0,
+      "date": "2026-09-21T03:47:00+00:00",
+      "display_description": "Txn 2459",
+      "transaction_id": "transactions#2460"
+     },
+     {
+      "amount": 4636.0,
+      "date": "2026-09-21T17:39:00+00:00",
+      "display_description": "Txn 516",
+      "transaction_id": "transactions#517"
+     },
+     {
+      "amount": 7867.0,
+      "date": "2026-09-24T03:53:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1766"
+     },
+     {
+      "amount": 1135.0,
+      "date": "2026-09-27T07:36:00+00:00",
+      "display_description": "Txn 486",
+      "transaction_id": "transactions#487"
+     },
+     {
+      "amount": 1865.0,
+      "date": "2026-09-28T00:00:00+00:00",
+      "display_description": "Txn 2503",
+      "transaction_id": "transactions#2504"
+     },
+     {
+      "amount": 2447.0,
+      "date": "2026-09-30T00:55:00+00:00",
+      "display_description": "Txn 1537",
+      "transaction_id": "transactions#1538"
+     },
+     {
+      "amount": 2272.0,
+      "date": "2026-10-03T17:48:00+00:00",
+      "display_description": "Txn 2534",
+      "transaction_id": "transactions#2535"
+     },
+     {
+      "amount": 5575.0,
+      "date": "2026-10-04T05:44:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#1451"
+     },
+     {
+      "amount": 2812.0,
+      "date": "2026-10-06T18:15:00+00:00",
+      "display_description": "Transfer",
+      "transaction_id": "transactions#2446"
+     },
+     {
+      "amount": 2471.0,
+      "date": "2026-10-09T13:43:00+00:00",
+      "display_description": "Txn 152",
+      "transaction_id": "transactions#153"
+     }
+    ],
+    "statement_balance": 49251.0,
+    "status": "overdue",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 25043.0,
+    "close_date": "2026-11-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-12-06T00:00:00",
+    "lines": [
+     {
+      "amount": 952.0,
+      "date": "2026-10-11T16:00:00+00:00",
+      "display_description": "Posted late card_a 2",
+      "posted_date": "2026-10-14",
+      "transaction_id": "transactions#2917"
+     },
+     {
+      "amount": 2002.0,
+      "date": "2026-10-13T03:01:00+00:00",
+      "display_description": "Txn 1619",
+      "transaction_id": "transactions#1620"
+     },
+     {
+      "amount": 4099.0,
+      "date": "2026-10-16T20:29:00+00:00",
+      "display_description": "Txn 2198",
+      "transaction_id": "transactions#2199"
+     },
+     {
+      "amount": 775.0,
+      "date": "2026-10-18T05:27:00+00:00",
+      "display_description": "Txn 47",
+      "transaction_id": "transactions#48"
+     },
+     {
+      "amount": 1766.0,
+      "date": "2026-10-19T19:11:00+00:00",
+      "display_description": "Txn 789",
+      "transaction_id": "transactions#790"
+     },
+     {
+      "amount": 4876.0,
+      "date": "2026-10-27T12:05:00+00:00",
+      "display_description": "Txn 840",
+      "transaction_id": "transactions#841"
+     },
+     {
+      "amount": 628.0,
+      "date": "2026-10-27T14:43:00+00:00",
+      "display_description": "Txn 2518",
+      "transaction_id": "transactions#2519"
+     },
+     {
+      "amount": 4146.0,
+      "date": "2026-10-29T08:41:00+00:00",
+      "display_description": "Txn 2297",
+      "transaction_id": "transactions#2298"
+     },
+     {
+      "amount": 2730.0,
+      "date": "2026-11-02T04:55:00+00:00",
+      "display_description": "Txn 2104",
+      "transaction_id": "transactions#2105"
+     },
+     {
+      "amount": 3428.0,
+      "date": "2026-11-02T05:09:00+00:00",
+      "display_description": "Txn 1790",
+      "transaction_id": "transactions#1791"
+     },
+     {
+      "amount": -2707.0,
+      "date": "2026-11-06T04:16:00+00:00",
+      "display_description": "Txn 523",
+      "transaction_id": "transactions#524"
+     },
+     {
+      "amount": 3915.0,
+      "date": "2026-11-07T21:04:00+00:00",
+      "display_description": "Txn 1192",
+      "transaction_id": "transactions#1193"
+     },
+     {
+      "amount": -2886.0,
+      "date": "2026-11-09T12:56:00+00:00",
+      "display_description": "Txn 929",
+      "transaction_id": "transactions#930"
+     },
+     {
+      "amount": 1319.0,
+      "date": "2026-11-11T01:30:00+00:00",
+      "display_description": "Txn 1735",
+      "transaction_id": "transactions#1736"
+     }
+    ],
+    "statement_balance": 25043.0,
+    "status": "open",
+    "unconverted_lines": []
+   },
+   {
+    "amount_due": 26768.0,
+    "close_date": "2026-12-12T00:00:00",
+    "currency": "PHP",
+    "due_date": "2027-01-04T00:00:00",
+    "lines": [
+     {
+      "amount": 856.0,
+      "date": "2025-02-28T04:54:00+00:00",
+      "display_description": "Txn 1218",
+      "transaction_id": "transactions#1219"
+     },
+     {
+      "amount": 2363.0,
+      "date": "2025-04-22T07:44:00+00:00",
+      "display_description": "Txn 1783",
+      "transaction_id": "transactions#1784"
+     },
+     {
+      "amount": 1068.0,
+      "date": "2025-04-24T23:19:00+00:00",
+      "display_description": "Txn 2491",
+      "transaction_id": "transactions#2492"
+     },
+     {
+      "amount": 2740.0,
+      "date": "2025-05-05T02:45:00+00:00",
+      "display_description": "Txn 1499",
+      "transaction_id": "transactions#1500"
+     },
+     {
+      "amount": 1792.0,
+      "date": "2025-05-12T04:08:00+00:00",
+      "display_description": "Txn 2572",
+      "transaction_id": "transactions#2573"
+     },
+     {
+      "amount": 3212.0,
+      "date": "2025-11-27T07:23:00+00:00",
+      "display_description": "Txn 1374",
+      "transaction_id": "transactions#1375"
+     },
+     {
+      "amount": 1557.0,
+      "date": "2025-12-22T15:21:00+00:00",
+      "display_description": "Txn 1387",
+      "transaction_id": "transactions#1388"
+     },
+     {
+      "amount": 4577.0,
+      "date": "2026-05-01T00:21:00+00:00",
+      "display_description": "Txn 2624",
+      "transaction_id": "transactions#2625"
+     },
+     {
+      "amount": -4137.0,
+      "date": "2026-08-16T00:38:00+00:00",
+      "display_description": "Txn 1668",
+      "transaction_id": "transactions#1669"
+     },
+     {
+      "amount": 1465.0,
+      "date": "2026-11-11T16:00:00+00:00",
+      "display_description": "Posted late card_a 1",
+      "posted_date": "2026-11-14",
+      "transaction_id": "transactions#2916"
+     },
+     {
+      "amount": 1160.0,
+      "date": "2026-11-16T09:00:00+00:00",
+      "display_description": "Foreign charge",
+      "estimated": true,
+      "original_amount": 20.0,
+      "original_currency": "USD",
+      "rate": 58.0,
+      "rate_as_of": "2026-11-01",
+      "rate_stale": false,
+      "transaction_id": "transactions#2938"
+     },
+     {
+      "amount": 1318.0,
+      "date": "2026-11-19T09:00:00+00:00",
+      "display_description": "Txn 556",
+      "transaction_id": "transactions#557"
+     },
+     {
+      "amount": 3675.0,
+      "date": "2026-11-19T09:00:00+00:00",
+      "display_description": "Txn 2398",
+      "transaction_id": "transactions#2399"
+     },
+     {
+      "amount": 1104.0,
+      "date": "2026-11-28T09:00:00+00:00",
+      "display_description": "Txn 1102",
+      "transaction_id": "transactions#1103"
+     },
+     {
+      "amount": -1604.0,
+      "date": "2026-11-30T09:00:00+00:00",
+      "display_description": "Txn 2402",
+      "transaction_id": "transactions#2403"
+     },
+     {
+      "amount": 1445.0,
+      "date": "2026-12-01T09:00:00+00:00",
+      "display_description": "Txn 2435",
+      "transaction_id": "transactions#2436"
+     },
+     {
+      "amount": 4183.0,
+      "date": "2026-12-01T09:00:00+00:00",
+      "display_description": "Txn 1869",
+      "transaction_id": "transactions#1870"
+     },
+     {
+      "amount": 124.0,
+      "date": "2026-12-02T09:00:00+00:00",
+      "display_description": "Txn 505",
+      "transaction_id": "transactions#506"
+     },
+     {
+      "amount": -130.0,
+      "date": "2026-12-08T09:00:00+00:00",
+      "display_description": "Txn 1002",
+      "transaction_id": "transactions#1003"
+     }
+    ],
+    "statement_balance": 26768.0,
+    "status": "open",
+    "unconverted_lines": []
+   }
+  ],
+  "view": "full"
+ },
+ "status": 200
+}

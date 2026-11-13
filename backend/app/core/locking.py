@@ -35,8 +35,8 @@ from app.models.transaction import Transaction
 # single-bigint key (app/core/seed.py) lives in a different key space.
 OWNER_BUDGET_LOCK_NS = 226
 
-# Column attributes only: refreshing these never re-runs the account's
-# ``lazy="selectin"`` collections (transactions, shares, tag links).
+# Column attributes only: refreshing these never touches the account's
+# relationships (transactions, shares, tag links).
 ACCOUNT_COLUMNS = [a.key for a in sa.inspect(Account).column_attrs]
 
 

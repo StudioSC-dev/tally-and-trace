@@ -37,7 +37,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core import locking
-from app.core.access import MANAGE_ROLES, RecordAccess, account_role
+from app.core.access import MANAGE_ROLES, RecordAccess, access_map, account_role
 from app.core.record_dates import refuse_record_date
 from app.core.tags import copy_explicit_tags
 from app.core.time import manila_today, utc_now
@@ -1582,15 +1582,17 @@ def turn_on_loan_autopay(db: Session, loan: Account, caller: User,
 def _auto_post_loans(db: Session, actor_scope: Optional[User]) -> List[Tuple[int, int]]:
     """``[(loan id, owner id)]`` in id order: active, flagged loans; for a caller,
     only those the caller manages, since only an owner or admin may see the flag."""
-    from app.core.access import editable_account_ids
+    from app.core.access import EDIT_ROLES
 
     query = db.query(Account).filter(Account.account_type == AccountType.LOAN,
                                      Account.is_active.is_(True),
                                      Account.auto_post_enabled.is_(True))
-    if actor_scope is not None:
-        query = query.filter(Account.id.in_(editable_account_ids(db, actor_scope)))
-    return [(loan.id, loan.user_id) for loan in query.order_by(Account.id).all()
-            if actor_scope is None or account_role(actor_scope, loan) in MANAGE_ROLES]
+    if actor_scope is None:
+        return [(loan.id, loan.user_id) for loan in query.order_by(Account.id).all()]
+    held = access_map(db, actor_scope)
+    return [(loan.id, loan.user_id) for loan in query.filter(
+        Account.id.in_(held.ids(EDIT_ROLES))).order_by(Account.id).all()
+            if held.of(loan) in MANAGE_ROLES]
 
 
 def post_due_loans(db: Session, *, through: date, actor_scope: Optional[User] = None,

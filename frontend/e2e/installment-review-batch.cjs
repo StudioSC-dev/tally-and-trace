@@ -27,7 +27,7 @@
 //   (e) roles: an editor ticks and reviews the owner's clean entry; a viewer sees no
 //       notice and no checkboxes
 //   (f) request failure: the POST is fulfilled with a 500; the confirm stays open with the
-//       error, the screen loader clears, and Cancel keeps the selection and changes nothing
+//       error, no screen loader exists, and Cancel keeps the selection and changes nothing
 //   (g) the cap: 51 clean entries. Select all gives "Review selected (50)" and ticks the 50
 //       lowest ids; the 51st checkbox is disabled and the visible limit line names it by
 //       aria-describedby; Confirm sends one POST of exactly 50 distinct items with no 422;
@@ -38,7 +38,7 @@
 //
 // Usage: node frontend/e2e/installment-review-batch.cjs [a|b|c|d|e|f|g]
 const { startLocalStack, consumePageOpen } = require('./_local_stack.cjs')
-const { overlayPhase, sleep, waitQuiet } = require('./_smooth.cjs')
+const { sleep, waitQuiet } = require('./_smooth.cjs')
 const dialogs = require('./_dialogs.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -471,7 +471,7 @@ async function requestFails(browser) {
   await cd.error.waitFor()
   await waitQuiet(page)
   check('(f) the confirm stays open with an error', [await cd.dialog.count(), ((await text(cd.error)) ?? '').length > 0], [1, true])
-  check('(f) the screen loader has cleared', await overlayPhase(page), 'hidden')
+  check('(f) no screen loader exists (STU-605)', await page.locator('[data-testid="busy-overlay"]').count(), 0)
   check('(f) one POST was sent', reqs.posts.length, 1)
   await cd.cancel.click()
   await waitCount(cd.dialog, 0)

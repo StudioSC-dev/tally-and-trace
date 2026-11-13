@@ -1,0 +1,32 @@
+{
+ "body": {
+  "has_more": false,
+  "items": [
+   {
+    "account_type": "credit",
+    "balance": 0.0,
+    "currency": "PHP",
+    "id": "accounts#9",
+    "my_role": "tag_viewer",
+    "name": "Card B",
+    "owner_name": "Owner P.",
+    "permissions": {
+     "can_add_transactions": false,
+     "can_delete": false,
+     "can_edit_settings": false,
+     "can_manage_shares": false
+    },
+    "tags": [
+     {
+      "color": null,
+      "id": "tags#1",
+      "is_system": true,
+      "name": "Household"
+     }
+    ]
+   }
+  ],
+  "total": 1
+ },
+ "status": 200
+}

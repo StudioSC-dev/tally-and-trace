@@ -11,9 +11,12 @@ single root, ``account_role(user, account)``:
   below it;
 - ``none`` otherwise.
 
-When several apply, the highest wins (``ROLE_RANK``). ``_shared_role`` is the
-one place a role other than the owner's comes from. Nothing outside this
-module should compare ``user_id`` columns to decide access to an account.
+When several apply, the highest wins (``ROLE_RANK``). ``_role_rows`` is the
+one place a role other than the owner's comes from: one query per user, held
+as data in an ``AccessMap`` (``access_map``). Access is never read from an
+account's relationships (``Account.shares``, ``Account.tag_links`` and
+``Tag.shares`` raise if lazily loaded). Nothing outside this module should
+compare ``user_id`` columns to decide access to an account.
 
 **Tag-share invariant.** A tag share from U only ever reaches records owned by
 U on accounts owned by U: rules (b2) and (c) below, applied everywhere a
@@ -64,11 +67,13 @@ no right to know that.
 """
 
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Mapping, Optional, Set, Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, exists, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import String, and_, exists, literal, or_, select, union_all
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm.util import identity_key
 
 from app.models.account import Account
 from app.models.account_share import AccountShare
@@ -138,72 +143,120 @@ def _highest(*roles: str) -> str:
     return max(roles, key=ROLE_RANK.__getitem__)
 
 
-def _holds_household_share(uid, account) -> bool:
-    """Whether the account's owner put their Household tag on it and shared it with ``uid``.
+def _role_rows(uid, account_ids: Optional[Iterable[int]] = None):
+    """Select ``(account_id, role, is_active)``: one row per role ``uid`` holds on an
+    account, from the three places a role comes from, in one statement:
 
-    Reads the account's ``tag_links`` and each tag's ``shares`` (loaded with it).
-    Only the owner's own system tag counts: a tag anyone else put on the
-    account grants nothing.
+    - ``owner``: the account is the user's (``accounts.user_id``);
+    - ``admin``, ``editor`` or ``viewer``: the user's ``account_shares`` row;
+    - ``tag_viewer``: the account's owner put their Household system tag on it and
+      shared that tag with the user (``_tag_viewer_ids``).
+
+    With ``account_ids``, only those accounts. ``AccessMap`` keeps the highest.
     """
-    for tag in account.tag_links:
-        if (tag.is_system and tag.user_id == account.user_id
-                and any(share.user_id == uid for share in tag.shares)):
-            return True
-    return False
+    owned = select(Account.id.label("account_id"),
+                   literal(OWNER, String).label("role")).where(Account.user_id == uid)
+    shared = select(AccountShare.account_id.label("account_id"),
+                    AccountShare.role.label("role")).where(AccountShare.user_id == uid)
+    tagged = _tag_viewer_ids(uid).add_columns(literal(TAG_VIEWER, String).label("role"))
+    if account_ids is not None:
+        ids = list(account_ids)
+        owned = owned.where(Account.id.in_(ids))
+        shared = shared.where(AccountShare.account_id.in_(ids))
+        tagged = tagged.where(account_tags.c.account_id.in_(ids))
+    held = union_all(owned, shared, tagged).subquery()
+    return (select(held.c.account_id, held.c.role, Account.is_active)
+            .join(Account, Account.id == held.c.account_id))
 
 
-def _owner_shares_out(account) -> bool:
-    """Whether the owner shares the account out: it has an account share, or it carries
-    the owner's own Household system tag (whether or not anyone holds that tag yet).
+@dataclass(frozen=True)
+class AccessMap:
+    """One user's ``{account id: role}``, computed as data in one query (``access_map``).
 
-    Reads ``shares`` and ``tag_links``, both loaded with the account. A Household tag
-    another user put on the account does not count.
+    The same rules as ``account_role``: the highest role held wins, an account
+    missing from ``roles`` is ``none``. Holds no ORM objects, so reading it never
+    loads an account, its shares or its tags.
     """
-    return bool(account.shares) or any(
-        tag.is_system and tag.user_id == account.user_id for tag in account.tag_links)
+
+    uid: Optional[int]
+    roles: Mapping[int, str]
+    active: FrozenSet[int]  # the accounts in ``roles`` that are active
+
+    def role(self, account_id: Optional[int]) -> str:
+        """The user's role on the account (``none`` for None or an account not held)."""
+        if account_id is None:
+            return NONE
+        return self.roles.get(account_id, NONE)
+
+    def of(self, account) -> str:
+        """The user's role on an ``Account`` (``account_role`` without a query)."""
+        if account is None:
+            return NONE
+        if account.user_id == self.uid:
+            return OWNER
+        return self.role(account.id)
+
+    def ids(self, roles=DIRECT_ROLES, *, active_only: bool = False) -> Set[int]:
+        """The accounts the user holds one of ``roles`` on (active ones only, if asked)."""
+        return {i for i, r in self.roles.items()
+                if r in roles and (not active_only or i in self.active)}
 
 
-def _shared_role(uid, account) -> str:
-    """The role ``uid`` holds on ``account`` through a share, or ``none``.
-
-    An account share's role (``admin``, ``editor`` or ``viewer``) outranks
-    ``tag_viewer``, so it wins when the user holds both.
-    """
-    for share in account.shares:
-        if share.user_id == uid:
-            return share.role
-    if _holds_household_share(uid, account):
-        return TAG_VIEWER
-    return NONE
+def access_map(db: Session, user, account_ids: Optional[Iterable[int]] = None) -> AccessMap:
+    """The caller's ``AccessMap``, in one query (with ``account_ids``, over those only)."""
+    uid = _uid(user)
+    roles: Dict[int, str] = {}
+    active: Set[int] = set()
+    if uid is not None:
+        for account_id, role, is_active in db.execute(_role_rows(uid, account_ids)):
+            roles[account_id] = _highest(roles.get(account_id, NONE), role)
+            if is_active is True:
+                active.add(account_id)
+    return AccessMap(uid, roles, frozenset(active))
 
 
 def account_role(user, account) -> str:
     """The caller's role on ``account``: ``owner``, ``admin``, ``editor``, ``viewer``,
-    ``tag_viewer`` or ``none``."""
+    ``tag_viewer`` or ``none``.
+
+    The owner is read from the account itself; any other role from the database
+    (``access_map`` over this one account, one query), never from the account's
+    relationships. Over many accounts, build one ``access_map`` and use ``of``.
+    """
     if user is None or account is None:
         return NONE
     uid = _uid(user)
     if account.user_id == uid:
         return OWNER
-    return _highest(NONE, _shared_role(uid, account))
+    db = object_session(account)
+    if db is None:
+        raise ValueError("account_role needs an account attached to a session")
+    return access_map(db, uid, [account.id]).role(account.id)
 
 
 def role_map(db: Session, user) -> Dict[int, str]:
     """``{account id: role}`` for every account the caller holds a role on.
 
-    The bulk form of ``account_role``, by the same rules, in two queries: an
-    account missing from the map is ``none``.
+    The bulk form of ``account_role``, by the same rules, in one query
+    (``access_map``): an account missing from the map is ``none``.
     """
-    uid = _uid(user)
-    roles: Dict[int, str] = {}
-    for account_id, role in db.query(AccountShare.account_id, AccountShare.role).filter(
-            AccountShare.user_id == uid):
-        roles[account_id] = _highest(roles.get(account_id, NONE), role)
-    for (account_id,) in db.query(Account.id).filter(Account.id.in_(_tag_viewer_ids(uid))):
-        roles.setdefault(account_id, TAG_VIEWER)
-    for (account_id,) in db.query(Account.id).filter(Account.user_id == uid):
-        roles[account_id] = OWNER
-    return roles
+    return dict(access_map(db, user).roles)
+
+
+def shared_out_ids(db: Session, accounts: Iterable) -> Set[int]:
+    """The accounts among ``accounts`` whose owner shares them out: each has an account
+    share, or carries the owner's own Household system tag (whether or not anyone
+    holds that tag yet). A Household tag another user put on the account does not count.
+    """
+    ids = [a.id for a in accounts]
+    if not ids:
+        return set()
+    has_share = exists().where(AccountShare.account_id == Account.id)
+    has_household = exists().where(
+        account_tags.c.account_id == Account.id, account_tags.c.tag_id == Tag.id,
+        Tag.is_system.is_(True), Tag.user_id == Account.user_id)
+    return {row[0] for row in db.query(Account.id).filter(
+        Account.id.in_(ids), or_(has_share, has_household))}
 
 
 def tag_shared_account_ids():
@@ -260,15 +313,13 @@ def viewable_accounts(db: Session, user, *, active_only: bool = False, roles=DIR
 
 def viewable_account_ids(db: Session, user, *, active_only: bool = False,
                          roles=DIRECT_ROLES) -> Set[int]:
-    query = db.query(Account.id).filter(_held_criterion(user, roles))
-    if active_only:
-        query = query.filter(Account.is_active.is_(True))
-    return {row[0] for row in query.all()}
+    """The accounts the caller holds one of ``roles`` on, from the ``AccessMap``."""
+    return access_map(db, user).ids(roles, active_only=active_only)
 
 
 def editable_account_ids(db: Session, user) -> Set[int]:
     """The accounts the caller may add, change or remove records on."""
-    return {row[0] for row in db.query(Account.id).filter(_held_criterion(user, EDIT_ROLES))}
+    return access_map(db, user).ids(EDIT_ROLES)
 
 
 def record_account_ids(record) -> Tuple[int, ...]:
@@ -390,13 +441,6 @@ def readable_criterion(model, user, scope_ids: Iterable[int],
                *(household_criterion(model, g) for g in grants))
 
 
-def _accounts(db: Session, ids: Iterable[int]) -> dict:
-    ids = list(ids)
-    if not ids:
-        return {}
-    return {a.id: a for a in db.query(Account).filter(Account.id.in_(ids)).all()}
-
-
 def has_explicit_tag(db: Session, record, tag_id: int) -> bool:
     link, column = TAG_LINKS[type(record)]
     return db.query(exists().where(link.c[column] == record.id,
@@ -427,8 +471,9 @@ def can_read_record(db: Session, user, record) -> bool:
     """Read rule for a transaction or recurring entry (see the module docstring)."""
     if record.user_id == _uid(user):
         return True
-    accounts = _accounts(db, record_account_ids(record))
-    if any(account_role(user, a) in DIRECT_ROLES for a in accounts.values()):
+    ids = record_account_ids(record)
+    held = access_map(db, user, ids) if ids else None
+    if any(held.role(i) in DIRECT_ROLES for i in ids):
         return True
     return any(household_reads(db, g, record) for g in household_grants(db, user)
                if g.sharer_id == record.user_id)
@@ -444,26 +489,35 @@ def can_write_record(db: Session, user, record) -> bool:
     ids = record_account_ids(record)
     if not ids:
         return record.user_id == _uid(user)
-    accounts = _accounts(db, ids)
-    if len(accounts) != len(ids):
-        return False
-    return all(account_role(user, a) in EDIT_ROLES for a in accounts.values())
+    held = access_map(db, user, ids)  # an account that no longer exists is held by no one
+    return all(held.role(i) in EDIT_ROLES for i in ids)
 
 
 class RecordAccess:
     """Per-request access for one caller over many records, without a query per record.
 
-    Accounts are loaded once (with their shares) and roles are computed by the
-    same rules as ``account_role``, for the caller and for each record's
-    creator. ``permissions`` gives the flags every record response carries.
+    Roles come from one ``AccessMap`` per user (the caller's, and each record
+    creator's when a rule needs it), by the same rules as ``account_role``.
+    Account objects are loaded only for ``account`` (names and types), in one
+    query for every id ``load`` was given. ``permissions`` gives the flags every
+    record response carries.
     """
 
     def __init__(self, db: Session, user):
         self.db = db
         self.uid = _uid(user)
+        self._maps: Dict[Optional[int], AccessMap] = {}
         self._accounts: Dict[int, Optional[Account]] = {}
+        self._wanted: Set[int] = set()
         self._grants: Optional[Dict[int, HouseholdGrant]] = None
         self._explicit: Dict[Tuple[type, int], bool] = {}
+
+    def access_map(self, user=None) -> AccessMap:
+        """``user``'s ``AccessMap`` (default the caller), built once."""
+        uid = self.uid if user is None else _uid(user)
+        if uid not in self._maps:
+            self._maps[uid] = access_map(self.db, uid)
+        return self._maps[uid]
 
     @property
     def grants(self) -> Dict[int, HouseholdGrant]:
@@ -511,22 +565,34 @@ class RecordAccess:
         return self.household(record) is not None
 
     def load(self, ids: Iterable[int]) -> None:
-        missing = [i for i in set(ids) if i is not None and i not in self._accounts]
-        if missing:
-            for account in self.db.query(Account).filter(Account.id.in_(missing)).all():
-                self._accounts[account.id] = account
-            for i in missing:
-                self._accounts.setdefault(i, None)
+        """Note accounts ``account`` will be asked for, so they load in one query."""
+        self._wanted.update(i for i in ids if i is not None and i not in self._accounts)
 
     def account(self, account_id: Optional[int]) -> Optional[Account]:
         if account_id is None:
             return None
-        self.load([account_id])
+        if account_id not in self._accounts:
+            self._wanted.add(account_id)
+            missing = []
+            for i in self._wanted:
+                # One the session already holds, fully loaded, is the object a query
+                # would return (a query never refreshes it): no need to ask.
+                held = self.db.identity_map.get(identity_key(Account, i))
+                if held is not None and not sa_inspect(held).expired_attributes:
+                    self._accounts[i] = held
+                else:
+                    missing.append(i)
+            self._wanted.clear()
+            if missing:
+                for account in self.db.query(Account).filter(Account.id.in_(missing)).all():
+                    self._accounts[account.id] = account
+                for i in missing:
+                    self._accounts.setdefault(i, None)
         return self._accounts[account_id]
 
     def role(self, account_id: Optional[int], user=None) -> str:
         """``user``'s role (default the caller) on the account."""
-        return account_role(self.uid if user is None else user, self.account(account_id))
+        return self.access_map(user).role(account_id)
 
     def facts(self, record) -> dict:
         """The access facts every rule about ``record`` is built from."""

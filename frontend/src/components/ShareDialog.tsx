@@ -1,5 +1,5 @@
 import { LoadingLine } from './Loading'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   useCreateAccountShareMutation,
   useDeleteAccountShareMutation,
@@ -45,6 +45,11 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
   const [updateShare] = useUpdateAccountShareMutation()
   const [deleteShare] = useDeleteAccountShareMutation()
   const askConfirm = useConfirm()
+  // Focus moves into the dialog when it opens.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!panelRef.current?.contains(document.activeElement)) panelRef.current?.focus()
+  }, [])
 
   const [email, setEmail] = useState('')
   const [match, setMatch] = useState<UserMatch | null>(null)
@@ -143,7 +148,9 @@ export function ShareDialog({ account, onClose }: { account: Account; onClose: (
     >
       <div className="min-h-full flex items-center justify-center">
         <div
-          className="w-full max-w-lg bg-surface p-6 border border-line"
+          ref={panelRef}
+          tabIndex={-1}
+          className="w-full max-w-lg bg-surface p-6 border border-line outline-none"
           role="dialog"
           aria-modal="true"
           aria-label={`Share ${account.name}`}

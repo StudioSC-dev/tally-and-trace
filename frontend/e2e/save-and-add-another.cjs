@@ -1,17 +1,18 @@
 // Browser checks for STU-475 on Transactions: "Save and add another" in the Create
 // Transaction dialog. (a) the happy path and the final primary save; (b) what is cleared
 // and kept, including the recurring link, tags and posting date; (c) a transfer between
-// currencies; (d) the screen loader stays off for the save and its refresh, and the submit
-// buttons wait for that refresh; (d2) an unrelated request and a primary save still block,
-// and a save made after the refresh sends fresh requests; (d3) with over 1000 rows in
-// the Upcoming window, one ascending window request, held after the save, stays off the
-// loader and is not followed by a second; (d4) a primary save's refetches
-// still block; (e) a refused save and the inline errors; (f) Edit has no such button;
-// (g) Cancel after a save; (h) a pending foreign currency does not ride into a posted
-// entry; (h2) the form is locked while the POST is held; (i1, i2) Cancel, reopen, then
-// the abandoned POST settles (success, failure); (j) closing the dialog mid-refresh hands
-// the refresh back to the screen loader; (k) a reopened dialog cannot save until an abandoned save and its
-// refresh have settled.
+// currencies; (d) the save clears the form at once (`Saving "<desc> <figure>"…`), the
+// form stays usable, a second save queues behind a held one (FIFO) and the primary button
+// closes the dialog at once; (d2) an unrelated request is never held back by a save, and the
+// refresh after the queue drains is fresh; (d3) with over 1000 rows in the Upcoming window,
+// one ascending window request after the save, and nothing blocks; (d4) a primary save's held
+// refresh keeps the list on screen; (e) a refused save (a failed toast whose Edit brings the
+// entry back with the refusal inline) and the inline errors; (f) Edit has no such button;
+// (g) Cancel after a save; (h) a pending foreign currency does not ride into a posted entry;
+// (h2) nothing is locked while the POST is held; (i1, i2) Cancel, reopen, then the earlier
+// POST settles (success, failure: a failed toast with Retry); (j) closing the dialog
+// mid-refresh blocks nothing; (k) a reopened dialog's save queues behind the held one.
+// STU-605: saves run in the background through the save outbox; there is no screen loader.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API. Not wired into CI and not part of `pnpm build`. Run steps: see
 // ./README.md.
@@ -20,10 +21,8 @@
 // [G] guard. The script ends with RESULT: k/m and exits 0 only when every check passed,
 // 1 when any failed, 2 for setup.
 //
-// Phase-recording scenarios (d, d2, d3, d4, e, j) go through `openWithPhaseRecorder`: the
-// recorder is installed before login (`addInitScript` only reaches documents loaded after
-// it), the history is reset once the page has settled, and an [S] `recorder-installed`
-// check proves the instrumentation exists before any phase assertion.
+// Every page carries a probe, installed before login, that notes any busy overlay element;
+// an [S] `<scenario>.overlay-probe` check proves it reads false once the page has settled.
 //
 // Usage: node frontend/e2e/save-and-add-another.cjs [scenario]
 const { startLocalStack } = require('./_local_stack.cjs')
@@ -110,20 +109,20 @@ const waitFocus = (locator, ms = 3000) => until(() => isFocused(locator), (v) =>
 const waitButtons = (modal, ms = 6000) =>
   until(async () => (await anotherOf(modal).isEnabled()) && (await primaryOf(modal).isEnabled()), (v) => v === true, ms)
 
-// ─── Phases ──────────────────────────────────────────────────────────────────
-const phasesOf = async (page) => ((await h.readTexts(page))['busy-overlay'] || { attrs: {} }).attrs['data-phase'] || []
-const blockedIn = (phases) => phases.filter((p) => p === 'shield' || p === 'visible')
-
-/**
- * The app's own `quietPending()`: imports the exact module URL the app loaded (the dev server
- * may add ?t=…), so this reads the running store's state, not a second copy.
- */
-const quietPendingOf = (page) => page.evaluate(async () => {
-  const file = '/src/store/busy.ts'
-  const url = performance.getEntriesByType('resource').map((e) => e.name).find((n) => new URL(n).pathname === file) || file
-  const { quietPending } = await import(url)
-  return quietPending()
-})
+// ─── Background saves (STU-605) ─────────────────────────────────────────────
+// The screen loader is gone: Save and add another queues the save in the outbox, clears the
+// form at once and says `Saving "<desc> <figure>"…`; the request goes in the background, one
+// at a time, and a toast reports the outcome.
+// A pending toast names the figure and the account ("Saving ₱180.00 to Sav Checking…"); a
+// saved or failed one names the description.
+const toastFor = (page, description) => page.locator('[data-testid="save-toast"]').filter({ hasText: description })
+/** Waits (bounded) for the save toast naming `description` to be in `state`; true on arrival. */
+const waitToast = (page, description, state, ms = 10000) =>
+  toastFor(page, description).and(page.locator(`[data-state="${state}"]`)).first().waitFor({ timeout: ms }).then(() => true, () => false)
+/** Waits (bounded) until `creates` holds at least `n` POST bodies; returns the count. */
+const waitCreates = (creates, n, ms = 6000) => until(async () => creates.length, (c) => c >= n, ms)
+/** Whether a busy overlay element was ever in the page (it must never be, STU-605). */
+const overlaySeen = (page) => page.evaluate(() => window.__overlaySeen === true).catch(() => null)
 
 // ─── Setup and pages ─────────────────────────────────────────────────────────
 /**
@@ -173,34 +172,32 @@ async function openAddForm(page) {
 
 /**
  * A fresh signed-in page on Transactions with the Create dialog open, its native dialogs
- * tracked and its requests logged. With `recorder`, the overlay's `data-phase` history is
- * recorded (Phase recorder rule): installed before login, reset after the page settles,
- * and proven present by the [S] `<scenario>.recorder-installed` check.
+ * tracked and its requests logged. A probe installed before login sets `__overlaySeen` if a
+ * busy overlay element ever appears (STU-605: none may); `overlaySeen(page)` reads it.
  */
-async function openPage(browser, user, scenario, { recorder = false, dialog = true } = {}) {
+async function openPage(browser, user, scenario, { dialog = true } = {}) {
   const { ctx, page } = await h.newPage(browser, { timezoneId: 'Asia/Manila' })
   page.setDefaultTimeout(10000)
   const native = d.trackNativeDialogs(page)
   const log = h.logRequests(page)
   const creates = watchCreates(page)
-  if (recorder) await h.recordTexts(page, ['busy-overlay'], { attributes: ['data-phase'] })
+  await page.addInitScript(() => {
+    window.__overlaySeen = false
+    const probe = () => { if (document.querySelector('[data-testid="busy-overlay"]')) window.__overlaySeen = true }
+    const start = () => { new MutationObserver(probe).observe(document.documentElement, { childList: true, subtree: true }); probe() }
+    if (document.documentElement) start()
+    else document.addEventListener('DOMContentLoaded', start, { once: true })
+  })
   await h.uiLogin(page, stack, user)
   await page.goto(`${stack.webUrl}/transactions`)
   await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
   await h.waitQuiet(page)
   const modal = dialog ? await openAddForm(page) : null
   await h.waitQuiet(page)
-  if (recorder) {
-    await h.resetTexts(page)
-    await h.check(`${scenario}.recorder-installed`, 'S', async () => {
-      const defined = (await h.readTexts(page))['busy-overlay'] !== undefined
-      const present = await page.evaluate(() => !!window.__stu335Texts)
-      return (defined && present) || `overlay history defined ${defined}, recorder present ${present}`
-    })
-  }
+  await h.check(`${scenario}.overlay-probe`, 'S', async () =>
+    (await overlaySeen(page)) === false || `overlay probe ${await overlaySeen(page)} before the scenario began`)
   return { ctx, page, native, log, creates, modal }
 }
-const openWithPhaseRecorder = (browser, user, scenario, options) => openPage(browser, user, scenario, { ...options, recorder: true })
 
 /** Description, the account chip (if not already selected) and the posted amount. */
 async function fillEntry(modal, description, amount, account = 'Sav Checking') {
@@ -243,6 +240,7 @@ async function scenarioA(browser) {
     await fillEntry(modal, 'Coffee', 180)
     await clickAnother(page, modal)
     await waitNotice(modal)
+    await waitCreates(creates, 1)
 
     await h.check('a.one-post-typed-body', 'B', async () => {
       const body = creates[0]
@@ -253,7 +251,7 @@ async function scenarioA(browser) {
     await h.check('a.dialog-open', 'B', async () => (await modal.isVisible()) || 'the dialog closed')
     await h.check('a.notice-text', 'B', async () => {
       const text = await textOf(noticeOf(modal))
-      return text === 'Saved "Coffee ₱180.00"' || `notice ${JSON.stringify(text)}`
+      return text === 'Saving "Coffee ₱180.00"…' || `notice ${JSON.stringify(text)}`
     })
     await h.check('a.notice-role', 'B', async () =>
       (await noticeOf(modal).getAttribute('role')) === 'status' || 'the notice is not role=status')
@@ -278,16 +276,18 @@ async function scenarioA(browser) {
     await control(modal, 'description').fill('Tea')
     await control(modal, 'amount').fill('95')
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Tea ₱95.00"')
+    await waitNotice(modal, 'Saving "Tea ₱95.00"…')
+    await waitCreates(creates, 2)
     await h.check('a.second-add-another', 'B', async () => {
       const text = await textOf(noticeOf(modal))
-      return (creates.length === 2 && text === 'Saved "Tea ₱95.00"') || `${creates.length} POST(s), notice ${JSON.stringify(text)}`
+      return (creates.length === 2 && text === 'Saving "Tea ₱95.00"…') || `${creates.length} POST(s), notice ${JSON.stringify(text)}`
     })
 
     await control(modal, 'description').fill('Snack')
     await control(modal, 'amount').fill('40')
     await clickPrimary(page, modal)
     await modal.waitFor({ state: 'detached', timeout: 6000 }).catch(() => {})
+    await waitCreates(creates, 3)
     await h.check('a.primary-saves-and-closes', 'B', async () =>
       (creates.length === 3 && (await modal.count()) === 0) || `${creates.length} POST(s), dialog open ${(await modal.count()) > 0}`)
     await h.waitQuiet(page)
@@ -336,6 +336,7 @@ async function scenarioB(browser) {
     const dateBefore = await control(modal, 'transaction_date').inputValue()
     await clickAnother(page, modal)
     await waitNotice(modal)
+    await waitCreates(creates, 1)
 
     await h.check('b.first-body-linked', 'S', async () => {
       const body = creates[0]
@@ -367,7 +368,8 @@ async function scenarioB(browser) {
     await control(modal, 'description').fill('Other')
     await control(modal, 'amount').fill('20')
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Other ₱20.00"')
+    await waitNotice(modal, 'Saving "Other ₱20.00"…')
+    await waitCreates(creates, 2)
     await h.check('b.second-body-unlinked', 'B', async () => {
       const body = creates[1]
       const ok = creates.length === 2 && body &&
@@ -398,6 +400,7 @@ async function scenarioC(browser) {
     await control(modal, 'transfer_fee').fill('5')
     await clickAnother(page, modal)
     await waitNotice(modal)
+    await waitCreates(creates, 1)
 
     await h.check('c.first-posted', 'S', async () => creates.length === 1 || `${creates.length} POST(s)`)
     await h.check('c.destination-kept', 'B', async () =>
@@ -422,93 +425,88 @@ async function scenarioC(browser) {
   }
 }
 
-// (d) The screen loader stays off for the save and the refetches it starts.
+// (d) The save leaves the form at once: cleared, usable, one request at a time, nothing blocks.
 async function scenarioD(browser) {
-  console.log('\n=== (d) The screen loader stays off for the save and its refresh')
+  console.log('\n=== (d) Save and add another clears at once; the saves queue; nothing blocks')
   const seed = await seedUser('d')
-  const { ctx, page, native, creates } = await openWithPhaseRecorder(browser, seed.user, 'd')
+  const { ctx, page, native, creates } = await openPage(browser, seed.user, 'd')
   const gates = []
   try {
     const modal = createModal(page)
     await fillEntry(modal, 'Coffee', 180)
     const postGate = await h.gate(page, isCreate)
-    const listGate = await h.gate(page, isMainList)
-    const snapGate = await h.gate(page, isSnapshot)
-    gates.push(postGate, listGate, snapGate)
+    gates.push(postGate)
     await clickAnother(page, modal)
     await postGate.waitHits(1)
-    await page.waitForTimeout(700)
     await h.check('d.post-no-block', 'B', async () => {
       const got = {
         hit: postGate.hits,
-        blocked: blockedIn(await phasesOf(page)),
-        another: await anotherOf(modal).isDisabled(),
-        primary: await primaryOf(modal).isDisabled(),
-      }
-      // Enter has nowhere to land while the fields are disabled: it must not submit again.
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(150)
-      const ok = got.hit === 1 && got.blocked.length === 0 && got.another && got.primary && postGate.hits === 1 && creates.length === 1
-      return ok || `${JSON.stringify(got)}, POSTs after Enter ${postGate.hits}`
-    })
-
-    // The in-flight guard itself: a submit with no button and no focus (requestSubmit with no
-    // submitter) must not start a second POST while the first is held.
-    await modal.locator('form').evaluate((form) => form.requestSubmit())
-    await page.waitForTimeout(300)
-    await h.check('d.inflight-guard', 'B', async () =>
-      (postGate.hits === 1 && creates.length === 1) || `POSTs after requestSubmit: gate ${postGate.hits}, requests ${creates.length}`)
-
-    postGate.release({ disarm: true })
-    const listHit = await listGate.waitHits(1)
-    const snapHit = await snapGate.waitHits(1)
-    await h.check('d.gets-received', 'S', async () =>
-      (listHit && snapHit) || `list gate hit ${listHit}, snapshot gate hit ${snapHit}`)
-    await waitNotice(modal)
-    await page.waitForTimeout(700)
-    await page.keyboard.type('Tea')
-    // The fields stay usable while the refresh is held; the submit buttons wait for it.
-    await h.check('d.refetch-no-block', 'B', async () => {
-      const got = {
-        blocked: blockedIn(await phasesOf(page)),
-        typed: await control(modal, 'description').inputValue(),
-        focus: await activeField(page),
         notice: await textOf(noticeOf(modal)),
-        anotherDisabled: await anotherOf(modal).isDisabled(),
-        primaryDisabled: await primaryOf(modal).isDisabled(),
+        description: await control(modal, 'description').inputValue(),
+        another: await anotherOf(modal).isEnabled(),
+        primary: await primaryOf(modal).isEnabled(),
+        descriptionEnabled: await control(modal, 'description').isEnabled(),
+        pending: await waitToast(page, '₱180.00', 'pending', 3000),
+        overlay: await overlaySeen(page),
       }
-      const ok = got.blocked.length === 0 && got.typed === 'Tea' && got.focus === 'description' &&
-        got.notice === 'Saved "Coffee ₱180.00"' && got.anotherDisabled && got.primaryDisabled
+      const ok = got.hit === 1 && got.notice === 'Saving "Coffee ₱180.00"…' && got.description === '' &&
+        got.another && got.primary && got.descriptionEnabled && got.pending && got.overlay === false
       return ok || JSON.stringify(got)
     })
 
-    // A submit with no button (requestSubmit) while the refresh is held must not save: the
-    // save's own refetches would join the held, older requests.
-    await control(modal, 'amount').fill('20')
-    const postsBefore = creates.length
+    // An empty form submitted with no button (requestSubmit) is refused by validation: no POST.
     await modal.locator('form').evaluate((form) => form.requestSubmit())
-    await page.waitForTimeout(400)
-    await h.check('d.save-waits-for-refresh', 'B', async () =>
-      creates.length === postsBefore || `POSTs while the refresh is held: ${creates.length - postsBefore}`)
+    await page.waitForTimeout(300)
+    await h.check('d.inflight-guard', 'B', async () =>
+      (postGate.hits === 1 && creates.length === 1) || `POSTs after an empty requestSubmit: gate ${postGate.hits}, requests ${creates.length}`)
 
+    // A second save while the first is held is queued behind it, not sent alongside.
+    await control(modal, 'description').fill('Tea')
+    await control(modal, 'amount').fill('20')
+    await anotherOf(modal).click()
+    await waitNotice(modal, 'Saving "Tea ₱20.00"…')
+    await page.waitForTimeout(400)
+    await h.check('d.second-queued', 'B', async () =>
+      (postGate.hits === 1 && creates.length === 1) || `POSTs while the first is held: gate ${postGate.hits}, requests ${creates.length}`)
+
+    // Released: both go, in order, and the list refreshes once the queue drains.
+    const listGate = await h.gate(page, isMainList)
+    gates.push(listGate)
+    postGate.release({ disarm: true })
+    await waitCreates(creates, 2)
+    await h.check('d.fifo', 'B', async () =>
+      (creates.length === 2 && creates[0]?.description === 'Coffee' && creates[1]?.description === 'Tea') ||
+      `bodies ${JSON.stringify(creates.map((b) => b && b.description))}`)
+    const listHit = await listGate.waitHits(1, 5000)
+    await h.check('d.gets-received', 'S', async () => listHit || 'the drained queue started no list refetch')
+    await page.keyboard.type('Rice')
+    await h.check('d.refetch-no-block', 'B', async () => {
+      const got = {
+        typed: await control(modal, 'description').inputValue(),
+        focus: await activeField(page),
+        another: await anotherOf(modal).isEnabled(),
+        overlay: await overlaySeen(page),
+      }
+      return (got.typed === 'Rice' && got.focus === 'description' && got.another && got.overlay === false) || JSON.stringify(got)
+    })
     listGate.release({ disarm: true })
-    snapGate.release({ disarm: true })
     await h.waitQuiet(page)
     await h.check('d.row-appears', 'B', async () => {
-      const n = await until(() => rowFor(page, 'Coffee').count(), (c) => c > 0)
-      return n > 0 || 'the saved row is not in the list'
+      const n = await until(async () => [await rowFor(page, 'Coffee').count(), await rowFor(page, 'Tea').count()], (c) => c.every((x) => x > 0))
+      return n.every((x) => x > 0) || `rows (Coffee, Tea) ${JSON.stringify(n)}`
     })
 
-    // Control: the primary button with its POST held does block, so the recorder can see it.
-    await waitButtons(modal)
+    // The primary button closes the dialog at once, its POST held behind it.
     const holdPrimary = await h.gate(page, isCreate)
     gates.push(holdPrimary)
+    await control(modal, 'amount').fill('15')
     await clickPrimary(page, modal)
     await holdPrimary.waitHits(1)
-    const sawVisible = await h.waitPhase(page, 'visible', 3000)
-    await h.check('d.control-primary-blocks', 'G', async () => sawVisible || 'the primary save never reached visible')
+    await h.check('d.primary-closes-at-once', 'B', async () =>
+      ((await modal.count()) === 0 && (await waitToast(page, '₱15.00', 'pending', 3000)) && (await overlaySeen(page)) === false) ||
+      `dialog open ${(await modal.count()) > 0}, overlay ${await overlaySeen(page)}`)
     holdPrimary.release({ disarm: true })
-    await modal.waitFor({ state: 'detached', timeout: 6000 }).catch(() => {})
+    await h.check('d.primary-saved', 'B', async () => (await waitToast(page, 'Rice', 'saved')) || 'no Saved toast for Rice')
     await h.waitQuiet(page)
   } finally {
     for (const gate of gates) gate.release({ disarm: true })
@@ -517,114 +515,41 @@ async function scenarioD(browser) {
   }
 }
 
-// (d2) Unrelated requests and a primary save still block; a save waits for the refresh and is fresh.
+// (d2) Unrelated requests are never held back by a save; the drained queue refreshes once,
+// with requests sent after the last save settled.
 async function scenarioD2(browser) {
-  console.log('\n=== (d2) An unrelated request and a primary save still block; a save after the refresh is fresh')
+  console.log('\n=== (d2) An unrelated request goes while a save is held; the refresh after the drain is fresh')
   const seed = await seedUser('d2')
-  const { ctx, page, native } = await openWithPhaseRecorder(browser, seed.user, 'd2')
+  const { ctx, page, native } = await openPage(browser, seed.user, 'd2')
   const gates = []
   try {
     const modal = createModal(page)
     await fillEntry(modal, 'Coffee', 180)
     const search = page.locator('[data-testid="transactions-search"]')
     const postGate = await h.gate(page, isCreate)
-    const searchOne = await h.gate(page, isSearchList('zz'))
-    gates.push(postGate, searchOne)
+    gates.push(postGate)
     await clickAnother(page, modal)
     await postGate.waitHits(1)
 
-    // While the quiet POST is held, an unrelated request (a new search key) must block.
-    await h.resetTexts(page)
+    // While the save is held, an unrelated request (a new search key) is sent and answered.
+    const searched = page.waitForResponse((res) => isSearchList('zz')(res.request()), { timeout: 5000 }).then(() => true, () => false)
     await search.fill('zz', { force: true })
-    await searchOne.waitHits(1, 5000)
-    await page.waitForTimeout(500)
-    await h.check('d2.unrelated-during-post', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return blocked.length > 0 || `phases ${JSON.stringify(await phasesOf(page))}`
-    })
-    searchOne.release({ disarm: true })
-    const settled = await h.waitPhase(page, 'hidden', 5000)
-    await h.check('d2.idle-before-refresh', 'S', async () => settled || 'the overlay did not return to hidden')
-
-    // Release the quiet POST with the refetches it starts held, then block again unrelatedly.
-    const refresh = await h.gate(page, isSearchList('zz'))
-    const searchTwo = await h.gate(page, isSearchList('yy'))
-    gates.push(refresh, searchTwo)
-    postGate.release({ disarm: true })
-    const refreshHit = await refresh.waitHits(1, 5000)
-    await h.check('d2.refresh-started', 'S', async () => refreshHit || 'the save started no list refetch')
-    await waitNotice(modal)
-    await h.resetTexts(page)
-    await search.fill('yy', { force: true })
-    await searchTwo.waitHits(1, 5000)
-    await page.waitForTimeout(500)
-    await h.check('d2.unrelated-during-refresh', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return blocked.length > 0 || `phases ${JSON.stringify(await phasesOf(page))}`
-    })
-    searchTwo.release({ disarm: true })
-    await h.waitPhase(page, 'hidden', 5000)
-
-    // The refresh GETs are still held: the submit buttons wait for them, the fields do not.
-    await h.check('d2.buttons-wait-for-refresh', 'B', async () => {
-      const got = {
-        another: await anotherOf(modal).isDisabled(),
-        primary: await primaryOf(modal).isDisabled(),
-        description: await control(modal, 'description').isEnabled(),
-      }
-      return (got.another && got.primary && got.description) || JSON.stringify(got)
-    })
-    refresh.release({ disarm: true })
-    await h.check('d2.buttons-enabled', 'S', async () => (await waitButtons(modal)) || 'the buttons stayed disabled after the refresh')
-
-    // A primary save counts (its POST is not exempt).
-    await control(modal, 'description').fill('Tea')
-    await control(modal, 'amount').fill('20')
-    const primaryGate = await h.gate(page, isCreate)
-    gates.push(primaryGate)
-    await h.resetTexts(page)
-    await primaryOf(modal).click()
-    await primaryGate.waitHits(1, 5000)
-    await page.waitForTimeout(500)
-    await h.check('d2.overlapping-save-counts', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return (primaryGate.hits === 1 && blocked.length > 0) || `POSTs ${primaryGate.hits}, phases ${JSON.stringify(await phasesOf(page))}`
-    })
-    primaryGate.release({ disarm: true })
-    await modal.waitFor({ state: 'detached', timeout: 6000 }).catch(() => {})
-    // The list is filtered by the search; clear it so the saved rows can show.
-    await h.waitPhase(page, 'hidden', 5000)
+    await h.check('d2.unrelated-during-post', 'B', async () =>
+      ((await searched) && postGate.hits === 1 && (await overlaySeen(page)) === false) || `search answered ${await searched}, overlay ${await overlaySeen(page)}`)
     await search.fill('', { force: true })
-    await h.waitQuiet(page)
-    await h.waitPhase(page, 'hidden', 5000)
 
-    // A second save tried while the first save's refresh is held must wait. Once it is made,
-    // the requests it starts must be new ones, sent after it settled (not joined to the held,
-    // older ones), so the list and the balance show both rows.
+    // The dialog is usable while the save is held: a second save queues.
     const events = []
     page.on('request', (r) => { if (isMainList(r) || isSnapshot(r) || isAccountsList(r)) events.push({ kind: 'get', r }) })
     page.on('response', (res) => {
       const r = res.request()
       if (isCreate(r) && (r.postData() || '').includes('"Dinner"')) events.push({ kind: 'second-post-done' })
     })
-    const again = await openAddForm(page)
-    await fillEntry(again, 'Lunch', 30)
-    const held = [await h.gate(page, isMainList), await h.gate(page, isSnapshot), await h.gate(page, isAccountsList)]
-    gates.push(...held)
-    await clickAnother(page, again)
-    await waitNotice(again, 'Saved "Lunch ₱30.00"')
-    await held[0].waitHits(1, 5000)
-    await control(again, 'description').fill('Dinner')
-    await control(again, 'amount').fill('40')
-    // A disabled button ignores even a forced click; without the wait this saves at once.
-    await primaryOf(again).click({ force: true, timeout: 2000 }).catch(() => {})
-    await page.waitForTimeout(500)
-    for (const gate of held) gate.release({ disarm: true })
-    if ((await again.count()) > 0) {
-      await waitButtons(again)
-      await clickPrimary(page, again)
-      await again.waitFor({ state: 'detached', timeout: 6000 }).catch(() => {})
-    }
+    await fillEntry(modal, 'Dinner', 40)
+    await primaryOf(modal).click()
+    await h.check('d2.buttons-never-wait', 'B', async () => (await modal.count()) === 0 || 'the primary save did not close the dialog')
+    postGate.release({ disarm: true })
+    await waitToast(page, 'Dinner', 'saved')
     await h.waitQuiet(page)
     await h.check('d2.second-save-fresh', 'B', async () => {
       const done = events.findIndex((e) => e.kind === 'second-post-done')
@@ -639,11 +564,11 @@ async function scenarioD2(browser) {
       const shown = items.find((a) => a.id === seed.checking.id)?.balance
       const truth = (await client.get(seed.user.token, `/accounts/${seed.checking.id}`)).balance
       const listed = [
-        await until(() => rowFor(page, 'Lunch').count(), (c) => c > 0),
+        await until(() => rowFor(page, 'Coffee').count(), (c) => c > 0),
         await until(() => rowFor(page, 'Dinner').count(), (c) => c > 0),
       ]
       const ok = shown !== undefined && Number(shown) === Number(truth) && listed.every((n) => n > 0)
-      return ok || `balance on the page ${shown}, server ${truth}, rows listed (Lunch, Dinner) ${JSON.stringify(listed)}, ${JSON.stringify(counts)}`
+      return ok || `balance on the page ${shown}, server ${truth}, rows listed (Coffee, Dinner) ${JSON.stringify(listed)}, ${JSON.stringify(counts)}`
     })
   } finally {
     for (const gate of gates) gate.release({ disarm: true })
@@ -652,9 +577,9 @@ async function scenarioD2(browser) {
   }
 }
 
-// (d3) Over 1000 future rows: one ascending window request, nothing after it, and it stays off the loader.
+// (d3) Over 1000 future rows: one ascending window request, nothing after it, nothing blocks.
 async function scenarioD3(browser) {
-  console.log('\n=== (d3) 1005 rows in the Upcoming window: one ascending request, quiet after Save and add another')
+  console.log('\n=== (d3) 1005 rows in the Upcoming window: one ascending request after Save and add another')
   const seed = await seedUser('d3')
   const start = addDays(today(), 1)
   const rows = Array.from({ length: 1005 }, (_, i) => i)
@@ -667,7 +592,7 @@ async function scenarioD3(browser) {
       })))
   }
   console.log(`    seeded ${rows.length} rows through the API in ${((Date.now() - seedStart) / 1000).toFixed(1)} s`)
-  const { ctx, page, native, log } = await openWithPhaseRecorder(browser, seed.user, 'd3')
+  const { ctx, page, native, log } = await openPage(browser, seed.user, 'd3')
   const gates = []
   try {
     const modal = createModal(page)
@@ -687,18 +612,13 @@ async function scenarioD3(browser) {
     gates.push(windowGate)
     let windowRequests = 0
     page.on('request', (r) => { if (isUpcomingList(r)) windowRequests++ })
-    await h.resetTexts(page)
     await clickAnother(page, modal)
     await windowGate.waitHits(1, 5000)
     await h.check('d3.window-refetched', 'S', async () => windowGate.hits >= 1 || 'the invalidation sent no window refetch')
-    await page.waitForTimeout(700)
-    await h.check('d3.quiet-probe', 'S', async () => {
-      const pending = await quietPendingOf(page).catch((e) => `probe failed: ${e.message}`)
-      return pending === true || `quietPending() while the window request is held ${JSON.stringify(pending)}`
-    })
+    await page.keyboard.type('Tea')
     await h.check('d3.window-no-block', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return blocked.length === 0 || `phases ${JSON.stringify(await phasesOf(page))}`
+      const got = { typed: await control(modal, 'description').inputValue(), overlay: await overlaySeen(page) }
+      return (got.typed === 'Tea' && got.overlay === false) || JSON.stringify(got)
     })
     windowGate.release({ disarm: true })
     await h.waitQuiet(page)
@@ -711,24 +631,24 @@ async function scenarioD3(browser) {
   }
 }
 
-// (d4) A primary save's refetches still count: the integration oracle for the matcher.
+// (d4) A primary save's refresh: the dialog closed at once, the list keeps its rows while the
+// refresh is held, and the saved row lands once it is released.
 async function scenarioD4(browser) {
-  console.log('\n=== (d4) A primary save\'s refetches still block the screen')
+  console.log('\n=== (d4) A primary save\'s refresh blocks nothing and keeps the list on screen')
   const seed = await seedUser('d4')
-  const { ctx, page, native } = await openWithPhaseRecorder(browser, seed.user, 'd4')
+  const { ctx, page, native } = await openPage(browser, seed.user, 'd4')
   const gates = []
   try {
     const modal = createModal(page)
     await fillEntry(modal, 'First', 30)
     await clickAnother(page, modal)
     await waitNotice(modal)
-    await page.waitForTimeout(500)
     await h.check('d4.add-another-no-block', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
       const notice = await textOf(noticeOf(modal))
-      return (blocked.length === 0 && notice === 'Saved "First ₱30.00"') || `phases ${JSON.stringify(await phasesOf(page))}, notice ${JSON.stringify(notice)}`
+      return (notice === 'Saving "First ₱30.00"…' && (await overlaySeen(page)) === false) || `overlay ${await overlaySeen(page)}, notice ${JSON.stringify(notice)}`
     })
     await h.waitQuiet(page)
+    await until(() => rowFor(page, 'First').count(), (c) => c > 0)
 
     const listGate = await h.gate(page, isMainList)
     gates.push(listGate)
@@ -736,17 +656,11 @@ async function scenarioD4(browser) {
     await control(modal, 'amount').fill('40')
     await clickPrimary(page, modal)
     const hit = await listGate.waitHits(1, 5000)
-    const visible = hit ? await h.waitPhase(page, 'visible', 3000) : false
-    await page.waitForTimeout(600)
-    // A guard: a primary save's refresh still shows the loader. The matcher's own oracle is the
-    // shared negative isQuietSettle test, since the explicit refresh is loud either way.
-    await h.check('d4.plain-refetch-counts', 'G', async () => {
-      const phase = await h.overlayPhase(page)
-      return (hit && visible && phase === 'visible') || `list GET held ${hit}, reached visible ${visible}, phase after 600 ms ${phase}`
+    await h.check('d4.plain-refetch-no-block', 'B', async () => {
+      const got = { hit, dialog: await modal.count(), first: await rowFor(page, 'First').count(), overlay: await overlaySeen(page) }
+      return (got.hit && got.dialog === 0 && got.first > 0 && got.overlay === false) || JSON.stringify(got)
     })
     listGate.release({ disarm: true })
-    const hidden = await h.waitPhase(page, 'hidden', 5000)
-    await h.check('d4.back-to-hidden', 'B', async () => hidden || 'the overlay did not return to hidden')
     await h.check('d4.row-in-list', 'B', async () => {
       const n = await until(() => rowFor(page, 'Plain').count(), (c) => c > 0)
       return n > 0 || 'the primary save\'s row is not in the list'
@@ -762,21 +676,26 @@ async function scenarioD4(browser) {
 async function scenarioE(browser) {
   console.log('\n=== (e) Save and add another: a refused save and the inline errors')
   const seed = await seedUser('e')
-  const { ctx, page, native, creates } = await openWithPhaseRecorder(browser, seed.user, 'e')
+  const { ctx, page, native, creates } = await openPage(browser, seed.user, 'e')
   const gates = []
   try {
     const modal = createModal(page)
     await fillEntry(modal, 'Err probe', 50)
-    const fail = await h.failWith(page, isCreate, 500, { times: 1 })
-    const listGate = await h.gate(page, isMainList)
-    gates.push(fail, listGate)
+    const fail = await h.failWith(page, isCreate, 400, { times: 1 })
+    gates.push(fail)
     await clickAnother(page, modal)
+    // The refusal arrives after the form cleared: a failed toast, whose Edit brings the entry back.
+    const failed = await waitToast(page, 'Err probe', 'failed')
+    await h.check('e.failed-toast', 'B', async () => {
+      const t = failed ? await textOf(toastFor(page, 'Err probe').locator('[data-testid="save-toast-message"]')) : ''
+      const got = { failed, t, retry: await toastFor(page, 'Err probe').locator('[data-testid="save-toast-retry"]').count(), overlay: await overlaySeen(page) }
+      return (failed && t.includes('Couldn\'t save "Err probe"') && t.includes('stu335 injected failure 400') && got.retry === 0 && got.overlay === false) || JSON.stringify(got)
+    })
+    await toastFor(page, 'Err probe').locator('[data-testid="save-toast-edit"]').click()
     await formErrorOf(modal).waitFor({ timeout: 5000 }).catch(() => {})
-    await listGate.waitHits(1, 3000)
-    await page.waitForTimeout(700)
     await h.check('e.server-reason', 'B', async () => {
       const text = await textOf(formErrorOf(modal))
-      return text.includes('stu335 injected failure 500') || `form error ${JSON.stringify(text)}`
+      return text.includes('stu335 injected failure 400') || `form error ${JSON.stringify(text)}`
     })
     await h.check('e.nothing-cleared', 'B', async () => {
       const got = [await control(modal, 'description').inputValue(), await control(modal, 'amount').inputValue(),
@@ -787,27 +706,22 @@ async function scenarioE(browser) {
       const [n, text] = [await noticeOf(modal).count(), await textOf(noticeOf(modal))]
       return (n === 1 && text === '') || `status elements ${n}, text ${JSON.stringify(text)}`
     })
-    // The fields are usable at once; the buttons wait for the refetches the refusal started.
+    // The fields and the buttons are usable at once: nothing waits for a refetch.
     await h.check('e.fields-enabled', 'B', async () => {
       const got = [await control(modal, 'description').isEnabled(), await control(modal, 'amount').isEnabled(),
-        await anotherOf(modal).isDisabled(), await primaryOf(modal).isDisabled()]
-      return got.every(Boolean) || `description, amount enabled; another, primary disabled ${JSON.stringify(got)}`
+        await anotherOf(modal).isEnabled(), await primaryOf(modal).isEnabled()]
+      return got.every(Boolean) || `description, amount, another, primary enabled ${JSON.stringify(got)}`
     })
-    await h.check('e.failure-no-block', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return (listGate.hits >= 1 && blocked.length === 0) || `list GET held ${listGate.hits}, phases ${JSON.stringify(await phasesOf(page))}`
-    })
-    listGate.release({ disarm: true })
-    await h.check('e.buttons-enabled', 'B', async () => (await waitButtons(modal)) || 'the buttons stayed disabled after the refetch')
-    // The focus waited for the used button to be enabled again.
-    await h.check('e.focus-on-used-button', 'B', async () => (await waitFocus(anotherOf(modal))) || `active ${await d.activeTestId(page)}`)
+    await h.check('e.toast-gone-after-edit', 'B', async () =>
+      (await h.expectAbsentFor(page, toastFor(page, 'Err probe'), 500)) || 'the failed toast is still shown')
     await h.waitQuiet(page)
 
     // A save that works leaves a status line to be cleared by the next failed attempt.
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Err probe ₱50.00"')
+    await waitNotice(modal, 'Saving "Err probe ₱50.00"…')
 
     // An empty amount: the field's own error, focus on it, no POST.
+    await h.waitQuiet(page)
     await control(modal, 'description').fill('Dated')
     let before = creates.length
     await clickAnother(page, modal)
@@ -829,7 +743,8 @@ async function scenarioE(browser) {
     // A save that works, then an out-of-range date.
     await control(modal, 'amount').fill('25')
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Dated ₱25.00"')
+    await waitNotice(modal, 'Saving "Dated ₱25.00"…')
+    await h.waitQuiet(page)
     await control(modal, 'description').fill('Late')
     await control(modal, 'amount').fill('30')
     await control(modal, 'transaction_date').fill('2099-12-31')
@@ -838,6 +753,7 @@ async function scenarioE(browser) {
     before = creates.length
     await clickAnother(page, modal)
     await modal.locator('[data-testid="record-date-error"]').first().waitFor({ timeout: 3000 }).catch(() => {})
+    await page.waitForTimeout(300)
     await h.check('e.date-error', 'B', async () => {
       const got = { errors: await modal.locator('[data-testid="record-date-error"]').count(), posts: creates.length - before }
       return (got.errors >= 1 && got.posts === 0) || JSON.stringify(got)
@@ -852,7 +768,6 @@ async function scenarioE(browser) {
       return (got[0] === 'Late' && got[1] === '30' && got[2] === '2099-12-31') || `values ${JSON.stringify(got)}`
     })
   } finally {
-    for (const gate of gates) gate.release?.({ disarm: true })
     await Promise.all(gates.map((gate) => gate.stop?.()))
     await d.checkNoNativeDialogs(h, 'e', native)
     await ctx.close()
@@ -941,6 +856,8 @@ async function scenarioH(browser) {
     await control(modal, 'amount').fill('560')
     await clickAnother(page, modal)
     await waitNotice(modal)
+    await waitCreates(creates, 1)
+    await waitToast(page, 'Cash in', 'saved')
 
     await h.check('h.first-usd', 'S', async () => {
       const body = creates[0]
@@ -956,7 +873,9 @@ async function scenarioH(browser) {
     await control(modal, 'description').fill('Tea')
     await control(modal, 'amount').fill('180')
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Tea ₱180.00"')
+    await waitNotice(modal, 'Saving "Tea ₱180.00"…')
+    await waitCreates(creates, 2)
+    await waitToast(page, 'Tea', 'saved')
     await h.check('h.second-payload', 'B', async () => {
       const body = creates[1]
       return (creates.length === 2 && body && body.projected_currency === 'PHP') ||
@@ -975,11 +894,12 @@ async function scenarioH(browser) {
   }
 }
 
-// (h2) The form is locked while the POST is held.
+// (h2) Nothing is locked while the POST is held: the form is cleared and usable at once, and
+// the pending mode and currency the user chose stay for the next entry.
 async function scenarioH2(browser) {
-  console.log('\n=== (h2) Edits during the held POST are locked')
+  console.log('\n=== (h2) The form stays usable while the POST is held')
   const seed = await seedUser('h2', { entry: true, tagName: true })
-  const { ctx, page, native } = await openPage(browser, seed.user, 'h2')
+  const { ctx, page, native, creates } = await openPage(browser, seed.user, 'h2')
   let hold = null
   try {
     const modal = createModal(page)
@@ -990,7 +910,7 @@ async function scenarioH2(browser) {
     await currency.selectOption('USD')
     await control(modal, 'projected_amount').fill('10')
 
-    const locks = {
+    const controls = {
       posted: postedBox(modal),
       currency,
       account: control(modal, 'account_id').getByRole('button').first(),
@@ -999,27 +919,23 @@ async function scenarioH2(browser) {
       tag: modal.locator('[data-testid="tag-picker"] button').first(),
       recurring: recurringSelect(modal),
       description: control(modal, 'description'),
+      another: anotherOf(modal),
+      primary: primaryOf(modal),
     }
     await h.check('h2.controls-present', 'S', async () => {
       const missing = []
-      for (const [name, locator] of Object.entries(locks)) if ((await locator.count()) === 0) missing.push(name)
+      for (const [name, locator] of Object.entries(controls)) if ((await locator.count()) === 0) missing.push(name)
       return missing.length === 0 || `missing controls: ${missing.join(', ')}`
     })
 
     hold = await h.gate(page, isCreate)
     await clickAnother(page, modal)
     await hold.waitHits(1)
-    await page.waitForTimeout(300)
-    await h.check('h2.locked-during-save', 'B', async () => {
-      const enabled = []
-      for (const [name, locator] of Object.entries(locks)) if (!(await locator.first().isDisabled())) enabled.push(name)
-      const cancelEnabled = await cancelOf(modal).isEnabled()
-      return (enabled.length === 0 && cancelEnabled) || `still enabled: ${enabled.join(', ') || 'none'}, Cancel enabled ${cancelEnabled}`
+    await h.check('h2.usable-during-save', 'B', async () => {
+      const disabled = []
+      for (const [name, locator] of Object.entries(controls)) if (await locator.first().isDisabled()) disabled.push(name)
+      return disabled.length === 0 || `disabled while the POST is held: ${disabled.join(', ')}`
     })
-    // A disabled input ignores a forced click: the mode must not flip mid-flight.
-    await locks.posted.click({ force: true, timeout: 2000 }).catch(() => {})
-    hold.release({ disarm: true })
-    await waitNotice(modal)
     await h.check('h2.mode-kept-pending', 'B', async () => {
       const got = {
         posted: await postedBox(modal).isChecked(),
@@ -1027,18 +943,14 @@ async function scenarioH2(browser) {
         currency: await currency.inputValue().catch(() => null),
         notice: await textOf(noticeOf(modal)),
       }
-      const ok = !got.posted && got.currencyShown && got.currency === 'USD' && got.notice.startsWith('Saved "Hold test')
+      const ok = !got.posted && got.currencyShown && got.currency === 'USD' && got.notice.startsWith('Saving "Hold test')
       return ok || JSON.stringify(got)
     })
-    await waitButtons(modal)
-    await h.check('h2.unlocked-and-focused', 'B', async () => {
-      const got = {
-        another: await anotherOf(modal).isEnabled(),
-        primary: await primaryOf(modal).isEnabled(),
-        description: await control(modal, 'description').isEnabled(),
-        focused: await waitFocus(control(modal, 'description')),
-      }
-      return (got.another && got.primary && got.description && got.focused) || JSON.stringify(got)
+    await h.check('h2.focused', 'B', async () => (await waitFocus(control(modal, 'description'))) || `active field ${await activeField(page)}`)
+    hold.release({ disarm: true })
+    await h.check('h2.saved', 'B', async () => {
+      const ok = await waitToast(page, 'Hold test', 'saved')
+      return (ok && creates.length === 1 && creates[0]?.projected_currency === 'USD') || `saved ${ok}, bodies ${JSON.stringify(creates)}`
     })
   } finally {
     hold?.release({ disarm: true })
@@ -1047,7 +959,7 @@ async function scenarioH2(browser) {
   }
 }
 
-// (i1) Cancel, reopen, then the abandoned POST succeeds.
+// (i1) Cancel, reopen, then the earlier POST succeeds: it was never abandoned, only queued.
 async function scenarioI1(browser) {
   console.log('\n=== (i1) Cancel, reopen, release: success')
   const seed = await seedUser('i1')
@@ -1059,18 +971,19 @@ async function scenarioI1(browser) {
     hold = await h.gate(page, isCreate)
     await clickAnother(page, modal)
     await hold.waitHits(1)
-    await h.waitQuiet(page)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    const again = await openAddForm(page)
+    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    const again = createModal(page)
+    await again.waitFor()
     await control(again, 'description').fill('Fresh')
-    // The fields are usable at once; the submit buttons wait for the abandoned save (see k).
+    // Everything is usable at once: nothing waits for the earlier save.
     await h.check('i1.new-dialog-fields-enabled', 'B', async () => {
-      const got = [await anotherOf(again).isDisabled(), await primaryOf(again).isDisabled(), await control(again, 'description').isEnabled(), await control(again, 'amount').isEnabled()]
-      return got.every(Boolean) || `disabled: another, primary; enabled: description, amount ${JSON.stringify(got)}`
+      const got = [await anotherOf(again).isEnabled(), await primaryOf(again).isEnabled(), await control(again, 'description').isEnabled(), await control(again, 'amount').isEnabled()]
+      return got.every(Boolean) || `enabled: another, primary, description, amount ${JSON.stringify(got)}`
     })
     hold.release({ disarm: true })
-    await h.sleep(1200)
+    await h.check('i1.saved-toast', 'B', async () => (await waitToast(page, 'Abandoned', 'saved')) || 'no Saved toast for the earlier save')
     await h.waitQuiet(page)
     await h.check('i1.new-dialog-open', 'B', async () => (await again.isVisible()) || 'the new dialog closed')
     await h.check('i1.description-kept', 'B', async () => {
@@ -1083,14 +996,13 @@ async function scenarioI1(browser) {
     })
     await h.check('i1.focus-not-stolen', 'B', async () =>
       (await isFocused(control(again, 'description'))) || `active field ${await activeField(page)}`)
-    // The released POST is still on its way to the server: poll, bounded, rather than read once.
     await h.check('i1.api-holds-row', 'B', async () => {
       const rows = await until(() => apiRows(seed.user, ['Abandoned']), (r) => r.length === 1, 10000)
-      return rows.length === 1 || 'the abandoned save did not store its row'
+      return rows.length === 1 || 'the earlier save did not store its row'
     })
     await h.check('i1.list-refreshes', 'B', async () => {
       const n = await until(() => rowFor(page, 'Abandoned').count(), (c) => c > 0)
-      return n > 0 || 'the list does not show the abandoned save\'s row'
+      return n > 0 || 'the list does not show the earlier save\'s row'
     })
   } finally {
     hold?.release({ disarm: true })
@@ -1099,7 +1011,7 @@ async function scenarioI1(browser) {
   }
 }
 
-// (i2) Cancel, reopen, then the abandoned POST fails.
+// (i2) Cancel, reopen, then the earlier POST fails: a failed toast, the new dialog untouched.
 async function scenarioI2(browser) {
   console.log('\n=== (i2) Cancel, reopen, release: failure')
   const seed = await seedUser('i2')
@@ -1111,14 +1023,18 @@ async function scenarioI2(browser) {
     hold = await h.gate(page, isCreate, { failStatus: 500 })
     await clickAnother(page, modal)
     await hold.waitHits(1)
-    await h.waitQuiet(page)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    const again = await openAddForm(page)
+    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    const again = createModal(page)
+    await again.waitFor()
     await control(again, 'description').fill('Fresh')
     hold.release({ disarm: true })
-    await h.sleep(1200)
-    await h.waitQuiet(page)
+    await h.check('i2.failed-toast', 'B', async () => {
+      const failed = await waitToast(page, 'Abandoned', 'failed')
+      const retry = await toastFor(page, 'Abandoned').locator('[data-testid="save-toast-retry"]').count()
+      return (failed && retry === 1) || `failed ${failed}, Retry buttons ${retry}`
+    })
     await h.check('i2.no-form-error', 'B', async () => {
       const n = await formErrorOf(again).count()
       return n === 0 || `form error shown: ${JSON.stringify(await textOf(formErrorOf(again)))}`
@@ -1138,11 +1054,16 @@ async function scenarioI2(browser) {
   }
 }
 
-// (j) Closing the dialog while its quiet refresh is held hands that refresh to the loader.
+// (j) Closing the dialog while the refresh after its save is held: nothing blocks, the list
+// keeps its rows, and the saved row lands once the refresh is released.
 async function scenarioJ(browser) {
-  console.log('\n=== (j) Cancel mid-refresh: the held refresh shows the screen loader')
+  console.log('\n=== (j) Cancel mid-refresh: nothing blocks, the list stays on screen')
   const seed = await seedUser('j')
-  const { ctx, page, native } = await openWithPhaseRecorder(browser, seed.user, 'j')
+  await client.post(seed.user.token, '/transactions/', {
+    account_id: seed.checking.id, transaction_type: 'debit', amount: 12, currency: 'PHP', description: 'Earlier row',
+    transaction_date: new Date().toISOString(), is_posted: true,
+  })
+  const { ctx, page, native } = await openPage(browser, seed.user, 'j')
   const gates = []
   try {
     const modal = createModal(page)
@@ -1151,25 +1072,23 @@ async function scenarioJ(browser) {
     const snapGate = await h.gate(page, isSnapshot)
     gates.push(listGate, snapGate)
     await clickAnother(page, modal)
-    await waitNotice(modal, 'Saved "Coffee ₱180.00"')
+    await waitNotice(modal, 'Saving "Coffee ₱180.00"…')
     const held = await listGate.waitHits(1, 5000)
     await h.check('j.refresh-held', 'S', async () => held || 'the save started no list refetch')
-    await page.waitForTimeout(300)
-    await h.check('j.quiet-before-close', 'S', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return blocked.length === 0 || `phases ${JSON.stringify(await phasesOf(page))}`
-    })
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    await page.waitForTimeout(1000)
-    await h.check('j.close-releases-quiet', 'B', async () => {
-      const blocked = blockedIn(await phasesOf(page))
-      return blocked.length > 0 || `phases ${JSON.stringify(await phasesOf(page))}`
+    await h.check('j.close-no-block', 'B', async () => {
+      const got = { dialog: await modal.count(), earlier: await rowFor(page, 'Earlier row').count(), overlay: await overlaySeen(page) }
+      return (got.dialog === 0 && got.earlier > 0 && got.overlay === false) || JSON.stringify(got)
+    })
+    await h.check('j.page-takes-input', 'B', async () => {
+      await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+      const ok = await createModal(page).waitFor({ timeout: 3000 }).then(() => true, () => false)
+      if (ok) await cancelOf(createModal(page)).click()
+      return ok || 'the Create dialog did not open while the refresh was held'
     })
     listGate.release({ disarm: true })
     snapGate.release({ disarm: true })
-    const hidden = await h.waitPhase(page, 'hidden', 5000)
-    await h.check('j.back-to-hidden', 'B', async () => hidden || 'the overlay did not return to hidden')
     await h.check('j.row-in-list', 'B', async () => {
       const n = await until(() => rowFor(page, 'Coffee').count(), (c) => c > 0)
       return n > 0 || 'the saved row is not in the list'
@@ -1181,9 +1100,10 @@ async function scenarioJ(browser) {
   }
 }
 
-// (k) Cancel mid-POST, reopen: no save until the abandoned save and its refresh have settled.
+// (k) Cancel mid-POST, reopen: the new dialog saves at once; its save queues behind the
+// first, which goes first; both rows land.
 async function scenarioK(browser) {
-  console.log('\n=== (k) Cancel, reopen: the submit buttons wait for the abandoned save and its refresh')
+  console.log('\n=== (k) Cancel, reopen: the next save queues behind the held one')
   const seed = await seedUser('k')
   const { ctx, page, native, creates } = await openPage(browser, seed.user, 'k')
   const gates = []
@@ -1194,62 +1114,39 @@ async function scenarioK(browser) {
     gates.push(postGate)
     await clickAnother(page, modal)
     await postGate.waitHits(1)
-    await h.waitQuiet(page)
     await cancelOf(modal).click()
     await modal.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
-    const again = await openAddForm(page)
+    await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+    const again = createModal(page)
+    await again.waitFor()
     await fillEntry(again, 'Fresh', 25)
-
-    // Neither button, Enter nor a submit with no button may save while A's POST is held.
-    const tryToSave = async () => {
-      await control(again, 'amount').press('Enter')
-      await again.locator('form').evaluate((form) => form.requestSubmit())
-      await page.waitForTimeout(400)
-    }
-    const state = async () => ({
-      another: await anotherOf(again).isDisabled(),
-      primary: await primaryOf(again).isDisabled(),
-      description: await control(again, 'description').isEnabled(),
-      amount: await control(again, 'amount').isEnabled(),
+    await h.check('k.buttons-enabled', 'B', async () => {
+      const got = [await anotherOf(again).isEnabled(), await primaryOf(again).isEnabled()]
+      return got.every(Boolean) || `enabled: another, primary ${JSON.stringify(got)}`
     })
-    const blocked = (got) => got.another && got.primary && got.description && got.amount
-    const during = await state()
-    await h.check('k.buttons-wait-for-post', 'B', async () => blocked(during) || JSON.stringify(during))
-    await tryToSave()
-    await h.check('k.no-save-during-post', 'B', async () =>
-      (postGate.hits === 1 && creates.length === 1) || `POSTs: gate ${postGate.hits}, requests ${creates.length}`)
-
-    // A's POST settles; the refresh its success starts is held.
-    const held = [await h.gate(page, isMainList), await h.gate(page, isSnapshot), await h.gate(page, isAccountsList)]
-    gates.push(...held)
-    postGate.release({ disarm: true })
-    const listHit = await held[0].waitHits(1, 5000)
-    await h.check('k.refresh-held', 'S', async () => listHit || 'the abandoned save started no list refresh')
-    await page.waitForTimeout(500)
-    const refreshing = await state()
-    await h.check('k.buttons-wait-for-refresh', 'B', async () => blocked(refreshing) || JSON.stringify(refreshing))
-    await tryToSave()
-    await h.check('k.no-save-during-refresh', 'B', async () =>
-      creates.length === 1 || `POSTs while A's refresh is held: ${creates.length - 1}`)
-
-    // Once A's refresh settles the buttons enable in this dialog, with no reopen.
+    await anotherOf(again).click()
+    await waitNotice(again, 'Saving "Fresh ₱25.00"…')
+    await page.waitForTimeout(400)
+    await h.check('k.queued-behind-first', 'B', async () =>
+      (postGate.hits === 1 && creates.length === 1) || `POSTs while the first is held: gate ${postGate.hits}, requests ${creates.length}`)
     const events = []
     page.on('request', (r) => { if (isMainList(r)) events.push({ kind: 'list', r }) })
     page.on('response', (res) => {
       const r = res.request()
       if (isCreate(r) && (r.postData() || '').includes('"Fresh"')) events.push({ kind: 'b-post-done' })
     })
-    for (const gate of held) gate.release({ disarm: true })
-    await h.check('k.buttons-enabled', 'B', async () => (await waitButtons(again)) || JSON.stringify(await state()))
-    await clickAnother(page, again)
-    await waitNotice(again, 'Saved "Fresh ₱25.00"')
+    postGate.release({ disarm: true })
+    await waitToast(page, 'Fresh', 'saved')
     await h.waitQuiet(page)
+    await h.check('k.fifo', 'B', async () =>
+      (creates.length === 2 && creates[0]?.description === 'Abandoned' && creates[1]?.description === 'Fresh') ||
+      `bodies ${JSON.stringify(creates.map((b) => b && b.description))}`)
     await h.check('k.b-saved-fresh', 'B', async () => {
       const done = events.findIndex((e) => e.kind === 'b-post-done')
       if (done < 0) return 'B\'s save never completed'
       const lists = events.slice(done + 1).filter((e) => e.kind === 'list').length
-      const n = await until(() => rowFor(page, 'Fresh').count(), (c) => c > 0)
-      return (lists > 0 && n > 0) || `list GETs started after B succeeded ${lists}, B's row listed ${n}`
+      const n = [await until(() => rowFor(page, 'Fresh').count(), (c) => c > 0), await rowFor(page, 'Abandoned').count()]
+      return (lists > 0 && n.every((x) => x > 0)) || `list GETs started after B succeeded ${lists}, rows (Fresh, Abandoned) ${JSON.stringify(n)}`
     })
   } finally {
     for (const gate of gates) gate.release({ disarm: true })

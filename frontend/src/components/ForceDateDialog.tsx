@@ -22,7 +22,6 @@ import {
   useSetOccurrenceDateMutation,
   useUndoCascadeMutation,
 } from '../store/api'
-import { useInputBlocked } from '../store/busy'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 
 const FOCUSABLE =
@@ -114,10 +113,6 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
   const [fetchOptions] = useLazyGetForcedDateOptionsQuery()
   const [undoCascade, { isLoading: undoing }] = useUndoCascadeMutation()
   const busy = settingEntry || clearingEntry || settingLoan || clearingLoan || undoing
-  // The screen loader blocks input a little past the request (STU-576): a refusal shown
-  // before it lets go invites a date that is swallowed, so the refusal waits for it.
-  const inputBlocked = useInputBlocked()
-
   // A row without its effective date (an installment plan) reads it from the entry's occurrences.
   const lookup = useGetEntryOccurrencesQuery(
     { id: target.id, include: target.occurrenceDate },
@@ -300,7 +295,7 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
           {cascadeDone ? (
             <div className="space-y-3">
               <p className="text-sm text-ok" role="status" data-testid="force-date-cascade-confirmation">{cascadeDone.text}</p>
-              {error && !inputBlocked && (
+              {error && (
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
               <div className="flex gap-3">
@@ -345,10 +340,10 @@ export function ForceDateDialog({ target, onClose, onChanged }: Props) {
                   The schedule is unchanged: this occurrence alone is due, shown and posted on this date.
                 </p>
               </div>
-              {error && !inputBlocked && (
+              {error && (
                 <p className="text-sm text-danger" role="alert" data-testid="force-date-error">{error}</p>
               )}
-              {options && choiceDay === day && !inputBlocked && (() => {
+              {options && choiceDay === day && (() => {
                 const lines = dateChoiceLines(options, choiceDay)
                 return (
                   <div className="space-y-3" data-testid="date-choices">

@@ -12,10 +12,11 @@
 // (c) a card installment of 12: the help says the amount is each payment, the cadence reads
 //     "Charged monthly on each statement close", `repeat` has no anchor_day, and the
 //     Installments tab then shows "11 of 12 left";
-// (d) a refused save (autopay on a past unposted row) shows the server's reason inline,
-//     creates nothing and keeps the form's values; the preview counts the missed payments.
-//     An API without the endpoint (405) shows the Repeat section's error with Retry, and
-//     Retry saves once the endpoint answers;
+// (d) a refused save (autopay on a past unposted row) comes back as a failed toast whose
+//     Edit reopens the form (STU-605: saves run in the background) with the server's reason
+//     inline, nothing created and the form's values kept; the preview counts the missed
+//     payments. An API without the endpoint (405) shows, after Edit, the Repeat section's
+//     error with Retry, and Retry saves once the endpoint answers;
 // (e) Edit of a repeated transaction shows no Repeat toggle and shows its linked entry;
 //     "Save and add another" with Repeat on resets Repeat and its fields;
 // (f) at 390px the Repeat fieldset has no horizontal scroll and its targets are 44px tall.
@@ -134,6 +135,22 @@ async function submit(page, modal, name) {
     modal.getByRole('button', { name, exact: true }).click(),
   ])
   return response
+}
+
+const failedToast = (page, description) =>
+  page.locator('[data-testid="save-toast"][data-state="failed"]').filter({ hasText: description })
+/**
+ * STU-605: a refusal arrives after the dialog closed (or cleared, for Save and add another),
+ * as a failed toast; its Edit reopens the form with the typed values and the refusal shown
+ * where the dialog used to show it. Waits for the toast naming `description`, clicks Edit
+ * and waits for the Create dialog.
+ */
+async function editRefused(page, modal, description) {
+  const toast = failedToast(page, description).last()
+  await toast.waitFor({ timeout: 10000 })
+  await toast.locator('[data-testid="save-toast-edit"]').click()
+  await modal.waitFor({ timeout: 5000 })
+  await h.waitQuiet(page)
 }
 
 // (a) One request, the row in the list and the entry on Allocations.
@@ -309,8 +326,7 @@ async function scenarioD(browser) {
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('autopay')
     posts.length = 0
     const response = await submit(page, modal, 'Create Transaction')
-    // The screen loader blocks input while the refusal's requests settle.
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'Rent past')
     await h.check('d.refused-422', 'B', async () => response.status() === 422 || `status ${response.status()}`)
     await h.check('d.reason-inline', 'B', async () => {
       const line = modal.locator('[data-testid="transaction-form-error"]')
@@ -340,7 +356,7 @@ async function scenarioD(browser) {
     await fields(modal).locator('[data-testid="repeat-settlement"]').selectOption('manual')
     await answerRepeating(page, 404, { detail: 'Account not found' })
     await submit(page, modal, 'Create Transaction')
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'Rent past')
     await h.check('d.404-reason-inline', 'B', async () => {
       const line = modal.locator('[data-testid="transaction-form-error"]')
       await line.waitFor({ timeout: 5000 })
@@ -355,7 +371,7 @@ async function scenarioD(browser) {
     for (const [field, key] of [['settlement', 'settlement'], ['cadence', 'cadence'], ['end_mode', 'end_mode']]) {
       await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', field], msg: `${field} refused`, type: 'value_error' }] })
       await submit(page, modal, 'Create Transaction')
-      await h.waitQuiet(page)
+      await editRefused(page, modal, 'Rent past')
       await h.check(`d.${field}-error-on-control`, 'B', async () => {
         const error = modal.locator(`[data-testid="repeat-error-${key}"]`)
         await error.waitFor({ timeout: 5000 })
@@ -370,7 +386,7 @@ async function scenarioD(browser) {
     }
     await answerRepeating(page, 422, { detail: [{ loc: ['body', 'repeat', 'lead_time_days'], msg: 'Extra inputs are not permitted', type: 'extra_forbidden' }] })
     await submit(page, modal, 'Create Transaction')
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'Rent past')
     await h.check('d.unknown-field-on-section-line', 'B', async () => {
       const line = modal.locator('[data-testid="repeat-error"]')
       await line.waitFor({ timeout: 5000 })
@@ -380,7 +396,7 @@ async function scenarioD(browser) {
     // An API from before the endpoint: 405, then Retry once it answers, with the button used.
     const oldAdd = await h.failWith(page, (r) => r.method() === 'POST' && r.url().includes('/transactions/repeating'), 405, { times: 1 })
     await submit(page, modal, 'Save and add another')
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'Rent past')
     await modal.locator('[data-testid="repeat-unavailable"]').waitFor({ timeout: 5000 })
     const [retriedAdd] = await Promise.all([
       page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/transactions/repeating')),
@@ -388,7 +404,7 @@ async function scenarioD(browser) {
     ])
     await h.check('d.retry-keeps-add-another', 'B', async () => {
       if (retriedAdd.status() !== 201 || oldAdd.failed !== 1) return `status ${retriedAdd.status()}, failed ${oldAdd.failed}`
-      await modal.locator('[data-testid="transaction-saved-notice"]').filter({ hasText: 'Saved "Rent past' }).waitFor({ timeout: 10000 })
+      await modal.locator('[data-testid="transaction-saved-notice"]').filter({ hasText: 'Saving "Rent past' }).waitFor({ timeout: 10000 })
       return (await modal.isVisible()) || 'dialog closed'
     })
     await oldAdd.stop()
@@ -399,7 +415,7 @@ async function scenarioD(browser) {
 
     const old = await h.failWith(page, (r) => r.method() === 'POST' && r.url().includes('/transactions/repeating'), 405, { times: 1 })
     await submit(page, modal, 'Create Transaction')
-    await h.waitQuiet(page)
+    await editRefused(page, modal, 'Rent again')
     await h.check('d.unavailable-shown', 'B', async () => {
       await modal.locator('[data-testid="repeat-unavailable"]').waitFor({ timeout: 5000 })
       return true
@@ -451,7 +467,7 @@ async function scenarioE(browser) {
     await h.check('e.add-another-repeating-201', 'B', async () =>
       (response.status() === 201 && posts[0]?.path === '/transactions/repeating') || `status ${response.status()} ${JSON.stringify(posts.map((p) => p.path))}`)
     await h.check('e.add-another-resets-repeat', 'B', async () => {
-      await modal.locator('[data-testid="transaction-saved-notice"]').filter({ hasText: 'Saved "Spotify' }).waitFor({ timeout: 10000 })
+      await modal.locator('[data-testid="transaction-saved-notice"]').filter({ hasText: 'Saving "Spotify' }).waitFor({ timeout: 10000 })
       return (!(await toggle(modal).isChecked()) && (await fields(modal).count()) === 0) || 'Repeat still on'
     })
     await modal.getByRole('button', { name: 'Cancel', exact: true }).click()

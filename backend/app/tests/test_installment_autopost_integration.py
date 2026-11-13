@@ -836,6 +836,8 @@ def test_backstop_roles(world):
 
 def test_backstop_rechecks_the_caller_on_the_locked_entry(world, monkeypatch):
     """r3 row 5: a demotion committed before the locks is seen on the locked entry."""
+    from sqlalchemy.orm import selectinload
+
     from app.core import locking
     from app.core.database import SessionLocal
     from app.models.account import Account
@@ -864,7 +866,8 @@ def test_backstop_rechecks_the_caller_on_the_locked_entry(world, monkeypatch):
         # The request's session holds Card C and its shares from before the
         # demotion (a strong reference keeps them in its identity map).
         scope = real_scope(session, *args)
-        cached.append(session.get(Account, w["card"]))
+        cached.append(session.query(Account).options(selectinload(Account.shares))
+                      .filter(Account.id == w["card"]).one())
         assert [s.role for s in cached[0].shares if s.user_id == w["e"]["id"]] == ["editor"]
         return scope
 
