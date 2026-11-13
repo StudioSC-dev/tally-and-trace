@@ -93,7 +93,12 @@ async function recordApi(page, run) {
     const got = wire.get(id)
     if (got) { entry.status = got.statusCode; entry.etag = header(got.headers, 'etag') }
   }
-  return seen
+  // A request the page cancelled before any answer (a superseded query) has no status
+  // on the wire: it is counted, not judged.
+  const answered = seen.filter((r) => r.status !== null)
+  answered.writes = seen.writes
+  answered.cancelled = seen.length - answered.length
+  return answered
 }
 
 async function openTransactions(page) {
@@ -140,7 +145,7 @@ async function scenarioA(browser) {
     await h.check('a.rows-shown', 'B', async () =>
       (await page.locator('article[role="button"]').filter({ hasText: 'Etag lunch 2' }).count()) > 0 ||
       'the rows are not shown after the 304s')
-    console.log(`  second open: ${second.length} opted-in requests, ${second.filter((r) => r.status === 304).length} answered 304`)
+    console.log(`  second open: ${second.length} opted-in requests answered, ${second.filter((r) => r.status === 304).length} with 304 (${second.cancelled} cancelled by the page; first open: ${first.cancelled})`)
   } finally {
     await ctx.close()
   }
