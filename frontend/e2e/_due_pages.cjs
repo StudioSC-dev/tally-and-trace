@@ -192,7 +192,7 @@ async function expectDueTab(page, which) {
  * exists (once per page and tab while it does; every time it does not, and then throws,
  * so a build without the tab fails an assertion instead of a timeout). Then clicks it
  * (opening the card if it is collapsed), waits for aria-selected, for its badge to be a
- * figure and not "…", then waitQuiet. Wait for the screen loader first, since it shields clicks.
+ * figure and not "…", then waitQuiet. It waits for quiet first, so the tab is read from settled data.
  */
 async function openDueTab(page, which) {
   const { tab, badge } = DUE_TABS.find((t) => t.slug === which) ?? {}

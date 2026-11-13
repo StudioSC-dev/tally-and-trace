@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.access import TAG_VIEWER, account_role, owned_criterion
+from app.core.access import TAG_VIEWER, access_map, owned_criterion
 from app.core.redaction import Redactor
 from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.allocation import Allocation, AllocationType
@@ -121,6 +121,7 @@ def get_snapshot(
     ]
     # By the caller's role: an account seen through a tag share shows only
     # what every role sees (no settings, so no spending-wallet flag).
+    held = access_map(db, current_user)
     by_account = [
         {
             "id": a.id,
@@ -128,7 +129,7 @@ def get_snapshot(
             "balance": a.balance,
             "currency": a.currency.value,
             # Shown, but not counted in available cash or projections.
-            **({} if account_role(current_user.id, a) == TAG_VIEWER
+            **({} if held.of(a) == TAG_VIEWER
                else {"is_spending_wallet": forecast_svc.is_spending_wallet(a)}),
         }
         for a in accounts

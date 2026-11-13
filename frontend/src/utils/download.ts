@@ -1,5 +1,3 @@
-import { allowProgrammaticClick, releaseProgrammaticClick } from '../store/busy'
-
 /**
  * Fetch an authenticated API endpoint and trigger a browser download of the
  * response body. Used for the data-export endpoints, which require the Bearer
@@ -18,13 +16,7 @@ export async function downloadAuthed(path: string, filename: string): Promise<vo
   a.href = url
   a.download = filename
   document.body.appendChild(a)
-  // The screen loader's input guard lets exactly this synthetic click through.
-  allowProgrammaticClick(a)
-  try {
-    a.click()
-  } finally {
-    releaseProgrammaticClick(a)
-  }
+  a.click()
   a.remove()
   URL.revokeObjectURL(url)
 }

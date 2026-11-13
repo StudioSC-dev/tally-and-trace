@@ -217,11 +217,22 @@ const HOUSEHOLD_SHARE_CHANGED = [
   'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'Account', 'Transaction', 'BudgetEntry', 'Allocation',
 ] as const
 
+/** One queued save as sent: `url` relative to the API root, `idempotencyKey` on creates. */
+export interface OutboxSendArgs {
+  method: 'POST' | 'PUT' | 'DELETE'
+  url: string
+  body?: unknown
+  idempotencyKey?: string
+}
+
+/** Long enough for a cold start on the free tier; after it the save is "not confirmed" and Retry is offered. */
+export const OUTBOX_SEND_TIMEOUT_MS = 90_000
+
 export const accountingApi = createApi({
   reducerPath: 'accountingApi',
   baseQuery: baseQueryWithReauth,
-  // A save's invalidation runs inside its own settle, so its reload is pending before
-  // the save leaves the screen loader's busy level (STU-335).
+  // A save's invalidation runs inside its own settle, so its reload is already pending
+  // when the save resolves.
   invalidationBehavior: 'immediately',
   tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances'],
   endpoints: (builder) => ({
@@ -498,7 +509,7 @@ export const accountingApi = createApi({
       invalidatesTags: [...INSTALLMENTS_POSTED],
     }),
     // The page-open run (Due and overdue, on mount): the same route as the button, with its own endpoint
-    // name so the screen loader can leave it out (store/busy.ts EXEMPT_ENDPOINTS). A throttled or empty
+    // name, so its trigger stays 'page_open'. A throttled or empty
     // run (posted 0) starts no refetch.
     postDueInstallmentsOnOpen: builder.mutation<PostDueInstallmentsResult, void>({
       query: () => ({ url: 'budget-entries/post-due-installments', method: 'POST', body: { trigger: 'page_open' } }),
@@ -603,6 +614,17 @@ export const accountingApi = createApi({
       },
       providesTags: ['Transaction', 'BudgetEntry', 'Account'],
     }),
+    // The save outbox's one request (store/outbox.ts): any queued save, sent as the dialog left it.
+    // No tags: the outbox invalidates once, when its queue drains.
+    outboxSend: builder.mutation<unknown, OutboxSendArgs>({
+      query: ({ method, url, body, idempotencyKey }) => ({
+        url,
+        method,
+        ...(body !== undefined ? { body } : {}),
+        ...(idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : {}),
+        timeout: OUTBOX_SEND_TIMEOUT_MS,
+      }),
+    }),
     getTransaction: builder.query<Transaction, number>({
       query: (id) => `transactions/${id}`,
       providesTags: ['Transaction'],
@@ -611,21 +633,9 @@ export const accountingApi = createApi({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
       invalidatesTags: ['Transaction', 'Account', 'Allocation'],
     }),
-    // The "Save and add another" save: the same route and invalidation as createTransaction, under its own
-    // endpoint name so the screen loader can skip it and its refetches (store/busy.ts EXEMPT_ENDPOINTS and
-    // QUIET_REFETCH_MUTATIONS). Keep the two definitions in step.
-    createTransactionQuiet: builder.mutation<Transaction, TransactionInput>({
-      query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
-      invalidatesTags: ['Transaction', 'Account', 'Allocation'],
-    }),
     // Repeat in Add Transaction: the transaction and the recurring entry it is the first occurrence of,
     // in one request that commits both or neither (POST /transactions/repeating).
     createRepeatingTransaction: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
-      query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
-      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
-    }),
-    // Its "Save and add another" save, quiet as createTransactionQuiet is (store/busy.ts). Keep the two in step.
-    createRepeatingTransactionQuiet: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
       query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
       invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
     }),
@@ -934,9 +944,7 @@ export const {
   useLazyGetTransactionsQuery,
   useGetTransactionQuery,
   useCreateTransactionMutation,
-  useCreateTransactionQuietMutation,
   useCreateRepeatingTransactionMutation,
-  useCreateRepeatingTransactionQuietMutation,
   useMakeTransactionRepeatMutation,
   useUpdateTransactionMutation,
   useDeleteTransactionMutation,

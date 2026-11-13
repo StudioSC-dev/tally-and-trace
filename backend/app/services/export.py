@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 from app.core.access import (
     OWNER,
     VIEW_ROLES,
-    account_role,
+    access_map,
     household_grants,
     owned_criterion,
     readable_criterion,
@@ -191,9 +191,10 @@ def _own_links(db: Session, user: User, table, fields, record_ids) -> list:
 def build_export(db: Session, user: User) -> Dict[str, object]:
     """The caller's export, as plain JSON-ready data (see the module docstring)."""
     owned = db.query(Account).filter(owned_criterion(Account, user)).order_by(Account.id).all()
-    owned = [a for a in owned if account_role(user, a) == OWNER]
+    held = access_map(db, user)
+    owned = [a for a in owned if held.of(a) == OWNER]
     shared = [a for a in viewable_accounts(db, user, roles=VIEW_ROLES).order_by(Account.id).all()
-              if account_role(user, a) != OWNER]
+              if held.of(a) != OWNER]
     scope_ids = viewable_account_ids(db, user)
     grants = household_grants(db, user)
     redactor = Redactor(db, user)
@@ -236,7 +237,7 @@ def build_export(db: Session, user: User) -> Dict[str, object]:
         "accounts": [_row(a, ACCOUNT_FIELDS) for a in owned],
         "shared_accounts": [
             {"id": a.id, "name": a.name, "account_type": _value(a.account_type),
-             "currency": _value(a.currency), "my_role": account_role(user, a),
+             "currency": _value(a.currency), "my_role": held.of(a),
              "owner_name": display_name(a.user)} for a in shared],
         "transactions": [_row(t, TRANSACTION_FIELDS) for t in transactions],
         "budget_entries": [_row(e, BUDGET_ENTRY_FIELDS) for e in entries],

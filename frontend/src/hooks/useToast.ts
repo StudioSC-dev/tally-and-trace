@@ -13,7 +13,8 @@ const outsideProvider: ShowToast = () => {
 
 /**
  * The in-app toast (STU-410), for a message that has no dialog or form to show it in.
- * It stays until dismissed.
+ * It stays until dismissed. It shares the toast stack with the save outbox's toasts
+ * (components/Toast.tsx), which have their own variants and actions.
  */
 export function useToast(): ShowToast {
   return useContext(ToastContext) ?? outsideProvider

@@ -1,6 +1,6 @@
 // Shared harness for the page-smoothness and screen-loader browser checks (STU-335).
 // Pure helpers over a Playwright page: route gates, held and rewritten responses, a
-// text/attribute recorder, overlay waits, a request log and the check bookkeeping.
+// text/attribute recorder, quiet waits, a request log and the check bookkeeping.
 // It starts nothing itself; each smooth-*.cjs script starts its stack through
 // ./_local_stack.cjs and passes it in where a helper needs the API.
 //
@@ -343,70 +343,61 @@ async function resetTexts(page) {
   })
 }
 
-// ─── Overlay waits ───────────────────────────────────────────────────────────
+// ─── Quiet waits ─────────────────────────────────────────────────────────────
 
-const OVERLAY = '[data-testid="busy-overlay"]'
+// The blocking screen loader is gone (STU-605): "quiet" now means no API request in flight
+// and no background save still pending in the toast stack.
 
-/** The busy overlay's `data-phase`, or null when the page has no overlay. */
-async function overlayPhase(page) {
-  try {
-    return await page.evaluate((sel) => document.querySelector(sel)?.getAttribute('data-phase') ?? null, OVERLAY)
-  } catch { return null }
+const PENDING_SAVE = '[data-testid="save-toast"][data-state="pending"]'
+const inflight = new WeakMap()
+
+/** Counts the page's API requests in flight from now on; idempotent per page. */
+function trackRequests(page) {
+  if (inflight.has(page)) return inflight.get(page)
+  const open = new Set()
+  inflight.set(page, open)
+  const isApi = (request) => request.url().includes('/api/')
+  page.on('request', (request) => { if (isApi(request)) open.add(request) })
+  page.on('requestfinished', (request) => open.delete(request))
+  page.on('requestfailed', (request) => open.delete(request))
+  return open
 }
 
-/** Waits (bounded, node-side polling) for the overlay's phase; true on arrival, false at the bound. */
-async function waitPhase(page, phase, ms = 3000) {
-  const until = Date.now() + ms
-  for (;;) {
-    if ((await overlayPhase(page)) === phase) return true
-    if (Date.now() > until) return false
-    await sleep(25)
-  }
+/** True while a background save's toast is still pending. */
+async function savePending(page) {
+  try {
+    return await page.evaluate((sel) => document.querySelector(sel) !== null, PENDING_SAVE)
+  } catch { return false }
 }
 
 /**
- * Waits for the overlay to be `hidden` and to stay `hidden` for `settleMs` (default 150)
- * without a break; any other phase restarts the hold, so a request that starts just after
- * the triggering click does not slip past. `ms` bounds the whole wait. Never throws and no
- * check depends on it. Costs about `settleMs` per call.
- * With no overlay on the page (any commit before 5) it waits for network idle (bounded),
- * prints `NOTE no busy-overlay` and returns. At the bound with the overlay still showing
- * it prints `NOTE waitQuiet bound, phase=<phase>`; if the page clock did not advance over
- * 100 ms of real time it also prints `NOTE waitQuiet clock paused`.
+ * Waits until no API request is in flight and no save toast is pending, and that holds for
+ * `settleMs` (default 150) without a break, so a request that starts just after the
+ * triggering click does not slip past. `ms` bounds the whole wait. Never throws and no check
+ * depends on it. On a page first seen here it also waits (bounded) for network idle, since
+ * requests sent before tracking began are not counted. At the bound it prints
+ * `NOTE waitQuiet bound, inflight=<n>`.
  */
 async function waitQuiet(page, ms = 5000, { settleMs = 150 } = {}) {
   const until = Date.now() + ms
-  // The overlay mounts with the signed-in layout; give it a moment to appear.
-  const present = Date.now() + Math.min(ms, 1000)
-  let phase = await overlayPhase(page)
-  while (phase === null && Date.now() < present) {
-    await sleep(50)
-    phase = await overlayPhase(page)
-  }
-  if (phase === null) {
+  const fresh = !inflight.has(page)
+  const open = trackRequests(page)
+  if (fresh) {
     try { await page.waitForLoadState('networkidle', { timeout: ms }) } catch { /* bounded */ }
-    console.log('  NOTE no busy-overlay')
-    return
   }
-  let hiddenSince = null
+  let quietSince = null
   for (;;) {
     const now = Date.now()
-    if (phase !== 'hidden') hiddenSince = null
+    const busy = open.size > 0 || (await savePending(page))
+    if (busy) quietSince = null
     else {
-      hiddenSince ??= now
-      if (now - hiddenSince >= settleMs) return
+      quietSince ??= now
+      if (now - quietSince >= settleMs) return
     }
     if (now >= until) break
     await sleep(25)
-    phase = await overlayPhase(page)
   }
-  if (phase !== 'hidden') {
-    console.log(`  NOTE waitQuiet bound, phase=${phase}`)
-    const before = await pageNow(page)
-    await sleep(100)
-    const after = await pageNow(page)
-    if (before !== null && after !== null && after <= before) console.log('  NOTE waitQuiet clock paused')
-  }
+  console.log(`  NOTE waitQuiet bound, inflight=${open.size}`)
 }
 
 // ─── Pages and logs ──────────────────────────────────────────────────────────
@@ -419,6 +410,7 @@ async function waitQuiet(page, ms = 5000, { settleMs = 150 } = {}) {
 async function newPage(browser, contextOptions = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, ...contextOptions })
   const page = await ctx.newPage()
+  trackRequests(page)
   return { ctx, page }
 }
 
@@ -593,8 +585,8 @@ module.exports = {
   readTexts,
   readInputs,
   resetTexts,
-  overlayPhase,
-  waitPhase,
+  savePending,
+  trackRequests,
   waitQuiet,
   newPage,
   logRequests,

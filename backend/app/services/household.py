@@ -98,7 +98,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.core.access import (
-    VIEW_ROLES, HouseholdGrant, account_role, household_explicit_criterion, touches_none,
+    VIEW_ROLES, HouseholdGrant, access_map, household_explicit_criterion, touches_none,
 )
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry, BudgetEntryType
@@ -120,8 +120,8 @@ def household_accounts(db: Session, user, grant: HouseholdGrant) -> List[Account
         return []
     accounts = db.query(Account).filter(Account.id.in_(list(grant.tagged_ids)),
                                         Account.is_active.is_(True)).all()
-    uid = _uid(user)
-    return [a for a in accounts if account_role(uid, a) in VIEW_ROLES]
+    held = access_map(db, user, [a.id for a in accounts])
+    return [a for a in accounts if held.of(a) in VIEW_ROLES]
 
 
 @dataclass
