@@ -555,3 +555,52 @@ def test_an_unused_card_lists_its_open_cycle_at_zero(realistic, sw_client):
     (s,) = sw_client.get(f"{API}/cards/{card_id}/statements",
                          headers=headers).json()["statements"]
     assert s["balance"] == 0 and s["owed"] == 0 and s["outstanding"] == -500
+
+
+# --- the data version (STU-602) ----------------------------------------------------------------
+# card_statements and card_statement_state carry no data_version trigger by design
+# (data_version.EXCLUDED_TABLES): what they hold is derived from rows whose writes bump.
+
+def _version(db) -> int:
+    db.rollback()
+    return db.execute(text("SELECT version FROM data_version WHERE id = 1")).scalar_one()
+
+
+def test_the_store_tables_carry_no_data_version_trigger(sw_db):
+    from app.core.data_version import EXCLUDED_TABLES, TRIGGER
+
+    sw_db.rollback()
+    found = {t for (t,) in sw_db.execute(text(
+        "SELECT c.relname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+        "WHERE t.tgname = :name AND c.relname IN ('card_statements', 'card_statement_state')"),
+        {"name": TRIGGER})}
+    assert found == set()
+    assert {"card_statements", "card_statement_state"} <= EXCLUDED_TABLES
+
+
+def test_a_catch_up_read_leaves_the_data_version_alone(realistic, sw_db):
+    """A read that stores newly closed cycles changes no answer, so no ETag."""
+    today, card_id = realistic.today, realistic.accounts["card_b"]
+    _read(sw_db, card_id, today)
+    close = _closed_cycles(_card(sw_db, card_id), today, 1)[0]["close"].date()
+    _behind(sw_db, card_id, close)  # an UPDATE of card_statement_state, committed
+    before = _version(sw_db)
+    _read(sw_db, card_id, today)  # catches up: writes both tables, commits
+    assert _state(sw_db, card_id).materialized_through == close
+    assert _version(sw_db) == before
+
+
+def test_a_write_through_bumps_the_data_version_with_the_stored_rows(realistic, sw_client,
+                                                                     sw_db):
+    """The stored rows change in the same commit as the row write that bumps."""
+    w, today = realistic, realistic.today
+    card_id = w.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    close = _closed_cycles(_card(sw_db, card_id), today, 2)[0]["close"].date()
+    stored, before = _stored(sw_db, card_id)[close], _version(sw_db)
+    r = sw_client.post(f"{API}/transactions/", headers=w.callers["owner"].headers, json={
+        "account_id": card_id, "amount": 42, "transaction_type": "debit",
+        "description": "Bump", "transaction_date": f"{close}T03:00:00", "is_posted": True})
+    assert r.status_code in (200, 201), r.text
+    assert _version(sw_db) == before + 1
+    assert _stored(sw_db, card_id)[close] == (stored[0] + 42, stored[1] + 1)
