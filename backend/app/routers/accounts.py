@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
+from app.core.conditional import conditional_get
 from app.core import locking
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
@@ -692,7 +693,7 @@ def _validate_minimum_due_rule(data: dict, rule: Optional[MinimumDueRule],
         raise HTTPException(status_code=400, detail="Only a credit card has a minimum due rule")
 
 
-@router.get("/", response_model=AccountListResponse)
+@router.get("/", response_model=AccountListResponse, dependencies=[Depends(conditional_get)])
 def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

@@ -16,7 +16,10 @@ It measures, in-process:
 * per hot endpoint, as the owner: SQL statements, response bytes (ids normalised),
   ``statement_day`` calls, ORM instances loaded, CPU time and wall time;
 * the Transactions page-open set and the post-save refetch set, fired concurrently
-  at a real uvicorn server on a local port: total wall time and total CPU time.
+  at a real uvicorn server on a local port: total wall time and total CPU time;
+* the repeat page open: the page-open set again with no write in between, each
+  request sending the ``ETag`` its previous answer carried as ``If-None-Match``, as
+  the browser's cache does (STU-602); the table shows how many were answered 304.
 
 ``--cpu both`` (the default) runs the measurement twice: at full CPU, and in a
 ``systemd-run --user --scope -p CPUQuota=10%`` scope, which is about what Render's
@@ -128,6 +131,38 @@ def _concurrent(base_url: str, headers, paths: dict, rounds: int) -> dict:
             "cpu_ms": statistics.median(cpus)}
 
 
+def _repeat_open(base_url: str, headers, paths: dict, rounds: int) -> dict:
+    """The page-open set revalidated: each path sends its last ``ETag`` back as
+    ``If-None-Match``. The median total wall and process time, and the 304 count of
+    the last round."""
+    import httpx
+
+    walls, cpus = [], []
+    tags: dict = {}
+    statuses: dict = {}
+    with httpx.Client(base_url=base_url, timeout=300) as http:
+        def get(path):
+            sent = dict(headers)
+            if tags.get(path):
+                sent["If-None-Match"] = tags[path]
+            r = http.get(f"/api/v1{path}", headers=sent)
+            assert r.status_code in (200, 304), (path, r.status_code)
+            statuses[path] = r.status_code
+            if r.headers.get("etag"):
+                tags[path] = r.headers["etag"]
+
+        with ThreadPoolExecutor(max_workers=len(paths)) as pool:
+            list(pool.map(get, paths.values()))  # the first open: fills the tags
+            for _ in range(rounds):
+                w0, c0 = time.perf_counter(), time.process_time()
+                list(pool.map(get, paths.values()))
+                cpus.append((time.process_time() - c0) * 1000)
+                walls.append((time.perf_counter() - w0) * 1000)
+    return {"requests": len(paths), "wall_ms": statistics.median(walls),
+            "cpu_ms": statistics.median(cpus),
+            "not_modified": sum(1 for c in statuses.values() if c == 304)}
+
+
 def _measure(state_path: str, runs: int) -> int:
     """Child: measure and print one JSON document on stdout."""
     from dataclasses import asdict
@@ -158,6 +193,7 @@ def _measure(state_path: str, runs: int) -> int:
         auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
         result["page_open"] = _concurrent(url, auth, perf.page_open_paths(world), runs)
         result["post_save"] = _concurrent(url, auth, perf.post_save_paths(world), runs)
+        result["repeat_open"] = _repeat_open(url, auth, perf.page_open_paths(world), runs)
     finally:
         server.should_exit = True
         thread.join(timeout=15)
@@ -196,8 +232,13 @@ def _table(results: dict) -> str:
     lines += ["", "| request set | requests | " + " | ".join(
         f"wall ms ({lv}) | CPU ms ({lv})" for lv in levels) + " |",
         "|" + "---|" * (2 + 2 * len(levels))]
-    for key, label in (("page_open", "Transactions page open"), ("post_save", "after one save")):
+    for key, label in (("page_open", "Transactions page open"), ("post_save", "after one save"),
+                       ("repeat_open", "repeat page open, no write")):
+        if key not in first:
+            continue
         cells = [label, first[key]["requests"]]
+        if "not_modified" in first[key]:
+            cells[1] = f"{first[key]['requests']} ({first[key]['not_modified']} × 304)"
         for lv in levels:
             cells += [f"{results[lv][key]['wall_ms']:.0f}", f"{results[lv][key]['cpu_ms']:.0f}"]
         lines.append("| " + " | ".join(str(c) for c in cells) + " |")
