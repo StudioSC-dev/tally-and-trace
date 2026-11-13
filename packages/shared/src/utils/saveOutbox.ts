@@ -14,6 +14,9 @@
  * - A success removes the entry and records a completion. Its tags are collected and handed
  *   out once, when the queue drains (`drain`), not after every save.
  * - A retried DELETE that answers 404 already happened: the caller reports it as a success.
+ * - A failed edit of a row is superseded by a later save of the same row (enqueued after it, or
+ *   already waiting when it failed): it is never resent, since it would land last and undo the
+ *   newer change. Its draft stays for Edit. Deletes and POST actions on a target are not edits.
  */
 
 export type OutboxKind = 'create' | 'update' | 'delete' | 'repeat' | 'due-action'
@@ -34,6 +37,8 @@ export interface OutboxError {
   retryable: boolean
   /** The outcome is unknown: restored after a reload while it was unsent or in flight. */
   notConfirmed?: boolean
+  /** A newer change to the same row was made after it: never resent (Retry would undo it). */
+  superseded?: boolean
   raw?: unknown
 }
 
@@ -106,10 +111,46 @@ export const MAX_COMPLETIONS = 50
 
 export type NewOutboxEntry = Omit<OutboxEntry, 'status' | 'error'>
 
-/** Appends a save at the tail of the queue. A clientId already queued is ignored. */
+/** What a superseded save's toast says. */
+export const SUPERSEDED = 'A newer change to it was made since. Edit to apply these values again, or Discard.'
+
+/**
+ * A save that rewrites an existing row (an edit, a repeat, a delete, a PUT action such as Post),
+ * as opposed to a create or a POST that records something new against its target.
+ */
+function rewritesRow(e: Pick<OutboxEntry, 'kind' | 'targetId' | 'request'>): boolean {
+  if (e.targetId === undefined) return false
+  return e.kind === 'update' || e.kind === 'repeat' || e.kind === 'delete' || (e.kind === 'due-action' && e.request.method === 'PUT')
+}
+
+/** Whether `older`, a failed rewrite (not a delete), would undo `newer` if it were resent. */
+function overtakenBy(older: OutboxEntry, newer: Pick<OutboxEntry, 'clientId' | 'kind' | 'targetId' | 'request' | 'form'>): boolean {
+  return (
+    older.clientId !== newer.clientId &&
+    older.kind !== 'delete' &&
+    rewritesRow(older) &&
+    rewritesRow(newer) &&
+    older.form === newer.form &&
+    older.targetId === newer.targetId
+  )
+}
+
+function supersede(e: OutboxEntry): OutboxEntry {
+  return {
+    ...e,
+    status: 'failed',
+    error: { message: SUPERSEDED, retryable: false, superseded: true, ...(e.error?.raw !== undefined ? { raw: e.error.raw } : {}) },
+  }
+}
+
+/**
+ * Appends a save at the tail of the queue. A clientId already queued is ignored. A failed
+ * rewrite of the same row made before it is superseded: resending it would undo this one.
+ */
 export function enqueueEntry(state: OutboxState, entry: NewOutboxEntry): OutboxState {
   if (state.entries.some((e) => e.clientId === entry.clientId)) return state
-  return { ...state, entries: [...state.entries, { ...entry, status: 'pending' }] }
+  const entries = state.entries.map((e) => (e.status === 'failed' && !e.error?.superseded && overtakenBy(e, entry) ? supersede(e) : e))
+  return { ...state, entries: [...entries, { ...entry, status: 'pending' }] }
 }
 
 /** The entry to send now: the oldest pending one, only when none is in flight. */
@@ -160,15 +201,22 @@ export function succeedEntry(state: OutboxState, clientId: string, serverId?: nu
   }
 }
 
-/** The entry failed: it stays, out of the line, until Retry or Discard. */
+/**
+ * The entry failed: it stays, out of the line, until Retry or Discard. A rewrite whose row
+ * already has a later save waiting is superseded at once: resent, it would land after that one.
+ */
 export function failEntry(state: OutboxState, clientId: string, error: OutboxError): OutboxState {
-  return patch(state, clientId, (e) => ({ ...e, status: 'failed', error }))
+  return patch(state, clientId, (e) => {
+    const failed: OutboxEntry = { ...e, status: 'failed', error }
+    const later = state.entries.some((o) => o.status !== 'failed' && overtakenBy(failed, o))
+    return later ? supersede(failed) : failed
+  })
 }
 
-/** Retry: the failed entry goes back to the tail of the line, with its idempotency key. */
+/** Retry: the failed entry goes back to the tail of the line, with its idempotency key. A superseded one stays. */
 export function retryEntry(state: OutboxState, clientId: string): OutboxState {
   const entry = state.entries.find((e) => e.clientId === clientId)
-  if (!entry || entry.status !== 'failed') return state
+  if (!entry || entry.status !== 'failed' || entry.error?.superseded) return state
   const rest = state.entries.filter((e) => e.clientId !== clientId)
   const retried: OutboxEntry = { ...entry, status: 'pending' }
   delete retried.error
