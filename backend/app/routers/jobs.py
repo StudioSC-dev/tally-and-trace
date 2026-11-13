@@ -10,20 +10,25 @@ The caller sends ``X-Job-Token``, compared in constant time with
 ``settings.JOB_TOKEN``. With no token configured the endpoint does not exist
 (404); a missing or wrong token is a 401. The response carries counts only (no
 ids, names or amounts), because the workflow's logs are public.
+
+The same run deletes the idempotency keys older than a week (core/idempotency.py).
 """
 import hmac
+import logging
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core import idempotency
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.time import manila_today
 from app.services import posting
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _require_job_token(token: Optional[str]) -> None:
@@ -32,6 +37,16 @@ def _require_job_token(token: Optional[str]) -> None:
         raise HTTPException(status_code=404, detail="Not Found")
     if token is None or not hmac.compare_digest(token.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Invalid job token")
+
+
+def _purge_idempotency_keys(db: Session) -> None:
+    """Delete the idempotency keys past their retention (core/idempotency.py). A failure here
+    must not fail the posting that already committed."""
+    try:
+        idempotency.purge_expired(db)
+    except Exception:
+        db.rollback()
+        logger.exception("could not purge expired idempotency keys")
 
 
 @router.post("/post-due-installments")
@@ -53,4 +68,6 @@ def post_due_installments_job(
         raise HTTPException(status_code=422, detail="through cannot be after today")
     result = posting.post_due_installments(db, through=through, dry_run=dry_run)
     posting.post_due_loans(db, through=through, dry_run=dry_run, result=result)
+    if not dry_run:
+        _purge_idempotency_keys(db)
     return {"dry_run": dry_run, "posted": result.posted, "skipped": dict(result.skipped)}
