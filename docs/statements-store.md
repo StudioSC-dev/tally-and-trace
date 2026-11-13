@@ -36,6 +36,13 @@ transaction of its own, committed at once. It takes the card's lock with `pg_try
 lock is held (a writer, the request's own session, another catch-up) the card is skipped and the read replays
 those cycles from the rows, which gives the same answer.
 
+**One view.** The stored cycles and the rows read after them come from two queries. So that no write commits
+between them, the read takes each card's lock shared (`pg_try_advisory_xact_lock_shared(601, card_id)`, one
+statement for all cards, held to the end of the request's transaction) and only then reads the state and the
+stored rows (one statement) and the rows. A card whose lock a writer holds at that moment is replayed from
+the rows instead. The read never waits; a writer on that card waits for the read's transaction to end, and a
+catch-up skips the card while a read holds it.
+
 ## Writes (write-through)
 
 A session hook (`before_flush`/`after_flush`, registered on every `Session` in `app/core/database.py`) sees
