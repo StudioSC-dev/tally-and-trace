@@ -140,10 +140,10 @@ def moves(db: Session, today: date) -> List[Move]:
 def _card_figures(db: Session, card: Account, today: date) -> Tuple[Decimal, Decimal]:
     """The sum of the card's statement balances and its stored balance."""
     from app.core.access import viewable_account_ids
-    from app.services.statements import statement_history
+    from app.services.statements import statement_summaries
 
-    history = statement_history(db, card, datetime.combine(today, time()),
-                                viewable_account_ids(db, card.user_id))
+    history = statement_summaries(db, card, datetime.combine(today, time()),
+                                  viewable_account_ids(db, card.user_id))
     return sum((s["balance"] for s in history), Decimal("0")), Decimal(str(card.balance or 0))
 
 

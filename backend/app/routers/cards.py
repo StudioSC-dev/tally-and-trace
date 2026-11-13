@@ -111,7 +111,7 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
     (``card_credit.unposted_months``) whose cycle closes on or before that
     statement's close, cumulatively like ``clear_through``: what Full leaves
     out, and how many of those the caller's Post now would record."""
-    history = card_credit.closed_statements(db, user, card, fx)
+    history = card_credit.closed_statements(db, user, card, fx, with_lines=True)
     if not history:
         return []
     overrides = {row.statement_close: row.amount for row in db.query(CardStatementMinimum)

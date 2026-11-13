@@ -105,7 +105,7 @@ from app.services.payment_dates import Moved, effective, extend, load_entry_over
 from app.services.recurring_kinds import entry_kind, is_card_installment, is_kind_eligible
 from app.services.statements import (
     _card_rows, _split_card_rows, iter_cycles_from, load_due_overrides, resolve_cycle_fields,
-    statement_day, statement_history,
+    statement_day, statement_history, statement_summaries,
 )
 
 CARD_FX_BUFFER = Decimal("0.03")
@@ -626,8 +626,9 @@ def open_cycle(card: Account, today: date, *, due_overrides) -> Optional[dict]:
 
 def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
                       viewable_ids: Optional[Iterable[int]] = None,
-                      card_rows=None, due_overrides=None) -> List[dict]:
-    """The card's closed statements, oldest first: ``statement_history`` on
+                      card_rows=None, due_overrides=None, *,
+                      with_lines: bool = False) -> List[dict]:
+    """The card's closed statements, oldest first: ``statement_summaries`` on
     Manila's midnight over the caller's viewable accounts, kept while the close
     is before Manila's today (a statement closing today can still take
     charges). Recorded rows only, in the card's currency. The one selection
@@ -637,12 +638,17 @@ def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
     ``viewable_ids`` and ``card_rows`` (a ``statements._card_rows`` result
     covering the card) and ``due_overrides`` (the card's
     ``statements.load_due_overrides`` entry) let a caller walking many cards
-    look them up once; by default each is read for this card."""
+    look them up once; by default each is read for this card.
+
+    Figures only by default; ``with_lines`` reads ``statement_history``
+    instead, so each statement also carries its ``lines`` and ``unconverted``
+    (the minimum amount due needs them)."""
     today = manila_today()
     if viewable_ids is None:
         viewable_ids = viewable_account_ids(db, user)
-    history = statement_history(db, card, manila_midnight(), viewable_ids, fx=fx,
-                                card_rows=card_rows, due_overrides=due_overrides)
+    read = statement_history if with_lines else statement_summaries
+    history = read(db, card, manila_midnight(), viewable_ids, fx=fx,
+                   card_rows=card_rows, due_overrides=due_overrides)
     return [s for s in history if s["close"].date() < today]
 
 
