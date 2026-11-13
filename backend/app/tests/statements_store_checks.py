@@ -22,6 +22,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import List
 
+from app.core.context import RequestContext
 from app.tests import statements_reference as reference
 
 CARD_KEYS = ("card_a", "card_b", "card_c", "card_d")
@@ -109,11 +110,11 @@ def compare_world(db, world, today: date, fx, monkeypatch, rng: random.Random,
                                                        viewable_ids=viewable, fx=fx)
                 assert repr(got) == repr(ref), f"payables differ: {label} window={days}d"
         managed = [c for c in cards if card_credit.can_see_credit(user, c)]
-        due, amounts = (card_credit.statements_due(db, user, fx),
+        due, amounts = (card_credit.statements_due(RequestContext(db, user, fx=fx)),
                         card_credit.amount_due(db, user, managed, fx))
         monkeypatch.setenv("STATEMENTS_STORE", "off")
         try:
-            due_off, amounts_off = (card_credit.statements_due(db, user, fx),
+            due_off, amounts_off = (card_credit.statements_due(RequestContext(db, user, fx=fx)),
                                     card_credit.amount_due(db, user, managed, fx))
         finally:
             monkeypatch.delenv("STATEMENTS_STORE")

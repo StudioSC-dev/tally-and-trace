@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, sw_db_reachable, sw_post
 from app.tests.test_currency_projection_integration import (  # noqa: F401  (fixtures)
     _acct, _d, _entry, _get, _row, _transfer, check_timeline_row, cx, frozen,
@@ -105,7 +106,7 @@ def test_unchanged_figures_against_the_engine(sw_client, sw_db, frozen, mx):  # 
 
     body = _timeline(sw_client, mx["a"])
     start, end = forecast_svc._timeline_window(DAYS, None)
-    p = forecast_svc.Projection(sw_db, mx["a"]["id"], start, end, fx=fx_rates())
+    p = forecast_svc.Projection(RequestContext(sw_db, mx["a"]["id"], fx=fx_rates()), start, end)
     result = forecast_svc._timeline(p, "PHP", start, end, rows=True)
     assert [Decimal(str(e["running_balance"])) for e in _row(body, "PHP")["events"]] == [
         e["running_balance"] for e in result["events"]]

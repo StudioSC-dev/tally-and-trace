@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
 
 pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
@@ -368,7 +369,7 @@ def test_row_fields_on_snapshot_rows_only(sw, sw_client, sw_db, monkeypatch):
     items = _rows(r.json()["items"], rent)
     assert [(i["occurrence_date"], i["overdue"]) for i in items] == [("2026-10-25", False)]
     assert all("kind" not in i and "can_mark_paid" not in i for i in items)
-    payables = fc.payables_by_currency(sw_db, a["id"], days=30)
+    payables = fc.payables_by_currency(RequestContext(sw_db, a["id"]), days=30)
     assert _rows(payables, rent)
     assert all("kind" not in p and "can_mark_paid" not in p for p in payables if p)
 

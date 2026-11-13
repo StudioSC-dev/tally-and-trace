@@ -24,6 +24,7 @@ from app.core.access import (
 )
 from app.core.auth import get_current_active_user
 from app.core.idempotency import Idempotency, finish, idempotency
+from app.core.context import RequestContext, request_context
 from app.core.database import get_db
 from app.core.redaction import Redactor, serialize_transaction
 from app.core.time import manila_day, manila_midnight, manila_today
@@ -156,25 +157,18 @@ def card_statements(db: Session, user: User, card: Account, fx: Optional[FxRates
 
 
 @router.get("/credit")
-def list_card_credit(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    fx: FxRates = Depends(get_fx),
-):
+def list_card_credit(ctx: RequestContext = Depends(request_context)):
     """``{items: CardCredit[]}``: every active credit card the caller manages
     (owner or admin) that has a limit, by name."""
-    ids = card_credit.managed_card_ids(db, current_user)
-    credit = card_credit.credit_for_cards(db, current_user, ids, fx=fx,
-                                          redactor=Redactor(db, current_user))
+    ids = card_credit.managed_card_ids(ctx)
+    credit = card_credit.credit_for_cards(ctx, ids)
     return {"items": [credit[i] for i in ids if i in credit]}
 
 
 @router.get("/{account_id}/credit")
 def get_card_credit(
     account_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    fx: FxRates = Depends(get_fx),
+    ctx: RequestContext = Depends(request_context),
 ):
     """One card's credit detail (``CardCreditDetail``).
 
@@ -188,11 +182,10 @@ def get_card_credit(
     (``card_credit.unposted_months``), null when there are none; it exists
     with no recorded statement at all.
     """
+    db, current_user, fx, redactor = ctx.db, ctx.user, ctx.fx, ctx.redactor
     card = _managed_card(db, current_user, account_id)
-    redactor = Redactor(db, current_user)
     unposted = card_credit.unposted_months(db, card, current_user)
-    credit = card_credit.credit_for_cards(db, current_user, [card.id], fx=fx,
-                                          redactor=redactor)
+    credit = card_credit.credit_for_cards(ctx, [card.id])
     rule = _rule(card)
     return {
         "account_id": card.id,

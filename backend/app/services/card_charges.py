@@ -42,14 +42,14 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.access import DIRECT_ROLES, access_map
+from app.core.access import DIRECT_ROLES
+from app.core.context import RequestContext
 from app.core.redaction import LIMITED, Redactor
-from app.core.time import manila_midnight, manila_today
+from app.core.time import manila_midnight
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face
 from app.services import forecast as fc
-from app.services.fx import FxRates
 from app.services.missed import split_pending_links
 from app.services.payment_dates import effective, load_entry_overrides
 from app.services.recurring_kinds import entry_kind, is_capped, is_kind_eligible, plan_kind
@@ -87,9 +87,8 @@ class _Charge:
         return (self.when.date(), (self.original or self.when).date(), self.order)
 
 
-def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
-                         collector: fc.FxCollector, ids: fc.PublicIds,
-                         redactor: Redactor,
+def card_charges_by_card(ctx: RequestContext, *, collector: fc.FxCollector,
+                         ids: fc.PublicIds,
                          credit: Optional[Dict[int, dict]] = None) -> List[dict]:
     """``card_charges`` of the snapshot (see the module docstring).
 
@@ -99,17 +98,16 @@ def card_charges_by_card(db: Session, user, *, fx: Optional[FxRates],
     gains its ``credit`` key.
     """
     credit = credit or {}
-    user_id = user.id
-    accounts = fc.get_account_balances(db, user_id)
-    held = access_map(db, user_id)
+    db, fx, redactor = ctx.db, ctx.fx, ctx.redactor
+    accounts = ctx.accounts
+    held = ctx.access
     cards = {a.id: a for a in accounts
              if a.account_type == AccountType.CREDIT and held.of(a) in DIRECT_ROLES}
     if not cards:
         return []
     start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())
-    today = manila_today()
-    events = fc.collect_events(db, start, end, user_id=user_id, accounts=accounts,
-                               keep_origin=True, fx=fx, detail=True)
+    today = ctx.today
+    events = fc.shared_events(ctx, start, end, keep_origin=True, detail=True)
 
     entry_ids = {e["origin"][1] for e in events if e["origin"][0] is BudgetEntry}
     txn_ids = {e["origin"][1] for e in events if e["origin"][0] is Transaction}

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.core.access import household_grants
 from app.core.auth import get_current_active_user
+from app.core.context import RequestContext, request_context
 from app.core.database import get_db
 from app.core.redaction import display_name, serialize_accounts, serialize_transactions
 from app.core.time import manila_wall_now
@@ -109,7 +110,7 @@ def household_transactions(
             "has_more": offset + len(rows) < total}
 
 
-@router.get("/{sharer_id}/upcoming")
+@router.get("/{sharer_id}/upcoming", dependencies=[Depends(request_context)])
 def household_upcoming(
     sharer_id: int,
     days: int = Query(30, ge=1, le=365),
@@ -123,7 +124,8 @@ def household_upcoming(
     return {"sharer": _sharer(db, sharer_id), "items": items, "days": days}
 
 
-@router.get("/{sharer_id}/monthly", response_model=HouseholdMonthlyResponse)
+@router.get("/{sharer_id}/monthly", response_model=HouseholdMonthlyResponse,
+            dependencies=[Depends(request_context)])
 def household_monthly(
     sharer_id: int,
     from_: Optional[str] = Query(None, alias="from", pattern=MONTH,
@@ -149,15 +151,17 @@ def household_monthly(
 @router.get("/{sharer_id}/dashboard")
 def household_dashboard(
     sharer_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     fx: FxRates = Depends(get_fx),
 ):
+    db, current_user = ctx.db, ctx.user
     grant = _grant(db, current_user, sharer_id)
     accounts = household_svc.household_accounts(db, current_user, grant)
     month = manila_wall_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    [current] = household_svc.household_monthly(db, current_user, grant, month, month, fx=fx)
     start, end = _upcoming_window(30, None)
+    # The month and the upcoming list read one run of the view's events (STU-598).
+    ctx.widen_events(max(end, household_svc.month_end(month)))
+    [current] = household_svc.household_monthly(db, current_user, grant, month, month, fx=fx)
     return {
         "sharer": _sharer(db, sharer_id),
         "accounts": serialize_accounts(db, current_user, accounts),

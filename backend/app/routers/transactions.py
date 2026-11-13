@@ -67,6 +67,7 @@ import json
 import os
 import sys
 from app.core.config import settings
+from app.core.context import RequestContext, request_context
 
 router = APIRouter()
 
@@ -1002,7 +1003,8 @@ def transaction_list_query(
     return query
 
 
-@router.get("/", response_model=TransactionListResponse, dependencies=[Depends(conditional_get)])
+@router.get("/", response_model=TransactionListResponse,
+            dependencies=[Depends(conditional_get), Depends(request_context)])
 def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -1297,6 +1299,7 @@ def _occurrence_key(item: dict) -> tuple:
 def list_scheduled(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     account_ids: Optional[List[int]] = Query(None, description="Rows and entries touching these accounts"),
     category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
         None, max_length=50, description="As GET /transactions, read for entries too"),
@@ -1363,7 +1366,7 @@ def list_scheduled(
     # Every occurrence in the range: the service builds them all in memory
     # before its own cut, so the cursor is applied here.
     upcoming = missed_svc.upcoming_occurrences(
-        db, current_user, redactor=Redactor(db, current_user), start=first,
+        ctx, start=first,
         end=occurrences_through, filters=filters, limit=sys.maxsize, plan=None)
     occurrences = sorted(upcoming["items"], key=_occurrence_key)
     if after is not None and after.kind == "transaction":

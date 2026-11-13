@@ -14,6 +14,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, sw_db_reachable, sw_post
 
 pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
@@ -408,7 +409,7 @@ def _statements(db, user_id) -> dict:
 
     db.expire_all()
     out = {p["due_date"]: p["amount"]
-           for p in forecast.payables_by_currency(db, user_id, days=60)
+           for p in forecast.payables_by_currency(RequestContext(db, user_id), days=60)
            if p.get("source") == "statement"}
     # End the read: it holds the cards' statement locks shared (STU-601) until then.
     db.rollback()

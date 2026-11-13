@@ -20,6 +20,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import text
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, PRIVATE, sw_db_reachable, sw_leaks, sw_post
 from app.tests.test_installment_autopost_integration import (
     MONTHS, TOKEN, _card, _entry, _flags, _installment, _job_ok, _rows, _state, _txn,
@@ -746,7 +747,7 @@ def test_turning_auto_post_off_keeps_the_review(world, token, monkeypatch):
     assert _state(db, tablet) == (date(2026, 11, 5), 20)
     db.expire_all()
     statements = [(str(p["statement_close"])[:10], float(p["amount"]))
-                  for p in payables_by_currency(db, w["o"]["id"], days=60,
+                  for p in payables_by_currency(RequestContext(db, w["o"]["id"]), days=60,
                                                 reference=datetime(2026, 12, 20, 10, 0))
                   if p["source"] == "statement"]
     assert ("2026-11-24", 5_000.0) in statements

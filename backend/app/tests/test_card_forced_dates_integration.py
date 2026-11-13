@@ -16,6 +16,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import text
 
+from app.core.context import RequestContext
 from app.routers.accounts import LOAN_FIELDS
 from app.services.payment_dates import extend
 from app.tests.conftest import API, hh_household, sw_db_reachable, sw_post
@@ -70,7 +71,7 @@ def _statements(client, who, card, days=90):
 
     db = SessionLocal()
     try:
-        rows = _rows(payables_by_currency(db, who["id"], days=days), "statement", card)
+        rows = _rows(payables_by_currency(RequestContext(db, who["id"]), days=days), "statement", card)
     finally:
         db.close()
     return {r["statement_close"]: (r["due_date"], r["amount"]) for r in rows}

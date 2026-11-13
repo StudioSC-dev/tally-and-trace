@@ -57,7 +57,7 @@ from sqlalchemy import case, func, select, union_all
 from sqlalchemy.orm import Session
 
 from app.core.access import DIRECT_ROLES, MANAGE_ROLES, viewable_accounts
-from app.core.redaction import Redactor
+from app.core.context import RequestContext
 from app.core.time import manila_today
 from app.models.account import Account, AccountType
 from app.models.transaction import Transaction, TransactionType
@@ -143,8 +143,8 @@ def tiles(db: Session, user, placed: List[Tuple[Optional[str], Account]],
     cards = [a for _, a in placed if a.account_type == AccountType.CREDIT]
     managed = [a for a in cards if card_credit.can_see_credit(user, a)]
     due = card_credit.amount_due(db, user, managed, fx)
-    credit = (card_credit.credit_for_cards(db, user, [a.id for a in managed], fx=fx,
-                                           redactor=Redactor(db, user))
+    credit = (card_credit.credit_for_cards(RequestContext(db, user, fx=fx),
+                                           [a.id for a in managed])
               if managed else {})
     out = []
     for slot, account in placed:

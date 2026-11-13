@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, hh_tag_share, sw_db_reachable, sw_post, sw_share
 from app.tests.test_card_charges_integration import pin_clock
 from app.tests.test_balance_locking_integration import engine, holder  # noqa: F401
@@ -244,7 +245,7 @@ def test_forecast_payable_moves_with_due_override(world):
 
     def payable():
         db.expire_all()
-        (row,) = [p for p in fc.payables_by_currency(db, me["id"], days=30)
+        (row,) = [p for p in fc.payables_by_currency(RequestContext(db, me["id"]), days=30)
                   if p and p.get("source") == "statement" and p["source_id"] == card]
         return row["statement_close"], row["due_date"]
 

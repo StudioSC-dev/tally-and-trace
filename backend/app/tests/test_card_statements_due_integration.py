@@ -16,6 +16,7 @@ from datetime import datetime
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, hh_household, hh_tag_share, sw_db_reachable, sw_post, sw_share
 from app.tests.test_card_charges_integration import pin_clock
 from app.tests.test_statement_minimum_integration import REF, _account, _card, _card_m, _debit, _m2
@@ -137,7 +138,7 @@ def test_recorded_figure_ignores_projected_lines(world):
     assert clear_through == 55_000.0
 
     db.expire_all()
-    payables = fc.payables_by_currency(db, me["id"], days=30)
+    payables = fc.payables_by_currency(RequestContext(db, me["id"]), days=30)
     (march,) = [p for p in payables if p and p.get("source") == "statement"
                 and p["source_id"] == card and p["statement_close"] == "2027-03-03"]
     assert march["amount"] > clear_through
@@ -274,7 +275,7 @@ def test_payables_unchanged(sw, sw_client, sw_db, monkeypatch):
         return [p for p in rows if p and p.get("source") == source and p["source_id"] == source_id]
 
     db.expire_all()
-    direct = fc.payables_by_currency(db, a["id"], days=30)
+    direct = fc.payables_by_currency(RequestContext(db, a["id"]), days=30)
     (statement,) = by_source(direct, "statement", card)
     (entry,) = by_source(direct, "budget_entry", rent)
     assert set(statement) == STATEMENT_PAYABLE_KEYS
@@ -289,7 +290,7 @@ def test_payables_unchanged(sw, sw_client, sw_db, monkeypatch):
 
     # The viewer sees the joint account's rows Limited, in their public shape.
     db.expire_all()
-    limited = [p for p in fc.payables_by_currency(db, v["id"], days=30)
+    limited = [p for p in fc.payables_by_currency(RequestContext(db, v["id"]), days=30)
                if p.get("view") == "limited"]
     snapshot_limited = [p for p in _snapshot(client, v)["payables"] if p.get("view") == "limited"]
     assert limited and snapshot_limited

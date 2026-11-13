@@ -15,6 +15,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import sw_db_reachable, sw_post
 
 pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
@@ -82,7 +83,7 @@ def _statements(db, who, days=60):
 
     db.expire_all()
     return [(p["due_date"], p["statement_close"], Decimal(str(p["amount"])))
-            for p in payables_by_currency(db, who["id"], days=days, reference=WALL)
+            for p in payables_by_currency(RequestContext(db, who["id"]), days=days, reference=WALL)
             if p["source"] == "statement"]
 
 

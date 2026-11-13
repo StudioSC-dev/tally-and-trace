@@ -607,12 +607,27 @@ def household_view(db: Session, user, sharer_id: int) -> Optional[HouseholdGrant
 def household_events(db: Session, user, grant: HouseholdGrant, start: datetime, end: datetime,
                      *, keep_origin: bool = False, fx=None) -> List[dict]:
     """``collect_events`` in Household mode: the Household view of ``grant``'s
-    sharer, with the per-currency detail (``collect_events(detail=True)``)."""
-    from app.services.forecast import collect_events
+    sharer, with the per-currency detail (``collect_events(detail=True)``). Inside a
+    request with a context the view's events are read once (``RequestContext.events_run``)."""
+    from app.core.context import context_of
+    from app.services.forecast import _naive, collect_events, within
 
-    return collect_events(db, start, end, user_id=_uid(user),
-                          accounts=household_accounts(db, user, grant), household=grant,
-                          keep_origin=keep_origin, fx=fx, detail=True)
+    def collect(through: datetime, origin: bool = keep_origin) -> List[dict]:
+        return collect_events(db, start, through, user_id=_uid(user),
+                              accounts=household_accounts(db, user, grant), household=grant,
+                              keep_origin=origin, fx=fx, detail=True)
+
+    ctx = context_of(db)
+    if ctx is None or ctx.uid != _uid(user):
+        return collect(end)
+    # One run per request and view, as ``forecast.shared_events`` does for the caller's.
+    start, end = _naive(start), _naive(end)
+    events = within(ctx.events_run(("household", grant.sharer_id, start), end,
+                                   lambda through: collect(through, True)), end)
+    if not keep_origin:
+        for e in events:
+            del e["origin"]
+    return events
 
 
 def household_upcoming(db: Session, user, grant: HouseholdGrant, start: datetime,
@@ -659,6 +674,11 @@ def _month_key(when) -> str:
 
 def _next_month(day: datetime) -> datetime:
     return day.replace(year=day.year + day.month // 12, month=day.month % 12 + 1, day=1)
+
+
+def month_end(month: datetime) -> datetime:
+    """The end of ``household_monthly``'s window when ``month`` is its last month."""
+    return _next_month(month)
 
 
 def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime, last: datetime,

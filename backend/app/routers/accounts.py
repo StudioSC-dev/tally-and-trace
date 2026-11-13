@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from typing import List, Optional
 from app.core.conditional import conditional_get
 from app.core import locking
+from app.core.context import request_context
 from app.core.database import get_db
 from app.core.auth import get_current_active_user
 from app.core.access import (
@@ -930,7 +931,7 @@ def get_account_balance(account_id: int, db: Session = Depends(get_db), current_
     }
 
 
-@router.get("/{account_id}/statements")
+@router.get("/{account_id}/statements", dependencies=[Depends(request_context)])
 def get_card_statements(
     account_id: int,
     db: Session = Depends(get_db),
