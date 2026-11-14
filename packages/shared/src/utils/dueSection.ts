@@ -1,5 +1,6 @@
 import type {
   DashboardSnapshot,
+  DueLists,
   Estimate,
   FullTransaction,
   InstallmentAutoPostState,
@@ -173,7 +174,7 @@ function estimateOf(row: Partial<Estimate>): Partial<Estimate> {
 
 const day = (value: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? value : wallDay(value))
 
-function candidates(snapshot: DashboardSnapshot): Candidate[] {
+function candidates(snapshot: DueLists): Candidate[] {
   const out: Candidate[] = []
   for (const card of snapshot.card_charges) {
     for (const charge of card.charges) {
@@ -262,7 +263,7 @@ interface MissedSource {
   plan_kind: PlanKind | null
 }
 
-function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
+function missedSources(snapshot: DueLists): MissedSource[] {
   const card: MissedSource[] = snapshot.card_charges.flatMap((c) =>
     c.missed.map((m) => ({
       view: null,
@@ -307,7 +308,7 @@ function missedSources(snapshot: DashboardSnapshot): MissedSource[] {
   return [...card, ...other]
 }
 
-function limitedRows(snapshot: DashboardSnapshot): DueLimitedRow[] {
+function limitedRows(snapshot: DueLists): DueLimitedRow[] {
   const seen = new Map<string, DueLimitedRow>()
   const add = (row: { public_id: string; display_name: string; date: string; original_date: string | null; overdue: boolean }) => {
     if (seen.has(row.public_id)) return
@@ -348,7 +349,7 @@ function urgent(row: DueRecurringRow): boolean {
  * whose `oldest` is on or before it. Missed rows are listed only while `unlinked_count > 0`.
  * A missing `plan_kind` reads as null. Unsorted; no Limited rows.
  */
-function recurringRows(snapshot: DashboardSnapshot, today: string, plan: PlanKind | null): Array<DueEntryRow | DueMissedRow> {
+function recurringRows(snapshot: DueLists, today: string, plan: PlanKind | null): Array<DueEntryRow | DueMissedRow> {
   const missed = missedSources(snapshot)
   const coveredFrom = new Map<number, string>()
   for (const m of missed) {
@@ -460,7 +461,7 @@ function byUrgencyThenDay<T extends DueRecurringRow>(rows: T[]): T[] {
  * kind, follow `limited`. Missed and overdue rows sort first, then by day.
  */
 export function dueRecurringRows(
-  snapshot: DashboardSnapshot,
+  snapshot: DueLists,
   today: string,
   limited: LimitedRowsMode = LIMITED_ROWS,
 ): DueRecurringRow[] {
@@ -474,7 +475,7 @@ export function dueRecurringRows(
  * `plan_kind` `subscription` entries, with the same rules as Due (`recurringRows`). Missed
  * and overdue rows sort first, then by day.
  */
-export function subscriptionPastRows(snapshot: DashboardSnapshot, today: string): Array<DueEntryRow | DueMissedRow> {
+export function subscriptionPastRows(snapshot: DueLists, today: string): Array<DueEntryRow | DueMissedRow> {
   return byUrgencyThenDay(recurringRows(snapshot, today, 'subscription'))
 }
 
@@ -605,7 +606,7 @@ export function dueTabBadge(sources: readonly DueBadgeSource[], kept: number | u
 }
 
 /** Every pending row id any missed row links, ascending and once each: the linked query's `ids`. */
-export function pendingLinkIds(snapshot: DashboardSnapshot): number[] {
+export function pendingLinkIds(snapshot: DueLists): number[] {
   const ids = new Set<number>()
   for (const card of snapshot.card_charges) for (const m of card.missed) for (const id of m.pending_transaction_ids) ids.add(id)
   for (const m of snapshot.missed) for (const id of m.pending_transaction_ids) ids.add(id)
@@ -613,7 +614,7 @@ export function pendingLinkIds(snapshot: DashboardSnapshot): number[] {
 }
 
 /** Ids of the pending card debits the snapshot flags `recurring`. */
-function recurringChargeIds(snapshot: DashboardSnapshot): Set<number> {
+function recurringChargeIds(snapshot: DueLists): Set<number> {
   const ids = new Set<number>()
   for (const card of snapshot.card_charges) {
     for (const charge of card.charges) {
@@ -624,7 +625,7 @@ function recurringChargeIds(snapshot: DashboardSnapshot): Set<number> {
 }
 
 /** "Posted" for a pending row the snapshot lists as a recurring card charge, otherwise "Mark posted". */
-export function pendingPostLabel(txn: Pick<Transaction, 'id'>, snapshot: DashboardSnapshot): string {
+export function pendingPostLabel(txn: Pick<Transaction, 'id'>, snapshot: DueLists): string {
   return PENDING_POST_LABELS[recurringChargeIds(snapshot).has(txn.id) ? 'posted' : 'mark_posted']
 }
 
@@ -657,7 +658,7 @@ function unpostedVisible(txns: readonly Transaction[]): Map<number, FullTransact
 export function duePendingRows(
   windowTxns: readonly Transaction[],
   linkedTxns: readonly Transaction[],
-  snapshot: DashboardSnapshot,
+  snapshot: DueLists,
   today: string,
 ): DuePendingRow[] {
   const linked = new Set(pendingLinkIds(snapshot))
@@ -780,7 +781,7 @@ export interface DueStatementRow {
 }
 
 /** Group C. One row per card in `card_statements_due`, in the server's order. */
-export function dueStatementRows(snapshot: DashboardSnapshot): DueStatementRow[] {
+export function dueStatementRows(snapshot: DueLists): DueStatementRow[] {
   return snapshot.card_statements_due.map((s) => ({
     kind: 'statement',
     key: `statement:${s.account_id}`,
@@ -922,7 +923,7 @@ export interface DueTodayLine {
  * the missed list or their pending rows show them, and an entry the missed list
  * leaves out for scope gets no line for them either.
  */
-export function dueTodayLines(snapshot: DashboardSnapshot): DueTodayLine[] {
+export function dueTodayLines(snapshot: DueLists): DueTodayLine[] {
   const covered = new Set<number>()
   for (const m of missedSources(snapshot)) {
     if (m.unlinked_count > 0 && m.oldest_unlinked !== null) covered.add(m.entry_id)
