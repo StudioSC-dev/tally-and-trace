@@ -180,15 +180,45 @@ def test_work_within_the_ceilings(measured, caller, endpoint):
     assert not over, f"{caller} {endpoint} over its ceiling (measured, ceiling): {over}"
 
 
+# STU-598 (PERF-3): what each read builds, exactly. Every endpoint is named in one
+# of the sets below, so a new one has to be placed before its budget can pass.
+# The reads that run the projection (``collect_events``), once:
+PROJECTING = {"snapshot", "household-upcoming", "household-monthly", "household-dashboard"}
+# The reads that legitimately do not run it:
+NOT_PROJECTING = {"installment-plans", "budget-entries", "accounts", "transactions",
+                  "statements", "card-credit"}
+# The reads with no ``RequestContext``: the accounts list reads the caller's access map
+# once and builds no ``RecordAccess`` or ``Redactor``.
+NO_CONTEXT = {"accounts"}
+
+
+def _expected_once(endpoint: str) -> Dict[str, int]:
+    if endpoint in NO_CONTEXT:
+        built = {"contexts": 0, "access_maps": 1, "record_access": 0, "redactors": 0}
+    else:
+        built = {"contexts": 1, "access_maps": 1, "record_access": 1, "redactors": 1}
+    return {**built, "collect_events": 1 if endpoint in PROJECTING else 0}
+
+
+def test_every_budgeted_endpoint_is_placed_once():
+    endpoints = {endpoint for _, endpoint in BUDGETS}
+    assert PROJECTING.isdisjoint(NOT_PROJECTING)
+    assert PROJECTING | NOT_PROJECTING == endpoints
+    assert NO_CONTEXT <= endpoints
+
+
 @needs_db
 @pytest.mark.parametrize("caller,endpoint", sorted(BUDGETS))
 def test_one_request_context_per_request(measured, caller, endpoint):
-    """STU-598 (PERF-3): a read runs the projection's ``collect_events`` at most once
-    and reads each user's ``AccessMap`` (the viewable accounts and roles), builds
-    their ``RecordAccess`` and their ``Redactor`` at most once (``RequestContext``)."""
+    """STU-598 (PERF-3): a context-backed read builds exactly one ``RequestContext``,
+    reads each user's ``AccessMap`` (the viewable accounts and roles) once and builds
+    their ``RecordAccess`` and ``Redactor`` once, and runs the projection's
+    ``collect_events`` exactly once when it projects (never when it does not). Exact,
+    so a read that stopped building the context (all zeros) fails as well."""
     got = measured[(caller, endpoint)]
-    once = {f: getattr(got, f) for f in ("collect_events", *perf.PER_USER)}
-    assert all(n <= 1 for n in once.values()), f"{caller} {endpoint}: {once}"
+    expected = _expected_once(endpoint)
+    once = {f: getattr(got, f) for f in expected}
+    assert once == expected, f"{caller} {endpoint}: measured {once}, expected {expected}"
 
 
 @needs_db

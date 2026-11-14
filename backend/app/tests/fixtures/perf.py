@@ -13,6 +13,7 @@
                    accounts and roles, for the user read most often (STU-598)
 ``record_access``  ``RecordAccess`` objects built, for the user built most often
 ``redactors``      ``Redactor`` objects built, for the user built most often
+``contexts``       ``RequestContext`` objects built (``core/context.py``), in all
 ``cpu_ms``         ``time.process_time`` for the request (median of ``runs``)
 ``wall_ms``       wall clock for the request (median of ``runs``)
 
@@ -50,6 +51,7 @@ class Sample:
     access_maps: int = 0
     record_access: int = 0
     redactors: int = 0
+    contexts: int = 0
 
 
 def _canonical(node, key=None):
@@ -80,6 +82,7 @@ class _Counters:
         self.calls: Dict[str, int] = {n: 0 for n in COUNTED_CALLS}
         # Per user: what the request built for that user (``_count_per_user``).
         self.per_user: Dict[str, Counter] = {n: Counter() for n in PER_USER}
+        self.contexts = 0
         self._patched: List[tuple] = []
 
     def _statement(self, *args):
@@ -122,9 +125,10 @@ class _Counters:
 
     def _count_per_user(self) -> None:
         """Count, by user id, each ``AccessMap`` read and each ``RecordAccess`` and
-        ``Redactor`` built: ``access._build_access_map`` is read by name from its
-        module, the constructors from their classes."""
+        ``Redactor`` built, and each ``RequestContext`` built: ``access._build_access_map``
+        is read by name from its module, the constructors from their classes."""
         from app.core import access
+        from app.core.context import RequestContext
         from app.core.redaction import Redactor
 
         def on_build(fn):
@@ -139,7 +143,14 @@ class _Counters:
                 return fn(obj, db, user, *a, **kw)
             return wrapper
 
+        def on_context(fn):
+            def wrapper(obj, *a, **kw):
+                self.contexts += 1
+                return fn(obj, *a, **kw)
+            return wrapper
+
         for target, attr, wrapped in (
+                (RequestContext, "__init__", on_context(RequestContext.__init__)),
                 (access, "_build_access_map", on_build(access._build_access_map)),
                 (access.RecordAccess, "__init__",
                  on_init(access.RecordAccess.__init__, "record_access")),
@@ -171,6 +182,7 @@ def measure(client, headers, path: str, runs: int = 5) -> Sample:
     counts = (c.statements, canonical_bytes(r.content), c.calls["statement_day"],
               c.calls["collect_events"], c.instances)
     per_user = {name: c.most_per_user(name) for name in PER_USER}
+    per_user["contexts"] = c.contexts
     cpu: List[float] = []
     wall: List[float] = []
     for _ in range(max(runs, 1)):
