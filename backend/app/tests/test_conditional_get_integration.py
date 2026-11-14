@@ -18,6 +18,7 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 
 OPTED_IN = {
     ("GET", "/api/v1/dashboard/snapshot"),
+    ("GET", "/api/v1/dashboard/due"),
     ("GET", "/api/v1/budget-entries/installment-plans"),
     ("GET", "/api/v1/budget-entries/upcoming-occurrences"),
     ("GET", "/api/v1/budget-entries/"),
