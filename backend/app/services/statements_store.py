@@ -161,6 +161,11 @@ def _lock_and_read(conn, cards: Sequence, day: date, fresh: List[int], savepoint
     ``load``'s result. With ``savepoint`` the holds are taken after
     ``_READ_SAVEPOINT``, set in the same round trip, and released when the
     caller rolls back to it (``_release_read``)."""
+    # Several statements in one parameterised execute: this relies on psycopg2 (the
+    # app's driver, ``requirements.txt``), which binds parameters on the client and
+    # sends one simple query; no server-side prepared statements are configured
+    # (``core/database.py::make_engine``). A driver that prepares on the server
+    # (asyncpg, psycopg 3 past its prepare threshold) would refuse it.
     sql = (f"SAVEPOINT {_READ_SAVEPOINT};" if savepoint else "") + _LOCK_AND_READ
     locked, states = set(), {}
     found: Dict[int, Dict[date, Tuple[Decimal, int]]] = {}
