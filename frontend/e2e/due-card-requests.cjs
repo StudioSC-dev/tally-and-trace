@@ -8,6 +8,7 @@
 //       it, none of them the snapshot, a linked-ids read or an upcoming-occurrences read.
 //   (c) AC4 day rollover: with the page clock crossing Manila midnight the Due card reads "…"
 //       and then the new day's data, without navigation.
+//   (c2) an answer still dated the old day keeps Upcoming at "…" (the card shows a day's data only for that day).
 //   (d) AC5 fallback: with `/dashboard/due` answered 404 the card renders the rows it rendered
 //       from `/due`, from the older queries.
 //   (e) the stale-data guard (STU-603 comment): while the Due data refetches, Post on a pending
@@ -15,8 +16,8 @@
 //   (f) a Due-card save invalidates `Due`: after Mark paid drains, `/dashboard/due` is read again
 //       and the paid row has left; a Transactions save leaves Accounts and Allocations alone.
 //   (g) the toast stack does not cover the Due card's last rows (STU-605 QA note).
-//   (h) a Transactions save leaves no stale figure: after one, Accounts shows the new balance and Goals the new
-//       budget amount on the next visit, though both were cached before it.
+//   (h) a Transactions save leaves no stale figure: after one, the account page shows the new balance and the
+//       dashboard envelope the new amount on the next visit, though both were cached before it.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
 // through the API. Not wired into CI. Run steps: ./README.md. Condition waits only.
@@ -297,6 +298,33 @@ async function scenarioC(browser) {
   }
 }
 
+// (c2) AC4: an answer dated the old day is never shown as the new day's
+async function scenarioC2(browser) {
+  console.log('\n(c2) the page day turns and /dashboard/due still says the old day: Upcoming stays "…", never the old day\'s count')
+  const seeded = await seedFull('drc2')
+  const day = manilaToday()
+  const { ctx, page } = await signedIn(browser, seeded.user, {})
+  try {
+    await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })
+    await openTransactions(page)
+    await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor({ timeout: 10000 })
+    await h.waitQuiet(page)
+    const seen = await record(page, async () => {
+      await page.clock.fastForward('03:00')
+      await h.check('c2.crossed', 'S', async () => (await h.localDay(page)) === addDays(day, 1) || 'the page day did not turn')
+    })
+    await h.check('c2.due-read-again', 'S', async () => seen.some((r) => isDue(r.url)) || `no /dashboard/due request after midnight: ${show(seen)}`)
+    await h.sleep(500)
+    await h.check('c2.upcoming-stays-pending', 'B', async () => {
+      const shown = ((await page.locator(tid('due-upcoming-count')).textContent()) || '').trim()
+      return shown === '…' || `Upcoming read "${shown}" from an answer dated the old day`
+    })
+    await h.check('c2.no-empty-text', 'B', async () => (await page.locator(tid('due-upcoming-empty')).count()) === 0 || 'an empty text is shown')
+  } finally {
+    await ctx.close()
+  }
+}
+
 // (d) AC5
 async function scenarioD(browser) {
   console.log('\n(d) /dashboard/due answered 404: the card renders the rows it rendered from /due')
@@ -420,7 +448,7 @@ const goTo = async (page, nav, path) => {
 }
 
 async function scenarioH(browser) {
-  console.log('\n(h) after a save on Transactions, Accounts and Goals show the new balance and budget amount right away')
+  console.log('\n(h) after a save on Transactions, the account page and the dashboard envelope show the new figures right away')
   const seeded = await seedUser('drh')
   const { user, checking } = seeded
   const category = await client.post(user.token, '/categories/', { name: 'DRH Food', color: '#16a34a', is_expense: true })
@@ -432,14 +460,21 @@ async function scenarioH(browser) {
   try {
     const balanceOf = async () => (await client.get(user.token, `/accounts/${checking.id}`)).balance
     const usedOf = async () => (await client.get(user.token, `/allocations/${budget.id}`)).current_amount
-    const cardText = async (name) => (await page.locator('article, .card').filter({ hasText: name }).last().innerText()).replace(/\s+/g, ' ')
-    // Both pages are visited first, so their data is cached when the save happens.
-    await goTo(page, 'nav-accounts', '/accounts')
+    const detailBalance = async () => (await page.locator(tid('account-detail-balance')).innerText()).replace(/\s+/g, ' ')
+    const envelopes = async () => (await page.locator('[data-onboarding="budget-envelopes"]').innerText()).replace(/\s+/g, ' ')
+    const openDetail = async () => {
+      await goTo(page, 'nav-accounts', '/accounts')
+      await page.locator(`a[href="/accounts/${checking.id}"]`).first().click()
+      await page.locator(tid('account-detail-balance')).waitFor()
+      await h.waitQuiet(page)
+    }
+    // Both pages are read first, so their data is cached when the save happens (the dashboard is where the
+    // user starts; the account page and the envelope read through the shared cache, not a fresh request on mount).
     const balanceBefore = await balanceOf()
-    await h.check('h.accounts-show-old-balance', 'S', async () => (await cardText(checking.name)).includes(money(balanceBefore)) || `the card reads ${await cardText(checking.name)}`)
-    await goTo(page, 'nav-allocations', '/allocations')
-    await page.getByRole('tab', { name: 'Budgets' }).or(page.getByRole('button', { name: 'Budgets', exact: true })).first().click()
-    await h.check('h.goals-show-budget', 'S', async () => (await cardText('DRH Groceries')).includes('DRH Groceries') || 'the budget is not listed')
+    await openDetail()
+    await h.check('h.detail-shows-old-balance', 'S', async () => (await detailBalance()).includes(money(balanceBefore)) || `the page reads ${await detailBalance()}`)
+    await goTo(page, 'nav-home', '/')
+    await h.check('h.envelope-listed', 'S', async () => (await envelopes()).includes('DRH Groceries') || 'the envelope is not listed')
     await goTo(page, 'nav-transactions', '/transactions')
     await dueRows(page).first().waitFor()
     const form = await fillCreate(page, { accountName: checking.name, amount: 321, description: 'DR H Groceries run' })
@@ -448,16 +483,15 @@ async function scenarioH(browser) {
     const balanceAfter = await balanceOf()
     const usedAfter = await usedOf()
     await h.check('h.api-moved', 'S', async () => (balanceAfter !== balanceBefore && usedAfter === 321) || `balance ${balanceBefore} -> ${balanceAfter}, budget used ${usedAfter}`)
-    await goTo(page, 'nav-accounts', '/accounts')
-    await h.check('h.accounts-show-new-balance', 'B', async () => {
-      const text = await cardText(checking.name)
-      return text.includes(money(balanceAfter)) || `the card reads ${text}, the API says ${money(balanceAfter)}`
+    await openDetail()
+    await h.check('h.detail-shows-new-balance', 'B', async () => {
+      const text = await detailBalance()
+      return text.includes(money(balanceAfter)) || `the page reads ${text}, the API says ${money(balanceAfter)}`
     })
-    await goTo(page, 'nav-allocations', '/allocations')
-    await page.getByRole('tab', { name: 'Budgets' }).or(page.getByRole('button', { name: 'Budgets', exact: true })).first().click()
-    await h.check('h.goals-show-new-budget-amount', 'B', async () => {
-      const text = await cardText('DRH Groceries')
-      return text.includes(money(usedAfter)) || `the card reads ${text}, the API says ${money(usedAfter)}`
+    await goTo(page, 'nav-home', '/')
+    await h.check('h.envelope-shows-new-amount', 'B', async () => {
+      const text = await envelopes()
+      return text.includes(money(usedAfter)) || `the envelope reads ${text}, the API says ${money(usedAfter)}`
     })
   } finally {
     await ctx.close()
@@ -468,6 +502,7 @@ const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
   ['c', scenarioC],
+  ['c2', scenarioC2],
   ['d', scenarioD],
   ['e', (b) => scenarioE(b, { fallback: false })],
   ['e2', (b) => scenarioE(b, { fallback: true })],
