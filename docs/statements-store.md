@@ -37,11 +37,20 @@ lock is held (a writer, the request's own session, another catch-up) the card is
 those cycles from the rows, which gives the same answer.
 
 **One view.** The stored cycles and the rows read after them come from two queries. So that no write commits
-between them, the read takes each card's lock shared (`pg_try_advisory_xact_lock_shared(601, card_id)`, one
-statement for all cards, held to the end of the request's transaction) and only then reads the state and the
-stored rows (one statement) and the rows. A card whose lock a writer holds at that moment is replayed from
-the rows instead. The read never waits; a writer on that card waits for the read's transaction to end, and a
-catch-up skips the card while a read holds it.
+between them, the read takes each card's lock shared (`pg_try_advisory_xact_lock_shared(601, card_id)`) and
+only then reads the state and the stored rows, and then the rows. The savepoint, the holds and the stored
+read go in one round trip (three statements, each its own snapshot); the stored read takes the cards whose
+lock the transaction holds from `pg_locks`. A card whose lock a writer holds at that moment is replayed from
+the rows instead. The read never waits; a writer on that card waits for the read to end, and a catch-up skips
+the card while a read holds it.
+
+The holds last only to the end of the two queries (STU-623): they are taken after a savepoint
+(`statements_store_read`), and the read then rolls back to it and releases it, which frees them (Postgres
+frees a lock taken after a savepoint when it is rolled back to). Nothing is written in between: no flush,
+and a catch-up commits on its own connection. Held to the end of the transaction instead, a read followed
+by a write of the same card in the same transaction would wait for the writer's exclusive lock while still
+holding the shared one, and two such transactions would deadlock. A card found behind under the lock is
+released, caught up, then locked and read again; each card is checked for a catch-up once per transaction.
 
 ## Writes (write-through)
 
