@@ -58,7 +58,8 @@ class Budget(NamedTuple):
 # The owner's card-credit instances rose from 491 to 493 (ceiling 543): the per-entry
 # reads now load every reviewed installment and held-month pair the caller may walk
 # in one query each, a few more rows than the one card needs, for 26 statements
-# instead of 49.
+# instead of 49. Refitted after STU-623 (shared card holds released after each read),
+# which took one or two statements off the shared-caller snapshots and household reads.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
@@ -67,26 +68,26 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
     ("owner", "statements"): Budget(11, 47_893, 431, 0, 435),
     ("owner", "card-credit"): Budget(29, 9_374, 431, 0, 543),
-    ("editor", "snapshot"): Budget(66, 36_062, 54, 1, 197),
+    ("editor", "snapshot"): Budget(64, 36_062, 54, 1, 197),
     ("editor", "installment-plans"): Budget(17, 713, 0, 0, 7),
     ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
     ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
     ("editor", "statements"): Budget(14, 47_875, 431, 0, 436),
-    ("viewer", "snapshot"): Budget(62, 31_604, 54, 1, 183),
+    ("viewer", "snapshot"): Budget(60, 31_604, 54, 1, 183),
     ("viewer", "installment-plans"): Budget(9, 61, 0, 0, 5),
     ("viewer", "budget-entries"): Budget(9, 39, 0, 0, 1),
     ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
     ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
     ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),
-    ("household", "snapshot"): Budget(72, 10_590, 44, 1, 84),
+    ("household", "snapshot"): Budget(71, 10_590, 44, 1, 84),
     ("household", "installment-plans"): Budget(13, 61, 0, 0, 5),
     ("household", "budget-entries"): Budget(11, 39, 0, 0, 1),
     ("household", "accounts"): Budget(14, 358, 0, 0, 5),
     ("household", "transactions"): Budget(18, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(60, 7_353, 38, 1, 73),
-    ("household", "household-monthly"): Budget(77, 138, 38, 1, 82),
-    ("household", "household-dashboard"): Budget(90, 7_740, 38, 1, 85),
+    ("household", "household-upcoming"): Budget(59, 7_353, 38, 1, 73),
+    ("household", "household-monthly"): Budget(76, 138, 38, 1, 82),
+    ("household", "household-dashboard"): Budget(88, 7_740, 38, 1, 85),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full
