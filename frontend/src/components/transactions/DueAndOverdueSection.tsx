@@ -400,12 +400,18 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const refetchSource = () => void (legacy ? snapshotQuery.refetch() : dueQuery.refetch())
   // Consumed when this mount's first settled read is evaluated, whether or not a POST is sent.
   const pageOpenDone = useRef(false)
+  // Older API only: the snapshot already cached when the fallback began is never the basis of the page-open POST.
+  const legacyStartId = useRef<string | null | undefined>(undefined)
+  if (legacy && legacyStartId.current === undefined) {
+    legacyStartId.current = snapshotQuery.isFetching ? null : snapshotQuery.requestId ?? null
+  }
   // Page-open auto-post (Q1): once per mount, decided by a settled read. A read cached under a minute is
   // not refetched on mount, and is as good a decision as a fresh one: the POST is throttled by the server
   // and recomputes what is postable. A failed refetch consumes nothing.
   useEffect(() => {
     if (pageOpenDone.current) return
     if (snapshot === undefined || !snapshotSuccess || sourceFetching || snapshotIsError) return
+    if (legacy && (snapshotQuery.requestId ?? null) === legacyStartId.current) return
     pageOpenDone.current = true
     if (!shouldPostOnOpen(snapshot)) return
     // Fired and forgotten: an error is swallowed (Post now stays available) and nothing awaits it in a render path.
@@ -413,7 +419,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       .unwrap()
       .then((result) => setOpenPosted(result.posted))
       .catch(() => undefined)
-  }, [snapshot, snapshotSuccess, sourceFetching, snapshotIsError, postOnOpen])
+  }, [snapshot, snapshotSuccess, sourceFetching, snapshotIsError, postOnOpen, legacy, snapshotQuery.requestId])
   // A new Manila day can close a statement or make one overdue.
   useManilaDay(refetchSource)
   const endDate = dayEndWire(addDays(today, WINDOW_DAYS))
