@@ -92,8 +92,11 @@ from typing import Dict, Iterable, List, Optional, Set
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.access import MANAGE_ROLES, account_role, viewable_account_ids, viewable_accounts
-from app.core.redaction import FULL, LIMITED, Redactor
+from app.core.access import (
+    MANAGE_ROLES, account_role, record_access_for, viewable_account_ids, viewable_accounts,
+)
+from app.core.context import RequestContext, context_of
+from app.core.redaction import FULL, LIMITED
 from app.core.time import manila_midnight, manila_today
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
@@ -125,11 +128,11 @@ def can_see_credit(user, card: Optional[Account]) -> bool:
             and account_role(user, card) in MANAGE_ROLES)
 
 
-def managed_card_ids(db: Session, user) -> List[int]:
+def managed_card_ids(ctx: RequestContext) -> List[int]:
     """Every active credit card with a limit, or linked to another card's
     limit, that the caller manages, by name. ``credit_for_cards`` applies the
     group gate."""
-    cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
+    cards = viewable_accounts(ctx.db, ctx.user, active_only=True, roles=MANAGE_ROLES).filter(
         Account.account_type == AccountType.CREDIT,
         or_(Account.credit_limit.isnot(None),
             Account.shares_limit_with_account_id.isnot(None)),
@@ -203,9 +206,7 @@ def _stream(entry, end: datetime, *, whole: bool, moved: Optional[Moved] = None
     return fc.capped_distinct_days(entry, start, end, max_steps=bound)
 
 
-def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
-                     fx: Optional[FxRates], redactor: Optional[Redactor] = None
-                     ) -> Dict[int, dict]:
+def credit_for_cards(ctx: RequestContext, card_ids: Iterable[int]) -> Dict[int, dict]:
     """``{card id: CardCredit}`` for each of ``card_ids`` whose group (the card,
     or its primary and every card pointing at it; the module docstring) has a
     limit and passes ``can_see_credit`` on every member; the others are left
@@ -217,6 +218,7 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
     (``installment_duplicates.held_occurrences``, one call; the canonical
     assignment per creator and card, whatever the caller sees), which
     ``_card_parts`` leaves out of the hold."""
+    db, user = ctx.db, ctx.user
     card_ids = list(dict.fromkeys(card_ids))
     if not card_ids:
         return {}
@@ -224,8 +226,8 @@ def credit_for_cards(db: Session, user, card_ids: Iterable[int], *,
     if not groups:
         return {}
     cards = {m.id: m for _, members in groups for m in members}
-    fx = fx if fx is not None else FxRates.offline(db)
-    redactor = redactor or Redactor(db, user)
+    fx = ctx.fx if ctx.fx is not None else FxRates.offline(db)
+    redactor = ctx.redactor
     start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())
 
     ids = list(cards)
@@ -693,15 +695,10 @@ def unposted_months(db: Session, card: Account, caller,
     ``due`` is the cycle's printed due when one was entered; ``due_overrides``
     is the card's ``statements.load_due_overrides`` entry, read when None.
     """
-    from app.core.access import RecordAccess
     from app.services.posting import post_plan
 
     today = manila_today()
-    entries = [e for e in db.query(BudgetEntry).filter(
-        BudgetEntry.account_id == card.id,
-        BudgetEntry.is_active.is_(True),
-        BudgetEntry.installment_reviewed_at.isnot(None),
-    ).order_by(BudgetEntry.id).all() if is_card_installment(e, card)]
+    entries = [e for e in _reviewed_entries(db, card.id) if is_card_installment(e, card)]
     if not entries:
         return []
     if due_overrides is None:
@@ -712,7 +709,7 @@ def unposted_months(db: Session, card: Account, caller,
                for entry_id, when, _, is_posted in fc._linked_rows(
                    db, [e.id for e in entries], occurrence_match=True)
                if not is_posted}
-    access = RecordAccess(db, caller)
+    access = record_access_for(db, caller)
     out: List[UnpostedMonth] = []
     for entry in entries:
         plan = post_plan(db, entry, caller, today, held, access)
@@ -732,6 +729,27 @@ def unposted_months(db: Session, card: Account, caller,
     return out
 
 
+def _reviewed_entries(db: Session, card_id: int) -> List[BudgetEntry]:
+    """The card's active, reviewed recurring entries, by id: inside a request with
+    a context, read once for every account the caller holds a role on."""
+    ctx = context_of(db)
+    if ctx is None:
+        return _read_reviewed(db, [card_id]).get(card_id, [])
+    return ctx.by_id("reviewed_entries", [card_id], lambda ids: _read_reviewed(db, ids),
+                     universe=lambda: sorted(ctx.access.roles))[card_id] or []
+
+
+def _read_reviewed(db: Session, card_ids) -> Dict[int, List[BudgetEntry]]:
+    out: Dict[int, List[BudgetEntry]] = {}
+    for e in db.query(BudgetEntry).filter(
+            BudgetEntry.account_id.in_(list(card_ids)),
+            BudgetEntry.is_active.is_(True),
+            BudgetEntry.installment_reviewed_at.isnot(None),
+    ).order_by(BudgetEntry.id):
+        out.setdefault(e.account_id, []).append(e)
+    return out
+
+
 def unposted_summary(months: List[UnpostedMonth]) -> Optional[dict]:
     """The credit detail's ``unposted``: ``{count, postable, oldest_close,
     oldest_due}`` over ``months``, or None when there are none."""
@@ -742,7 +760,7 @@ def unposted_summary(months: List[UnpostedMonth]) -> Optional[dict]:
             "oldest_close": oldest.close.isoformat(), "oldest_due": oldest.due.isoformat()}
 
 
-def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
+def statements_due(ctx: RequestContext) -> List[dict]:
     """``CardStatementDue[]``: each managed credit card (owner or admin, active,
     with or without a limit: a superset of the credit pass) with something to
     clear on its closed statements, by name.
@@ -767,12 +785,12 @@ def statements_due(db: Session, user, fx: Optional[FxRates]) -> List[dict]:
     Post now would record. With no unposted month the row is exactly the
     recorded one.
     """
-    today = manila_today()
+    db, user, fx, today = ctx.db, ctx.user, ctx.fx, ctx.today
     end = today + timedelta(days=WINDOW_DAYS + 1)
     cards = viewable_accounts(db, user, active_only=True, roles=MANAGE_ROLES).filter(
         Account.account_type == AccountType.CREDIT).all()
     # The viewable accounts and every card's rows are read once, not per card.
-    viewable_ids = viewable_account_ids(db, user)
+    viewable_ids = ctx.viewable_ids()
     card_rows, stored = (statements_store.read_card_rows(db, cards, viewable_ids, today)
                          if cards else (None, {}))
     overrides = load_due_overrides(db, [c.id for c in cards])

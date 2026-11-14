@@ -178,7 +178,7 @@ def test_income_names_no_settlement(world):
 
 
 def test_wallet_spending_names_no_settlement(world, sw_db):
-    from app.core.redaction import Redactor
+    from app.core.context import RequestContext
     from app.models.user import User
     from app.services.missed import entry_row_fields
 
@@ -187,7 +187,7 @@ def test_wallet_spending_names_no_settlement(world, sw_db):
     spending = _entry(client, o, wallet, "Lunch")
     # The projection skips wallet spending, so no snapshot list shows it.
     rows = [{"source": "budget_entry", "source_id": spending["id"]}]
-    entry_row_fields(sw_db, rows, Redactor(sw_db, sw_db.get(User, o["id"])))
+    entry_row_fields(RequestContext(sw_db, sw_db.get(User, o["id"])), rows)
     assert rows[0]["kind"] == "cash" and rows[0]["settlement"] is None
 
 

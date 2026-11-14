@@ -26,6 +26,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, fx_rates, hh_household
 
 HERE = os.path.dirname(__file__)
@@ -423,8 +424,8 @@ def test_dates_round_trip_at_midnight(tmp_path, owner, sw_db, sw_client):
     assert [(h["close"].date(), h["balance"]) for h in history] == [
         (date(2026, 3, 31), D("100.00")), (date(2026, 4, 30), D("200.00"))]
 
-    flow = cashflow_by_currency(sw_db, owner["id"], months=2, reference=datetime(2026, 4, 5),
-                                fx=fx_rates())
+    flow = cashflow_by_currency(RequestContext(sw_db, owner["id"], fx=fx_rates()), months=2,
+                                reference=datetime(2026, 4, 5))
     php = [next(r for r in p["by_currency"] if r["currency"] == "PHP") for p in flow["periods"]]
     assert (php[0]["unposted_expenses"], php[1]["unposted_expenses"]) == (300.0, 400.0)
     assert (php[0]["expenses"], php[1]["expenses"]) == (0.0, 50.0)

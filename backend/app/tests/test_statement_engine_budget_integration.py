@@ -1,14 +1,16 @@
 """``statement_day`` work per snapshot is linear in the card rows (STU-600, PERF-5 AC2).
 
 Hard gate: one ``GET /dashboard/snapshot`` calls ``statements.statement_day`` at
-most 5 times per card row (every row touching one of the caller's cards,
+most 4 times per card row (every row touching one of the caller's cards,
 counted once per card it touches): the engine reads each line's day once per
-replay, and the snapshot replays five times today, four statement-payable
-passes (one per ``collect_events`` run, RC2) and one ``statement_summaries``
-pass (``statements_due``). Before the single-pass engine the replay called it
-once per row per cycle, about 295,000 times on a 2-year history; here that is
-roughly 36 cycles x 1,500 rows x 5 passes. PERF-3 (one ``collect_events`` per
-request) brings the pass count, and this limit, down.
+replay. The snapshot replayed five times before PERF-3 (STU-598), four
+statement-payable passes (one per ``collect_events`` run, RC2) and one
+``statement_summaries`` pass (``statements_due``). With one ``collect_events``
+run per request and the stored closed statements (STU-601) it measures under one
+call per card row (0.95 at STU-598); the limit keeps headroom below the old
+five. Before the single-pass engine the replay called it once per row per
+cycle, about 295,000 times on a 2-year history; here that is roughly 36 cycles
+x 1,500 rows x 5 passes.
 
 The fixture is seeded (``random.Random``) and self-contained: three years of
 history on three cards (closing on the 15th, on the 31st, and a legacy
@@ -34,7 +36,7 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 REF = datetime(2026, 11, 13, 2, 0)
 YEARS = 3
 ROWS = 1500
-CALLS_PER_CARD_ROW = 5  # passes per snapshot, see the module docstring
+CALLS_PER_CARD_ROW = 4  # passes per snapshot, see the module docstring
 
 
 def _seed(client, db, who, rng: random.Random):

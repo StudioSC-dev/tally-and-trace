@@ -33,6 +33,7 @@ def check_sheet(ctx, block) -> None:
     from app.cutover_check.check import _day, effect_on, ledger_balance, row_ref, touching
     from app.cutover_check.statements import naive
     from app.models.transaction import Transaction
+    from app.core.context import RequestContext
     from app.services.forecast import cashflow_by_currency, is_projection_cash
 
     s = ctx.frozen.sheet
@@ -57,8 +58,8 @@ def check_sheet(ctx, block) -> None:
     horizon = months_between(L, last) + 1 if last >= L else 0
     periods: List[dict] = []
     if horizon > 0:
-        periods = cashflow_by_currency(ctx.db, ctx.owner.id, months=horizon, reference=T,
-                                       fx=ctx.fx)["periods"]
+        periods = cashflow_by_currency(RequestContext(ctx.db, ctx.owner, fx=ctx.fx),
+                                       months=horizon, reference=T)["periods"]
 
     overflow: List[Decimal] = []
     running = Decimal("0")

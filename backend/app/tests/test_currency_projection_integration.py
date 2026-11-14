@@ -11,6 +11,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, FX_REF, sw_db_reachable, sw_share
 
 pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="no database available")
@@ -479,8 +480,8 @@ def test_disposable_keeps_the_leg_it_can_convert(sw_db, cx):
     from app.tests.conftest import FX_STORE, FxNoNetwork, fx_clock
 
     no_php = MemoryRateStore([r for c, r in FX_STORE.all().items() if c != "PHP"])
-    body = disposable_by_currency(sw_db, cx["a"]["id"],
-                                  fx=FxRates(no_php, FxNoNetwork(), fx_clock, lambda: None))
+    body = disposable_by_currency(RequestContext(
+        sw_db, cx["a"]["id"], fx=FxRates(no_php, FxNoNetwork(), fx_clock, lambda: None)))
     usd, php = _row(body, "USD"), _row(body, "PHP")
     assert (usd["monthly_expenses"], usd["moved_out"], usd["monthly_disposable"]) == (
         1_550.0, 500.0, -2_050.0)

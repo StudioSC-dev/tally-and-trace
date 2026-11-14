@@ -186,7 +186,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
     statement's due date, whatever ``end`` is. ``fx`` holds the request's
     stored rates (offline ones when None).
     """
-    from app.core.redaction import LIMITED, Redactor
+    from app.core.redaction import LIMITED, redactor_for
     from app.services.forecast import (
         Money, _billed_card_occurrences, _linked_occurrence_days, effective_window_occurrences,
     )
@@ -225,7 +225,7 @@ def household_occurrences(db: Session, grant: HouseholdGrant, scope: Iterable[Ac
 
     out: List[Occurrence] = []
     card_lines: Dict[int, list] = {}  # card id -> [(occurrence, line key)]
-    redactor = Redactor(db, access.uid, access)
+    redactor = redactor_for(db, access.uid, access)
     estimates: Dict[int, dict] = {}  # id(occurrence) -> its card line's estimate
 
     def in_card_currency(occ: Occurrence) -> bool:
@@ -607,12 +607,27 @@ def household_view(db: Session, user, sharer_id: int) -> Optional[HouseholdGrant
 def household_events(db: Session, user, grant: HouseholdGrant, start: datetime, end: datetime,
                      *, keep_origin: bool = False, fx=None) -> List[dict]:
     """``collect_events`` in Household mode: the Household view of ``grant``'s
-    sharer, with the per-currency detail (``collect_events(detail=True)``)."""
-    from app.services.forecast import collect_events
+    sharer, with the per-currency detail (``collect_events(detail=True)``). Inside a
+    request with a context the view's events are read once (``RequestContext.events_run``)."""
+    from app.core.context import context_of
+    from app.services.forecast import _naive, collect_events, within
 
-    return collect_events(db, start, end, user_id=_uid(user),
-                          accounts=household_accounts(db, user, grant), household=grant,
-                          keep_origin=keep_origin, fx=fx, detail=True)
+    def collect(through: datetime, origin: bool = keep_origin) -> List[dict]:
+        return collect_events(db, start, through, user_id=_uid(user),
+                              accounts=household_accounts(db, user, grant), household=grant,
+                              keep_origin=origin, fx=fx, detail=True)
+
+    ctx = context_of(db)
+    if ctx is None or ctx.uid != _uid(user):
+        return collect(end)
+    # One run per request and view, as ``forecast.shared_events`` does for the caller's.
+    start, end = _naive(start), _naive(end)
+    events = within(ctx.events_run(("household", grant.sharer_id, start), end,
+                                   lambda through: collect(through, True)), end)
+    if not keep_origin:
+        for e in events:
+            del e["origin"]
+    return events
 
 
 def household_upcoming(db: Session, user, grant: HouseholdGrant, start: datetime,
@@ -661,6 +676,11 @@ def _next_month(day: datetime) -> datetime:
     return day.replace(year=day.year + day.month // 12, month=day.month % 12 + 1, day=1)
 
 
+def month_end(month: datetime) -> datetime:
+    """The end of ``household_monthly``'s window when ``month`` is its last month."""
+    return _next_month(month)
+
+
 def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime, last: datetime,
                       reference: Optional[datetime] = None, fx=None) -> List[dict]:
     """Monthly totals of ``grant``'s Household view, per currency, never added
@@ -707,7 +727,7 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
     """
     from app.core.access import household_grants, readable_criterion, touches_accounts
     from app.core.access import viewable_account_ids
-    from app.core.redaction import Redactor
+    from app.core.redaction import redactor_for
     from app.core.time import manila_wall_now
     from app.services.forecast import is_projection_cash
 
@@ -740,7 +760,7 @@ def household_monthly(db: Session, user, grant: HouseholdGrant, first: datetime,
             types[account_id] = account.account_type if account else None
         return types[account_id] in LIABILITIES
 
-    redactor = Redactor(db, uid)
+    redactor = redactor_for(db, uid)
 
     def currency_of(account_id, fallback):
         account = db.get(Account, account_id) if account_id is not None else None

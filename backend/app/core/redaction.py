@@ -341,6 +341,19 @@ class Redactor:
         return [self.entry(e) for e in entries]
 
 
+def redactor_for(db: Session, user, access: Optional[RecordAccess] = None) -> Redactor:
+    """``user``'s ``Redactor`` (over ``access`` when given): the request's own with a
+    context (``app/core/context.py``) when its ``RecordAccess`` is ``access``, else a
+    new one."""
+    from app.core.context import context_of
+
+    ctx = context_of(db)
+    if ctx is not None and (access is None
+                            or ctx.record_access_of(getattr(user, "id", user)) is access):
+        return ctx.redactor_of(user)
+    return Redactor(db, user, access)
+
+
 def displayed_description_criterion(viewable_ids: Iterable[int], grants: Iterable = ()):
     """Criterion: a transaction whose stored description the caller is shown.
 

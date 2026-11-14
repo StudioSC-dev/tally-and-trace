@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from collections import Counter
+from copy import deepcopy
 from datetime import MAXYEAR, date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from itertools import count
@@ -23,9 +24,10 @@ from app.core.access import (
     DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, readable_criterion,
     tag_shared_account_ids, touches_accounts, viewable_account_ids, viewable_accounts,
 )
-from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, Redactor
+from app.core.context import RequestContext, context_of
+from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, redactor_for
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import manila_today, manila_wall_now
+from app.core.time import manila_wall_now
 # Unused here since the window moved to Manila, but tests pin the clock by
 # patching this module's ``naive_utc_now``.
 from app.core.time import naive_utc_now  # noqa: F401
@@ -198,7 +200,15 @@ def get_account_balances(db: Session, user_id: int):
     """The projection's scope: every active account the user sees (any role,
     ``tag_viewer`` included: a sharer's Household-tagged accounts), by id: the
     snapshot's per-account lists follow this order, and a query with no ORDER BY
-    returns rows in storage order, which moves as the table is updated."""
+    returns rows in storage order, which moves as the table is updated.
+    Read once per request with a context (``RequestContext.accounts``)."""
+    ctx = context_of(db)
+    if ctx is not None:
+        return list(ctx.memo(("accounts", user_id), lambda: _scope_accounts(db, user_id)))
+    return _scope_accounts(db, user_id)
+
+
+def _scope_accounts(db: Session, user_id: int):
     return (viewable_accounts(db, user_id, active_only=True, roles=VIEW_ROLES)
             .order_by(Account.id).all())
 
@@ -246,7 +256,8 @@ def project_cashflow(
     moved (``cashflow_by_currency``), in no column here but in ``net``.
     """
     boundaries = _month_boundaries(months, reference)
-    p = Projection(db, user_id, boundaries[0], boundaries[-1], tag_id=tag_id, fx=fx)
+    p = Projection(RequestContext(db, user_id, fx=fx), boundaries[0], boundaries[-1],
+                   tag_id=tag_id)
     return [{k: v for k, v in period.items() if k in LEGACY_PERIOD_KEYS}
             for period in _cashflow_periods(p, p.default, boundaries, rows=False)]
 
@@ -265,6 +276,12 @@ def _month_boundaries(months: int, reference: Optional[datetime]) -> list:
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = start.replace(day=1)
     return [start] + [_add_months(month_start, i) for i in range(1, months + 1)]
+
+
+def cashflow_window_end(months: int, reference: Optional[datetime] = None) -> datetime:
+    """The end of ``cashflow_by_currency``'s window over ``months`` (its last boundary),
+    for ``RequestContext.widen_events``."""
+    return _month_boundaries(months, reference)[-1]
 
 
 def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
@@ -620,18 +637,15 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
     return buckets
 
 
-def disposable_by_currency(db: Session, user_id: int, tag_id: Optional[int] = None,
-                           fx: Optional[FxRates] = None) -> dict:
+def disposable_by_currency(ctx: RequestContext, tag_id: Optional[int] = None) -> dict:
     """``/forecast/disposable``: the default currency's three figures, plus
     ``by_currency`` rows (``moved_in``/``moved_out`` too) and ``currencies``.
     Its rows are monthly equivalents of recurring entries; none is listed, so
     ``fx`` reports no rows."""
-    from app.core.access import household_grants
-
-    scope_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    db, user_id = ctx.db, ctx.uid
+    scope_ids = ctx.viewable_ids(roles=VIEW_ROLES)
     query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, viewable_account_ids(db, user_id),
-                           household_grants(db, user_id)),
+        readable_criterion(BudgetEntry, user_id, ctx.viewable_ids(), ctx.grants.values()),
         BudgetEntry.is_active.is_(True),
     )
     if tag_id is not None:
@@ -642,12 +656,12 @@ def disposable_by_currency(db: Session, user_id: int, tag_id: Optional[int] = No
         for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
     }
     wallet_ids = set(wallet_ids_of(db, referenced))
-    money = Money(db, fx)
+    money = Money(db, ctx.fx)
     buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, money)
-    default = default_currency(db, user_id)
+    default = ctx.default_currency
     rows = [{"currency": c, **(buckets.get(c) or _DisposableBucket()).as_dict()}
             for c in ordered_currencies(buckets, default)]
-    accounts = get_account_balances(db, user_id)
+    accounts = ctx.accounts
     collector = FxCollector()
     return {
         **{k: rows[0][k] for k in DISPOSABLE_KEYS},
@@ -1342,7 +1356,7 @@ def collect_events(
     scoped_ids = cash_ids | card_ids | scoped_wallet_ids
 
     events: List[dict] = []
-    redactor = Redactor(db, user_id)
+    redactor = redactor_for(db, user_id)
 
     # Every record of any type the caller created or that touches an account
     # in the scope (loans included), kept only when the caller may read it
@@ -1364,13 +1378,13 @@ def collect_events(
     entries = [e for e in db.query(BudgetEntry).filter(
         *disclosed(BudgetEntry),
         BudgetEntry.is_active.is_(True),
-    ).all() if access.readable(e)]
+    ).order_by(BudgetEntry.id).all() if access.readable(e)]
 
     txns = [t for t in db.query(Transaction).filter(
         *disclosed(Transaction),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).all() if access.readable(t)]
+    ).order_by(Transaction.id).all() if access.readable(t)]
 
     # Every wallet any event references among the accounts the caller can view
     # (inactive ones included). Whether an account they can't view is a wallet
@@ -1400,7 +1414,7 @@ def collect_events(
             Account.account_type == AccountType.LOAN,
             Account.is_active.is_(True),
             Account.payment_account_id.in_(scoped_ids),
-        ).all() if a.id not in loan_ids
+        ).order_by(Account.id).all() if a.id not in loan_ids
     ] if scoped_ids else []
     # Loans outside the scope the caller holds no role on: every event paying one
     # (derived payable, planned or recurring transfer) is a neutral "Loan payment".
@@ -1423,7 +1437,7 @@ def collect_events(
             Account.is_active.is_(True),
             or_(Account.payment_account_id.in_(scoped_ids),
                 Account.payment_overflow_account_id.in_(scoped_ids)),
-        ).all()
+        ).order_by(Account.id).all()
         if a.id not in card_ids and resolve_cycle_fields(a) is not None
         and (household is not None or access.access_map().of(a) == NONE)
     ] if scoped_ids else []
@@ -1658,7 +1672,7 @@ def collect_events(
             BudgetEntry.account_id.in_(list(hidden_cards)),
             BudgetEntry.is_active.is_(True),
             BudgetEntry.transfer_to_account_id.is_(None),
-        ).all()
+        ).order_by(BudgetEntry.id).all()
         hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None,
                                              money=money)
         for p in get_statement_payables(db, outside_cards, start, end,
@@ -1712,7 +1726,7 @@ def collect_events(
     loan_entries = db.query(BudgetEntry).filter(
         BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
         BudgetEntry.is_active.is_(True),
-    ).all() if payable_loan_ids else []
+    ).order_by(BudgetEntry.id).all() if payable_loan_ids else []
     linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
     forced_covers = load_entry_overrides(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
@@ -1791,6 +1805,43 @@ def collect_events(
             for key in DETAIL_KEYS:
                 e.pop(key, None)
     return events
+
+
+def shared_events(ctx: RequestContext, start: datetime, end: datetime, *,
+                  tag_id: Optional[int] = None, keep_origin: bool = False,
+                  detail: bool = False) -> List[dict]:
+    """``collect_events`` for the context's caller over ``[start, end)``, from the
+    request's one run (STU-598).
+
+    The run covers ``[start, horizon)``, the horizon being the furthest end the
+    request noted (``RequestContext.widen_events``), and each call keeps the
+    events dated before its own ``end``: a longer window with the same start adds
+    events after the others and changes none before ``end`` (statement payables,
+    loan dues and their covers are built to that rule; see
+    ``statements.build_statement_payables`` and services/loans.py). Each call
+    gets its own copies, then ``tag_id``, ``keep_origin`` and ``detail`` apply as
+    in ``collect_events``. A call reaching past the run's end, or from another
+    start, runs it again.
+    """
+    start, end = _naive(start), _naive(end)
+    run = ctx.events_run(("caller", start), end, lambda horizon: collect_events(
+        ctx.db, start, horizon, user_id=ctx.uid, accounts=ctx.accounts, fx=ctx.fx,
+        detail=True, keep_origin=True))
+    events = within(run, end)
+    if tag_id is not None:
+        events = _keep_tagged(ctx.db, events, tag_id)
+    for e in events:
+        if not keep_origin:
+            del e["origin"]
+        if not detail:
+            for k in DETAIL_KEYS:
+                e.pop(k, None)
+    return events
+
+
+def within(events: List[dict], end: datetime) -> List[dict]:
+    """Copies of the shared run's ``events`` dated before ``end`` (``shared_events``)."""
+    return [deepcopy(e) for e in events if _naive(e["date"]) < end]
 
 
 def _payable_legs(money: Money, funding, overflow, amount, currency, line_estimate,
@@ -2034,25 +2085,26 @@ def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List
     entry_ids = list(entry_ids)
     if not entry_ids:
         return []
-    rows = (
-        db.query(Transaction.budget_entry_id,
-                 func.coalesce(Transaction.occurrence_date, Transaction.transaction_date),
-                 Transaction.transaction_type, Transaction.account_id,
-                 Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
-                 BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
-                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
-                 Transaction.id, Transaction.is_posted)
-        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
-        .filter(Transaction.budget_entry_id.in_(entry_ids),
-                Transaction.user_id == BudgetEntry.user_id)
-        .order_by(Transaction.id)
-        .all()
-    )
-    touched = {acc for row in rows for acc in row[6:9] if acc is not None}
-    shared = {acc for (acc,) in db.query(Account.id).filter(
-        Account.id.in_(touched),
-        or_(Account.id.in_(select(AccountShare.account_id)),
-            Account.id.in_(tag_shared_account_ids())))} if touched else set()
+    ctx = context_of(db)
+    if ctx is None:
+        rows = _linked_query(db, entry_ids)
+        touched = {acc for row in rows for acc in row[6:9] if acc is not None}
+        shared = _shared_accounts(db, touched) if touched else set()
+    else:
+        # Read once per request, for every entry it may walk (``RequestContext``).
+        def load(ids):
+            grouped: Dict[int, list] = {}
+            for row in _linked_query(db, ids):
+                grouped.setdefault(row[0], []).append(row)
+            return grouped
+
+        found = ctx.by_id("linked_rows", entry_ids, load, universe=ctx.entry_ids)
+        rows = sorted((row for group in found.values() if group for row in group),
+                      key=lambda row: row[10])
+        touched = {acc for row in rows for acc in row[6:9] if acc is not None}
+        shared = {acc for acc, is_shared in ctx.by_id(
+            "shared_account", touched,
+            lambda ids: {acc: True for acc in _shared_accounts(db, ids)}).items() if is_shared}
 
     def on_entry_accounts(row) -> bool:
         _, _, kind, account, src, dst, entry_account, entry_dst, _, _ = row[:10]
@@ -2067,6 +2119,33 @@ def _linked_rows(db: Session, entry_ids, occurrence_match: bool = False) -> List
         return not shared.intersection(row[6:9]) or on_entry_accounts(row)
 
     return [(row[0], row[1], row[10], bool(row[11])) for row in rows if counts(row)]
+
+
+def _linked_query(db: Session, entry_ids) -> list:
+    """The rows naming the entries, with what ``_linked_rows`` decides on, by id."""
+    return (
+        db.query(Transaction.budget_entry_id,
+                 func.coalesce(Transaction.occurrence_date, Transaction.transaction_date),
+                 Transaction.transaction_type, Transaction.account_id,
+                 Transaction.transfer_from_account_id, Transaction.transfer_to_account_id,
+                 BudgetEntry.account_id, BudgetEntry.transfer_to_account_id,
+                 BudgetEntry.overflow_account_id, Transaction.occurrence_date.isnot(None),
+                 Transaction.id, Transaction.is_posted)
+        .join(BudgetEntry, BudgetEntry.id == Transaction.budget_entry_id)
+        .filter(Transaction.budget_entry_id.in_(entry_ids),
+                Transaction.user_id == BudgetEntry.user_id)
+        .order_by(Transaction.id)
+        .all()
+    )
+
+
+def _shared_accounts(db: Session, account_ids) -> set:
+    """The accounts among ``account_ids`` with any share (an account share, or the
+    owner's Household tag on it shared with anyone)."""
+    return {acc for (acc,) in db.query(Account.id).filter(
+        Account.id.in_(list(account_ids)),
+        or_(Account.id.in_(select(AccountShare.account_id)),
+            Account.id.in_(tag_shared_account_ids())))}
 
 
 def occurrence_links(db: Session, entry, day: date) -> List[tuple]:
@@ -2564,16 +2643,6 @@ def route_accounts(opening_by_account: dict, events: List[dict], account_names: 
     return _route_legs(opening_by_account, events, account_names)["shortfalls"]
 
 
-def _projection_accounts(db: Session, user_id: int):
-    """Accounts in scope, plus the projection-cash opening balance per account."""
-    accounts = get_account_balances(db, user_id)
-    opening_by_account = {
-        a.id: Decimal(str(a.balance)) for a in accounts if is_projection_cash(a)
-    }
-    account_names = {a.id: a.name for a in accounts}
-    return accounts, opening_by_account, account_names
-
-
 def project_running_balance(
     db: Session,
     user_id: int,
@@ -2589,7 +2658,7 @@ def project_running_balance(
     other currencies are ``timeline_by_currency``'s).
     """
     start, end = _timeline_window(days, reference)
-    p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
+    p = Projection(RequestContext(db, user_id, fx=fx), start, end, tag_id=tag_id)
     return _timeline(p, p.default, start, end, rows=False)
 
 
@@ -2697,18 +2766,19 @@ class _CurrencyLookup:
 class Projection:
     """One caller's projection events and opening balances, split by currency."""
 
-    def __init__(self, db: Session, user_id: int, start: datetime, end: datetime, *,
-                 tag_id: Optional[int] = None, fx: Optional[FxRates] = None):
-        self.db = db
-        self.user_id = user_id
-        self.accounts, self.opening_by_account, self.names = _projection_accounts(db, user_id)
-        self.money = Money(db, fx)
+    def __init__(self, ctx: RequestContext, start: datetime, end: datetime, *,
+                 tag_id: Optional[int] = None):
+        self.db = ctx.db
+        self.user_id = ctx.uid
+        self.accounts = ctx.accounts
+        self.opening_by_account = {
+            a.id: Decimal(str(a.balance)) for a in self.accounts if is_projection_cash(a)}
+        self.names = {a.id: a.name for a in self.accounts}
+        self.money = Money(ctx.db, ctx.fx)
         self.money.seed(self.accounts)
         self.currencies = _CurrencyLookup(self.money)
-        self.default = default_currency(db, user_id)
-        self.events = collect_events(db, start, end, user_id=user_id, accounts=self.accounts,
-                                     tag_id=tag_id, fx=self.money.fx if fx else None,
-                                     detail=True)
+        self.default = ctx.default_currency
+        self.events = shared_events(ctx, start, end, tag_id=tag_id, detail=True)
         self.cash_events = [e for e in self.events if e["counts_as_cash"]]
 
     def run(self, currency: str, *, rows: bool = True) -> tuple:
@@ -2861,7 +2931,7 @@ def timeline_by_currency(db: Session, user_id: int, days: int = 60,
     stays projection-wide, since an unconverted leg has no account to filter on.
     """
     start, end = _timeline_window(days, reference)
-    p = Projection(db, user_id, start, end, tag_id=tag_id, fx=fx)
+    p = Projection(RequestContext(db, user_id, fx=fx), start, end, tag_id=tag_id)
     collector = FxCollector()
     rows = []
     account = None
@@ -2928,9 +2998,8 @@ def serialize_currency_timeline(result: dict, currency: str, collector: FxCollec
     }
 
 
-def cashflow_by_currency(db: Session, user_id: int, months: int = 6,
+def cashflow_by_currency(ctx: RequestContext, months: int = 6,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
-                         fx: Optional[FxRates] = None,
                          collector: Optional[FxCollector] = None) -> dict:
     """``/forecast/cashflow``: each period's default-currency scalars plus
     ``by_currency`` rows; ``currencies`` and ``fx`` for the response.
@@ -2939,7 +3008,7 @@ def cashflow_by_currency(db: Session, user_id: int, months: int = 6,
     statement_payables + moved_in - moved_out + loan_payables`` (plan C3).
     """
     boundaries = _month_boundaries(months, reference)
-    p = Projection(db, user_id, boundaries[0], boundaries[-1], tag_id=tag_id, fx=fx)
+    p = Projection(ctx, boundaries[0], boundaries[-1], tag_id=tag_id)
     collector = collector or FxCollector()
     per_currency = {c: _cashflow_periods(p, c, boundaries, rows=True)
                     for c in p.run_currencies()}
@@ -2961,21 +3030,19 @@ def cashflow_by_currency(db: Session, user_id: int, months: int = 6,
             "fx": collector.as_dict()}
 
 
-def upcoming_by_currency(db: Session, user_id: int, days: int = 30,
+def upcoming_by_currency(ctx: RequestContext, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
-                         fx: Optional[FxRates] = None,
                          collector: Optional[FxCollector] = None,
                          ids: Optional["PublicIds"] = None) -> dict:
     """``/forecast/upcoming``: every item with its ``currency`` (a full one), plus
     ``currencies`` and ``fx``. No ``by_currency``: the list has no totals.
     ``ids`` numbers its limited items (``PublicIds``; a new one by default)."""
     start, end = _upcoming_window(days, reference)
-    accounts = get_account_balances(db, user_id)
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts,
-                            tag_id=tag_id, fx=fx, detail=True, keep_origin=True)
+    accounts = ctx.accounts
+    events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)
     collector = collector or FxCollector()
-    items = currency_upcoming_items(events, collector, ids, today=manila_today())
-    default = default_currency(db, user_id)
+    items = currency_upcoming_items(events, collector, ids, today=ctx.today)
+    default = ctx.default_currency
     return {"items": items,
             "currencies": response_currencies({_code(a.currency) for a in accounts},
                                               collector, default),
@@ -3106,9 +3173,8 @@ def _statement_fields(e: dict) -> dict:
     return {"statement_close": _naive(close).date().isoformat()} if close is not None else {}
 
 
-def payables_by_currency(db: Session, user_id: int, days: int = 30,
+def payables_by_currency(ctx: RequestContext, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
-                         fx: Optional[FxRates] = None,
                          collector: Optional[FxCollector] = None,
                          ids: Optional[PublicIds] = None) -> List[dict]:
     """``get_payables`` split by currency (plan C4): each event's sign filter and
@@ -3123,11 +3189,9 @@ def payables_by_currency(db: Session, user_id: int, days: int = 30,
     the occurrence it stands for (``occurrence_date``). A full card
     statement payable carries its ``statement_close`` (``_statement_fields``)."""
     start, end = _upcoming_window(days, reference)
-    today = manila_today()
-    accounts = get_account_balances(db, user_id)
-    names = {a.id: a.name for a in accounts}
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id,
-                            fx=fx, detail=True, keep_origin=True)
+    today = ctx.today
+    names = {a.id: a.name for a in ctx.accounts}
+    events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)
     collector = collector or FxCollector()
     payables = []
     limited = []  # (position in payables, event): numbered together below

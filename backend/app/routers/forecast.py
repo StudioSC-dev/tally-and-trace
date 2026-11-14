@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
+from app.core.context import RequestContext, request_context
 from app.core.database import get_db
 from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.user import User
@@ -32,21 +33,17 @@ router = APIRouter()
 @router.get("/cashflow")
 def get_cashflow(
     months: int = Query(6, ge=1, le=24, description="Number of months to project"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
-    fx: FxRates = Depends(get_fx),
 ):
     """
     Forward-looking cash-flow projection.
     Returns per-period breakdown: income, expenses, unposted debits, net, running balance.
     """
     result = forecast_svc.cashflow_by_currency(
-        db=db,
-        user_id=current_user.id,
+        ctx,
         months=months,
-        tag_id=filter_tag_id(db, current_user, tag),
-        fx=fx,
+        tag_id=filter_tag_id(ctx.db, ctx.user, tag),
     )
     return {"periods": result["periods"], "months": months,
             "currencies": result["currencies"], "fx": result["fx"]}
@@ -55,21 +52,17 @@ def get_cashflow(
 @router.get("/upcoming")
 def get_upcoming(
     days: int = Query(30, ge=1, le=365, description="Look-ahead window in days"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
-    fx: FxRates = Depends(get_fx),
 ):
     """
     Chronological list of upcoming bills/income from BudgetEntry.next_occurrence
     + unposted transactions within the next N days.
     """
     result = forecast_svc.upcoming_by_currency(
-        db=db,
-        user_id=current_user.id,
+        ctx,
         days=days,
-        tag_id=filter_tag_id(db, current_user, tag),
-        fx=fx,
+        tag_id=filter_tag_id(ctx.db, ctx.user, tag),
     )
     return {"items": result["items"], "days": days, "currencies": result["currencies"],
             "fx": result["fx"]}
@@ -113,10 +106,8 @@ def get_timeline(
 
 @router.get("/disposable")
 def get_disposable(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
-    fx: FxRates = Depends(get_fx),
 ):
     """
     Monthly net disposable income =
@@ -125,8 +116,6 @@ def get_disposable(
     minus money moved out across currencies, per currency.
     """
     return forecast_svc.disposable_by_currency(
-        db=db,
-        user_id=current_user.id,
-        tag_id=filter_tag_id(db, current_user, tag),
-        fx=fx,
+        ctx,
+        tag_id=filter_tag_id(ctx.db, ctx.user, tag),
     )

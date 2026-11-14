@@ -14,8 +14,8 @@ from app.core.conditional import conditional_get
 from app.core.config import settings
 from app.core.auth import get_current_active_user
 from app.core.database import get_db
-from app.core.access import TAG_VIEWER, access_map, owned_criterion
-from app.core.redaction import Redactor
+from app.core.access import TAG_VIEWER, owned_criterion
+from app.core.context import RequestContext, request_context
 from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
@@ -26,7 +26,7 @@ from app.services import forecast as forecast_svc
 from app.services import missed as missed_svc
 from app.services import quick_balances as quick_balances_svc
 from app.services.fx import FxRates, get_fx
-from app.core.time import manila_today, utc_now
+from app.core.time import utc_now
 
 router = APIRouter()
 
@@ -47,10 +47,8 @@ SAVINGS_RATE_FACTOR = 0.5
 
 @router.get("/snapshot", dependencies=[Depends(conditional_get)])
 def get_snapshot(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     tag: Optional[int] = Query(None, description=TAG_FILTER_HELP),
-    fx: FxRates = Depends(get_fx),
 ):
     """
     Single-call snapshot returning:
@@ -99,9 +97,9 @@ def get_snapshot(
     # Stamped before any list is computed: a request crossing Manila midnight
     # reports the older day, so the client refetches rather than taking
     # yesterday's rows for today's.
-    today = manila_today()
+    db, current_user, today = ctx.db, ctx.user, ctx.today
     tag_id = filter_tag_id(db, current_user, tag)
-    default = forecast_svc.default_currency(db, current_user.id)
+    default = ctx.default_currency
     collector = forecast_svc.FxCollector()
     # Limited public ids are numbered once per response: an occurrence keeps
     # one id in upcoming and payables, and distinct ones never share one.
@@ -109,7 +107,7 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 1. Account balances
     # -----------------------------------------------------------------------
-    accounts = forecast_svc.get_account_balances(db, current_user.id)
+    accounts = ctx.accounts
     total_balance = sum(a.balance for a in accounts if a.currency.value == default)
     balance_rows = [
         {
@@ -122,7 +120,7 @@ def get_snapshot(
     ]
     # By the caller's role: an account seen through a tag share shows only
     # what every role sees (no settings, so no spending-wallet flag).
-    held = access_map(db, current_user)
+    held = ctx.access
     by_account = [
         {
             "id": a.id,
@@ -139,20 +137,23 @@ def get_snapshot(
     # -----------------------------------------------------------------------
     # 2. Upcoming this month (next 30 days)
     # -----------------------------------------------------------------------
-    upcoming = forecast_svc.upcoming_by_currency(db, current_user.id, days=30, tag_id=tag_id,
-                                                 fx=fx, collector=collector, ids=ids)["items"]
+    # One ``collect_events`` run serves every list below (STU-598): it reaches
+    # the end of the cash-flow window, the furthest any of them reads.
+    ctx.widen_events(forecast_svc.cashflow_window_end(3))
+    upcoming = forecast_svc.upcoming_by_currency(ctx, days=30, tag_id=tag_id,
+                                                 collector=collector, ids=ids)["items"]
 
     # -----------------------------------------------------------------------
     # 3. Monthly income/expense summary (disposable income)
     # -----------------------------------------------------------------------
-    disposable = forecast_svc.disposable_by_currency(db, current_user.id, tag_id=tag_id, fx=fx)
+    disposable = forecast_svc.disposable_by_currency(ctx, tag_id=tag_id)
     disposable_data = {k: v for k, v in disposable.items() if k not in ("currencies", "fx")}
 
     # -----------------------------------------------------------------------
     # 4. 3-month cash-flow forecast
     # -----------------------------------------------------------------------
-    forecast_3m = forecast_svc.cashflow_by_currency(db, current_user.id, months=3, tag_id=tag_id,
-                                                    fx=fx, collector=collector)["periods"]
+    forecast_3m = forecast_svc.cashflow_by_currency(ctx, months=3, tag_id=tag_id,
+                                                    collector=collector)["periods"]
 
     # -----------------------------------------------------------------------
     # 5. Goals progress
@@ -236,31 +237,23 @@ def get_snapshot(
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.payables_by_currency(db, current_user.id, days=30, tag_id=tag_id,
-                                                 fx=fx, collector=collector, ids=ids)
-    # One redactor for the lists below: accounts and roles load once.
-    redactor = Redactor(db, current_user)
+    payables = forecast_svc.payables_by_currency(ctx, days=30, tag_id=tag_id,
+                                                 collector=collector, ids=ids)
     # After the other lists: its rows join the same ``fx`` and public ids.
     # Available credit on the cards the caller manages (owner or admin, with a
     # limit): no one else gets a credit key (services/card_credit.py).
-    credit = card_credit_svc.credit_for_cards(
-        db, current_user, card_credit_svc.managed_card_ids(db, current_user), fx=fx,
-        redactor=redactor)
+    credit = card_credit_svc.credit_for_cards(ctx, card_credit_svc.managed_card_ids(ctx))
     card_charges = card_charges_svc.card_charges_by_card(
-        db, current_user, fx=fx, collector=collector, ids=ids, redactor=redactor,
-        credit=credit)
-    statements_due = card_credit_svc.statements_due(db, current_user, fx)
-    infos = missed_svc.installment_infos(db, current_user, redactor=redactor)
-    missed = missed_svc.recurring_missed(db, current_user, redactor=redactor, tag_id=tag_id,
-                                         infos=infos)
-    installments = missed_svc.installment_snapshot(db, current_user, redactor=redactor,
-                                                   infos=infos)
-    autopay_due = missed_svc.autopay_due(db, current_user, redactor=redactor)
+        ctx, collector=collector, ids=ids, credit=credit)
+    statements_due = card_credit_svc.statements_due(ctx)
+    missed = missed_svc.recurring_missed(ctx, tag_id=tag_id)
+    installments = missed_svc.installment_snapshot(ctx)
+    autopay_due = missed_svc.autopay_due(ctx)
     # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
-    missed_svc.entry_row_fields(db, upcoming, redactor)
-    missed_svc.entry_row_fields(db, payables, redactor)
-    missed_svc.loan_row_fields(db, upcoming, redactor)
-    missed_svc.loan_row_fields(db, payables, redactor)
+    missed_svc.entry_row_fields(ctx, upcoming)
+    missed_svc.entry_row_fields(ctx, payables)
+    missed_svc.loan_row_fields(ctx, upcoming)
+    missed_svc.loan_row_fields(ctx, payables)
 
     return {
         "balances": {

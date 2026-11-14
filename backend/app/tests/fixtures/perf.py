@@ -9,11 +9,16 @@
 ``statement_day``  calls to ``statements.statement_day``
 ``collect_events`` calls to ``forecast.collect_events``
 ``instances``      ORM instances loaded (``loaded_as_persistent``)
+``access_maps``    ``AccessMap`` reads (``access._build_access_map``), the viewable
+                   accounts and roles, for the user read most often (STU-598)
+``record_access``  ``RecordAccess`` objects built, for the user built most often
+``redactors``      ``Redactor`` objects built, for the user built most often
+``contexts``       ``RequestContext`` objects built (``core/context.py``), in all
 ``cpu_ms``         ``time.process_time`` for the request (median of ``runs``)
 ``wall_ms``       wall clock for the request (median of ``runs``)
 
-The first five are exact and repeat run to run, so a test can gate on them. The last
-two depend on the machine and are only reported (and gated at a generous multiple).
+All but the last two are exact and repeat run to run, so a test can gate on them. The
+last two depend on the machine and are only reported (and gated at a generous multiple).
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import json
 import statistics
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Dict, List
@@ -29,6 +35,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 COUNTED_CALLS = ("statement_day", "collect_events")
+PER_USER = ("access_maps", "record_access", "redactors")
 _CANON_ID = 100_000
 
 
@@ -41,6 +48,10 @@ class Sample:
     instances: int
     cpu_ms: float
     wall_ms: float
+    access_maps: int = 0
+    record_access: int = 0
+    redactors: int = 0
+    contexts: int = 0
 
 
 def _canonical(node, key=None):
@@ -69,6 +80,9 @@ class _Counters:
         self.statements = 0
         self.instances = 0
         self.calls: Dict[str, int] = {n: 0 for n in COUNTED_CALLS}
+        # Per user: what the request built for that user (``_count_per_user``).
+        self.per_user: Dict[str, Counter] = {n: Counter() for n in PER_USER}
+        self.contexts = 0
         self._patched: List[tuple] = []
 
     def _statement(self, *args):
@@ -106,7 +120,46 @@ class _Counters:
                     module = sys.modules[mod_name]
                     self._patched.append((module, name, fn))
                     setattr(module, name, wrapped)
+        self._count_per_user()
         return self
+
+    def _count_per_user(self) -> None:
+        """Count, by user id, each ``AccessMap`` read and each ``RecordAccess`` and
+        ``Redactor`` built, and each ``RequestContext`` built: ``access._build_access_map``
+        is read by name from its module, the constructors from their classes."""
+        from app.core import access
+        from app.core.context import RequestContext
+        from app.core.redaction import Redactor
+
+        def on_build(fn):
+            def wrapper(db, uid, *a, **kw):
+                self.per_user["access_maps"][uid] += 1
+                return fn(db, uid, *a, **kw)
+            return wrapper
+
+        def on_init(fn, name):
+            def wrapper(obj, db, user, *a, **kw):
+                self.per_user[name][getattr(user, "id", user)] += 1
+                return fn(obj, db, user, *a, **kw)
+            return wrapper
+
+        def on_context(fn):
+            def wrapper(obj, *a, **kw):
+                self.contexts += 1
+                return fn(obj, *a, **kw)
+            return wrapper
+
+        for target, attr, wrapped in (
+                (RequestContext, "__init__", on_context(RequestContext.__init__)),
+                (access, "_build_access_map", on_build(access._build_access_map)),
+                (access.RecordAccess, "__init__",
+                 on_init(access.RecordAccess.__init__, "record_access")),
+                (Redactor, "__init__", on_init(Redactor.__init__, "redactors"))):
+            self._patched.append((target, attr, getattr(target, attr)))
+            setattr(target, attr, wrapped)
+
+    def most_per_user(self, name: str) -> int:
+        return max(self.per_user[name].values(), default=0)
 
     def __exit__(self, *exc):
         event.remove(self.engine, "before_cursor_execute", self._statement)
@@ -128,6 +181,8 @@ def measure(client, headers, path: str, runs: int = 5) -> Sample:
         r = client.get(url, headers=headers)
     counts = (c.statements, canonical_bytes(r.content), c.calls["statement_day"],
               c.calls["collect_events"], c.instances)
+    per_user = {name: c.most_per_user(name) for name in PER_USER}
+    per_user["contexts"] = c.contexts
     cpu: List[float] = []
     wall: List[float] = []
     for _ in range(max(runs, 1)):
@@ -137,7 +192,8 @@ def measure(client, headers, path: str, runs: int = 5) -> Sample:
         assert r.status_code == 200, (path, r.status_code)
         cpu.append((c1 - c0) * 1000)
         wall.append((w1 - w0) * 1000)
-    return Sample(*counts, cpu_ms=statistics.median(cpu), wall_ms=statistics.median(wall))
+    return Sample(*counts, cpu_ms=statistics.median(cpu), wall_ms=statistics.median(wall),
+                  **per_user)
 
 
 # --- the requests the budgets and the benchmark cover -----------------------------------------

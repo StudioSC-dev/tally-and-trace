@@ -53,34 +53,41 @@ class Budget(NamedTuple):
 # STU-601 (PERF-6, stored closed statements) lowered statement_day and instances the same
 # way; its SQL counts rose by up to 10 (each statement read loads the cards' stored state
 # and rows) and stayed within these ceilings.
+# STU-598 (PERF-3, one request context per read) lowered them again to its measured
+# result plus 10% (``collect_events`` to its exact count: one run per read at most).
+# The owner's card-credit instances rose from 491 to 493 (ceiling 543): the per-entry
+# reads now load every reviewed installment and held-month pair the caller may walk
+# in one query each, a few more rows than the one card needs, for 26 statements
+# instead of 49. Refitted after STU-623 (shared card holds released after each read),
+# which took one or two statements off the shared-caller snapshots and household reads.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
-    ("owner", "snapshot"): Budget(351, 111_157, 807, 4, 2_023),
-    ("owner", "installment-plans"): Budget(70, 1_963, 0, 0, 26),
-    ("owner", "budget-entries"): Budget(20, 14_408, 0, 0, 29),
+    ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
+    ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
+    ("owner", "budget-entries"): Budget(16, 14_408, 0, 0, 29),
     ("owner", "accounts"): Budget(12, 9_876, 0, 0, 16),
-    ("owner", "transactions"): Budget(17, 20_829, 0, 0, 38),
-    ("owner", "statements"): Budget(13, 47_893, 431, 0, 435),
-    ("owner", "card-credit"): Budget(54, 9_374, 431, 0, 491),
-    ("editor", "snapshot"): Budget(292, 36_062, 190, 4, 613),
-    ("editor", "installment-plans"): Budget(41, 713, 0, 0, 8),
-    ("editor", "budget-entries"): Budget(18, 4_187, 0, 0, 10),
+    ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
+    ("owner", "statements"): Budget(11, 47_893, 431, 0, 435),
+    ("owner", "card-credit"): Budget(29, 9_374, 431, 0, 543),
+    ("editor", "snapshot"): Budget(64, 36_062, 54, 1, 197),
+    ("editor", "installment-plans"): Budget(17, 713, 0, 0, 7),
+    ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
     ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
-    ("editor", "transactions"): Budget(16, 8_878, 0, 0, 27),
-    ("editor", "statements"): Budget(17, 47_875, 431, 0, 436),
-    ("viewer", "snapshot"): Budget(251, 31_604, 190, 4, 599),
-    ("viewer", "installment-plans"): Budget(10, 61, 0, 0, 5),
-    ("viewer", "budget-entries"): Budget(12, 39, 0, 0, 1),
+    ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
+    ("editor", "statements"): Budget(14, 47_875, 431, 0, 436),
+    ("viewer", "snapshot"): Budget(60, 31_604, 54, 1, 183),
+    ("viewer", "installment-plans"): Budget(9, 61, 0, 0, 5),
+    ("viewer", "budget-entries"): Budget(9, 39, 0, 0, 1),
     ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
-    ("viewer", "transactions"): Budget(16, 3_824, 0, 0, 21),
-    ("viewer", "statements"): Budget(17, 36_670, 427, 0, 434),
-    ("household", "snapshot"): Budget(233, 10_590, 119, 3, 223),
-    ("household", "installment-plans"): Budget(14, 61, 0, 0, 5),
-    ("household", "budget-entries"): Budget(18, 39, 0, 0, 1),
+    ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
+    ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),
+    ("household", "snapshot"): Budget(71, 10_590, 44, 1, 84),
+    ("household", "installment-plans"): Budget(13, 61, 0, 0, 5),
+    ("household", "budget-entries"): Budget(11, 39, 0, 0, 1),
     ("household", "accounts"): Budget(14, 358, 0, 0, 5),
-    ("household", "transactions"): Budget(25, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(71, 7_353, 38, 1, 73),
-    ("household", "household-monthly"): Budget(100, 138, 38, 1, 82),
-    ("household", "household-dashboard"): Budget(173, 7_740, 75, 2, 153),
+    ("household", "transactions"): Budget(18, 4_601, 0, 0, 21),
+    ("household", "household-upcoming"): Budget(59, 7_353, 38, 1, 73),
+    ("household", "household-monthly"): Budget(76, 138, 38, 1, 82),
+    ("household", "household-dashboard"): Budget(88, 7_740, 38, 1, 85),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full
@@ -171,6 +178,47 @@ def test_work_within_the_ceilings(measured, caller, endpoint):
     over = {f: (getattr(got, f), getattr(ceiling, f)) for f in Budget._fields
             if getattr(got, f) > getattr(ceiling, f)}
     assert not over, f"{caller} {endpoint} over its ceiling (measured, ceiling): {over}"
+
+
+# STU-598 (PERF-3): what each read builds, exactly. Every endpoint is named in one
+# of the sets below, so a new one has to be placed before its budget can pass.
+# The reads that run the projection (``collect_events``), once:
+PROJECTING = {"snapshot", "household-upcoming", "household-monthly", "household-dashboard"}
+# The reads that legitimately do not run it:
+NOT_PROJECTING = {"installment-plans", "budget-entries", "accounts", "transactions",
+                  "statements", "card-credit"}
+# The reads with no ``RequestContext``: the accounts list reads the caller's access map
+# once and builds no ``RecordAccess`` or ``Redactor``.
+NO_CONTEXT = {"accounts"}
+
+
+def _expected_once(endpoint: str) -> Dict[str, int]:
+    if endpoint in NO_CONTEXT:
+        built = {"contexts": 0, "access_maps": 1, "record_access": 0, "redactors": 0}
+    else:
+        built = {"contexts": 1, "access_maps": 1, "record_access": 1, "redactors": 1}
+    return {**built, "collect_events": 1 if endpoint in PROJECTING else 0}
+
+
+def test_every_budgeted_endpoint_is_placed_once():
+    endpoints = {endpoint for _, endpoint in BUDGETS}
+    assert PROJECTING.isdisjoint(NOT_PROJECTING)
+    assert PROJECTING | NOT_PROJECTING == endpoints
+    assert NO_CONTEXT <= endpoints
+
+
+@needs_db
+@pytest.mark.parametrize("caller,endpoint", sorted(BUDGETS))
+def test_one_request_context_per_request(measured, caller, endpoint):
+    """STU-598 (PERF-3): a context-backed read builds exactly one ``RequestContext``,
+    reads each user's ``AccessMap`` (the viewable accounts and roles) once and builds
+    their ``RecordAccess`` and ``Redactor`` once, and runs the projection's
+    ``collect_events`` exactly once when it projects (never when it does not). Exact,
+    so a read that stopped building the context (all zeros) fails as well."""
+    got = measured[(caller, endpoint)]
+    expected = _expected_once(endpoint)
+    once = {f: getattr(got, f) for f in expected}
+    assert once == expected, f"{caller} {endpoint}: measured {once}, expected {expected}"
 
 
 @needs_db

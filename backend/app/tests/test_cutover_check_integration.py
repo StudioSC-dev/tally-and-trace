@@ -10,6 +10,7 @@ import stat
 
 import pytest
 
+from app.core.context import RequestContext
 from app.cutover_check import bootstrap, schema
 
 DATA = os.path.join(os.path.dirname(__file__), "data", "cutover_check")
@@ -1518,9 +1519,9 @@ def test_the_sheet_reads_its_own_account_not_the_partition(world, target, sw_db)
     report = run_check(target, owner_frozen(world), blocks=sheet_only())
     assert block(report, "sheet")["status"] == "pass", block(report, "sheet")
     # The PHP partition's net moves with the second bank too: reading it would fail.
-    periods = cashflow_by_currency(sw_db, world["o"]["id"], months=2,
-                                   reference=datetime(2031, 3, 10),
-                                   fx=FxRates.offline(sw_db))["periods"]
+    periods = cashflow_by_currency(RequestContext(sw_db, world["o"]["id"],
+                                                  fx=FxRates.offline(sw_db)),
+                                   months=2, reference=datetime(2031, 3, 10))["periods"]
     php = next(r for r in periods[1]["by_currency"] if r["currency"] == "PHP")
     bank = next(a for a in php["by_account"] if a["account_id"] == world["bank"])
     assert Decimal(str(bank["closing_balance"])) - Decimal("74000") != Decimal(str(php["net"]))
@@ -1687,9 +1688,9 @@ def test_a_usd_account_is_absent_from_the_php_row(world, target, sw_db):
     world["post"]("/budget-entries/", {
         "name": "Dollar income", "entry_type": "income", "amount": 50, "currency": "USD",
         "account_id": world["usd"], "next_occurrence": day("2031-03-20")})
-    periods = cashflow_by_currency(sw_db, world["o"]["id"], months=1,
-                                   reference=datetime(2031, 3, 10),
-                                   fx=FxRates.offline(sw_db))["periods"]
+    periods = cashflow_by_currency(RequestContext(sw_db, world["o"]["id"],
+                                                  fx=FxRates.offline(sw_db)),
+                                   months=1, reference=datetime(2031, 3, 10))["periods"]
     php = next(r for r in periods[0]["by_currency"] if r["currency"] == "PHP")
     assert world["usd"] not in [a["account_id"] for a in php["by_account"]]
     raw = owner_frozen(world)

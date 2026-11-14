@@ -19,6 +19,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, hh_household, sw_db_reachable, sw_post
 
 pytestmark = [pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not reachable"),
@@ -134,7 +135,7 @@ def _statements(db, who, days=60):
     db.rollback()
     db.expire_all()
     out = [(p["due_date"], p["statement_close"], Decimal(str(p["amount"])))
-           for p in payables_by_currency(db, who["id"], days=days, reference=WALL)
+           for p in payables_by_currency(RequestContext(db, who["id"]), days=days, reference=WALL)
            if p["source"] == "statement"]
     # End the read: it holds the cards' statement locks shared (STU-601) until then.
     db.rollback()

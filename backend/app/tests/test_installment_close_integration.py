@@ -20,6 +20,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import create_engine, text
 
+from app.core.context import RequestContext
 from app.tests.conftest import API, sw_db_reachable, sw_post
 from app.tests.test_card_charges_integration import pin_clock
 
@@ -327,7 +328,7 @@ def test_close4_installment_payable_rolls_then_due_override_wins(world):
 
     def payable():
         db.expire_all()
-        (row,) = [p for p in fc.payables_by_currency(db, me["id"], days=60)
+        (row,) = [p for p in fc.payables_by_currency(RequestContext(db, me["id"]), days=60)
                   if p and p.get("source") == "statement" and p["source_id"] == card
                   and p["statement_close"] == "2026-11-04"]
         return row["statement_close"], row["due_date"]

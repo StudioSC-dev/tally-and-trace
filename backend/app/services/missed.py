@@ -39,9 +39,10 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.context import RequestContext
 from app.core.access import (
     MANAGE_ROLES, VIEW_ROLES, access_map, editable_account_ids, readable_criterion,
-    record_account_ids, touches_accounts, viewable_account_ids,
+    record_account_ids, touches_accounts,
 )
 from app.core.redaction import FULL, LIMITED, Redactor
 from app.core.tags import effective_tag_criterion
@@ -156,17 +157,22 @@ class InstallmentInfo:
     today: date
 
 
-def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, InstallmentInfo]:
+def installment_infos(ctx: RequestContext) -> Dict[int, InstallmentInfo]:
     """``{entry id: InstallmentInfo}`` for every active card installment the
     caller reads in full or shared_full (a Limited view is left out, as
     ``recurring_missed`` leaves it out), planned for the caller through Manila's
     today by ``post_plan``. One ``held_occurrences`` call covers the reviewed
     ones (the canonical assignment), so every caller sees the same held months.
     Not filtered by tag: the backstop posts whatever it can, whatever tag the
-    page is showing.
+    page is showing. Computed once per request (``RequestContext.memo``).
     """
+    return ctx.memo("installment_infos", lambda: _installment_infos(ctx))
+
+
+def _installment_infos(ctx: RequestContext) -> Dict[int, InstallmentInfo]:
+    db, user, redactor = ctx.db, ctx.user, ctx.redactor
     access = redactor.access
-    direct_ids = viewable_account_ids(db, user.id)
+    direct_ids = ctx.viewable_ids()
     grants = list(access.grants.values())
     candidates = db.query(BudgetEntry).filter(
         readable_criterion(BudgetEntry, user.id, direct_ids, grants),
@@ -181,7 +187,7 @@ def installment_infos(db: Session, user, *, redactor: Redactor) -> Dict[int, Ins
     entries = [e for e in candidates if is_card_installment(e, access.account(e.account_id))]
     if not entries:
         return {}
-    today = manila_today()
+    today = ctx.today
     reviewed = [e for e in entries if e.installment_reviewed_at is not None]
     held = held_occurrences(db, reviewed, today) if reviewed else Counter()
     out: Dict[int, InstallmentInfo] = {}
@@ -204,8 +210,7 @@ def _clean_review(db: Session, entry: BudgetEntry, user, today: date) -> Optiona
     return {"entry_version": posting_svc._iso(entry.updated_at), "review_token": state.token}
 
 
-def installment_snapshot(db: Session, user, *, redactor: Redactor,
-                         infos: Optional[Dict[int, InstallmentInfo]] = None) -> dict:
+def installment_snapshot(ctx: RequestContext) -> dict:
     """The snapshot's ``installment_review`` and ``installment_auto_post``.
 
     - ``installment_review``: active card installments the caller can edit that
@@ -228,8 +233,8 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
       ``can_post`` and ``can_review`` are both the caller's ``can_edit``. A
       viewer's or tag viewer's view is Limited, so they get no row.
     """
-    if infos is None:
-        infos = installment_infos(db, user, redactor=redactor)
+    db, user, redactor = ctx.db, ctx.user, ctx.redactor
+    infos = installment_infos(ctx)
     access = redactor.access
 
     def account_name(entry: BudgetEntry) -> Optional[str]:
@@ -269,7 +274,7 @@ def installment_snapshot(db: Session, user, *, redactor: Redactor,
     return {"installment_review": review, "installment_auto_post": posting}
 
 
-def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int],
+def _listed_entries(ctx: RequestContext, tag_id: Optional[int],
                     criteria: Sequence = ()) -> List[BudgetEntry]:
     """The recurring entries a list of the caller's may show, in id order: the
     payables' disclosure (``collect_events``' ``disclosed()`` in
@@ -278,10 +283,10 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     ``is_active``, so listing only active entries would reveal it. With
     ``tag_id`` only entries carrying it effectively are kept, and ``criteria``
     narrow the query further."""
-    user_id = user.id
+    db, user_id, redactor = ctx.db, ctx.uid, ctx.redactor
     access = redactor.access
-    scope_account_ids = {a.id for a in fc.get_account_balances(db, user_id)}
-    direct_ids = viewable_account_ids(db, user_id)
+    scope_account_ids = {a.id for a in ctx.accounts}
+    direct_ids = ctx.viewable_ids()
     grants = list(access.grants.values())
     query = db.query(BudgetEntry).filter(
         readable_criterion(BudgetEntry, user_id, direct_ids, grants),
@@ -301,11 +306,11 @@ def _listed_entries(db: Session, user, redactor: Redactor, tag_id: Optional[int]
     return [e for e in entries if access.readable(e) and redactor.view(e) != LIMITED]
 
 
-def _autopay_due_loans(db: Session, user, redactor: Redactor) -> List[dict]:
+def _autopay_due_loans(ctx: RequestContext) -> List[dict]:
     """``autopay_due``'s rows for the autopay loans the caller manages (only an
     owner or admin sees the flag), planned for the caller by ``loan_plan``.
     ``account_name`` is the paying account a notice names."""
-    today = manila_today()
+    db, user, redactor, today = ctx.db, ctx.user, ctx.redactor, ctx.today
     loans = db.query(Account).filter(
         Account.account_type == AccountType.LOAN, Account.is_active.is_(True),
         Account.auto_post_enabled.is_(True),
@@ -335,7 +340,7 @@ def _autopay_due_loans(db: Session, user, redactor: Redactor) -> List[dict]:
     return out
 
 
-def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
+def autopay_due(ctx: RequestContext) -> List[dict]:
     """The snapshot's ``autopay_due`` key: one row per autopay cash entry the
     caller can edit, in a view not Limited, with an occurrence due through
     Manila's today, planned for the caller by ``post_plan``, and per autopay loan
@@ -347,18 +352,17 @@ def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
     the account a notice names. A held row stays until it posts. Card installments
     stay in ``installment_auto_post``. Not filtered by tag, as that list is not.
     """
+    db, user, redactor, today = ctx.db, ctx.user, ctx.redactor, ctx.today
     access = redactor.access
-    entries = _listed_entries(db, user, redactor, None,
-                              (BudgetEntry.auto_post_enabled.is_(True),))
+    entries = _listed_entries(ctx, None, (BudgetEntry.auto_post_enabled.is_(True),))
     access.load(e.account_id for e in entries)
     entries = [e for e in entries
                if not is_card_installment(e, access.account(e.account_id))
                and auto_posts(e, access.account(e.account_id))
                and access.permissions(e)["can_edit"]]
-    today = manila_today()
     held = held_occurrences(db, entries, today) if entries else Counter()
     forced = load_entry_overrides(db, [e.id for e in entries])
-    out = _autopay_due_loans(db, user, redactor)
+    out = _autopay_due_loans(ctx)
     for entry in entries:
         plan = post_plan(db, entry, user, today, held, access)
         if not plan.due:
@@ -379,7 +383,7 @@ def autopay_due(db: Session, user, *, redactor: Redactor) -> List[dict]:
     return out
 
 
-def loan_row_fields(db: Session, rows: List[dict], redactor: Redactor) -> None:
+def loan_row_fields(ctx: RequestContext, rows: List[dict]) -> None:
     """Add ``settlement`` to each full loan row, in place: the loan's for an owner
     or admin, null for anyone else (the flag is theirs to see). Limited rows and
     other sources are left as they are."""
@@ -387,6 +391,7 @@ def loan_row_fields(db: Session, rows: List[dict], redactor: Redactor) -> None:
             and r.get("source_id") is not None]
     if not rows:
         return
+    db, redactor = ctx.db, ctx.redactor
     loans = {a.id: a for a in db.query(Account).filter(
         Account.id.in_({r["source_id"] for r in rows})).all()}
     for row in rows:
@@ -396,8 +401,7 @@ def loan_row_fields(db: Session, rows: List[dict], redactor: Redactor) -> None:
                              else None)
 
 
-def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[int],
-                     infos: Optional[Dict[int, InstallmentInfo]] = None) -> List[dict]:
+def recurring_missed(ctx: RequestContext, *, tag_id: Optional[int]) -> List[dict]:
     """The snapshot's ``missed`` key (see the module docstring), sorted by
     ``oldest_effective``, then name.
 
@@ -411,18 +415,18 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
     as the payables are. A card installment's row also carries ``auto_post`` (its
     ``installment_state``), ``block_reason`` and ``can_review`` (the caller can
     edit and ``auto_post_block`` is None, the rule that admits an entry to
-    ``installment_review``), which no other row has; ``infos`` is ``installment_infos`` when the caller has it.
+    ``installment_review``), which no other row has.
     """
-    user_id = user.id
+    db, redactor = ctx.db, ctx.redactor
     access = redactor.access
-    entries = _listed_entries(db, user, redactor, tag_id)
+    entries = _listed_entries(ctx, tag_id)
     if not entries:
         return []
 
     # Wallets as the projection judges them (``collect_events``): the scoped
     # ones plus any viewable account an entry is funded from.
-    accounts = fc.get_account_balances(db, user_id)
-    viewable_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
+    accounts = ctx.accounts
+    viewable_ids = ctx.viewable_ids(roles=VIEW_ROLES)
     wallet_ids = {a.id for a in accounts if fc.is_spending_wallet(a)} | fc.wallet_ids_of(
         db, (e.account_id for e in entries if e.account_id in viewable_ids))
     access.load(e.account_id for e in entries)
@@ -430,9 +434,8 @@ def recurring_missed(db: Session, user, *, redactor: Redactor, tag_id: Optional[
                if not _card_missed_covers(e, access.account(e.account_id))
                and not (e.transfer_to_account_id is None and e.account_id in wallet_ids)]
 
-    if infos is None:
-        infos = installment_infos(db, user, redactor=redactor)
-    today = manila_today()
+    infos = installment_infos(ctx)
+    today = ctx.today
     unrecorded = fc.unrecorded_occurrences(db, entries, through=today - timedelta(days=1))
     links = split_pending_links(db, entries, unrecorded, redactor)
     forced = load_entry_overrides(db, [e.id for e in entries])
@@ -508,7 +511,7 @@ def upcoming_window(start: Optional[date], end: Optional[date]) -> tuple:
             min(end, last) if end is not None else last)
 
 
-def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Optional[date],
+def upcoming_occurrences(ctx: RequestContext, *, start: Optional[date],
                          end: Optional[date], filters: UpcomingFilters, limit: int,
                          plan: Optional[str] = None) -> dict:
     """``{"items", "total"}``: every occurrence from ``start`` through ``end``
@@ -536,6 +539,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
     (``subscription``, or ``none`` for null) before the sort and ``limit``, so
     ``items`` and ``total`` are exact for one Transactions card tab; installments
     match neither. None keeps every entry."""
+    db, user, redactor = ctx.db, ctx.user, ctx.redactor
     first, last = upcoming_window(start, end)
     if first > last:
         return {"items": [], "total": 0}
@@ -548,7 +552,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
         criteria.append(BudgetEntry.user_id == user.id)
     if filters.search:
         criteria.append(BudgetEntry.name.ilike(f"%{filters.search}%"))
-    entries = _listed_entries(db, user, redactor, filters.tag_id, criteria)
+    entries = _listed_entries(ctx, filters.tag_id, criteria)
     if filters.category_names or filters.uncategorized:
         # As the transaction list matches them: the category its creator owns
         # and keeps active (``Redactor.category_name``), ORed with having none
@@ -569,7 +573,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
             return {"items": [], "total": 0}
     # Only card installments have an auto-post state: a list without one (a
     # ``plan`` partition never has one) skips the per-installment plans.
-    infos = (installment_infos(db, user, redactor=redactor)
+    infos = (installment_infos(ctx)
              if any(is_card_installment(e, access.account(e.account_id)) for e in entries)
              else {})
     unrecorded = fc.unrecorded_occurrences(db, entries, through=last, pending_records=True)
@@ -624,7 +628,7 @@ def upcoming_occurrences(db: Session, user, *, redactor: Redactor, start: Option
     return {"items": items[:limit], "total": len(items)}
 
 
-def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
+def installment_plans(ctx: RequestContext) -> dict:
     """``{"items", "auto_post_scheduled", "today"}``: one item per active entry
     ``_listed_entries`` gives whose ``plan_kind`` is ``installment``, with
     ``today`` the Manila day the items were computed for.
@@ -645,13 +649,12 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
 
     Sorted with an overdue ``effective_date`` first, then by ``effective_date``,
     ``name`` and ``entry_id``; a null one goes last."""
-    today = manila_today()
+    db, redactor, today = ctx.db, ctx.redactor, ctx.today
     access = redactor.access
-    entries = _listed_entries(db, user, redactor, None,
-                              (BudgetEntry.end_mode == "after_occurrences",))
+    entries = _listed_entries(ctx, None, (BudgetEntry.end_mode == "after_occurrences",))
     access.load(e.account_id for e in entries)
     entries = [e for e in entries if plan_kind(e, access.account(e.account_id)) == "installment"]
-    infos = installment_infos(db, user, redactor=redactor) if entries else {}
+    infos = installment_infos(ctx) if entries else {}
     paid = fc.occurrences_paid(db, entries)
     # One pass for every plan's linked rows: each walk is still capped at its
     # own ``max_occurrences`` (``capped_distinct_days``), so walking through the
@@ -701,7 +704,7 @@ def installment_plans(db: Session, user, *, redactor: Redactor) -> dict:
             "today": today}
 
 
-def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> None:
+def entry_row_fields(ctx: RequestContext, rows: Iterable[dict]) -> None:
     """Add ``kind`` (``entry_kind``), ``plan_kind`` (``plan_kind``, the
     Transactions card tab), ``settlement`` (``settlement``) and ``can_mark_paid``
     (the entry's ``can_post``, with an account to post to) to each full budget-entry row,
@@ -712,6 +715,7 @@ def entry_row_fields(db: Session, rows: Iterable[dict], redactor: Redactor) -> N
             and r.get("source_id") is not None]
     if not rows:
         return
+    db, redactor = ctx.db, ctx.redactor
     ids = {r["source_id"] for r in rows}
     entries = {e.id: e for e in db.query(BudgetEntry).filter(BudgetEntry.id.in_(ids)).all()}
     access = redactor.access

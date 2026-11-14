@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.conditional import conditional_get
 from app.core import locking
 from app.core.config import settings
+from app.core.context import RequestContext, request_context
 from app.core.auth import get_current_active_user
 from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.database import get_db
@@ -39,7 +40,7 @@ from app.models.allocation import Allocation
 from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
 from app.models.user import User
 from app.core.redaction import (
-    Redactor, full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
+    full_view_criterion, serialize_entries, serialize_entry, serialize_transaction,
 )
 from app.schemas.budget_entry import (
     CascadeUndo,
@@ -485,7 +486,8 @@ def _keep_final_month(entry: BudgetEntry, prospective_data: dict) -> None:
         prospective_data["occurrences_paid_offset"] = new_offset
 
 
-@router.get("/", response_model=BudgetEntryListResponse, dependencies=[Depends(conditional_get)])
+@router.get("/", response_model=BudgetEntryListResponse,
+            dependencies=[Depends(conditional_get), Depends(request_context)])
 def list_budget_entries(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -552,6 +554,7 @@ def _wall_day(value: Optional[datetime]) -> Optional[date]:
 def list_upcoming_occurrences(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
     account_ids: Optional[List[int]] = Query(None, description="Entries touching these accounts"),
     category_names: Optional[List[Annotated[str, Field(min_length=1, max_length=100)]]] = Query(
         None, max_length=50, description="Entries in a category of the creator's with this name"),
@@ -598,21 +601,18 @@ def list_upcoming_occurrences(
         tag_id=filter_tag_id(db, current_user, tag),
     )
     result = missed_svc.upcoming_occurrences(
-        db, current_user, redactor=Redactor(db, current_user), start=_wall_day(start_date),
+        ctx, start=_wall_day(start_date),
         end=_wall_day(end_date), filters=filters, limit=limit, plan=plan)
     return {**result, "auto_post_scheduled": settings.JOB_TOKEN is not None}
 
 
 # Declared before ``/{entry_id}``, which would otherwise take the path.
 @router.get("/installment-plans", response_model=InstallmentPlans, dependencies=[Depends(conditional_get)])
-def list_installment_plans(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
+def list_installment_plans(ctx: RequestContext = Depends(request_context)):
     """One row per active card installment the caller sees in full or
     shared_full, with its next unrecorded charge (services/missed.py
     ``installment_plans``), for the Transactions card's Installments tab."""
-    return missed_svc.installment_plans(db, current_user, redactor=Redactor(db, current_user))
+    return missed_svc.installment_plans(ctx)
 
 
 @router.get("/{entry_id}", response_model=BudgetEntryOut)

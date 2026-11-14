@@ -75,6 +75,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.util import identity_key
 
+from app.core.context import context_of
 from app.models.account import Account
 from app.models.account_share import AccountShare
 from app.models.budget_entry import BudgetEntry
@@ -203,8 +204,24 @@ class AccessMap:
 
 
 def access_map(db: Session, user, account_ids: Optional[Iterable[int]] = None) -> AccessMap:
-    """The caller's ``AccessMap``, in one query (with ``account_ids``, over those only)."""
-    uid = _uid(user)
+    """The caller's ``AccessMap``, in one query (with ``account_ids``, over those only).
+
+    Inside a request with a context (``app/core/context.py``) each user's map is
+    read once, and a map over ``account_ids`` is cut from it."""
+    ctx = context_of(db)
+    if ctx is None:
+        return _build_access_map(db, _uid(user), account_ids)
+    full = ctx.access_map(_uid(user))
+    if account_ids is None:
+        return full
+    ids = set(account_ids)
+    return AccessMap(full.uid, {i: r for i, r in full.roles.items() if i in ids},
+                     frozenset(i for i in full.active if i in ids))
+
+
+def _build_access_map(db: Session, uid: Optional[int],
+                      account_ids: Optional[Iterable[int]]) -> AccessMap:
+    """``access_map`` read from the database."""
     roles: Dict[int, str] = {}
     active: Set[int] = set()
     if uid is not None:
@@ -358,8 +375,16 @@ class HouseholdGrant:
 
 
 def household_grants(db: Session, user) -> List[HouseholdGrant]:
-    """The Household tag shares the caller holds, one per sharer (none: ``[]``)."""
+    """The Household tag shares the caller holds, one per sharer (none: ``[]``);
+    read once per request with a context."""
     uid = _uid(user)
+    ctx = context_of(db)
+    if ctx is not None:
+        return list(ctx.memo(("household_grants", uid), lambda: _household_grants(db, uid)))
+    return _household_grants(db, uid)
+
+
+def _household_grants(db: Session, uid: Optional[int]) -> List[HouseholdGrant]:
     shares = (db.query(Tag.id, Tag.user_id).join(TagShare, TagShare.tag_id == Tag.id)
               .filter(TagShare.user_id == uid, Tag.is_system.is_(True), Tag.user_id != uid)
               .order_by(Tag.user_id).all())
@@ -650,6 +675,12 @@ class RecordAccess:
             "can_revert": False,
             "can_tag": can_edit,
         }
+
+
+def record_access_for(db: Session, user) -> "RecordAccess":
+    """``user``'s ``RecordAccess``: the request's own with a context, else a new one."""
+    ctx = context_of(db)
+    return ctx.record_access_of(_uid(user)) if ctx is not None else RecordAccess(db, user)
 
 
 def record_permissions(db: Session, user, record) -> dict:

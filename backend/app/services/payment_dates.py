@@ -47,14 +47,34 @@ def _load(db: Session, column, ids: Iterable[Optional[int]]) -> Dict[int, Moved]
     return out
 
 
+def _load_once(db: Session, kind: str, column, ids: Iterable[Optional[int]],
+               universe=None) -> Dict[int, Moved]:
+    """``_load``, each id read once per request with a context
+    (``app/core/context.py``), the request's ``universe`` read with the first."""
+    from app.core.context import context_of
+
+    ctx = context_of(db)
+    if ctx is None:
+        return _load(db, column, ids)
+    found = ctx.by_id(kind, ids, lambda wanted: _load(db, column, wanted),
+                      universe=(lambda: universe(ctx)) if universe is not None else None)
+    out: Dict[int, Moved] = defaultdict(dict)
+    for owner, moved in found.items():
+        if moved:
+            out[owner] = dict(moved)
+    return out
+
+
 def load_entry_overrides(db: Session, entry_ids: Iterable[int]) -> Dict[int, Moved]:
-    """``{entry id: {nominal: effective}}``; an entry with none is missing or empty."""
-    return _load(db, PaymentDateOverride.budget_entry_id, entry_ids)
+    """``{entry id: {nominal: effective}}``; an entry with none is missing or empty.
+    In a request with a context, every entry the request may walk is read at once."""
+    return _load_once(db, "entry_overrides", PaymentDateOverride.budget_entry_id, entry_ids,
+                      universe=lambda ctx: ctx.entry_ids())
 
 
 def load_loan_overrides(db: Session, loan_ids: Iterable[int]) -> Dict[int, Moved]:
     """``{loan id: {nominal due date: effective}}``; a loan with none is missing or empty."""
-    return _load(db, PaymentDateOverride.loan_account_id, loan_ids)
+    return _load_once(db, "loan_overrides", PaymentDateOverride.loan_account_id, loan_ids)
 
 
 def effective(moved: Optional[Moved], day: date) -> date:
