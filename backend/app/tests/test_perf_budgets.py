@@ -60,6 +60,9 @@ class Budget(NamedTuple):
 # in one query each, a few more rows than the one card needs, for 26 statements
 # instead of 49. Refitted after STU-623 (shared card holds released after each read),
 # which took one or two statements off the shared-caller snapshots and household reads.
+# STU-599 (PERF-4) read the Household tag links of a tag holder's projection in one query
+# per kind of record instead of one per row: the household reads' SQL ceilings are
+# lowered to the measured result plus 10%.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
@@ -80,14 +83,14 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
     ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
     ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),
-    ("household", "snapshot"): Budget(71, 10_590, 44, 1, 84),
+    ("household", "snapshot"): Budget(51, 10_590, 44, 1, 84),
     ("household", "installment-plans"): Budget(13, 61, 0, 0, 5),
     ("household", "budget-entries"): Budget(11, 39, 0, 0, 1),
     ("household", "accounts"): Budget(14, 358, 0, 0, 5),
     ("household", "transactions"): Budget(18, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(59, 7_353, 38, 1, 73),
-    ("household", "household-monthly"): Budget(76, 138, 38, 1, 82),
-    ("household", "household-dashboard"): Budget(88, 7_740, 38, 1, 85),
+    ("household", "household-upcoming"): Budget(39, 7_353, 38, 1, 73),
+    ("household", "household-monthly"): Budget(63, 138, 38, 1, 82),
+    ("household", "household-dashboard"): Budget(69, 7_740, 38, 1, 85),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full

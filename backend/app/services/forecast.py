@@ -1375,16 +1375,22 @@ def collect_events(
         return (readable_criterion(model, user_id, direct_ids, grants),
                 or_(model.user_id == user_id, touches_accounts(model, scope_account_ids)))
 
-    entries = [e for e in db.query(BudgetEntry).filter(
+    def readable(rows: list) -> list:
+        # The Household tag links of every row read through a tag share, in one
+        # query per kind of record, rather than one per row ``readable`` asks about.
+        access.load_explicit(rows)
+        return [r for r in rows if access.readable(r)]
+
+    entries = readable(db.query(BudgetEntry).filter(
         *disclosed(BudgetEntry),
         BudgetEntry.is_active.is_(True),
-    ).order_by(BudgetEntry.id).all() if access.readable(e)]
+    ).order_by(BudgetEntry.id).all())
 
-    txns = [t for t in db.query(Transaction).filter(
+    txns = readable(db.query(Transaction).filter(
         *disclosed(Transaction),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).order_by(Transaction.id).all() if access.readable(t)]
+    ).order_by(Transaction.id).all())
 
     # Every wallet any event references among the accounts the caller can view
     # (inactive ones included). Whether an account they can't view is a wallet
