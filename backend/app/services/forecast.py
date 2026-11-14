@@ -1378,13 +1378,13 @@ def collect_events(
     entries = [e for e in db.query(BudgetEntry).filter(
         *disclosed(BudgetEntry),
         BudgetEntry.is_active.is_(True),
-    ).all() if access.readable(e)]
+    ).order_by(BudgetEntry.id).all() if access.readable(e)]
 
     txns = [t for t in db.query(Transaction).filter(
         *disclosed(Transaction),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).all() if access.readable(t)]
+    ).order_by(Transaction.id).all() if access.readable(t)]
 
     # Every wallet any event references among the accounts the caller can view
     # (inactive ones included). Whether an account they can't view is a wallet
@@ -1414,7 +1414,7 @@ def collect_events(
             Account.account_type == AccountType.LOAN,
             Account.is_active.is_(True),
             Account.payment_account_id.in_(scoped_ids),
-        ).all() if a.id not in loan_ids
+        ).order_by(Account.id).all() if a.id not in loan_ids
     ] if scoped_ids else []
     # Loans outside the scope the caller holds no role on: every event paying one
     # (derived payable, planned or recurring transfer) is a neutral "Loan payment".
@@ -1437,7 +1437,7 @@ def collect_events(
             Account.is_active.is_(True),
             or_(Account.payment_account_id.in_(scoped_ids),
                 Account.payment_overflow_account_id.in_(scoped_ids)),
-        ).all()
+        ).order_by(Account.id).all()
         if a.id not in card_ids and resolve_cycle_fields(a) is not None
         and (household is not None or access.access_map().of(a) == NONE)
     ] if scoped_ids else []
@@ -1672,7 +1672,7 @@ def collect_events(
             BudgetEntry.account_id.in_(list(hidden_cards)),
             BudgetEntry.is_active.is_(True),
             BudgetEntry.transfer_to_account_id.is_(None),
-        ).all()
+        ).order_by(BudgetEntry.id).all()
         hidden_charges = _card_entry_charges(db, card_rows, hidden_cards, start, end, None,
                                              money=money)
         for p in get_statement_payables(db, outside_cards, start, end,
@@ -1726,7 +1726,7 @@ def collect_events(
     loan_entries = db.query(BudgetEntry).filter(
         BudgetEntry.transfer_to_account_id.in_(payable_loan_ids),
         BudgetEntry.is_active.is_(True),
-    ).all() if payable_loan_ids else []
+    ).order_by(BudgetEntry.id).all() if payable_loan_ids else []
     linked_covers = _linked_occurrence_days(db, [e.id for e in loan_entries])
     forced_covers = load_entry_overrides(db, [e.id for e in loan_entries])
     projected_covers: dict = {}
