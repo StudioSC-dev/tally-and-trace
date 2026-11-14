@@ -59,6 +59,7 @@ export type {
   UpcomingBill,
   NetDisposableIncome,
   DashboardSnapshot,
+  DashboardDue,
   QuickBalances,
   BudgetEntryMaterializeInput,
   ForcedDateInput,
@@ -145,6 +146,7 @@ import type {
   TransactionSummary,
   CashflowTimeline,
   DashboardSnapshot,
+  DashboardDue,
   QuickBalances,
   WishlistItem,
   WishlistPlan,
@@ -207,14 +209,14 @@ function responseHeaders(meta: unknown): HeaderReader {
 }
 
 /** What recording installment months changes: the entries, their rows, card balances and credit, and envelopes. */
-const INSTALLMENTS_POSTED = ['BudgetEntry', 'Transaction', 'Account', 'Allocation'] as const
+const INSTALLMENTS_POSTED = ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'] as const
 
 // ─── RTK Query API ────────────────────────────────────────────────────────────
 
 // Creating, revoking or leaving a Household tag share changes which accounts, records,
 // recurring entries and projections the holder sees, and which Household views exist.
 const HOUSEHOLD_SHARE_CHANGED = [
-  'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'Account', 'Transaction', 'BudgetEntry', 'Allocation',
+  'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due',
 ] as const
 
 /** One queued save as sent: `url` relative to the API root, `idempotencyKey` on creates. */
@@ -234,7 +236,7 @@ export const accountingApi = createApi({
   // A save's invalidation runs inside its own settle, so its reload is already pending
   // when the save resolves.
   invalidationBehavior: 'immediately',
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances', 'Due'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
     getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
@@ -249,16 +251,16 @@ export const accountingApi = createApi({
       query: (account) => ({ url: 'accounts/', method: 'POST', body: account }),
       // An account's tags are effective tags on its transactions and entries.
       invalidatesTags: (_result, _error, account) =>
-        account.tag_ids && account.tag_ids.length > 0 ? ['Account', 'Transaction', 'BudgetEntry'] : ['Account'],
+        account.tag_ids && account.tag_ids.length > 0 ? ['Account', 'Transaction', 'BudgetEntry', 'Due'] : ['Account'],
     }),
     updateAccount: builder.mutation<Account, { id: number; data: AccountInput }>({
       query: ({ id, data }) => ({ url: `accounts/${id}`, method: 'PUT', body: data }),
       invalidatesTags: (_result, _error, { data }) =>
-        data.tag_ids !== undefined ? ['Account', 'Transaction', 'BudgetEntry'] : ['Account'],
+        data.tag_ids !== undefined ? ['Account', 'Transaction', 'BudgetEntry', 'Due'] : ['Account', 'Due'],
     }),
     deleteAccount: builder.mutation<void, number>({
       query: (id) => ({ url: `accounts/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Account'],
+      invalidatesTags: ['Account', 'Due'],
     }),
     // An owner, admin or editor gets the full schedule; a viewer gets the limited one.
     getLoanSchedule: builder.query<LoanScheduleResponse, number>({
@@ -272,11 +274,11 @@ export const accountingApi = createApi({
     }),
     recordLoanPayment: builder.mutation<Transaction, { id: number; data: LoanPaymentRequest }>({
       query: ({ id, data }) => ({ url: `accounts/${id}/loan-payment`, method: 'POST', body: data }),
-      invalidatesTags: ['Account', 'Transaction', 'Allocation'],
+      invalidatesTags: ['Account', 'Transaction', 'Allocation', 'Due'],
     }),
     recordLoanPrepayment: builder.mutation<Transaction, { id: number; data: LoanPrepaymentRequest }>({
       query: ({ id, data }) => ({ url: `accounts/${id}/loan-prepayment`, method: 'POST', body: data }),
-      invalidatesTags: ['Account', 'Transaction', 'Allocation'],
+      invalidatesTags: ['Account', 'Transaction', 'Allocation', 'Due'],
     }),
     getAccountBalance: builder.query<AccountBalance, number>({
       query: (id) => `accounts/${id}/balance`,
@@ -303,7 +305,7 @@ export const accountingApi = createApi({
     // One transfer into the card. A day after today is a planned payment.
     payCard: builder.mutation<Transaction, { accountId: number; data: CardPaymentInput }>({
       query: ({ accountId, data }) => ({ url: `cards/${accountId}/payments`, method: 'POST', body: data }),
-      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
     }),
     // Enter the minimum a closed statement actually shows, replacing the estimate.
     setStatementMinimum: builder.mutation<{ close_date: string; amount: number }, { accountId: number; closeDate: string; data: StatementMinimumInput }>({
@@ -312,14 +314,14 @@ export const accountingApi = createApi({
         method: 'PUT',
         body: data,
       }),
-      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry'],
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Due'],
     }),
     clearStatementMinimum: builder.mutation<void, { accountId: number; closeDate: string }>({
       query: ({ accountId, closeDate }) => ({
         url: `cards/${accountId}/statements/${closeDate}/minimum-due`,
         method: 'DELETE',
       }),
-      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry'],
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Due'],
     }),
     // Enter the due date a statement shows, replacing its rolled due everywhere: the
     // forecast, the dashboard and the statements read these tags, and Household too.
@@ -332,14 +334,14 @@ export const accountingApi = createApi({
         method: 'PUT',
         body: data,
       }),
-      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household'],
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household', 'Due'],
     }),
     clearStatementDue: builder.mutation<void, { accountId: number; closeDate: string }>({
       query: ({ accountId, closeDate }) => ({
         url: `cards/${accountId}/statements/${closeDate}/due-date`,
         method: 'DELETE',
       }),
-      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household'],
+      invalidatesTags: ['Account', 'Transaction', 'BudgetEntry', 'Household', 'Due'],
     }),
 
     // ── Categories ────────────────────────────────────────────────────────────
@@ -413,30 +415,30 @@ export const accountingApi = createApi({
     }),
     createBudgetEntry: builder.mutation<BudgetEntry, BudgetEntryInput>({
       query: (entry) => ({ url: 'budget-entries/', method: 'POST', body: entry }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation', 'Due'],
     }),
     updateBudgetEntry: builder.mutation<BudgetEntry, { id: number; data: BudgetEntryInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation', 'Due'],
     }),
     deleteBudgetEntry: builder.mutation<void, number>({
       query: (id) => ({ url: `budget-entries/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Allocation', 'Due'],
     }),
     // Mark paid. The body is the transaction; the X-Occurrence* headers say what was recorded.
     materializeBudgetEntry: builder.mutation<MaterializeOutcome, { id: number; data: BudgetEntryMaterializeInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/materialize`, method: 'POST', body: data }),
       transformResponse: (transaction: Transaction, meta) => ({ transaction, ...readMaterializeHeaders(responseHeaders(meta)) }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     // Force an occurrence onto another date (its scheduled day stays its identity), or put it back.
     setOccurrenceDate: builder.mutation<ForcedDateResult, { id: number; day: string; data: ForcedDateInput }>({
       query: ({ id, day, data }) => ({ url: `budget-entries/${id}/occurrences/${day}/date`, method: 'PUT', body: data }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     clearOccurrenceDate: builder.mutation<void, { id: number; day: string }>({
       query: ({ id, day }) => ({ url: `budget-entries/${id}/occurrences/${day}/date`, method: 'DELETE' }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     // What a refused date can become (Pay together, Delay all). Always fresh: the preview is only valid for the date asked.
     getForcedDateOptions: builder.query<ForcedDateOptions, { id: number; day: string; effectiveDate: string }>({
@@ -449,20 +451,20 @@ export const accountingApi = createApi({
     // Undo a Delay all with the token it replied with (not the entry PUT, which would drop auto-post and forced dates).
     undoCascade: builder.mutation<BudgetEntry, { id: number; data: CascadeUndoInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/cascade-undo`, method: 'POST', body: data }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     setLoanDueDate: builder.mutation<ForcedDateResult, { id: number; day: string; data: ForcedDateInput }>({
       query: ({ id, day, data }) => ({ url: `accounts/${id}/loan-due-dates/${day}/date`, method: 'PUT', body: data }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     clearLoanDueDate: builder.mutation<void, { id: number; day: string }>({
       query: ({ id, day }) => ({ url: `accounts/${id}/loan-due-dates/${day}/date`, method: 'DELETE' }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     // Post N due: every due occurrence of a non-capped subscription or cash expense at once.
     materializeDueBudgetEntry: builder.mutation<MaterializeDueResult, number>({
       query: (id) => ({ url: `budget-entries/${id}/materialize-due`, method: 'POST' }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Allocation', 'Due'],
     }),
     // Card installment review (STU-343 Plan B): what turning auto-post on would record, and its binding.
     getInstallmentReview: builder.query<InstallmentReview, number>({
@@ -482,7 +484,7 @@ export const accountingApi = createApi({
     // Turn a reviewed installment's auto-post off; it stays reviewed.
     setInstallmentAutoPost: builder.mutation<BudgetEntry, { id: number; data: InstallmentAutoPostToggleInput }>({
       query: ({ id, data }) => ({ url: `budget-entries/${id}/auto-post`, method: 'POST', body: data }),
-      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account'],
+      invalidatesTags: ['BudgetEntry', 'Transaction', 'Account', 'Due'],
     }),
     // Settlement of a cash entry (autopay or manual): what turning it on would post, and the toggle. On posts
     // each missed occurrence on its own day, so it invalidates what a posting does.
@@ -631,26 +633,26 @@ export const accountingApi = createApi({
     }),
     createTransaction: builder.mutation<Transaction, TransactionInput>({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
-      invalidatesTags: ['Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['Transaction', 'Due'],
     }),
     // Repeat in Add Transaction: the transaction and the recurring entry it is the first occurrence of,
     // in one request that commits both or neither (POST /transactions/repeating).
     createRepeatingTransaction: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
       query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
-      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Due'],
     }),
     // Edit's "Make this repeat": the edits and the entry the saved row starts, in one commit.
     makeTransactionRepeat: builder.mutation<RepeatingCreated, { id: number; body: RepeatEditInput }>({
       query: ({ id, body }) => ({ url: `transactions/${id}/repeat`, method: 'POST', body }),
-      invalidatesTags: ['Transaction', 'BudgetEntry', 'Account', 'Allocation'],
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Due'],
     }),
     updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['Transaction', 'Due'],
     }),
     deleteTransaction: builder.mutation<void, number>({
       query: (id) => ({ url: `transactions/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Transaction', 'Account', 'Allocation'],
+      invalidatesTags: ['Transaction', 'Due'],
     }),
     uploadReceipt: builder.mutation<{ message: string; file_url: string }, { transaction_id: number; file: File }>({
       query: ({ transaction_id, file }) => {
@@ -658,7 +660,7 @@ export const accountingApi = createApi({
         formData.append('file', file)
         return { url: `transactions/${transaction_id}/upload-receipt`, method: 'POST', body: formData }
       },
-      invalidatesTags: ['Transaction'],
+      invalidatesTags: ['Transaction', 'Due'],
     }),
     // A receipt is served only behind auth (GET /transactions/{id}/receipt), so it is
     // fetched as a blob and shown through an object URL; the caller revokes the URL.
@@ -689,6 +691,16 @@ export const accountingApi = createApi({
     getDashboardSnapshot: builder.query<DashboardSnapshot, { tag?: number } | void>({
       query: (params) => ({ url: 'dashboard/snapshot', params: params ?? {} }),
       providesTags: ['Account', 'BudgetEntry', 'Transaction', 'Allocation'],
+    }),
+
+    // The Transactions page's Due card in one request (docs/dashboard-due.md): the snapshot's due
+    // lists, the pending rows they link, both upcoming-occurrence lists and the unposted rows.
+    // Its own `Due` tag: every mutation that can change a due list invalidates it, and a
+    // transaction save leaves `Account` and `Allocation` alone. An API without the route answers 404;
+    // the card then reads the older queries.
+    getDashboardDue: builder.query<DashboardDue, { unposted_page?: number } | void>({
+      query: (params) => ({ url: 'dashboard/due', params: params ?? {} }),
+      providesTags: ['Due'],
     }),
 
     // The tiles under "Quick balances". A payment or any balance change refreshes them.
@@ -730,11 +742,11 @@ export const accountingApi = createApi({
     }),
     updateTag: builder.mutation<Tag, { id: number; data: TagUpdate }>({
       query: ({ id, data }) => ({ url: `tags/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
+      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry', 'Due'],
     }),
     deleteTag: builder.mutation<void, number>({
       query: (id) => ({ url: `tags/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry'],
+      invalidatesTags: ['Tag', 'Account', 'Transaction', 'BudgetEntry', 'Due'],
     }),
 
     // ── Shares ────────────────────────────────────────────────────────────────
@@ -750,7 +762,7 @@ export const accountingApi = createApi({
     // the recurring entries that person kept on the account.
     createAccountShare: builder.mutation<AccountShare, { accountId: number; data: ShareCreate }>({
       query: ({ accountId, data }) => ({ url: `accounts/${accountId}/shares`, method: 'POST', body: data }),
-      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
     }),
     updateAccountShare: builder.mutation<AccountShare, { accountId: number; shareId: number; data: ShareUpdate }>({
       query: ({ accountId, shareId, data }) => ({
@@ -758,11 +770,11 @@ export const accountingApi = createApi({
         method: 'PATCH',
         body: data,
       }),
-      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
     }),
     deleteAccountShare: builder.mutation<void, { accountId: number; shareId: number }>({
       query: ({ accountId, shareId }) => ({ url: `accounts/${accountId}/shares/${shareId}`, method: 'DELETE' }),
-      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+      invalidatesTags: ['Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
     }),
     // Shares other people made to the caller.
     getReceivedShares: builder.query<ReceivedShare[], void>({
@@ -772,7 +784,7 @@ export const accountingApi = createApi({
     // Leaving drops the account and every record, entry and projection that came through it.
     leaveShare: builder.mutation<void, number>({
       query: (shareId) => ({ url: `shares/received/${shareId}`, method: 'DELETE' }),
-      invalidatesTags: ['ReceivedShare', 'Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation'],
+      invalidatesTags: ['ReceivedShare', 'Share', 'Account', 'Transaction', 'BudgetEntry', 'Allocation', 'Due'],
     }),
     // ── Household tag shares ──────────────────────────────────────────────────
     // The sharer's side (the Household tag's owner only; demo users get 403). A holder
@@ -983,6 +995,7 @@ export const {
 
   // Dashboard hooks
   useGetDashboardSnapshotQuery,
+  useGetDashboardDueQuery,
   useGetQuickBalancesQuery,
   usePutQuickBalancesMutation,
   // Forecast hooks

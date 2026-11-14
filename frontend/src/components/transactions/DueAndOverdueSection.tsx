@@ -66,6 +66,8 @@ import type {
   RecurringAction,
   Transaction,
   CreditCheck,
+  DashboardDue,
+  DueLists,
   InstallmentPlan,
   SubscriptionRow,
   UpcomingOccurrence,
@@ -76,6 +78,7 @@ import { useManilaDay } from '../../hooks/useManilaDay'
 import { useToday } from '../../hooks/useToday'
 import {
   accountingApi,
+  useGetDashboardDueQuery,
   useGetDashboardSnapshotQuery,
   useGetInstallmentPlansQuery,
   useGetTransactionsQuery,
@@ -102,11 +105,11 @@ import { outboxActions } from '../../store/outbox'
 
 /**
  * "Due and overdue": every recurring occurrence the caller can record and every pending
- * transaction that is overdue or tied to the schedule, in one place. Recurring rows come
- * from the dashboard snapshot (the same cache the dashboard fills; no new endpoint);
- * pending rows from transaction queries (the next 30 days, in batches of 1000 that "Load more"
- * adds to, every loaded batch staying subscribed; and the rows missed occurrences link,
- * whatever their date, in batches of 500). An owner or admin also gets one
+ * transaction that is overdue or tied to the schedule, in one place. Everything comes from one
+ * request, `GET /dashboard/due` (STU-599, STU-603; `docs/dashboard-due.md`): the due lists, the
+ * unposted rows ("Load more" is its next `unposted_page`), the rows missed occurrences link and the
+ * occurrence lists. Against an API without that route (404) the card reads the older queries: the
+ * dashboard snapshot, the window's batches of 1000 and the linked rows in batches of 500. An owner or admin also gets one
  * row per card with an owed closed statement (`card_statements_due`), with Pay; the server
  * decides closed and overdue on the Manila day, so the snapshot is refetched when that day
  * changes. The merge, the dedup and the labels live in `@tally-trace/shared` (`dueSection.ts`).
@@ -136,6 +139,10 @@ import { outboxActions } from '../../store/outbox'
 
 const WINDOW_DAYS = 30
 const PAGE = 1000
+/** Seconds a Due read stays current when the card mounts again; focus also revalidates (a 304 when nothing changed). */
+const DUE_REVALIDATE_SECONDS = 60
+const NO_TRANSACTIONS: readonly Transaction[] = []
+const NO_PAGES: readonly number[] = []
 /** The most ids one transactions request may name (the API's `ids` limit). */
 const IDS_PER_REQUEST = 500
 /** The most occurrences one window request lists (the API's `limit` maximum); its `total` stays exact. */
@@ -178,6 +185,8 @@ const addDays = (day: string, n: number): string => {
 type TransactionsArgs = typeof accountingApi.endpoints.getTransactions.Types.QueryArg
 type TransactionsResult = ReturnType<ReturnType<typeof accountingApi.endpoints.getTransactions.select>>
 
+const NO_BATCHES: readonly TransactionsArgs[] = []
+
 interface TransactionQueries {
   items: Transaction[]
   failed: boolean
@@ -216,7 +225,7 @@ function useTransactionQueries(batches: readonly TransactionsArgs[]): Transactio
  * `IDS_PER_REQUEST`, merged. Each batch stays subscribed, so it refetches when
  * transactions change, as a query hook would.
  */
-function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean } {
+function usePendingTransactionsByIds(ids: readonly number[]): { items: Transaction[]; failed: boolean; loading: boolean; fetching: boolean } {
   const batches = useMemo(() => {
     const out: { ids: number[]; is_posted: false; limit: number }[] = []
     for (let start = 0; start < ids.length; start += IDS_PER_REQUEST) {
@@ -226,6 +235,44 @@ function usePendingTransactionsByIds(ids: readonly number[]): { items: Transacti
     return out
   }, [ids])
   return useTransactionQueries(batches)
+}
+
+/** Whether a query failed because the API has no such route (an older backend). */
+function isNotFound(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'status' in error && error.status === 404
+}
+
+interface DuePages {
+  /** The unposted rows of the pages after the first, in page order. */
+  items: Transaction[]
+  failed: boolean
+  loading: boolean
+  fetching: boolean
+  /** The last page's `has_more`; undefined while it has not landed. */
+  hasMore: boolean | undefined
+}
+
+/**
+ * The `/dashboard/due` pages after the first ("Load more"): one cached query per page number in `pages`
+ * (memoise the array), each staying subscribed so the `Due` tag refetches them all together. The first
+ * page is the card's own query.
+ */
+function useDuePages(pages: readonly number[]): DuePages {
+  const dispatch = useDispatch<AppDispatch>()
+  useEffect(() => {
+    const subscriptions = pages.map((n) => dispatch(accountingApi.endpoints.getDashboardDue.initiate({ unposted_page: n })))
+    return () => subscriptions.forEach((subscription) => subscription.unsubscribe())
+  }, [dispatch, pages])
+  const selectors = useMemo(() => pages.map((n) => accountingApi.endpoints.getDashboardDue.select({ unposted_page: n })), [pages])
+  const results = useSelector((state: RootState) => selectors.map((select) => select(state)), shallowEqual)
+  const items = useMemo(() => results.flatMap((result) => result.data?.unposted.items ?? NO_TRANSACTIONS), [results])
+  return {
+    items,
+    failed: results.some((result) => result.error !== undefined),
+    loading: results.some((result) => result.data === undefined && result.error === undefined),
+    fetching: results.some((result) => result.status === 'pending'),
+    hasMore: results[results.length - 1]?.data?.unposted.has_more,
+  }
 }
 
 /**
@@ -330,28 +377,35 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     [],
   )
 
+  // The card's one request (docs/dashboard-due.md): the due lists, the pending rows they link, both
+  // occurrence lists and the unposted rows. An API without the route answers 404; the card then reads
+  // the older queries (snapshot, linked ids, the window batches, the occurrences) until it has one, with the
+  // refetch-on-mount they always had: the fallback behaves as the card did before `/dashboard/due`.
+  const dueQuery = useGetDashboardDueQuery(undefined, { refetchOnMountOrArgChange: DUE_REVALIDATE_SECONDS, refetchOnFocus: true })
+  const legacy = isNotFound(dueQuery.error)
+  const snapshotQuery = useGetDashboardSnapshotQuery(
+    {},
+    { skip: !legacy, refetchOnMountOrArgChange: true, refetchOnFocus: true },
+  )
+  const source = legacy ? snapshotQuery : dueQuery
+  const snapshot: DueLists | undefined = legacy ? snapshotQuery.data : dueQuery.data
+  const dueData: DashboardDue | undefined = legacy ? undefined : dueQuery.data
   const {
-    data: snapshot,
-    requestId: snapshotRequestId,
     isSuccess: snapshotSuccess,
-    isFetching: snapshotFetching,
+    isFetching: sourceFetching,
     isError: snapshotIsError,
     isLoading: snapshotLoading,
     error: snapshotError,
-    refetch: refetchSnapshot,
-  } = useGetDashboardSnapshotQuery({}, { refetchOnMountOrArgChange: true })
-  // The id of the request whose data was already settled when this mounted (a cache entry the dashboard filled);
-  // undefined for a hard load or a request in flight. A ref keeps its first value, so that snapshot is never fresh.
-  const mountRequestId = useRef<string | undefined>(snapshotFetching ? undefined : snapshotRequestId)
-  // Consumed when this mount's first fresh snapshot is evaluated, whether or not a POST is sent.
+  } = source
+  const refetchSource = () => void (legacy ? snapshotQuery.refetch() : dueQuery.refetch())
+  // Consumed when this mount's first settled read is evaluated, whether or not a POST is sent.
   const pageOpenDone = useRef(false)
-  // Page-open auto-post (Q1): once per mount, decided by a fresh snapshot, never a cached one. The effect lists
-  // every value the gate reads: structural sharing keeps `snapshot`'s identity when a refetch returns the same
-  // JSON, so only the request id says the response is new. A failed refetch is not fresh and consumes nothing.
+  // Page-open auto-post (Q1): once per mount, decided by a settled read. A read cached under a minute is
+  // not refetched on mount, and is as good a decision as a fresh one: the POST is throttled by the server
+  // and recomputes what is postable. A failed refetch consumes nothing.
   useEffect(() => {
     if (pageOpenDone.current) return
-    if (snapshot === undefined || !snapshotSuccess || snapshotFetching || snapshotIsError) return
-    if (snapshotRequestId === mountRequestId.current) return
+    if (snapshot === undefined || !snapshotSuccess || sourceFetching || snapshotIsError) return
     pageOpenDone.current = true
     if (!shouldPostOnOpen(snapshot)) return
     // Fired and forgotten: an error is swallowed (Post now stays available) and nothing awaits it in a render path.
@@ -359,41 +413,63 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       .unwrap()
       .then((result) => setOpenPosted(result.posted))
       .catch(() => undefined)
-  }, [snapshot, snapshotRequestId, snapshotSuccess, snapshotFetching, snapshotIsError, postOnOpen])
+  }, [snapshot, snapshotSuccess, sourceFetching, snapshotIsError, postOnOpen])
   // A new Manila day can close a statement or make one overdue.
-  useManilaDay(() => void refetchSnapshot())
+  useManilaDay(refetchSource)
   const endDate = dayEndWire(addDays(today, WINDOW_DAYS))
-  // Every loaded batch stays subscribed, so all of them refetch together when transactions change.
+  // Older API only: every loaded batch stays subscribed, so all of them refetch together when transactions change.
   const windowBatches = useMemo(
-    () => Array.from({ length: batchCount }, (_, i) => ({ is_posted: false, end_date: endDate, limit: PAGE, offset: i * PAGE })),
-    [endDate, batchCount],
+    () =>
+      legacy
+        ? Array.from({ length: batchCount }, (_, i) => ({ is_posted: false, end_date: endDate, limit: PAGE, offset: i * PAGE }))
+        : NO_BATCHES,
+    [legacy, endDate, batchCount],
   )
   const windowResult = useTransactionQueries(windowBatches)
-  const linkIds = useMemo(() => (snapshot ? pendingLinkIds(snapshot) : []), [snapshot])
-  const { items: linkedTxns, failed: linkedFailed, loading: linkedLoading } = usePendingTransactionsByIds(linkIds)
+  const linkIds = useMemo(() => (legacy && snapshot ? pendingLinkIds(snapshot) : []), [legacy, snapshot])
+  const legacyLinked = usePendingTransactionsByIds(linkIds)
+  const linkedTxns: readonly Transaction[] = legacy ? legacyLinked.items : dueData?.linked_pending ?? NO_TRANSACTIONS
+  const linkedFailed = legacyLinked.failed
+  const linkedLoading = legacyLinked.loading
+  // "Load more": the next unposted page of the same endpoint.
+  const extraPages = useMemo(
+    () => (legacy || batchCount < 2 ? NO_PAGES : Array.from({ length: batchCount - 1 }, (_, i) => i + 2)),
+    [legacy, batchCount],
+  )
+  const duePages = useDuePages(extraPages)
+  const windowState = legacy
+    ? { loading: windowResult.loading, failed: windowResult.failed, fetching: windowResult.fetching }
+    : { loading: duePages.loading, failed: duePages.failed, fetching: duePages.fetching }
+  // Stale-data guard: every query the rows come from. The row actions wait while any of them refetches.
+  const listsFetching = sourceFetching || windowState.fetching || legacyLinked.fetching
   // Upcoming: the fixed window from the Manila day. Its arguments come from `today`, so a new
   // day is a new cache entry, and `currentData` reads it as not loaded until it lands.
   const upcomingRange = useMemo(() => upcomingWindow(today), [today])
   const upcomingTxnResult = useGetTransactionsQuery(
     { start_date: upcomingRange.start, end_date: upcomingRange.end, order: 'asc', limit: UPCOMING_LIMIT, offset: 0 },
-    { refetchOnMountOrArgChange: true },
   )
   const upcomingOccResult = useGetUpcomingOccurrencesQuery(
     { start_date: upcomingRange.start, end_date: upcomingRange.end, plan: 'none', limit: OCCURRENCE_LIMIT },
-    { refetchOnMountOrArgChange: true },
+    { skip: !legacy, refetchOnMountOrArgChange: true },
   )
   // Subscriptions: the same window's occurrences of `plan_kind` `subscription` entries.
   const subscriptionOccResult = useGetUpcomingOccurrencesQuery(
     { start_date: upcomingRange.start, end_date: upcomingRange.end, plan: 'subscription', limit: OCCURRENCE_LIMIT },
-    { refetchOnMountOrArgChange: true },
+    { skip: !legacy, refetchOnMountOrArgChange: true },
   )
   // Installments: one row per active plan. `day` is only the cache key, so a new day is a new request.
-  const plansResult = useGetInstallmentPlansQuery({ day: today }, { refetchOnMountOrArgChange: true })
+  const plansResult = useGetInstallmentPlansQuery({ day: today })
   // The viewer's local day: an Upcoming transaction's Planned / Pending / Posted label only.
   const localDay = useToday()
 
-  const windowTxns = windowResult.items
-  const hasMore = windowResult.last?.data?.has_more === true
+  // The unposted rows: the older API's window batches, or `/dashboard/due`'s pages.
+  const windowTxns = useMemo(
+    () => (legacy ? windowResult.items : [...(dueData?.unposted.items ?? NO_TRANSACTIONS), ...duePages.items]),
+    [legacy, windowResult.items, dueData, duePages.items],
+  )
+  const hasMore = legacy
+    ? windowResult.last?.data?.has_more === true
+    : (batchCount > 1 ? duePages.hasMore : dueData?.unposted.has_more) === true
 
   const recurring = useMemo(() => (snapshot ? dueRecurringRows(snapshot, today) : []), [snapshot, today])
   const pending = useMemo(
@@ -414,10 +490,10 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   // Overdue rows first, across every kind, so page 1 is where they are.
   const rows = useMemo(() => orderDueRows(recurring, pending, statements), [recurring, pending, statements])
   const count = rows.length
-  const loading = snapshotLoading || windowResult.loading
+  const loading = snapshotLoading || windowState.loading
   // First-load flags only: a refetch keeps the previous rows. A linked batch that lands adds rows, so the count waits for it.
   const countPending = loading || linkedLoading
-  const view = useClampedPage(count, 'due', pageStates.due, setPageState, today, !countPending && !windowResult.fetching)
+  const view = useClampedPage(count, 'due', pageStates.due, setPageState, today, !countPending && !windowState.fetching)
   const visible = count > 0 ? rows.slice(view.from - 1, view.to) : []
   // Not posted yet: the window's one-off rows only, so its count never waits for the linked batches.
   const notPosted = useMemo(() => notPostedRows(windowTxns, today), [windowTxns, today])
@@ -428,7 +504,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     pageStates.not_posted,
     setPageState,
     today,
-    !loading && !windowResult.fetching,
+    !loading && !windowState.fetching,
   )
   const notPostedVisible = notPostedCount > 0 ? notPosted.slice(notPostedView.from - 1, notPostedView.to) : []
   // The Upcoming, Subscriptions and Installments badges are decided by `dueTabBadge` from each source's
@@ -440,10 +516,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   }
   // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
   const upcomingTxns = upcomingTxnResult.currentData
-  const upcomingOccs = upcomingOccResult.currentData
-  const upcomingFailed = upcomingTxnResult.isError || upcomingOccResult.isError
+  // The occurrences: the older API's own queries, or `/dashboard/due`'s lists while they are for today.
+  const dueFresh = dueData !== undefined && freshFor(dueData.today, today)
+  const upcomingOccs = legacy ? upcomingOccResult.currentData : dueFresh ? dueData?.upcoming_occurrences : undefined
+  const upcomingOccFetching = legacy ? upcomingOccResult.isFetching : sourceFetching
+  const upcomingOccFailed = legacy ? upcomingOccResult.isError : snapshotIsError
+  const upcomingFailed = upcomingTxnResult.isError || upcomingOccFailed
   const upcomingPending =
-    (upcomingTxns === undefined && !upcomingTxnResult.isError) || (upcomingOccs === undefined && !upcomingOccResult.isError)
+    (upcomingTxns === undefined && !upcomingTxnResult.isError) || (upcomingOccs === undefined && !upcomingOccFailed)
   const upcomingRows = useMemo(
     () => mergeUpcoming(upcomingTxns?.items ?? [], upcomingOccs?.items ?? [], UPCOMING_LIMIT),
     [upcomingTxns, upcomingOccs],
@@ -451,7 +531,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const upcomingBadge = dueTabBadge(
     [
       { hasData: upcomingTxns !== undefined, fresh: true, fetching: upcomingTxnResult.isFetching, failed: upcomingTxnResult.isError, count: upcomingTxns?.total ?? 0 },
-      { hasData: upcomingOccs !== undefined, fresh: true, fetching: upcomingOccResult.isFetching, failed: upcomingOccResult.isError, count: upcomingOccs?.total ?? 0 },
+      { hasData: upcomingOccs !== undefined, fresh: true, fetching: upcomingOccFetching, failed: upcomingOccFailed, count: upcomingOccs?.total ?? 0 },
     ],
     keptFor('upcoming'),
   )
@@ -463,12 +543,13 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     pageStates.upcoming,
     setPageState,
     today,
-    !upcomingPending && !upcomingTxnResult.isFetching && !upcomingOccResult.isFetching,
+    !upcomingPending && !upcomingTxnResult.isFetching && !upcomingOccFetching,
   )
   const upcomingVisible = upcomingCount > 0 ? upcomingRows.slice(upcomingView.from - 1, upcomingView.to) : []
   const retryUpcoming = () => {
     void upcomingTxnResult.refetch()
-    void upcomingOccResult.refetch()
+    if (legacy) void upcomingOccResult.refetch()
+    else refetchSource()
   }
   // Subscriptions: the snapshot's rows dated today or earlier, only while the snapshot is for
   // today, and the window's occurrences. While either has failed the badge is the last complete total (D7).
@@ -477,18 +558,19 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     () => (snapshot !== undefined && snapshotFresh ? subscriptionPastRows(snapshot, today) : []),
     [snapshot, snapshotFresh, today],
   )
-  const subscriptionOccs = subscriptionOccResult.currentData
-  const subscriptionFailed = subscriptionOccResult.isError
+  const subscriptionOccs = legacy ? subscriptionOccResult.currentData : dueFresh ? dueData?.subscription_occurrences : undefined
+  const subscriptionOccFetching = legacy ? subscriptionOccResult.isFetching : sourceFetching
+  const subscriptionFailed = legacy ? subscriptionOccResult.isError : snapshotIsError
   const subscriptionPending =
-    (!snapshotFresh && !snapshotIsError) || (subscriptionOccs === undefined && !subscriptionOccResult.isError)
+    (!snapshotFresh && !snapshotIsError) || (subscriptionOccs === undefined && !subscriptionFailed)
   const subscriptionRows = useMemo(
     () => orderSubscriptionRows(subscriptionPast, subscriptionOccs?.items ?? []),
     [subscriptionPast, subscriptionOccs],
   )
   const subscriptionBadge = dueTabBadge(
     [
-      { hasData: snapshot !== undefined, fresh: snapshotFresh, fetching: snapshotFetching, failed: snapshotIsError, count: subscriptionPast.length },
-      { hasData: subscriptionOccs !== undefined, fresh: true, fetching: subscriptionOccResult.isFetching, failed: subscriptionOccResult.isError, count: subscriptionOccs?.total ?? 0 },
+      { hasData: snapshot !== undefined, fresh: snapshotFresh, fetching: sourceFetching, failed: snapshotIsError, count: subscriptionPast.length },
+      { hasData: subscriptionOccs !== undefined, fresh: true, fetching: subscriptionOccFetching, failed: subscriptionFailed, count: subscriptionOccs?.total ?? 0 },
     ],
     keptFor('subscriptions'),
   )
@@ -499,7 +581,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     pageStates.subscriptions,
     setPageState,
     today,
-    !subscriptionPending && !snapshotFetching && !subscriptionOccResult.isFetching,
+    !subscriptionPending && !listsFetching && !subscriptionOccFetching,
   )
   const subscriptionVisible =
     subscriptionCount > 0 ? subscriptionRows.slice(subscriptionView.from - 1, subscriptionView.to) : []
@@ -575,7 +657,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     }
   }
 
-  const batchBusy = snapshotFetching || batching
+  const batchBusy = listsFetching || batching
 
   const reviewSelected = () => {
     if (!snapshot || reviewNotice === null) return
@@ -604,13 +686,14 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
 
   const review = openReview
 
-  // Stale-data guard (STU-605): while the Due data refetches, or while a row's own save is still
-  // queued, its record, post and pay actions wait, so nothing is recorded from figures about to change.
+  // Stale-data guard (STU-605, STU-603): while any query the rows come from refetches (`listsFetching`: the
+  // Due read, its later pages, or on an older API the snapshot, window and linked batches), or while a row's own
+  // save is still queued, its record, post and pay actions wait, so nothing is recorded from figures about to change.
   const outbox = useSelector((state: RootState) => state.outbox)
   const pendingEntries = useMemo(() => pendingTargets(outbox, DUE_ENTRY_FORM), [outbox])
   const pendingCards = useMemo(() => pendingTargets(outbox, CARD_PAY_FORM), [outbox])
   const pendingTransactions = useMemo(() => pendingTargets(outbox, 'transaction'), [outbox])
-  const entryActionsOff = (entryId: number) => snapshotFetching || pendingEntries.has(entryId)
+  const entryActionsOff = (entryId: number) => listsFetching || pendingEntries.has(entryId)
 
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
     openRecord(row.entryId, row.name, row.kind === 'missed' ? row.oldest : row.occurrenceDate, action)
@@ -667,7 +750,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             <button
               type="button"
               onClick={() => onPost(txn)}
-              disabled={snapshotFetching || pendingTransactions.has(txn.id)}
+              disabled={listsFetching || pendingTransactions.has(txn.id)}
               className={primaryButtonClass}
               data-testid={row.action === 'posted' ? 'due-posted' : 'due-mark-posted'}
             >
@@ -703,7 +786,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         <div className="flex-shrink-0 space-y-1 text-right">
           <p className="text-sm font-semibold text-ink">{formatCurrency(shown.amount, shown.currency)}</p>
           {row.action && (
-            <button type="button" onClick={() => onPost(txn)} disabled={snapshotFetching || pendingTransactions.has(txn.id)} className={primaryButtonClass} data-testid="due-mark-posted">
+            <button type="button" onClick={() => onPost(txn)} disabled={listsFetching || pendingTransactions.has(txn.id)} className={primaryButtonClass} data-testid="due-mark-posted">
               {PENDING_POST_LABELS[row.action]}
             </button>
           )}
@@ -841,7 +924,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
           <div className="flex flex-wrap justify-end gap-2">
             {postButton}
             {shown.pay && (
-              <button type="button" onClick={() => setPayCardId(row.cardId)} disabled={snapshotFetching || pendingCards.has(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
+              <button type="button" onClick={() => setPayCardId(row.cardId)} disabled={listsFetching || pendingCards.has(row.cardId)} className={primaryButtonClass} data-testid="due-pay">
                 Pay
               </button>
             )}
@@ -1133,7 +1216,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
             ))}
           </ul>
         )}
-        <SlowReload active={snapshotFetching} className="px-4 pt-3" />
+        <SlowReload active={listsFetching} className="px-4 pt-3" />
         {openPostedText !== null && (
           <p className="px-4 pt-3 text-sm text-ok" role="status" data-testid="due-page-open-result">{openPostedText}</p>
         )}
@@ -1241,7 +1324,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       <>
         {throughLine(null)}
         {cappedNote(subscriptionOccs)}
-        {subscriptionFailed && windowError(() => void subscriptionOccResult.refetch())}
+        {subscriptionFailed && windowError(() => (legacy ? void subscriptionOccResult.refetch() : refetchSource()))}
         {!subscriptionPending && !subscriptionFailed && !snapshotError && subscriptionCount === 0 && (
           <p className="px-4 py-3 text-sm text-muted" data-testid="due-subscriptions-empty">
             No subscription charges due or in the next 30 days.
@@ -1355,7 +1438,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       {open && snapshotError && (
         <p className="border-t border-line px-4 py-3 text-sm text-danger" role="alert">Could not load what is due.</p>
       )}
-      {open && !snapshotError && (windowResult.failed || linkedFailed) && (
+      {open && !snapshotError && (windowState.failed || linkedFailed) && (
         <p className="border-t border-line px-4 py-3 text-sm text-danger" role="alert" data-testid="due-pending-error">
           Could not load some pending transactions.
         </p>

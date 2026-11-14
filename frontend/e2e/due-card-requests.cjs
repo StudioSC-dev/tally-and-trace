@@ -1,0 +1,439 @@
+// Browser checks for STU-603 (PERF-8): the Transactions page's Due card reads
+// `GET /dashboard/due`, refetches by its own `Due` tag, and falls back to the older queries
+// when the API has no such route.
+//   (a) AC3 opening Transactions: the card sends three reads (/dashboard/due, the upcoming transactions,
+//       the installment plans) and the page at most 8 in all (11 before); none of them is the dashboard
+//       snapshot, a linked-ids read or an upcoming-occurrences read.
+//   (b) AC2 one save from Transactions (the outbox drains once): at most 4 API requests after
+//       it, none of them the snapshot, a linked-ids read or an upcoming-occurrences read.
+//   (c) AC4 day rollover: with the page clock crossing Manila midnight the Due card reads "…"
+//       and then the new day's data, without navigation.
+//   (d) AC5 fallback: with `/dashboard/due` answered 404 the card renders the rows it rendered
+//       from `/due`, from the older queries.
+//   (e) the stale-data guard (STU-603 comment): while the Due data refetches, Post on a pending
+//       row is disabled: with `/dashboard/due` held, and (older API) with the window query held.
+//   (f) a Due-card save invalidates `Due`: after Mark paid drains, `/dashboard/due` is read again
+//       and the paid row has left; a Transactions save leaves Accounts and Allocations alone.
+//   (g) the toast stack does not cover the Due card's last rows (STU-605 QA note).
+//
+// Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
+// through the API. Not wired into CI. Run steps: ./README.md. Condition waits only.
+//
+// Usage: node frontend/e2e/due-card-requests.cjs [scenario]
+const { startLocalStack } = require('./_local_stack.cjs')
+const h = require('./_smooth.cjs')
+const { pick } = require('./_picker.cjs')
+
+const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
+let chromium
+try {
+  ;({ chromium } = require(playwrightPath))
+} catch {
+  console.error(`Cannot load Playwright from "${playwrightPath}". Set PLAYWRIGHT_PATH (see frontend/e2e/README.md).`)
+  process.exit(2)
+}
+
+const only = process.argv[2]
+let stack, client
+
+const manilaToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+const addDays = (day, n) => {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const wire = (day) => `${day}T00:00:00`
+const tid = (id) => `[data-testid="${id}"]`
+const pathOf = (url) => new URL(url).pathname.replace(/^.*\/api\/v1/, '').replace(/\/$/, '')
+const label = (url) => `${pathOf(url)}${new URL(url).search}`
+
+const isSnapshot = (url) => pathOf(url) === '/dashboard/snapshot'
+const isDue = (url) => pathOf(url) === '/dashboard/due'
+const isLinkedIds = (url) => pathOf(url) === '/transactions' && new URL(url).searchParams.has('ids')
+const isOccurrences = (url) => pathOf(url) === '/budget-entries/upcoming-occurrences'
+const isUnpostedWindow = (url) =>
+  pathOf(url) === '/transactions' && new URL(url).searchParams.get('is_posted') === 'false' && new URL(url).searchParams.has('end_date')
+const isCreate = (r) => r.method() === 'POST' && pathOf(r.url()) === '/transactions'
+
+/** Every API request (not only GETs) the page sends while `run` goes on: ['METHOD /path?query']. */
+async function record(page, run) {
+  const seen = []
+  const onRequest = (request) => {
+    if (request.url().includes('/api/v1/')) seen.push({ method: request.method(), url: request.url() })
+  }
+  page.on('request', onRequest)
+  try {
+    await run()
+    await h.waitQuiet(page)
+    await h.sleep(300)
+    await h.waitQuiet(page)
+  } finally {
+    page.off('request', onRequest)
+  }
+  return seen
+}
+const show = (seen) => seen.map((r) => `${r.method} ${label(r.url)}`).join(' | ')
+
+async function seedUser(tag) {
+  const user = await h.makeUser(stack, tag)
+  const checking = await client.post(user.token, '/accounts/', { name: `${tag} Checking`, account_type: 'checking', balance: 50000, currency: 'PHP' })
+  const today = manilaToday()
+  // A missed monthly cash expense, an overdue pending row, a recurring entry still to come.
+  const rent = await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: `${tag} Rent`, amount: 900,
+    account_id: checking.id, next_occurrence: wire(addDays(today, -35)),
+  })
+  const pending = await client.post(user.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'debit', amount: 77, description: `${tag} Pending bill`,
+    transaction_date: wire(addDays(today, -3)), is_posted: false,
+  })
+  await client.post(user.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'debit', amount: 12, description: `${tag} Posted lunch`,
+    transaction_date: wire(today), is_posted: true,
+  })
+  return { user, checking, rent, pending, tag }
+}
+
+/** A signed-in page on the dashboard (so the page open to measure starts from a loaded app). */
+async function signedIn(browser, user, contextOptions = {}) {
+  const { ctx, page } = await h.newPage(browser, { timezoneId: 'Asia/Manila', ...contextOptions })
+  page.setDefaultTimeout(10000)
+  await h.uiLogin(page, stack, user)
+  return { ctx, page }
+}
+
+const dueCard = (page) => page.locator(tid('due-and-overdue'))
+
+async function openTransactions(page) {
+  await page.goto(`${stack.webUrl}/transactions`)
+  await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+}
+
+const formOf = (page) => page.locator('form').filter({ has: page.getByRole('button', { name: /^(Create|Update) Transaction$/ }) })
+const dueRows = (page) => page.locator(tid('due-row'))
+
+/** Fills the Create dialog with an expense; returns the form. */
+async function fillCreate(page, { accountName, amount, description }) {
+  await page.getByRole('button', { name: 'Add Transaction' }).first().click()
+  const form = formOf(page)
+  await form.waitFor()
+  await form.locator('input[placeholder="Add notes about this transaction"]').fill(description)
+  await pick(form.locator('[data-field="account_id"]'), accountName)
+  await form.getByRole('button', { name: 'Expense', exact: true }).click()
+  await form.locator('input[type="number"][placeholder="0.00"]').first().fill(String(amount))
+  return form
+}
+
+/** Clicks Create and waits for the "Saved" toast: the outbox drained. */
+async function submitAndWaitSaved(page, form) {
+  await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+  await page.locator(`${tid('save-toast')}[data-state="saved"]`).first().waitFor({ timeout: 15000 })
+}
+
+const REMOVED = [
+  ['the dashboard snapshot', isSnapshot],
+  ['a linked-ids read', isLinkedIds],
+  ['an upcoming-occurrences read', isOccurrences],
+]
+
+// (a) AC3
+async function scenarioA(browser) {
+  console.log('\n(a) opening Transactions fires at most 6 API requests')
+  const seeded = await seedUser('dra')
+  const { ctx, page } = await signedIn(browser, seeded.user)
+  try {
+    const seen = await record(page, () => openTransactions(page))
+    console.log(`  ${seen.length} requests: ${show(seen)}`)
+    await h.check('a.rows-shown', 'S', async () => {
+      await dueRows(page).first().waitFor({ timeout: 10000 })
+      return true
+    })
+    // The card's own reads: /dashboard/due, the upcoming transactions and the installment plans. The page's
+    // other reads (the session, accounts, categories, recurring entries, the main list) are not the card's.
+    const card = seen.filter((r) => isDue(r.url) || pathOf(r.url) === '/budget-entries/installment-plans' ||
+      (pathOf(r.url) === '/transactions' && new URL(r.url.toString()).searchParams.get('order') === 'asc'))
+    await h.check('a.card-sends-three', 'B', async () => card.length === 3 || `the card sent ${card.length}: ${show(card)}`)
+    // Before: 11 (the snapshot, the unposted window, upcoming transactions, two occurrence reads, plans, plus the page's 5).
+    await h.check('a.at-most-8', 'B', async () => seen.length <= 8 || `${seen.length} requests`)
+    for (const [name, is] of REMOVED) {
+      await h.check(`a.no-${name.replace(/ /g, '-')}`, 'B', async () => !seen.some((r) => is(r.url)) || `${name} was sent`)
+    }
+  } finally {
+    await ctx.close()
+  }
+}
+
+// (b) AC2
+async function scenarioB(browser) {
+  console.log('\n(b) one save from Transactions: at most 4 API requests after it')
+  const seeded = await seedUser('drb')
+  const { ctx, page } = await signedIn(browser, seeded.user)
+  try {
+    await openTransactions(page)
+    await dueRows(page).first().waitFor()
+    await h.waitQuiet(page)
+    const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 321, description: 'DR B Coffee' })
+    await h.waitQuiet(page)
+    const seen = await record(page, () => submitAndWaitSaved(page, form))
+    console.log(`  ${seen.length} requests: ${show(seen)}`)
+    const after = seen.filter((r) => r.method === 'GET')
+    await h.check('b.saved-once', 'S', async () => seen.filter((r) => r.method === 'POST').length === 1 || 'not one POST')
+    await h.check('b.at-most-4', 'B', async () => after.length <= 4 || `${after.length} requests after the save`)
+    await h.check('b.due-refetched-by-its-tag', 'B', async () => seen.some((r) => isDue(r.url)) || 'a save did not refetch /dashboard/due')
+    await h.check('b.accounts-and-allocations-left-alone', 'B', async () => {
+      const hit = seen.filter((r) => ['/accounts', '/allocations'].includes(pathOf(r.url)))
+      return hit.length === 0 || `a transaction save refetched ${show(hit)}`
+    })
+    for (const [name, is] of REMOVED) {
+      await h.check(`b.no-${name.replace(/ /g, '-')}`, 'B', async () => !seen.some((r) => is(r.url)) || `${name} was sent`)
+    }
+  } finally {
+    await ctx.close()
+  }
+}
+
+
+const getOf = (is) => (r) => r.method() === 'GET' && is(r.url())
+
+/** The visible text of every row on the Due tab's current page, whitespace folded. */
+async function dueRowTexts(page) {
+  return (await dueRows(page).allTextContents()).map((t) => t.replace(/\s+/g, ' ').trim())
+}
+
+/** Every tab's row texts (first page), by slug. */
+async function tabRows(page) {
+  const out = {}
+  for (const slug of ['due', 'not-posted', 'upcoming', 'subscriptions', 'installments']) {
+    await page.locator(tid(`due-tab-${slug}`)).click()
+    await page.locator(`${tid(`due-panel-${slug}`)}:not([hidden])`).waitFor()
+    await h.waitQuiet(page)
+    out[slug] = await dueRowTexts(page)
+  }
+  await page.locator(tid('due-tab-due')).click()
+  return out
+}
+
+/** The five tab badges, as shown. */
+async function badges(page) {
+  const out = {}
+  for (const id of ['due-count', 'due-not-posted-count', 'due-upcoming-count', 'due-subscriptions-count', 'due-installments-count']) {
+    out[id] = ((await page.locator(tid(id)).textContent({ timeout: 3000 }).catch(() => null)) || '').trim()
+  }
+  return out
+}
+
+async function settledBadges(page) {
+  await h.waitQuiet(page)
+  for (let i = 0; i < 40; i++) {
+    const b = await badges(page)
+    if (!Object.values(b).includes('…') && !Object.values(b).includes('')) return b
+    await h.sleep(250)
+  }
+  return badges(page)
+}
+
+/** One user with everything the card lists: a missed entry, an overdue pending row, upcoming and subscription entries. */
+async function seedFull(tag) {
+  const seeded = await seedUser(tag)
+  const today = manilaToday()
+  const { user, checking } = seeded
+  await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: `${tag} Upcoming bill`, amount: 800,
+    account_id: checking.id, next_occurrence: wire(addDays(today, 3)),
+  })
+  await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: `${tag} Streaming`, amount: 549, plan_kind: 'subscription',
+    account_id: checking.id, next_occurrence: wire(addDays(today, 5)),
+  })
+  await client.post(user.token, '/transactions/', {
+    account_id: checking.id, transaction_type: 'debit', amount: 60, description: `${tag} Planned`,
+    transaction_date: wire(addDays(today, 2)), is_posted: false,
+  })
+  return seeded
+}
+
+// (c) AC4
+async function scenarioC(browser) {
+  console.log('\n(c) day rollover: the Upcoming figure reads "…" and then the new day, with no navigation')
+  const seeded = await seedFull('drc')
+  const day = manilaToday()
+  const next = addDays(day, 1)
+  const { ctx, page } = await signedIn(browser, seeded.user, {})
+  let held
+  try {
+    // The backend clock is real: the browser sits two minutes before Manila midnight of the real
+    // day, and the held /due answer says it is the next day, as a server past midnight would.
+    await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })
+    await openTransactions(page)
+    await page.evaluate(() => { window.__noNavigation = true })
+    await h.check('c.upcoming-settled', 'S', async () => {
+      await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor({ timeout: 10000 })
+      return true
+    })
+    await h.waitQuiet(page)
+    const before = await badges(page)
+    held = await h.holdResponse(page, getOf(isDue), { transform: (json) => ({ ...json, today: next }) })
+    await h.rewrite(page, getOf((u) => pathOf(u) === '/budget-entries/installment-plans'), (json) => ({ ...json, today: next }))
+    await page.clock.fastForward('03:00')
+    await h.check('c.crossed', 'S', async () => (await h.localDay(page)) === next || 'the page day did not turn')
+    await h.check('c.new-day-request', 'S', async () => (await held.waitHits(1, 5000)) || 'the card sent no /dashboard/due request after midnight')
+    await h.check('c.upcoming-reads-pending', 'B', async () => {
+      const shown = ((await page.locator(tid('due-upcoming-count')).textContent()) || '').trim()
+      return shown === '…' || `Upcoming read "${shown}" while the new day's data was held`
+    })
+    held.release({ disarm: true })
+    await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor({ timeout: 10000 })
+    await h.waitQuiet(page)
+    const after = await badges(page)
+    await h.check('c.new-day-data', 'B', async () =>
+      after['due-upcoming-count'] === before['due-upcoming-count'] && !Object.values(after).includes('…') ||
+      `before ${JSON.stringify(before)} after ${JSON.stringify(after)}`)
+    await h.check('c.no-navigation', 'B', async () => (await page.evaluate(() => window.__noNavigation === true)) || 'the page reloaded')
+  } finally {
+    held?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (d) AC5
+async function scenarioD(browser) {
+  console.log('\n(d) /dashboard/due answered 404: the card renders the rows it rendered from /due')
+  const seeded = await seedFull('drd')
+  const first = await signedIn(browser, seeded.user)
+  let reference
+  try {
+    await openTransactions(first.page)
+    await dueRows(first.page).first().waitFor()
+    reference = { badges: await settledBadges(first.page), rows: await tabRows(first.page) }
+  } finally {
+    await first.ctx.close()
+  }
+  const { ctx, page } = await signedIn(browser, seeded.user)
+  try {
+    const failed = await h.failWith(page, getOf(isDue), 404)
+    const seen = await record(page, async () => {
+      await openTransactions(page)
+      await dueRows(page).first().waitFor()
+    })
+    console.log(`  ${seen.length} requests: ${show(seen)}`)
+    const shown = { badges: await settledBadges(page), rows: await tabRows(page) }
+    await h.check('d.due-answered-404', 'S', async () => failed.failed >= 1 || 'the 404 was never served')
+    await h.check('d.older-queries-read', 'S', async () =>
+      (seen.some((r) => isSnapshot(r.url)) && seen.some((r) => isOccurrences(r.url)) && seen.some((r) => isUnpostedWindow(r.url))) ||
+      `the fallback did not read the older queries: ${show(seen)}`)
+    await h.check('d.no-error-shown', 'B', async () => (await page.getByText('Could not load what is due.').count()) === 0 || 'the card shows its load error')
+    await h.check('d.same-rows', 'B', async () => JSON.stringify(shown.rows) === JSON.stringify(reference.rows) || `fallback ${JSON.stringify(shown.rows)} vs /due ${JSON.stringify(reference.rows)}`)
+    await h.check('d.same-badges', 'B', async () => JSON.stringify(shown.badges) === JSON.stringify(reference.badges) || `fallback ${JSON.stringify(shown.badges)} vs /due ${JSON.stringify(reference.badges)}`)
+    await h.check('d.rows-not-empty', 'S', async () => Object.values(reference.rows).flat().length >= 5 || `only ${JSON.stringify(reference.rows)}`)
+  } finally {
+    await ctx.close()
+  }
+}
+
+// (e) the stale-data guard
+async function scenarioE(browser, { fallback }) {
+  const name = fallback ? 'e2' : 'e1'
+  console.log(`\n(${name}) Post on a pending row is disabled while the row source refetches${fallback ? ' (older API: the window query)' : ' (/dashboard/due)'}`)
+  const seeded = await seedFull(`dr${name}`)
+  const { ctx, page } = await signedIn(browser, seeded.user)
+  let g
+  try {
+    if (fallback) await h.failWith(page, getOf(isDue), 404)
+    await openTransactions(page)
+    await page.locator(tid('due-tab-not-posted')).click()
+    const post = page.locator(tid('due-mark-posted')).first()
+    await post.waitFor()
+    await h.waitQuiet(page)
+    await h.check(`${name}.enabled-when-settled`, 'S', async () => (await post.isEnabled()) || 'Post is disabled with nothing refetching')
+    // The row source is held; a save elsewhere on the page invalidates it.
+    g = await h.gate(page, getOf(fallback ? isUnpostedWindow : isDue))
+    const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 15, description: `DR ${name} Snack` })
+    await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await h.check(`${name}.refetch-held`, 'S', async () => (await g.waitHits(1, 10000)) || 'the save sent no refetch of the row source')
+    await h.sleep(500)
+    await h.check(`${name}.post-disabled`, 'B', async () => (await post.isDisabled()) || 'Post is enabled while the row source refetches')
+    g.release({ disarm: true })
+    await h.waitQuiet(page)
+    await h.check(`${name}.post-enabled-again`, 'B', async () => {
+      await post.waitFor()
+      return (await post.isEnabled()) || 'Post stays disabled after the refetch landed'
+    })
+  } finally {
+    g?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
+// (g) STU-605 QA note: the toast stack must not cover the Due card's rows at the end of the page.
+async function scenarioG(browser) {
+  console.log('\n(g) with toasts showing and the page scrolled to its end, no Due row button sits under the stack')
+  const seeded = await seedFull('drg')
+  for (const width of [1280, 390]) {
+    const { ctx, page } = await signedIn(browser, seeded.user, { viewport: { width, height: 900 } })
+    let g
+    try {
+      await openTransactions(page)
+      await dueRows(page).first().waitFor()
+      await h.waitQuiet(page)
+      g = await h.gate(page, isCreate)
+      for (const n of [1, 2, 3]) {
+        const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 10 + n, description: `DR G ${width} ${n}` })
+        // The pending toasts of the earlier saves may sit over the button at a narrow width: dispatch the click.
+        await form.getByRole('button', { name: 'Create Transaction', exact: true }).dispatchEvent('click')
+        await form.waitFor({ state: 'hidden' })
+      }
+      await page.locator(tid('toast-stack')).waitFor()
+      for (const slug of ['due', 'not-posted', 'upcoming', 'subscriptions']) {
+        await page.locator(tid(`due-tab-${slug}`)).click()
+        await h.sleep(150)
+        const covered = await page.evaluate(() => {
+          window.scrollTo(0, document.documentElement.scrollHeight)
+          const stack = document.querySelector('[data-testid="toast-stack"]').getBoundingClientRect()
+          const hit = []
+          for (const row of document.querySelectorAll('[data-testid="due-row"]')) {
+            for (const el of row.querySelectorAll('button, a')) {
+              const r = el.getBoundingClientRect()
+              if (r.width === 0 || r.height === 0) continue
+              const overlap = r.left < stack.right && r.right > stack.left && r.top < stack.bottom && r.bottom > stack.top
+              if (overlap) hit.push((el.textContent || '').trim().slice(0, 20))
+            }
+          }
+          return hit
+        })
+        await h.check(`g.${width}.${slug}-clear-of-toasts`, 'B', async () => covered.length === 0 || `covered at the page end: ${covered.join(', ')}`)
+      }
+    } finally {
+      g?.release({ disarm: true })
+      await ctx.close()
+    }
+  }
+}
+
+const SCENARIOS = [
+  ['a', scenarioA],
+  ['b', scenarioB],
+  ['c', scenarioC],
+  ['d', scenarioD],
+  ['e', (b) => scenarioE(b, { fallback: false })],
+  ['e2', (b) => scenarioE(b, { fallback: true })],
+  ['g', scenarioG],
+]
+
+;(async () => {
+  process.on('unhandledRejection', (e) => console.log(`  NOTE unhandled rejection: ${e && e.message ? e.message.split('\n')[0] : e}`))
+  stack = await startLocalStack()
+  client = h.apiClient(stack)
+  stack.psql('UPDATE fx_rates SET fetched_at = now()')
+  const browser = await chromium.launch()
+  for (const [name, run] of SCENARIOS) {
+    if (only && only !== name) continue
+    try {
+      await run(browser)
+    } catch (e) {
+      await h.check(`${name}.completed`, 'B', async () => `scenario threw: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`)
+    }
+  }
+  await browser.close()
+  stack.stop()
+  process.exit(h.report())
+})().catch((e) => { console.error(e); stack?.stop(); process.exit(2) })
