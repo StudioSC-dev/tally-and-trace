@@ -97,7 +97,7 @@ from app.core.access import (
 )
 from app.core.context import RequestContext, context_of
 from app.core.redaction import FULL, LIMITED
-from app.core.time import manila_midnight, manila_today
+from app.core.time import manila_today
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
@@ -228,7 +228,7 @@ def credit_for_cards(ctx: RequestContext, card_ids: Iterable[int]) -> Dict[int, 
     cards = {m.id: m for _, members in groups for m in members}
     fx = ctx.fx if ctx.fx is not None else FxRates.offline(db)
     redactor = ctx.redactor
-    start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())
+    start, end = fc._upcoming_window(WINDOW_DAYS, fc._day_start(ctx.today))
 
     ids = list(cards)
     rows = db.query(Transaction).filter(
@@ -630,7 +630,8 @@ def open_cycle(card: Account, today: date, *, due_overrides) -> Optional[dict]:
 def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
                       viewable_ids: Optional[Iterable[int]] = None,
                       card_rows=None, due_overrides=None, *,
-                      with_lines: bool = False, stored=None) -> List[dict]:
+                      with_lines: bool = False, stored=None,
+                      today: Optional[date] = None) -> List[dict]:
     """The card's closed statements, oldest first: ``statement_summaries`` on
     Manila's midnight over the caller's viewable accounts, kept while the close
     is before Manila's today (a statement closing today can still take
@@ -650,15 +651,20 @@ def closed_statements(db: Session, user, card: Account, fx: Optional[FxRates],
     Figures come from the stored closed statements (STU-601): ``stored`` is
     the card's ``statements_store.read_card_rows`` entry matching
     ``card_rows`` (None with every row, or when ``card_rows`` is None and the
-    store is read here)."""
-    today = manila_today()
+    store is read here).
+
+    ``today`` is the request's day (``ctx.today``); ``manila_today()`` by
+    default."""
+    if today is None:
+        today = manila_today()
+    midnight = fc._day_start(today)
     if viewable_ids is None:
         viewable_ids = viewable_account_ids(db, user)
     if with_lines:
-        history = statement_history(db, card, manila_midnight(), viewable_ids, fx=fx,
+        history = statement_history(db, card, midnight, viewable_ids, fx=fx,
                                     card_rows=card_rows, due_overrides=due_overrides)
     else:
-        history = statement_summaries(db, card, manila_midnight(), viewable_ids, fx=fx,
+        history = statement_summaries(db, card, midnight, viewable_ids, fx=fx,
                                       card_rows=card_rows, due_overrides=due_overrides,
                                       stored=stored)
     return [s for s in history if s["close"].date() < today]
@@ -675,7 +681,7 @@ class UnpostedMonth:
 
 
 def unposted_months(db: Session, card: Account, caller,
-                    due_overrides=None) -> List[UnpostedMonth]:
+                    due_overrides=None, today: Optional[date] = None) -> List[UnpostedMonth]:
     """The months the card's statements leave out because no recorder has run.
 
     Over the card's active, reviewed card installments (any creator, as
@@ -694,10 +700,12 @@ def unposted_months(db: Session, card: Account, caller,
     callers are the managers' surfaces (``statements_due``, the credit detail).
     ``due`` is the cycle's printed due when one was entered; ``due_overrides``
     is the card's ``statements.load_due_overrides`` entry, read when None.
+    ``today`` is the request's day (``ctx.today``); ``manila_today()`` by default.
     """
     from app.services.posting import post_plan
 
-    today = manila_today()
+    if today is None:
+        today = manila_today()
     entries = [e for e in _reviewed_entries(db, card.id) if is_card_installment(e, card)]
     if not entries:
         return []
@@ -798,8 +806,9 @@ def statements_due(ctx: RequestContext) -> List[dict]:
     for card in sorted(cards, key=lambda a: (a.name, a.id)):
         closed = closed_statements(db, user, card, fx, viewable_ids=viewable_ids,
                                    card_rows=card_rows, due_overrides=overrides[card.id],
-                                   stored=stored.get(card.id))
-        months = unposted_months(db, card, user, due_overrides=overrides[card.id])
+                                   stored=stored.get(card.id), today=today)
+        months = unposted_months(db, card, user, due_overrides=overrides[card.id],
+                                 today=today)
         latest_clear = closed[-1]["clear_through"] if closed else _ZERO
         owed = [s for s in closed if s["owed"] > 0] if latest_clear > 0 else []
         if not owed and not months:

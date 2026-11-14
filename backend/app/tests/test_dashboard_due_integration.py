@@ -17,6 +17,7 @@ none), the Manila-day boundary of ``unposted``, and (AC5) its paging over 450 ov
 rows. The statement and byte budgets (AC3) are in ``test_perf_budgets.py``.
 """
 import json
+import sys
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -235,3 +236,58 @@ def test_unposted_pages_of_200(sw_client, sw_db, me):
     assert got == [f"Overdue {n}" for n in range(449, -1, -1)]
     r = client.get(f"{API}/dashboard/due?unposted_page=0", headers=who["headers"])
     assert r.status_code == 422
+
+
+def test_one_manila_day_when_the_clock_crosses_midnight(sw_client, sw_people, monkeypatch):
+    """Every list is for the day the request context stamped: the clock passing
+    Manila midnight after the context is built changes nothing in the answer."""
+    from app.core.context import RequestContext
+
+    clock = {"now": NOW}  # 23:30 in Manila on Friday 13 Nov
+    for name, module in list(sys.modules.items()):
+        if name.startswith("app.") and hasattr(module, "naive_utc_now"):
+            monkeypatch.setattr(module, "naive_utc_now", lambda: clock["now"])
+    client = sw_client
+    who = sw_people("Due", "Midnight")
+    checking = sw_post(client, who, "/accounts/", {
+        "name": "Checking", "account_type": "checking", "balance": 50_000})["id"]
+    for name, day in (("Today bill", "2026-11-13"), ("Tomorrow bill", "2026-11-14"),
+                      ("Last window day", "2026-12-13")):
+        sw_post(client, who, "/budget-entries/", {
+            "name": name, "entry_type": "expense", "amount": 500, "cadence": "monthly",
+            "next_occurrence": f"{day}T00:00:00", "account_id": checking})
+    _debit(client, who, checking, "2026-11-13T20:00:00", "Pending today")
+    _debit(client, who, checking, "2026-11-14T00:10:00", "Pending tomorrow")
+    # A card whose cycle closes today: its statement is still open, and today's
+    # pending charge is today's, not an overdue one.
+    card = sw_post(client, who, "/accounts/", {
+        "name": "Card", "account_type": "credit", "balance": 0, "credit_limit": 50_000,
+        "billing_cycle_start": 13,
+        "days_until_due_date": 21, "payment_account_id": checking})["id"]
+    _debit(client, who, card, "2026-11-01T00:00:00", "Card spend", posted=True)
+    _debit(client, who, card, "2026-11-13T00:00:00", "Card today")
+    sw_post(client, who, "/budget-entries/", {  # a day past the card window's end
+        "name": "Card bill", "entry_type": "expense", "amount": 700, "cadence": "monthly",
+        "next_occurrence": "2026-12-14T00:00:00", "account_id": card})
+
+    steady = _due(client, who["headers"])
+    built = RequestContext.__init__
+
+    def stamp_then_cross_midnight(self, *args, **kwargs):
+        built(self, *args, **kwargs)
+        clock["now"] = NOW + timedelta(hours=1)  # 00:30 in Manila on Saturday 14 Nov
+
+    monkeypatch.setattr(RequestContext, "__init__", stamp_then_cross_midnight)
+    try:
+        crossed = _due(client, who["headers"])
+    finally:
+        monkeypatch.setattr(RequestContext, "__init__", built)
+        clock["now"] = NOW
+
+    occurrences = [(o["name"], o["effective_date"][:10])
+                   for o in crossed["upcoming_occurrences"]["items"]]
+    assert ("Tomorrow bill", "2026-11-14") in occurrences
+    assert [t["description"] for t in crossed["unposted"]["items"]] == [
+        "Pending today", "Card today"]
+    assert crossed["card_statements_due"] == []
+    assert crossed == steady

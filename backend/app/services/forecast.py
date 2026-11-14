@@ -368,6 +368,12 @@ def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
     return timeline
 
 
+def _day_start(day: date) -> datetime:
+    """Midnight starting ``day``: a window reference for the request's day
+    (``ctx.today``), so a request crossing Manila midnight keeps one day."""
+    return datetime.combine(day, datetime.min.time())
+
+
 def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
     # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
@@ -3043,7 +3049,7 @@ def upcoming_by_currency(ctx: RequestContext, days: int = 30,
     """``/forecast/upcoming``: every item with its ``currency`` (a full one), plus
     ``currencies`` and ``fx``. No ``by_currency``: the list has no totals.
     ``ids`` numbers its limited items (``PublicIds``; a new one by default)."""
-    start, end = _upcoming_window(days, reference)
+    start, end = _upcoming_window(days, reference or _day_start(ctx.today))
     accounts = ctx.accounts
     events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)
     collector = collector or FxCollector()
@@ -3194,7 +3200,7 @@ def payables_by_currency(ctx: RequestContext, days: int = 30,
     overdue on the window start (``_due_fields``); a budget-entry payable also
     the occurrence it stands for (``occurrence_date``). A full card
     statement payable carries its ``statement_close`` (``_statement_fields``)."""
-    start, end = _upcoming_window(days, reference)
+    start, end = _upcoming_window(days, reference or _day_start(ctx.today))
     today = ctx.today
     names = {a.id: a.name for a in ctx.accounts}
     events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)

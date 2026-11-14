@@ -499,12 +499,15 @@ def _type_criterion(types: FrozenSet[TransactionType]):
     return or_(*matches)
 
 
-def upcoming_window(start: Optional[date], end: Optional[date]) -> tuple:
+def upcoming_window(start: Optional[date], end: Optional[date],
+                    today: Optional[date] = None) -> tuple:
     """``(first day, last day)`` of an upcoming list: from Manila's tomorrow at
     the earliest (today and earlier are Due and overdue's) through Manila's
     today plus ``OCCURRENCE_HORIZON`` at the latest; an open end is that
-    horizon. The first day may be after the last: an empty list."""
-    today = manila_today()
+    horizon. The first day may be after the last: an empty list. ``today`` is
+    the request's day (``ctx.today``); ``manila_today()`` by default."""
+    if today is None:
+        today = manila_today()
     first = today + timedelta(days=1)
     last = today + OCCURRENCE_HORIZON
     return (max(start, first) if start is not None else first,
@@ -540,7 +543,7 @@ def upcoming_occurrences(ctx: RequestContext, *, start: Optional[date],
     ``items`` and ``total`` are exact for one Transactions card tab; installments
     match neither. None keeps every entry."""
     db, user, redactor = ctx.db, ctx.user, ctx.redactor
-    first, last = upcoming_window(start, end)
+    first, last = upcoming_window(start, end, ctx.today)
     if first > last:
         return {"items": [], "total": 0}
     criteria = []
