@@ -51,6 +51,11 @@ const wire = (day) => `${day}T00:00:00`
 let stack, client
 
 const tid = (id) => `[data-testid="${id}"]`
+// STU-603: the card's rows come from `/dashboard/due` (TT_DUE_API=real) or, with that route answered 404, from the
+// older queries. The scenarios hold whichever request brings the rows: the route itself in one case, the linked
+// batch, the window batch and the occurrences request in the other.
+const REAL = process.env.TT_DUE_API === 'real'
+const isDueRoute = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/api/v1/dashboard/due')
 const pathIs = (suffix) => (r) => new URL(r.url()).pathname.endsWith(suffix)
 /** The window query: transactions with no `ids`. */
 const isWindow = (r) => r.method() === 'GET' && pathIs('/transactions/')(r) && new URL(r.url()).searchParams.getAll('ids').length === 0
@@ -95,7 +100,7 @@ async function scenarioE(browser) {
   try {
     // The window query does not return the linked row, so only the linked batch can.
     drop = await h.rewrite(page, isWindow, (json) => ({ ...json, items: json.items.filter((t) => t.id !== linked.id) }))
-    g = await h.gate(page, isLinkedBatch)
+    g = await h.gate(page, REAL ? isDueRoute : isLinkedBatch)
     await h.uiLogin(page, stack, u)
     await page.goto(`${stack.webUrl}/transactions`)
     await h.check('e.linked-batch-held', 'S', async () => (await g.waitHits(1)) || 'linked batch never requested')
@@ -148,7 +153,7 @@ async function scenarioF(browser) {
   await h.recordTexts(page, ['due-count', 'due-not-posted-count'])
   let g
   try {
-    g = await h.gate(page, isSectionWindow)
+    g = await h.gate(page, REAL ? isDueRoute : isSectionWindow)
     await h.uiLogin(page, stack, u)
     await page.goto(`${stack.webUrl}/transactions`)
     await h.check('f.window-held', 'S', async () => (await g.waitHits(1)) || 'window query never requested')
@@ -222,7 +227,12 @@ async function scenarioG(browser) {
     await h.waitQuiet(page)
     await h.sleep(500)
     await h.resetTexts(page)
-    g = await h.gate(page, isUpcomingOccurrences)
+    // The backend clock is real, so on `/due` the held answer says it is the next day, as a server past midnight would.
+    const next = addDays(day, 1)
+    g = REAL
+      ? await h.holdResponse(page, isDueRoute, { transform: (json) => ({ ...json, today: next }) })
+      : await h.gate(page, isUpcomingOccurrences)
+    if (REAL) await h.rewrite(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/budget-entries/installment-plans'), (json) => ({ ...json, today: next }))
     gt = await h.gate(page, isUpcomingTransactions)
     // Playwright reads '03:00' as mm:ss: three minutes, past Manila midnight.
     await page.clock.fastForward('03:00')

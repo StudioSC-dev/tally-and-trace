@@ -199,7 +199,8 @@ function trackRequests(page) {
   page.on('request', (r) => {
     const url = r.url()
     if (r.method() === 'POST' && url.endsWith('/budget-entries/review-installments')) s.posts.push(JSON.parse(r.postData() || '{}'))
-    if (r.method() === 'GET' && url.includes('/dashboard/snapshot')) s.snapshots++
+    // What the Due card reads: `/dashboard/due`, or the snapshot when that route is answered 404 (STU-603).
+    if (r.method() === 'GET' && url.includes(process.env.TT_DUE_API === 'real' ? '/dashboard/due' : '/dashboard/snapshot')) s.snapshots++
   })
   return s
 }

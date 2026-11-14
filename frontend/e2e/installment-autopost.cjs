@@ -661,6 +661,9 @@ async function unpostedPanel(browser) {
 
 // ─── Page-open helpers ───────────────────────────────────────────────────────
 const isPageOpenPath = (url) => /\/budget-entries\/post-due-installments$/.test(new URL(url).pathname)
+// STU-603: the card reads `/dashboard/due` (TT_DUE_API=real) or, with that route answered 404, the snapshot.
+const REAL = process.env.TT_DUE_API === 'real'
+const isDueRoute = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/due')
 const isSnapshot = (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/dashboard/snapshot')
 const isPostDue = (r) => r.method() === 'POST' && isPageOpenPath(r.url())
 const openResult = (page) => testId(page, 'due-page-open-result')
@@ -791,7 +794,7 @@ async function pageOpenIsQuiet(browser) {
     // Release the POST while its snapshot refetch is held: the refetch does not block either,
     // and the Due figures already on screen stay while it is held.
     const countBefore = (await testId(page, 'due-count').textContent())?.trim()
-    snapGate = await gate(page, isSnapshot)
+    snapGate = await gate(page, REAL ? isDueRoute : isSnapshot)
     openGate.release({ disarm: true })
     const snapHit = await snapGate.waitHits(1)
     check('(i.refetch-no-block) the post\'s snapshot refetch is held', snapHit, true)
@@ -823,10 +826,12 @@ async function onDashboard(browser, tag, dueToday) {
   const watch = watchPostDue(page)
   const snapshots = []
   page.on('response', (res) => { if (isSnapshot(res.request())) snapshots.push(res.json().catch(() => null)) })
+  const dues = []
+  page.on('response', (res) => { if (isDueRoute(res.request())) dues.push(res.json().catch(() => null)) })
   await uiLogin(page, me)
   await page.goto(`${stack.webUrl}/`)
   await waitQuiet(page)
-  return { me, card, entry, ctx, page, watch, snapshots }
+  return { me, card, entry, ctx, page, watch, snapshots, dues }
 }
 
 async function freshSnapshot(browser) {
@@ -869,8 +874,15 @@ async function freshSnapshot(browser) {
     await waitQuiet(s.page)
     const bodies = await Promise.all(s.snapshots)
     // The dashboard's last snapshot and the Transactions mount's first: nothing changed between them.
-    check('(j.same-json) the two snapshots are deep-equal',
-      before > 0 && bodies.length > before && util.isDeepStrictEqual(bodies[before - 1], bodies[before]), true)
+    if (REAL) {
+      // `/dashboard/due` is not the snapshot: what must match is what the page-open POST is decided from.
+      const due = (await Promise.all(s.dues))[0]
+      check('(j.same-json) the dashboard\'s snapshot and the first /dashboard/due agree on the installments to post',
+        before > 0 && due !== undefined && util.isDeepStrictEqual(bodies[before - 1].installment_auto_post, due.installment_auto_post), true)
+    } else {
+      check('(j.same-json) the two snapshots are deep-equal',
+        before > 0 && bodies.length > before && util.isDeepStrictEqual(bodies[before - 1], bodies[before]), true)
+    }
     check('(j.same-posts) the same JSON still posts once', [line, s.watch.count(), triggers(s.watch.bodies)], [POSTED_ONE, 1, [{ trigger: 'page_open' }]])
     await s.ctx.close()
   }

@@ -54,7 +54,7 @@
 // posted yet", read with openDueTab(page, 'not-posted'): (b), (e), (e2), (e3), (e5), (h),
 // (p) and (q) read that tab, and (n) hand-links its pending row so it stays in Due.
 //
-// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|e6|e7|e8|f|g|h|i|j|k|l|m|n|o|p|q|r|s]
+// Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|e6|e7|e8|f|g|h|i|j|k|l|m|m2|n|o|o2|p|p2|q|q2|r|s]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
 const h = require('./_smooth.cjs')
@@ -160,6 +160,8 @@ const allTransactions = async (u) => (await get(u.token, '/transactions/?limit=1
 // set is checked in due-card-requests.cjs.
 let fallbackApi = false
 const olderApi = (step) => async (browser) => {
+  // TT_DUE_API=real skips them: (m2), (o2), (p2) and (q2) are the same scenarios on the real route.
+  if (process.env.TT_DUE_API === 'real') return undefined
   fallbackApi = true
   try {
     return await step(browser)
@@ -236,11 +238,12 @@ const FILLER_CONCURRENCY = 8
  * `fillerCount` pending "Filler" debits dated today+5 (future and unlinked, so the section never
  * lists them), then the `named` rows ([description, day]) in order. Returns the named rows by description.
  */
-async function seedWindow(u, acct, fillerCount, named) {
+async function seedWindow(u, acct, fillerCount, named, fillerDay) {
   const today = manilaToday()
+  const fillerOn = fillerDay ?? addDays(today, 5)
   for (let start = 0; start < fillerCount; start += FILLER_CONCURRENCY) {
     const n = Math.min(FILLER_CONCURRENCY, fillerCount - start)
-    await Promise.all(Array.from({ length: n }, () => unposted(u, acct, addDays(today, 5), 10, 'Filler')))
+    await Promise.all(Array.from({ length: n }, () => unposted(u, acct, fillerOn, 10, 'Filler')))
   }
   const rows = {}
   for (const [name, day] of named) rows[name] = await unposted(u, acct, day, 100, name)
@@ -1314,6 +1317,260 @@ async function outOfOrderRefetch(browser) {
   await ctx.close()
 }
 
+// ─── The same steps on the real `/dashboard/due` (STU-603) ───────────────────
+// (m), (o), (p) and (q) above assert the older request set, so they run with `/dashboard/due` answered 404.
+// These four run the same scenarios against the real route: the rows, badges, pagers and out-of-order
+// refetches must come out the same; only how the rows are fetched differs.
+
+/** A GET of `/dashboard/due`, optionally of one of `pages` (the first page has no `unposted_page`). */
+const isDueUrl = (url, pages) =>
+  url.pathname.endsWith('/api/v1/dashboard/due') && (pages === undefined || pages.includes(url.searchParams.get('unposted_page') ?? '1'))
+const isDueRequest = (request, pages) => request.method() === 'GET' && isDueUrl(new URL(request.url()), pages)
+const dueResponse = (page, n, ms = 15000) =>
+  page.waitForResponse((r) => isDueRequest(r.request(), [String(n)]), { timeout: ms }).catch(() => null)
+
+// (m) on /due: the rows the missed rows link come with the answer, in no request of their own.
+async function manyLinkedIdsDue(browser) {
+  console.log('\n=== (m, /due) a linked pending row comes with /dashboard/due: no ids request, one row, an error line when /due fails')
+  const u = await makeUser('mr')
+  const today = manilaToday()
+  const anchor = Math.min(25, Math.max(5, Number(today.slice(8, 10))))
+  const bank = await account(u, 'MR Checking')
+  const start = addMonths(today, -2, anchor)
+  const water = await entry(u, { name: 'Water', amount: 900, account_id: bank.id, next_occurrence: wire(start), anchor_day: anchor })
+  const linked = await post(u.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 900, description: 'Water bill',
+    transaction_date: wire(start), is_posted: false, budget_entry_id: water.id,
+  })
+  const body = await get(u.token, '/dashboard/due')
+  check('(m, /due) the API names the linked pending row', body.linked_pending.map((t) => t.id), [linked.id])
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  const idReads = []
+  page.on('request', (r) => {
+    const url = new URL(r.url())
+    if (r.method() === 'GET' && url.pathname.endsWith('/api/v1/transactions/') && url.searchParams.getAll('ids').length > 0) idReads.push(url.search)
+  })
+  await openTransactions(page)
+  check('(m, /due) no request names transaction ids', idReads, [])
+  check('(m, /due) the linked pending row is listed once', (await rowsOf(page, 'Water bill', 'pending')).length, 1)
+  check('(m, /due) no error line', await page.locator('[data-testid="due-pending-error"]').count(), 0)
+
+  // /due failing (not 404): the section says so.
+  await page.route((url) => isDueUrl(url), (route) => route.fulfill({ status: 500, json: { detail: 'boom' } }))
+  await page.goto(`${stack.webUrl}/transactions`)
+  await page.locator('[data-testid="due-section"]').waitFor()
+  await page.getByText('Could not load what is due.').waitFor({ timeout: 15000 }).catch(() => {})
+  check('(m, /due) a failed /due shows the section error', await page.getByText('Could not load what is due.').count() > 0, true)
+  await ctx.close()
+}
+
+// (o) on /due: in-app navigation from the dashboard to Transactions.
+async function inAppRefetchDue(browser) {
+  console.log('\n=== (o, /due) opening Transactions in-app from the dashboard reads /dashboard/due')
+  const w = await seed()
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, w.u)
+  await page.locator('[data-testid="payables"]').waitFor()
+  await settle(page)
+  const due = page.waitForResponse((r) => isDueRequest(r.request()), { timeout: 15000 }).catch(() => null)
+  await page.locator('a[data-onboarding="nav-transactions"]:visible').first().click()
+  await page.waitForURL((url) => url.pathname === '/transactions')
+  check('(o, /due) the section asks for /dashboard/due after the in-app navigation', (await due)?.status() ?? null, 200)
+  await ctx.close()
+}
+
+// (p) on /due: Load more pages stay live.
+async function loadMoreLiveDue(browser) {
+  console.log('\n=== (p, /due) Load more pages stay live: a posted row leaves, a slid row stays, a new day restarts the window')
+  const u = await makeUser('pr')
+  const today = manilaToday()
+  const bank = await account(u, 'PR Checking')
+  // 199 overdue fillers (the newest) fill page 1 with Early; Edge and Tail are page 2. The list reads oldest first.
+  const FILLERS = 199
+  const rows = await seedWindow(u, bank, FILLERS, [['Early', addDays(today, -3)], ['Edge', addDays(today, -4)], ['Tail', addDays(today, -6)]], addDays(today, -1))
+  const first = (await get(u.token, '/dashboard/due')).unposted
+  const second = (await get(u.token, '/dashboard/due?unposted_page=2')).unposted
+  check('(p, /due) API: page 1 has more and ends with Early', [first.items.length, first.has_more, first.items.at(-1)?.description], [200, true, 'Early'])
+  check('(p, /due) API: page 2 is Edge and Tail', second.items.map((t) => t.description), ['Edge', 'Tail'])
+  const total = FILLERS + 3
+
+  const { ctx, page } = await openDue(browser, u)
+  await openDueTab(page, 'not-posted')
+  check('(p, /due) before Load more: 200 rows, Early the oldest, Load more offered',
+    [await dueBadge(page), (await dueNames(page))[0], await loadMoreButton(page).isVisible()], [String(FILLERS + 1), 'Early', true])
+  await loadMoreButton(page).click()
+  await waitForBadge(page, String(total))
+  await settle(page)
+  check('(p, /due) after Load more: Tail, Edge, Early first, Load more hidden',
+    [await dueNames(page), await loadMoreButton(page).isVisible()], [['Tail', 'Edge', 'Early'], false])
+
+  // Post Early, the last row of page 1: Edge slides from page 2 into page 1.
+  await pendRow(page, 'Early').locator('[data-testid="due-mark-posted"]').click()
+  const refetched = [dueResponse(page, 1), dueResponse(page, 2)]
+  const early = await savePosted(page, rows.Early.id)
+  check('(p, /due) posting Early saves it (200)', early.status(), 200)
+  await closeActions(page)
+  await Promise.all(refetched)
+  await gone(pendRow(page, 'Early'))
+  await settle(page)
+  check('(p, /due) the row posted from the earlier page is gone', [(await dueNames(page)).includes('Early'), (await rowsOf(page, 'Early', 'pending')).length], [false, 0])
+  check('(p, /due) the row that slid across the page boundary is still listed', (await dueNames(page)).slice(0, 2), ['Tail', 'Edge'])
+
+  // A new day, in a second context whose clock is two minutes before Manila's midnight.
+  const night = await newPage(browser, { timezoneId: 'Asia/Manila' })
+  await night.page.clock.install({ time: new Date(`${today}T15:58:00Z`) })
+  await uiLogin(night.page, u)
+  await openTransactions(night.page)
+  await openDueTab(night.page, 'not-posted')
+  await loadMoreButton(night.page).click()
+  await waitForBadge(night.page, String(total - 1))
+  await settle(night.page)
+  let secondPage = 0
+  night.page.on('request', (r) => { if (isDueRequest(r, ['2'])) secondPage++ })
+  // Playwright reads '03:00' as mm:ss: three minutes, 23:58 to 00:01 Manila.
+  await night.page.clock.fastForward('03:00')
+  await loadMoreButton(night.page).waitFor({ timeout: 15000 }).catch(() => {})
+  await settle(night.page)
+  check('(p, /due) a new day restarts the window: one page, Load more again',
+    [(await dueNames(night.page))[0], await dueBadge(night.page), await loadMoreButton(night.page).isVisible()], ['Edge', String(FILLERS + 1), true])
+  check('(p, /due) no request for the second page after the day turned', secondPage, 0)
+  check('(p, /due) Not posted yet is still the selected tab after the day changed', await night.page.locator('[data-testid="due-tab-not-posted"]').getAttribute('aria-selected'), 'true')
+  await night.ctx.close()
+
+  // Back on the first page (real clock): post Tail, the only row of the last loaded page.
+  const tail = await postFromSection(page, 'Tail', rows.Tail.id)
+  if (tail !== 200) throw new Error(`(p, /due) posting Tail returned ${tail}: the first context's session may have ended after the second login; stopping`)
+  check('(p, /due) posting Tail from the first context saves it (200)', tail, 200)
+  await closeActions(page)
+  await waitForBadge(page, String(FILLERS + 1))
+  await settle(page)
+  check('(p, /due) the row posted from the last loaded page is gone', (await rowsOf(page, 'Tail', 'pending')).length, 0)
+  check('(p, /due) after posting from the last page Edge is first and Load more is hidden',
+    [(await dueNames(page))[0], await loadMoreButton(page).isVisible()], ['Edge', false])
+  await ctx.close()
+}
+
+// (q) on /due: out-of-order refetches of two pages.
+async function outOfOrderRefetchDue(browser) {
+  console.log('\n=== (q, /due) out-of-order page refetches: the selected page survives and a row in two pages counts once')
+  const u = await makeUser('qr')
+  const today = manilaToday()
+  const bank = await account(u, 'QR Checking')
+  const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  // 196 fillers dated today are the newest, so page 1 = the fillers and A B C D; page 2 = E F G H.
+  const FILLERS = 196
+  const rows = await seedWindow(u, bank, FILLERS, names.map((name, i) => [name, addDays(today, -(i + 1))]), today)
+  const second = (await get(u.token, '/dashboard/due?unposted_page=2')).unposted
+  check('(q, /due) API: page 2 is E, F, G, H', second.items.map((t) => t.description), ['E', 'F', 'G', 'H'])
+  const all8 = FILLERS + 8
+
+  const { ctx, page } = await openDue(browser, u)
+  await openDueTab(page, 'not-posted')
+  await loadMoreButton(page).click()
+  await waitForBadge(page, String(all8))
+  await settle(page)
+  check('(q, /due) after Load more: every row, H G F on page 1', [await dueBadge(page), await dueNames(page)], [String(all8), ['H', 'G', 'F']])
+
+  /** Holds the next GET of page 1 and page 2. Returns the held routes, or false (after releasing them) unless both were held in 10 s. */
+  const hold = async () => {
+    const held = []
+    const matcher = (url) => isDueUrl(url, ['1', '2'])
+    const handler = (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      held.push({ route, page: new URL(route.request().url()).searchParams.get('unposted_page') ?? '1' })
+    }
+    await page.route(matcher, handler)
+    return {
+      wait: async (round) => {
+        const until = Date.now() + 10000
+        while (held.length < 2 && Date.now() < until) await page.waitForTimeout(100)
+        const pages = held.map((x) => x.page).sort()
+        check(`(q, /due) round ${round}: both pages were requested and held`, pages, ['1', '2'])
+        if (JSON.stringify(pages) === JSON.stringify(['1', '2'])) return true
+        await Promise.all(held.map((x) => x.route.continue().catch(() => {})))
+        await page.unroute(matcher, handler)
+        return false
+      },
+      release: async (n) => {
+        const x = held.find((y) => y.page === n)
+        const response = page.waitForResponse((r) => r.request() === x.route.request(), { timeout: 15000 }).catch(() => null)
+        await x.route.continue()
+        return (await response)?.status() ?? null
+      },
+      remove: () => page.unroute(matcher, handler),
+    }
+  }
+  const postHeld = async (name, txnId) => {
+    await pendRow(page, name).locator('[data-testid="due-mark-posted"]').click()
+    await page.getByRole('button', { name: 'Save Posted Amount' }).waitFor()
+    await waitQuiet(page)
+    const held = await hold()
+    return { held, status: (await savePosted(page, txnId)).status() }
+  }
+  /** The pager label of page `n` of `count` rows. */
+  const labelOf = (n, count) => `${(n - 1) * 3 + 1}–${Math.min(n * 3, count)} of ${count}`
+
+  // Round 1, page 3. Oldest first: H G F | E D C | B A Filler. Same moves as the older-API round: the API
+  // moves H and G to yesterday and B is posted, so page 1 = fillers A H G C, page 2 = D E F.
+  // Page 2 lands first: old page 1 (fillers A B C D) + new page 2 (D E F) = fillers + 6 rows with D once;
+  // a double count reads one more, no merge keeps all 8. Page 3 stays on screen (the rows still fill it).
+  // Page 1 then lands: A H G C D E F + fillers.
+  await goToPage(page, 3)
+  check('(q, /due) round 1: page 3 is on screen with B on it', [await currentPage(page), await pendRow(page, 'B').count()], [3, 1])
+  const moveH = await api(u.token, 'PUT', `/transactions/${rows.H.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q, /due) round 1: the API moves H to yesterday (200)', moveH.status, 200)
+  const moveG = await api(u.token, 'PUT', `/transactions/${rows.G.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q, /due) round 1: the API moves G to yesterday (200)', moveG.status, 200)
+  let posted = await postHeld('B', rows.B.id)
+  let held = posted.held
+  check('(q, /due) round 1: posting B from page 3 saves it (200)', posted.status, 200)
+  if (await held.wait(1)) {
+    const late = await held.release('2')
+    await waitForBadge(page, String(FILLERS + 6))
+    check('(q, /due) round 1: while page 1 is held the badge counts D once and page 3 stays',
+      [await dueBadge(page), await currentPage(page), await pagerLabel(page)], [String(FILLERS + 6), 3, labelOf(3, FILLERS + 6)])
+    const early = await held.release('1')
+    check('(q, /due) round 1: both held responses completed with 200', [late, early], [200, 200])
+    await held.remove()
+    await waitForBadge(page, String(FILLERS + 7))
+    await waitQuiet(page)
+    await closeActions(page)
+    await settle(page)
+    check('(q, /due) round 1: page 3 survives the out-of-order refetch',
+      [await currentPage(page), await pagerLabel(page), await dueBadge(page)], [3, labelOf(3, FILLERS + 7), String(FILLERS + 7)])
+  }
+
+  // Round 2, page 2. The API moves F to yesterday and C is posted from page 2: page 1 = fillers A H G F,
+  // page 2 = D E. Page 1 lands first: new page 1 + old page 2 (D E F) = fillers + 6 rows with F once.
+  const moveF = await api(u.token, 'PUT', `/transactions/${rows.F.id}`, { transaction_date: wire(addDays(today, -1)) })
+  check('(q, /due) round 2: the API moves F to yesterday (200)', moveF.status, 200)
+  await goToPage(page, 2)
+  check('(q, /due) round 2: page 2 is on screen with C on it', [await currentPage(page), await pendRow(page, 'C').count()], [2, 1])
+  posted = await postHeld('C', rows.C.id)
+  held = posted.held
+  check('(q, /due) round 2: posting C from page 2 saves it (200)', posted.status, 200)
+  if (await held.wait(2)) {
+    const early = await held.release('1')
+    await waitForBadge(page, String(FILLERS + 6))
+    check('(q, /due) round 2: the row in two pages counts once while page 2 is held',
+      [await dueBadge(page), await currentPage(page), await pagerLabel(page)], [String(FILLERS + 6), 2, labelOf(2, FILLERS + 6)])
+    const late = await held.release('2')
+    check('(q, /due) round 2: both held responses completed with 200', [early, late], [200, 200])
+    await held.remove()
+    await waitQuiet(page)
+    await closeActions(page)
+    await settle(page)
+    const onScreen = [await currentPage(page), await pagerLabel(page), await dueBadge(page)]
+    const every = (await allDueRows(page)).map((r) => r.name)
+    const named = every.filter((n) => n !== 'Filler')
+    check('(q, /due) round 2: page 2 survives', onScreen, [2, labelOf(2, FILLERS + 6), String(FILLERS + 6)])
+    check('(q, /due) round 2: every row is listed once', [every.length === FILLERS + 6, named.length === new Set(named).size, [...named].sort()], [true, true, ['A', 'D', 'E', 'F', 'G', 'H']])
+  }
+  await ctx.close()
+}
+
 // (s) STU-343: an overdue loan or shared row reads "Overdue" with its real day, not "Due today".
 async function overdueEverySource(browser) {
   console.log('\n=== (s) an overdue loan and a Limited row show their real day and "Overdue"')
@@ -1469,7 +1726,9 @@ const fmtClose = (day) => {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, e6: postedHintMarkPosted, e7: postedHintEditForm, e8: statementLinePostedDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: olderApi(manyLinkedIds), n: pagination, o: olderApi(inAppRefetch), r: pendingLinkedIncome, p: olderApi(loadMoreLive), q: olderApi(outOfOrderRefetch), s: overdueEverySource }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, e6: postedHintMarkPosted, e7: postedHintEditForm, e8: statementLinePostedDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: olderApi(manyLinkedIds), n: pagination, o: olderApi(inAppRefetch), r: pendingLinkedIncome, p: olderApi(loadMoreLive), q: olderApi(outOfOrderRefetch), s: overdueEverySource,
+    // The same four steps on the real /dashboard/due.
+    m2: manyLinkedIdsDue, o2: inAppRefetchDue, p2: loadMoreLiveDue, q2: outOfOrderRefetchDue }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

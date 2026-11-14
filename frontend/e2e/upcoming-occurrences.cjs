@@ -786,6 +786,8 @@ const listRequest = (url) =>
  * Commit 6 sends `plan=none` only; the Subscriptions tab adds `plan=subscription` (commit 7).
  */
 const PARTITIONS = ['none', 'subscription']
+// STU-603: with TT_DUE_API=real the card's snapshot and occurrence reads are one `/dashboard/due` read.
+const REAL = process.env.TT_DUE_API === 'real'
 const newOccurrenceCounts = () => Object.fromEntries(PARTITIONS.map((p) => [p, 0]))
 function countOccurrenceRequest(url, from, counts) {
   if (!url.pathname.endsWith('/api/v1/budget-entries/upcoming-occurrences')) return
@@ -794,7 +796,7 @@ function countOccurrenceRequest(url, from, counts) {
   if (plan !== null && plan in counts) counts[plan]++
 }
 /** One request per partition the card queries: `none` always, `subscription` once the Subscriptions tab exists. */
-const expectedOccurrenceCounts = () => PARTITIONS.map((p) => (p === 'subscription' && !DUE_TABS.some((t) => t.slug === 'subscriptions') ? 0 : 1))
+const expectedOccurrenceCounts = () => REAL ? PARTITIONS.map(() => 0) : PARTITIONS.map((p) => (p === 'subscription' && !DUE_TABS.some((t) => t.slug === 'subscriptions') ? 0 : 1))
 
 // (l) The rollover trigger, on the browser clock only.
 async function rolloverTrigger(browser) {
@@ -822,7 +824,7 @@ async function rolloverTrigger(browser) {
     if (r.resourceType() === 'document') seen.documents++
     if (r.method() !== 'GET') return
     const url = new URL(r.url())
-    if (url.pathname.endsWith('/api/v1/dashboard/snapshot')) seen.snapshot++
+    if (url.pathname.endsWith(REAL ? '/api/v1/dashboard/due' : '/api/v1/dashboard/snapshot')) seen.snapshot++
     countOccurrenceRequest(url, addDays(next, 1), seen.occurrences)
     if (!listRequest(url)) return
     const start = url.searchParams.get('start_date') ?? ''
@@ -944,6 +946,14 @@ async function upcomingTabPlacement(browser) {
     const res = await route.fetch()
     const json = await res.json()
     await route.fulfill({ response: res, json: { ...json, has_more: true } })
+  })
+  // On `/dashboard/due` the pending rows' paging flag is the body's `unposted.has_more` (STU-603).
+  await forced.page.route((url) => url.pathname.endsWith('/api/v1/dashboard/due'), async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const res = await route.fetch()
+    if (res.status() !== 200) return route.fulfill({ response: res })
+    const json = await res.json()
+    await route.fulfill({ response: res, json: { ...json, unposted: { ...json.unposted, has_more: true } } })
   })
   await uiLogin(forced.page, u)
   await openTransactions(forced.page)
