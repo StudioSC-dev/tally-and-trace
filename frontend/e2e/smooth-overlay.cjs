@@ -83,7 +83,7 @@ const waitResponse = (page, pred) => page.waitForResponse(pred, { timeout: 10000
  * overlay element ever appeared (`overlaySeen`), and a request log.
  */
 async function openPage(browser, contextOptions = {}, { clock = null } = {}) {
-  const { ctx, page } = await h.newPage(browser, contextOptions)
+  const { ctx, page } = await h.newPage(browser, contextOptions, { older: true })
   page.setDefaultTimeout(10000)
   if (clock) await page.clock.install({ time: clock })
   await page.addInitScript((sel) => {

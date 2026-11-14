@@ -172,6 +172,8 @@ const planned = (u, acct, day, amount, description) => post(u.token, '/transacti
 async function newPage(browser, contextOptions = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 }, timezoneId: 'Asia/Manila', ...contextOptions })
   const page = await ctx.newPage()
+  // These checks assert the older request set (STU-603): `/dashboard/due` answers 404, so the Due card falls back to it.
+  await require('./_smooth.cjs').olderApi(page)
   const native = trackNativeDialogs(page)
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page, native }

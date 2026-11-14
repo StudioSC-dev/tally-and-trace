@@ -88,7 +88,7 @@ async function scenarioE(browser) {
     account_id: bank.id, transaction_type: 'debit', amount: 900, description: 'Water bill',
     transaction_date: wire(start), is_posted: false, budget_entry_id: water.id,
   })
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, ['due-count'])
   let drop, g
@@ -143,7 +143,7 @@ async function scenarioF(browser) {
       transaction_date: wire(addDays(today, -days)), is_posted: false,
     })
   }
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   await h.recordTexts(page, ['due-count', 'due-not-posted-count'])
   let g
@@ -205,7 +205,7 @@ async function scenarioG(browser) {
     entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'G Bill', amount: 800, account_id: bank.id,
     next_occurrence: wire(addDays(day, 3)),
   })
-  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } })
+  const { ctx, page } = await h.newPage(browser, { viewport: { width: 1280, height: 1400 } }, { older: true })
   page.setDefaultTimeout(10000)
   // A UTC browser two minutes before Manila midnight (16:00 UTC) of the real day.
   await page.clock.install({ time: new Date(`${day}T15:58:00Z`) })

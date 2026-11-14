@@ -57,7 +57,8 @@
 // Usage: node frontend/e2e/due-and-overdue.cjs [a|b|c|d|e|e2|e3|e4|e5|e6|e7|e8|f|g|h|i|j|k|l|m|n|o|p|q|r|s]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, nextButton, previousButton, openDueTab, readTab } = require('./_due_pages.cjs')
-const { waitQuiet } = require('./_smooth.cjs')
+const h = require('./_smooth.cjs')
+const { waitQuiet } = h
 const { pick } = require('./_picker.cjs')
 
 const playwrightPath = process.env.PLAYWRIGHT_PATH || 'playwright'
@@ -153,9 +154,23 @@ const accountBalance = async (u, id) => (await get(u.token, `/accounts/${id}`)).
 /** Every transaction the user can read (the e2e users have a handful). */
 const allTransactions = async (u) => (await get(u.token, '/transactions/?limit=1000')).items
 
+// STU-603: the card reads `GET /dashboard/due`. The steps wrapped in `olderApi` assert the request set of an
+// older backend (the snapshot, linked-id batches of 500, window batches of 1000), so `/dashboard/due` answers
+// 404 there and the card falls back to those queries; the steps themselves are unchanged. The new request
+// set is checked in due-card-requests.cjs.
+let fallbackApi = false
+const olderApi = (step) => async (browser) => {
+  fallbackApi = true
+  try {
+    return await step(browser)
+  } finally {
+    fallbackApi = false
+  }
+}
 async function newPage(browser, contextOptions = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 1400 }, ...contextOptions })
   const page = await ctx.newPage()
+  if (fallbackApi) await h.failWith(page, (r) => r.method() === 'GET' && new URL(r.url()).pathname.endsWith('/api/v1/dashboard/due'), 404)
   if (process.env.DEBUG) page.on('response', (r) => { if (r.url().includes('/api/v1/')) console.log(`    [net] ${r.request().method()} ${r.url().replace(API, '')} -> ${r.status()}`) })
   return { ctx, page }
 }
@@ -1454,7 +1469,7 @@ const fmtClose = (day) => {
   API = `${stack.apiUrl}/api/v1`
   const browser = await chromium.launch()
   const run = (k) => !only || only === k
-  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, e6: postedHintMarkPosted, e7: postedHintEditForm, e8: statementLinePostedDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: manyLinkedIds, n: pagination, o: inAppRefetch, r: pendingLinkedIncome, p: loadMoreLive, q: outOfOrderRefetch, s: overdueEverySource }
+  const steps = { a: dashboardReadOnly, b: listing, c: markPaidRent, d: chargedThenPosted, e: markPostedCoffee, e2: postingDateChecks, e3: statusOnlyPosting, e4: postingDateDisplay, e5: postingDefaultDay, e6: postedHintMarkPosted, e7: postedHintEditForm, e8: statementLinePostedDay, f: markReceivedSalary, g: gifts, h: viewer, i: pausedEntry, j: missedKinds, k: chargedMissed, l: endedInstallment, m: olderApi(manyLinkedIds), n: pagination, o: olderApi(inAppRefetch), r: pendingLinkedIncome, p: olderApi(loadMoreLive), q: olderApi(outOfOrderRefetch), s: overdueEverySource }
   for (const [k, fn] of Object.entries(steps)) if (run(k)) await fn(browser)
   await browser.close()
   stack.stop()

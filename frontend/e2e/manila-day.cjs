@@ -93,7 +93,7 @@ const wireAt = (day, time) => `${day}T${time}`
       })
     }
 
-    const { ctx, page } = await h.newPage(browser, { timezoneId: zone })
+    const { ctx, page } = await h.newPage(browser, { timezoneId: zone }, { older: true })
     const requests = h.logRequests(page)
     try {
       const local = await h.localDay(page)
