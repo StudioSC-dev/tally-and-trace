@@ -301,6 +301,7 @@ LIST_ROUTES = [
     ("/wishlist/", {}),
     ("/wishlist/plan", {}),
     ("/dashboard/snapshot", {}),
+    ("/dashboard/due", {}),
     ("/forecast/cashflow", {}),
     ("/forecast/upcoming", {"days": 60}),
     ("/forecast/timeline", {"days": 60}),

@@ -38,8 +38,8 @@ finer than these is not opted in.
 Opted in (each checked for wall-clock reads finer than a day; none found beyond the
 above): ``/dashboard/snapshot``, ``/budget-entries/installment-plans``,
 ``/budget-entries/upcoming-occurrences``, ``/transactions/``, ``/accounts/``,
-``/categories/``, ``/budget-entries/``. ``/dashboard/due`` (PERF-4) and
-``/cards/{id}/statements`` (PERF-6) opt in with the same one line when they land.
+``/categories/``, ``/budget-entries/``, ``/dashboard/due`` (PERF-4).
+``/cards/{id}/statements`` (PERF-6) opts in with the same one line when it lands.
 
 The browser's HTTP cache sends ``If-None-Match`` by itself (fetch's default cache
 mode), so the web client needs no code for 304s.
