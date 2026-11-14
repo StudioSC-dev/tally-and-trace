@@ -45,7 +45,6 @@ from sqlalchemy.orm import Session
 from app.core.access import DIRECT_ROLES
 from app.core.context import RequestContext
 from app.core.redaction import LIMITED, Redactor
-from app.core.time import manila_midnight
 from app.models.account import Account, AccountType
 from app.models.budget_entry import BudgetEntry
 from app.models.transaction import Transaction, TransactionType, pending_face
@@ -105,8 +104,8 @@ def card_charges_by_card(ctx: RequestContext, *, collector: fc.FxCollector,
              if a.account_type == AccountType.CREDIT and held.of(a) in DIRECT_ROLES}
     if not cards:
         return []
-    start, end = fc._upcoming_window(WINDOW_DAYS, manila_midnight())
     today = ctx.today
+    start, end = fc._upcoming_window(WINDOW_DAYS, fc._day_start(today))
     events = fc.shared_events(ctx, start, end, keep_origin=True, detail=True)
 
     entry_ids = {e["origin"][1] for e in events if e["origin"][0] is BudgetEntry}

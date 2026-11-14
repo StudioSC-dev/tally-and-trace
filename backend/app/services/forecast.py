@@ -368,6 +368,12 @@ def _cashflow_periods(p: "Projection", currency: str, boundaries: list, *,
     return timeline
 
 
+def _day_start(day: date) -> datetime:
+    """Midnight starting ``day``: a window reference for the request's day
+    (``ctx.today``), so a request crossing Manila midnight keeps one day."""
+    return datetime.combine(day, datetime.min.time())
+
+
 def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     """``[start of today, end of the day `days` from now)`` — the cutoff day is inclusive."""
     # Naive Manila wall time: the window starts at the Manila calendar day's midnight,
@@ -1375,16 +1381,22 @@ def collect_events(
         return (readable_criterion(model, user_id, direct_ids, grants),
                 or_(model.user_id == user_id, touches_accounts(model, scope_account_ids)))
 
-    entries = [e for e in db.query(BudgetEntry).filter(
+    def readable(rows: list) -> list:
+        # The Household tag links of every row read through a tag share, in one
+        # query per kind of record, rather than one per row ``readable`` asks about.
+        access.load_explicit(rows)
+        return [r for r in rows if access.readable(r)]
+
+    entries = readable(db.query(BudgetEntry).filter(
         *disclosed(BudgetEntry),
         BudgetEntry.is_active.is_(True),
-    ).order_by(BudgetEntry.id).all() if access.readable(e)]
+    ).order_by(BudgetEntry.id).all())
 
-    txns = [t for t in db.query(Transaction).filter(
+    txns = readable(db.query(Transaction).filter(
         *disclosed(Transaction),
         Transaction.is_posted.is_(False),
         Transaction.transaction_date < end,
-    ).order_by(Transaction.id).all() if access.readable(t)]
+    ).order_by(Transaction.id).all())
 
     # Every wallet any event references among the accounts the caller can view
     # (inactive ones included). Whether an account they can't view is a wallet
@@ -3037,7 +3049,7 @@ def upcoming_by_currency(ctx: RequestContext, days: int = 30,
     """``/forecast/upcoming``: every item with its ``currency`` (a full one), plus
     ``currencies`` and ``fx``. No ``by_currency``: the list has no totals.
     ``ids`` numbers its limited items (``PublicIds``; a new one by default)."""
-    start, end = _upcoming_window(days, reference)
+    start, end = _upcoming_window(days, reference or _day_start(ctx.today))
     accounts = ctx.accounts
     events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)
     collector = collector or FxCollector()
@@ -3188,7 +3200,7 @@ def payables_by_currency(ctx: RequestContext, days: int = 30,
     overdue on the window start (``_due_fields``); a budget-entry payable also
     the occurrence it stands for (``occurrence_date``). A full card
     statement payable carries its ``statement_close`` (``_statement_fields``)."""
-    start, end = _upcoming_window(days, reference)
+    start, end = _upcoming_window(days, reference or _day_start(ctx.today))
     today = ctx.today
     names = {a.id: a.name for a in ctx.accounts}
     events = shared_events(ctx, start, end, tag_id=tag_id, detail=True, keep_origin=True)

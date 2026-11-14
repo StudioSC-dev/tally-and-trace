@@ -1,0 +1,33 @@
+{
+ "body": {
+  "auto_post_scheduled": false,
+  "autopay_due": [],
+  "card_charges": [],
+  "card_statements_due": [],
+  "installment_auto_post": [],
+  "installment_review": [],
+  "linked_pending": [],
+  "missed": [],
+  "payables": [],
+  "subscription_occurrences": {
+   "auto_post_scheduled": false,
+   "items": [],
+   "total": 0
+  },
+  "today": "2026-11-13",
+  "unposted": {
+   "has_more": false,
+   "items": [],
+   "page": 1,
+   "page_size": 200,
+   "total": 0
+  },
+  "upcoming_occurrences": {
+   "auto_post_scheduled": false,
+   "items": [],
+   "total": 0
+  },
+  "upcoming_this_month": []
+ },
+ "status": 200
+}

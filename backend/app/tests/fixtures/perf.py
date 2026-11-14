@@ -210,6 +210,8 @@ def hot_paths(world, caller: str) -> Dict[str, str]:
     card = world.statement_card[caller]
     paths = {
         "snapshot": "/dashboard/snapshot",
+        # The Transactions page's Due card (STU-599, PERF-4).
+        "due": "/dashboard/due",
         "installment-plans": f"/budget-entries/installment-plans?day={today}",
         "budget-entries": "/budget-entries/?is_active=true&limit=200",
         "accounts": "/accounts/?is_active=true&limit=100",

@@ -3,11 +3,14 @@ Unified dashboard snapshot endpoint for Tally & Trace.
 Returns everything the front-end needs in a single call.
 """
 import math
+import sys
 
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.conditional import conditional_get
@@ -20,6 +23,7 @@ from app.core.tags import TAG_FILTER_HELP, filter_tag_id
 from app.models.allocation import Allocation, AllocationType
 from app.models.user import User
 from app.models.wishlist_item import WishlistItem
+from app.schemas.dashboard import DashboardDue
 from app.services import card_charges as card_charges_svc
 from app.services import card_credit as card_credit_svc
 from app.services import forecast as forecast_svc
@@ -43,6 +47,44 @@ class QuickBalancePins(BaseModel):
         return ids
 
 SAVINGS_RATE_FACTOR = 0.5
+
+
+def _due_lists(ctx: RequestContext, upcoming: list, *, tag_id: Optional[int],
+               collector: forecast_svc.FxCollector, ids: forecast_svc.PublicIds) -> dict:
+    """The lists the Transactions page's Due card reads, after ``upcoming`` (the
+    30-day ``upcoming_by_currency`` items, given with the same ``collector`` and
+    ``ids``): ``payables``, ``card_charges``, ``card_statements_due``, ``missed``,
+    ``installment_review``, ``installment_auto_post``, ``autopay_due`` and
+    ``auto_post_scheduled``. The snapshot and ``/dashboard/due`` both build them
+    here, so their rows cannot drift apart. Adds the entry and loan row fields to
+    ``upcoming`` and ``payables`` in place."""
+    payables = forecast_svc.payables_by_currency(ctx, days=30, tag_id=tag_id,
+                                                 collector=collector, ids=ids)
+    # After the other lists: its rows join the same ``fx`` and public ids.
+    # Available credit on the cards the caller manages (owner or admin, with a
+    # limit): no one else gets a credit key (services/card_credit.py).
+    credit = card_credit_svc.credit_for_cards(ctx, card_credit_svc.managed_card_ids(ctx))
+    card_charges = card_charges_svc.card_charges_by_card(
+        ctx, collector=collector, ids=ids, credit=credit)
+    statements_due = card_credit_svc.statements_due(ctx)
+    missed = missed_svc.recurring_missed(ctx, tag_id=tag_id)
+    installments = missed_svc.installment_snapshot(ctx)
+    autopay_due = missed_svc.autopay_due(ctx)
+    # Snapshot and due only: /forecast/payables and /forecast/upcoming stay as they are.
+    missed_svc.entry_row_fields(ctx, upcoming)
+    missed_svc.entry_row_fields(ctx, payables)
+    missed_svc.loan_row_fields(ctx, upcoming)
+    missed_svc.loan_row_fields(ctx, payables)
+    return {
+        "payables": payables,
+        "card_charges": card_charges,
+        "card_statements_due": statements_due,
+        "missed": missed,
+        "installment_review": installments["installment_review"],
+        "installment_auto_post": installments["installment_auto_post"],
+        "autopay_due": autopay_due,
+        "auto_post_scheduled": settings.JOB_TOKEN is not None,
+    }
 
 
 @router.get("/snapshot", dependencies=[Depends(conditional_get)])
@@ -237,23 +279,7 @@ def get_snapshot(
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.payables_by_currency(ctx, days=30, tag_id=tag_id,
-                                                 collector=collector, ids=ids)
-    # After the other lists: its rows join the same ``fx`` and public ids.
-    # Available credit on the cards the caller manages (owner or admin, with a
-    # limit): no one else gets a credit key (services/card_credit.py).
-    credit = card_credit_svc.credit_for_cards(ctx, card_credit_svc.managed_card_ids(ctx))
-    card_charges = card_charges_svc.card_charges_by_card(
-        ctx, collector=collector, ids=ids, credit=credit)
-    statements_due = card_credit_svc.statements_due(ctx)
-    missed = missed_svc.recurring_missed(ctx, tag_id=tag_id)
-    installments = missed_svc.installment_snapshot(ctx)
-    autopay_due = missed_svc.autopay_due(ctx)
-    # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
-    missed_svc.entry_row_fields(ctx, upcoming)
-    missed_svc.entry_row_fields(ctx, payables)
-    missed_svc.loan_row_fields(ctx, upcoming)
-    missed_svc.loan_row_fields(ctx, payables)
+    due = _due_lists(ctx, upcoming, tag_id=tag_id, collector=collector, ids=ids)
 
     return {
         "balances": {
@@ -268,13 +294,14 @@ def get_snapshot(
         "wishlist_next_up": wishlist_next_up,
         "available_cash": round(float(available_cash), 2),
         "account_closings": account_closings,
-        "payables": payables,
-        "card_charges": card_charges,
-        "card_statements_due": statements_due,
-        "missed": missed,
-        **installments,
-        "autopay_due": autopay_due,
-        "auto_post_scheduled": settings.JOB_TOKEN is not None,
+        "payables": due["payables"],
+        "card_charges": due["card_charges"],
+        "card_statements_due": due["card_statements_due"],
+        "missed": due["missed"],
+        "installment_review": due["installment_review"],
+        "installment_auto_post": due["installment_auto_post"],
+        "autopay_due": due["autopay_due"],
+        "auto_post_scheduled": due["auto_post_scheduled"],
         # The Manila day this snapshot was computed for (STU-511): a client
         # holding it across midnight can tell its rows are yesterday's.
         "today": today.isoformat(),
@@ -284,6 +311,113 @@ def get_snapshot(
             {a.currency.value for a in accounts} | set(disposable["currencies"]),
             collector, default),
         "fx": collector.as_dict(),
+    }
+
+
+DUE_WINDOW_DAYS = 30
+UNPOSTED_PAGE_SIZE = 200
+# The most occurrences each window list carries (the card's request limit).
+OCCURRENCE_LIMIT = 500
+
+
+def _linked_ids(due: dict) -> List[int]:
+    """Every pending row id a missed row links, ascending, once each (the card's
+    ``pendingLinkIds``)."""
+    ids = set()
+    for card in due["card_charges"]:
+        for m in card.get("missed", []):
+            ids.update(m["pending_transaction_ids"])
+    for m in due["missed"]:
+        ids.update(m.get("pending_transaction_ids", []))
+    return sorted(ids)
+
+
+def _serialize(ctx: RequestContext, rows: list) -> List[dict]:
+    """Transactions as ``serialize_transactions`` shows them, through the request's
+    one ``Redactor``."""
+    from app.core.tags import attach_visible_tags
+
+    if not rows:
+        return []
+    attach_visible_tags(ctx.db, ctx.user, rows)
+    return ctx.redactor.transactions(rows)
+
+
+@router.get("/due", response_model=DashboardDue, dependencies=[Depends(conditional_get)])
+def get_due(
+    ctx: RequestContext = Depends(request_context),
+    unposted_page: int = Query(1, ge=1, description="Page of ``unposted``, 1-based, "
+                                                     f"{UNPOSTED_PAGE_SIZE} rows a page"),
+):
+    """``DashboardDue``: everything the Transactions page's Due card renders, in one
+    request (PERF-4). The snapshot's due lists, the rows its missed rows link, the
+    next 30 days' occurrences (``plan`` none and subscription) and the unposted rows
+    dated on or before today, paged. One ``collect_events`` run over the 30-day
+    window serves every projected list; nothing else of the snapshot (balances,
+    cash flow, goals, closings) is computed."""
+    from app.core.access import editable_account_ids, viewable_account_ids, VIEW_ROLES
+    from app.core.redaction import full_view_criterion
+    from app.models.transaction import Transaction
+    from app.routers.transactions import transaction_list_query
+
+    db, user, today = ctx.db, ctx.user, ctx.today
+    collector = forecast_svc.FxCollector()
+    ids = forecast_svc.PublicIds()
+    upcoming = forecast_svc.upcoming_by_currency(ctx, days=DUE_WINDOW_DAYS,
+                                                 collector=collector, ids=ids)["items"]
+    due = _due_lists(ctx, upcoming, tag_id=None, collector=collector, ids=ids)
+
+    # The rows the missed rows link, as ``GET /transactions?ids=&is_posted=false``.
+    linked_ids = _linked_ids(due)
+    linked = []
+    if linked_ids:
+        rows = (transaction_list_query(db, user, ids=linked_ids, is_posted=False)
+                .order_by(Transaction.transaction_date.desc(), Transaction.id.desc()).all())
+        linked = _serialize(ctx, rows)
+
+    # The window after today, as ``GET /budget-entries/upcoming-occurrences``.
+    first, last = today + timedelta(days=1), today + timedelta(days=DUE_WINDOW_DAYS)
+    # One walk over every entry, split by ``plan_kind`` as ``plan=`` splits it (a
+    # subset keeps the walk's order); each list is cut to the request's limit and
+    # its ``total`` counts before the cut.
+    walked = missed_svc.upcoming_occurrences(
+        ctx, start=first, end=last, filters=missed_svc.UpcomingFilters(),
+        limit=sys.maxsize)["items"]
+    occurrences = {}
+    for plan, kind in (("none", None), ("subscription", "subscription")):
+        items = [o for o in walked if o["plan_kind"] == kind]
+        occurrences[plan] = {"items": items[:OCCURRENCE_LIMIT], "total": len(items),
+                             "auto_post_scheduled": due["auto_post_scheduled"]}
+
+    # Unposted rows dated today or earlier that the caller sees full or shared_full.
+    tomorrow = datetime.combine(today + timedelta(days=1), datetime.min.time())
+    query = transaction_list_query(db, user, is_posted=False).filter(
+        Transaction.transaction_date < tomorrow,
+        full_view_criterion(Transaction, user, viewable_account_ids(db, user, roles=VIEW_ROLES),
+                            editable_account_ids(db, user)))
+    offset = (unposted_page - 1) * UNPOSTED_PAGE_SIZE
+    # The page and the count of every page in one statement; a page past the end
+    # has no row to carry the count, so it counts on its own.
+    found = (query.add_columns(func.count().over())
+             .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
+             .offset(offset).limit(UNPOSTED_PAGE_SIZE).all())
+    page = [row for row, _ in found]
+    total = found[0][1] if found else (query.count() if offset else 0)
+
+    return {
+        "today": today.isoformat(),
+        "upcoming_this_month": upcoming,
+        **due,
+        "linked_pending": linked,
+        "upcoming_occurrences": occurrences["none"],
+        "subscription_occurrences": occurrences["subscription"],
+        "unposted": {
+            "items": _serialize(ctx, page),
+            "total": total,
+            "page": unposted_page,
+            "page_size": UNPOSTED_PAGE_SIZE,
+            "has_more": offset + len(page) < total,
+        },
     }
 
 
