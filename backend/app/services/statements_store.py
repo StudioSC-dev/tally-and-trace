@@ -167,6 +167,9 @@ def _lock_and_read(conn, cards: Sequence, day: date, fresh: List[int], savepoint
     # (``core/database.py::make_engine``). A driver that prepares on the server
     # (asyncpg, psycopg 3 past its prepare threshold) would refuse it.
     sql = (f"SAVEPOINT {_READ_SAVEPOINT};" if savepoint else "") + _LOCK_AND_READ
+    if savepoint:
+        # Set before the execute: a failure part-way may leave the savepoint set.
+        conn.info[_READ_SAVEPOINT] = True
     locked, states = set(), {}
     found: Dict[int, Dict[date, Tuple[Decimal, int]]] = {}
     for row in conn.execute(text(sql), {"ns": LOCK_NS, "fresh": sorted(set(fresh)),
@@ -189,7 +192,9 @@ def _lock_and_read(conn, cards: Sequence, day: date, fresh: List[int], savepoint
 
 def _release_read(conn) -> None:
     """Roll back to ``_READ_SAVEPOINT`` (releasing the shared holds taken after it)
-    and release it, in one round trip."""
+    and release it, in one round trip; nothing when it is not set."""
+    if not conn.info.pop(_READ_SAVEPOINT, False):
+        return
     conn.exec_driver_sql(f"ROLLBACK TO SAVEPOINT {_READ_SAVEPOINT}; "
                          f"RELEASE SAVEPOINT {_READ_SAVEPOINT}")
 
@@ -440,6 +445,7 @@ def read_card_rows(db: Session, cards: Sequence, viewable_ids: Iterable[int], da
     if db.autoflush:
         db.flush()  # what the reads' autoflush would do, before the savepoint
     conn = db.connection()
+    conn.info.pop(_READ_SAVEPOINT, None)  # left by a transaction that ended mid-read
     held = _held(db)
     kept = set(held)
     # The shared holds last only to the end of these two reads (STU-623): ``load``
@@ -449,14 +455,23 @@ def read_card_rows(db: Session, cards: Sequence, viewable_ids: Iterable[int], da
     # write of the card would wait, holding them, for the writer's exclusive lock,
     # and two such transactions deadlock. Nothing is written in between (no flush;
     # a catch-up commits on its own connection), so the rollback undoes nothing else.
-    with db.no_autoflush:
-        stored = load(db, cards, day, catch_up_first=catch_up_first, _savepoint=True)
-        after = None
-        if all(c.id in stored for c in modelled):
-            after = min(stored[c.id].through for c in modelled)
-        card_rows = _card_rows(db, [c.id for c in cards], viewable_ids, lines_after=after)
+    # On any exception too: the holds are released before it propagates.
+    try:
+        with db.no_autoflush:
+            stored = load(db, cards, day, catch_up_first=catch_up_first, _savepoint=True)
+            after = None
+            if all(c.id in stored for c in modelled):
+                after = min(stored[c.id].through for c in modelled)
+            card_rows = _card_rows(db, [c.id for c in cards], viewable_ids, lines_after=after)
+    except BaseException:
+        try:
+            _release_read(conn)
+        except Exception:
+            pass  # the connection is gone: its transaction and holds went with it
+        raise
+    finally:
+        held.intersection_update(kept)
     _release_read(conn)
-    held.intersection_update(kept)
     return card_rows, stored
 
 

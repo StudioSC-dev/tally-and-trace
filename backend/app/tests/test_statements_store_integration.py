@@ -753,3 +753,45 @@ def test_the_lock_and_read_round_trip_runs_on_the_app_driver(realistic, sw_db):
     statements_store._release_read(conn)  # the first one set the savepoint
     assert _shared_holds(sw_db, card_id) == []
     sw_db.rollback()
+
+
+def test_a_read_that_fails_after_the_lock_releases_it(realistic, sw_db, monkeypatch):
+    """An exception after the shared hold is taken (here from the rows query) rolls
+    back to the savepoint before it propagates: the hold is gone, and a write of the
+    card from another session commits at once while this transaction stays open."""
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction, TransactionType
+    from app.services import statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    row = (sw_db.query(Transaction)
+           .filter(Transaction.account_id == card_id, Transaction.is_posted.is_(True),
+                   Transaction.transaction_type == TransactionType.DEBIT)
+           .order_by(Transaction.id).first())
+    row_id, amount = row.id, row.amount
+    sw_db.rollback()
+
+    def fails(*args, **kwargs):
+        assert _shared_holds(sw_db, card_id) == ["ShareLock"]  # taken before the failure
+        raise RuntimeError("rows query failed")
+
+    monkeypatch.setattr(statements_store, "_card_rows", fails)
+    card = _card(sw_db, card_id)
+    with pytest.raises(RuntimeError, match="rows query failed"):
+        statements_store.read_card_rows(sw_db, [card], _owner_view(sw_db, card), today)
+    monkeypatch.undo()
+    try:
+        assert _shared_holds(sw_db, card_id) == []  # same transaction, still open
+        other = SessionLocal()
+        try:
+            other.execute(text("SET LOCAL lock_timeout = '2s'"))
+            other.get(Transaction, row_id).amount = amount + 1
+            other.commit()  # the write-through takes the card's lock exclusive
+        finally:
+            other.close()
+    finally:
+        sw_db.rollback()
+        sw_db.get(Transaction, row_id).amount = amount
+        sw_db.commit()
+    assert _good(_verify(sw_db, card_id, today))
