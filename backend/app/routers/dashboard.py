@@ -45,6 +45,44 @@ class QuickBalancePins(BaseModel):
 SAVINGS_RATE_FACTOR = 0.5
 
 
+def _due_lists(ctx: RequestContext, upcoming: list, *, tag_id: Optional[int],
+               collector: forecast_svc.FxCollector, ids: forecast_svc.PublicIds) -> dict:
+    """The lists the Transactions page's Due card reads, after ``upcoming`` (the
+    30-day ``upcoming_by_currency`` items, given with the same ``collector`` and
+    ``ids``): ``payables``, ``card_charges``, ``card_statements_due``, ``missed``,
+    ``installment_review``, ``installment_auto_post``, ``autopay_due`` and
+    ``auto_post_scheduled``. The snapshot and ``/dashboard/due`` both build them
+    here, so their rows cannot drift apart. Adds the entry and loan row fields to
+    ``upcoming`` and ``payables`` in place."""
+    payables = forecast_svc.payables_by_currency(ctx, days=30, tag_id=tag_id,
+                                                 collector=collector, ids=ids)
+    # After the other lists: its rows join the same ``fx`` and public ids.
+    # Available credit on the cards the caller manages (owner or admin, with a
+    # limit): no one else gets a credit key (services/card_credit.py).
+    credit = card_credit_svc.credit_for_cards(ctx, card_credit_svc.managed_card_ids(ctx))
+    card_charges = card_charges_svc.card_charges_by_card(
+        ctx, collector=collector, ids=ids, credit=credit)
+    statements_due = card_credit_svc.statements_due(ctx)
+    missed = missed_svc.recurring_missed(ctx, tag_id=tag_id)
+    installments = missed_svc.installment_snapshot(ctx)
+    autopay_due = missed_svc.autopay_due(ctx)
+    # Snapshot and due only: /forecast/payables and /forecast/upcoming stay as they are.
+    missed_svc.entry_row_fields(ctx, upcoming)
+    missed_svc.entry_row_fields(ctx, payables)
+    missed_svc.loan_row_fields(ctx, upcoming)
+    missed_svc.loan_row_fields(ctx, payables)
+    return {
+        "payables": payables,
+        "card_charges": card_charges,
+        "card_statements_due": statements_due,
+        "missed": missed,
+        "installment_review": installments["installment_review"],
+        "installment_auto_post": installments["installment_auto_post"],
+        "autopay_due": autopay_due,
+        "auto_post_scheduled": settings.JOB_TOKEN is not None,
+    }
+
+
 @router.get("/snapshot", dependencies=[Depends(conditional_get)])
 def get_snapshot(
     ctx: RequestContext = Depends(request_context),
@@ -237,23 +275,7 @@ def get_snapshot(
         }
         for p in forecast_3m
     ]
-    payables = forecast_svc.payables_by_currency(ctx, days=30, tag_id=tag_id,
-                                                 collector=collector, ids=ids)
-    # After the other lists: its rows join the same ``fx`` and public ids.
-    # Available credit on the cards the caller manages (owner or admin, with a
-    # limit): no one else gets a credit key (services/card_credit.py).
-    credit = card_credit_svc.credit_for_cards(ctx, card_credit_svc.managed_card_ids(ctx))
-    card_charges = card_charges_svc.card_charges_by_card(
-        ctx, collector=collector, ids=ids, credit=credit)
-    statements_due = card_credit_svc.statements_due(ctx)
-    missed = missed_svc.recurring_missed(ctx, tag_id=tag_id)
-    installments = missed_svc.installment_snapshot(ctx)
-    autopay_due = missed_svc.autopay_due(ctx)
-    # Snapshot only: /forecast/payables and /forecast/upcoming stay as they are.
-    missed_svc.entry_row_fields(ctx, upcoming)
-    missed_svc.entry_row_fields(ctx, payables)
-    missed_svc.loan_row_fields(ctx, upcoming)
-    missed_svc.loan_row_fields(ctx, payables)
+    due = _due_lists(ctx, upcoming, tag_id=tag_id, collector=collector, ids=ids)
 
     return {
         "balances": {
@@ -268,13 +290,14 @@ def get_snapshot(
         "wishlist_next_up": wishlist_next_up,
         "available_cash": round(float(available_cash), 2),
         "account_closings": account_closings,
-        "payables": payables,
-        "card_charges": card_charges,
-        "card_statements_due": statements_due,
-        "missed": missed,
-        **installments,
-        "autopay_due": autopay_due,
-        "auto_post_scheduled": settings.JOB_TOKEN is not None,
+        "payables": due["payables"],
+        "card_charges": due["card_charges"],
+        "card_statements_due": due["card_statements_due"],
+        "missed": due["missed"],
+        "installment_review": due["installment_review"],
+        "installment_auto_post": due["installment_auto_post"],
+        "autopay_due": due["autopay_due"],
+        "auto_post_scheduled": due["auto_post_scheduled"],
         # The Manila day this snapshot was computed for (STU-511): a client
         # holding it across midnight can tell its rows are yesterday's.
         "today": today.isoformat(),
