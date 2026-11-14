@@ -236,16 +236,20 @@ export const accountingApi = createApi({
   // A save's invalidation runs inside its own settle, so its reload is already pending
   // when the save resolves.
   invalidationBehavior: 'immediately',
-  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances', 'Due'],
+  tagTypes: ['Account', 'Category', 'Transaction', 'Allocation', 'BudgetEntry', 'Wishlist', 'Tag', 'Share', 'ReceivedShare', 'HouseholdShare', 'ReceivedHouseholdShare', 'Household', 'QuickBalances', 'Due', 'Balance'],
   endpoints: (builder) => ({
     // ── Accounts ──────────────────────────────────────────────────────────────
-    getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number }>({
-      query: (params) => ({ url: 'accounts/', params }),
-      providesTags: ['Account'],
+    // `Balance` marks the figures a transaction save moves (balances, loan schedules). A list read only
+    // to pick an account (`forSelector`, the Transactions page's) does not carry it, so a save does not
+    // refetch it; it still changes with `Account`.
+    getAccounts: builder.query<PaginatedResponse<Account>, { account_type?: string; is_active?: boolean; tag?: number; limit?: number; offset?: number; forSelector?: boolean }>({
+      // `forSelector` only shapes the cache entry and its tags; it is not sent.
+      query: (arg) => ({ url: 'accounts/', params: { ...arg, forSelector: undefined } }),
+      providesTags: (_result, _error, arg) => (arg.forSelector ? ['Account'] : ['Account', 'Balance']),
     }),
     getAccount: builder.query<Account, number>({
       query: (id) => `accounts/${id}`,
-      providesTags: ['Account'],
+      providesTags: ['Account', 'Balance'],
     }),
     createAccount: builder.mutation<Account, AccountInput>({
       query: (account) => ({ url: 'accounts/', method: 'POST', body: account }),
@@ -265,7 +269,7 @@ export const accountingApi = createApi({
     // An owner, admin or editor gets the full schedule; a viewer gets the limited one.
     getLoanSchedule: builder.query<LoanScheduleResponse, number>({
       query: (id) => `accounts/${id}/loan-schedule`,
-      providesTags: ['Account'],
+      providesTags: ['Account', 'Balance'],
     }),
     // Credit accounts only (anything else is a 400).
     getAccountStatements: builder.query<CardStatementsResponse, number>({
@@ -282,7 +286,7 @@ export const accountingApi = createApi({
     }),
     getAccountBalance: builder.query<AccountBalance, number>({
       query: (id) => `accounts/${id}/balance`,
-      providesTags: ['Account'],
+      providesTags: ['Account', 'Balance'],
     }),
     // The bank presets for a card's minimum due rule. Static, so it carries no tag.
     getMinimumDuePresets: builder.query<MinimumDuePreset[], void>({
@@ -633,26 +637,26 @@ export const accountingApi = createApi({
     }),
     createTransaction: builder.mutation<Transaction, TransactionInput>({
       query: (transaction) => ({ url: 'transactions/', method: 'POST', body: transaction }),
-      invalidatesTags: ['Transaction', 'Due'],
+      invalidatesTags: ['Transaction', 'Balance', 'Allocation', 'Due'],
     }),
     // Repeat in Add Transaction: the transaction and the recurring entry it is the first occurrence of,
     // in one request that commits both or neither (POST /transactions/repeating).
     createRepeatingTransaction: builder.mutation<RepeatingCreated, RepeatingTransactionInput>({
       query: (body) => ({ url: 'transactions/repeating', method: 'POST', body }),
-      invalidatesTags: ['Transaction', 'BudgetEntry', 'Due'],
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Balance', 'Allocation', 'Due'],
     }),
     // Edit's "Make this repeat": the edits and the entry the saved row starts, in one commit.
     makeTransactionRepeat: builder.mutation<RepeatingCreated, { id: number; body: RepeatEditInput }>({
       query: ({ id, body }) => ({ url: `transactions/${id}/repeat`, method: 'POST', body }),
-      invalidatesTags: ['Transaction', 'BudgetEntry', 'Due'],
+      invalidatesTags: ['Transaction', 'BudgetEntry', 'Balance', 'Allocation', 'Due'],
     }),
     updateTransaction: builder.mutation<Transaction, { id: number; data: TransactionInput }>({
       query: ({ id, data }) => ({ url: `transactions/${id}`, method: 'PUT', body: data }),
-      invalidatesTags: ['Transaction', 'Due'],
+      invalidatesTags: ['Transaction', 'Balance', 'Allocation', 'Due'],
     }),
     deleteTransaction: builder.mutation<void, number>({
       query: (id) => ({ url: `transactions/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Transaction', 'Due'],
+      invalidatesTags: ['Transaction', 'Balance', 'Allocation', 'Due'],
     }),
     uploadReceipt: builder.mutation<{ message: string; file_url: string }, { transaction_id: number; file: File }>({
       query: ({ transaction_id, file }) => {

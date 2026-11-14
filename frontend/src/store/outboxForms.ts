@@ -11,7 +11,7 @@ export interface OutboxFormHandlers {
 }
 
 /** Tags a transaction save invalidates (as the mutations it replaces did). */
-export const TRANSACTION_TAGS = ['Transaction', 'Due']
+export const TRANSACTION_TAGS = ['Transaction', 'Balance', 'Allocation', 'Due']
 
 /** Queues the delete of a transaction row (the Transactions page's Delete and the toast's Undo). */
 export function transactionDelete(id: number, description: string): NewOutboxEntry {

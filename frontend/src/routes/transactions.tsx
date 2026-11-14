@@ -655,7 +655,8 @@ export function TransactionsPage() {
   const [triggerTransactions] = useLazyGetTransactionsQuery()
   const beginTransactionsRequest = useRequestGeneration()
   const { data: accountsData, isLoading: isAccountsLoading } = useGetAccountsQuery(
-    { is_active: true, limit: 100 },
+    // Read to pick accounts, not to show balances: a save does not refetch it (see `getAccounts`).
+    { is_active: true, limit: 100, forSelector: true },
     { skip: !isAuthenticated }
   )
   const {

@@ -15,6 +15,8 @@
 //   (f) a Due-card save invalidates `Due`: after Mark paid drains, `/dashboard/due` is read again
 //       and the paid row has left; a Transactions save leaves Accounts and Allocations alone.
 //   (g) the toast stack does not cover the Due card's last rows (STU-605 QA note).
+//   (h) a Transactions save leaves no stale figure: after one, Accounts shows the new balance and Goals the new
+//       budget amount on the next visit, though both were cached before it.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and seeds
 // through the API. Not wired into CI. Run steps: ./README.md. Condition waits only.
@@ -409,6 +411,59 @@ async function scenarioG(browser) {
   }
 }
 
+// (h) a Transactions save leaves no stale balance or budget amount behind
+const money = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const goTo = async (page, nav, path) => {
+  await page.locator(`a[data-onboarding="${nav}"]:visible`).first().click()
+  await page.waitForURL((url) => url.pathname === path)
+  await h.waitQuiet(page)
+}
+
+async function scenarioH(browser) {
+  console.log('\n(h) after a save on Transactions, Accounts and Goals show the new balance and budget amount right away')
+  const seeded = await seedUser('drh')
+  const { user, checking } = seeded
+  const category = await client.post(user.token, '/categories/', { name: 'DRH Food', color: '#16a34a', is_expense: true })
+  const budget = await client.post(user.token, '/allocations/', {
+    account_id: checking.id, name: 'DRH Groceries', allocation_type: 'budget', target_amount: 9000, period_frequency: 'monthly',
+    configuration: { category_ids: [category.id] },
+  })
+  const { ctx, page } = await signedIn(browser, user)
+  try {
+    const balanceOf = async () => (await client.get(user.token, `/accounts/${checking.id}`)).balance
+    const usedOf = async () => (await client.get(user.token, `/allocations/${budget.id}`)).current_amount
+    const cardText = async (name) => (await page.locator('article, .card').filter({ hasText: name }).last().innerText()).replace(/\s+/g, ' ')
+    // Both pages are visited first, so their data is cached when the save happens.
+    await goTo(page, 'nav-accounts', '/accounts')
+    const balanceBefore = await balanceOf()
+    await h.check('h.accounts-show-old-balance', 'S', async () => (await cardText(checking.name)).includes(money(balanceBefore)) || `the card reads ${await cardText(checking.name)}`)
+    await goTo(page, 'nav-allocations', '/allocations')
+    await page.getByRole('tab', { name: 'Budgets' }).or(page.getByRole('button', { name: 'Budgets', exact: true })).first().click()
+    await h.check('h.goals-show-budget', 'S', async () => (await cardText('DRH Groceries')).includes('DRH Groceries') || 'the budget is not listed')
+    await goTo(page, 'nav-transactions', '/transactions')
+    await dueRows(page).first().waitFor()
+    const form = await fillCreate(page, { accountName: checking.name, amount: 321, description: 'DR H Groceries run' })
+    await pick(form.locator('[data-field="category_id"]'), 'DRH Food')
+    await submitAndWaitSaved(page, form)
+    const balanceAfter = await balanceOf()
+    const usedAfter = await usedOf()
+    await h.check('h.api-moved', 'S', async () => (balanceAfter !== balanceBefore && usedAfter === 321) || `balance ${balanceBefore} -> ${balanceAfter}, budget used ${usedAfter}`)
+    await goTo(page, 'nav-accounts', '/accounts')
+    await h.check('h.accounts-show-new-balance', 'B', async () => {
+      const text = await cardText(checking.name)
+      return text.includes(money(balanceAfter)) || `the card reads ${text}, the API says ${money(balanceAfter)}`
+    })
+    await goTo(page, 'nav-allocations', '/allocations')
+    await page.getByRole('tab', { name: 'Budgets' }).or(page.getByRole('button', { name: 'Budgets', exact: true })).first().click()
+    await h.check('h.goals-show-new-budget-amount', 'B', async () => {
+      const text = await cardText('DRH Groceries')
+      return text.includes(money(usedAfter)) || `the card reads ${text}, the API says ${money(usedAfter)}`
+    })
+  } finally {
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['b', scenarioB],
@@ -417,6 +472,7 @@ const SCENARIOS = [
   ['e', (b) => scenarioE(b, { fallback: false })],
   ['e2', (b) => scenarioE(b, { fallback: true })],
   ['g', scenarioG],
+  ['h', scenarioH],
 ]
 
 ;(async () => {
