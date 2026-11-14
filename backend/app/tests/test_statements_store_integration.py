@@ -660,3 +660,138 @@ def test_a_write_between_the_stored_rows_and_the_rows_is_not_half_seen(realistic
     assert not writer.is_alive()
     assert repr(got) == repr(before), first_difference(got, before)
     assert _good(_verify(sw_db, card_id, today))
+
+
+# --- read, then write: two transactions on one card (STU-623) ---------------------------------
+
+def test_two_reads_then_two_writes_of_one_card_both_commit(realistic, sw_db):
+    """Two transactions each read the card's statements through the store and then
+    each change a posted row of it. Neither may abort with a deadlock: a read must
+    not keep a hold on the card that a write of another transaction then waits for
+    while that one waits for it."""
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction, TransactionType
+    from app.services import statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    through = _state(sw_db, card_id).materialized_through
+    sw_db.rollback()
+    rows = [t.id for t in (sw_db.query(Transaction)
+                           .filter(Transaction.account_id == card_id,
+                                   Transaction.is_posted.is_(True),
+                                   Transaction.transaction_type == TransactionType.DEBIT,
+                                   Transaction.transaction_date
+                                   < datetime.combine(through, time()))
+                           .order_by(Transaction.id).limit(2))]
+    assert len(rows) == 2
+    amounts = {i: sw_db.get(Transaction, i).amount for i in rows}
+    sw_db.rollback()
+    read, errors = threading.Barrier(2, timeout=30), []
+
+    def read_then_write(txn_id):
+        db = SessionLocal()
+        try:
+            card = _card(db, card_id)
+            _, stored = statements_store.read_card_rows(db, [card], _owner_view(db, card), today)
+            assert card_id in stored  # read from the store, not replayed
+            read.wait()  # both have read before either writes
+            db.get(Transaction, txn_id).amount += Decimal("1.00")
+            db.commit()
+        except Exception as exc:
+            errors.append(exc)
+            read.abort()
+        finally:
+            db.close()
+
+    writers = [threading.Thread(target=read_then_write, args=(i,)) for i in rows]
+    for t in writers:
+        t.start()
+    for t in writers:
+        t.join(40)
+    try:
+        assert not any(t.is_alive() for t in writers)
+        assert not errors, errors
+        assert _good(_verify(sw_db, card_id, today))
+    finally:
+        sw_db.rollback()
+        for txn_id, amount in amounts.items():
+            sw_db.get(Transaction, txn_id).amount = amount  # through the hook
+        sw_db.commit()
+
+
+def _shared_holds(db, card_id):
+    """The modes in which ``db``'s backend holds the card's statements lock."""
+    from app.services.statements_store import LOCK_NS
+
+    return sorted(m for (m,) in db.execute(text(
+        "SELECT mode FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() "
+        "AND granted AND classid = CAST(:ns AS oid) AND objsubid = 2 "
+        "AND objid = CAST(:c AS oid)"), {"ns": LOCK_NS, "c": card_id}))
+
+
+def test_the_lock_and_read_round_trip_runs_on_the_app_driver(realistic, sw_db):
+    """``_lock_and_read`` sends the savepoint, the shared holds and the stored read as
+    one multi-statement execute with bound parameters. psycopg2 binds parameters on
+    the client and sends a simple query, so Postgres runs all three; this runs it
+    through the application's own engine and driver and checks each one took effect."""
+    from app.core.database import engine
+    from app.services import statements_store
+
+    assert engine.dialect.driver == "psycopg2"
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    _read(sw_db, card_id, today)  # stored and current
+    card = _card(sw_db, card_id)
+    conn = sw_db.connection()
+    assert _shared_holds(sw_db, card_id) == []
+    locked, states, stored = statements_store._lock_and_read(conn, [card], today, [card_id],
+                                                             True)
+    assert locked == {card_id}
+    assert states[card_id].materialized_through is not None
+    assert stored[card_id].cycles  # the stored rows came back from the last statement
+    assert _shared_holds(sw_db, card_id) == ["ShareLock"]  # the second statement ran
+    statements_store._release_read(conn)  # the first one set the savepoint
+    assert _shared_holds(sw_db, card_id) == []
+    sw_db.rollback()
+
+
+def test_a_read_that_fails_after_the_lock_releases_it(realistic, sw_db, monkeypatch):
+    """An exception after the shared hold is taken (here from the rows query) rolls
+    back to the savepoint before it propagates: the hold is gone, and a write of the
+    card from another session commits at once while this transaction stays open."""
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction, TransactionType
+    from app.services import statements_store
+
+    today, card_id = realistic.today, realistic.accounts["card_a"]
+    _read(sw_db, card_id, today)
+    row = (sw_db.query(Transaction)
+           .filter(Transaction.account_id == card_id, Transaction.is_posted.is_(True),
+                   Transaction.transaction_type == TransactionType.DEBIT)
+           .order_by(Transaction.id).first())
+    row_id, amount = row.id, row.amount
+    sw_db.rollback()
+
+    def fails(*args, **kwargs):
+        assert _shared_holds(sw_db, card_id) == ["ShareLock"]  # taken before the failure
+        raise RuntimeError("rows query failed")
+
+    monkeypatch.setattr(statements_store, "_card_rows", fails)
+    card = _card(sw_db, card_id)
+    with pytest.raises(RuntimeError, match="rows query failed"):
+        statements_store.read_card_rows(sw_db, [card], _owner_view(sw_db, card), today)
+    monkeypatch.undo()
+    try:
+        assert _shared_holds(sw_db, card_id) == []  # same transaction, still open
+        other = SessionLocal()
+        try:
+            other.execute(text("SET LOCAL lock_timeout = '2s'"))
+            other.get(Transaction, row_id).amount = amount + 1
+            other.commit()  # the write-through takes the card's lock exclusive
+        finally:
+            other.close()
+    finally:
+        sw_db.rollback()
+        sw_db.get(Transaction, row_id).amount = amount
+        sw_db.commit()
+    assert _good(_verify(sw_db, card_id, today))
