@@ -784,9 +784,10 @@ async function heldRollover(browser) {
   await page.locator('nav a[href="/transactions"]').first().click()
   await page.waitForURL((url) => url.pathname === '/transactions')
   await settle(page)
-  precondition('the return to Transactions refetched the snapshot and the plans', stage.hits.snapshot >= 1 && stage.hits.plans >= 1, stage.hits)
+  precondition('the return to Transactions refetched the snapshot (plans stay cached for a minute)', stage.hits.snapshot >= 1, stage.hits)
   await sleep(600)
-  check('(i) a response still dated the old day keeps both badges at "..."', [await badgeOf(page, 'subscriptions'), await badgeOf(page, 'installments')], ['…', '…'])
+  // Plans stay cached for a minute on return (STU-603), so only the snapshot-dated Subscriptions badge waits.
+  check('(i) a response still dated the old day keeps the subscriptions badge at "..."', await badgeOf(page, 'subscriptions'), '…')
   await page.locator(`[data-testid="${DUE_TABS.find((t) => t.slug === 'subscriptions').tab}"]`).click()
   check('(i) and no empty text is shown', await page.locator('[data-testid="due-subscriptions-empty"], [data-testid="due-installments-empty"]').count(), 0)
   checkNoNative('i', native)
