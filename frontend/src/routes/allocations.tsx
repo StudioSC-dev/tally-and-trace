@@ -1234,7 +1234,7 @@ export function AllocationsPage() {
                   Target {new Date(allocation.target_date).toLocaleDateString()}
                 </span>
               )}
-              {allocation.monthly_target !== undefined && !isBudget && (
+              {allocation.monthly_target != null && !isBudget && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 text-ink">
                   Monthly {format(allocation.monthly_target)}
                 </span>
@@ -2002,7 +2002,7 @@ export function AllocationsPage() {
 
               <div className="border border-line p-4">
                 <h3 className="text-sm font-semibold text-body">Details</h3>
-                {actionAllocation.monthly_target !== undefined && !actionAllocationIsBudget && (
+                {actionAllocation.monthly_target != null && !actionAllocationIsBudget && (
                   <p className="mt-2 text-sm text-muted">Monthly target {format(actionAllocation.monthly_target)}</p>
                 )}
                 {actionAllocation.target_date && !actionAllocationIsBudget && (
