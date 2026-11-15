@@ -1,9 +1,13 @@
 // Browser checks for STU-213: the dead mobile menu in Navigation.tsx and the unused
 // OnboardingStep.targetElement field are gone, and nothing visible changed.
 //
-//   a.unreachable-before-removal  AC1  at 360, 390, 640, 768 and 1280px the hamburger (if the build has one)
-//                                      cannot be seen, hit with the pointer or focused with Tab, and no
-//                                      dropdown can be open. Passes on the code before the change and after it.
+//   a.unreachable-before-removal  AC1  evidence from the parent build (main e2e881d) recorded in
+//                                      nav-dead-code.baseline/pre-removal.json: at 360, 390, 640, 768 and 1280px, in
+//                                      both engines, the hamburger was in the DOM and could not be seen, hit with the
+//                                      pointer or focused with Tab, and no dropdown could be open. This check reads
+//                                      that record; it does not measure the current tree. To retake it: check out the
+//                                      parent, copy this script in, and run
+//                                      PRE_REMOVAL=write PARENT_SHA=<sha> node frontend/e2e/nav-dead-code.cjs a
 //   a.no-hamburger                AC1  after the change neither the hamburger nor the dropdown is in the DOM,
 //                                      and Navigation.tsx no longer holds their state or classes
 //   b.nav-geometry                AC2  the top bar's bounding boxes and pixels at 390 and 1280px match the
@@ -56,6 +60,12 @@ const ONBOARDING = path.join(FRONTEND, 'src', 'components', 'onboarding', 'Onboa
 const TOP_NAV = 'nav.fixed.top-0'
 const HAMBURGER_TEXT = 'Open main menu'
 let stack
+// PRE_REMOVAL=write on a checkout of the parent build records AC1's baseline evidence (see the header).
+const PRE_WRITE = process.env.PRE_REMOVAL === 'write'
+const PRE_FILE = path.join(BASELINE_DIR, 'pre-removal.json')
+const pre = { parent: process.env.PARENT_SHA || '', results: {} }
+let PRE = null
+try { PRE = JSON.parse(fs.readFileSync(PRE_FILE, 'utf8')) } catch { /* reported by the checks */ }
 
 async function openAt(browser, user, width) {
   const { ctx, page } = await h.newPage(browser, { viewport: { width, height: HEIGHT } })
@@ -68,41 +78,54 @@ async function openAt(browser, user, width) {
 
 const hamburgers = (page) => page.locator(`${TOP_NAV} button`).filter({ hasText: HAMBURGER_TEXT })
 
+/** Hamburger and dropdown reachability on the page as built: what the parent build is measured with. */
+async function measureReachability(page) {
+  const found = await hamburgers(page).count()
+  const problems = []
+  for (let i = 0; i < found; i++) {
+    const one = hamburgers(page).nth(i)
+    if (await one.isVisible()) problems.push('visible')
+    if (await one.boundingBox()) problems.push('has a box')
+    const hit = await one.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      return !!at && (at === el || el.contains(at))
+    })
+    if (hit) problems.push('a pointer at its centre lands on it')
+  }
+  // Keyboard: walk the page's tab order from the top; the hamburger is never focused.
+  await page.evaluate(() => { (document.activeElement instanceof HTMLElement) && document.activeElement.blur(); window.scrollTo(0, 0) })
+  for (let i = 0; i < 50; i++) {
+    await page.keyboard.press('Tab')
+    // Match the focused element itself: a wrap to <body> has the label in its text too.
+    const onIt = await page.evaluate((label) => {
+      const el = document.activeElement
+      return !!el && el.tagName === 'BUTTON' && (el.textContent || '').trim() === label
+    }, HAMBURGER_TEXT)
+    if (onIt) { problems.push(`Tab ${i + 1} focused it`); break }
+  }
+  // The dropdown exists only while its state is true, and only the hamburger set it.
+  const dropdown = await page.locator(`${TOP_NAV} > div.sm\\:hidden`).count()
+  if (dropdown > 0) problems.push('a dropdown is in the DOM')
+  return { found, problems }
+}
+
 async function scenarioA(browser, engine) {
   console.log(`\n=== (a) ${engine}: no hamburger, no dropdown`)
   const user = await h.makeUser(stack, `a${engine.slice(0, 2)}`)
   for (const width of WIDTHS) {
     const { ctx, page } = await openAt(browser, user, width)
     try {
-      await h.check(`a.${engine}.${width}.unreachable-before-removal`, 'B', async () => {
-        const found = await hamburgers(page).count()
-        const problems = []
-        for (let i = 0; i < found; i++) {
-          const one = hamburgers(page).nth(i)
-          if (await one.isVisible()) problems.push('visible')
-          if (await one.boundingBox()) problems.push('has a box')
-          const hit = await one.evaluate((el) => {
-            const r = el.getBoundingClientRect()
-            const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
-            return !!at && (at === el || el.contains(at))
-          })
-          if (hit) problems.push('a pointer at its centre lands on it')
-        }
-        // Keyboard: walk the page's tab order from the top; the hamburger is never focused.
-        await page.evaluate(() => { (document.activeElement instanceof HTMLElement) && document.activeElement.blur(); window.scrollTo(0, 0) })
-        for (let i = 0; i < 50; i++) {
-          await page.keyboard.press('Tab')
-          // Match the focused element itself: a wrap to <body> has the label in its text too.
-          const onIt = await page.evaluate((label) => {
-            const el = document.activeElement
-            return !!el && el.tagName === 'BUTTON' && (el.textContent || '').trim() === label
-          }, HAMBURGER_TEXT)
-          if (onIt) { problems.push(`Tab ${i + 1} focused it`); break }
-        }
-        // The dropdown exists only while its state is true, and only the hamburger set it.
-        const dropdown = await page.locator(`${TOP_NAV} > div.sm\\:hidden`).count()
-        if (dropdown > 0) problems.push('a dropdown is in the DOM')
-        return problems.length === 0 || problems.join('; ')
+      if (PRE_WRITE) {
+        pre.results[`${engine}-${width}`] = await measureReachability(page)
+        continue
+      }
+      await h.check(`a.${engine}.${width}.unreachable-before-removal`, 'B', () => {
+        // Evidence recorded on the parent build, not measured on this tree (where there is nothing to find).
+        const rec = PRE && PRE.results[`${engine}-${width}`]
+        if (!rec) return `no recorded parent result for ${engine} at ${width}px in pre-removal.json`
+        if (rec.found < 1) return `the parent had no hamburger in the DOM at ${width}px, so the guard proves nothing`
+        return rec.problems.length === 0 || `on the parent: ${rec.problems.join('; ')}`
       })
       await h.check(`a.${engine}.${width}.no-hamburger`, 'B', async () => {
         const problems = []
@@ -242,6 +265,7 @@ async function scenarioD() {
       for (const [name, run] of browserScenarios) {
         if (only && only !== name) continue
         if (WRITE && name !== 'b') continue
+        if (PRE_WRITE && name !== 'a') continue
         try {
           await run(browser, engine)
         } catch (e) {
@@ -250,6 +274,13 @@ async function scenarioD() {
       }
       await browser.close()
     }
+  }
+  if (PRE_WRITE) {
+    fs.mkdirSync(BASELINE_DIR, { recursive: true })
+    fs.writeFileSync(PRE_FILE, JSON.stringify(pre, null, 2) + '\n')
+    console.log(`  WROTE ${PRE_FILE}`)
+    stack?.stop()
+    process.exit(0)
   }
   if ((!only || only === 'c') && !WRITE) await scenarioC()
   if ((!only || only === 'd') && !WRITE) await scenarioD()
