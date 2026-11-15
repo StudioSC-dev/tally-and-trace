@@ -714,6 +714,8 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const pendingCards = useMemo(() => pendingTargets(outbox, CARD_PAY_FORM), [outbox])
   const pendingTransactions = useMemo(() => pendingTargets(outbox, 'transaction'), [outbox])
   const entryActionsOff = (entryId: number) => listsFetching || pendingEntries.has(entryId)
+  // Upcoming and Subscriptions occurrences come from the Due read (or, on an older API, their own queries).
+  const occurrenceActionsOff = listsFetching || upcomingOccFetching || subscriptionOccFetching
 
   const record = (row: DueEntryRow | DueMissedRow, action: RecurringAction | undefined) =>
     openRecord(row.entryId, row.name, row.kind === 'missed' ? row.oldest : row.occurrenceDate, action)
@@ -900,7 +902,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   const statementRow = (row: DueStatementRow) => {
     const shown = statementRowText(row)
     const postButton = shown.post && (
-      <button type="button" onClick={() => void postDueNow()} disabled={posting} className={buttonClass} data-testid="due-unposted-post">
+      <button type="button" onClick={() => void postDueNow()} disabled={posting || listsFetching} className={buttonClass} data-testid="due-unposted-post">
         {posting ? 'Posting…' : 'Post due installments now'}
       </button>
     )
@@ -966,6 +968,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
       occurrence={occurrence}
       scheduled={scheduled}
       credit={credit}
+      disabled={occurrenceActionsOff}
       onRecord={(action) => openRecord(occurrence.entry_id, occurrence.name, occurrence.occurrence_date, action)}
       onReview={() => review(occurrence.entry_id, occurrence.name)}
       onChangeDate={() =>
@@ -1246,7 +1249,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
               <button
                 type="button"
                 onClick={() => void postDueNow()}
-                disabled={posting}
+                disabled={posting || listsFetching}
                 className={primaryButtonClass}
                 data-testid="due-post-now"
               >

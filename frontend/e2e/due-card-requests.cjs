@@ -16,6 +16,7 @@
 //       row is disabled: with `/dashboard/due` held, and (older API) with the window query held.
 //   (f) a Due-card save invalidates `Due`: after Mark paid drains, `/dashboard/due` is read again
 //       and the paid row has left; a Transactions save leaves Accounts and Allocations alone.
+//   (f1, f2) Post now and every Upcoming or Subscriptions occurrence button are disabled while their source refetches.
 //   (g) the toast stack does not cover the Due card's last rows (STU-605 QA note).
 //   (h) a Transactions save leaves no stale figure: after one, the account page shows the new balance and the
 //       dashboard envelope the new amount on the next visit, though both were cached before it.
@@ -464,6 +465,65 @@ async function scenarioE(browser, { fallback }) {
 }
 
 // (f) the stale-data guard reaches Post now and the occurrence rows
+async function scenarioF(browser, { fallback }) {
+  const name = fallback ? 'f2' : 'f1'
+  console.log(`\n(${name}) Post now and the occurrence actions are disabled while their source refetches${fallback ? ' (older API: the occurrence query)' : ' (/dashboard/due)'}`)
+  const seeded = await seedFull(`dr${name}`)
+  const { user } = seeded
+  const today = manilaToday()
+  const bank = await client.post(user.token, '/accounts/', { name: `${name} Pay`, account_type: 'checking', balance: 100000, currency: 'PHP' })
+  const card = await client.post(user.token, '/accounts/', {
+    name: `${name} Visa`, account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 100000,
+    billing_cycle_start: Math.min(28, Number(today.slice(8, 10))), days_until_due_date: 21, payment_account_id: bank.id,
+  })
+  await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: `${name} Lamp`, amount: 1200,
+    account_id: card.id, next_occurrence: wire(today), end_mode: 'after_occurrences', max_occurrences: 6,
+  })
+  // Opening Transactions would post the month at once; a viewer-day trick is not needed: hold the POST so Post now stays.
+  const { ctx, page } = await signedIn(browser, user)
+  let g, post
+  try {
+    if (fallback) await h.failWith(page, getOf(isDue), 404)
+    post = await h.gate(page, (r) => r.method() === 'POST' && pathOf(r.url()) === '/budget-entries/post-due-installments')
+    await openTransactions(page)
+    await h.waitQuiet(page)
+    const postNow = page.locator(tid('due-post-now'))
+    await postNow.waitFor({ timeout: 10000 })
+    const occurrenceButtons = page.locator(`${tid('due-panel-upcoming')} [data-testid="upcoming-occurrence"] button`)
+    const occurrenceStates = async () => {
+      await page.locator(tid('due-tab-upcoming')).click()
+      await occurrenceButtons.first().waitFor({ timeout: 10000 })
+      return occurrenceButtons.evaluateAll((els) => els.map((el) => el.disabled))
+    }
+    await h.check(`${name}.enabled-when-settled`, 'S', async () => {
+      const postEnabled = await postNow.isEnabled()
+      const states = await occurrenceStates()
+      await page.locator(tid('due-tab-due')).click()
+      return (postEnabled && states.length > 0 && states.every((d) => !d)) || `Post now enabled ${postEnabled}, occurrence buttons disabled ${JSON.stringify(states)}`
+    })
+    // The sources are held; a save elsewhere on the page invalidates them.
+    g = await h.gate(page, getOf(fallback ? isOccurrences : isDue))
+    const form = await fillCreate(page, { accountName: seeded.checking.name, amount: 15, description: `DR ${name} Snack` })
+    await form.getByRole('button', { name: 'Create Transaction', exact: true }).click()
+    await h.check(`${name}.refetch-held`, 'S', async () => (await g.waitHits(1, 10000)) || 'the save sent no refetch of the source')
+    await h.sleep(500)
+    if (!fallback) await h.check(`${name}.post-now-disabled`, 'B', async () => (await postNow.isDisabled()) || 'Post now is enabled while /dashboard/due refetches')
+    await h.check(`${name}.occurrence-actions-disabled`, 'B', async () => {
+      const states = await occurrenceStates()
+      return (states.length > 0 && states.every(Boolean)) || `occurrence buttons disabled: ${JSON.stringify(states)}`
+    })
+    g.release({ disarm: true })
+    await h.waitQuiet(page)
+    await h.check(`${name}.enabled-again`, 'B', async () =>
+      (await occurrenceStates()).every((d) => !d) || 'an occurrence button stays disabled after the refetch landed')
+  } finally {
+    g?.release({ disarm: true })
+    post?.release({ disarm: true })
+    await ctx.close()
+  }
+}
+
 // (g) STU-605 QA note: the toast stack must not cover the Due card's rows at the end of the page.
 async function scenarioG(browser) {
   console.log('\n(g) with toasts showing and the page scrolled to its end, no Due row button sits under the stack')
@@ -577,6 +637,8 @@ const SCENARIOS = [
   ['d', scenarioD],
   ['e', (b) => scenarioE(b, { fallback: false })],
   ['e2', (b) => scenarioE(b, { fallback: true })],
+  ['f1', (b) => scenarioF(b, { fallback: false })],
+  ['f2', (b) => scenarioF(b, { fallback: true })],
   ['g', scenarioG],
   ['h', scenarioH],
 ]
