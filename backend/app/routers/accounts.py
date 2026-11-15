@@ -616,6 +616,14 @@ LOAN_FIELDS = (
 )
 
 
+# A loan whose payment account is in another currency. Names neither account
+# nor a currency, as ``_validate_loan_payer`` does: an admin may change a loan
+# whose payment account is the owner's and hidden from them.
+LOAN_PAYER_CURRENCY_DETAIL = (
+    "This loan's payment account must stay a funding account in the same currency; "
+    "the loan's payment account has to change first")
+
+
 def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -> None:
     """Check loan terms against the account's resulting type; default the amortisation.
 
@@ -652,10 +660,7 @@ def _validate_loan(db: Session, data: dict, account: Optional[Account] = None) -
     if payment_account_id is not None:
         payer = db.query(Account).filter(Account.id == payment_account_id).first()
         if payer is not None and payer.currency != resolved("currency"):
-            raise HTTPException(
-                status_code=400,
-                detail="A loan's payment account must be in the loan's currency",
-            )
+            raise HTTPException(status_code=400, detail=LOAN_PAYER_CURRENCY_DETAIL)
 
     if account is None or account.account_type == AccountType.LOAN:
         return

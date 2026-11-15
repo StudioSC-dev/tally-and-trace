@@ -72,3 +72,25 @@ def test_loan_payment_funding_same_response(sw, sw_client, sw_db):
                for loan in (unrouted, hidden)]
         assert got[0].status_code == 404, (route, got[0].text)
         _same(*got)
+
+
+# --- AC2: changing a loan's currency ------------------------------------------------------
+
+def test_loan_currency_message_neutral(sw, sw_client, sw_db):
+    """An admin moving a loan to USD gets the same refusal whatever the currency of
+    the owner's payment account they cannot see, and it names neither."""
+    a, d = sw["a"], sw["d"]
+    euro_bank = sw_post(sw_client, a, "/accounts/", {
+        "name": "Euro bank", "account_type": "checking", "balance": 100,
+        "currency": "EUR"})["id"]
+    peso_paid = _loan(sw_client, a, "Peso loan", payment_account_id=sw["a_private"])
+    euro_paid = _loan(sw_client, a, "Euro loan", currency="EUR", payment_account_id=euro_bank)
+    for loan in (peso_paid, euro_paid):
+        sw_share(sw_db, loan, d["id"], "admin", a["id"])
+    got = [_call(sw_client, d, "PUT", f"/accounts/{loan}", {"currency": "USD"})
+           for loan in (peso_paid, euro_paid)]
+    assert got[0].status_code == 400, got[0].text
+    _same(*got)
+    assert got[0].json() == {"detail": NEUTRAL_CURRENCY_DETAIL}
+    for code in ("PHP", "EUR", "USD"):
+        assert code not in got[0].text
