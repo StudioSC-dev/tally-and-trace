@@ -27,7 +27,7 @@ from app.core.access import (
 from app.core.context import RequestContext, context_of
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, redactor_for
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import manila_wall_now
+from app.core.time import manila_today, manila_wall_now
 # Unused here since the window moved to Manila, but tests pin the clock by
 # patching this module's ``naive_utc_now``.
 from app.core.time import naive_utc_now  # noqa: F401
@@ -495,6 +495,7 @@ def get_disposable_income(
     user_id: int,
     tag_id: Optional[int] = None,
     fx: Optional[FxRates] = None,
+    today: Optional[date] = None,
 ) -> dict:
     """
     Compute monthly net disposable income:
@@ -514,6 +515,9 @@ def get_disposable_income(
 
     With ``tag_id`` only entries carrying that tag effectively count
     (``app/core/tags.py``), each once.
+
+    An entry whose end date is before ``today`` (Manila, by default) has ended
+    and never counts (``_still_running``), even while it is still active.
     """
     # The accounts the caller sees (inactive ones included, ``tag_viewer`` too),
     # as in the period summary: a top-up counts only when its source is one of
@@ -528,6 +532,7 @@ def get_disposable_income(
         readable_criterion(BudgetEntry, user_id, viewable_account_ids(db, user_id),
                            household_grants(db, user_id)),
         BudgetEntry.is_active.is_(True),
+        _still_running(today if today is not None else manila_today()),
     )
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
@@ -544,6 +549,17 @@ def get_disposable_income(
     buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, Money(db, fx))
     row = buckets.get(default_currency(db, user_id)) or _DisposableBucket()
     return {k: v for k, v in row.as_dict().items() if k in DISPOSABLE_KEYS}
+
+
+def _still_running(today: date):
+    """Entries whose schedule has not passed its end date on ``today``: no end date,
+    or one on ``today`` or later (``posting.has_ended``'s date rule, as a filter).
+    An entry ending today still counts; one that ended before it does not."""
+    return or_(
+        BudgetEntry.end_mode != "on_date",
+        BudgetEntry.end_date.is_(None),
+        BudgetEntry.end_date >= _day_start(today),
+    )
 
 
 DISPOSABLE_KEYS = ("monthly_income", "monthly_expenses", "monthly_disposable")
@@ -647,12 +663,14 @@ def disposable_by_currency(ctx: RequestContext, tag_id: Optional[int] = None) ->
     """``/forecast/disposable``: the default currency's three figures, plus
     ``by_currency`` rows (``moved_in``/``moved_out`` too) and ``currencies``.
     Its rows are monthly equivalents of recurring entries; none is listed, so
-    ``fx`` reports no rows."""
+    ``fx`` reports no rows. An entry that ended before ``ctx.today`` never
+    counts (``_still_running``)."""
     db, user_id = ctx.db, ctx.uid
     scope_ids = ctx.viewable_ids(roles=VIEW_ROLES)
     query = db.query(BudgetEntry).filter(
         readable_criterion(BudgetEntry, user_id, ctx.viewable_ids(), ctx.grants.values()),
         BudgetEntry.is_active.is_(True),
+        _still_running(ctx.today),
     )
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))

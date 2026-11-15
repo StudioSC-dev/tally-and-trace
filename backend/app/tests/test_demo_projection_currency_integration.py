@@ -199,6 +199,39 @@ def test_disposable(demo):
         v4("disposable monthly_disposable"))
 
 
+def test_ended_streaming_subscription_does_not_affect_disposable(demo, sw_db):
+    """STU-305: the "Streaming Subscription" entry ended in March 2026, so the
+    disposable figures are the same whether the seed leaves it inactive (shape 5)
+    or it is still active: the dashboard's, ``/forecast/disposable``'s and the
+    scalar the wishlist reads."""
+    from app.models.budget_entry import BudgetEntry
+    from app.models.user import User
+    from app.services.forecast import get_disposable_income
+
+    keys = ("monthly_income", "monthly_expenses", "monthly_disposable")
+    uid = sw_db.query(User.id).filter(User.email == "demo@example.com").scalar()
+    (entry,) = sw_db.query(BudgetEntry).filter(BudgetEntry.user_id == uid,
+                                               BudgetEntry.name == "Streaming Subscription")
+    assert (entry.end_mode, entry.end_date.replace(tzinfo=None), entry.is_active) == (
+        "on_date", datetime(2026, 3, 5, 8, 0), False)
+
+    def figures():
+        sw_db.expire_all()
+        dashboard = demo("/dashboard/snapshot")["monthly_summary"]
+        body = demo("/forecast/disposable")
+        scalar = get_disposable_income(sw_db, uid, today=FX_REF.date())
+        return ({k: dashboard[k] for k in keys}, {k: body[k] for k in keys},
+                body["by_currency"], {k: scalar[k] for k in keys})
+
+    inactive = figures()
+    assert inactive[1] == dict(zip(keys, (v4("disposable monthly_income"),
+                                          v4("disposable monthly_expenses"),
+                                          v4("disposable monthly_disposable"))))
+    entry.is_active = True
+    sw_db.commit()
+    assert figures() == inactive
+
+
 def test_card_statement_history(demo):
     accounts = {a["name"]: a["id"] for a in demo("/accounts/", limit=1000)["items"]}
     statements = demo(f"/accounts/{accounts['Credit Card']}/statements")["statements"]
