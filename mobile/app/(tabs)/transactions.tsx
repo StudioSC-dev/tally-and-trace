@@ -26,6 +26,7 @@ import {
   formatRelativeDate,
   transactionDate,
   transactionDescription,
+  transferAccountFields,
 } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
 import { isCrossCurrencyTransfer } from '../../src/utils/currencyDisplay'
@@ -146,6 +147,8 @@ export function TransactionFormModal({
   categories: Category[]
   defaultCurrency: CurrencyCode
 }) {
+  // Only accounts the caller may add transactions to are offered in the form.
+  const eligibleAccounts = accounts.filter((a) => a.permissions.can_add_transactions)
   const isEdit = !!initial?.id
   const isSharedEdit = initial?.view === 'shared_full'
   const [createTransaction, { isLoading: creating }] = useCreateTransactionMutation()
@@ -155,7 +158,17 @@ export function TransactionFormModal({
     description: initial?.description ?? '',
     amount: String(initial?.amount ?? ''),
     transaction_type: initial?.transaction_type ?? 'debit',
-    account_id: String(initial?.account_id ?? accounts[0]?.id ?? ''),
+    account_id: String(initial?.account_id ?? eligibleAccounts[0]?.id ?? ''),
+    transfer_from_account_id: String(
+      initial && initial.view === 'full' && initial.transaction_type === 'transfer'
+        ? (initial.transfer_from_account_id ?? initial.account_id ?? '')
+        : '',
+    ),
+    transfer_to_account_id: String(
+      initial && initial.view === 'full' && initial.transaction_type === 'transfer'
+        ? (initial.transfer_to_account_id ?? '')
+        : '',
+    ),
     category_id: String(initial && initial.view === 'full' ? (initial.category_id ?? '') : ''),
     transaction_date: initial?.transaction_date
       ? initial.transaction_date.split('T')[0]
@@ -166,23 +179,44 @@ export function TransactionFormModal({
     setForm((p) => ({ ...p, [key]: value }))
 
   const handleSubmit = async () => {
-    if (!form.amount || !form.account_id) {
+    const isTransfer = form.transaction_type === 'transfer'
+    if (isTransfer) {
+      if (!form.amount) return Alert.alert('Error', 'Amount is required.')
+      if (!form.transfer_from_account_id) {
+        return Alert.alert('Error', 'Choose the source account for the transfer.')
+      }
+      if (!form.transfer_to_account_id) {
+        return Alert.alert('Error', 'Choose the destination account for the transfer.')
+      }
+      if (form.transfer_from_account_id === form.transfer_to_account_id) {
+        return Alert.alert('Error', 'Source and destination must be different accounts.')
+      }
+    } else if (!form.amount || !form.account_id) {
       return Alert.alert('Error', 'Amount and account are required.')
     }
+    // A transfer is booked on its source account.
+    const accountId = isTransfer ? form.transfer_from_account_id : form.account_id
     try {
       const payload: Partial<FullTransaction> = {
         description: form.description.trim() || undefined,
         amount: parseFloat(form.amount),
         transaction_type: form.transaction_type as Transaction['transaction_type'],
-        account_id: parseInt(form.account_id),
+        account_id: parseInt(accountId),
         category_id: form.category_id ? parseInt(form.category_id) : undefined,
         transaction_date: new Date(form.transaction_date).toISOString(),
         // An edit keeps the record's own currency; only a new record takes its account's.
         currency:
           isEdit && initial?.currency
             ? (initial.currency as CurrencyCode)
-            : ((accounts.find((a) => String(a.id) === form.account_id)?.currency as CurrencyCode | undefined) ?? defaultCurrency),
-      }
+            : ((eligibleAccounts.find((a) => String(a.id) === accountId)?.currency as CurrencyCode | undefined) ?? defaultCurrency),
+        // Any other type sends both as null, so an edit away from a transfer clears them.
+        ...transferAccountFields(
+          form.transaction_type,
+          form.transfer_from_account_id ? parseInt(form.transfer_from_account_id) : undefined,
+          form.transfer_to_account_id ? parseInt(form.transfer_to_account_id) : undefined,
+        ),
+        // The API accepts an explicit null here; the shared field type only lists a number.
+      } as Partial<FullTransaction>
       // Another user's record: the server refuses references owned by someone else.
       if (isSharedEdit) delete payload.category_id
       if (isEdit && initial?.id) {
@@ -218,6 +252,7 @@ export function TransactionFormModal({
               {(['debit', 'credit', 'transfer'] as const).map((t) => (
                 <TouchableOpacity
                   key={t}
+                  testID={`type-${t}`}
                   onPress={() => update('transaction_type', t)}
                   className={`flex-1 py-2 rounded-lg border items-center ${
                     form.transaction_type === t
@@ -254,11 +289,12 @@ export function TransactionFormModal({
           />
 
           {/* Account */}
-          <View className="gap-2">
+          {form.transaction_type !== 'transfer' && (
+          <View className="gap-2" testID="account-picker">
             <Text className="text-slate-400 text-sm font-medium">Account</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View className="flex-row gap-2">
-                {accounts.map((acc) => (
+                {eligibleAccounts.map((acc) => (
                   <TouchableOpacity
                     key={acc.id}
                     testID={`account-${acc.id}`}
@@ -283,6 +319,37 @@ export function TransactionFormModal({
               </View>
             </ScrollView>
           </View>
+          )}
+
+          {/* Transfer source and destination */}
+          {form.transaction_type === 'transfer' &&
+            (['transfer_from_account_id', 'transfer_to_account_id'] as const).map((key) => (
+              <View key={key} className="gap-2" testID={key === 'transfer_from_account_id' ? 'transfer-from-picker' : 'transfer-to-picker'}>
+                <Text className="text-slate-400 text-sm font-medium">
+                  {key === 'transfer_from_account_id' ? 'From account' : 'To account'}
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View className="flex-row gap-2">
+                    {eligibleAccounts.map((acc) => (
+                      <TouchableOpacity
+                        key={acc.id}
+                        testID={`${key === 'transfer_from_account_id' ? 'transfer-from' : 'transfer-to'}-${acc.id}`}
+                        onPress={() => update(key, String(acc.id))}
+                        className={`px-3 py-2 rounded-lg border ${
+                          form[key] === String(acc.id)
+                            ? 'bg-sky-500 border-sky-500'
+                            : 'bg-slate-800 border-slate-700'
+                        }`}
+                      >
+                        <Text className={form[key] === String(acc.id) ? 'text-white font-semibold' : 'text-slate-300'}>
+                          {acc.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+            ))}
 
           {/* Category (hidden when editing another user's record) */}
           {!isSharedEdit && (
