@@ -8,7 +8,14 @@
 // (c) tour-tab: with the tour running at 200%, the Goals step highlights the Goals tab;
 // (d) quality-gates: tsc, vite build and lint each exit 0.
 //
-// Baselines live in ./bottom-nav-font.baseline/ (a rects JSON and a PNG per engine). They were taken
+// STU-637 adds scenario (e): the Dashboard period buttons and the Transactions due tabs at 200%.
+//   e.home-fits-200 / e.transactions-fits-200: scrollWidth <= 390 on each page;
+//   e.controls-reachable-200: every period button and due tab can be clicked, its whole label is
+//     readable (inside the viewport and not clipped by its own box, after scrolling its own row);
+//   e.default-same: at the default size their rects match ./bottom-nav-font.baseline/controls-<engine>.json,
+//     taken on main c244660 (before the fix) with BASELINE=write.
+//
+// Baselines live in ./bottom-nav-font.baseline/ (a rects JSON and a PNG per engine, plus controls-<engine>.json for (e)). They were taken
 // on main 06a95a9 with this script's BASELINE=write; the pixel check is only meaningful on the
 // machine and fonts they were taken on, so regenerate them (on main, never on a changed nav) when the
 // rendering environment changes. Rects are compared with a 0.5px tolerance.
@@ -120,7 +127,7 @@ async function scenarioA(browser, engine) {
         const inNav = over.filter((o) => o.inNav)
         if (inNav.length) return `the nav overflows: ${JSON.stringify(inNav.slice(0, 4))}`
         if (over.length === 0) return `scrollWidth ${scroll} > ${VIEWPORT.width} but no element's right edge exceeds it`
-        console.log(`  NOTE ${route}: scrollWidth ${scroll} comes from page content, not the nav (STU-637 will fix these pages): ${JSON.stringify(over.slice(0, 8))}`)
+        console.log(`  NOTE ${route}: scrollWidth ${scroll} comes from page content, not the nav (STU-637 fixes these pages): ${JSON.stringify(over.slice(0, 8))}`)
         return true
       })
     }
@@ -163,6 +170,110 @@ async function scenarioB(browser, engine) {
     })
   } finally {
     await ctx.close()
+  }
+}
+
+const PERIODS = ['week', 'month', 'year']
+const DUE_TABS = ['due', 'not-posted']
+
+const periodButtons = (page) => page.locator('[aria-label="Period for actual totals"] button')
+const dueTabs = (page) => page.locator('[data-testid="due-tab-due"], [data-testid="due-tab-not-posted"]')
+
+const rectsOf = (loc) =>
+  loc.evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { name: (el.textContent || '').trim().replace(/\s+/g, ' '), x: r.x, y: r.y, w: r.width, h: r.height }
+    }))
+
+async function openPage(browser, user, route, { big }) {
+  const { ctx, page } = await h.newPage(browser, { viewport: VIEWPORT })
+  page.setDefaultTimeout(10000)
+  if (big) await page.addInitScript(FONT_200)
+  await h.uiLogin(page, stack, user)
+  if (route !== '/') await page.goto(`${stack.webUrl}${route}`)
+  await page.locator('nav.fixed.bottom-0 [data-onboarding="nav-home"]').waitFor()
+  await (route === '/' ? periodButtons(page).first() : dueTabs(page).first()).waitFor()
+  await h.waitQuiet(page)
+  return { ctx, page }
+}
+
+/** A control's label is readable: inside the viewport, and not wider than its own box. */
+async function readable(loc) {
+  await loc.scrollIntoViewIfNeeded()
+  return loc.evaluate((el, vw) => {
+    const r = el.getBoundingClientRect()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const t = range.getBoundingClientRect()
+    const problems = []
+    if (r.left < -0.5 || r.right > vw + 0.5) problems.push(`box ${Math.round(r.left)}..${Math.round(r.right)} outside 0..${vw}`)
+    if (el.scrollWidth > el.clientWidth + 1) problems.push(`label clipped: scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth}`)
+    if (t.left < r.left - 0.5 || t.right > r.right + 0.5) problems.push(`text ${Math.round(t.left)}..${Math.round(t.right)} outside box ${Math.round(r.left)}..${Math.round(r.right)}`)
+    return problems.length ? problems.join('; ') : true
+  }, VIEWPORT.width)
+}
+
+async function scenarioE(browser, engine) {
+  console.log(`\n=== (e) ${engine}: period buttons and due tabs at 390px`)
+  const user = await h.makeUser(stack, `e${engine.slice(0, 2)}`)
+  const pages = [['/', 'home', periodButtons, PERIODS.length], ['/transactions', 'transactions', dueTabs, DUE_TABS.length]]
+  for (const [route, name, controls, count] of pages) {
+    if (WRITE) {
+      const { ctx, page } = await openPage(browser, user, route, { big: false })
+      try {
+        fs.mkdirSync(BASELINE_DIR, { recursive: true })
+        const file = path.join(BASELINE_DIR, `controls-${engine}.json`)
+        const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
+        all[name] = await rectsOf(controls(page))
+        fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n')
+        console.log(`  WROTE ${name} to ${path.relative(process.cwd(), file)}`)
+      } finally {
+        await ctx.close()
+      }
+      continue
+    }
+    const big = await openPage(browser, user, route, { big: true })
+    try {
+      await h.check(`e.${engine}.${name}-fits-200`, 'B', async () => {
+        const px = await big.page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize))
+        if (px !== 32) return `root font size ${px}px, expected 32`
+        const scroll = await big.page.evaluate(() => document.documentElement.scrollWidth)
+        return scroll <= VIEWPORT.width || `scrollWidth ${scroll} > ${VIEWPORT.width}`
+      })
+      await h.check(`e.${engine}.${name}-controls-reachable-200`, 'B', async () => {
+        const loc = controls(big.page)
+        const n = await loc.count()
+        if (n !== count) return `${n} controls found, expected ${count}`
+        for (let i = 0; i < n; i++) {
+          const one = controls(big.page).nth(i)
+          const label = (await one.textContent() || '').trim()
+          const ok = await readable(one)
+          if (ok !== true) return `${label}: ${ok}`
+          await one.click({ timeout: 5000 })
+          const state = await one.getAttribute(name === 'home' ? 'aria-pressed' : 'aria-selected')
+          if (state !== 'true') return `${label}: clicked but not selected (${state})`
+        }
+        return true
+      })
+    } finally {
+      await big.ctx.close()
+    }
+    const small = await openPage(browser, user, route, { big: false })
+    try {
+      await h.check(`e.${engine}.${name}-default-same`, 'B', async () => {
+        const file = path.join(BASELINE_DIR, `controls-${engine}.json`)
+        if (!fs.existsSync(file)) return `no baseline ${path.basename(file)}; run with BASELINE=write on main`
+        const base = JSON.parse(fs.readFileSync(file, 'utf8'))[name]
+        if (!base) return `no ${name} baseline`
+        const rects = await rectsOf(controls(small.page))
+        if (rects.length !== base.length) return `${rects.length} controls, baseline ${base.length}`
+        const off = rects.map((r, i) => ['x', 'y', 'w', 'h'].filter((k) => Math.abs(r[k] - base[i][k]) > TOL).map((k) => `${r.name}.${k} ${r[k]} vs ${base[i][k]}`)).flat()
+        return off.length === 0 || off.join('; ')
+      })
+    } finally {
+      await small.ctx.close()
+    }
   }
 }
 
@@ -229,12 +340,12 @@ async function scenarioD() {
   process.on('unhandledRejection', (e) => console.log(`  NOTE unhandled rejection: ${e && e.message ? e.message.split('\n')[0] : e}`))
   stack = await startLocalStack()
   const wanted = (process.env.ENGINES || ENGINES.join(',')).split(',')
-  const scenarios = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC]]
+  const scenarios = [['a', scenarioA], ['b', scenarioB], ['c', scenarioC], ['e', scenarioE]]
   for (const engine of wanted) {
     const browser = await pw[engine].launch()
     for (const [name, run] of scenarios) {
       if (only && only !== name) continue
-      if (WRITE && name !== 'b') continue
+      if (WRITE && name !== 'b' && name !== 'e') continue
       try {
         await run(browser, engine)
       } catch (e) {
