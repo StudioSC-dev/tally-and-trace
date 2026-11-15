@@ -263,5 +263,56 @@
       }
     }
   ],
-  "recordedOn": "75cba71"
+  "recordedOn": "75cba71",
+  "tokenProbe": {
+    "light": {
+      "paper": "rgb(222, 218, 212)",
+      "surface": "rgb(233, 230, 224)",
+      "sunken": "rgb(210, 205, 198)",
+      "line": "rgb(194, 188, 180)",
+      "line-strong": "rgb(169, 162, 154)",
+      "ink": "rgb(32, 29, 26)",
+      "body": "rgb(67, 64, 60)",
+      "muted": "rgb(89, 85, 79)",
+      "ok": "rgb(60, 97, 11)",
+      "warn": "rgb(127, 64, 33)",
+      "info": "rgb(89, 85, 79)",
+      "danger": "rgb(140, 34, 29)"
+    },
+    "dark-class": {
+      "paper": "rgb(28, 25, 23)",
+      "surface": "rgb(35, 31, 29)",
+      "sunken": "rgb(23, 20, 18)",
+      "line": "rgb(51, 46, 43)",
+      "line-strong": "rgb(68, 61, 57)",
+      "ink": "rgb(245, 245, 244)",
+      "body": "rgb(214, 211, 209)",
+      "muted": "rgb(168, 162, 158)",
+      "ok": "rgb(163, 177, 138)",
+      "warn": "rgb(217, 160, 91)",
+      "info": "rgb(168, 162, 158)",
+      "danger": "rgb(224, 145, 138)"
+    },
+    "dark-media": {
+      "paper": "rgb(28, 25, 23)",
+      "surface": "rgb(35, 31, 29)",
+      "sunken": "rgb(23, 20, 18)",
+      "line": "rgb(51, 46, 43)",
+      "line-strong": "rgb(68, 61, 57)",
+      "ink": "rgb(245, 245, 244)",
+      "body": "rgb(214, 211, 209)",
+      "muted": "rgb(168, 162, 158)",
+      "ok": "rgb(163, 177, 138)",
+      "warn": "rgb(217, 160, 91)",
+      "info": "rgb(168, 162, 158)",
+      "danger": "rgb(224, 145, 138)"
+    }
+  },
+  "renderNoise": {
+    "maxOutsidePixels": 0,
+    "maxChannelDelta": 0,
+    "repeats": 4,
+    "screens": 36,
+    "measuredOn": "75cba71faa71fac0a6ecd85211cb98dce66eb5bc"
+  }
 }
