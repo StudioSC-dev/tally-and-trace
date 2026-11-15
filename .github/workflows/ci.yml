@@ -118,9 +118,11 @@ jobs:
         run: pnpm --filter @tally-trace/shared test
 
       - name: Test frontend
+        working-directory: .
         run: pnpm --dir frontend test
 
       - name: Test mobile
+        working-directory: .
         run: pnpm --dir mobile test
 
       # No separate type-check step: `pnpm build` runs `tsc && vite build`, so
