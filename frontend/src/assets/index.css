@@ -547,8 +547,13 @@ body::after {
   document, so a z-50 overlay was painted under it and the tab bar covered the dialog's lower
   part at phone widths. z-60 is the level the other dialogs already use; the toast stack (z-70)
   and the confirm dialog (z-100) stay above it.
+
+  `margin: 0` keeps sibling spacing off the overlay (STU-644): inside a `space-y-6` parent (the
+  Accounts page) the utility gave this fixed box a 24px margin-top, so the backdrop started 24px
+  down and the top nav stayed uncovered.
 */
 .fixed.inset-0.overflow-y-auto.bg-black\/60:not(.z-\[100\]) {
   z-index: 60;
+  margin: 0;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
 }
