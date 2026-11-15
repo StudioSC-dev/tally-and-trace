@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation, useGetTagsQuery } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation, useUploadReceiptMutation, useGetTagsQuery } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import type {
@@ -10,7 +10,7 @@ import type {
   RecordPermissions,
   SharedFullTransaction,
 } from '../store/api'
-import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
 import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
 import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
@@ -65,6 +65,18 @@ const categoryKind = (category: { kind?: CategoryKind; is_expense?: boolean }): 
 
 // The API takes at most this many category names per request.
 const MAX_CATEGORY_NAMES = 50
+
+// A receipt or invoice given as an external link: an http(s) URL only, so a stored
+// upload (shown as `/api/...`) or any other scheme is never rendered as a link.
+const externalLink = (value: string | null | undefined): string | null => {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
+  } catch {
+    return null
+  }
+}
 
 const getOrdinalSuffix = (day: number) => {
   if (day % 100 >= 11 && day % 100 <= 13) {
@@ -430,6 +442,13 @@ export function TransactionsPage() {
   const [fetchReceipt, { isLoading: isReceiptLoading }] = useFetchReceiptMutation()
   const [receipt, setReceipt] = useState<{ url: string; type: string; transactionId: number } | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  // Uploading a receipt from the action modal: the chosen file, a refusal, and the
+  // input's key (bumped to clear it after an upload).
+  const [uploadReceipt, { isLoading: isReceiptUploading }] = useUploadReceiptMutation()
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [receiptUploadError, setReceiptUploadError] = useState<string | null>(null)
+  const [receiptUploaded, setReceiptUploaded] = useState(false)
+  const [receiptInputKey, setReceiptInputKey] = useState(0)
   // True once the user changes the date or the posted box in this dialog session. The
   // future-date note waits for it, so Edit never shows it for a row as loaded.
   const [postedTouched, setPostedTouched] = useState(false)
@@ -1296,6 +1315,7 @@ export function TransactionsPage() {
     releaseReceiptUrl()
     setReceipt(null)
     setReceiptError(null)
+    resetReceiptUpload()
     receiptFor.current = transaction.id
     setActionError(null)
     setActionTransaction(transaction)
@@ -1308,9 +1328,47 @@ export function TransactionsPage() {
     releaseReceiptUrl()
     setReceipt(null)
     setReceiptError(null)
+    resetReceiptUpload()
     receiptFor.current = null
     setActionError(null)
     resetPostingFormState()
+  }
+
+  const resetReceiptUpload = () => {
+    setReceiptFile(null)
+    setReceiptUploadError(null)
+    setReceiptUploaded(false)
+    setReceiptInputKey((key) => key + 1)
+  }
+
+  // Uploads the chosen file as the transaction's receipt. A refused upload shows the
+  // server's reason and leaves the stored receipt as it was; an accepted one replaces it,
+  // so a shown preview of the old one is dropped.
+  const handleUploadReceipt = async (transactionId: number) => {
+    if (!receiptFile) {
+      setReceiptUploadError('Choose a file to upload.')
+      return
+    }
+    setReceiptUploadError(null)
+    setReceiptUploaded(false)
+    const generation = currentSessionGeneration()
+    try {
+      const result = await uploadReceipt({ transaction_id: transactionId, file: receiptFile }).unwrap()
+      if (receiptFor.current !== transactionId || generation !== currentSessionGeneration()) return
+      releaseReceiptUrl()
+      setReceipt(null)
+      setReceiptError(null)
+      setActionTransaction((prev) =>
+        prev && prev.id === transactionId && isOwnerFull(prev) ? { ...prev, receipt_url: result.file_url } : prev,
+      )
+      setReceiptFile(null)
+      setReceiptInputKey((key) => key + 1)
+      setReceiptUploaded(true)
+    } catch (error) {
+      if (receiptFor.current === transactionId) {
+        setReceiptUploadError(apiErrorMessage(error) || 'Could not upload the receipt.')
+      }
+    }
   }
 
   // The receipt is fetched with the auth header and shown from an object URL,
@@ -1883,7 +1941,7 @@ export function TransactionsPage() {
         transfer_fee: transaction.transfer_fee ?? 0,
       description: transaction.description || '',
       transaction_type: transaction.transaction_type,
-      transaction_date: new Date(transaction.transaction_date).toISOString().split('T')[0],
+      transaction_date: entryDay(transaction.transaction_date),
         posting_date: transaction.posting_date
           ? postingDay(transaction.posting_date) ?? undefined
           : undefined,
@@ -3330,6 +3388,28 @@ export function TransactionsPage() {
             </div>
 
             <div className="mt-6 space-y-4">
+              {isOwnerFull(actionTransaction) && externalLink(actionTransaction.receipt_url) && (
+                <a
+                  href={externalLink(actionTransaction.receipt_url) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="receipt-link"
+                  className="block text-sm text-ink underline break-all"
+                >
+                  Open receipt link
+                </a>
+              )}
+              {isOwnerFull(actionTransaction) && externalLink(actionTransaction.invoice_url) && (
+                <a
+                  href={externalLink(actionTransaction.invoice_url) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="invoice-link"
+                  className="block text-sm text-ink underline break-all"
+                >
+                  Open invoice link
+                </a>
+              )}
               {isOwnerFull(actionTransaction) && actionTransaction.receipt_url?.startsWith('/api/') && (
                 <div className="space-y-2">
                   <button
@@ -3350,6 +3430,47 @@ export function TransactionsPage() {
                         Download receipt
                       </a>
                     )
+                  )}
+                </div>
+              )}
+              {isOwnerFull(actionTransaction) && actionPermissions.can_edit && (
+                <div className="space-y-2">
+                  <label htmlFor="receipt-file" className="block text-sm font-semibold text-body">
+                    {actionTransaction.receipt_url ? 'Replace receipt' : 'Add a receipt'}
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      key={receiptInputKey}
+                      id="receipt-file"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+                      data-testid="receipt-file"
+                      aria-invalid={receiptUploadError ? true : undefined}
+                      aria-describedby={receiptUploadError ? 'receipt-upload-error' : undefined}
+                      onChange={(event) => {
+                        setReceiptFile(event.target.files?.[0] ?? null)
+                        setReceiptUploadError(null)
+                        setReceiptUploaded(false)
+                      }}
+                      className="min-w-0 text-sm text-body"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUploadReceipt(actionTransaction.id)}
+                      disabled={isReceiptUploading || !receiptFile}
+                      data-testid="upload-receipt"
+                      className="px-4 py-2 text-sm font-semibold border border-line text-ink hover:bg-sunken disabled:opacity-50"
+                    >
+                      {isReceiptUploading ? 'Uploading…' : 'Upload receipt'}
+                    </button>
+                  </div>
+                  {receiptUploadError && (
+                    <p id="receipt-upload-error" role="alert" data-testid="receipt-upload-error" className="text-sm text-danger">
+                      {receiptUploadError}
+                    </p>
+                  )}
+                  {receiptUploaded && (
+                    <p role="status" data-testid="receipt-upload-done" className="text-sm text-ok">Receipt uploaded.</p>
                   )}
                 </div>
               )}

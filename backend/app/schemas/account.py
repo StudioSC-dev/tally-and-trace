@@ -140,6 +140,8 @@ class DirectAccountResponse(AccountFields):
     """
     my_role: Literal["owner", "admin", "editor", "viewer"]
     permissions: AccountPermissions
+    # The owner's user id: match accounts of one owner by this, not by name.
+    owner_id: int
     owner_name: Optional[str] = None
     is_shared: Optional[bool] = None
 
