@@ -68,12 +68,15 @@ class Budget(NamedTuple):
 # the editor, viewer and household member but not the owner: the owner's response is
 # 158,026 bytes, of which the snapshot's own lists (payables, upcoming, card charges) are
 # 97 KB and the 64 unposted rows through today 53 KB, so it is budgeted as measured.
+# STU-253 raised byte ceilings to the measured result: every account carries
+# ``permissions.can_view_details`` (accounts lists, the Household dashboard), and a
+# tag-viewer card's statement event shows its figure instead of 0 (household reads).
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "due"): Budget(60, 173_828, 308, 1, 992),
     ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
     ("owner", "budget-entries"): Budget(16, 14_408, 0, 0, 29),
-    ("owner", "accounts"): Budget(12, 9_876, 0, 0, 16),
+    ("owner", "accounts"): Budget(12, 10_164, 0, 0, 16),
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
     ("owner", "statements"): Budget(11, 47_893, 431, 0, 435),
     ("owner", "card-credit"): Budget(29, 9_374, 431, 0, 543),
@@ -81,25 +84,25 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("editor", "due"): Budget(60, 50_386, 45, 1, 223),
     ("editor", "installment-plans"): Budget(17, 713, 0, 0, 7),
     ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
-    ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
+    ("editor", "accounts"): Budget(10, 1_713, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
     ("editor", "statements"): Budget(14, 47_875, 431, 0, 436),
     ("viewer", "snapshot"): Budget(60, 31_604, 54, 1, 183),
     ("viewer", "due"): Budget(56, 30_039, 45, 1, 182),
     ("viewer", "installment-plans"): Budget(9, 61, 0, 0, 5),
     ("viewer", "budget-entries"): Budget(9, 39, 0, 0, 1),
-    ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
+    ("viewer", "accounts"): Budget(10, 1_715, 0, 0, 5),
     ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
     ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),
-    ("household", "snapshot"): Budget(51, 10_590, 44, 1, 84),
+    ("household", "snapshot"): Budget(51, 10_653, 44, 1, 84),
     ("household", "due"): Budget(47, 8_525, 37, 1, 82),
     ("household", "installment-plans"): Budget(13, 61, 0, 0, 5),
     ("household", "budget-entries"): Budget(11, 39, 0, 0, 1),
-    ("household", "accounts"): Budget(14, 358, 0, 0, 5),
+    ("household", "accounts"): Budget(14, 383, 0, 0, 5),
     ("household", "transactions"): Budget(18, 4_601, 0, 0, 21),
-    ("household", "household-upcoming"): Budget(39, 7_353, 38, 1, 73),
+    ("household", "household-upcoming"): Budget(39, 7_416, 38, 1, 73),
     ("household", "household-monthly"): Budget(63, 138, 38, 1, 82),
-    ("household", "household-dashboard"): Budget(69, 7_740, 38, 1, 85),
+    ("household", "household-dashboard"): Budget(69, 7_828, 38, 1, 85),
 }
 
 # The owner's median CPU (ms) on the machine that wrote the budgets, one run at full
