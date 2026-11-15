@@ -203,7 +203,8 @@ An account's owner can share it with another user as `viewer`, `editor` or
   `can_post`, `can_revert`, `can_tag`) and `created_by` (a display name such as
   "Alex P."). Accounts carry `my_role`, `owner_name` and `permissions`
   (`can_edit_settings`, `can_manage_shares`, `can_add_transactions`,
-  `can_delete`).
+  `can_delete`), and, for every direct role, `owner_id` (the owner's user id;
+  match accounts of one owner by it, since two owners can share a display name).
 - **Hidden accounts** appear as `{id: null, name}` with "Other account", "Loan
   payment" or "Card payment", and a description is shown only when you can view
   every account the record touches. A payment into a loan or card you can't
@@ -230,7 +231,9 @@ An account's owner can share it with another user as `viewer`, `editor` or
   everyone else gets the same 404 as for a missing transaction. A stored
   upload's `receipt_url` (older rows included) is shown as that route; an
   external link is returned as entered. `invoice_url` has no upload and is
-  returned as entered.
+  returned as entered. A stored file is deleted once the commit that deletes
+  its transaction, or replaces it with a new upload, succeeds; a request that
+  rolls back keeps both the file and the reference.
 - **Removing, leaving or demoting a share** to viewer deactivates the former
   sharee's recurring entries on that account; their transactions stay.
 - Demo users can neither share nor be shared with (403).
