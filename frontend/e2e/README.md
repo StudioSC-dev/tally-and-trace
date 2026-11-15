@@ -218,6 +218,8 @@ request on purpose: it would wait out its bound. Wait for the outcome with a
 condition instead (the toast's `data-state`, the row, or the request's hit count),
 never a fixed sleep. Its browser-free self-test is `node frontend/e2e/_smooth.selftest.cjs`.
 
+`allDueRows` (and so `readTab` and `rowsOf`) restarts its walk once from page 1 when the list shrinks while it pages (the paid row leaves, the pager unmounts or the total moves); a second change rejects with `DueListShrunk`. Its browser-free self-test is `node frontend/e2e/_due_pages.selftest.cjs` (STU-402).
+
 A script that opens a card tab with `openDueTab` or `readTab` registers its
 `check` with `useDueCheck(check)` first. `openDueTab` (and `expectDueTab`, for a
 script that waits on a tab's badge before opening it) records an assertion that

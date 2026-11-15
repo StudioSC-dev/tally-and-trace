@@ -39,16 +39,55 @@ async function pagerLabel(page) {
   return (await hasPager(page)) ? (await pager(page).locator('p').first().textContent())?.trim() ?? null : null
 }
 
+/**
+ * The list changed under a walk: the pager unmounted (the list shrank to one page) or the
+ * list's total moved (a row was paid, so the page count or the rows on each page shifted).
+ * allDueRows restarts its walk once on this error; a step outside a walk just throws it.
+ */
+class DueListShrunk extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'DueListShrunk'
+  }
+}
+
+/** The "of N" total in the pager's label, or null with no pager. */
+async function pagerTotal(page) {
+  const m = /of\s+(\d+)\s*$/.exec((await pagerLabel(page)) ?? '')
+  return m ? Number(m[1]) : null
+}
+
 async function step(page, button, to) {
+  // The pager unmounts when the list shrinks to one page; there is then no button to click.
+  if (!(await hasPager(page))) throw new DueListShrunk(`the pager is gone, so there is no page ${to}`)
   // Read-only paging: dispatch the click, so an open dialog or form over the page does not block it.
-  await button.dispatchEvent('click')
   try {
-    await pager(page).locator('button[aria-current="page"]').filter({ hasText: new RegExp(`^${to}$`) }).waitFor({ timeout: 5000 })
+    await button.dispatchEvent('click', undefined, { timeout: 2000 })
   } catch (e) {
-    // A step that does not land is a failed assertion (when the script registered its check), then the error.
-    if (dueCheck !== null) await dueCheck(`the pager reached page ${to}`, await currentPage(page).catch(() => null), to)
+    if (!(await hasPager(page))) throw new DueListShrunk(`the pager went away before page ${to} was clicked`)
     throw e
   }
+  // Wait for page `to`, or for the pager to stay gone (two polls in a row), so a shrunk list
+  // does not cost the whole 5 s.
+  let over = false
+  const landed = pager(page).locator('button[aria-current="page"]').filter({ hasText: new RegExp(`^${to}$`) })
+    .waitFor({ timeout: 5000 }).then(() => 'landed', () => 'timeout')
+  const gone = (async () => {
+    let misses = 0
+    while (!over) {
+      await new Promise((r) => setTimeout(r, 100))
+      misses = (await hasPager(page).catch(() => true)) ? 0 : misses + 1
+      if (misses >= 2) return 'gone'
+    }
+    return 'over'
+  })()
+  const outcome = await Promise.race([landed, gone])
+  over = true
+  if (outcome === 'landed') return
+  if (outcome === 'gone' || !(await hasPager(page))) throw new DueListShrunk(`the pager went away while waiting for page ${to}`)
+  // A step that does not land is a failed assertion (when the script registered its check), then the error.
+  if (dueCheck !== null) await dueCheck(`the pager reached page ${to}`, await currentPage(page).catch(() => null), to)
+  throw new Error(`the pager did not reach page ${to} in 5 s`)
 }
 
 /** Step to page `n` with Previous and Next; the list has no pager while it fits on one page. */
@@ -92,17 +131,42 @@ const readRows = (page) =>
     }
   }))
 
-/** Every row on every page in list order; leaves the section on page 1. */
-async function allDueRows(page) {
+/** One walk from page 1 to the last. Throws DueListShrunk when the pager or the list's total changes under it. */
+async function walkDueRows(page) {
   await goToPage(page, 1)
+  const total = await pagerTotal(page)
   const out = []
   for (;;) {
     out.push(...(await readRows(page)))
-    if (!(await hasPager(page)) || (await nextButton(page).isDisabled())) break
+    // Re-read the pager after the rows: a refetch that dropped a row has moved the pages under the walk.
+    if ((await pagerTotal(page)) !== total) throw new DueListShrunk(`the list changed during the walk (was ${total ?? 'one page'})`)
+    if (total === null) break
+    const last = await nextButton(page).isDisabled({ timeout: 2000 }).catch(() => null)
+    if (last === null) throw new DueListShrunk('the pager went away during the walk')
+    if (last) break
     await step(page, nextButton(page), (await currentPage(page)) + 1)
   }
   await goToPage(page, 1)
   return out
+}
+
+/**
+ * Every row on every page in list order; leaves the section on page 1. If the list shrinks
+ * mid-walk (the paid row leaves, the pager unmounts), the walk restarts once from page 1;
+ * a second shrink rejects with that error and does not start a third walk.
+ */
+async function allDueRows(page) {
+  try {
+    return await walkDueRows(page)
+  } catch (e) {
+    if (!(e instanceof DueListShrunk)) throw e
+  }
+  try {
+    return await walkDueRows(page)
+  } catch (e) {
+    if (e instanceof DueListShrunk && dueCheck !== null) await dueCheck('the due list held still through the walk', e.message, 'no change')
+    throw e
+  }
 }
 
 /** Does this row match? A pending row by its text, any other by its exact name, optionally of one kind. */
@@ -214,4 +278,4 @@ async function readTab(page, slug) {
   return allDueRows(page)
 }
 
-module.exports = { DUE_TABS, useDueCheck, dialogOpened, expectDueTab, readTab, openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
+module.exports = { DueListShrunk, DUE_TABS, useDueCheck, dialogOpened, expectDueTab, readTab, openDueTab, allDueRows, showLastRow, rowsOf, waitForRow, showRow, goToPage, currentPage, pagerLabel, hasPager, pager, nextButton, previousButton, readRows }
