@@ -1,0 +1,260 @@
+{
+  "phone": {
+    "transaction": {
+      "panel": {
+        "x": 16,
+        "y": 48,
+        "w": 358,
+        "h": 1228.5
+      },
+      "actions": [
+        {
+          "label": "Create Transaction",
+          "x": 40,
+          "y": 1154.5,
+          "w": 110,
+          "h": 98
+        },
+        {
+          "label": "Save and add another",
+          "x": 162,
+          "y": 1154.5,
+          "w": 88,
+          "h": 98
+        },
+        {
+          "label": "Cancel",
+          "x": 262,
+          "y": 1154.5,
+          "w": 88,
+          "h": 98
+        }
+      ]
+    },
+    "account": {
+      "panel": {
+        "x": 16,
+        "y": 48,
+        "w": 358,
+        "h": 939
+      },
+      "actions": [
+        {
+          "label": "Create Account",
+          "x": 41,
+          "y": 888,
+          "w": 148,
+          "h": 74
+        },
+        {
+          "label": "Cancel",
+          "x": 201,
+          "y": 888,
+          "w": 148,
+          "h": 74
+        }
+      ]
+    },
+    "recurring": {
+      "panel": {
+        "x": 16,
+        "y": 48,
+        "w": 358,
+        "h": 1850.5
+      },
+      "actions": [
+        {
+          "label": "Save Recurring Entry",
+          "x": 40,
+          "y": 1782.5,
+          "w": 310,
+          "h": 40
+        },
+        {
+          "label": "Cancel",
+          "x": 40,
+          "y": 1834.5,
+          "w": 310,
+          "h": 40
+        }
+      ]
+    },
+    "category": {
+      "panel": {
+        "x": 16,
+        "y": 186.5,
+        "w": 358,
+        "h": 503
+      },
+      "actions": [
+        {
+          "label": "Create",
+          "x": 41,
+          "y": 618.5,
+          "w": 148,
+          "h": 46
+        },
+        {
+          "label": "Cancel",
+          "x": 201,
+          "y": 618.5,
+          "w": 148,
+          "h": 46
+        }
+      ]
+    },
+    "tag": {
+      "panel": {
+        "x": 16,
+        "y": 263,
+        "w": 358,
+        "h": 350
+      },
+      "actions": [
+        {
+          "label": "Create",
+          "x": 41,
+          "y": 542,
+          "w": 148,
+          "h": 46
+        },
+        {
+          "label": "Cancel",
+          "x": 201,
+          "y": 542,
+          "w": 148,
+          "h": 46
+        }
+      ]
+    }
+  },
+  "desktop": {
+    "transaction": {
+      "panel": {
+        "x": 352,
+        "y": 48,
+        "w": 576,
+        "h": 1080
+      },
+      "actions": [
+        {
+          "label": "Create Transaction",
+          "x": 376,
+          "y": 1046,
+          "w": 168,
+          "h": 58
+        },
+        {
+          "label": "Save and add another",
+          "x": 556,
+          "y": 1046,
+          "w": 168,
+          "h": 58
+        },
+        {
+          "label": "Cancel",
+          "x": 736,
+          "y": 1046,
+          "w": 168,
+          "h": 58
+        }
+      ]
+    },
+    "account": {
+      "panel": {
+        "x": 416,
+        "y": 48,
+        "w": 448,
+        "h": 855
+      },
+      "actions": [
+        {
+          "label": "Create Account",
+          "x": 441,
+          "y": 828,
+          "w": 193,
+          "h": 50
+        },
+        {
+          "label": "Cancel",
+          "x": 646,
+          "y": 828,
+          "w": 193,
+          "h": 50
+        }
+      ]
+    },
+    "recurring": {
+      "panel": {
+        "x": 304,
+        "y": 48,
+        "w": 672,
+        "h": 1410
+      },
+      "actions": [
+        {
+          "label": "Save Recurring Entry",
+          "x": 328,
+          "y": 1394,
+          "w": 306,
+          "h": 40
+        },
+        {
+          "label": "Cancel",
+          "x": 646,
+          "y": 1394,
+          "w": 306,
+          "h": 40
+        }
+      ]
+    },
+    "category": {
+      "panel": {
+        "x": 416,
+        "y": 182.5,
+        "w": 448,
+        "h": 467
+      },
+      "actions": [
+        {
+          "label": "Create",
+          "x": 441,
+          "y": 578.5,
+          "w": 193,
+          "h": 46
+        },
+        {
+          "label": "Cancel",
+          "x": 646,
+          "y": 578.5,
+          "w": 193,
+          "h": 46
+        }
+      ]
+    },
+    "tag": {
+      "panel": {
+        "x": 416,
+        "y": 259,
+        "w": 448,
+        "h": 314
+      },
+      "actions": [
+        {
+          "label": "Create",
+          "x": 441,
+          "y": 502,
+          "w": 193,
+          "h": 46
+        },
+        {
+          "label": "Cancel",
+          "x": 646,
+          "y": 502,
+          "w": 193,
+          "h": 46
+        }
+      ]
+    }
+  }
+}
