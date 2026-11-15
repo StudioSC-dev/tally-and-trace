@@ -18,7 +18,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Sequence
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.access import (
     DIRECT_ROLES, NONE, TAG_VIEWER, VIEW_ROLES, readable_criterion,
@@ -1985,6 +1985,17 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
     hand (``occurrence_date`` null, which includes one relinked to another
     entry) keeps the rule above. Without ``occurrence_match`` (counting paid
     occurrences) the rule above holds for every row.
+
+    The test reads the entry's own accounts, not each viewer's read path, so
+    two kinds of viewer lose an occurrence to a row they may not be able to
+    read (STU-269; accepted, owner ruling 2026-11-15, no access-rule change).
+    A viewer who reads the entry only through its overflow account (a share on
+    that account alone), and a rule (c) reader (the entry carries the creator's
+    Household tag but none of its accounts does, so it counts as unshared and
+    any row of the creator's stands for an occurrence). Neither has a cash leg
+    for the occurrence, since legs are built only when the entry's main account
+    is in their scope, so suppression removes the occurrence from their
+    upcoming list and changes no balance of theirs.
     """
     return [(entry_id, when) for entry_id, when, _, _ in
             _linked_rows(db, entry_ids, occurrence_match=occurrence_match)]
@@ -2069,10 +2080,17 @@ def _linked_query(db: Session, entry_ids) -> list:
 
 def _shared_accounts(db: Session, account_ids) -> set:
     """The accounts among ``account_ids`` with any share (an account share, or the
-    owner's Household tag on it shared with anyone)."""
+    owner's Household tag on it shared with anyone). A share row held by the
+    account's own owner grants nothing, so it never makes an account shared (the
+    API refuses one; this ignores one written directly, as
+    ``tag_shared_account_ids`` does for a self tag-share)."""
+    holder_account = aliased(Account)
+    held_by_another = (select(AccountShare.account_id)
+                       .join(holder_account, holder_account.id == AccountShare.account_id)
+                       .where(AccountShare.user_id != holder_account.user_id))
     return {acc for (acc,) in db.query(Account.id).filter(
         Account.id.in_(list(account_ids)),
-        or_(Account.id.in_(select(AccountShare.account_id)),
+        or_(Account.id.in_(held_by_another),
             Account.id.in_(tag_shared_account_ids())))}
 
 
