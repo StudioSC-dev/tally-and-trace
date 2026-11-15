@@ -16,8 +16,14 @@
 //   unrelated_budget_fields_are_preserved   the same form keeps its non-date fields, in
 //       the database, in the API's reply and in the edit form; an unchanged re-save
 //       leaves them as they were
+//   clears_optional_date_on_edit   STU-640: clearing a savings target date or a budget's period
+//       end in the edit form and saving stores null; the API, the reopened form and the card show no date
+//   untouched_dates_kept_on_edit   STU-640: saving an edit that touches no date keeps every stored
+//       date, a budget with no period end included (the form does not refill it)
+//   required_date_cannot_be_cleared   STU-640: a budget's period start cannot be cleared: an inline
+//       error, the form stays open, no request is sent and the stored start is unchanged
 //
-// Usage: node frontend/e2e/budget-date-round-trip.cjs [entered_calendar_date_is_preserved|existing_conversion_reproduction|unrelated_budget_fields_are_preserved]
+// Usage: node frontend/e2e/budget-date-round-trip.cjs [entered_calendar_date_is_preserved|existing_conversion_reproduction|unrelated_budget_fields_are_preserved|clears_optional_date_on_edit|untouched_dates_kept_on_edit|required_date_cannot_be_cleared]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { pick } = require('./_picker.cjs')
 
@@ -300,6 +306,118 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   await ctx.close()
 }
 
+const updateButton = (form) => form.getByRole('button', { name: 'Update Allocation' })
+async function saveEdit(page, form) {
+  await updateButton(form).click()
+  await modal(page).waitFor({ state: 'detached' })
+  await settle(page)
+}
+/** The day before a calendar day: a budget card names its last day, one before the period's end. */
+const dayBefore = (day) => new Date(Date.parse(`${day}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
+
+async function clearsOptionalDateOnEdit(browser) {
+  console.log('clears_optional_date_on_edit')
+  const { user, bank } = await world('d')
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: 'UTC' })
+  const page = await ctx.newPage()
+  page.setDefaultTimeout(15000)
+  await uiLogin(page, user)
+  const budget = 'Clear end budget', goal = 'Clear target goal'
+  await openTab(page, 'Budgets')
+  await createBudget(page, bank, budget, { start: '2031-03-01', end: '2031-04-01' })
+  await openTab(page, 'Savings')
+  await createSavings(page, bank, goal, { target: '2031-09-15' })
+
+  // Budget: clear the period end.
+  await openTab(page, 'Budgets')
+  check('before: the card shows the period end', (await cardNamed(page, budget).innerText()).includes(label(dayBefore('2031-04-01'))), true)
+  let form = await openEdit(page, budget)
+  await field(form, 'period_end').fill('')
+  await saveEdit(page, form)
+  check('budget: period_end stored as null', stored(budget, 'period_end'), '')
+  check('budget: period_start kept', stored(budget, 'period_start'), '2031-03-01T00:00:00')
+  const b = await byName(user.token, budget)
+  check('budget: API returns period_end null', b.period_end, null)
+  await openTab(page, 'Budgets')
+  check('budget: the card shows no period end', (await cardNamed(page, budget).innerText()).includes(label(dayBefore('2031-04-01'))), false)
+  form = await openEdit(page, budget)
+  check('budget: edit form period_end is empty', await field(form, 'period_end').inputValue(), '')
+  check('budget: edit form period_start kept', await field(form, 'period_start').inputValue(), '2031-03-01')
+  await closeEdit(page)
+
+  // Savings: clear the target date.
+  await openTab(page, 'Savings')
+  check('before: the card shows the target date', /Target \d/.test(await cardNamed(page, goal).innerText()), true)
+  form = await openEdit(page, goal)
+  await field(form, 'target_date').fill('')
+  await saveEdit(page, form)
+  check('savings: target_date stored as null', stored(goal, 'target_date'), '')
+  check('savings: API returns target_date null', (await byName(user.token, goal)).target_date, null)
+  await openTab(page, 'Savings')
+  check('savings: the card shows no target date', /Target \d/.test(await cardNamed(page, goal).innerText()), false)
+  form = await openEdit(page, goal)
+  check('savings: edit form target_date is empty', await field(form, 'target_date').inputValue(), '')
+  await closeEdit(page)
+  await ctx.close()
+}
+
+async function untouchedDatesKeptOnEdit(browser) {
+  console.log('untouched_dates_kept_on_edit')
+  const { user, bank } = await world('e')
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: 'Asia/Manila' })
+  const page = await ctx.newPage()
+  page.setDefaultTimeout(15000)
+  await uiLogin(page, user)
+  const full = 'Keep both budget', startOnly = 'Keep start-only budget', goal = 'Keep target goal'
+  await openTab(page, 'Budgets')
+  await createBudget(page, bank, full, { start: '2031-03-01', end: '2031-04-01' })
+  await createBudget(page, bank, startOnly, { start: '2031-05-01' })
+  await openTab(page, 'Savings')
+  await createSavings(page, bank, goal, { target: '2031-09-15' })
+
+  const puts = []
+  page.on('request', (r) => { if (r.method() === 'PUT' && /\/allocations\/\d+$/.test(r.url())) puts.push(r.postDataJSON()) })
+  // Rename each and change nothing else: no date key may be sent.
+  for (const [tab, name] of [['Budgets', full], ['Budgets', startOnly], ['Savings', goal]]) {
+    await openTab(page, tab)
+    const form = await openEdit(page, name)
+    await field(form, 'name').fill(`${name} renamed`)
+    await saveEdit(page, form)
+  }
+  check('three edits sent', puts.length, 3)
+  check('no date key in any edit', puts.map((p) => ['target_date', 'period_start', 'period_end'].filter((k) => k in p)), [[], [], []])
+  check('both-dates budget: dates kept', [stored(`${full} renamed`, 'period_start'), stored(`${full} renamed`, 'period_end')],
+    ['2031-03-01T00:00:00', '2031-04-01T00:00:00'])
+  check('start-only budget: start kept, end still empty', [stored(`${startOnly} renamed`, 'period_start'), stored(`${startOnly} renamed`, 'period_end')],
+    ['2031-05-01T00:00:00', ''])
+  check('savings: target date kept', stored(`${goal} renamed`, 'target_date'), '2031-09-15T00:00:00')
+  await ctx.close()
+}
+
+async function requiredDateCannotBeCleared(browser) {
+  console.log('required_date_cannot_be_cleared')
+  const { user, bank } = await world('f')
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: 'Asia/Manila' })
+  const page = await ctx.newPage()
+  page.setDefaultTimeout(15000)
+  await uiLogin(page, user)
+  const name = 'Required start budget'
+  await openTab(page, 'Budgets')
+  await createBudget(page, bank, name, { start: '2031-03-01', end: '2031-04-01' })
+  const puts = []
+  page.on('request', (r) => { if (r.method() === 'PUT' && /\/allocations\/\d+$/.test(r.url())) puts.push(r.url()) })
+  const form = await openEdit(page, name)
+  await field(form, 'period_start').fill('')
+  await updateButton(form).click()
+  await page.waitForTimeout(800)
+  const err = page.getByTestId('field-error-period_start')
+  check('an inline error names the start date', await err.isVisible(), true)
+  check('the form stays open', await updateButton(form).isVisible(), true)
+  check('no update request was sent', puts.length, 0)
+  check('stored dates unchanged', [stored(name, 'period_start'), stored(name, 'period_end')], ['2031-03-01T00:00:00', '2031-04-01T00:00:00'])
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -308,6 +426,9 @@ async function unrelatedBudgetFieldsArePreserved(browser) {
   if (run('entered_calendar_date_is_preserved')) await enteredCalendarDateIsPreserved(browser)
   if (run('existing_conversion_reproduction')) await existingConversionReproduction(browser)
   if (run('unrelated_budget_fields_are_preserved')) await unrelatedBudgetFieldsArePreserved(browser)
+  if (run('clears_optional_date_on_edit')) await clearsOptionalDateOnEdit(browser)
+  if (run('untouched_dates_kept_on_edit')) await untouchedDatesKeptOnEdit(browser)
+  if (run('required_date_cannot_be_cleared')) await requiredDateCannotBeCleared(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)
