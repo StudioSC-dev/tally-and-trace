@@ -6,7 +6,7 @@
 //   phone_all_dialogs_clear: the same check for the account, recurring-entry, category and tag
 //       dialogs (all on the shared overlay).
 //   phone_with_toasts_clear: 2 saves pending (held POSTs), the first scenario's check again; the
-//       STU-629 toast-placement suite is re-run unchanged alongside.
+//       STU-629 toast-placement suite is then run unchanged as a child process and must pass in full.
 //   desktop_unchanged: 1280x800, the action buttons of every dialog sit where they did on main (+-1px).
 //   tabbar_unchanged: 390x844, no dialog open, the tab bar's bounding box matches main (+-1px).
 //   quality_gates: lint, tsc and the build pass.
@@ -252,6 +252,16 @@ async function phoneWithToastsClear(browser) {
   } finally {
     await ctx.close()
   }
+  // AC3: the STU-629 suite, unchanged, as a child process with this run's env, passes in full.
+  await h.check('phone_with_toasts_clear.toast-placement-suite', 'B', async () => {
+    const r = spawnSync(process.execPath, [path.join(__dirname, 'toast-placement.cjs')], { encoding: 'utf8', env: process.env, timeout: 600000, maxBuffer: 64 * 1024 * 1024 })
+    const out = `${r.stdout || ''}${r.stderr || ''}`
+    const m = out.match(/RESULT: (\d+)\/(\d+)/)
+    console.log(`  toast-placement: exit ${r.status}, ${m ? `RESULT ${m[1]}/${m[2]}` : 'no RESULT line'}`)
+    if (r.status !== 0) return `toast-placement exited ${r.status}: ${out.split('\n').filter((l) => /FAIL/.test(l)).slice(0, 4).join(' | ')}`
+    if (!m || m[1] !== m[2] || Number(m[2]) === 0) return `toast-placement did not pass in full: ${m ? `${m[1]}/${m[2]}` : 'no RESULT line'}`
+    return true
+  })
 }
 
 // ─── baseline-backed scenarios ─────────────────────────────────────────────
