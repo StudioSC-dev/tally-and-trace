@@ -174,10 +174,11 @@ async function scenarioB(browser, engine) {
 }
 
 const PERIODS = ['week', 'month', 'year']
-const DUE_TABS = ['due', 'not-posted']
+// All five tabs of the card render for any user, with no data seeded.
+const DUE_TABS = ['due', 'not-posted', 'upcoming', 'subscriptions', 'installments']
 
 const periodButtons = (page) => page.locator('[aria-label="Period for actual totals"] button')
-const dueTabs = (page) => page.locator('[data-testid="due-tab-due"], [data-testid="due-tab-not-posted"]')
+const dueTabs = (page) => page.locator(DUE_TABS.map((slug) => `[data-testid="due-tab-${slug}"]`).join(', '))
 
 const rectsOf = (loc) =>
   loc.evaluateAll((els) =>
