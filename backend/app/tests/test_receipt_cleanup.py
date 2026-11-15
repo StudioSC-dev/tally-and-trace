@@ -28,14 +28,14 @@ STU244_TESTS = (
 )
 
 
-def _second_stored(uploads, txn):
+def _second_stored(uploads, txn):  # noqa: F811
     """A second stored receipt file for ``txn``, as an upload would have left it."""
     name = f"receipt_{txn}_second.png"
     (uploads / "receipts" / name).write_bytes(NEW_PNG)
     return f"/uploads/receipts/{name}", uploads / "receipts" / name
 
 
-def test_put_replaced_receipt_removed(sw, sw_client, sw_db, uploads):
+def test_put_replaced_receipt_removed(sw, sw_client, sw_db, uploads):  # noqa: F811
     """AC1."""
     a = sw["a"]
     txn = _debit(sw_client, a, sw["joint"])
@@ -50,7 +50,7 @@ def test_put_replaced_receipt_removed(sw, sw_client, sw_db, uploads):
     assert _receipt_bytes(sw_client, a, txn) == NEW_PNG
 
 
-def test_put_rollback_keeps_old_receipt(sw, sw_client, sw_db, uploads, monkeypatch):
+def test_put_rollback_keeps_old_receipt(sw, sw_client, sw_db, uploads, monkeypatch):  # noqa: F811
     """AC2."""
     a = sw["a"]
     txn = _debit(sw_client, a, sw["joint"])
@@ -68,7 +68,7 @@ def test_put_rollback_keeps_old_receipt(sw, sw_client, sw_db, uploads, monkeypat
     assert _receipt_bytes(sw_client, a, txn) == PNG
 
 
-def test_put_replaced_external_receipt_not_deleted(sw, sw_client, sw_db, uploads):
+def test_put_replaced_external_receipt_not_deleted(sw, sw_client, sw_db, uploads):  # noqa: F811
     """AC3: replacing an external link, or a path outside the store, deletes nothing."""
     a = sw["a"]
     other = _debit(sw_client, sw["b"], sw["b_private"])
@@ -98,7 +98,7 @@ def test_put_replaced_external_receipt_not_deleted(sw, sw_client, sw_db, uploads
     assert _receipt_bytes(sw_client, sw["b"], other) == PNG
 
 
-def test_put_without_receipt_change_keeps_file(sw, sw_client, sw_db, uploads):
+def test_put_without_receipt_change_keeps_file(sw, sw_client, sw_db, uploads):  # noqa: F811
     """AC4: no receipt in the body, the same value, or the route form sent back."""
     a = sw["a"]
     txn = _debit(sw_client, a, sw["joint"])
@@ -115,7 +115,7 @@ def test_put_without_receipt_change_keeps_file(sw, sw_client, sw_db, uploads):
     assert _receipt_bytes(sw_client, a, txn) == PNG
 
 
-def test_stu244_cleanup_regressions(sw, sw_client, sw_db, uploads, tmp_path_factory,
+def test_stu244_cleanup_regressions(sw, sw_client, sw_db, uploads, tmp_path_factory,  # noqa: F811
                                     monkeypatch):
     """AC5: STU-244's own tests, called unchanged against fresh upload directories."""
     from app.core.config import settings
@@ -131,7 +131,7 @@ def test_stu244_cleanup_regressions(sw, sw_client, sw_db, uploads, tmp_path_fact
 
 
 def test_put_receipt_cleanup_preserves_unrelated_data_and_files(sw, sw_client, sw_db,
-                                                               uploads):
+                                                               uploads):  # noqa: F811
     """AC7."""
     from app.models.account import Account
 
