@@ -99,6 +99,9 @@ _OWN_ID = re.compile(r"\$(?:\.[a-z_]+)?\[\d+\]\.id")
 
 _ACCOUNT_REF = re.compile(r".*\.(?:account\.id|counterpart\.id|[a-z_]*account_id)")
 
+# A user id: ``owner_id``, ``user_id``, ``created_by_user_id``, ``shared_owner_id``.
+_USER_REF = re.compile(r".*\.(?:[a-z_]*owner_id|[a-z_]*user_id)")
+
 
 def _clean(body, rec, rows=None, accounts=()):
     """Leaks in ``body``; ``rows`` names the table its list rows come from.
@@ -110,6 +113,8 @@ def _clean(body, rec, rows=None, accounts=()):
     reference to any other account and every other field. ``accounts`` are the
     accounts the viewer may see: a reference to one (``account.id``,
     ``account_id``) is that account's id, not a private record's, so it passes too.
+    So does a user id (``owner_id``, ``user_id``): it comes from the users
+    sequence and is never a transaction or entry id (STU-651).
     """
     own = {"transactions": [rec["b_lunch"], rec["b_deposit"], rec["a_private"]],
            "entries": [rec["b_entry"], rec["a_private_entry"]]}.get(rows, [])
@@ -117,7 +122,8 @@ def _clean(body, rec, rows=None, accounts=()):
                      numbers=(B_LUNCH, B_DEPOSIT, A_PHARMACY))
     return [(where, value) for where, value in leaks
             if not (_OWN_ID.fullmatch(where) and value not in own)
-            and not (_ACCOUNT_REF.fullmatch(where) and value in accounts)]
+            and not (_ACCOUNT_REF.fullmatch(where) and value in accounts)
+            and not _USER_REF.fullmatch(where)]
 
 
 def _assert_clean(body, rec, rows=None, accounts=()):
@@ -190,6 +196,51 @@ def test_leak_check_ignores_viewer_id_77(viewer_id_77, hh, leak, sw_client):
     accounts = _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]
     assert 77 in {a.get("owner_id") for a in accounts}  # the viewer's own id is in the response
     _assert_minimal_shape(hh, leak, sw_client)
+
+
+@pytest.fixture
+def viewer_id_equals_private_txn_id(sw_db):
+    """Both sequences set so the tag viewer (``hh``'s third user) gets the same id
+    as ``leak``'s ``a_private`` transaction. Put back afterwards."""
+    from sqlalchemy import text
+
+    def seq(table):
+        return sw_db.execute(text(f"SELECT pg_get_serial_sequence('{table}', 'id')")).scalar()
+
+    users, txns = seq("users"), seq("transactions")
+    before = {t: sw_db.execute(text(f"SELECT last_value FROM {t}")).scalar() for t in (users, txns)}
+    target = 9000
+    # ``a_private`` is the ``A_PRIVATE_OFFSET``-th transaction row ``leak`` creates.
+    sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": txns, "v": target - A_PRIVATE_OFFSET})
+    sw_db.execute(text("SELECT setval(:seq, :v)"), {"seq": users, "v": target - 3})
+    sw_db.commit()
+    yield target
+    for table, name in (("users", users), ("transactions", txns)):
+        sw_db.execute(text(f"SELECT setval(:seq, GREATEST(:before, (SELECT COALESCE(MAX(id), 1) FROM {table})))"),
+                      {"seq": name, "before": before[name]})
+    sw_db.commit()
+
+
+A_PRIVATE_OFFSET = 4
+
+
+def test_leak_check_ignores_user_id_equal_to_private_id(viewer_id_equals_private_txn_id, hh, leak,
+                                                         sw_client):
+    assert hh["c"]["id"] == leak["a_private"] == viewer_id_equals_private_txn_id
+    accounts = _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]
+    owners = {a.get("owner_id") for a in accounts}
+    assert leak["a_private"] in owners  # the viewer's id is in the response, as owner_id
+    _assert_minimal_shape(hh, leak, sw_client)
+
+
+def test_leak_check_flags_planted_private_id(hh, leak, sw_client):
+    accounts = _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]
+    _assert_clean(accounts, leak, "accounts")
+    planted = [{**accounts[0], "transaction_id": leak["a_private"]}, *accounts[1:]]
+    assert _clean(planted, leak, "accounts") == [("$[0].transaction_id", leak["a_private"])]
+    # A transaction id in a transactions row is flagged; a user id in the same row is not.
+    row = {"id": leak["b_lunch"], "owner_id": leak["a_private"], "user_id": leak["a_private"]}
+    assert _clean([row], leak, "transactions") == [("$[0].id", leak["b_lunch"])]
 
 
 def test_leak_check_flags_planted_figure(hh, leak, sw_client):
