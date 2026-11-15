@@ -111,8 +111,8 @@ async function formState(modal) {
   }
 }
 const starts = (got, name) => typeof got === 'string' && got.startsWith(name)
-// A category picker with nothing chosen reads "Uncategorized".
-const noCategory = (got) => got === '' || got === 'Uncategorized'
+// A category picker with nothing chosen reads "Uncategorized" ("None" on a transfer).
+const noCategory = (got) => got === '' || got === 'Uncategorized' || got === 'None'
 
 /** A user with three accounts, two categories and two tags; `history` posts earlier rows. */
 async function seedUser(tag) {
