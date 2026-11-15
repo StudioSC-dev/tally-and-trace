@@ -603,9 +603,39 @@ async function makeUser(stack, tag, { currency = 'PHP' } = {}) {
   return { email, password, tag, token: login.json.access_token }
 }
 
-/** Signs in through the login form and waits for the dashboard URL. Throws on failure (setup). */
-async function uiLogin(page, stack, user) {
-  await page.goto(`${stack.webUrl}/login`)
+/**
+ * How long uiLogin waits for the login page to be ready, in ms (STU-508). A stack that has
+ * just started compiles the login page on its first request, which has taken longer than
+ * the 10 s a script sets as its default timeout. The wait is finite: past this deadline
+ * uiLogin rejects, which a script's setup handling exits 2 on.
+ */
+const LOGIN_READY_DEADLINE_MS = 60000
+
+/**
+ * Signs in through the login form and waits for the dashboard URL. Throws on failure (setup).
+ * Before the first fill it waits for the page to serve the form (`#email` present), up to
+ * `readyDeadlineMs` (default LOGIN_READY_DEADLINE_MS). A page that is already ready costs
+ * no more than the navigation: the wait returns at once and nothing retries. Only a
+ * navigation that errors (the stack not answering yet) is retried, every 500 ms, until
+ * the deadline.
+ */
+async function uiLogin(page, stack, user, { readyDeadlineMs = LOGIN_READY_DEADLINE_MS } = {}) {
+  const until = Date.now() + readyDeadlineMs
+  const left = () => Math.max(1, until - Date.now())
+  for (;;) {
+    try {
+      await page.goto(`${stack.webUrl}/login`, { timeout: left() })
+      break
+    } catch (e) {
+      if (Date.now() >= until) throw new Error(`login page not ready within ${readyDeadlineMs} ms: ${String(e.message).split('\n')[0]}`)
+      await sleep(500)
+    }
+  }
+  try {
+    await page.locator('#email').waitFor({ timeout: left() })
+  } catch (e) {
+    throw new Error(`login page not ready within ${readyDeadlineMs} ms: no #email field (${String(e.message).split('\n')[0]})`)
+  }
   await page.locator('#email').fill(user.email)
   await page.locator('#password').fill(user.password)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -639,4 +669,5 @@ module.exports = {
   apiClient,
   makeUser,
   uiLogin,
+  LOGIN_READY_DEADLINE_MS,
 }
