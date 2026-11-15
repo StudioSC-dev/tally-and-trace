@@ -344,6 +344,7 @@ def test_plan_rows_load_in_one_pass(w):
         e.id: (batch[e.id][0].date().isoformat() if batch[e.id] else None) for e in entries}
 
 
+@pytest.mark.schedule_date_guards
 def test_a_plan_ending_on_the_last_representable_day(w):
     """Monthly on the 31st from 9999-11-30 with 2 left ends on 9999-12-31
     (``date.max``): the walk through it has no next day to stop before."""

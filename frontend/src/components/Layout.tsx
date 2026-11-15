@@ -37,8 +37,11 @@ export function Layout() {
           {user && <OutboxHost key={user.id} userId={user.id} />}
           <div className="min-h-screen" data-app-shell>
             <Navigation />
-            {/* pt-20 clears the fixed top nav; pb-20 sm:pb-8 clears the fixed bottom tab bar on mobile; --toast-room (Toast.tsx, STU-629) lifts it over the toast stack */}
-            <main id="main-content" tabIndex={-1} className="pt-20 pb-[max(5rem,var(--toast-room,0px))] sm:pb-[max(2rem,var(--toast-room,0px))]">
+            {/* below-nav clears the fixed top nav including its status-bar inset: a flat pt-20
+                leaves 16px of slack over the 64px bar, which the ~59px inset on a notched phone
+                in standalone mode swallows. pb-20 sm:pb-8 clears the fixed bottom tab bar; --toast-room
+                 (Toast.tsx, STU-629) lifts the bottom padding over the toast stack. */}
+            <main id="main-content" tabIndex={-1} className="below-nav pb-[max(5rem,var(--toast-room,0px))] sm:pb-[max(2rem,var(--toast-room,0px))]">
               <div className="fade-in">
                 <Outlet />
               </div>

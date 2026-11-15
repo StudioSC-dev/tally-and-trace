@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RECORD_DATE_MIN, recordDateError, recordDateMax } from './recordDates'
+import { ENTRY_END_YEARS_AHEAD, ENTRY_NEXT_YEARS_AHEAD, RECORD_DATE_MIN, recordDateError, recordDateMax } from './recordDates'
 
 describe('recordDateMax', () => {
   it('is five years after the given day', () => {
@@ -68,5 +68,24 @@ describe('recordDateError', () => {
       expect(recordDateError('2031-10-22')).toBeNull()
       expect(recordDateError('2031-10-23')).toBe('Choose a date from Jan 1st, 2000 to Oct 22nd, 2031')
     })
+  })
+})
+
+describe('recurring-entry reach (STU-427)', () => {
+  const today = '2026-10-21'
+
+  it('bounds the next occurrence five years out and the end date thirty', () => {
+    expect([ENTRY_NEXT_YEARS_AHEAD, ENTRY_END_YEARS_AHEAD]).toEqual([5, 30])
+    expect(recordDateMax(today, ENTRY_NEXT_YEARS_AHEAD)).toBe('2031-10-21')
+    expect(recordDateMax(today, ENTRY_END_YEARS_AHEAD)).toBe('2056-10-21')
+    expect(recordDateMax('2028-02-29', ENTRY_END_YEARS_AHEAD)).toBe('2058-02-28')
+  })
+
+  it('names the end date range, inclusive at both bounds', () => {
+    const message = 'Choose a date from Jan 1st, 2000 to Oct 21st, 2056'
+    expect(recordDateError('2000-01-01', today, ENTRY_END_YEARS_AHEAD)).toBeNull()
+    expect(recordDateError('2056-10-21', today, ENTRY_END_YEARS_AHEAD)).toBeNull()
+    expect(recordDateError('1999-12-31', today, ENTRY_END_YEARS_AHEAD)).toBe(message)
+    expect(recordDateError('2056-10-22', today, ENTRY_END_YEARS_AHEAD)).toBe(message)
   })
 })

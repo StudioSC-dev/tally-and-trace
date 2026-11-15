@@ -531,7 +531,7 @@ def test_a_due_date_outside_the_record_dates_refuses_the_toggle(world, monkeypat
 
     w, db = world, world["db"]
     loan = _loan(w, loan_first_payment_date="2026-08-25")
-    monkeypatch.setattr(record_dates, "_in_range", lambda value: False)
+    monkeypatch.setattr(record_dates, "_in_range", lambda value, years=None: False)
     assert _toggle(w, loan, expected_due=2).status_code == 422
     assert _is_on(db, loan) is False
     assert _rows(db, loan) == []

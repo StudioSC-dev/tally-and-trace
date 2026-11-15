@@ -23,6 +23,9 @@
 //            transfer accounts the first filled when it has none to give (PR #172 audit)
 //   currency the recording currency follows an autofilled account, as a manual pick; a currency
 //            the user chose in this form is kept (PR #172 audit)
+//   type     STU-633: autofill that changes the type runs the type-button clean-up first.
+//            type_change_clears_links, type_change_replaces_mismatched_category,
+//            same_type_autofill_unchanged, type_change_save_desktop, type_change_save_phone
 // Every scenario checks that no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
@@ -723,6 +726,157 @@ async function scenarioCurrency(browser) {
   }
 }
 
+// ─── type change (STU-633) ──────────────────────────────────────────────────
+/** Seed for STU-633: an expense recurring entry on an allocation, an income category, and history. */
+async function seedTypeChange(tag) {
+  const seed = await seedUser(tag)
+  const post = (url, body) => client.post(seed.user.token, url, body)
+  seed.salary = await post('/categories/', { name: 'Auto Salary', color: '#0891b2', is_expense: false })
+  seed.allocation = await post('/allocations/', {
+    account_id: seed.bank.id, name: 'Auto Envelope', allocation_type: 'budget', target_amount: 1000,
+    period_frequency: 'monthly', period_start: wire(`${today().slice(0, 8)}01`),
+    configuration: { category_ids: [seed.fun.id] },
+  })
+  seed.entry = await post('/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'Auto Rent', amount: 500,
+    account_id: seed.bank.id, category_id: seed.fun.id, allocation_id: seed.allocation.id,
+    next_occurrence: wire(addDays(today(), 10)),
+  })
+  const hist = (body) => post('/transactions/', { amount: 100, is_posted: true, ...body })
+  await hist({ account_id: seed.cash.id, transaction_type: 'credit', description: 'Pay Day',
+    transaction_date: wire(addDays(today(), -4)), category_id: seed.salary.id })
+  await hist({ account_id: seed.cash.id, transaction_type: 'debit', description: 'Kopi Roti',
+    transaction_date: wire(addDays(today(), -2)), category_id: seed.food.id })
+  await hist({ account_id: seed.bank.id, transaction_type: 'transfer', description: 'Move to savings',
+    transaction_date: wire(addDays(today(), -3)), transfer_from_account_id: seed.bank.id, transfer_to_account_id: seed.savings.id })
+  return seed
+}
+const linkSelect = (modal) => modal.locator('select').filter({ has: modal.page().locator('option', { hasText: 'Auto Rent' }) }).first()
+const noEntries = (modal) => modal.getByText('No recurring entries of this type yet.')
+/** Link the expense entry (it also sets the allocation and its category), as a person does. */
+async function linkEntry(modal, seed) {
+  await linkSelect(modal).selectOption(String(seed.entry.id))
+  await h.sleep(200)
+}
+
+async function scenarioTypeChange(browser, phone) {
+  const name = phone ? 'phone' : 'desktop'
+  console.log(`\n=== (type_change ${name}) autofill that changes the type cleans up the old type's fields`)
+  const seed = await seedTypeChange(`tc-${name}`)
+  const { ctx, page, native, creates } = await openPage(browser, seed.user, phone ? PHONE : {})
+  try {
+    if (!phone) {
+      // type_change_clears_links: Expense to Transfer, then Expense to Income.
+      let modal = await openAdd(page)
+      await linkEntry(modal, seed)
+      await h.check('type_change_clears_links.linked', 'S', async () =>
+        (await linkSelect(modal).inputValue()) === String(seed.entry.id) || 'the entry did not link')
+      await typeDescription(modal, 'Move')
+      await choose(modal, 'Move to savings')
+      await h.check('type_change_clears_links.transfer', 'B', async () => {
+        const got = await until(() => formState(modal), (s) => s.type === 'Transfer')
+        return (got.type === 'Transfer' && (await linkSelect(modal).count()) === 0) || `form ${JSON.stringify(got)}`
+      })
+      // Back to Expense by hand: the entry and its envelope are gone, the form is not still linked.
+      await modal.getByRole('button', { name: 'Expense', exact: true }).click()
+      await h.check('type_change_clears_links', 'B', async () =>
+        (await linkSelect(modal).inputValue()) === '' || 'the entry link came back')
+      await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+      modal = await openAdd(page)
+      await linkEntry(modal, seed)
+      await typeDescription(modal, 'Pay')
+      await choose(modal, 'Pay Day')
+      let auto
+      await h.check('type_change_clears_links', 'B', async () => {
+        const got = await until(() => formState(modal), (s) => s.type === 'Income')
+        auto = got
+        if (got.type !== 'Income' || (await noEntries(modal).count()) !== 1) return `form ${JSON.stringify(got)}`
+        // The link is not just hidden: back on Expense by hand, no entry is selected.
+        await modal.getByRole('button', { name: 'Expense', exact: true }).click()
+        return (await linkSelect(modal).inputValue()) === '' || 'the entry link came back on Expense'
+      })
+      // Same as a click: the type button on a linked expense, in a fresh form.
+      await h.check('type_change_clears_links.same-as-click', 'B', async () => {
+        await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+        modal = await openAdd(page)
+        await linkEntry(modal, seed)
+        await modal.getByRole('button', { name: 'Income', exact: true }).click()
+        const click = await formState(modal)
+        const sameLinks = (await noEntries(modal).count()) === 1
+        return (sameLinks && starts(auto.category, 'Auto Salary') && noCategory(click.category)) || `auto ${JSON.stringify(auto)} click ${JSON.stringify(click)}`
+      })
+      await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+      // type_change_replaces_mismatched_category: an expense category the user picked.
+      modal = await openAdd(page)
+      await pick(control(modal, 'category_id'), 'Auto Food')
+      await typeDescription(modal, 'Pay')
+      await choose(modal, 'Pay Day')
+      await h.check('type_change_replaces_mismatched_category', 'B', async () => {
+        const got = await until(() => formState(modal), (s) => s.type === 'Income' && starts(s.category, 'Auto Salary'))
+        return (got.type === 'Income' && starts(got.category, 'Auto Salary')) || `form ${JSON.stringify(got)}`
+      })
+      await modal.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+      // same_type_autofill_unchanged: the type stays, so the link stays and the category is STU-626's.
+      modal = await openAdd(page)
+      await linkEntry(modal, seed)
+      await typeDescription(modal, 'Kopi')
+      await choose(modal, 'Kopi Roti')
+      await h.check('same_type_autofill_unchanged', 'B', async () => {
+        const got = await until(() => formState(modal), (s) => starts(s.category, 'Auto Food'))
+        const linked = (await linkSelect(modal).count()) === 1 && (await linkSelect(modal).inputValue()) === String(seed.entry.id)
+        return (got.type === 'Expense' && starts(got.category, 'Auto Food') && linked) || `form ${JSON.stringify(got)} linked ${linked}`
+      })
+      await control(modal, 'amount').fill('30')
+      const before = creates.length
+      await primaryOf(modal).click()
+      await until(async () => creates.length, (n) => n > before)
+      await h.check('same_type_autofill_unchanged.saved-body', 'B', async () => {
+        const body = creates[creates.length - 1]
+        const ok = body && body.budget_entry_id === seed.entry.id && body.allocation_id === seed.allocation.id && body.category_id === seed.food.id
+        return ok || `body ${JSON.stringify(body)}`
+      })
+    }
+
+    // type_change_save_desktop / type_change_save_phone: save a transfer autofilled over a linked
+    // expense with an expense category the user picked. (A manual click to Income keeps an
+    // allocation link, so the whole-record check uses the Transfer a click clears fully.)
+    const modal = await openAdd(page)
+    await linkEntry(modal, seed)
+    await pick(control(modal, 'category_id'), 'Auto Food')
+    await typeDescription(modal, 'Move')
+    await choose(modal, 'Move to savings', { tap: phone })
+    await h.check(`type_change_save_${name}.form`, 'B', async () => {
+      const got = await until(() => formState(modal), (s) => s.type === 'Transfer')
+      return (got.type === 'Transfer' && starts(got.destination, 'Auto Savings') && noCategory(got.category)) || `form ${JSON.stringify(got)}`
+    })
+    await control(modal, 'amount').fill('2500')
+    await h.waitQuiet(page)
+    const before = creates.length
+    await primaryOf(modal).click()
+    await until(async () => creates.length, (n) => n > before)
+    await h.check(`type_change_save_${name}`, 'B', async () => {
+      const body = creates[creates.length - 1]
+      const ok = body && body.transaction_type === 'transfer' && body.description === 'Move to savings' && Number(body.amount) === 2500 &&
+        !body.category_id && !body.budget_entry_id && !body.allocation_id &&
+        body.account_id === seed.bank.id && body.transfer_to_account_id === seed.savings.id
+      return ok || `body ${JSON.stringify(body)}`
+    })
+    await h.check(`type_change_save_${name}.saved`, 'S', async () => (await waitToast(page, 'Move to savings', 'saved')) || 'the save toast never read saved')
+    await h.check(`type_change_save_${name}.stored`, 'B', async () => {
+      const rows = await client.get(seed.user.token, '/transactions/?limit=50')
+      const row = (rows.items || rows).find((t) => t.description === 'Move to savings' && Number(t.amount) === 2500)
+      const ok = row && row.transaction_type === 'transfer' && !row.budget_entry_id && !row.allocation_id && !row.category_id
+      return ok || `row ${JSON.stringify(row)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, `type_change ${name}`, native)
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['desktop', (b) => desktopOrPhone(b, false)],
   ['phone', (b) => desktopOrPhone(b, true)],
@@ -736,6 +890,8 @@ const SCENARIOS = [
   ['source', scenarioSource],
   ['sequence', scenarioSequence],
   ['currency', scenarioCurrency],
+  ['type_change_desktop', (b) => scenarioTypeChange(b, false)],
+  ['type_change_phone', (b) => scenarioTypeChange(b, true)],
 ]
 
 ;(async () => {
