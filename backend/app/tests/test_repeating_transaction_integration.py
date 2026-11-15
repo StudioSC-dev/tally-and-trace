@@ -395,3 +395,54 @@ def test_repeat_access(world):
     assert _written(db, editor) == (1, 1) and _written(db, owner) == (0, 0)
     assert body["entry"]["view"] == "full" and body["transaction"]["view"] == "full"
     assert _row(client, editor, body["transaction"]["id"])["budget_entry_id"] == body["entry"]["id"]
+
+
+# --- 11 (STU-631) -----------------------------------------------------------------------------
+
+def test_repeat_amount_installment_from_total(world):
+    """``repeat.amount`` sets the entry's amount apart from the first transaction's: a
+    10,000.00 purchase over 3 months is a first payment of 3,333.34 (the remainder) and an
+    installment of 3,333.33 for the other two, on the statement closes."""
+    client, db, me, card = world["client"], world["db"], world["me"], world["card"]
+    body = _repeat(client, me, _txn(card, day="2026-11-05", description="Sofa", amount=3_333.34,
+                                    posted=False, projected_amount=3_333.34),
+                   end_mode="after_occurrences", max_occurrences=3, amount=3_333.33)
+    entry, txn = body["entry"], body["transaction"]
+    assert (txn["amount"], txn["projected_amount"]) == (3_333.34, 3_333.34)
+    assert (entry["amount"], entry["currency"], entry["kind"]) == (3_333.33, "PHP", "installment")
+    assert entry["max_occurrences"] == 2 and entry["anchor_day"] == 2
+    assert _day(_occurrence_date(db, txn["id"])) == "2026-12-02"
+    assert _day(entry["next_occurrence"]) == "2027-01-02"
+    db.expire_all()
+    stored = db.execute(text("SELECT amount FROM budget_entries WHERE id = :i"),
+                        {"i": entry["id"]}).scalar_one()
+    first = db.execute(text("SELECT amount FROM transactions WHERE id = :i"),
+                       {"i": txn["id"]}).scalar_one()
+    assert first + stored * 2 == Decimal("10000.00")
+
+    r = client.get(f"{API}/budget-entries/upcoming-occurrences", headers=me["headers"],
+                   params={"end_date": "2027-12-31T00:00:00"})
+    assert r.status_code == 200, r.text
+    items = [i for i in r.json()["items"] if i["entry_id"] == entry["id"]]
+    assert [(i["occurrence_date"], i["amount"]) for i in items] == [
+        ("2027-01-02", 3_333.33), ("2027-02-02", 3_333.33)]
+
+
+def test_repeat_amount_omitted_keeps_face(world):
+    """Without ``repeat.amount`` the entry takes the transaction's face amount, as before."""
+    client, me, card = world["client"], world["me"], world["card"]
+    body = _repeat(client, me, _txn(card, day="2026-11-05", description="Sofa", amount=3_333.34,
+                                    posted=False, projected_amount=3_333.34),
+                   end_mode="after_occurrences", max_occurrences=3)
+    assert body["entry"]["amount"] == body["transaction"]["amount"] == 3_333.34
+
+
+@pytest.mark.parametrize("amount", [0, -5, 1.005, "abc"])
+def test_repeat_amount_refused(world, amount):
+    """A non-positive, fractional-centavo or non-numeric ``repeat.amount`` is a 422 on
+    ``body.repeat.amount`` and writes nothing."""
+    client, db, me, card = world["client"], world["db"], world["me"], world["card"]
+    r = _repeat(client, me, _txn(card, description="Sofa", amount=10, posted=False),
+                end_mode="after_occurrences", max_occurrences=3, amount=amount, expect=422)
+    assert [e["loc"] for e in r["detail"]] == [["body", "repeat", "amount"]]
+    assert _written(db, me) == (0, 0)
