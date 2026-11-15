@@ -621,6 +621,9 @@ async function postingDefaultDay(browser) {
     const lastDay = addDays(D, -1)
     const start = new Date(`${lastDay}T15:59:45Z`)
     const { ctx, page } = await newPage(browser, { timezoneId: 'Asia/Manila' })
+    // The page's clock is a day behind the real API: `/dashboard/due` is answered dated by the page clock, as a server
+    // on the page's day would (an answer dated another day is not shown, STU-603).
+    if (!fallbackApi) await h.alignServerDay(page)
     await page.clock.install({ time: new Date(start.getTime() - 5000) })
     await page.clock.pauseAt(start)
     await uiLogin(page, u)
@@ -1420,6 +1423,8 @@ async function loadMoreLiveDue(browser) {
 
   // A new day, in a second context whose clock is two minutes before Manila's midnight.
   const night = await newPage(browser, { timezoneId: 'Asia/Manila' })
+  // The API answers dated by the page clock, as a server on the page's day would (STU-603).
+  await h.alignServerDay(night.page)
   await night.page.clock.install({ time: new Date(`${today}T15:58:00Z`) })
   await uiLogin(night.page, u)
   await openTransactions(night.page)

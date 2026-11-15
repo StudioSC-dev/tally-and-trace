@@ -411,11 +411,16 @@ async function alignServerDay(page) {
   const dated = (url) => /\/api\/v1\/(dashboard\/due|budget-entries\/installment-plans)$/.test(url.pathname)
   await page.route(dated, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
-    const res = await route.fetch()
-    if (res.status() !== 200) return route.fulfill({ response: res })
-    const json = await res.json()
-    const today = await page.evaluate(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)).catch(() => null)
-    return route.fulfill({ response: res, json: today ? { ...json, today } : json })
+    // A page closed while this answers (a scenario ends) is not an error.
+    try {
+      const res = await route.fetch()
+      if (res.status() !== 200) return await route.fulfill({ response: res })
+      const json = await res.json()
+      const today = await page.evaluate(() => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)).catch(() => null)
+      return await route.fulfill({ response: res, json: today ? { ...json, today } : json })
+    } catch {
+      return undefined
+    }
   })
   return null
 }
@@ -622,6 +627,7 @@ module.exports = {
   waitQuiet,
   newPage,
   olderApi,
+  alignServerDay,
   logRequests,
   localDay,
   installDayClock,
