@@ -582,8 +582,11 @@ def test_the_guard_refuses_each_rule(case, tmp_path, owner, sw_people, sw_db):
     assert table_counts(sw_db) == before
 
 
-@pytest.mark.parametrize("case", ["missing", "unverified", "inactive", "demo", "case"])
-def test_the_owner_must_be_one_active_verified_non_demo_user(case, tmp_path, owner, sw_people,
+# A second user holding the owner's email by case alone can no longer exist: the
+# database refuses it (``uq_users_lower_email``, STU-241, tested in
+# test_users_lower_email_migration_integration.py).
+@pytest.mark.parametrize("case", ["missing", "unverified", "inactive", "demo"])
+def test_the_owner_must_be_one_active_verified_non_demo_user(case, tmp_path, owner,
                                                              sw_db, sw_client):
     from app.cutover_load.loader import CutoverError
     from app.models.user import User
@@ -597,11 +600,8 @@ def test_the_owner_must_be_one_active_verified_non_demo_user(case, tmp_path, own
         user.is_verified = False
     elif case == "inactive":
         user.is_active = False
-    elif case == "demo":
-        who["email"] = "Demo@Example.com"
     else:
-        twin = sw_people("Twin", "Case")
-        sw_db.get(User, twin["id"]).email = owner["email"].upper()
+        who["email"] = "Demo@Example.com"
     sw_db.commit()
     before = table_counts(sw_db)
     with pytest.raises(CutoverError) as exc:
