@@ -10,7 +10,6 @@ interface OnboardingStep {
   title: string
   description: string
   targetSelector?: string
-  targetElement?: HTMLElement | null
   navigateTo?: string
   content?: React.ReactNode
 }
