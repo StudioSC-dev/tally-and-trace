@@ -77,12 +77,14 @@ class Budget(NamedTuple):
 # The description suggestions (STU-626) are budgeted at their measured result plus 10%:
 # four statements, of which one is their own (``SUGGESTIONS_SQL_GATE``); the viewer and
 # household member see no row in full that starts with "T", so they get an empty list.
+# STU-244 added ``owner_id`` to every direct-role account: the accounts lists' byte
+# ceilings rose by exactly its bytes (18 per account); the household list is unchanged.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "due"): Budget(60, 173_828, 308, 1, 992),
     ("owner", "installment-plans"): Budget(15, 1_963, 0, 0, 21),
     ("owner", "budget-entries"): Budget(16, 14_408, 0, 0, 29),
-    ("owner", "accounts"): Budget(12, 9_876, 0, 0, 16),
+    ("owner", "accounts"): Budget(12, 10_092, 0, 0, 16),
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
     ("owner", SUGGESTIONS): Budget(4, 1_506, 0, 0, 1),
     ("owner", "statements"): Budget(11, 47_893, 431, 0, 435),
@@ -91,7 +93,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("editor", "due"): Budget(60, 50_386, 45, 1, 223),
     ("editor", "installment-plans"): Budget(17, 713, 0, 0, 7),
     ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
-    ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
+    ("editor", "accounts"): Budget(10, 1_701, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
     ("editor", SUGGESTIONS): Budget(4, 1_492, 0, 0, 1),
     ("editor", "statements"): Budget(14, 47_875, 431, 0, 436),
@@ -99,7 +101,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("viewer", "due"): Budget(56, 30_039, 45, 1, 182),
     ("viewer", "installment-plans"): Budget(9, 61, 0, 0, 5),
     ("viewer", "budget-entries"): Budget(9, 39, 0, 0, 1),
-    ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
+    ("viewer", "accounts"): Budget(10, 1_703, 0, 0, 5),
     ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
     ("viewer", SUGGESTIONS): Budget(4, 13, 0, 0, 1),
     ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),

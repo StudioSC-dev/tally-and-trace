@@ -39,8 +39,9 @@ export function Layout() {
             <Navigation />
             {/* below-nav clears the fixed top nav including its status-bar inset: a flat pt-20
                 leaves 16px of slack over the 64px bar, which the ~59px inset on a notched phone
-                in standalone mode swallows. pb-20 sm:pb-8 clears the fixed bottom tab bar. */}
-            <main id="main-content" tabIndex={-1} className="below-nav pb-20 sm:pb-8">
+                in standalone mode swallows. pb-20 sm:pb-8 clears the fixed bottom tab bar; --toast-room
+                 (Toast.tsx, STU-629) lifts the bottom padding over the toast stack. */}
+            <main id="main-content" tabIndex={-1} className="below-nav pb-[max(5rem,var(--toast-room,0px))] sm:pb-[max(2rem,var(--toast-room,0px))]">
               <div className="fade-in">
                 <Outlet />
               </div>

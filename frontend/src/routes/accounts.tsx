@@ -456,12 +456,14 @@ export function AccountsPage() {
       // Routing never points across owners: a target belongs to the edited account's
       // owner, and the caller needs an edit role on it. Your own account routes to your
       // own accounts; an account shared with you (as admin) to accounts of that same
-      // owner shared with you as editor or admin.
+      // owner (matched by id: two owners can share a display name) shared with you as
+      // editor or admin.
       (editingOwnAccount
         ? a.my_role === 'owner'
         : a.my_role !== 'owner' &&
           a.permissions.can_add_transactions &&
-          a.owner_name === editingAccount?.owner_name),
+          a.owner_id != null &&
+          a.owner_id === editingAccount?.owner_id),
   )
   // A stored route the picker can't offer (the owner's account, not shared with you)
   // stays selected as it is, under a neutral name, and is left out of the save.

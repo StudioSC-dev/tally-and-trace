@@ -1428,7 +1428,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
         >
           {open ? 'Hide' : 'Show'}
         </button>
-        <div role="tablist" aria-labelledby={titleId} className="flex min-w-0 flex-1 flex-wrap gap-1 bg-sunken p-1">
+        <div role="tablist" aria-labelledby={titleId} className="flex min-w-[min(16rem,100%)] flex-1 flex-wrap gap-1 bg-sunken p-1">
           {TABS.map(({ id, label, slug, badgeTestId }, index) => {
             const selectedTab = tab === id
             const badge = badges[id]
@@ -1446,7 +1446,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
                 tabIndex={selectedTab ? 0 : -1}
                 onClick={() => selectTab(id)}
                 onKeyDown={(event) => onTabKey(event, index)}
-                className={`flex flex-auto items-center justify-between gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
+                className={`flex min-w-0 flex-auto items-center justify-between gap-2 px-3 py-1.5 text-left text-sm font-medium transition-colors duration-200 focus-ring ${
                   selectedTab ? 'bg-surface text-ink' : 'text-body hover:text-ink'
                 }`}
                 data-testid={`due-tab-${slug}`}
