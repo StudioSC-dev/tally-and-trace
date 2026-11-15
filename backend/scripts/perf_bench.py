@@ -26,6 +26,13 @@ It measures, in-process:
 free instance gives. The dataset is seeded once, at full CPU, before either run.
 It prints a markdown table to paste into a PR. Counts are exact and repeat; times
 are for comparing a before and an after on the same machine.
+
+``--scenario suggestions`` (STU-626, AC6) seeds the description-suggestions fixture
+instead (``app/tests/fixtures/suggestions.py``: one caller with 10,000 rows in full
+and 10,000 limited) and times ``GET /transactions/description-suggestions`` for that
+caller: 10 warm-up requests, then 100 timed ones (``--runs`` is not used), reported as
+the median, p95 and slowest wall time and the most SQL statements a request ran. The
+ticket's budget is a p95 of at most 250 ms at full CPU.
 """
 from __future__ import annotations
 
@@ -85,6 +92,50 @@ def _seed(state_path: str) -> int:
     print(f"seeded {world.transaction_count} transactions in {world.build_seconds:.1f} s",
           file=sys.stderr)
     return 0
+
+
+def _seed_suggestions(state_path: str) -> int:
+    from app.core.database import SessionLocal
+    from app.models.transaction import Transaction
+    from app.tests.fixtures.suggestions import build_suggestions
+
+    db = SessionLocal()
+    try:
+        if db.query(Transaction.id).first() is not None:
+            print("refusing: the database already holds transactions; use a fresh "
+                  "throwaway database for each run", file=sys.stderr)
+            return 2
+        world = build_suggestions(db, tag="bench")
+    finally:
+        db.close()
+    with open(state_path, "w") as f:
+        json.dump(world.to_state(), f)
+    print(f"seeded the suggestions fixture in {world.build_seconds:.1f} s", file=sys.stderr)
+    return 0
+
+
+def _measure_suggestions(state_path: str) -> int:
+    """Child: time the suggestions requests and print one JSON document on stdout."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.tests.fixtures.suggestions import SuggestionsWorld, measure_latency
+
+    with open(state_path) as f:
+        world = SuggestionsWorld.from_state(json.load(f))
+    with TestClient(app) as client:
+        result = measure_latency(client, world.headers(client))
+    print(json.dumps(result))
+    return 0
+
+
+def _suggestions_table(results: dict) -> str:
+    lines = ["| CPU | requests | median ms | p95 ms | slowest ms | SQL per request |",
+             "|---|---|---|---|---|---|"]
+    for level, r in results.items():
+        lines.append(f"| {level} | {r['requests']} | {r['median_ms']:.1f} | {r['p95_ms']:.1f} "
+                     f"| {r['max_ms']:.1f} | {r['statements']} |")
+    return "\n".join(lines)
 
 
 def _serve():
@@ -201,9 +252,9 @@ def _measure(state_path: str, runs: int) -> int:
     return 0
 
 
-def _run_child(state_path: str, runs: int, limited: bool) -> dict:
+def _run_child(state_path: str, runs: int, limited: bool, scenario: str = "hot") -> dict:
     cmd = [sys.executable, os.path.realpath(__file__), "--measure", state_path,
-           "--runs", str(runs)]
+           "--runs", str(runs), "--scenario", scenario]
     if limited:
         cmd = ["systemd-run", "--user", "--scope", "--quiet", "-p", f"CPUQuota={CPU_QUOTA}",
                *cmd]
@@ -249,16 +300,35 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--cpu", choices=("both", "full", "limited"), default="both")
     parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--scenario", choices=("hot", "suggestions"), default="hot",
+                        help="the hot endpoints (default) or the description suggestions")
     parser.add_argument("--measure", metavar="STATE", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     code = _guard()
     if code:
         return code
     if args.measure:
+        if args.scenario == "suggestions":
+            return _measure_suggestions(args.measure)
         return _measure(args.measure, args.runs)
     if args.cpu != "full" and shutil.which("systemd-run") is None:
         print("refusing: systemd-run is not available; use --cpu full", file=sys.stderr)
         return 2
+    if args.scenario == "suggestions":
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = os.path.join(tmp, "state.json")
+            code = _seed_suggestions(state_path)
+            if code:
+                return code
+            results = {}
+            if args.cpu in ("both", "full"):
+                results["full"] = _run_child(state_path, args.runs, False, "suggestions")
+            if args.cpu in ("both", "limited"):
+                results["limited"] = _run_child(state_path, args.runs, True, "suggestions")
+        print(f"Description suggestions on {date.today()}: 10,000 rows in full and 10,000 "
+              f"limited, 100 requests after 10 warm-ups; limited = CPUQuota={CPU_QUOTA}\n")
+        print(_suggestions_table(results))
+        return 0
     with tempfile.TemporaryDirectory() as tmp:
         state_path = os.path.join(tmp, "state.json")
         code = _seed(state_path)

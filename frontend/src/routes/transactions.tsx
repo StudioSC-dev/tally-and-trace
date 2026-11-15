@@ -1,5 +1,5 @@
 import { createFileRoute, useCanGoBack, useNavigate, useRouter } from '@tanstack/react-router'
-import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation } from '../store/api'
+import { useLazyGetTransactionsQuery, useGetAccountsQuery, useLazyGetAccountQuery, useGetCategoriesQuery, useGetBudgetEntriesQuery, useGetTransactionQuery, useUpdateTransactionMutation, useFetchReceiptMutation, useGetTagsQuery } from '../store/api'
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import type {
@@ -11,6 +11,8 @@ import type {
   SharedFullTransaction,
 } from '../store/api'
 import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
+import { AUTOFILL_FIELDS, autofillPatch } from '@tally-trace/shared'
+import type { AutofillField, DescriptionSuggestion } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -30,6 +32,7 @@ import { TagFilter } from '../components/TagFilter'
 import { TagPicker } from '../components/TagPicker'
 import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
 import { RepeatSection } from '../components/transactions/RepeatSection'
+import { DescriptionAutofillInput } from '../components/transactions/DescriptionAutofillInput'
 import type { RepeatErrorKey } from '../components/transactions/RepeatSection'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
@@ -505,6 +508,18 @@ export function TransactionsPage() {
   const [endDate, setEndDate] = useState<string>(() => formatDateInput(defaultMonthEndRef.current))
   const [isCustomRange, setIsCustomRange] = useState(false)
   const [formData, setFormData] = useState<TransactionFormState>(() => createInitialFormState())
+  // Description autofill (STU-626): the fields the user changed in this form, which autofill
+  // never overwrites, and a key the Description field drops its suggestions on. Both reset with
+  // the form, and on "Save and add another".
+  const changedFields = useRef<Set<AutofillField>>(new Set())
+  const markChanged = (...fields: AutofillField[]) => {
+    for (const field of fields) changedFields.current.add(field)
+  }
+  const [autofillResetKey, setAutofillResetKey] = useState(0)
+  const resetAutofill = () => {
+    changedFields.current = new Set()
+    setAutofillResetKey((n) => n + 1)
+  }
   const currencyOptions = useMemo(() => Object.keys(CURRENCY_CONFIGS) as CurrencyCode[], [])
   const transactionTypeOptions = useMemo(
     () => [
@@ -1213,6 +1228,31 @@ export function TransactionsPage() {
     }))
   }
 
+  // Description autofill (STU-626): the latest transaction with this description fills the
+  // fields the user has not changed, with what they can still use. Add only; never the amount.
+  const { data: tagOptions = [] } = useGetTagsQuery(undefined, { skip: !isAuthenticated })
+  const applyAutofill = (suggestion: DescriptionSuggestion) => {
+    if (editingTransaction) return
+    const changed = new Set(changedFields.current)
+    setFormData((prev) => {
+      const patch = autofillPatch(prev, suggestion, changed, {
+        account: (id) => writableAccounts.some((account) => account.id === id),
+        category: (id, type) =>
+          categories.some((category) => category.id === id && categoryKind(category) === TYPE_TO_KIND[type]),
+        tag: (id) => tagOptions.some((tag) => tag.id === id),
+      })
+      if (Object.keys(patch).length === 0) return prev
+      const next = { ...prev, ...patch }
+      if (patch.account_id !== undefined) {
+        // The account's currency is the form's recording currency, as a manual pick sets it.
+        const account = accounts.find((a) => a.id === patch.account_id)
+        if (account) next.currency = account.currency as CurrencyCode
+      }
+      return next
+    })
+    setFieldErrors((prev) => withoutErrors(prev, ['account_id', 'transfer_to_account_id']))
+  }
+
   const handleTypeChange = (nextType: Transaction['transaction_type']) => {
     // The destination, fee and received figure come and go with the type.
     setFieldErrors((prev) => withoutErrors(prev, ['transfer_to_account_id', 'transfer_fee', 'received_amount']))
@@ -1315,6 +1355,7 @@ export function TransactionsPage() {
 
   const resetForm = () => {
     setFormData(createInitialFormState())
+    resetAutofill()
     setEditingTransaction(null)
     setPostedTouched(false)
     setDateErrors({})
@@ -1748,8 +1789,10 @@ export function TransactionsPage() {
           // unseen into the next posted entry. A pending run keeps its visible choice.
           projected_currency: prev.is_posted ? accountCurrency : prev.projected_currency,
         }))
-        // Repeat and its schedule reset with the form.
+        // Repeat and its schedule reset with the form; so does what the user changed (STU-626):
+        // the kept account, type and category are the next entry's to autofill.
         resetRepeat()
+        resetAutofill()
         setSavedNotice(`Saving "${formData.description} ${figure}"…`)
         setDateErrors({})
         setFieldErrors({})
@@ -1782,6 +1825,8 @@ export function TransactionsPage() {
     closeActionModal()
     setEditingTransaction(draft.editing)
     setFormData(draft.formData)
+    // What the user had in the form is theirs: autofill leaves it alone.
+    markChanged(...AUTOFILL_FIELDS)
     setPostedTouched(draft.postedTouched)
     if (draft.repeatOn) {
       setRepeatOn(true)
@@ -3564,16 +3609,15 @@ export function TransactionsPage() {
               <fieldset className="space-y-5 min-w-0">
               <div>
                 <label className="label">Description</label>
-                <input
-                  type="text"
+                <DescriptionAutofillInput
                   value={formData.description}
-                  onChange={(e) => {
-                    setFormData((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
+                  onValueChange={(description) => {
+                    setFormData((prev) => ({ ...prev, description }))
                     setFieldErrors((prev) => withoutError(prev, 'description'))
                   }}
+                  enabled={!editingTransaction}
+                  onAutofill={applyAutofill}
+                  resetKey={autofillResetKey}
                   className="input-field focus-ring"
                   placeholder="Add notes about this transaction"
                   data-field="description"
@@ -3591,7 +3635,9 @@ export function TransactionsPage() {
                   accounts={writableAccounts}
                   value={formData.account_id || undefined}
                   onChange={(id) => {
-                    if (typeof id === 'number') handleAccountSelect(id)
+                    if (typeof id !== 'number') return
+                    markChanged('account_id', ...(formData.transaction_type === 'transfer' ? ['transfer_from_account_id' as const] : []))
+                    handleAccountSelect(id)
                   }}
                   recentIds={recentAccounts.recentIds}
                   pinnedId={user?.main_account_id ?? undefined}
@@ -3623,6 +3669,7 @@ export function TransactionsPage() {
                     value={formData.transfer_to_account_id}
                     onChange={(id) => {
                       const account = transferDestinationOptions.find((a) => a.id === id)
+                      markChanged('transfer_to_account_id')
                       setFieldErrors((prev) => withoutError(prev, 'transfer_to_account_id'))
                       setFormData((prev) => ({
                         ...prev,
@@ -3665,14 +3712,19 @@ export function TransactionsPage() {
                   categories={visibleCategories}
                   value={formData.category_id}
                   onChange={(id) => {
-                    if (typeof id === 'number') setFormData((prev) => ({ ...prev, category_id: id }))
+                    if (typeof id !== 'number') return
+                    markChanged('category_id')
+                    setFormData((prev) => ({ ...prev, category_id: id }))
                   }}
                   leading={[
                     {
                       key: 'none',
                       label: formData.transaction_type === 'transfer' ? 'None' : 'Uncategorized',
                       selected: formData.category_id === undefined,
-                      onClick: () => setFormData((prev) => ({ ...prev, category_id: undefined })),
+                      onClick: () => {
+                        markChanged('category_id')
+                        setFormData((prev) => ({ ...prev, category_id: undefined }))
+                      },
                     },
                   ]}
                   recentIds={recentCategories.recentIds}
@@ -3697,7 +3749,10 @@ export function TransactionsPage() {
                       <button
                         type="button"
                         key={option.value}
-                        onClick={() => handleTypeChange(option.value)}
+                        onClick={() => {
+                          markChanged('transaction_type')
+                          handleTypeChange(option.value)
+                        }}
                         className={`rounded-full px-3 py-1.5 text-sm font-medium capitalize transition ${ isSelected ? 'bg-ink text-paper' : 'bg-sunken text-body hover:bg-sunken' }`}
                       >
                         {option.label}
@@ -3715,7 +3770,10 @@ export function TransactionsPage() {
                       {contextHint.suggestTransfer && (
                         <button
                           type="button"
-                          onClick={() => handleTypeChange('transfer')}
+                          onClick={() => {
+                            markChanged('transaction_type')
+                            handleTypeChange('transfer')
+                          }}
                           className="font-semibold text-ink underline-offset-2 hover:underline"
                         >
                           Switch to Transfer
@@ -3968,7 +4026,10 @@ export function TransactionsPage() {
               {(!editingTransaction || editingTransaction.permissions.can_tag) && (
                 <TagPicker
                   value={formData.tag_ids}
-                  onChange={(tag_ids) => setFormData((prev) => ({ ...prev, tag_ids }))}
+                  onChange={(tag_ids) => {
+                    markChanged('tag_ids')
+                    setFormData((prev) => ({ ...prev, tag_ids }))
+                  }}
                 />
               )}
 

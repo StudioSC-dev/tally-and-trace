@@ -292,6 +292,8 @@ def _create_routes(w):
 LIST_ROUTES = [
     ("/accounts/", {}),
     ("/transactions/", {}),
+    # STU-626: the Add form's suggestions, asked with the start of the owner's description.
+    ("/transactions/description-suggestions", {"q": MARK[:3]}),
     ("/transactions/summary/period",
      {"start_date": "2026-10-01T00:00:00", "end_date": "2026-10-31T23:59:59"}),
     ("/categories/", {}),
