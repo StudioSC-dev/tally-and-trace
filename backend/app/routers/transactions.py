@@ -39,7 +39,8 @@ from app.core.redaction import (
     serialize_entry, serialize_transaction, serialize_transactions,
 )
 from app.core.attachments import (
-    RECEIPTS, STORED_PREFIX, new_receipt_filename, public_receipt_url, stored_receipt_path,
+    RECEIPTS, STORED_PREFIX, new_receipt_filename, public_receipt_url, remove_stored_receipt,
+    stored_receipt_path,
 )
 from app.models.account import Account, AccountType
 from app.services.forecast import is_spending_wallet
@@ -1827,11 +1828,14 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db), curre
         amount=db_transaction.amount, is_posted=db_transaction.is_posted,
         allocation_id=db_transaction.allocation_id, category_id=db_transaction.category_id)
     old_transaction_date = db_transaction.transaction_date
+    old_receipt = db_transaction.receipt_url
     db.delete(db_transaction)
     db.flush()
     for allocation in _lock_allocations(db, counted):
         _recompute_budget_total(db, allocation, [old_transaction_date])
     db.commit()
+    # Only once the row is gone for good: a rolled-back delete keeps its file.
+    remove_stored_receipt(transaction_id, old_receipt)
     return {"message": "Transaction deleted successfully"}
 
 @router.post("/{transaction_id}/upload-receipt")
@@ -1873,8 +1877,19 @@ async def upload_receipt(
         buffer.write(content)
     
     # Update transaction with receipt URL
-    db_transaction.receipt_url = f"{STORED_PREFIX}{RECEIPTS}/{filename}"
-    db.commit()
+    old_receipt = db_transaction.receipt_url
+    new_receipt = f"{STORED_PREFIX}{RECEIPTS}/{filename}"
+    db_transaction.receipt_url = new_receipt
+    try:
+        db.commit()
+    except Exception:
+        # The row keeps its old receipt, and the file that was never named goes.
+        db.rollback()
+        remove_stored_receipt(transaction_id, new_receipt)
+        raise
+    # The replaced file is removed only once the new one is committed.
+    if old_receipt != new_receipt:
+        remove_stored_receipt(transaction_id, old_receipt)
     
     return {"message": "Receipt uploaded successfully",
             "file_url": public_receipt_url(transaction_id, db_transaction.receipt_url)}
