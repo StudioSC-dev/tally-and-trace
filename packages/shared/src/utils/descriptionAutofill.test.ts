@@ -127,8 +127,28 @@ describe('transaction_description_autofill', () => {
       transfer_from_account_id: 4, transfer_to_account_id: 6, transaction_type: 'transfer' })
     const changed = new Set<AutofillField>(AUTOFILL_FIELDS)
     expect(apply(form, transfer, changed, usable)).toEqual(form)
+    // The transfer accounts were not changed by the user: a credit has none, so they go blank.
     expect(apply(form, groceries, new Set<AutofillField>(['account_id', 'category_id', 'tag_ids']), usable))
-      .toEqual({ ...form, transaction_type: 'credit' })
+      .toEqual({ ...form, transaction_type: 'credit', transfer_from_account_id: undefined, transfer_to_account_id: undefined })
+  })
+
+  it('unavailable_references_are_skipped: a second autofill blanks what the first filled and it cannot', () => {
+    const first = apply(blank({ description: 'To savings' }), { ...transfer, category_id: 31, tag_ids: [100] })
+    expect([first.transfer_from_account_id, first.transfer_to_account_id, first.category_id, first.tag_ids])
+      .toEqual([7, 8, 31, [100]])
+    // The next suggestion, an expense with no category and no tags, leaves nothing of the first behind.
+    const bare: DescriptionSuggestion = { ...groceries, transaction_type: 'debit', category_id: null, tag_ids: [] }
+    const second = apply(first, bare)
+    expect([second.transaction_type, second.account_id, second.category_id, second.tag_ids,
+      second.transfer_from_account_id, second.transfer_to_account_id]).toEqual(['debit', 7, undefined, [], undefined, undefined])
+    // A transfer whose destination and category can't be used: they go blank, not the first's.
+    const other = apply(first, { ...transfer, transfer_to_account_id: 9, category_id: 32, tag_ids: [101] },
+      none, { account: (id) => id !== 9, category: (id) => id !== 32, tag: (id) => id !== 101 })
+    expect([other.transfer_from_account_id, other.transfer_to_account_id, other.category_id, other.tag_ids])
+      .toEqual([7, undefined, undefined, []])
+    // What the user changed stays, even then.
+    const kept = apply(first, bare, new Set<AutofillField>(['category_id', 'tag_ids']))
+    expect([kept.category_id, kept.tag_ids]).toEqual([31, [100]])
   })
 
   it('empty_amount_is_preserved', () => {

@@ -6,8 +6,9 @@
 // from the latest transaction with that description: its type, account, category, tags
 // and, for a transfer, its from and to accounts. Never the amount, never Description, and
 // never a field the user already changed in this form. A value the user can no longer use
-// (an account they can't add to, a deleted category, a tag that is gone) is skipped, so the
-// field keeps what it has. Edit Transaction never autofills.
+// (an account they can't add to, a deleted category, a tag that is gone) is skipped: the
+// account keeps what it has, any other field the user has not changed goes blank, so an
+// earlier suggestion's value never stays behind. Edit Transaction never autofills.
 import type { TransactionType } from '../types/api'
 
 /** One suggestion: a description and the latest such transaction's usable values. */
@@ -86,18 +87,19 @@ export function autofillPatch<F extends AutofillForm>(
   const source = transfer ? suggestion.transfer_from_account_id ?? suggestion.account_id : suggestion.account_id
   if (free('account_id') && okAccount(source)) patch.account_id = source
   const account = patch.account_id ?? form.account_id
-  if (transfer && free('transfer_from_account_id') && account) patch.transfer_from_account_id = account
-  if (transfer && free('transfer_to_account_id') && okAccount(suggestion.transfer_to_account_id)) {
-    const from = patch.account_id ?? form.account_id
-    if (suggestion.transfer_to_account_id !== from) patch.transfer_to_account_id = suggestion.transfer_to_account_id
+  // A field the user has not changed takes the suggestion's usable value, or goes blank when
+  // there is none, so an earlier suggestion's value never stays behind. The account itself is
+  // required and kept (its picker has no blank).
+  if (free('transfer_from_account_id')) patch.transfer_from_account_id = transfer && account ? account : undefined
+  if (free('transfer_to_account_id')) {
+    const to = suggestion.transfer_to_account_id
+    patch.transfer_to_account_id = transfer && okAccount(to) && to !== account ? to : undefined
   }
-  if (free('category_id') && suggestion.category_id !== null && usable.category(suggestion.category_id, type)) {
-    patch.category_id = suggestion.category_id
+  if (free('category_id')) {
+    const id = suggestion.category_id
+    patch.category_id = id !== null && usable.category(id, type) ? id : undefined
   }
-  if (free('tag_ids')) {
-    const tags = suggestion.tag_ids.filter((id) => usable.tag(id))
-    if (tags.length > 0) patch.tag_ids = tags
-  }
+  if (free('tag_ids')) patch.tag_ids = suggestion.tag_ids.filter((id) => usable.tag(id))
   return patch as Partial<Pick<F, AutofillField>>
 }
 
