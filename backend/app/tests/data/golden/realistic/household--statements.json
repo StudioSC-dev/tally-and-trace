@@ -1,6 +1,2299 @@
 {
  "body": {
-  "detail": "Account not found"
+  "currency": "PHP",
+  "name": "Card B",
+  "statements": [
+   {
+    "amount_due": 0.0,
+    "close_date": "2024-11-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2024-12-16T00:00:00",
+    "lines": [
+     {
+      "amount": 85.0,
+      "date": "2024-11-14T16:12:00+00:00",
+      "display_description": "Txn 165"
+     },
+     {
+      "amount": -349.0,
+      "date": "2024-11-17T07:20:00+00:00",
+      "display_description": "Txn 948"
+     },
+     {
+      "amount": 914.0,
+      "date": "2024-11-17T07:39:00+00:00",
+      "display_description": "Txn 1485"
+     },
+     {
+      "amount": 4152.0,
+      "date": "2024-11-19T01:12:00+00:00",
+      "display_description": "Txn 206"
+     },
+     {
+      "amount": 1859.0,
+      "date": "2024-11-20T13:25:00+00:00",
+      "display_description": "Txn 1948"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2024-12-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-01-14T00:00:00",
+    "lines": [
+     {
+      "amount": -4860.0,
+      "date": "2024-11-21T20:27:00+00:00",
+      "display_description": "Txn 2498"
+     },
+     {
+      "amount": 2458.0,
+      "date": "2024-11-22T21:14:00+00:00",
+      "display_description": "Txn 418"
+     },
+     {
+      "amount": 3475.0,
+      "date": "2024-11-23T22:34:00+00:00",
+      "display_description": "Txn 1599"
+     },
+     {
+      "amount": 1856.0,
+      "date": "2024-11-25T14:45:00+00:00",
+      "display_description": "Txn 238"
+     },
+     {
+      "amount": -4898.0,
+      "date": "2024-11-25T17:27:00+00:00",
+      "display_description": "Txn 2043"
+     },
+     {
+      "amount": 2248.0,
+      "date": "2024-11-26T09:06:00+00:00",
+      "display_description": "Txn 1616"
+     },
+     {
+      "amount": -1802.0,
+      "date": "2024-11-26T13:50:00+00:00",
+      "display_description": "Txn 1063"
+     },
+     {
+      "amount": 295.0,
+      "date": "2024-11-26T14:53:00+00:00",
+      "display_description": "Txn 1296"
+     },
+     {
+      "amount": 3638.0,
+      "date": "2024-11-26T22:16:00+00:00",
+      "display_description": "Txn 529"
+     },
+     {
+      "amount": 2098.0,
+      "date": "2024-11-28T21:00:00+00:00",
+      "display_description": "Txn 193"
+     },
+     {
+      "amount": 460.0,
+      "date": "2024-12-01T08:46:00+00:00",
+      "display_description": "Txn 214"
+     },
+     {
+      "amount": 2067.0,
+      "date": "2024-12-02T19:10:00+00:00",
+      "display_description": "Txn 1568"
+     },
+     {
+      "amount": 405.0,
+      "date": "2024-12-03T16:21:00+00:00",
+      "display_description": "Txn 2146"
+     },
+     {
+      "amount": -3890.0,
+      "date": "2024-12-03T23:02:00+00:00",
+      "display_description": "Txn 2789"
+     },
+     {
+      "amount": 2226.0,
+      "date": "2024-12-04T01:29:00+00:00",
+      "display_description": "Txn 2105"
+     },
+     {
+      "amount": 3714.0,
+      "date": "2024-12-04T02:35:00+00:00",
+      "display_description": "Txn 1319"
+     },
+     {
+      "amount": 3094.0,
+      "date": "2024-12-04T13:26:00+00:00",
+      "display_description": "Txn 1907"
+     },
+     {
+      "amount": 3944.0,
+      "date": "2024-12-04T21:53:00+00:00",
+      "display_description": "Txn 1688"
+     },
+     {
+      "amount": 3372.0,
+      "date": "2024-12-05T01:37:00+00:00",
+      "display_description": "Txn 2654"
+     },
+     {
+      "amount": 2484.0,
+      "date": "2024-12-07T14:44:00+00:00",
+      "display_description": "Txn 2229"
+     },
+     {
+      "amount": 3306.0,
+      "date": "2024-12-08T22:49:00+00:00",
+      "display_description": "Txn 2513"
+     },
+     {
+      "amount": 4547.0,
+      "date": "2024-12-10T06:09:00+00:00",
+      "display_description": "Txn 2759"
+     },
+     {
+      "amount": -4052.0,
+      "date": "2024-12-10T21:55:00+00:00",
+      "display_description": "Txn 1699"
+     },
+     {
+      "amount": 4512.0,
+      "date": "2024-12-14T00:14:00+00:00",
+      "display_description": "Txn 1801"
+     },
+     {
+      "amount": -1523.0,
+      "date": "2024-12-14T21:43:00+00:00",
+      "display_description": "Txn 522"
+     },
+     {
+      "amount": 3068.0,
+      "date": "2024-12-16T18:58:00+00:00",
+      "display_description": "Txn 1006"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-01-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-02-14T00:00:00",
+    "lines": [
+     {
+      "amount": 3755.0,
+      "date": "2024-12-21T03:19:00+00:00",
+      "display_description": "Txn 1216"
+     },
+     {
+      "amount": -3818.0,
+      "date": "2024-12-22T12:58:00+00:00",
+      "display_description": "Txn 1576"
+     },
+     {
+      "amount": 1022.0,
+      "date": "2024-12-23T09:43:00+00:00",
+      "display_description": "Txn 1344"
+     },
+     {
+      "amount": 4298.0,
+      "date": "2024-12-23T23:34:00+00:00",
+      "display_description": "Txn 2007"
+     },
+     {
+      "amount": 2831.0,
+      "date": "2024-12-25T23:19:00+00:00",
+      "display_description": "Txn 1743"
+     },
+     {
+      "amount": 2195.0,
+      "date": "2024-12-27T16:45:00+00:00",
+      "display_description": "Txn 49"
+     },
+     {
+      "amount": 1122.0,
+      "date": "2024-12-30T20:53:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 3344.0,
+      "date": "2025-01-02T09:30:00+00:00",
+      "display_description": "Txn 1522"
+     },
+     {
+      "amount": 4049.0,
+      "date": "2025-01-02T22:10:00+00:00",
+      "display_description": "Txn 2039"
+     },
+     {
+      "amount": 3023.0,
+      "date": "2025-01-05T10:12:00+00:00",
+      "display_description": "Txn 1669"
+     },
+     {
+      "amount": 3194.0,
+      "date": "2025-01-06T11:19:00+00:00",
+      "display_description": "Txn 2160"
+     },
+     {
+      "amount": 3123.0,
+      "date": "2025-01-06T17:14:00+00:00",
+      "display_description": "Txn 2320"
+     },
+     {
+      "amount": 1897.0,
+      "date": "2025-01-12T00:51:00+00:00",
+      "display_description": "Txn 1814"
+     },
+     {
+      "amount": 3663.0,
+      "date": "2025-01-12T06:26:00+00:00",
+      "display_description": "Txn 1730"
+     },
+     {
+      "amount": -4456.0,
+      "date": "2025-01-12T14:37:00+00:00",
+      "display_description": "Txn 491"
+     },
+     {
+      "amount": 1128.0,
+      "date": "2025-01-12T21:36:00+00:00",
+      "display_description": "Txn 1512"
+     },
+     {
+      "amount": 3748.0,
+      "date": "2025-01-13T19:22:00+00:00",
+      "display_description": "Txn 1170"
+     },
+     {
+      "amount": 2146.0,
+      "date": "2025-01-14T02:10:00+00:00",
+      "display_description": "Txn 2408"
+     },
+     {
+      "amount": 994.0,
+      "date": "2025-01-15T23:12:00+00:00",
+      "display_description": "Txn 1822"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-02-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-03-17T00:00:00",
+    "lines": [
+     {
+      "amount": -3285.0,
+      "date": "2025-01-21T09:01:00+00:00",
+      "display_description": "Txn 757"
+     },
+     {
+      "amount": 1916.0,
+      "date": "2025-01-22T07:44:00+00:00",
+      "display_description": "Txn 1184"
+     },
+     {
+      "amount": 3993.0,
+      "date": "2025-01-22T10:30:00+00:00",
+      "display_description": "Txn 1040"
+     },
+     {
+      "amount": 4804.0,
+      "date": "2025-01-24T04:24:00+00:00",
+      "display_description": "Txn 808"
+     },
+     {
+      "amount": 3630.0,
+      "date": "2025-01-25T15:50:00+00:00",
+      "display_description": "Txn 978"
+     },
+     {
+      "amount": 2862.0,
+      "date": "2025-01-28T09:32:00+00:00",
+      "display_description": "Txn 286"
+     },
+     {
+      "amount": 141.0,
+      "date": "2025-01-28T16:45:00+00:00",
+      "display_description": "Txn 1080"
+     },
+     {
+      "amount": 4306.0,
+      "date": "2025-01-29T16:17:00+00:00",
+      "display_description": "Txn 1926"
+     },
+     {
+      "amount": 3622.0,
+      "date": "2025-01-31T07:53:00+00:00",
+      "display_description": "Txn 2637"
+     },
+     {
+      "amount": 870.0,
+      "date": "2025-02-01T23:49:00+00:00",
+      "display_description": "Txn 2645"
+     },
+     {
+      "amount": 4178.0,
+      "date": "2025-02-05T23:20:00+00:00",
+      "display_description": "Txn 132"
+     },
+     {
+      "amount": 464.0,
+      "date": "2025-02-08T04:29:00+00:00",
+      "display_description": "Txn 2354"
+     },
+     {
+      "amount": 2206.0,
+      "date": "2025-02-09T13:56:00+00:00",
+      "display_description": "Txn 169"
+     },
+     {
+      "amount": 3294.0,
+      "date": "2025-02-10T05:10:00+00:00",
+      "display_description": "Txn 298"
+     },
+     {
+      "amount": 1171.0,
+      "date": "2025-02-10T06:01:00+00:00",
+      "display_description": "Txn 2058"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-03-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-04-14T00:00:00",
+    "lines": [
+     {
+      "amount": 1435.0,
+      "date": "2025-02-22T12:05:00+00:00",
+      "display_description": "Txn 2431"
+     },
+     {
+      "amount": 733.0,
+      "date": "2025-02-23T09:47:00+00:00",
+      "display_description": "Txn 1993"
+     },
+     {
+      "amount": 2184.0,
+      "date": "2025-02-27T03:14:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 3369.0,
+      "date": "2025-02-27T15:37:00+00:00",
+      "display_description": "Txn 866"
+     },
+     {
+      "amount": -2265.0,
+      "date": "2025-02-28T02:16:00+00:00",
+      "display_description": "Txn 45"
+     },
+     {
+      "amount": -2137.0,
+      "date": "2025-02-28T03:00:00+00:00",
+      "display_description": "Txn 1901"
+     },
+     {
+      "amount": 4892.0,
+      "date": "2025-03-05T06:30:00+00:00",
+      "display_description": "Txn 2643"
+     },
+     {
+      "amount": 3974.0,
+      "date": "2025-03-07T08:37:00+00:00",
+      "display_description": "Txn 2356"
+     },
+     {
+      "amount": 3364.0,
+      "date": "2025-03-10T08:58:00+00:00",
+      "display_description": "Txn 310"
+     },
+     {
+      "amount": 2462.0,
+      "date": "2025-03-13T06:07:00+00:00",
+      "display_description": "Txn 1543"
+     },
+     {
+      "amount": 2125.0,
+      "date": "2025-03-14T03:41:00+00:00",
+      "display_description": "Txn 2275"
+     },
+     {
+      "amount": 4906.0,
+      "date": "2025-03-14T21:48:00+00:00",
+      "display_description": "Txn 1486"
+     },
+     {
+      "amount": 1391.0,
+      "date": "2025-03-15T20:11:00+00:00",
+      "display_description": "Txn 655"
+     },
+     {
+      "amount": 3271.0,
+      "date": "2025-03-16T17:39:00+00:00",
+      "display_description": "Txn 2315"
+     },
+     {
+      "amount": 2172.0,
+      "date": "2025-03-18T01:34:00+00:00",
+      "display_description": "Txn 378"
+     },
+     {
+      "amount": 4212.0,
+      "date": "2025-03-18T14:52:00+00:00",
+      "display_description": "Txn 1431"
+     },
+     {
+      "amount": 3592.0,
+      "date": "2025-03-19T17:48:00+00:00",
+      "display_description": "Txn 100"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-04-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-05-15T00:00:00",
+    "lines": [
+     {
+      "amount": 1520.0,
+      "date": "2025-03-21T14:14:00+00:00",
+      "display_description": "Txn 1921"
+     },
+     {
+      "amount": 75.0,
+      "date": "2025-03-26T22:49:00+00:00",
+      "display_description": "Txn 2017"
+     },
+     {
+      "amount": 214.0,
+      "date": "2025-03-28T07:10:00+00:00",
+      "display_description": "Txn 2187"
+     },
+     {
+      "amount": 731.0,
+      "date": "2025-03-28T09:00:00+00:00",
+      "display_description": "Txn 2685"
+     },
+     {
+      "amount": 633.0,
+      "date": "2025-04-01T09:57:00+00:00",
+      "display_description": "Txn 1010"
+     },
+     {
+      "amount": 2468.0,
+      "date": "2025-04-05T01:07:00+00:00",
+      "display_description": "Txn 1713"
+     },
+     {
+      "amount": 1837.0,
+      "date": "2025-04-05T17:21:00+00:00",
+      "display_description": "Txn 2604"
+     },
+     {
+      "amount": 4996.0,
+      "date": "2025-04-06T19:30:00+00:00",
+      "display_description": "Txn 2545"
+     },
+     {
+      "amount": 4464.0,
+      "date": "2025-04-08T02:19:00+00:00",
+      "display_description": "Txn 2546"
+     },
+     {
+      "amount": 2859.0,
+      "date": "2025-04-10T12:44:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2132.0,
+      "date": "2025-04-11T02:20:00+00:00",
+      "display_description": "Txn 1761"
+     },
+     {
+      "amount": 2819.0,
+      "date": "2025-04-12T21:11:00+00:00",
+      "display_description": "Txn 2219"
+     },
+     {
+      "amount": -2692.0,
+      "date": "2025-04-13T22:34:00+00:00",
+      "display_description": "Txn 1345"
+     },
+     {
+      "amount": 2322.0,
+      "date": "2025-04-15T15:56:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4069.0,
+      "date": "2025-04-16T00:58:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4666.0,
+      "date": "2025-04-18T22:00:00+00:00",
+      "display_description": "Txn 1674"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-05-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-06-16T00:00:00",
+    "lines": [
+     {
+      "amount": 4285.0,
+      "date": "2025-04-24T17:04:00+00:00",
+      "display_description": "Txn 273"
+     },
+     {
+      "amount": 2146.0,
+      "date": "2025-04-25T11:15:00+00:00",
+      "display_description": "Txn 234"
+     },
+     {
+      "amount": 2705.0,
+      "date": "2025-04-26T15:48:00+00:00",
+      "display_description": "Txn 1562"
+     },
+     {
+      "amount": 1820.0,
+      "date": "2025-04-28T07:20:00+00:00",
+      "display_description": "Txn 272"
+     },
+     {
+      "amount": 4407.0,
+      "date": "2025-05-02T04:51:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4482.0,
+      "date": "2025-05-05T03:32:00+00:00",
+      "display_description": "Txn 715"
+     },
+     {
+      "amount": 152.0,
+      "date": "2025-05-06T16:31:00+00:00",
+      "display_description": "Txn 292"
+     },
+     {
+      "amount": 3544.0,
+      "date": "2025-05-09T15:43:00+00:00",
+      "display_description": "Txn 1858"
+     },
+     {
+      "amount": -4386.0,
+      "date": "2025-05-18T17:29:00+00:00",
+      "display_description": "Txn 2331"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 0.0,
+    "close_date": "2025-06-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-07-15T00:00:00",
+    "lines": [
+     {
+      "amount": 3773.0,
+      "date": "2025-05-21T17:38:00+00:00",
+      "display_description": "Txn 1401"
+     },
+     {
+      "amount": 3914.0,
+      "date": "2025-05-23T14:59:00+00:00",
+      "display_description": "Txn 2284"
+     },
+     {
+      "amount": 4526.0,
+      "date": "2025-05-25T01:44:00+00:00",
+      "display_description": "Txn 318"
+     },
+     {
+      "amount": 6909.0,
+      "date": "2025-05-29T02:19:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2361.0,
+      "date": "2025-05-30T05:20:00+00:00",
+      "display_description": "Txn 2035"
+     },
+     {
+      "amount": 5843.0,
+      "date": "2025-06-01T18:58:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": -3964.0,
+      "date": "2025-06-07T17:45:00+00:00",
+      "display_description": "Txn 270"
+     },
+     {
+      "amount": 2293.0,
+      "date": "2025-06-18T06:18:00+00:00",
+      "display_description": "Txn 1311"
+     },
+     {
+      "amount": 2178.0,
+      "date": "2025-06-18T08:02:00+00:00",
+      "display_description": "Txn 1525"
+     },
+     {
+      "amount": 1874.0,
+      "date": "2025-06-19T16:22:00+00:00",
+      "display_description": "Txn 2614"
+     },
+     {
+      "amount": 1743.0,
+      "date": "2025-06-20T11:18:00+00:00",
+      "display_description": "Txn 1074"
+     },
+     {
+      "amount": -1470.0,
+      "date": "2025-06-20T20:26:00+00:00",
+      "display_description": "Txn 1960"
+     }
+    ],
+    "status": "paid"
+   },
+   {
+    "amount_due": 4160.0,
+    "close_date": "2025-07-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-08-14T00:00:00",
+    "lines": [
+     {
+      "amount": 610.0,
+      "date": "2025-06-22T13:33:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4986.0,
+      "date": "2025-06-22T15:27:00+00:00",
+      "display_description": "Txn 332"
+     },
+     {
+      "amount": -3935.0,
+      "date": "2025-07-03T11:56:00+00:00",
+      "display_description": "Txn 2762"
+     },
+     {
+      "amount": 4044.0,
+      "date": "2025-07-05T10:21:00+00:00",
+      "display_description": "Txn 700"
+     },
+     {
+      "amount": -4099.0,
+      "date": "2025-07-06T14:58:00+00:00",
+      "display_description": "Txn 2504"
+     },
+     {
+      "amount": 79.0,
+      "date": "2025-07-07T15:57:00+00:00",
+      "display_description": "Txn 71"
+     },
+     {
+      "amount": 288.0,
+      "date": "2025-07-09T14:44:00+00:00",
+      "display_description": "Txn 2317"
+     },
+     {
+      "amount": 4371.0,
+      "date": "2025-07-13T04:24:00+00:00",
+      "display_description": "Txn 912"
+     },
+     {
+      "amount": -2454.0,
+      "date": "2025-07-14T03:24:00+00:00",
+      "display_description": "Txn 245"
+     },
+     {
+      "amount": 2619.0,
+      "date": "2025-07-15T10:50:00+00:00",
+      "display_description": "Txn 526"
+     },
+     {
+      "amount": -2238.0,
+      "date": "2025-07-17T08:33:00+00:00",
+      "display_description": "Txn 1866"
+     },
+     {
+      "amount": 1711.0,
+      "date": "2025-07-17T18:28:00+00:00",
+      "display_description": "Txn 341"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 32756.0,
+    "close_date": "2025-08-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-09-15T00:00:00",
+    "lines": [
+     {
+      "amount": 2438.0,
+      "date": "2025-07-21T10:49:00+00:00",
+      "display_description": "Txn 253"
+     },
+     {
+      "amount": 3929.0,
+      "date": "2025-07-21T23:42:00+00:00",
+      "display_description": "Txn 1508"
+     },
+     {
+      "amount": 4012.0,
+      "date": "2025-07-22T23:22:00+00:00",
+      "display_description": "Txn 1530"
+     },
+     {
+      "amount": 1353.0,
+      "date": "2025-07-23T10:52:00+00:00",
+      "display_description": "Txn 1312"
+     },
+     {
+      "amount": 4352.0,
+      "date": "2025-07-25T05:44:00+00:00",
+      "display_description": "Txn 6"
+     },
+     {
+      "amount": 2628.0,
+      "date": "2025-07-26T07:02:00+00:00",
+      "display_description": "Txn 295"
+     },
+     {
+      "amount": 1406.0,
+      "date": "2025-07-30T14:14:00+00:00",
+      "display_description": "Txn 638"
+     },
+     {
+      "amount": 1142.0,
+      "date": "2025-08-03T22:57:00+00:00",
+      "display_description": "Txn 432"
+     },
+     {
+      "amount": 4865.0,
+      "date": "2025-08-11T02:11:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4521.0,
+      "date": "2025-08-14T14:30:00+00:00",
+      "display_description": "Txn 777"
+     },
+     {
+      "amount": 2110.0,
+      "date": "2025-08-20T03:46:00+00:00",
+      "display_description": "Txn 2020"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 44543.0,
+    "close_date": "2025-09-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-10-15T00:00:00",
+    "lines": [
+     {
+      "amount": 4629.0,
+      "date": "2025-08-24T00:53:00+00:00",
+      "display_description": "Txn 913"
+     },
+     {
+      "amount": 1970.0,
+      "date": "2025-08-24T18:44:00+00:00",
+      "display_description": "Txn 1879"
+     },
+     {
+      "amount": 2547.0,
+      "date": "2025-08-26T05:14:00+00:00",
+      "display_description": "Txn 1882"
+     },
+     {
+      "amount": -601.0,
+      "date": "2025-08-28T04:58:00+00:00",
+      "display_description": "Txn 1193"
+     },
+     {
+      "amount": 3161.0,
+      "date": "2025-08-29T06:55:00+00:00",
+      "display_description": "Txn 819"
+     },
+     {
+      "amount": 1106.0,
+      "date": "2025-08-29T16:41:00+00:00",
+      "display_description": "Txn 368"
+     },
+     {
+      "amount": 4855.0,
+      "date": "2025-08-30T22:00:00+00:00",
+      "display_description": "Txn 222"
+     },
+     {
+      "amount": 1999.0,
+      "date": "2025-09-06T19:35:00+00:00",
+      "display_description": "Txn 1692"
+     },
+     {
+      "amount": 1131.0,
+      "date": "2025-09-06T19:40:00+00:00",
+      "display_description": "Txn 142"
+     },
+     {
+      "amount": -2017.0,
+      "date": "2025-09-07T19:54:00+00:00",
+      "display_description": "Txn 992"
+     },
+     {
+      "amount": 4369.0,
+      "date": "2025-09-10T21:24:00+00:00",
+      "display_description": "Txn 2566"
+     },
+     {
+      "amount": 3030.0,
+      "date": "2025-09-12T02:43:00+00:00",
+      "display_description": "Txn 1239"
+     },
+     {
+      "amount": 1083.0,
+      "date": "2025-09-13T06:04:00+00:00",
+      "display_description": "Txn 307"
+     },
+     {
+      "amount": 421.0,
+      "date": "2025-09-14T18:51:00+00:00",
+      "display_description": "Txn 2729"
+     },
+     {
+      "amount": 891.0,
+      "date": "2025-09-14T20:15:00+00:00",
+      "display_description": "Txn 1298"
+     },
+     {
+      "amount": 2058.0,
+      "date": "2025-09-16T03:02:00+00:00",
+      "display_description": "Txn 1774"
+     },
+     {
+      "amount": 2956.0,
+      "date": "2025-09-16T18:45:00+00:00",
+      "display_description": "Txn 1999"
+     },
+     {
+      "amount": 6668.0,
+      "date": "2025-09-18T21:54:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 138.0,
+      "date": "2025-09-19T10:05:00+00:00",
+      "display_description": "Txn 451"
+     },
+     {
+      "amount": 3991.0,
+      "date": "2025-09-20T06:20:00+00:00",
+      "display_description": "Txn 1835"
+     },
+     {
+      "amount": 158.0,
+      "date": "2025-09-20T20:25:00+00:00",
+      "display_description": "Txn 1137"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 38482.0,
+    "close_date": "2025-10-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-11-14T00:00:00",
+    "lines": [
+     {
+      "amount": 2712.0,
+      "date": "2025-09-22T01:49:00+00:00",
+      "display_description": "Txn 585"
+     },
+     {
+      "amount": 3314.0,
+      "date": "2025-09-23T11:38:00+00:00",
+      "display_description": "Txn 2234"
+     },
+     {
+      "amount": 3649.0,
+      "date": "2025-09-24T09:06:00+00:00",
+      "display_description": "Txn 980"
+     },
+     {
+      "amount": 4055.0,
+      "date": "2025-09-24T10:47:00+00:00",
+      "display_description": "Txn 2014"
+     },
+     {
+      "amount": 1305.0,
+      "date": "2025-09-30T14:20:00+00:00",
+      "display_description": "Txn 996"
+     },
+     {
+      "amount": 1264.0,
+      "date": "2025-10-01T07:48:00+00:00",
+      "display_description": "Txn 2294"
+     },
+     {
+      "amount": 4360.0,
+      "date": "2025-10-03T08:11:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 1634.0,
+      "date": "2025-10-04T20:02:00+00:00",
+      "display_description": "Txn 1739"
+     },
+     {
+      "amount": -3755.0,
+      "date": "2025-10-10T09:16:00+00:00",
+      "display_description": "Txn 2629"
+     },
+     {
+      "amount": 1907.0,
+      "date": "2025-10-10T17:27:00+00:00",
+      "display_description": "Txn 1754"
+     },
+     {
+      "amount": 863.0,
+      "date": "2025-10-14T00:33:00+00:00",
+      "display_description": "Txn 1376"
+     },
+     {
+      "amount": 4731.0,
+      "date": "2025-10-15T06:34:00+00:00",
+      "display_description": "Txn 1707"
+     },
+     {
+      "amount": 4950.0,
+      "date": "2025-10-20T09:12:00+00:00",
+      "display_description": "Txn 1590"
+     },
+     {
+      "amount": 7493.0,
+      "date": "2025-10-20T23:46:00+00:00",
+      "display_description": "Transfer"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 40865.0,
+    "close_date": "2025-11-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2025-12-15T00:00:00",
+    "lines": [
+     {
+      "amount": -2303.0,
+      "date": "2025-10-23T20:19:00+00:00",
+      "display_description": "Txn 2253"
+     },
+     {
+      "amount": 4257.0,
+      "date": "2025-10-24T13:46:00+00:00",
+      "display_description": "Txn 1884"
+     },
+     {
+      "amount": 7995.0,
+      "date": "2025-10-25T21:46:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 1224.0,
+      "date": "2025-10-28T12:25:00+00:00",
+      "display_description": "Txn 484"
+     },
+     {
+      "amount": 703.0,
+      "date": "2025-10-29T04:26:00+00:00",
+      "display_description": "Txn 1209"
+     },
+     {
+      "amount": 3485.0,
+      "date": "2025-11-02T02:28:00+00:00",
+      "display_description": "Txn 2481"
+     },
+     {
+      "amount": -2573.0,
+      "date": "2025-11-03T04:12:00+00:00",
+      "display_description": "Txn 475"
+     },
+     {
+      "amount": 6761.0,
+      "date": "2025-11-03T15:46:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 1444.0,
+      "date": "2025-11-08T11:14:00+00:00",
+      "display_description": "Txn 1369"
+     },
+     {
+      "amount": 3975.0,
+      "date": "2025-11-09T01:23:00+00:00",
+      "display_description": "Txn 1470"
+     },
+     {
+      "amount": -333.0,
+      "date": "2025-11-09T14:38:00+00:00",
+      "display_description": "Txn 1697"
+     },
+     {
+      "amount": 4980.0,
+      "date": "2025-11-10T18:30:00+00:00",
+      "display_description": "Txn 2370"
+     },
+     {
+      "amount": 1844.0,
+      "date": "2025-11-13T03:14:00+00:00",
+      "display_description": "Txn 610"
+     },
+     {
+      "amount": 4069.0,
+      "date": "2025-11-14T09:37:00+00:00",
+      "display_description": "Txn 1352"
+     },
+     {
+      "amount": 4889.0,
+      "date": "2025-11-20T06:01:00+00:00",
+      "display_description": "Txn 2027"
+     },
+     {
+      "amount": 448.0,
+      "date": "2025-11-20T11:27:00+00:00",
+      "display_description": "Txn 2154"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 55055.0,
+    "close_date": "2025-12-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-01-14T00:00:00",
+    "lines": [
+     {
+      "amount": 1494.0,
+      "date": "2025-11-21T04:45:00+00:00",
+      "display_description": "Txn 2466"
+     },
+     {
+      "amount": 2996.0,
+      "date": "2025-11-21T07:23:00+00:00",
+      "display_description": "Txn 1615"
+     },
+     {
+      "amount": 1734.0,
+      "date": "2025-11-23T17:37:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2983.0,
+      "date": "2025-11-24T04:32:00+00:00",
+      "display_description": "Txn 1958"
+     },
+     {
+      "amount": 1715.0,
+      "date": "2025-11-24T08:44:00+00:00",
+      "display_description": "Txn 2351"
+     },
+     {
+      "amount": 3154.0,
+      "date": "2025-11-25T09:22:00+00:00",
+      "display_description": "Txn 1421"
+     },
+     {
+      "amount": 2901.0,
+      "date": "2025-11-25T22:09:00+00:00",
+      "display_description": "Txn 1961"
+     },
+     {
+      "amount": 2493.0,
+      "date": "2025-11-29T17:00:00+00:00",
+      "display_description": "Txn 2515"
+     },
+     {
+      "amount": 4076.0,
+      "date": "2025-12-03T01:08:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 3838.0,
+      "date": "2025-12-03T20:54:00+00:00",
+      "display_description": "Txn 2055"
+     },
+     {
+      "amount": 1309.0,
+      "date": "2025-12-05T02:10:00+00:00",
+      "display_description": "Txn 1627"
+     },
+     {
+      "amount": 4151.0,
+      "date": "2025-12-05T03:51:00+00:00",
+      "display_description": "Txn 2574"
+     },
+     {
+      "amount": 4296.0,
+      "date": "2025-12-05T19:17:00+00:00",
+      "display_description": "Txn 1658"
+     },
+     {
+      "amount": 4376.0,
+      "date": "2025-12-06T12:51:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2729.0,
+      "date": "2025-12-07T06:59:00+00:00",
+      "display_description": "Txn 2062"
+     },
+     {
+      "amount": 4126.0,
+      "date": "2025-12-10T00:46:00+00:00",
+      "display_description": "Txn 2024"
+     },
+     {
+      "amount": 4624.0,
+      "date": "2025-12-11T08:08:00+00:00",
+      "display_description": "Txn 1890"
+     },
+     {
+      "amount": 68.0,
+      "date": "2025-12-12T06:59:00+00:00",
+      "display_description": "Txn 2471"
+     },
+     {
+      "amount": 2342.0,
+      "date": "2025-12-12T14:17:00+00:00",
+      "display_description": "Txn 219"
+     },
+     {
+      "amount": 2336.0,
+      "date": "2025-12-14T06:29:00+00:00",
+      "display_description": "Txn 300"
+     },
+     {
+      "amount": -2686.0,
+      "date": "2025-12-16T08:15:00+00:00",
+      "display_description": "Txn 1710"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 41606.0,
+    "close_date": "2026-01-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-02-16T00:00:00",
+    "lines": [
+     {
+      "amount": 3667.0,
+      "date": "2025-12-21T18:00:00+00:00",
+      "display_description": "Txn 2167"
+     },
+     {
+      "amount": 4878.0,
+      "date": "2025-12-23T19:43:00+00:00",
+      "display_description": "Txn 1254"
+     },
+     {
+      "amount": 2124.0,
+      "date": "2025-12-25T03:59:00+00:00",
+      "display_description": "Txn 73"
+     },
+     {
+      "amount": 1058.0,
+      "date": "2025-12-25T11:36:00+00:00",
+      "display_description": "Txn 916"
+     },
+     {
+      "amount": 3472.0,
+      "date": "2025-12-25T22:17:00+00:00",
+      "display_description": "Txn 119"
+     },
+     {
+      "amount": 3092.0,
+      "date": "2025-12-27T12:32:00+00:00",
+      "display_description": "Txn 495"
+     },
+     {
+      "amount": 4606.0,
+      "date": "2025-12-29T07:59:00+00:00",
+      "display_description": "Txn 512"
+     },
+     {
+      "amount": 4692.0,
+      "date": "2026-01-01T18:28:00+00:00",
+      "display_description": "Txn 1414"
+     },
+     {
+      "amount": 3536.0,
+      "date": "2026-01-04T06:32:00+00:00",
+      "display_description": "Txn 1777"
+     },
+     {
+      "amount": 1146.0,
+      "date": "2026-01-05T20:09:00+00:00",
+      "display_description": "Txn 901"
+     },
+     {
+      "amount": 2631.0,
+      "date": "2026-01-06T20:12:00+00:00",
+      "display_description": "Txn 1276"
+     },
+     {
+      "amount": 3849.0,
+      "date": "2026-01-07T10:18:00+00:00",
+      "display_description": "Txn 1117"
+     },
+     {
+      "amount": 3314.0,
+      "date": "2026-01-10T08:41:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4145.0,
+      "date": "2026-01-12T03:56:00+00:00",
+      "display_description": "Txn 2798"
+     },
+     {
+      "amount": 379.0,
+      "date": "2026-01-17T12:49:00+00:00",
+      "display_description": "Txn 264"
+     },
+     {
+      "amount": -4983.0,
+      "date": "2026-01-19T00:09:00+00:00",
+      "display_description": "Txn 2475"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 40979.0,
+    "close_date": "2026-02-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-03-17T00:00:00",
+    "lines": [
+     {
+      "amount": 241.0,
+      "date": "2026-01-22T12:42:00+00:00",
+      "display_description": "Txn 129"
+     },
+     {
+      "amount": 2002.0,
+      "date": "2026-01-26T15:40:00+00:00",
+      "display_description": "Txn 1205"
+     },
+     {
+      "amount": 2910.0,
+      "date": "2026-01-27T14:11:00+00:00",
+      "display_description": "Txn 1452"
+     },
+     {
+      "amount": 1289.0,
+      "date": "2026-01-27T15:08:00+00:00",
+      "display_description": "Txn 106"
+     },
+     {
+      "amount": 1628.0,
+      "date": "2026-01-28T00:00:00+00:00",
+      "display_description": "Txn 753"
+     },
+     {
+      "amount": 4574.0,
+      "date": "2026-01-28T06:48:00+00:00",
+      "display_description": "Txn 311"
+     },
+     {
+      "amount": -262.0,
+      "date": "2026-01-30T10:36:00+00:00",
+      "display_description": "Txn 2340"
+     },
+     {
+      "amount": 4153.0,
+      "date": "2026-01-31T06:51:00+00:00",
+      "display_description": "Txn 786"
+     },
+     {
+      "amount": 1181.0,
+      "date": "2026-02-01T01:58:00+00:00",
+      "display_description": "Txn 247"
+     },
+     {
+      "amount": 2140.0,
+      "date": "2026-02-02T01:32:00+00:00",
+      "display_description": "Txn 1236"
+     },
+     {
+      "amount": 4238.0,
+      "date": "2026-02-06T15:12:00+00:00",
+      "display_description": "Txn 334"
+     },
+     {
+      "amount": 2393.0,
+      "date": "2026-02-06T16:23:00+00:00",
+      "display_description": "Txn 1361"
+     },
+     {
+      "amount": 3271.0,
+      "date": "2026-02-07T14:37:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4439.0,
+      "date": "2026-02-14T03:20:00+00:00",
+      "display_description": "Txn 884"
+     },
+     {
+      "amount": 1602.0,
+      "date": "2026-02-15T11:02:00+00:00",
+      "display_description": "Txn 114"
+     },
+     {
+      "amount": 1449.0,
+      "date": "2026-02-17T13:03:00+00:00",
+      "display_description": "Txn 1334"
+     },
+     {
+      "amount": 1620.0,
+      "date": "2026-02-18T01:50:00+00:00",
+      "display_description": "Txn 1480"
+     },
+     {
+      "amount": 2111.0,
+      "date": "2026-02-19T16:33:00+00:00",
+      "display_description": "Txn 2069"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 24681.0,
+    "close_date": "2026-03-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-04-14T00:00:00",
+    "lines": [
+     {
+      "amount": 1821.0,
+      "date": "2026-02-23T05:19:00+00:00",
+      "display_description": "Txn 2653"
+     },
+     {
+      "amount": 1971.0,
+      "date": "2026-02-23T15:31:00+00:00",
+      "display_description": "Txn 1823"
+     },
+     {
+      "amount": 3503.0,
+      "date": "2026-02-24T20:48:00+00:00",
+      "display_description": "Txn 208"
+     },
+     {
+      "amount": 2350.0,
+      "date": "2026-02-26T10:08:00+00:00",
+      "display_description": "Txn 2183"
+     },
+     {
+      "amount": 2029.0,
+      "date": "2026-02-26T12:33:00+00:00",
+      "display_description": "Txn 2002"
+     },
+     {
+      "amount": -1599.0,
+      "date": "2026-02-28T23:32:00+00:00",
+      "display_description": "Txn 2560"
+     },
+     {
+      "amount": -4966.0,
+      "date": "2026-03-04T22:40:00+00:00",
+      "display_description": "Txn 1577"
+     },
+     {
+      "amount": 3732.0,
+      "date": "2026-03-09T05:04:00+00:00",
+      "display_description": "Txn 2784"
+     },
+     {
+      "amount": 2441.0,
+      "date": "2026-03-12T04:20:00+00:00",
+      "display_description": "Txn 2455"
+     },
+     {
+      "amount": 4621.0,
+      "date": "2026-03-15T01:14:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2863.0,
+      "date": "2026-03-16T00:42:00+00:00",
+      "display_description": "Txn 2437"
+     },
+     {
+      "amount": 2225.0,
+      "date": "2026-03-18T08:21:00+00:00",
+      "display_description": "Txn 576"
+     },
+     {
+      "amount": 3690.0,
+      "date": "2026-03-19T20:25:00+00:00",
+      "display_description": "Txn 2244"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 34109.0,
+    "close_date": "2026-04-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-05-15T00:00:00",
+    "lines": [
+     {
+      "amount": 2869.0,
+      "date": "2026-03-19T16:00:00+00:00",
+      "display_description": "Posted late card_b 8"
+     },
+     {
+      "amount": 4786.0,
+      "date": "2026-03-23T13:08:00+00:00",
+      "display_description": "Txn 687"
+     },
+     {
+      "amount": 2594.0,
+      "date": "2026-03-28T05:48:00+00:00",
+      "display_description": "Txn 1915"
+     },
+     {
+      "amount": 518.0,
+      "date": "2026-03-30T13:46:00+00:00",
+      "display_description": "Txn 2139"
+     },
+     {
+      "amount": 4252.0,
+      "date": "2026-04-03T04:18:00+00:00",
+      "display_description": "Txn 60"
+     },
+     {
+      "amount": 62.0,
+      "date": "2026-04-04T10:39:00+00:00",
+      "display_description": "Txn 2599"
+     },
+     {
+      "amount": 3566.0,
+      "date": "2026-04-12T11:33:00+00:00",
+      "display_description": "Txn 1289"
+     },
+     {
+      "amount": 3813.0,
+      "date": "2026-04-15T21:18:00+00:00",
+      "display_description": "Txn 55"
+     },
+     {
+      "amount": 2721.0,
+      "date": "2026-04-16T00:54:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 963.0,
+      "date": "2026-04-16T03:34:00+00:00",
+      "display_description": "Txn 1070"
+     },
+     {
+      "amount": 2251.0,
+      "date": "2026-04-18T19:59:00+00:00",
+      "display_description": "Txn 2495"
+     },
+     {
+      "amount": 3561.0,
+      "date": "2026-04-18T22:29:00+00:00",
+      "display_description": "Txn 1116"
+     },
+     {
+      "amount": 2153.0,
+      "date": "2026-04-20T17:24:00+00:00",
+      "display_description": "Txn 696"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 24197.0,
+    "close_date": "2026-05-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-06-15T00:00:00",
+    "lines": [
+     {
+      "amount": 4996.0,
+      "date": "2026-04-22T23:33:00+00:00",
+      "display_description": "Txn 349"
+     },
+     {
+      "amount": -4879.0,
+      "date": "2026-04-24T04:18:00+00:00",
+      "display_description": "Txn 823"
+     },
+     {
+      "amount": 2253.0,
+      "date": "2026-04-25T18:35:00+00:00",
+      "display_description": "Txn 873"
+     },
+     {
+      "amount": -554.0,
+      "date": "2026-04-27T23:31:00+00:00",
+      "display_description": "Txn 147"
+     },
+     {
+      "amount": 3914.0,
+      "date": "2026-05-03T08:43:00+00:00",
+      "display_description": "Txn 564"
+     },
+     {
+      "amount": 3941.0,
+      "date": "2026-05-04T03:27:00+00:00",
+      "display_description": "Txn 2570"
+     },
+     {
+      "amount": 4293.0,
+      "date": "2026-05-06T06:12:00+00:00",
+      "display_description": "Txn 1581"
+     },
+     {
+      "amount": 1781.0,
+      "date": "2026-05-07T06:19:00+00:00",
+      "display_description": "Txn 355"
+     },
+     {
+      "amount": 3612.0,
+      "date": "2026-05-07T11:14:00+00:00",
+      "display_description": "Txn 1398"
+     },
+     {
+      "amount": 4050.0,
+      "date": "2026-05-14T16:15:00+00:00",
+      "display_description": "Txn 447"
+     },
+     {
+      "amount": 721.0,
+      "date": "2026-05-17T18:27:00+00:00",
+      "display_description": "Txn 1655"
+     },
+     {
+      "amount": 4749.0,
+      "date": "2026-05-18T08:29:00+00:00",
+      "display_description": "Txn 1513"
+     },
+     {
+      "amount": -4680.0,
+      "date": "2026-05-18T22:08:00+00:00",
+      "display_description": "Txn 1969"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 30516.0,
+    "close_date": "2026-06-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-07-15T00:00:00",
+    "lines": [
+     {
+      "amount": 1297.0,
+      "date": "2026-05-21T04:43:00+00:00",
+      "display_description": "Txn 1750"
+     },
+     {
+      "amount": 2603.0,
+      "date": "2026-05-24T09:07:00+00:00",
+      "display_description": "Txn 2419"
+     },
+     {
+      "amount": 4869.0,
+      "date": "2026-05-25T19:55:00+00:00",
+      "display_description": "Txn 2485"
+     },
+     {
+      "amount": 503.0,
+      "date": "2026-05-27T07:01:00+00:00",
+      "display_description": "Txn 91"
+     },
+     {
+      "amount": 2369.0,
+      "date": "2026-05-29T22:57:00+00:00",
+      "display_description": "Txn 1760"
+     },
+     {
+      "amount": -1667.0,
+      "date": "2026-05-30T23:51:00+00:00",
+      "display_description": "Txn 746"
+     },
+     {
+      "amount": 1172.0,
+      "date": "2026-05-31T07:54:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 928.0,
+      "date": "2026-05-31T11:53:00+00:00",
+      "display_description": "Txn 331"
+     },
+     {
+      "amount": 4408.0,
+      "date": "2026-05-31T21:38:00+00:00",
+      "display_description": "Txn 1856"
+     },
+     {
+      "amount": 1944.0,
+      "date": "2026-06-03T05:47:00+00:00",
+      "display_description": "Txn 1324"
+     },
+     {
+      "amount": 2561.0,
+      "date": "2026-06-05T06:00:00+00:00",
+      "display_description": "Txn 410"
+     },
+     {
+      "amount": 2071.0,
+      "date": "2026-06-09T01:40:00+00:00",
+      "display_description": "Txn 2400"
+     },
+     {
+      "amount": 3900.0,
+      "date": "2026-06-09T21:35:00+00:00",
+      "display_description": "Txn 2684"
+     },
+     {
+      "amount": -1283.0,
+      "date": "2026-06-16T07:52:00+00:00",
+      "display_description": "Txn 600"
+     },
+     {
+      "amount": 4841.0,
+      "date": "2026-06-18T23:27:00+00:00",
+      "display_description": "Txn 2169"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 33884.0,
+    "close_date": "2026-07-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-08-14T00:00:00",
+    "lines": [
+     {
+      "amount": 2823.0,
+      "date": "2026-06-19T16:00:00+00:00",
+      "display_description": "Posted late card_b 5"
+     },
+     {
+      "amount": 2051.0,
+      "date": "2026-06-25T13:43:00+00:00",
+      "display_description": "Txn 2240"
+     },
+     {
+      "amount": 3609.0,
+      "date": "2026-06-29T19:37:00+00:00",
+      "display_description": "Txn 1346"
+     },
+     {
+      "amount": 1161.0,
+      "date": "2026-07-02T18:38:00+00:00",
+      "display_description": "Txn 2694"
+     },
+     {
+      "amount": 1945.0,
+      "date": "2026-07-03T06:29:00+00:00",
+      "display_description": "Txn 1408"
+     },
+     {
+      "amount": 3182.0,
+      "date": "2026-07-04T00:03:00+00:00",
+      "display_description": "Txn 2677"
+     },
+     {
+      "amount": 4598.0,
+      "date": "2026-07-04T13:31:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 1923.0,
+      "date": "2026-07-07T05:50:00+00:00",
+      "display_description": "Txn 2342"
+     },
+     {
+      "amount": 2348.0,
+      "date": "2026-07-09T02:23:00+00:00",
+      "display_description": "Txn 74"
+     },
+     {
+      "amount": 3022.0,
+      "date": "2026-07-09T06:12:00+00:00",
+      "display_description": "Txn 227"
+     },
+     {
+      "amount": 1886.0,
+      "date": "2026-07-09T17:52:00+00:00",
+      "display_description": "Txn 668"
+     },
+     {
+      "amount": 1960.0,
+      "date": "2026-07-12T18:38:00+00:00",
+      "display_description": "Txn 2447"
+     },
+     {
+      "amount": 3376.0,
+      "date": "2026-07-15T08:38:00+00:00",
+      "display_description": "Txn 1776"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 28438.0,
+    "close_date": "2026-08-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-09-14T00:00:00",
+    "lines": [
+     {
+      "amount": 4660.0,
+      "date": "2026-07-23T02:35:00+00:00",
+      "display_description": "Txn 1487"
+     },
+     {
+      "amount": 1335.0,
+      "date": "2026-07-23T21:01:00+00:00",
+      "display_description": "Txn 2303"
+     },
+     {
+      "amount": 4519.0,
+      "date": "2026-07-25T12:43:00+00:00",
+      "display_description": "Txn 2202"
+     },
+     {
+      "amount": 3818.0,
+      "date": "2026-07-27T09:25:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 241.0,
+      "date": "2026-07-27T17:55:00+00:00",
+      "display_description": "Txn 1243"
+     },
+     {
+      "amount": 753.0,
+      "date": "2026-07-30T08:00:00+00:00",
+      "display_description": "Txn 2185"
+     },
+     {
+      "amount": -1595.0,
+      "date": "2026-08-04T02:38:00+00:00",
+      "display_description": "Txn 1148"
+     },
+     {
+      "amount": 656.0,
+      "date": "2026-08-06T09:14:00+00:00",
+      "display_description": "Txn 2145"
+     },
+     {
+      "amount": 3734.0,
+      "date": "2026-08-07T06:41:00+00:00",
+      "display_description": "Txn 1681"
+     },
+     {
+      "amount": -1628.0,
+      "date": "2026-08-12T12:25:00+00:00",
+      "display_description": "Txn 1939"
+     },
+     {
+      "amount": 3183.0,
+      "date": "2026-08-12T22:58:00+00:00",
+      "display_description": "Txn 1231"
+     },
+     {
+      "amount": 3439.0,
+      "date": "2026-08-15T08:42:00+00:00",
+      "display_description": "Txn 2374"
+     },
+     {
+      "amount": 4461.0,
+      "date": "2026-08-16T15:59:00+00:00",
+      "display_description": "Txn 2268"
+     },
+     {
+      "amount": 862.0,
+      "date": "2026-08-17T05:36:00+00:00",
+      "display_description": "Transfer"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 46675.0,
+    "close_date": "2026-09-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-10-15T00:00:00",
+    "lines": [
+     {
+      "amount": 1294.0,
+      "date": "2026-08-19T16:00:00+00:00",
+      "display_description": "Posted late card_b 3"
+     },
+     {
+      "amount": 1890.0,
+      "date": "2026-08-26T08:53:00+00:00",
+      "display_description": "Txn 2026"
+     },
+     {
+      "amount": 1869.0,
+      "date": "2026-08-26T12:05:00+00:00",
+      "display_description": "Txn 125"
+     },
+     {
+      "amount": 4346.0,
+      "date": "2026-08-26T13:44:00+00:00",
+      "display_description": "Txn 89"
+     },
+     {
+      "amount": -1135.0,
+      "date": "2026-08-27T02:54:00+00:00",
+      "display_description": "Txn 2349"
+     },
+     {
+      "amount": 3631.0,
+      "date": "2026-08-27T06:36:00+00:00",
+      "display_description": "Txn 2477"
+     },
+     {
+      "amount": 3344.0,
+      "date": "2026-08-27T07:34:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 2191.0,
+      "date": "2026-08-27T10:08:00+00:00",
+      "display_description": "Txn 1587"
+     },
+     {
+      "amount": 962.0,
+      "date": "2026-08-27T18:15:00+00:00",
+      "display_description": "Txn 2274"
+     },
+     {
+      "amount": 1005.0,
+      "date": "2026-08-29T17:44:00+00:00",
+      "display_description": "Txn 2389"
+     },
+     {
+      "amount": -2728.0,
+      "date": "2026-08-30T07:24:00+00:00",
+      "display_description": "Txn 1769"
+     },
+     {
+      "amount": 408.0,
+      "date": "2026-08-30T10:22:00+00:00",
+      "display_description": "Txn 1217"
+     },
+     {
+      "amount": 2772.0,
+      "date": "2026-08-31T01:03:00+00:00",
+      "display_description": "Txn 1478"
+     },
+     {
+      "amount": -1466.0,
+      "date": "2026-09-03T16:57:00+00:00",
+      "display_description": "Txn 2257"
+     },
+     {
+      "amount": 4920.0,
+      "date": "2026-09-05T18:06:00+00:00",
+      "display_description": "Txn 744"
+     },
+     {
+      "amount": 187.0,
+      "date": "2026-09-06T07:07:00+00:00",
+      "display_description": "Txn 1698"
+     },
+     {
+      "amount": 432.0,
+      "date": "2026-09-09T14:31:00+00:00",
+      "display_description": "Txn 65"
+     },
+     {
+      "amount": 3618.0,
+      "date": "2026-09-09T16:32:00+00:00",
+      "display_description": "Txn 1853"
+     },
+     {
+      "amount": -1518.0,
+      "date": "2026-09-09T22:48:00+00:00",
+      "display_description": "Txn 1388"
+     },
+     {
+      "amount": 4983.0,
+      "date": "2026-09-09T23:33:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 1951.0,
+      "date": "2026-09-11T06:24:00+00:00",
+      "display_description": "Txn 1058"
+     },
+     {
+      "amount": 1649.0,
+      "date": "2026-09-11T10:33:00+00:00",
+      "display_description": "Txn 2075"
+     },
+     {
+      "amount": 921.0,
+      "date": "2026-09-12T01:01:00+00:00",
+      "display_description": "Txn 143"
+     },
+     {
+      "amount": 4278.0,
+      "date": "2026-09-13T13:21:00+00:00",
+      "display_description": "Txn 897"
+     },
+     {
+      "amount": 1095.0,
+      "date": "2026-09-14T15:50:00+00:00",
+      "display_description": "Txn 204"
+     },
+     {
+      "amount": 4654.0,
+      "date": "2026-09-15T00:23:00+00:00",
+      "display_description": "Txn 209"
+     },
+     {
+      "amount": -672.0,
+      "date": "2026-09-17T00:12:00+00:00",
+      "display_description": "Txn 969"
+     },
+     {
+      "amount": 1794.0,
+      "date": "2026-09-19T16:41:00+00:00",
+      "display_description": "Txn 1371"
+     }
+    ],
+    "status": "overdue"
+   },
+   {
+    "amount_due": 45208.0,
+    "close_date": "2026-10-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-11-16T00:00:00",
+    "lines": [
+     {
+      "amount": 3538.0,
+      "date": "2026-09-19T16:00:00+00:00",
+      "display_description": "Posted late card_b 2"
+     },
+     {
+      "amount": 3034.0,
+      "date": "2026-09-21T12:06:00+00:00",
+      "display_description": "Txn 683"
+     },
+     {
+      "amount": -2563.0,
+      "date": "2026-09-23T09:35:00+00:00",
+      "display_description": "Txn 423"
+     },
+     {
+      "amount": 2450.0,
+      "date": "2026-09-24T21:11:00+00:00",
+      "display_description": "Txn 664"
+     },
+     {
+      "amount": 967.0,
+      "date": "2026-09-25T14:02:00+00:00",
+      "display_description": "Txn 2463"
+     },
+     {
+      "amount": -1041.0,
+      "date": "2026-09-25T19:42:00+00:00",
+      "display_description": "Txn 2120"
+     },
+     {
+      "amount": 2421.0,
+      "date": "2026-09-25T22:25:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": -2051.0,
+      "date": "2026-09-26T00:09:00+00:00",
+      "display_description": "Txn 803"
+     },
+     {
+      "amount": 4406.0,
+      "date": "2026-09-30T04:33:00+00:00",
+      "display_description": "Txn 592"
+     },
+     {
+      "amount": -86.0,
+      "date": "2026-10-02T10:42:00+00:00",
+      "display_description": "Txn 460"
+     },
+     {
+      "amount": 10300.0,
+      "date": "2026-10-04T10:00:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 4604.0,
+      "date": "2026-10-07T09:43:00+00:00",
+      "display_description": "Txn 1626"
+     },
+     {
+      "amount": 1866.0,
+      "date": "2026-10-07T11:04:00+00:00",
+      "display_description": "Txn 1911"
+     },
+     {
+      "amount": 3315.0,
+      "date": "2026-10-07T12:43:00+00:00",
+      "display_description": "Txn 297"
+     },
+     {
+      "amount": 1003.0,
+      "date": "2026-10-08T21:00:00+00:00",
+      "display_description": "Txn 2436"
+     },
+     {
+      "amount": 1010.0,
+      "date": "2026-10-08T22:15:00+00:00",
+      "display_description": "Txn 2690"
+     },
+     {
+      "amount": 4303.0,
+      "date": "2026-10-10T06:12:00+00:00",
+      "display_description": "Txn 2237"
+     },
+     {
+      "amount": 4859.0,
+      "date": "2026-10-11T00:13:00+00:00",
+      "display_description": "Txn 2176"
+     },
+     {
+      "amount": 723.0,
+      "date": "2026-10-11T14:50:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 3777.0,
+      "date": "2026-10-12T06:46:00+00:00",
+      "display_description": "Txn 697"
+     },
+     {
+      "amount": 2350.0,
+      "date": "2026-10-20T09:00:00+00:00",
+      "display_description": "Txn 324"
+     },
+     {
+      "amount": -3977.0,
+      "date": "2026-10-20T21:38:00+00:00",
+      "display_description": "Txn 2325"
+     }
+    ],
+    "status": "open"
+   },
+   {
+    "amount_due": 42903.0,
+    "close_date": "2026-11-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2026-12-15T00:00:00",
+    "lines": [
+     {
+      "amount": 3668.0,
+      "date": "2025-09-02T23:34:00+00:00",
+      "display_description": "Txn 2197"
+     },
+     {
+      "amount": 4764.0,
+      "date": "2025-09-07T15:23:00+00:00",
+      "display_description": "Txn 2421"
+     },
+     {
+      "amount": 3805.0,
+      "date": "2025-11-26T23:04:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 401.0,
+      "date": "2026-06-25T11:59:00+00:00",
+      "display_description": "Txn 313"
+     },
+     {
+      "amount": -2854.0,
+      "date": "2026-08-28T17:13:00+00:00",
+      "display_description": "Txn 2686"
+     },
+     {
+      "amount": 985.0,
+      "date": "2026-10-19T16:00:00+00:00",
+      "display_description": "Posted late card_b 1"
+     },
+     {
+      "amount": 155.0,
+      "date": "2026-10-21T17:56:00+00:00",
+      "display_description": "Txn 1815"
+     },
+     {
+      "amount": 1566.0,
+      "date": "2026-10-23T20:03:00+00:00",
+      "display_description": "Txn 2489"
+     },
+     {
+      "amount": 793.0,
+      "date": "2026-10-25T01:35:00+00:00",
+      "display_description": "Txn 1155"
+     },
+     {
+      "amount": 2035.0,
+      "date": "2026-11-01T16:44:00+00:00",
+      "display_description": "Txn 1859"
+     },
+     {
+      "amount": 4340.0,
+      "date": "2026-11-02T06:58:00+00:00",
+      "display_description": "Txn 1734"
+     },
+     {
+      "amount": 967.0,
+      "date": "2026-11-03T05:10:00+00:00",
+      "display_description": "Txn 1303"
+     },
+     {
+      "amount": 1328.0,
+      "date": "2026-11-04T12:12:00+00:00",
+      "display_description": "Txn 1695"
+     },
+     {
+      "amount": 285.0,
+      "date": "2026-11-04T14:10:00+00:00",
+      "display_description": "Txn 720"
+     },
+     {
+      "amount": 4502.0,
+      "date": "2026-11-05T03:52:00+00:00",
+      "display_description": "Txn 1229"
+     },
+     {
+      "amount": 1241.0,
+      "date": "2026-11-05T13:50:00+00:00",
+      "display_description": "Txn 905"
+     },
+     {
+      "amount": 750.0,
+      "date": "2026-11-11T10:53:00+00:00",
+      "display_description": "Txn 1100"
+     },
+     {
+      "amount": 1732.0,
+      "date": "2026-11-11T14:31:00+00:00",
+      "display_description": "Txn 1152"
+     },
+     {
+      "amount": 3789.0,
+      "date": "2026-11-11T18:09:00+00:00",
+      "display_description": "Txn 2679"
+     },
+     {
+      "amount": 4364.0,
+      "date": "2026-11-12T12:35:00+00:00",
+      "display_description": "Txn 1602"
+     },
+     {
+      "amount": 2748.0,
+      "date": "2026-11-19T09:00:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": 5150.0,
+      "date": "2026-11-19T10:00:00+00:00",
+      "display_description": "Transfer"
+     },
+     {
+      "amount": -3611.0,
+      "date": "2026-11-20T09:00:00+00:00",
+      "display_description": "Txn 2696"
+     }
+    ],
+    "status": "open"
+   },
+   {
+    "amount_due": 21938.0,
+    "close_date": "2026-12-20T00:00:00",
+    "currency": "PHP",
+    "due_date": "2027-01-14T00:00:00",
+    "lines": [
+     {
+      "amount": 1838.0,
+      "date": "2026-11-24T09:00:00+00:00",
+      "display_description": "Txn 1906"
+     },
+     {
+      "amount": 3651.0,
+      "date": "2026-11-26T09:00:00+00:00",
+      "display_description": "Txn 294"
+     },
+     {
+      "amount": 4701.0,
+      "date": "2026-11-30T09:00:00+00:00",
+      "display_description": "Txn 1149"
+     },
+     {
+      "amount": 1484.0,
+      "date": "2026-12-03T09:00:00+00:00",
+      "display_description": "Txn 2405"
+     },
+     {
+      "amount": 1726.0,
+      "date": "2026-12-03T09:00:00+00:00",
+      "display_description": "Txn 229"
+     },
+     {
+      "amount": 4851.0,
+      "date": "2026-12-03T09:00:00+00:00",
+      "display_description": "Txn 762"
+     },
+     {
+      "amount": 577.0,
+      "date": "2026-12-06T09:00:00+00:00",
+      "display_description": "Txn 1423"
+     },
+     {
+      "amount": 2114.0,
+      "date": "2026-12-07T09:00:00+00:00",
+      "display_description": "Txn 1474"
+     },
+     {
+      "amount": 996.0,
+      "date": "2026-12-09T09:00:00+00:00",
+      "display_description": "Txn 756"
+     }
+    ],
+    "status": "open"
+   }
+  ],
+  "view": "limited"
  },
- "status": 404
+ "status": 200
 }
