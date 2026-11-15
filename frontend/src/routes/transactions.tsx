@@ -1230,7 +1230,8 @@ export function TransactionsPage() {
 
   // Description autofill (STU-626): the latest transaction with this description fills the
   // fields the user has not changed, with what they can still use. Add only; never the amount.
-  const { data: tagOptions = [] } = useGetTagsQuery(undefined, { skip: !isAuthenticated })
+  // Read only while the form is open, as the tag picker in it does (the same cached read): opening the page sends none (STU-636).
+  const { data: tagOptions = [] } = useGetTagsQuery(undefined, { skip: !isAuthenticated || !isCreateModalOpen })
   const applyAutofill = (suggestion: DescriptionSuggestion) => {
     if (editingTransaction) return
     const changed = new Set(changedFields.current)
