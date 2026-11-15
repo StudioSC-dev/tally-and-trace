@@ -520,10 +520,12 @@ export type BudgetEntryInput = Partial<
   Omit<
     FullBudgetEntry,
     'id' | 'view' | 'tags' | 'permissions' | 'created_by' | 'created_at' | 'updated_at' | 'occurrences_paid' | 'kind'
-    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement'
+    | 'installment_reviewed' | 'auto_post_enabled' | 'settlement' | 'end_date'
   >
 > &
   TagIdsInput & {
+    /** The end date; on PUT, `null` clears a stored one (an omitted field is kept). */
+    end_date?: string | null
     /** Installments paid before import with no linked transaction. */
     occurrences_paid_offset?: number
     /**

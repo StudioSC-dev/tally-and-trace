@@ -11,6 +11,8 @@ import {
   isOwnerFull,
   isSharedFull,
   kindChoiceFor,
+  moveToNextYear,
+  pastStartWarning,
   scheduleRequest,
   schedulePreview as previewSchedule,
   scheduleState,
@@ -303,6 +305,15 @@ export function RecurringEntryFormModal({
   // The schedule a save would store: the day fields the API resolves the write to
   // (or the detail it would refuse it with), and the next three dates.
   const schedulePreview = previewSchedule(subscriptionForm, scheduleContext)
+  // A next occurrence the form set before today (STU-630): the first date the schedule will
+  // use, and "Use next year". A stored past date left as loaded shows nothing.
+  const pastStart = dateTouched('next_occurrence') ? pastStartWarning(subscriptionForm, scheduleContext) : null
+  const useNextYear = () => {
+    setSubscriptionForm((prev) => ({ ...prev, next_occurrence: moveToNextYear(prev.next_occurrence) }))
+    // As typing a new date does: the date's and the day's messages go.
+    setFieldErrors((prev) =>
+      (['day', 'day_of_month'] as const).reduce<FieldErrors<RecurringFieldKey>>(withoutError, withoutError(prev, 'next_occurrence')))
+  }
 
   const handleSubscriptionAccountChange = (accountId: number) => {
     const account = accountsById.get(accountId)
@@ -397,6 +408,9 @@ export function RecurringEntryFormModal({
         // The cadence, day fields, ends and card or bank kind (scheduleRequest). The kind is sent
         // only on a card or open-ended bank expense, and an edit sends it only when the pick moved.
         ...sentSchedule,
+        // An edit that leaves "On date" clears the stored end date: the update keeps an
+        // omitted field, and the schedule walk applies an end date in every end mode.
+        ...(editingBudgetEntry && subscriptionForm.end_mode !== 'on_date' ? { end_date: null } : {}),
         lead_time_days: subscriptionForm.lead_time_days,
         is_active: subscriptionForm.is_active,
         // An edit sends the tags only when they changed; omitting them keeps them.
@@ -706,6 +720,19 @@ export function RecurringEntryFormModal({
                   {...fieldProps('next_occurrence')}
                   />
                   {renderFieldError('next_occurrence')}
+                  {pastStart && (
+                    <div className="mt-1 text-xs text-warn" role="status" data-testid="past-start-warning">
+                      <p>{pastStart.message}</p>
+                      <button
+                        type="button"
+                        onClick={useNextYear}
+                        className="mt-1 min-h-11 underline"
+                        data-testid="past-start-next-year"
+                      >
+                        Use next year
+                      </button>
+                    </div>
+                  )}
         </div>
                 }
                 beforeEnds={
