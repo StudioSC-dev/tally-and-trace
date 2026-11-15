@@ -2716,7 +2716,7 @@ export function TransactionsPage() {
   return (
     <div className="max-w-7xl mx-auto px-3 py-6 sm:px-4 lg:px-6 space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold text-ink">Transactions</h1>
+        <h1 className="text-[length:min(1.875rem,10vw)] leading-9 font-bold text-ink">Transactions</h1>
         {canAddTransactions && (
           <button
             onClick={() => setIsCreateModalOpen(true)}
