@@ -385,7 +385,8 @@ def test_entry_funded_from_an_account_the_caller_cant_view_moves_no_cash(db, use
 def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
     from app.models.account import AccountType
     from app.models.transaction import Transaction, TransactionType
-    from app.services.forecast import collect_events, get_payables, project_running_balance
+    from app.services.forecast import collect_events, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     _account(db, user, "Bank", AccountType.SAVINGS, "5000.00")
     wallet = _wallet(db, user, "Cash", "3000.00")
@@ -409,7 +410,7 @@ def test_statement_paid_from_a_wallet_does_not_take_cash_twice(db, user):
     r = project_running_balance(db, user.id, days=30, reference=REF)
     assert r["account_shortfalls"] == []
     assert r["closing_balance"] == Decimal("5000.00") and r["unassigned_closing"] == 0
-    assert get_payables(db, user.id, days=30, reference=REF) == []
+    assert payable_rows(db, user.id, days=30, reference=REF) == []
 
 
 def test_cross_owner_recurring_transfer_keeps_each_views_in_scope_leg(db, owners):
@@ -443,7 +444,8 @@ def test_cross_owner_recurring_transfer_keeps_each_views_in_scope_leg(db, owners
 def test_top_ups_are_payables_so_timeline_monthly_and_payables_agree(db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
-    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+    from app.services.forecast import project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     bank = _account(db, user, "Bank", AccountType.SAVINGS, "10000.00")
     checking = _account(db, user, "Checking", AccountType.CHECKING, "0.00")
@@ -456,7 +458,7 @@ def test_top_ups_are_payables_so_timeline_monthly_and_payables_agree(db, user):
     _transfer(db, user, bank, cash, "500.00", datetime(2026, 11, 5), fee="10.00")
     _transfer(db, user, bank, checking, "3000.00", datetime(2026, 11, 7))  # internal: not a payable
 
-    payables = get_payables(db, user.id, days=29, reference=REF)
+    payables = payable_rows(db, user.id, days=29, reference=REF)
     assert [(p["name"], p["amount"], p["account_id"]) for p in payables] == [
         ("Load GCash", 1000.0, bank.id), ("Move", 510.0, bank.id), ("Rent", 2000.0, bank.id)]
 
@@ -600,7 +602,8 @@ def test_disposable_income_ignores_another_users_transfer_between_its_own_accoun
 def test_recurring_transfers_materialised_without_advancing_move_money_once(client, db, user):
     from app.models.account import AccountType
     from app.models.budget_entry import BudgetEntryType
-    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+    from app.services.forecast import project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     bank = _account(db, user, "Bank", AccountType.SAVINGS, "10000.00")
     checking = _account(db, user, "Checking", AccountType.CHECKING, "0.00")
@@ -613,7 +616,7 @@ def test_recurring_transfers_materialised_without_advancing_move_money_once(clie
     def views():
         timeline = project_running_balance(db, user.id, days=30, reference=REF)
         month = project_cashflow(db, user.id, months=1, reference=REF)[0]
-        payables = get_payables(db, user.id, days=30, reference=REF)
+        payables = payable_rows(db, user.id, days=30, reference=REF)
         return (timeline["closing_balance"], _closings(timeline), month["closing_balance"],
                 {a["account_name"]: a["closing_balance"] for a in month["by_account"]},
                 [(p["name"], p["amount"]) for p in payables])

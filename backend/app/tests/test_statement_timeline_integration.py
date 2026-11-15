@@ -281,7 +281,8 @@ def refunded_scenario(db):
 @pytest.mark.parametrize("days", [30, 60, 90])
 def test_refund_in_a_later_cycle_bills_nothing_in_any_window(db, refunded_scenario, days):
     """The refund settles the 14 Aug statement however far the window reaches."""
-    from app.services.forecast import get_payables, project_running_balance
+    from app.services.forecast import project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     user_id = refunded_scenario["user"].id
     result = project_running_balance(db, user_id=user_id, days=days,
@@ -291,5 +292,5 @@ def test_refund_in_a_later_cycle_bills_nothing_in_any_window(db, refunded_scenar
     (checking,) = [a for a in result["by_account"] if a["account_name"] == "Checking"]
     assert checking["closing_balance"] == pytest.approx(10000.00)
 
-    payables = get_payables(db, user_id=user_id, days=days, reference=datetime(2026, 8, 1))
+    payables = payable_rows(db, user_id=user_id, days=days, reference=datetime(2026, 8, 1))
     assert [p for p in payables if p["source"] == "statement"] == []

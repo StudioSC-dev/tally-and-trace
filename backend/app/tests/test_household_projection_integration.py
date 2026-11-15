@@ -38,10 +38,10 @@ def _put(client, who, path, body):
 
 
 def _upcoming(db, who, days=60):
-    from app.services.forecast import get_upcoming_items
+    from app.tests.projection_lists import upcoming_rows
 
     db.expire_all()
-    return get_upcoming_items(db, who["id"], days=days, reference=REF)
+    return upcoming_rows(db, who["id"], days=days, reference=REF)
 
 
 def _household(items):
@@ -50,7 +50,8 @@ def _household(items):
 
 def test_household_occurrences_on_a_private_card_wallet_and_accountless_entry(hh, sw_client,
                                                                               sw_db):
-    from app.services.forecast import get_payables, project_running_balance
+    from app.services.forecast import project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     a, c = hh["a"], hh["c"]
     _txn(sw_client, a, hh["a_card"], 100, "2026-10-12T00:00:00", tags=[hh["hh_a"]],
@@ -74,7 +75,7 @@ def test_household_occurrences_on_a_private_card_wallet_and_accountless_entry(hh
     assert all(set(i) == LIMITED_EVENT_KEYS for i in items)
     assert sw_leaks(_upcoming(sw_db, c), private_ids=[hh["a_card"], hh["a_wallet"]]) == []
     # Never cash: no payable, no unassigned cash, the same closings.
-    assert not [p for p in get_payables(sw_db, c["id"], days=60, reference=REF)
+    assert not [p for p in payable_rows(sw_db, c["id"], days=60, reference=REF)
                 if p.get("kind") == "household"]
     after = project_running_balance(sw_db, c["id"], days=60, reference=REF)
     assert after["unassigned_closing"] == 0
