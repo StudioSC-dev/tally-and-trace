@@ -241,13 +241,14 @@ describe('sharedLimitTargets', () => {
     shares_limit_with_account_id: null as number | null,
     my_role: 'owner' as const,
     owner_name: 'Seth P.',
+    owner_id: 1,
     permissions: { can_edit_settings: true },
     ...over,
   })
   const ids = (list: { id: number }[]) => list.map((a) => a.id)
 
   it('keeps an eligible card and drops the card itself', () => {
-    expect(ids(sharedLimitTargets([card(1), card(2)], { id: 2, currency: 'PHP', ownerName: null }))).toEqual([1])
+    expect(ids(sharedLimitTargets([card(1), card(2)], { id: 2, currency: 'PHP', ownerId: null }))).toEqual([1])
   })
 
   it('drops other currencies, inactive, non-credit, no-limit, linked and unmanaged cards', () => {
@@ -260,13 +261,13 @@ describe('sharedLimitTargets', () => {
       card(6, { permissions: { can_edit_settings: false } }),
       card(7),
     ]
-    expect(ids(sharedLimitTargets(all, { id: null, currency: 'PHP', ownerName: null }))).toEqual([7])
+    expect(ids(sharedLimitTargets(all, { id: null, currency: 'PHP', ownerId: null }))).toEqual([7])
   })
 
   it('on create only the caller\'s own cards qualify; on edit only the card\'s owner\'s', () => {
     const mine = card(1)
-    const theirs = card(2, { my_role: 'admin', owner_name: 'Ana R.' })
-    expect(ids(sharedLimitTargets([mine, theirs], { id: null, currency: 'PHP', ownerName: null }))).toEqual([1])
-    expect(ids(sharedLimitTargets([mine, theirs], { id: 9, currency: 'PHP', ownerName: 'Ana R.' }))).toEqual([2])
+    const theirs = card(2, { my_role: 'admin', owner_name: 'Ana R.', owner_id: 2 })
+    expect(ids(sharedLimitTargets([mine, theirs], { id: null, currency: 'PHP', ownerId: null }))).toEqual([1])
+    expect(ids(sharedLimitTargets([mine, theirs], { id: 9, currency: 'PHP', ownerId: 2 }))).toEqual([2])
   })
 })
