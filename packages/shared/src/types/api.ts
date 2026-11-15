@@ -998,36 +998,10 @@ export interface ProjectionMeta {
   fx: FxMeta
 }
 
-export interface MonthlySummary {
-  month: string
-  income: number
-  expenses: number
-  net_flow: number
-}
-
 /** GET /forecast/cashflow. Each period's scalars are the default currency only. */
 export interface CashflowResponse extends ProjectionMeta {
   periods: ForecastPeriod[]
   months: number
-}
-
-export interface CashFlowProjection {
-  projection_start: string
-  projection_end: string
-  monthly_summary: MonthlySummary[]
-}
-
-/** A full upcoming item in the dashboard's older summary shape. */
-export interface UpcomingBill {
-  /** Absent on a full event; lets `isLimitedEvent` narrow the union. */
-  view?: undefined
-  type: string
-  name: string
-  date: string
-  amount: number
-  currency: CurrencyCode
-  entry_type: BudgetEntryType
-  lead_time_days: number
 }
 
 /**
@@ -1153,15 +1127,6 @@ export type PayableOrEvent = Payable | LimitedEvent
 /** Type guard for the forecast unions: a full event has no `view`. */
 export function isLimitedEvent<T extends { view?: string }>(event: T): event is Extract<T, { view: 'limited' }> {
   return event.view === 'limited'
-}
-
-export interface NetDisposableIncome {
-  period_start: string
-  period_end: string
-  total_income: number
-  total_expenses: number
-  net_disposable_income: number
-  currency?: CurrencyCode
 }
 
 /** One currency's row of GET /forecast/disposable and the snapshot's `monthly_summary`. */
