@@ -251,7 +251,11 @@ export interface OmittedRun {
   count: number
 }
 
-/** Mirrors the server's `skipped_before`: any day with a posted linked row, even an ambiguous one, is recorded. */
+/**
+ * Whether a listed occurrence is unrecorded, read from `linked` alone: a day linked to one posted
+ * row ('posted') or to more than one row ('ambiguous') counts as recorded; one pending row or none
+ * does not.
+ */
 const isUnrecorded = (occurrence: EntryOccurrence): boolean => occurrence.linked !== 'posted' && occurrence.linked !== 'ambiguous'
 
 /**

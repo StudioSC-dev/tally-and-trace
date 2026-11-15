@@ -411,3 +411,25 @@ describe('skippedBefore', () => {
     expect(skippedBefore({}, listed, listed[2]!)).toEqual({ count: 1, dates: ['2026-08-05'] })
   })
 })
+
+describe('documented ambiguous-day cases', () => {
+  const occ = (date: string, skipped_before: number, linked: 'pending' | 'posted' | 'ambiguous' | null) => ({
+    occurrence_date: date, due: true, linked, skipped_before,
+  })
+
+  // The documented cases, read from `linked` alone: posted and ambiguous are recorded; pending and none are not.
+  it('documented_ambiguous_day_cases', () => {
+    const listed = [
+      occ('2026-05-05', 0, 'posted'),
+      occ('2026-06-05', 0, 'ambiguous'),
+      occ('2026-07-05', 0, 'pending'),
+      occ('2026-08-05', 1, null),
+      occ('2026-09-05', 2, null),
+    ]
+    expect(skippedBefore({}, listed, listed[4]!).dates).toEqual(['2026-07-05', '2026-08-05'])
+    // The fallback gap reading counts the same way: an unrecorded day accounts for one, a recorded one for none.
+    expect(omittedRuns(listed, 0)).toEqual([])
+    expect(omittedRuns([occ('2026-06-05', 0, 'ambiguous'), occ('2026-08-05', 1, null)], 1)).toEqual([{ before: '2026-08-05', count: 1 }])
+    expect(omittedRuns([occ('2026-07-05', 0, 'pending'), occ('2026-08-05', 1, null)], 0)).toEqual([])
+  })
+})
