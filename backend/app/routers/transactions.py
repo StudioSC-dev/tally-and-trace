@@ -31,7 +31,7 @@ from app.core.tags import (
 )
 from app.models.transaction import Transaction, TransactionType, pending_face, transfer_sides
 from app.schemas.transaction import (
-    RepeatExisting, RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
+    DescriptionSuggestions, RepeatExisting, RepeatingCreate, TransactionCreate, TransactionOut, TransactionUpdate, TransactionListResponse,
 )
 from app.schemas.budget_entry import RepeatingCreated, ScheduledList
 from app.core.redaction import (
@@ -46,6 +46,7 @@ from app.services.forecast import is_spending_wallet
 from app.services import loans as loan_svc
 from app.services import missed as missed_svc
 from app.services import posting
+from app.services import description_suggestions as suggestions_svc
 from app.services import repeat as repeat_svc
 from app.services.statements import resolve_cycle_fields
 from app.routers.accounts import _funding_account, _loan_or_404, _lock
@@ -1292,6 +1293,20 @@ def _occurrence_key(item: dict) -> tuple:
     """The occurrences' order (``upcoming_occurrences``'), with the scheduled day
     last so two moved onto one day still have a strict order."""
     return (item["effective_date"], item["name"], item["entry_id"], item["occurrence_date"])
+
+
+# Declared before ``/{transaction_id}``, which would otherwise take the path.
+@router.get("/description-suggestions", response_model=DescriptionSuggestions)
+def get_description_suggestions(
+    ctx: RequestContext = Depends(request_context),
+    q: str = Query("", max_length=suggestions_svc.MAX_QUERY_LENGTH,
+                   description="The start of a description (case-insensitive)"),
+):
+    """The descriptions the caller used before that start with ``q``, most recent first
+    (up to 8), each with the latest such transaction's type, account, category, tags and
+    transfer accounts (STU-626, ``services/description_suggestions.py``). Only rows the
+    caller sees in full count; references they can no longer use come back null."""
+    return {"items": suggestions_svc.suggestions(ctx, q)}
 
 
 # Declared before ``/{transaction_id}``, which would otherwise take the path.

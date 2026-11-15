@@ -35,6 +35,12 @@ CPU_FACTOR = 3
 CPU_FLOOR_MS = 100
 
 
+# The Add form's Description suggestions (STU-626): budgeted for every caller but kept
+# out of ``perf.hot_paths`` (and so out of the golden files). "T" starts most rows.
+SUGGESTIONS = "description-suggestions"
+SUGGESTIONS_PATH = "/transactions/description-suggestions?q=T"
+
+
 class Budget(NamedTuple):
     statements: int
     bytes: int
@@ -68,6 +74,9 @@ class Budget(NamedTuple):
 # the editor, viewer and household member but not the owner: the owner's response is
 # 158,026 bytes, of which the snapshot's own lists (payables, upcoming, card charges) are
 # 97 KB and the 64 unposted rows through today 53 KB, so it is budgeted as measured.
+# The description suggestions (STU-626) are budgeted at their measured result plus 10%:
+# four statements, of which one is their own (``SUGGESTIONS_SQL_GATE``); the viewer and
+# household member see no row in full that starts with "T", so they get an empty list.
 BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "snapshot"): Budget(66, 111_157, 328, 1, 929),
     ("owner", "due"): Budget(60, 173_828, 308, 1, 992),
@@ -75,6 +84,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("owner", "budget-entries"): Budget(16, 14_408, 0, 0, 29),
     ("owner", "accounts"): Budget(12, 9_876, 0, 0, 16),
     ("owner", "transactions"): Budget(13, 20_829, 0, 0, 38),
+    ("owner", SUGGESTIONS): Budget(4, 1_506, 0, 0, 1),
     ("owner", "statements"): Budget(11, 47_893, 431, 0, 435),
     ("owner", "card-credit"): Budget(29, 9_374, 431, 0, 543),
     ("editor", "snapshot"): Budget(64, 36_062, 54, 1, 197),
@@ -83,6 +93,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("editor", "budget-entries"): Budget(16, 4_187, 0, 0, 10),
     ("editor", "accounts"): Budget(10, 1_665, 0, 0, 5),
     ("editor", "transactions"): Budget(14, 8_878, 0, 0, 27),
+    ("editor", SUGGESTIONS): Budget(4, 1_492, 0, 0, 1),
     ("editor", "statements"): Budget(14, 47_875, 431, 0, 436),
     ("viewer", "snapshot"): Budget(60, 31_604, 54, 1, 183),
     ("viewer", "due"): Budget(56, 30_039, 45, 1, 182),
@@ -90,6 +101,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("viewer", "budget-entries"): Budget(9, 39, 0, 0, 1),
     ("viewer", "accounts"): Budget(10, 1_667, 0, 0, 5),
     ("viewer", "transactions"): Budget(14, 3_824, 0, 0, 21),
+    ("viewer", SUGGESTIONS): Budget(4, 13, 0, 0, 1),
     ("viewer", "statements"): Budget(14, 36_670, 427, 0, 434),
     ("household", "snapshot"): Budget(51, 10_590, 44, 1, 84),
     ("household", "due"): Budget(47, 8_525, 37, 1, 82),
@@ -97,6 +109,7 @@ BUDGETS: Dict[Tuple[str, str], Budget] = {
     ("household", "budget-entries"): Budget(11, 39, 0, 0, 1),
     ("household", "accounts"): Budget(14, 358, 0, 0, 5),
     ("household", "transactions"): Budget(18, 4_601, 0, 0, 21),
+    ("household", SUGGESTIONS): Budget(4, 13, 0, 0, 1),
     ("household", "household-upcoming"): Budget(39, 7_353, 38, 1, 73),
     ("household", "household-monthly"): Budget(63, 138, 38, 1, 82),
     ("household", "household-dashboard"): Budget(69, 7_740, 38, 1, 85),
@@ -117,7 +130,9 @@ def measured(realistic, sw_client):
     """Every (caller, endpoint) of ``BUDGETS`` measured once; the report written."""
     samples: Dict[Tuple[str, str], perf.Sample] = {}
     for caller in CALLERS:
-        for name, path in perf.hot_paths(realistic, caller).items():
+        paths = dict(perf.hot_paths(realistic, caller))
+        paths[SUGGESTIONS] = SUGGESTIONS_PATH
+        for name, path in paths.items():
             samples[(caller, name)] = perf.measure(
                 sw_client, realistic.callers[caller].headers, path, runs=5)
     _write_report(realistic, samples)
@@ -199,15 +214,20 @@ PROJECTING = {"snapshot", "due", "household-upcoming", "household-monthly",
               "household-dashboard"}
 # The reads that legitimately do not run it:
 NOT_PROJECTING = {"installment-plans", "budget-entries", "accounts", "transactions",
-                  "statements", "card-credit"}
+                  "statements", "card-credit", SUGGESTIONS}
 # The reads with no ``RequestContext``: the accounts list reads the caller's access map
 # once and builds no ``RecordAccess`` or ``Redactor``.
 NO_CONTEXT = {"accounts"}
+# The reads whose context reads the caller's access map and builds no ``RecordAccess``
+# or ``Redactor``: the description suggestions (STU-626) serialize no record.
+ACCESS_MAP_ONLY = {SUGGESTIONS}
 
 
 def _expected_once(endpoint: str) -> Dict[str, int]:
     if endpoint in NO_CONTEXT:
         built = {"contexts": 0, "access_maps": 1, "record_access": 0, "redactors": 0}
+    elif endpoint in ACCESS_MAP_ONLY:
+        built = {"contexts": 1, "access_maps": 1, "record_access": 0, "redactors": 0}
     else:
         built = {"contexts": 1, "access_maps": 1, "record_access": 1, "redactors": 1}
     return {**built, "collect_events": 1 if endpoint in PROJECTING else 0}
@@ -217,7 +237,8 @@ def test_every_budgeted_endpoint_is_placed_once():
     endpoints = {endpoint for _, endpoint in BUDGETS}
     assert PROJECTING.isdisjoint(NOT_PROJECTING)
     assert PROJECTING | NOT_PROJECTING == endpoints
-    assert NO_CONTEXT <= endpoints
+    assert NO_CONTEXT <= endpoints and ACCESS_MAP_ONLY <= endpoints
+    assert NO_CONTEXT.isdisjoint(ACCESS_MAP_ONLY)
 
 
 @needs_db
@@ -244,6 +265,29 @@ DUE_SQL_GATE = 60
 def test_due_within_the_sql_gate(measured, caller):
     got = measured[(caller, "due")].statements
     assert got <= DUE_SQL_GATE, f"{caller} /dashboard/due ran {got} SQL statements"
+
+
+# STU-626 (AC6): the description suggestions run at most this many SQL statements of
+# their own, for every caller, whatever their budget says: what a request runs beyond
+# its fixed cost, which is the UTC pin of its transaction (``database.pin_utc``), the
+# caller's row (auth) and the request context's one ``AccessMap`` read (PERF-3).
+SUGGESTIONS_SQL_GATE = 1
+SUGGESTIONS_FIXED_SQL = 3
+
+
+@needs_db
+@pytest.mark.parametrize("caller", CALLERS)
+def test_suggestions_query_budget(measured, realistic, sw_client, caller):
+    from app.tests.fixtures.suggestions import suggestion_reads
+
+    got = measured[(caller, SUGGESTIONS)].statements
+    assert got - SUGGESTIONS_FIXED_SQL <= SUGGESTIONS_SQL_GATE, (
+        f"{caller} {SUGGESTIONS} ran {got} SQL statements")
+    who = {"headers": realistic.callers[caller].headers}
+    for q in ("T", "Txn 1", "Card payment", "no such description"):
+        reads, seen = suggestion_reads(sw_client, who, q)
+        assert len(reads) <= SUGGESTIONS_SQL_GATE, (caller, q, reads)
+        assert len(seen) - len(reads) <= SUGGESTIONS_FIXED_SQL, (caller, q, seen)
 
 
 @needs_db

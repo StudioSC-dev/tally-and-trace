@@ -252,3 +252,20 @@ class TransactionListResponse(BaseModel):
     items: List[TransactionOut]
     total: int
     has_more: bool
+
+
+class DescriptionSuggestion(BaseModel):
+    """A description the caller used before, with the latest such row's values (STU-626).
+
+    A reference the caller can no longer use is null (or left out of ``tag_ids``)."""
+    description: str
+    transaction_type: TransactionType
+    account_id: Optional[int] = None
+    category_id: Optional[int] = None
+    tag_ids: List[int] = []
+    transfer_from_account_id: Optional[int] = None
+    transfer_to_account_id: Optional[int] = None
+
+
+class DescriptionSuggestions(BaseModel):
+    items: List[DescriptionSuggestion]
