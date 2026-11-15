@@ -408,6 +408,9 @@ export function RecurringEntryFormModal({
         // The cadence, day fields, ends and card or bank kind (scheduleRequest). The kind is sent
         // only on a card or open-ended bank expense, and an edit sends it only when the pick moved.
         ...sentSchedule,
+        // An edit that leaves "On date" clears the stored end date: the update keeps an
+        // omitted field, and the schedule walk applies an end date in every end mode.
+        ...(editingBudgetEntry && subscriptionForm.end_mode !== 'on_date' ? { end_date: null } : {}),
         lead_time_days: subscriptionForm.lead_time_days,
         is_active: subscriptionForm.is_active,
         // An edit sends the tags only when they changed; omitting them keeps them.
