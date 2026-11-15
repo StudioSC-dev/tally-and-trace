@@ -49,6 +49,16 @@ The cash side of a payment is modelled on the paying account by the forecast
 engine (a posted one is in its balance, a planned one is a dated outflow), so
 each peso of a statement leaves cash exactly once: as payment or as payable.
 
+A recurring transfer into the card (a budget entry with ``transfer_to_account_id``)
+is a payment too, on each occurrence the forecast projects (STU-249): it is
+netted after the recorded payments and the projected rows, in date order, each
+occurrence paying the oldest statement still owing something that is due on or
+after its date (``settle_projected``). An occurrence after a statement's due
+date never pays that statement: it pays later ones, and any excess stays a
+payment that pays nothing here. So a statement's payable and the occurrences'
+own cash take each peso once, and a payable inside a window never depends on
+the window's end.
+
 A transfer OUT of the card (a cash advance or balance transfer) is a line item:
 the card is charged the amount plus the transfer fee, placed by the transfer's
 ``statement_day``, so the cash it brought in is repaid through that statement.
@@ -325,7 +335,8 @@ def unspent_pool(balances: List[Decimal], payments: List[Decimal],
 
 
 def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
-                     projected: list) -> List[Decimal]:
+                     projected: list,
+                     recurring: Sequence[Tuple[datetime, Decimal]] = ()) -> List[Decimal]:
     """Apply projected line items on top of the settled recorded ledger.
 
     ``owed`` is what each cycle still owes after ``allocate_payments`` ran over
@@ -338,7 +349,11 @@ def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
     - a projected credit (an income scheduled on the card) pays, in date order,
       the oldest outstanding statement due on or after its date. It never
       reaches a statement already due before it was credited, so one dated
-      after a window cannot change a payable inside it.
+      after a window cannot change a payable inside it;
+    - last, each recurring transfer occurrence into the card (``recurring``,
+      ``(date, amount)``, STU-249) pays, in date order, oldest statement first,
+      the outstanding statements due on or after its date, exactly as a
+      projected credit does; what it leaves is a payment that pays nothing here.
     """
     owed = list(owed)
 
@@ -364,6 +379,10 @@ def settle_projected(cycles: List[dict], owed: List[Decimal], pool: Decimal,
                 break
     spend(pool, 0)
     for day, amount in sorted(credits, key=lambda c: c[0]):
+        first = next((i for i, c in enumerate(cycles) if c["due"].date() >= day), len(cycles))
+        spend(amount, first)
+    for when, amount in sorted(recurring, key=lambda r: r[0].date()):
+        day = when.date()
         first = next((i for i, c in enumerate(cycles) if c["due"].date() >= day), len(cycles))
         spend(amount, first)
     return owed
@@ -669,8 +688,16 @@ def build_statement_payables(
     normalise=None,
     due_overrides_by_card: Optional[Mapping[int, Mapping[date, date]]] = None,
     stored_by_card: Optional[Mapping[int, StoredCycles]] = None,
+    recurring_by_card: Optional[Mapping[int, Sequence[tuple]]] = None,
 ) -> List[dict]:
     """Pure core: turn cards + their transactions into dated payable events.
+
+    ``recurring_by_card`` holds each card's recurring transfer occurrences into
+    it (STU-249) as ``(date, amount in the card's currency, source account id)``:
+    the occurrences the caller projects as cash, up to ``end``. They are netted
+    last (``settle_projected``), so like a projected credit an occurrence only
+    pays statements due on or after its date. One from a source in the unbilled
+    set below is ignored, as such a posted payment is.
 
     ``stored_by_card`` holds a card's stored closed statements (``StoredCycles``,
     STU-601): its rows then need only the payments and the line items placed
@@ -779,8 +806,11 @@ def build_statement_payables(
             recorded = stored.add(cycles, recorded, 0)
         paid_in = [amount for _, amount in payments]
         settled = allocate_payments(recorded, paid_in)
+        recurring = [(when, amount) for when, amount, source
+                     in (recurring_by_card or {}).get(card.id, ())
+                     if source not in unbilled_ids]
         remaining = settle_projected(
-            cycles, settled, unspent_pool(recorded, paid_in, settled), projected)
+            cycles, settled, unspent_pool(recorded, paid_in, settled), projected, recurring)
         balances = cycle_balances(every, placed, len(cycles), amount_of)
         if stored is not None:
             balances = stored.add(cycles, balances, 0)
@@ -1123,6 +1153,7 @@ def get_statement_payables(
     *,
     viewable_ids: Iterable[int],
     fx=None,
+    recurring_payments: Optional[Mapping[int, Sequence[tuple]]] = None,
 ) -> List[dict]:
     """DB wrapper: build the statement payables of ``cards``.
 
@@ -1137,10 +1168,17 @@ def get_statement_payables(
     accounts (see ``_card_rows``). Lines are normalised into each card's
     currency at the stored rates of ``fx`` (``normalise_lines``). Each card's
     printed dues (``load_due_overrides``) date its payables.
+
+    ``recurring_payments`` is ``{card_id: [(date, amount, source id)]}``: the
+    recurring transfer occurrences into each card the caller projects
+    (``build_statement_payables``' ``recurring_by_card``). A source card the
+    caller can view that has no cycle settings is unbilled, as for a payment
+    row (``_card_rows``), so its occurrences net nothing.
     """
     cards = [c for c in cards if c.account_type == AccountType.CREDIT]
     if not cards:
         return []
+    viewable_ids = set(viewable_ids)
 
     # Rows are filtered by card id ALONE, not re-scoped by user: the card itself
     # is already in the caller's scope, and a statement must include every
@@ -1152,6 +1190,12 @@ def get_statement_payables(
 
     (by_card, unbilled_sources), stored_by_card = statements_store.read_card_rows(
         db, cards, viewable_ids, start.date())
+    sources = {source for rows in (recurring_payments or {}).values()
+               for _, _, source in rows} & viewable_ids
+    if sources:
+        unbilled_sources = unbilled_sources | frozenset(
+            a.id for a in db.query(Account).filter(Account.id.in_(sources))
+            if a.account_type == AccountType.CREDIT and resolve_cycle_fields(a) is None)
     if fx is None:
         from app.services.fx import FxRates
 
@@ -1162,4 +1206,5 @@ def get_statement_payables(
                                         db, card, lines, fx),
                                     due_overrides_by_card=load_due_overrides(
                                         db, [c.id for c in cards]),
-                                    stored_by_card=stored_by_card)
+                                    stored_by_card=stored_by_card,
+                                    recurring_by_card=recurring_payments)

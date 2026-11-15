@@ -1593,9 +1593,13 @@ def collect_events(
     # exactly as then.
     # In a Household view only scope accounts get legs.
     leg_ids = scoped_ids if household is not None else viewable_ids
+    # A recurring transfer occurrence into a card is a payment its statements
+    # net (STU-249), as a planned one is: its cash leaves once, on its own date.
     for p in get_statement_payables(db, [a for a in accounts if a.id in card_ids], start, end,
                                     projected_charges=projected_charges,
-                                    viewable_ids=viewable_ids, fx=money.fx):
+                                    viewable_ids=viewable_ids, fx=money.fx,
+                                    recurring_payments=_card_recurring_payments(
+                                        db, cards, start, end, money)):
         line_estimate = p.pop("line_estimate", None)
         extra = {k: v for k, v in p.items() if k not in {
             "date", "name", "amount", "type", "source", "source_id",
@@ -1647,7 +1651,9 @@ def collect_events(
                                              money=money)
         for p in get_statement_payables(db, outside_cards, start, end,
                                         projected_charges=hidden_charges,
-                                        viewable_ids=viewable_ids, fx=money.fx):
+                                        viewable_ids=viewable_ids, fx=money.fx,
+                                        recurring_payments=_card_recurring_payments(
+                                            db, hidden_cards, start, end, money)):
             line_estimate = p.pop("line_estimate", None)
             card = hidden_cards[p["source_id"]]
             primary = p["funding_account_id"] if p["funding_account_id"] in scoped_ids else None
@@ -2260,6 +2266,46 @@ def _linked_occurrence_days(db: Session, entry_ids: list) -> Counter:
     return Counter((entry_id, _naive(when).date())
                    for entry_id, when in linked_transactions(db, entry_ids,
                                                              occurrence_match=True))
+
+
+def _card_recurring_payments(db: Session, cards: dict, start: datetime, end: datetime,
+                             money: Money) -> dict:
+    """``{card id: [(date, amount, source account id)]}``: every recurring transfer
+    occurrence into each card of ``cards`` in ``[start, end)`` (STU-249), the
+    payments its statements net (``statements.get_statement_payables``).
+
+    They are found by the card alone, whoever created the entry, as a payment
+    row into the card is (``statements._card_rows``). Each is walked as
+    ``collect_events`` walks it: on its effective date (a capped entry's overdue
+    occurrence on ``start``), an occurrence already recorded suppressed on its
+    nominal day, and its amount what the card receives, the entry's amount
+    estimated into the card's currency; with no stored rate it nets nothing,
+    as its card leg is left out.
+    """
+    if not cards:
+        return {}
+    entries = db.query(BudgetEntry).filter(
+        BudgetEntry.transfer_to_account_id.in_(list(cards)),
+        BudgetEntry.is_active.is_(True),
+    ).order_by(BudgetEntry.id).all()
+    if not entries:
+        return {}
+    ids = [e.id for e in entries]
+    linked = _linked_occurrence_days(db, ids)
+    forced = load_entry_overrides(db, ids)
+    out: dict = {}
+    for entry in entries:
+        card = cards[entry.transfer_to_account_id]
+        for when, _, nominal in effective_window_occurrences(
+                entry, start, end, forced.get(entry.id)):
+            key = (entry.id, nominal.date())
+            if linked[key]:
+                linked[key] -= 1
+                continue
+            amount, _ = money.to(entry.amount, entry.currency, card.currency)
+            if amount is not None:
+                out.setdefault(card.id, []).append((when, amount, entry.account_id))
+    return out
 
 
 def _card_entry_charges(db: Session, entries: list, cards: dict, start: datetime,

@@ -536,6 +536,18 @@ def test_routed_cover_counts_only_payments_the_viewer_can_read(hh, sw_client, sw
     assert (totals["expense"], totals["paid_from_other_accounts"]) == (expense, remainder)
 
 
+def test_household_total_nets_recurring_transfer(hh, sw_client, sw_db):
+    # STU-249: A's card is routed to the joint account, which also pays it 100 by
+    # a recurring transfer on November 1, before the 100 statement is due
+    # (November 5). The statement nets the transfer, so the bill leaves the
+    # joint account once: expense 100, nothing left paid from other accounts.
+    _put(sw_client, hh["a"], f"/accounts/{hh['a_card']}", {"payment_account_id": hh["joint"]})
+    _charge(sw_client, hh, "projected")
+    _recurring_payment(sw_db, hh["a"], hh["joint"], hh["a_card"], 100, datetime(2026, 11, 1))
+    totals = _sum(_monthly(sw_db, hh["c"], hh["a"], PROJECTED))
+    assert (totals["expense"], totals["paid_from_other_accounts"]) == (100.0, 0.0)
+
+
 # --- Cover settles in the card's currency (STU-236) ----------------------------------------------
 
 @pytest.mark.parametrize("mode", list(MODES))

@@ -25,8 +25,9 @@ statement engine's order (``_settle_with_sources``, mirroring
 ``statements.build_statement_payables``): the transaction rows are balanced
 and paid oldest statement first, and only then are the projected entry
 charges added and paid from what is left, so a payment the rows already used
-never covers a charge projected later. Recurring transfers into the card,
-which the engine does not net, are applied last. A virtual overflow move is
+never covers a charge projected later. Recurring transfers into the card are
+applied last, as the engine nets them (STU-249), each over the statement's own
+horizon (below). A virtual overflow move is
 not cash and never counts. When the card's primary payment account is in the
 view scope (a cash account, or, on legacy data only, a scope spending
 wallet), its routed statement payment pays whatever the statement still
@@ -496,8 +497,9 @@ def _settle_with_sources(cycles: List[dict], lines: list,
     as the engine computes it. ``in_scope`` is the part of each cycle paid by
     a payment flagged True (an in-scope payment from a cash account or
     spending wallet); credits are never in
-    scope. Recurring transfers into the card, which the engine does not net,
-    are applied last, in date order, oldest statement first. ``amount_of``
+    scope. Recurring transfers into the card, which the engine nets last too
+    (STU-249), are applied last, in date order, oldest statement first; the
+    caller bounds them by each statement's due date. ``amount_of``
     reads a line's figure in the card's currency (``normalise_lines``), and
     ``today`` is the day the rows are read on (``statements.statement_day``).
 
