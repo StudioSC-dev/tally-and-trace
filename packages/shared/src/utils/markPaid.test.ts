@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   canPostAllDue,
   defaultMarkPaidDay,
+  firstWalkedOccurrence,
   markPaidAmountEdited,
   markPaidAmountShown,
+  markPaidRequestedOccurrence,
   markPaidSendsAmount,
+  noOccurrenceReason,
   omittedRuns,
   markPaidWireDate,
   postAllDueRange,
@@ -431,5 +434,40 @@ describe('documented ambiguous-day cases', () => {
     expect(omittedRuns(listed, 0)).toEqual([])
     expect(omittedRuns([occ('2026-06-05', 0, 'ambiguous'), occ('2026-08-05', 1, null)], 1)).toEqual([{ before: '2026-08-05', count: 1 }])
     expect(omittedRuns([occ('2026-07-05', 0, 'pending'), occ('2026-08-05', 1, null)], 0)).toEqual([])
+  })
+})
+
+describe('the first walked occurrence', () => {
+  const semi = (next: string, extra: Record<string, unknown> = {}) => ({
+    cadence: 'semi_monthly' as const, next_occurrence: next, semi_monthly_day_1: 1, semi_monthly_day_2: 15, end_mode: 'indefinite' as const, ...extra,
+  })
+
+  // Days 1/15 stored on Dec 26 (40 days after Nov 16): the first walked occurrence is Jan 1, 46 days out.
+  it('semi_monthly_far_first_date', () => {
+    const entry = semi('2026-12-26T00:00:00Z')
+    expect(firstWalkedOccurrence(entry)).toBe('2027-01-01')
+    expect(markPaidRequestedOccurrence('2026-12-26', entry)).toBe('2027-01-01')
+    // A listed occurrence the caller clicked is asked for as it is.
+    expect(markPaidRequestedOccurrence('2027-01-15', entry)).toBe('2027-01-15')
+    // On its days, or another cadence: next_occurrence itself.
+    expect(firstWalkedOccurrence(semi('2026-12-15T00:00:00Z'))).toBe('2026-12-15')
+    expect(firstWalkedOccurrence({ cadence: 'monthly', next_occurrence: '2026-12-26T00:00:00Z', end_mode: 'indefinite' })).toBe('2026-12-26')
+    // Days 30/31 from Feb 1 clamp to Feb 28.
+    expect(firstWalkedOccurrence(semi('2027-02-01T00:00:00Z', { semi_monthly_day_1: 30, semi_monthly_day_2: 31 }))).toBe('2027-02-28')
+    // Without the entry, the day is asked for as it is.
+    expect(markPaidRequestedOccurrence('2026-12-26', undefined)).toBe('2026-12-26')
+    expect(markPaidRequestedOccurrence(null, entry)).toBeNull()
+  })
+
+  it('is null, with a reason, when the walk yields nothing', () => {
+    const ended = semi('2026-12-26T00:00:00Z', { end_mode: 'on_date', end_date: '2026-12-31T00:00:00Z' })
+    expect(firstWalkedOccurrence(ended)).toBeNull()
+    expect(markPaidRequestedOccurrence('2026-12-26', ended)).toBe('2026-12-26')
+    expect(noOccurrenceReason(ended)).toBe('This entry ends on Dec 31st, 2026, before its next scheduled day.')
+    const done = semi('2026-12-26T00:00:00Z', { end_mode: 'after_occurrences', max_occurrences: 0 })
+    expect(firstWalkedOccurrence(done)).toBeNull()
+    expect(noOccurrenceReason(done)).toBe('Every occurrence of this entry is already recorded.')
+    expect(noOccurrenceReason(semi('2029-06-20T00:00:00Z'))).toBe('Its next occurrence, Jul 1st, 2029, is too far ahead to record yet.')
+    expect(noOccurrenceReason(undefined)).toBe('This entry has no occurrence left to record.')
   })
 })
