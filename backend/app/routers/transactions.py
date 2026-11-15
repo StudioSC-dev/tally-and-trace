@@ -2064,6 +2064,9 @@ def summarize_period(
                     b["moved_out"] += amount
                     inbound = bucket(destination)
                     inbound["moved_in"] += transfer_sides(t)[1]
+                    # Counted in both buckets for now. Owner ruling 2026-11-15
+                    # (STU-306 part 3, deferred): a cross-currency move counts
+                    # once, in its source currency, so this inbound count goes.
                     inbound["transaction_count"] += 1
 
     def result(b: dict) -> dict:
