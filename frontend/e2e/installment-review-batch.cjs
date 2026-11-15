@@ -350,7 +350,7 @@ async function postedLinkedClean(u, card, name) {
   const start = recentStart()
   const e = await installment(u, card, name, 2500, start, 12)
   const typed = await post(u.token, '/transactions/', {
-    account_id: card.id, transaction_type: 'debit', amount: 2500, description: `${name} typed by hand`, transaction_date: wire(addDays(start, -1)), is_posted: true,
+    account_id: card.id, transaction_type: 'debit', amount: 2500, description: `${name} typed by hand`, transaction_date: wire(addDays(start, 1)), is_posted: true,
   })
   const review = await get(u.token, `/budget-entries/${e.id}/auto-post-review`)
   const candidate = review.candidates.find((c) => c.occurrence_date.slice(0, 10) === start)
