@@ -1985,6 +1985,17 @@ def linked_transactions(db: Session, entry_ids, *, occurrence_match: bool = Fals
     hand (``occurrence_date`` null, which includes one relinked to another
     entry) keeps the rule above. Without ``occurrence_match`` (counting paid
     occurrences) the rule above holds for every row.
+
+    The test reads the entry's own accounts, not each viewer's read path, so
+    two kinds of viewer lose an occurrence to a row they may not be able to
+    read (STU-269; accepted, owner ruling 2026-11-15, no access-rule change).
+    A viewer who reads the entry only through its overflow account (a share on
+    that account alone), and a rule (c) reader (the entry carries the creator's
+    Household tag but none of its accounts does, so it counts as unshared and
+    any row of the creator's stands for an occurrence). Neither has a cash leg
+    for the occurrence, since legs are built only when the entry's main account
+    is in their scope, so suppression removes the occurrence from their
+    upcoming list and changes no balance of theirs.
     """
     return [(entry_id, when) for entry_id, when, _, _ in
             _linked_rows(db, entry_ids, occurrence_match=occurrence_match)]
