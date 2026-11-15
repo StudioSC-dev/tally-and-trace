@@ -139,14 +139,15 @@ export function sharedLimitText(credit: Pick<CardCredit, 'currency' | 'limit' | 
 /**
  * The cards a card may share its limit with: active credit cards in the same currency that
  * have a limit of their own, are not linked themselves, are not the card itself, and that the
- * caller manages and the same person owns. `ownerName` is the card's owner for an edit; null
- * on create, where the caller owns it and so only the caller's own cards qualify.
+ * caller manages and the same person owns. `ownerId` is the card's owner for an edit, matched
+ * by id (two owners can share a display name); null on create, where the caller owns it and so
+ * only the caller's own cards qualify. An edit whose owner id is unknown (undefined) matches none.
  */
 export function sharedLimitTargets<
-  T extends Pick<Account, 'id' | 'account_type' | 'currency' | 'is_active' | 'credit_limit' | 'shares_limit_with_account_id' | 'my_role' | 'owner_name'> & {
+  T extends Pick<Account, 'id' | 'account_type' | 'currency' | 'is_active' | 'credit_limit' | 'shares_limit_with_account_id' | 'my_role' | 'owner_id'> & {
     permissions: Pick<Account['permissions'], 'can_edit_settings'>
   },
->(accounts: readonly T[], card: { id: number | null; currency: string; ownerName: string | null }): T[] {
+>(accounts: readonly T[], card: { id: number | null; currency: string; ownerId: number | null | undefined }): T[] {
   return accounts.filter(
     (a) =>
       a.account_type === 'credit' &&
@@ -156,6 +157,6 @@ export function sharedLimitTargets<
       a.shares_limit_with_account_id == null &&
       a.id !== card.id &&
       a.permissions.can_edit_settings &&
-      (card.ownerName === null ? a.my_role === 'owner' : a.owner_name === card.ownerName),
+      (card.ownerId === null ? a.my_role === 'owner' : a.owner_id != null && a.owner_id === card.ownerId),
   )
 }
