@@ -1476,10 +1476,14 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     posted.
     """
     db_transaction = _locked_for_edit(db, current_user, transaction_id)
+    old_receipt = db_transaction.receipt_url
     db_transaction = apply_transaction_update(db, current_user, db_transaction,
                                               transaction_update)
     db.commit()
     db.refresh(db_transaction)
+    # Only once the edit is committed: a rolled-back edit keeps its file.
+    if db_transaction.receipt_url != old_receipt:
+        remove_stored_receipt(transaction_id, old_receipt)
     return serialize_transaction(db, current_user, db_transaction)
 
 
