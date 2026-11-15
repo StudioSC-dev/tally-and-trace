@@ -657,6 +657,11 @@ export interface RepeatScheduleInput {
   max_occurrences?: number
   billing_kind?: BillingKind | null
   settlement: Settlement
+  /**
+   * The entry's amount, for the payments after the first, in the transaction's face
+   * currency (STU-631: an installment split from its total). Omitted: the transaction's.
+   */
+  amount?: number
 }
 
 /**

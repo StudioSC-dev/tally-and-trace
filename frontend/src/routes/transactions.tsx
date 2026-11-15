@@ -12,6 +12,7 @@ import type {
 } from '../store/api'
 import { entryDay, DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
 import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
+import { cappedPaymentDays, centavosToAmount, installmentInput, installmentScheduleDraft } from '@tally-trace/shared'
 import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
@@ -34,6 +35,8 @@ import type { ScheduleFieldKey } from '../components/RecurringScheduleFields'
 import { RepeatSection } from '../components/transactions/RepeatSection'
 import { DescriptionAutofillInput } from '../components/transactions/DescriptionAutofillInput'
 import type { RepeatErrorKey } from '../components/transactions/RepeatSection'
+import { InstallmentSection } from '../components/transactions/InstallmentSection'
+import type { InstallmentField, InstallmentPreview } from '../components/transactions/InstallmentSection'
 import { AccountPicker, CategoryPicker } from '../components/GroupedPicker'
 import { useRecentPicks } from '../hooks/useRecentPicks'
 import { DueAndOverdueSection } from '../components/transactions/DueAndOverdueSection'
@@ -346,9 +349,16 @@ type TransactionDraft = {
   formData: TransactionFormState
   repeatOn: boolean
   repeatDraft: RepeatDraft
+  /** Installment from a total (STU-631): on, with the total and months as typed. */
+  installment?: InstallmentDraft
   editing: DetailedTransaction | null
   postedTouched: boolean
 }
+
+/** The Installment option as typed: the total and months are kept as text, as entered. */
+type InstallmentDraft = { on: boolean; total: string; months: string }
+const createInstallmentDraft = (): InstallmentDraft => ({ on: false, total: '', months: '' })
+const INSTALLMENT_UNAVAILABLE = "Installments aren't available right now; the app may be updating. Try again in a moment."
 
 /** A display-only "Saving…" row in the main list: built from what was typed, it feeds no total. */
 type PendingListRow = {
@@ -468,6 +478,11 @@ export function TransactionsPage() {
   const [repeatErrors, setRepeatErrors] = useState<FieldErrors<RepeatErrorKey>>({})
   const [repeatError, setRepeatError] = useState<string | null>(null)
   const [repeatUnavailable, setRepeatUnavailable] = useState(false)
+  // Installment from a total (Add only, an expense on a credit card, STU-631): the toggle, the
+  // total and months as typed, their errors and a refusal shown on the section's own line.
+  const [installment, setInstallment] = useState<InstallmentDraft>(createInstallmentDraft)
+  const [installmentErrors, setInstallmentErrors] = useState<Partial<Record<InstallmentField, string>>>({})
+  const [installmentError, setInstallmentError] = useState<string | null>(null)
   // A save is queued in the save outbox (STU-605) and runs in the background: the dialog closes
   // at once, or clears for the next entry. The ref guards a second submit in the same tick.
   const saveInFlight = useRef(false)
@@ -1070,7 +1085,49 @@ export function TransactionsPage() {
       return next
     })
   }
+  // Installment from a total: an expense on a credit card, in Add only. It is the same card
+  // installment Repeat starts, with the first payment (and any remainder) as this transaction.
+  const offerInstallment =
+    !editingTransaction && formData.transaction_type === 'debit' && selectedFormAccount?.account_type === 'credit'
+  const installmentActive = installment.on && offerInstallment
+  // The currency the save sends the payments in: the account's when posted (the amount
+  // field is hidden, so no projected figure is sent), else the Currency select's.
+  const installmentCurrency = formData.is_posted ? repeatAccountCurrency : formData.projected_currency ?? repeatAccountCurrency
+  const installmentInputState = installmentActive ? installmentInput(installment.total, installment.months) : null
+  const installmentPreview: InstallmentPreview | null = (() => {
+    if (!installmentInputState?.ok) return null
+    const { split } = installmentInputState
+    const draft = installmentScheduleDraft(`${formData.transaction_date}T00:00`, split.months)
+    const days = cappedPaymentDays(draft, repeatContext)
+    if (!days || days.length !== split.months) return null
+    return {
+      first: formatCurrency(centavosToAmount(split.first), installmentCurrency),
+      rest: formatCurrency(centavosToAmount(split.rest), installmentCurrency),
+      months: split.months,
+      days,
+      onClose: scheduleState(draft, repeatContext).chargedOnClose,
+    }
+  })()
+  const changeInstallment = (update: Partial<InstallmentDraft>) => {
+    setInstallmentErrors({})
+    setInstallmentError(null)
+    setInstallment((prev) => ({ ...prev, ...update }))
+  }
+  const toggleInstallment = (on: boolean) => {
+    changeInstallment({ on })
+    if (on) {
+      // One new entry at a time, and a transaction that starts its own entry links to no other.
+      setRepeatOn(false)
+      setFormData((prev) => ({ ...prev, budget_entry_id: undefined }))
+    }
+  }
+  const resetInstallment = () => {
+    setInstallment(createInstallmentDraft())
+    setInstallmentErrors({})
+    setInstallmentError(null)
+  }
   const toggleRepeat = (on: boolean) => {
+    if (on) changeInstallment({ on: false })
     setRepeatOn(on)
     setRepeatErrors({})
     setRepeatError(null)
@@ -1415,6 +1472,7 @@ export function TransactionsPage() {
     setFormError(null)
     setSavedNotice(null)
     resetRepeat()
+    resetInstallment()
     saveInFlight.current = false
     setFocusRequest(null)
   }
@@ -1444,6 +1502,7 @@ export function TransactionsPage() {
   const fail = (key: TransactionField, message: string) => {
     setDateErrors({})
     setRepeatErrors({})
+    setInstallmentErrors({})
     setFieldErrors({ [key]: message })
     focusField(transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`) ?? null)
   }
@@ -1456,8 +1515,18 @@ export function TransactionsPage() {
   const failRepeat = (key: RepeatErrorKey, message: string) => {
     setDateErrors({})
     setFieldErrors({})
+    setInstallmentErrors({})
     setRepeatErrors({ [key]: message })
     focusField(repeatControl(key))
+  }
+
+  // An Installment field's error, shown under it, with focus.
+  const failInstallment = (key: InstallmentField, message: string) => {
+    setDateErrors({})
+    setFieldErrors({})
+    setRepeatErrors({})
+    setInstallmentErrors({ [key]: message })
+    focusField(transactionForm.current?.querySelector<HTMLElement>(`[data-field="${key}"]`) ?? null)
   }
 
   // A refused save's field takes focus once its form has reopened.
@@ -1523,11 +1592,18 @@ export function TransactionsPage() {
     const status = apiErrorStatus(error)
     const detail = (error as { data?: { detail?: unknown } } | undefined)?.data?.detail
     if (status === 405 || (status === 404 && detail === 'Not Found')) {
-      setRepeatUnavailable(true)
+      if (installment.on) setInstallmentError(INSTALLMENT_UNAVAILABLE)
+      else setRepeatUnavailable(true)
       return true
     }
     const refusal = repeatingRefusal(detail)
     if (!refusal || refusal.part === null || !refusal.message) return false
+    // Installment from a total: the schedule and the split amounts are the section's, so a
+    // refusal of them, or of the first payment's amount, is shown there.
+    if (installment.on && (refusal.part === 'repeat' || refusal.field === 'amount' || refusal.field === 'projected_amount')) {
+      setInstallmentError(refusal.message)
+      return true
+    }
     if (refusal.part === 'repeat') {
       const control = repeatFieldControl(refusal.field)
       if (control && repeatControl(control)) {
@@ -1564,6 +1640,8 @@ export function TransactionsPage() {
     setRepeatErrors({})
     setRepeatError(null)
     setRepeatUnavailable(false)
+    setInstallmentErrors({})
+    setInstallmentError(null)
     // The button pressed picks the path, so the browser's own checks run the same for both.
     const submitter = (e.nativeEvent as SubmitEvent).submitter
     submitterRef.current = submitter
@@ -1588,7 +1666,7 @@ export function TransactionsPage() {
         return
       }
       setDateErrors({})
-      if (repeatActive && !formData.description.trim()) {
+      if ((repeatActive || installmentActive) && !formData.description.trim()) {
         fail('description', 'Please enter a description: it names the recurring entry.')
         return
       }
@@ -1601,11 +1679,23 @@ export function TransactionsPage() {
         return
       }
 
+      // Installment from a total: the total and months are checked, and this transaction is the
+      // first payment, carrying any remainder, in place of the amount field it hides.
+      const installmentSplit = installmentActive ? installmentInput(installment.total, installment.months) : null
+      if (installmentSplit && !installmentSplit.ok) {
+        failInstallment(installmentSplit.field, installmentSplit.message)
+        return
+      }
+      const firstPayment = installmentSplit?.ok ? centavosToAmount(installmentSplit.split.first) : undefined
+      const formAmount = firstPayment !== undefined && formData.is_posted ? firstPayment : formData.amount
+      const formProjected =
+        firstPayment === undefined ? formData.projected_amount : formData.is_posted ? undefined : firstPayment
+
       const selectedAccount = accounts.find((account) => account.id === formData.account_id)
       const accountCurrency = (selectedAccount?.currency as CurrencyCode) || fallbackCurrency
       // A new posted row keeps a foreign currency only when a positive projected amount was
       // typed for it; the hidden select's earlier value must not ride into a bare actual.
-      const enteredProjected = formData.projected_amount ?? 0
+      const enteredProjected = formProjected ?? 0
       const projectedCurrency =
         formData.is_posted && !editingTransaction && !(enteredProjected > 0)
           ? accountCurrency
@@ -1620,7 +1710,7 @@ export function TransactionsPage() {
         return
       }
 
-      let projectedAmount = formData.projected_amount
+      let projectedAmount = formProjected
       if (!formData.is_posted) {
         if (!projectedAmount || projectedAmount <= 0) {
           fail('projected_amount', 'Please enter an amount greater than zero.')
@@ -1628,7 +1718,7 @@ export function TransactionsPage() {
         }
       }
 
-      let actualAmount = formData.amount
+      let actualAmount = formAmount
       if (formData.is_posted) {
         if (actualAmount === undefined || actualAmount <= 0) {
           fail('amount', 'Please enter the actual amount posted to the account.')
@@ -1743,7 +1833,27 @@ export function TransactionsPage() {
       // request that commits both or neither. It links to no other entry. In Edit the row
       // itself becomes the first occurrence: POST /transactions/{id}/repeat replaces the PUT.
       let repeatBody: RepeatingTransactionInput | null = null
-      if (repeatActive) {
+      if (installmentSplit?.ok) {
+        // The card installment Repeat starts, for all the months: the server links this
+        // transaction as the first payment, and the entry's amount is each later payment.
+        const { split } = installmentSplit
+        const schedule = scheduleRequest(installmentScheduleDraft(`${formData.transaction_date}T00:00`, split.months), repeatContext)
+        if (!schedule.ok) {
+          if (schedule.field === 'next_occurrence') {
+            setDateErrors({ transaction_date: schedule.message })
+            transactionDateInput.current?.focus()
+          } else {
+            setInstallmentError(schedule.message)
+          }
+          return
+        }
+        const transaction = { ...payload }
+        delete transaction.budget_entry_id
+        repeatBody = {
+          transaction,
+          repeat: { ...repeatScheduleOf(schedule.fields, 'manual'), amount: centavosToAmount(split.rest) },
+        }
+      } else if (repeatActive) {
         const schedule = scheduleRequest(repeatSchedule, repeatContext)
         if (!schedule.ok) {
           if (schedule.field === 'next_occurrence') {
@@ -1767,7 +1877,7 @@ export function TransactionsPage() {
       saveInFlight.current = true
       // The entered figure, not the server's principal (a loan payment's differs).
       const figure = formData.is_posted
-        ? formatCurrency(formData.amount ?? 0, accountCurrency)
+        ? formatCurrency(formAmount ?? 0, accountCurrency)
         : formatCurrency(projectedAmount ?? 0, projectedCurrency)
       const accountName = selectedAccount?.name ?? 'the account'
       const description = formData.description.trim() || `${TRANSACTION_TYPE_LABELS[formData.transaction_type]} ${figure}`
@@ -1781,7 +1891,14 @@ export function TransactionsPage() {
           ? { method: 'POST', url: 'transactions/repeating', body: repeatBody }
           : { method: 'POST', url: 'transactions/', body: payload }
       const clientId = newOutboxId()
-      const draft: TransactionDraft = { formData, repeatOn: repeatActive, repeatDraft, editing: editingRow, postedTouched }
+      const draft: TransactionDraft = {
+        formData,
+        repeatOn: repeatActive,
+        repeatDraft,
+        installment: { ...installment, on: installmentActive },
+        editing: editingRow,
+        postedTouched,
+      }
       dispatch(
         outboxActions.enqueued({
           clientId,
@@ -1844,6 +1961,7 @@ export function TransactionsPage() {
         // Repeat and its schedule reset with the form; so does what the user changed (STU-626):
         // the kept account, type and category are the next entry's to autofill.
         resetRepeat()
+        resetInstallment()
         resetAutofill()
         setSavedNotice(`Saving "${formData.description} ${figure}"…`)
         setDateErrors({})
@@ -1884,6 +2002,7 @@ export function TransactionsPage() {
       setRepeatOn(true)
       setRepeatDraft(draft.repeatDraft)
     }
+    if (draft.installment?.on) setInstallment(draft.installment)
     setIsCreateModalOpen(true)
     setPendingRefusal({ error: editEntry.error?.raw, repeat: editEntry.kind === 'repeat', superseded: editEntry.error?.superseded === true })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per request; the form setters are stable
@@ -2441,8 +2560,9 @@ export function TransactionsPage() {
       return
     }
 
-    // A link to an existing entry and Repeat (a new entry) exclude each other.
+    // A link to an existing entry and Repeat or Installment (a new entry) exclude each other.
     setRepeatOn(false)
+    setInstallment((prev) => ({ ...prev, on: false }))
     setFormData((prev) => {
       const nextAccountId = entry.account_id ?? prev.account_id
       const nextAccount = nextAccountId ? accounts.find((acc) => acc.id === nextAccountId) : undefined
@@ -3901,6 +4021,7 @@ export function TransactionsPage() {
 
               {!formData.is_posted && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {!installmentActive && (
                   <div>
                     <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                     <div className="relative">
@@ -3929,6 +4050,7 @@ export function TransactionsPage() {
                     </div>
                     <FieldErrorText field="projected_amount" message={fieldErrors.projected_amount} />
                   </div>
+                  )}
                   <div>
                     <label className="label">Currency</label>
                     <select
@@ -4021,7 +4143,7 @@ export function TransactionsPage() {
                 </div>
               )}
               
-              {formData.is_posted && (
+              {formData.is_posted && !installmentActive && (
               <div>
                   <label className="label">{crossCurrencyTransfer ? `Amount sent (${formData.currency})` : 'Amount'}</label>
                   <div className="relative">
@@ -4148,7 +4270,22 @@ export function TransactionsPage() {
                 />
               )}
 
-              {offerRepeat && (
+              {offerInstallment && (
+                <InstallmentSection
+                  active={installmentActive}
+                  onToggle={toggleInstallment}
+                  total={installment.total}
+                  months={installment.months}
+                  onTotalChange={(total) => changeInstallment({ total })}
+                  onMonthsChange={(months) => changeInstallment({ months })}
+                  symbol={getCurrencySymbol(installmentCurrency)}
+                  errors={installmentErrors}
+                  error={installmentError}
+                  preview={installmentPreview}
+                />
+              )}
+
+              {offerRepeat && !installmentActive && (
                 <RepeatSection
                   label={editingTransaction ? 'Make this repeat' : 'Repeat'}
                   help={
@@ -4180,7 +4317,7 @@ export function TransactionsPage() {
                 />
               )}
 
-              {formData.transaction_type !== 'transfer' && !repeatActive && !(editingTransaction && isSharedFull(editingTransaction)) && (
+              {formData.transaction_type !== 'transfer' && !repeatActive && !installmentActive && !(editingTransaction && isSharedFull(editingTransaction)) && (
                 <div className="space-y-3">
                   <label className="label">Recurring entry (optional)</label>
                   <p className="text-xs text-muted">Link this to one of your recurring income or expenses.</p>

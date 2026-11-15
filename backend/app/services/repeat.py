@@ -138,7 +138,8 @@ def _entry_in(source: _EntrySource, repeat: RepeatSchedule) -> BudgetEntryCreate
         "entry_type": (BudgetEntryType.INCOME
                        if source.transaction_type == TransactionType.CREDIT
                        else BudgetEntryType.EXPENSE),
-        "amount": source.amount,
+        # The payments after the first: ``repeat.amount`` when sent, else the face.
+        "amount": source.amount if repeat.amount is None else repeat.amount,
         "currency": source.currency,
         "cadence": repeat.cadence,
         "next_occurrence": source.date,
