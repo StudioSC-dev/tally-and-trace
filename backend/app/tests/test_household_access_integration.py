@@ -17,6 +17,9 @@ pytestmark = pytest.mark.skipif(not sw_db_reachable(), reason="DATABASE_URL not 
 
 DAY = "2026-10-01T00:00:00"
 B_LUNCH, B_DEPOSIT = 66.61, 311.37  # B's amounts on A's joint account: never in C's view
+# A's private pharmacy amount. Not a whole number: a user or row id is an integer,
+# so no id the database hands out can equal this figure marker (STU-645).
+A_PHARMACY = 77.77
 
 
 def _call(client, who, method, path, body=None, **kw):
@@ -60,7 +63,7 @@ def leak(hh, sw_client, sw_db):
         "a_explicit": _txn(client, a, hh["a_private"], 55, "Shared internet",
                            tags=[hh["hh_a"]]),
         "a_loan_payment": _transfer(client, a, hh["joint"], hh["a_loan"], 500, f"{PRIVATE} car"),
-        "a_private": _txn(client, a, hh["a_private"], 77, f"{PRIVATE} pharmacy"),
+        "a_private": _txn(client, a, hh["a_private"], A_PHARMACY, f"{PRIVATE} pharmacy"),
         "a_private_entry": _entry(client, a, hh["a_private"], f"{PRIVATE} gym"),
         "a_hh_entry": _entry(client, a, None, "Household water", tags=[hh["hh_a"]]),
         # B's, on A's joint account, every one tagged with B's Household tag.
@@ -111,10 +114,15 @@ def _clean(body, rec, rows=None, accounts=()):
     own = {"transactions": [rec["b_lunch"], rec["b_deposit"], rec["a_private"]],
            "entries": [rec["b_entry"], rec["a_private_entry"]]}.get(rows, [])
     leaks = sw_leaks(body, private_ids=_b_ids(rec) + [rec["a_private"], rec["a_private_entry"]],
-                     numbers=(B_LUNCH, B_DEPOSIT, 77))
+                     numbers=(B_LUNCH, B_DEPOSIT, A_PHARMACY))
     return [(where, value) for where, value in leaks
             if not (_OWN_ID.fullmatch(where) and value not in own)
             and not (_ACCOUNT_REF.fullmatch(where) and value in accounts)]
+
+
+def _assert_clean(body, rec, rows=None, accounts=()):
+    leaks = _clean(body, rec, rows, accounts)
+    assert leaks == [], leaks
 
 
 def test_the_leak_check_passes_a_rows_own_id_that_equals_a_private_id_and_still_catches_leaks(
@@ -141,7 +149,7 @@ def test_the_leak_check_passes_a_rows_own_id_that_equals_a_private_id_and_still_
 
 # --- Accounts ---------------------------------------------------------------------------
 
-def test_tag_viewer_sees_the_household_account_in_the_minimal_shape(hh, leak, sw_client):
+def _assert_minimal_shape(hh, leak, sw_client):
     c = hh["c"]
     accounts = _get(sw_client, c, "/accounts/", limit=100)["items"]
     by_id = {a["id"]: a for a in accounts}
@@ -154,7 +162,43 @@ def test_tag_viewer_sees_the_household_account_in_the_minimal_shape(hh, leak, sw
     assert _get(sw_client, c, f"/accounts/{hh['joint']}") == joint
     for hidden in ("a_private", "a_card", "a_loan", "a_wallet", "b_private"):
         assert _call(sw_client, c, "GET", f"/accounts/{hh[hidden]}").status_code == 404, hidden
-    assert _clean(accounts, leak, "accounts") == []
+    _assert_clean(accounts, leak, "accounts")
+
+
+def test_tag_viewer_sees_the_household_account_in_the_minimal_shape(hh, leak, sw_client):
+    _assert_minimal_shape(hh, leak, sw_client)
+
+
+@pytest.fixture
+def viewer_id_77(sw_client, sw_db):
+    """The user id sequence set so the next three users get ids 75, 76 and 77:
+    ``hh``'s third user, the tag viewer, is user 77. Put back afterwards."""
+    from sqlalchemy import text
+
+    seq = sw_db.execute(text("SELECT pg_get_serial_sequence('users', 'id')")).scalar()
+    before = sw_db.execute(text(f"SELECT last_value FROM {seq}")).scalar()
+    sw_db.execute(text("SELECT setval(:seq, 74)"), {"seq": seq})
+    sw_db.commit()
+    yield
+    sw_db.execute(text("SELECT setval(:seq, GREATEST(:before, (SELECT COALESCE(MAX(id), 1) FROM users)))"),
+                  {"seq": seq, "before": before})
+    sw_db.commit()
+
+
+def test_leak_check_ignores_viewer_id_77(viewer_id_77, hh, leak, sw_client):
+    assert hh["c"]["id"] == 77
+    accounts = _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]
+    assert 77 in {a.get("owner_id") for a in accounts}  # the viewer's own id is in the response
+    _assert_minimal_shape(hh, leak, sw_client)
+
+
+def test_leak_check_flags_planted_figure(hh, leak, sw_client):
+    accounts = _get(sw_client, hh["c"], "/accounts/", limit=100)["items"]
+    _assert_clean(accounts, leak, "accounts")
+    for figure in (B_LUNCH, B_DEPOSIT, A_PHARMACY):
+        planted = [{**accounts[0], "balance": figure}, *accounts[1:]]
+        with pytest.raises(AssertionError):
+            _assert_clean(planted, leak, "accounts")
 
 
 def test_an_account_share_viewer_holding_the_tag_share_gets_the_higher_role(hh, leak, sw_client,
