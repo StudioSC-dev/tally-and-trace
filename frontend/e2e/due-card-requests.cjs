@@ -78,26 +78,6 @@ async function record(page, run) {
   return seen
 }
 
-/** Like `record`, with each request's initiator from the browser (CDP): the script that issued it and its call stack. */
-async function recordWithInitiators(page, run) {
-  const cdp = await page.context().newCDPSession(page)
-  await cdp.send('Network.enable')
-  const seen = []
-  cdp.on('Network.requestWillBeSent', (e) => {
-    if (!e.request.url.includes('/api/v1/')) return
-    const frames = (e.initiator.stack?.callFrames || []).map((f) => `${f.functionName || '(anon)'} ${f.url.replace(/^https?:\/\/[^/]+/, '')}:${f.lineNumber + 1}`)
-    if (e.initiator.type !== 'preflight') seen.push({ method: e.request.method, url: e.request.url, initiator: e.initiator.type, frames })
-  })
-  try {
-    await run()
-    await h.waitQuiet(page)
-    await h.sleep(300)
-    await h.waitQuiet(page)
-  } finally {
-    await cdp.detach().catch(() => {})
-  }
-  return seen
-}
 const show = (seen) => seen.map((r) => `${r.method} ${label(r.url)}`).join(' | ')
 
 async function seedUser(tag) {
@@ -184,16 +164,14 @@ async function scenarioA(browser) {
     for (const [name, is] of REMOVED) {
       await h.check(`a.no-${name.replace(/ /g, '-')}`, 'B', async () => !seen.some((r) => is(r.url)) || `${name} was sent`)
     }
-    // STU-636: the ninth request was `GET /tags`, sent by the page's own description-autofill read (STU-626) on
-    // open. It is the form's read (the tag picker sends the same one), so it belongs to opening the Add dialog.
-    await h.check('a.extra-request-attribution', 'B', async () => {
+    // STU-636: opening Transactions sends no `GET /tags`; the Add dialog sends exactly one (its tag picker's read).
+    await h.check('a.tags-read-only-with-add-dialog', 'B', async () => {
       if (seen.some((r) => pathOf(r.url) === '/tags')) return 'opening Transactions sent GET /tags'
-      const opened = await recordWithInitiators(page, async () => {
+      const opened = await record(page, async () => {
         await page.getByRole('button', { name: 'Add Transaction' }).first().click()
         await page.locator('[data-testid="tag-picker"]').waitFor()
       })
       const tags = opened.filter((r) => pathOf(r.url) === '/tags')
-      console.log(`  opening the Add dialog: ${tags.map((r) => `${r.method} ${label(r.url)} [${r.initiator}] ${r.frames.slice(0, 3).join(' < ')}`).join(' | ') || 'no /tags read'}`)
       return (tags.length === 1 && tags[0].method === 'GET') || `the Add dialog sent ${tags.length} /tags reads`
     })
   } finally {
