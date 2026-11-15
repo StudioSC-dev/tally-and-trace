@@ -24,6 +24,7 @@ import {
   categoryOptionLabel,
   entryCalendarDate,
   formatEntryDate,
+  toWireWallTime,
   entryCreditWarning,
   isLimited,
   groupByKind,
@@ -245,6 +246,13 @@ const formatBudgetPeriodEndLabel = (value?: string) => {
   date.setDate(date.getDate() - 1)
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
+
+/**
+ * A date input's calendar day as the wire value: that day at UTC midnight. The
+ * allocation date columns are naive and hold the UTC components as sent, so
+ * local midnight through toISOString() would store the previous day east of UTC.
+ */
+const dateInputToWire = (day: string) => toWireWallTime(`${day}T00:00`)
 
 const isoToDateInput = (value?: string) => {
   if (!value) {
@@ -940,7 +948,7 @@ export function AllocationsPage() {
       const targetDateIso =
         allocationForm.allocation_type === 'budget' || !allocationForm.target_date
           ? undefined
-          : new Date(`${allocationForm.target_date}T00:00:00`).toISOString()
+          : dateInputToWire(allocationForm.target_date)
 
       const allocationPayload = {
         account_id: allocationForm.account_id,
@@ -955,11 +963,11 @@ export function AllocationsPage() {
           allocationForm.allocation_type === 'budget' ? allocationForm.period_frequency : undefined,
         period_start:
           allocationForm.allocation_type === 'budget' && allocationForm.period_start
-            ? new Date(`${allocationForm.period_start}T00:00:00`).toISOString()
+            ? dateInputToWire(allocationForm.period_start)
             : undefined,
         period_end:
           allocationForm.allocation_type === 'budget' && allocationForm.period_end
-            ? new Date(`${allocationForm.period_end}T00:00:00`).toISOString()
+            ? dateInputToWire(allocationForm.period_end)
             : undefined,
         is_active: allocationForm.is_active,
         configuration,
