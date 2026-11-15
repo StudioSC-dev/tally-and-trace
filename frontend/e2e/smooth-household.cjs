@@ -1,6 +1,8 @@
 // Browser checks for STU-335 PR 2's Household polish (plan 3.6 Q7, scenarios in 5.2): the
 // title waits for the views instead of flipping from "Household" to the sharer's name, and
-// the Transactions tab waits for the dashboard's account names before it lists rows.
+// the Transactions tab waits for the dashboard's account names before it lists rows. Scenario
+// (h) is STU-253's: statement and loan controls follow `permissions.can_view_details`, and
+// the dashboard total counts the balances the viewer can see.
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
 // seeds through the API; every expected figure is read from the API. Not wired into CI and
 // not part of `pnpm build`. Run steps: see ./README.md.
@@ -196,12 +198,100 @@ const scenarioC2 = (browser) => failedNames(browser, 'c2', 'dashboard fails: a n
   })
 })
 
+// (h) STU-253: a Household share (tag_viewer) gets no statement or loan controls, gated on
+// `permissions.can_view_details`; the owner, who holds it, still gets them.
+const isDetails = (r) => r.method() === 'GET' && /\/accounts\/\d+\/(statements|loan-schedule)$/.test(new URL(r.url()).pathname)
+
+/** A Household-tagged card, loan and bank account of A's, seen by B through the tag share. */
+async function seedDetails(tag) {
+  const w = await seedShare(tag)
+  const household = (await client.get(w.a.token, '/tags/')).find((t) => t.is_system)
+  if (!household) throw new Error('STOP: A has no Household system tag')
+  const bank = await client.post(w.a.token, '/accounts/', { name: `Joint ${tag}`, account_type: 'checking', balance: 50000, currency: 'PHP', tag_ids: [household.id] })
+  const card = await client.post(w.a.token, '/accounts/', {
+    name: `Card ${tag}`, account_type: 'credit', balance: 0, currency: 'PHP', billing_cycle_start: 15, days_until_due_date: 21,
+    payment_account_id: bank.id, tag_ids: [household.id],
+  })
+  const loan = await client.post(w.a.token, '/accounts/', {
+    name: `Loan ${tag}`, account_type: 'loan', loan_kind: 'auto', balance: -10000, currency: 'PHP', loan_annual_rate: 12,
+    loan_term_months: 12, loan_payment_amount: 900, loan_first_payment_date: '2026-12-20', payment_account_id: bank.id, tag_ids: [household.id],
+  })
+  await client.post(w.b.token, '/accounts/', { name: `Own ${tag}`, account_type: 'checking', balance: 1000, currency: 'PHP' })
+  const listed = (await client.get(w.b.token, '/accounts/?limit=100')).items
+  for (const id of [bank.id, card.id, loan.id]) {
+    const row = listed.find((a) => a.id === id)
+    if (!row || row.my_role !== 'tag_viewer' || row.permissions.can_view_details !== false) throw new Error(`STOP: B does not hold ${id} as a tag viewer without details: ${JSON.stringify(row)}`)
+  }
+  return { ...w, card, loan }
+}
+
+/** Opens `who`'s accounts page, opens each account's dialog in turn and records what it shows. */
+async function detailsShown(browser, who, accounts) {
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  const asked = []
+  page.on('request', (r) => { if (isDetails(r)) asked.push(new URL(r.url()).pathname) })
+  const shown = {}
+  try {
+    await h.uiLogin(page, stack, who)
+    for (const account of accounts) {
+      await page.goto(`${stack.webUrl}/accounts`)
+      const row = page.locator('article', { has: page.locator(tid(`account-detail-link-${account.id}`)) })
+      await row.waitFor()
+      await h.waitQuiet(page)
+      await row.locator('[role="button"]').first().click()
+      await page.locator(tid('view-account-transactions')).waitFor()
+      await h.waitQuiet(page)
+      shown[account.id] = {
+        statements: await page.locator(tid('account-statements')).count(),
+        loan: await page.locator(tid('account-loan-details')).count(),
+      }
+    }
+  } finally {
+    await ctx.close()
+  }
+  return { asked, shown }
+}
+
+async function scenarioH(browser) {
+  console.log('\n=== (h) details gate: no statement or loan controls without can_view_details')
+  const w = await seedDetails('hh-h')
+  const owner = await detailsShown(browser, w.a, [w.card, w.loan])
+  await h.check('h.details-owner-control', 'S', async () =>
+    (owner.shown[w.card.id].statements === 1 && owner.shown[w.loan.id].loan === 1) || `owner sees ${JSON.stringify(owner.shown)}`)
+  const viewer = await detailsShown(browser, w.b, [w.card, w.loan])
+  await h.check('h.details-gate', 'B', async () => {
+    const shown = viewer.shown[w.card.id].statements + viewer.shown[w.card.id].loan + viewer.shown[w.loan.id].statements + viewer.shown[w.loan.id].loan
+    return (shown === 0 && viewer.asked.length === 0) || `tag viewer sees ${JSON.stringify(viewer.shown)}, asked ${JSON.stringify(viewer.asked)}`
+  })
+  // The dashboard's total is the snapshot's, over the accounts B can see: A's Household ones in.
+  const listed = (await client.get(w.b.token, '/accounts/?limit=100')).items
+  const visible = listed.filter((a) => a.currency === 'PHP').reduce((n, a) => n + a.balance, 0)
+  const snapshot = await client.get(w.b.token, '/dashboard/snapshot')
+  const { ctx, page } = await h.newPage(browser)
+  page.setDefaultTimeout(10000)
+  try {
+    await h.uiLogin(page, stack, w.b)
+    await page.goto(`${stack.webUrl}/`)
+    await page.locator(tid('net-worth')).waitFor()
+    await h.waitQuiet(page)
+    const shown = ((await page.locator(tid('net-worth')).textContent()) || '').trim()
+    const peso = (n) => `₱${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    await h.check('h.visible-balance-total', 'B', async () =>
+      (listed.some((a) => a.my_role === 'tag_viewer') && snapshot.balances.total === visible && shown === peso(visible)) ||
+      `shown ${shown}, snapshot ${snapshot.balances.total}, visible accounts ${visible}`)
+  } finally {
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['a', scenarioA],
   ['a2', scenarioA2],
   ['b', scenarioB],
   ['c1', scenarioC1],
   ['c2', scenarioC2],
+  ['h', scenarioH],
 ]
 
 ;(async () => {

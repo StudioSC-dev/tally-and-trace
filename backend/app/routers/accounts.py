@@ -948,7 +948,11 @@ def get_card_statements(
     Any role on the card. An owner, admin or editor gets each statement's
     ``statement_balance`` and its lines with ``transaction_id``; a viewer gets
     the limited statement: ``{close_date, due_date, amount_due, currency,
-    status, lines: [{date, display_description, amount}]}``. Line descriptions
+    status, lines: [{date, display_description, amount}]}``. A ``tag_viewer``
+    (Household tag share, an active card only) gets the same limited statement
+    with the lines of the rows it may read only, the sharer's own (the
+    tag-share invariant); ``amount_due`` is still the whole statement's, other
+    users' charges on the card included (STU-253). Line descriptions
     follow the description rule (app/core/redaction.py). ``status`` is "paid",
     "open" or "overdue". A full line carries ``posted_date`` (a Manila day) when
     its row is posted on a day other than its own; the limited line never does.
@@ -965,7 +969,7 @@ def get_card_statements(
     from app.services.forecast import _row, row_labels
     from app.services.statements import statement_history
 
-    card = get_account_or_404(db, current_user, account_id)
+    card = get_account_or_404(db, current_user, account_id, roles=VIEW_ROLES)
     if card.account_type != AccountType.CREDIT:
         raise HTTPException(status_code=400, detail="Account is not a credit card")
     role = account_role(current_user, card)
@@ -981,6 +985,8 @@ def get_card_statements(
         lines = []
         for line in statement["lines"]:
             txn = line["transaction"]
+            if role == TAG_VIEWER and not redactor.access.readable(txn):
+                continue
             item = {"date": line["date"], "amount": float(line["amount"]),
                     "display_description": redactor.display_description(txn)}
             if not limited:
@@ -1026,10 +1032,12 @@ def get_card_statements(
 # --- Loans -------------------------------------------------------------------
 
 def _loan_or_404(db: Session, current_user: User, account_id: int, *, edit: bool = False,
-                 manage: bool = False) -> Account:
-    """The loan, 404ing unless the caller holds a role on it (an edit role with
-    ``edit``, an owner's or admin's with ``manage``)."""
-    roles = MANAGE_ROLES if manage else EDIT_ROLES if edit else DIRECT_ROLES
+                 manage: bool = False, view: bool = False) -> Account:
+    """The loan, 404ing unless the caller holds a direct role on it (an edit role
+    with ``edit``, an owner's or admin's with ``manage``, ``tag_viewer`` too with
+    ``view``)."""
+    roles = (MANAGE_ROLES if manage else EDIT_ROLES if edit else VIEW_ROLES if view
+             else DIRECT_ROLES)
     account = get_account_or_404(db, current_user, account_id, roles=roles)
     if account.account_type != AccountType.LOAN:
         raise HTTPException(status_code=400, detail="Account is not a loan")
@@ -1320,6 +1328,19 @@ LOAN_TERM_SCHEDULE_FIELDS = ("annual_rate", "payment_amount", "term_months",
                              "settlement")
 
 
+def _readable_payments(db: Session, current_user: User, payments: list) -> list:
+    """The schedule's payments whose transaction the caller may read."""
+    from app.core.access import RecordAccess, record_account_ids
+
+    ids = [p["transaction_id"] for p in payments]
+    txns = db.query(Transaction).filter(Transaction.id.in_(ids)).all() if ids else []
+    access = RecordAccess(db, current_user)
+    access.load({i for t in txns for i in record_account_ids(t)})
+    access.load_explicit(txns)
+    readable = {t.id for t in txns if access.readable(t)}
+    return [p for p in payments if p["transaction_id"] in readable]
+
+
 @router.get("/{account_id}/loan-schedule")
 def get_loan_schedule(
     account_id: int,
@@ -1338,9 +1359,12 @@ def get_loan_schedule(
     payments_left, rows: [{due_date, amount, status}]}`` with ``status`` "paid"
     (a posted payment, dated when it was made, principal and interest together)
     or "open" (an upcoming due date). No rate, term, amortisation, first payment
-    date, balance after, principal and interest split, or row ids.
+    date, balance after, principal and interest split, or row ids. A
+    ``tag_viewer`` (Household tag share, an active loan only) gets the same
+    limited schedule with the "paid" rows of the payments it may read only, the
+    sharer's own (the tag-share invariant, STU-253).
     """
-    loan = _loan_or_404(db, current_user, account_id)
+    loan = _loan_or_404(db, current_user, account_id, view=True)
     schedule = loan_svc.build_schedule(db, loan)
     role = account_role(current_user, loan)
     if role in MANAGE_ROLES:
@@ -1350,8 +1374,11 @@ def get_loan_schedule(
         upcoming = [{**row, "principal": None, "interest": None, "balance_after": None}
                     for row in schedule["upcoming"]]
         return {"view": "full", **schedule, **terms, "upcoming": upcoming}
+    payments = schedule["payments"]
+    if role == TAG_VIEWER:
+        payments = _readable_payments(db, current_user, payments)
     rows = [{"due_date": p["date"], "amount": round(p["principal"] + p["interest"], 2),
-             "status": "paid"} for p in schedule["payments"]]
+             "status": "paid"} for p in payments]
     rows += [{"due_date": r["effective_date"], "amount": r["payment"], "status": "open"}
              for r in schedule["upcoming"]]
     return {

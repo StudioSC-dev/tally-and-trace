@@ -199,6 +199,8 @@ def test_demotion_to_viewer_deactivates_entries_and_keeps_reading(sw, sw_client,
     assert not any(v for k, v in body["permissions"].items() if k != "can_delete")
     account = _call(sw_client, sw["b"], "get", f"/accounts/{sw['joint']}").json()
     assert account["my_role"] == "viewer"
+    # A viewer still sees the statements and schedule (STU-253), nothing else.
+    assert account["permissions"].pop("can_view_details") is True
     assert not any(account["permissions"].values())
 
 

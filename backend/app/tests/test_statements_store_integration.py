@@ -454,10 +454,12 @@ def test_the_statements_api_by_role(realistic, sw_client, sw_people):
         assert "unconverted_lines" not in detail
         assert not any("transaction_id" in line for line in detail["lines"])
 
-    # A tag viewer is not on the card, as with GET /accounts/{id}/statements.
+    # A tag viewer is not on the card here; GET /accounts/{id}/statements gives it the
+    # limited statements (STU-253).
     assert get(w.callers["household"].headers, acc["card_b"]).status_code == 404
-    assert sw_client.get(f"{API}/accounts/{acc['card_b']}/statements",
-                         headers=w.callers["household"].headers).status_code == 404
+    r = sw_client.get(f"{API}/accounts/{acc['card_b']}/statements",
+                      headers=w.callers["household"].headers)
+    assert r.status_code == 200 and r.json()["view"] == "limited"
     stranger = sw_people("Sam", "Stranger")["headers"]
     assert get(stranger, acc["card_a"]).status_code == 404
     assert get(stranger, acc["card_a"], "/2026-10-12").status_code == 404

@@ -29,9 +29,9 @@ received. The exception is a transfer into a loan the caller can view: its fee
 is that loan's interest, and a loan they can view is one whose interest they
 may see, so ``transfer_fee`` is shown and the source stays a neutral reference.
 With a direct role the loan's schedule and balance history show it too. A
-``tag_viewer`` of a Household-tagged loan gets no schedule (404), but such a
-loan is visible by the Household share (plan §1), so its interest is shown to
-them deliberately.
+``tag_viewer`` of a Household-tagged loan gets only the limited schedule (no
+principal and interest split, STU-253), but such a loan is visible by the
+Household share (plan §1), so its interest is shown to them deliberately.
 
 Tags are the caller's own, plus a sharer's Household tag where rule (c)
 applies (``attach_visible_tags``). Every record
@@ -464,14 +464,15 @@ TAG_VIEWER_ACCOUNT_FIELDS = ("id", "name", "account_type", "currency", "balance"
 def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]:
     """Accounts as ``user`` sees them: ``my_role``, ``permissions``, ``owner_name``,
     and the owner-or-admin fields nulled for everyone else. ``can_delete``
-    (deleting or deactivating the account) is the owner's alone. An account
-    the caller reaches only through a Household tag share (``tag_viewer``)
-    shows ``TAG_VIEWER_ACCOUNT_FIELDS`` alone, with the same access fields
-    (every permission false) and ``tags``. ``is_shared`` is the owner's alone
+    (deleting or deactivating the account) is the owner's alone;
+    ``can_view_details`` (the web app's statement and loan-schedule controls)
+    is every direct role's. An account the caller reaches only through a
+    Household tag share (``tag_viewer``) shows ``TAG_VIEWER_ACCOUNT_FIELDS``
+    alone, with the same access fields (every permission false) and ``tags``. ``is_shared`` is the owner's alone
     (null for other direct roles, absent for ``tag_viewer``). ``owner_id`` (the
     owner's user id) is given to every direct role and absent for ``tag_viewer``."""
-    from app.core.access import (MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER, access_map,
-                                 shared_out_ids)
+    from app.core.access import (DIRECT_ROLES, MANAGE_ROLES, OWNER, OWNER_ROLES, TAG_VIEWER,
+                                 access_map, shared_out_ids)
     from app.core.tags import attach_visible_tags
     from app.schemas.account import AccountFields
 
@@ -497,6 +498,7 @@ def serialize_accounts(db: Session, user, accounts: List[Account]) -> List[dict]
                 "can_manage_shares": role in MANAGE_ROLES,
                 "can_add_transactions": role in EDIT_ROLES,
                 "can_delete": role in OWNER_ROLES,
+                "can_view_details": role in DIRECT_ROLES,
             },
             "owner_name": display_name(owners.get(account.user_id)),
         })

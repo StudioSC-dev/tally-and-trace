@@ -256,8 +256,11 @@ def test_tagging_a_private_card_household_exposes_only_the_owners_transactions(h
     assert _call(sw_client, c, "GET", f"/transactions/{theirs}").status_code == 404
     ids = {t["id"] for t in _get(sw_client, c, "/transactions/", limit=100)["items"]}
     assert mine in ids and theirs not in ids
-    # Statements and the card's settings stay closed to a tag viewer.
-    assert _call(sw_client, c, "GET", f"/accounts/{hh['a_card']}/statements").status_code == 404
+    # The card's settings stay closed to a tag viewer; its statements are the
+    # limited ones (STU-253), never another user's line.
+    statements = _get(sw_client, c, f"/accounts/{hh['a_card']}/statements")
+    assert statements["view"] == "limited"
+    assert sw_leaks(statements["statements"], numbers=(B_LUNCH,)) == []
 
 
 # --- Never a write -----------------------------------------------------------------------

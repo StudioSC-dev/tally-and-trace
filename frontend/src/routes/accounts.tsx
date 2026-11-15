@@ -95,7 +95,7 @@ function AccountCard({ account, credit, creditPhase, sharedWith, onOpen }: {
               </span>
             </div>
 
-            {account.account_type === 'loan' && account.my_role !== 'tag_viewer' && <LoanSummary account={account} />}
+            {account.account_type === 'loan' && account.permissions.can_view_details && <LoanSummary account={account} />}
 
             {managed && creditPhase === 'error' ? (
               <p className="text-xs text-muted" data-testid={`account-credit-error-${account.id}`}>
@@ -940,9 +940,9 @@ export function AccountsPage() {
               </p>
             )}
 
-            {/* A Household share shows no loan terms, schedule or statements (the API answers 404). */}
-            {actionAccount.account_type === 'loan' && actionAccount.my_role !== 'tag_viewer' && (
-              <div className="mt-6 space-y-4">
+            {/* Loan terms, schedule and statements only where the API grants the details (never a Household share). */}
+            {actionAccount.account_type === 'loan' && actionAccount.permissions.can_view_details && (
+              <div className="mt-6 space-y-4" data-testid="account-loan-details">
                 <LoanSummary account={actionAccount} />
                 <LoanSettlement account={actionAccount} />
                 <LoanDueDates account={actionAccount} />
@@ -967,8 +967,8 @@ export function AccountsPage() {
               </div>
             )}
 
-            {actionAccount.account_type === 'credit' && actionAccount.my_role !== 'tag_viewer' && (
-              <div className="mt-6">
+            {actionAccount.account_type === 'credit' && actionAccount.permissions.can_view_details && (
+              <div className="mt-6" data-testid="account-statements">
                 <StatementsPanel account={actionAccount} />
               </div>
             )}

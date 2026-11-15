@@ -30,6 +30,8 @@ export interface AccountPermissions {
   can_add_transactions: boolean
   /** Owner only: delete the account or mark it inactive (send `is_active`). */
   can_delete: boolean
+  /** Any direct role: show a card's statements and a loan's schedule (false for `tag_viewer`). */
+  can_view_details: boolean
 }
 
 /**
