@@ -9,6 +9,7 @@
 //   (c) AC4 day rollover: with the page clock crossing Manila midnight the Due card reads "…"
 //       and then the new day's data, without navigation.
 //   (c2) an answer still dated the old day keeps Upcoming at "…" (the card shows a day's data only for that day).
+//   (c3) an answer dated another day than the page decides nothing: no Due row, no page-open POST.
 //   (d) AC5 fallback: with `/dashboard/due` answered 404 the card renders the rows it rendered
 //       from `/due`, from the older queries.
 //   (e) the stale-data guard (STU-603 comment): while the Due data refetches, Post on a pending
@@ -275,6 +276,8 @@ async function scenarioC(browser) {
     })
     await h.waitQuiet(page)
     const before = await badges(page)
+    const rowsBefore = await dueRows(page).count()
+    await h.check('c.due-rows-before', 'S', async () => rowsBefore > 0 || 'the Due tab lists no row before midnight')
     held = await h.holdResponse(page, getOf(isDue), { transform: (json) => ({ ...json, today: next }) })
     await h.rewrite(page, getOf((u) => pathOf(u) === '/budget-entries/installment-plans'), (json) => ({ ...json, today: next }))
     await page.clock.fastForward('03:00')
@@ -284,9 +287,19 @@ async function scenarioC(browser) {
       const shown = ((await page.locator(tid('due-upcoming-count')).textContent()) || '').trim()
       return shown === '…' || `Upcoming read "${shown}" while the new day's data was held`
     })
+    // The old day's answer is still cached, and none of it is shown for the new day: no Due row, the Due badge pending.
+    await h.check('c.due-rows-hidden', 'B', async () => {
+      const n = await dueRows(page).count()
+      return n === 0 || `${n} Due row(s) from the previous day shown while the new day's data was held`
+    })
+    await h.check('c.due-badge-pending', 'B', async () => {
+      const shown = ((await page.locator(tid('due-count')).textContent()) || '').trim()
+      return shown === '…' || `the Due badge read "${shown}" while the new day's data was held`
+    })
     held.release({ disarm: true })
     await page.locator(tid('due-upcoming-count')).filter({ hasNotText: '…' }).waitFor({ timeout: 10000 })
     await h.waitQuiet(page)
+    await h.check('c.due-rows-back', 'B', async () => (await dueRows(page).count()) > 0 || 'the Due rows did not come back')
     const after = await badges(page)
     await h.check('c.new-day-data', 'B', async () =>
       after['due-upcoming-count'] === before['due-upcoming-count'] && !Object.values(after).includes('…') ||
@@ -320,6 +333,62 @@ async function scenarioC2(browser) {
       return shown === '…' || `Upcoming read "${shown}" from an answer dated the old day`
     })
     await h.check('c2.no-empty-text', 'B', async () => (await page.locator(tid('due-upcoming-empty')).count()) === 0 || 'an empty text is shown')
+  } finally {
+    await ctx.close()
+  }
+}
+
+// (c3) an answer dated another day decides nothing: no row, and no page-open POST
+async function scenarioC3(browser) {
+  console.log('\n(c3) /dashboard/due dated another day than the page: no Due row, no page-open POST')
+  const user = await h.makeUser(stack, 'drc3')
+  const today = manilaToday()
+  const day = today.slice(8, 10)
+  const bank = await client.post(user.token, '/accounts/', { name: 'drc3 Checking', account_type: 'checking', balance: 100000, currency: 'PHP' })
+  const card = await client.post(user.token, '/accounts/', {
+    name: 'drc3 Visa', account_type: 'credit', balance: 0, currency: 'PHP', credit_limit: 100000,
+    billing_cycle_start: Math.min(28, Number(day)), days_until_due_date: 21, payment_account_id: bank.id,
+  })
+  await client.post(user.token, '/budget-entries/', {
+    entry_type: 'expense', currency: 'PHP', cadence: 'monthly', name: 'drc3 Lamp', amount: 1200,
+    account_id: card.id, next_occurrence: wire(today), end_mode: 'after_occurrences', max_occurrences: 6,
+  })
+  await client.post(user.token, '/transactions/', {
+    account_id: bank.id, transaction_type: 'debit', amount: 40, description: 'drc3 Pending',
+    transaction_date: wire(addDays(today, -2)), is_posted: false,
+  })
+  const isPageOpenPost = (r) => r.method() === 'POST' && pathOf(r.url()) === '/budget-entries/post-due-installments'
+  // Control: on the real day the page-open POST is sent and the rows show.
+  const control = await signedIn(browser, user)
+  let posts = 0
+  try {
+    control.page.on('request', (r) => { if (isPageOpenPost(r)) posts++ })
+    await openTransactions(control.page)
+    await control.page.locator(tid('due-not-posted-count')).filter({ hasText: /^1$/ }).waitFor({ timeout: 10000 })
+    await h.waitQuiet(control.page)
+    await h.check('c3.control-posts-on-open', 'S', async () => posts === 1 || `the control sent ${posts} page-open POSTs`)
+  } finally {
+    await control.ctx.close()
+  }
+  // The page's clock is a day behind the API's: every /due answer is dated the day after the page's.
+  const { ctx, page } = await signedIn(browser, user, {})
+  try {
+    await page.clock.install({ time: new Date(`${addDays(today, -1)}T06:00:00Z`) })
+    let stalePosts = 0
+    page.on('request', (r) => { if (isPageOpenPost(r)) stalePosts++ })
+    const seen = await record(page, async () => {
+      await page.goto(`${stack.webUrl}/transactions`)
+      await page.getByRole('button', { name: 'Add Transaction' }).first().waitFor()
+      await h.sleep(1500)
+    })
+    await h.check('c3.due-read', 'S', async () => seen.some((r) => isDue(r.url)) || `no /dashboard/due request: ${show(seen)}`)
+    await h.check('c3.no-page-open-post', 'B', async () => stalePosts === 0 || `${stalePosts} page-open POST(s) decided from an answer dated another day`)
+    await h.check('c3.no-rows-and-badge-pending', 'B', async () => {
+      const badge = ((await page.locator(tid('due-not-posted-count')).textContent()) || '').trim()
+      await page.locator(tid('due-tab-not-posted')).click()
+      const n = await dueRows(page).count()
+      return (n === 0 && badge === '…') || `${n} row(s) shown and the Not posted yet badge read "${badge}" for an answer dated another day`
+    })
   } finally {
     await ctx.close()
   }
@@ -394,6 +463,7 @@ async function scenarioE(browser, { fallback }) {
   }
 }
 
+// (f) the stale-data guard reaches Post now and the occurrence rows
 // (g) STU-605 QA note: the toast stack must not cover the Due card's rows at the end of the page.
 async function scenarioG(browser) {
   console.log('\n(g) with toasts showing and the page scrolled to its end, no Due row button sits under the stack')
@@ -503,6 +573,7 @@ const SCENARIOS = [
   ['b', scenarioB],
   ['c', scenarioC],
   ['c2', scenarioC2],
+  ['c3', scenarioC3],
   ['d', scenarioD],
   ['e', (b) => scenarioE(b, { fallback: false })],
   ['e2', (b) => scenarioE(b, { fallback: true })],

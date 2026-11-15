@@ -388,16 +388,30 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
     { skip: !legacy, refetchOnMountOrArgChange: true, refetchOnFocus: true },
   )
   const source = legacy ? snapshotQuery : dueQuery
-  const snapshot: DueLists | undefined = legacy ? snapshotQuery.data : dueQuery.data
-  const dueData: DashboardDue | undefined = legacy ? undefined : dueQuery.data
+  // A `/dashboard/due` answer dated another Manila day is not this day's data (a statement may have closed, a
+  // row become overdue): it is treated as not loaded, so its rows, badge and the page-open decision wait for a
+  // refetch of the new day. The older API's snapshot keeps the behavior it always had.
+  const dueRaw: DashboardDue | undefined = legacy ? undefined : dueQuery.data
+  const dueStale = dueRaw !== undefined && !freshFor(dueRaw.today, today)
+  const dueData: DashboardDue | undefined = dueStale ? undefined : dueRaw
+  const snapshot: DueLists | undefined = legacy ? snapshotQuery.data : dueData
   const {
     isSuccess: snapshotSuccess,
     isFetching: sourceFetching,
     isError: snapshotIsError,
-    isLoading: snapshotLoading,
+    isLoading: sourceLoading,
     error: snapshotError,
   } = source
+  const snapshotLoading = sourceLoading || dueStale
   const refetchSource = () => void (legacy ? snapshotQuery.refetch() : dueQuery.refetch())
+  // A cached answer of another day (the page was left open past midnight, or the cache outlived it) is refetched
+  // once per day; the card shows no rows from it meanwhile.
+  const staleRefetchedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!dueStale || sourceFetching || staleRefetchedFor.current === today) return
+    staleRefetchedFor.current = today
+    void dueQuery.refetch()
+  }, [dueStale, sourceFetching, today, dueQuery])
   // Consumed when this mount's first settled read is evaluated, whether or not a POST is sent.
   const pageOpenDone = useRef(false)
   // Older API only: the snapshot already cached when the fallback began is never the basis of the page-open POST.
@@ -523,7 +537,7 @@ export function DueAndOverdueSection({ today, onPost, onChanged, onOpenTransacti
   // Upcoming: both sources soonest first, merged and cut at UPCOMING_LIMIT; the badge is the exact total.
   const upcomingTxns = upcomingTxnResult.currentData
   // The occurrences: the older API's own queries, or `/dashboard/due`'s lists while they are for today.
-  const dueFresh = dueData !== undefined && freshFor(dueData.today, today)
+  const dueFresh = dueData !== undefined
   const upcomingOccs = legacy ? upcomingOccResult.currentData : dueFresh ? dueData?.upcoming_occurrences : undefined
   const upcomingOccFetching = legacy ? upcomingOccResult.isFetching : sourceFetching
   const upcomingOccFailed = legacy ? upcomingOccResult.isError : snapshotIsError
