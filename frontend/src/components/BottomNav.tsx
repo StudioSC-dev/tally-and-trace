@@ -79,7 +79,7 @@ export function BottomNav() {
                   className={`absolute inset-x-0 top-0 h-px ${isActive ? 'bg-ink' : 'bg-transparent'}`}
                 />
                 <Icon active={isActive} />
-                <span className="label">{label}</span>
+                <span className="label text-[length:min(0.6875rem,11px)]">{label}</span>
               </>
             )}
           </Link>
