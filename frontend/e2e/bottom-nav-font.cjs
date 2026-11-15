@@ -107,7 +107,20 @@ async function scenarioA(browser, engine) {
         const scroll = await page.evaluate(() => document.documentElement.scrollWidth)
         if (scroll <= VIEWPORT.width) return true
         if (CLEAN_PAGES.includes(route)) return `scrollWidth ${scroll} > ${VIEWPORT.width}`
-        console.log(`  NOTE ${route}: page content (not the nav) makes scrollWidth ${scroll}`)
+        // Out of scope here, but verified rather than assumed: something other than the nav must
+        // be what is wider than the viewport, and it is recorded.
+        const over = await page.evaluate((w) => Array.from(document.body.querySelectorAll('*'))
+          .map((el) => ({ el, r: el.getBoundingClientRect() }))
+          .filter(({ r }) => r.width > 0 && r.right > w + 0.5)
+          .map(({ el, r }) => ({
+            inNav: el.closest('nav.fixed.bottom-0') !== null,
+            what: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${el.getAttribute('data-onboarding') ? `[data-onboarding=${el.getAttribute('data-onboarding')}]` : ''} "${(el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`,
+            rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right) },
+          })), VIEWPORT.width)
+        const inNav = over.filter((o) => o.inNav)
+        if (inNav.length) return `the nav overflows: ${JSON.stringify(inNav.slice(0, 4))}`
+        if (over.length === 0) return `scrollWidth ${scroll} > ${VIEWPORT.width} but no element's right edge exceeds it`
+        console.log(`  NOTE ${route}: scrollWidth ${scroll} comes from page content, not the nav (STU-637 will fix these pages): ${JSON.stringify(over.slice(0, 8))}`)
         return true
       })
     }
