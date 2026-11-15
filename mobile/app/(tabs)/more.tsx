@@ -208,7 +208,7 @@ function WishlistSection({ currency }: { currency: CurrencyCode }) {
         estimated_cost: parseFloat(form.estimated_cost),
         priority: form.priority as WishlistItem['priority'],
         currency,
-        is_achieved: false,
+        is_purchased: false,
       }).unwrap()
       setForm({ name: '', estimated_cost: '', priority: 'medium' })
       setShowForm(false)
@@ -271,7 +271,7 @@ function WishlistSection({ currency }: { currency: CurrencyCode }) {
               </Text>
             </View>
             <View className="flex-row gap-2 mt-3">
-              <Badge label={item.is_achieved ? '✓ Achieved' : 'Saving'} color={item.is_achieved ? 'green' : 'yellow'} />
+              <Badge label={item.is_purchased ? '✓ Purchased' : 'Saving'} color={item.is_purchased ? 'green' : 'yellow'} />
               <TouchableOpacity
                 onPress={() =>
                   Alert.alert('Delete', `Remove "${item.name}"?`, [
