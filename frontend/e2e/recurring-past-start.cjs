@@ -15,6 +15,9 @@
 //   forecast's first occurrence of the entry is the date the warning named;
 // due_card_matches_warning (AC4): the Due card's next date for the entry (its Upcoming tab) is
 //   the date the warning named;
+// edit_leaving_on_date_matches_warning (AC4): an edit from "On date" to "Keep running" or
+//   "After runs" clears the stored end date (before the named date), and the forecast's first
+//   occurrence and the Due card's next date are the date the warning named;
 // save_preserves_selected_past_date (AC6): the saved next occurrence is the picked date
 //   exactly, and Edit reopens it;
 // existing_recurrence_results_unchanged (AC6): a future-dated entry shows no warning and its
@@ -118,7 +121,8 @@ const entryNamed = async (user, name) => {
 /** The forecast's first occurrence of an entry (`GET /forecast/upcoming`, a year ahead). */
 const forecastFirst = async (user, entry) => {
   const body = await client.get(user.token, '/forecast/upcoming?days=365')
-  const mine = body.items.filter((i) => i.source === 'budget_entry' && i.name === entry.name).map((i) => i.due_date).sort()
+  // The occurrence's own date: an overdue one (a capped entry's past dates) is listed on today.
+  const mine = body.items.filter((i) => i.source === 'budget_entry' && i.name === entry.name).map((i) => i.occurrence_date ?? i.due_date).sort()
   return mine[0] ?? null
 }
 
@@ -358,6 +362,64 @@ async function dueCardMatchesWarning(browser) {
   }
 }
 
+// AC4, an edit that leaves "On date": the stored end date (before the named date) is cleared,
+// so the forecast and the Due card use the date the warning named.
+async function editLeavingOnDateMatchesWarning(browser) {
+  console.log('\n=== edit_leaving_on_date_matches_warning (AC4)')
+  const user = await h.makeUser(stack, 'psg')
+  const bank = await account(user, 'PS Checking')
+  const today = manilaToday()
+  const { ctx, page, native } = await openAllocations(browser, user)
+  try {
+    for (const [mode, button] of [['never', 'Keep running'], ['after_n', 'After runs']]) {
+      const name = `Ended ${mode}`
+      // Stored ending 50 days after its date and before the picked one: the old end date
+      // would leave the schedule nothing from the picked date on.
+      await client.post(user.token, '/budget-entries/', {
+        entry_type: 'income', currency: 'PHP', cadence: 'monthly', name, amount: 1000,
+        account_id: bank.id, next_occurrence: `${addDays(today, -400)}T09:00:00`,
+        end_mode: 'on_date', end_date: `${addDays(today, -350)}T09:00:00`,
+      })
+      const form = await openEdit(page, name)
+      await field(form, 'next_occurrence').fill(pastDate())
+      await form.getByRole('button', { name: button, exact: true }).click()
+      const text = await warningText(form)
+      const m = text && /^This date is in the past\. The first occurrence will be (.+?)(?:, shown as overdue)?\.$/.exec(text)
+      const named = m ? dayOfLabel(m[1]) : null
+      await h.check(`edit_leaving_on_date_matches_warning.${mode}.named`, 'S', () =>
+        (named !== null && named > addDays(today, -350)) || `warning ${JSON.stringify(text)}`)
+      await page.getByRole('button', { name: 'Update Recurring Entry' }).click()
+      await form.waitFor({ state: 'detached' })
+      await h.waitQuiet(page)
+      const entry = await entryNamed(user, name)
+      await h.check(`edit_leaving_on_date_matches_warning.${mode}.end-date-cleared`, 'B', () =>
+        entry.end_date === null || `stored end_date ${entry.end_date}`)
+      await h.check(`edit_leaving_on_date_matches_warning.${mode}.forecast-first`, 'B', async () => {
+        const first = await forecastFirst(user, entry)
+        return (named !== null && first === named) || `forecast ${first}, warning named ${named}`
+      })
+      await h.check(`edit_leaving_on_date_matches_warning.${mode}.due-card`, 'B', async () => {
+        const due = await client.get(user.token, '/dashboard/due')
+        // Never: the next occurrence on the Upcoming tab (or due today); After runs: the
+        // capped entry's oldest missed occurrence on the Due tab.
+        const days = (mode === 'after_n'
+          ? due.missed.filter((o) => o.entry_id === entry.id).map((o) => o.oldest)
+          : [
+              ...due.upcoming_occurrences.items.filter((o) => o.entry_id === entry.id).map((o) => o.occurrence_date),
+              ...due.upcoming_this_month.filter((o) => o.source === 'budget_entry' && o.name === name && o.due_date === today).map((o) => o.due_date),
+            ]).sort()
+        return (named !== null && days[0] === named) || `Due card days ${JSON.stringify(days)}, warning named ${named}`
+      })
+      await page.goto(`${stack.webUrl}/allocations`)
+      await page.getByRole('button', { name: 'Add Recurring Entry' }).waitFor()
+      await h.waitQuiet(page)
+    }
+  } finally {
+    await d.checkNoNativeDialogs(h, 'edit_leaving_on_date_matches_warning', native)
+    await ctx.close()
+  }
+}
+
 // AC6
 async function existingRecurrenceResultsUnchanged(browser) {
   console.log('\n=== existing_recurrence_results_unchanged (AC6)')
@@ -391,6 +453,7 @@ const SCENARIOS = [
   ['no_warning_for_future', noWarningForFuture],
   ['saved_past_date_matches_warning', savedPastDateMatchesWarning],
   ['due_card_matches_warning', dueCardMatchesWarning],
+  ['edit_leaving_on_date_matches_warning', editLeavingOnDateMatchesWarning],
   ['existing_recurrence_results_unchanged', existingRecurrenceResultsUnchanged],
 ]
 
