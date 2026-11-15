@@ -1,6 +1,7 @@
 import type { Account, EntryOccurrence, EntryOccurrences, MaterializeOutcome, OccurrenceOutcome, RecurringKind } from '../types/api'
-import { formatEntryDate } from './entryDate'
-import { daysInMonth } from './recurrence'
+import { entryDay, formatEntryDate, parseEntryDate } from './entryDate'
+import { daysInMonth, generateOccurrences } from './recurrence'
+import type { RecurringSchedule } from './recurrence'
 import { wallDay } from './transactionList'
 
 /**
@@ -251,7 +252,11 @@ export interface OmittedRun {
   count: number
 }
 
-/** Mirrors the server's `skipped_before`: any day with a posted linked row, even an ambiguous one, is recorded. */
+/**
+ * Whether a listed occurrence is unrecorded, read from `linked` alone: a day linked to one posted
+ * row ('posted') or to more than one row ('ambiguous') counts as recorded; one pending row or none
+ * does not.
+ */
 const isUnrecorded = (occurrence: EntryOccurrence): boolean => occurrence.linked !== 'posted' && occurrence.linked !== 'ambiguous'
 
 /**
@@ -295,4 +300,52 @@ export function skippedBefore(
   const oldest = listing.oldest_unrecorded
   if (oldest && oldest < selected.occurrence_date && !dates.includes(oldest)) dates.unshift(oldest)
   return { count: selected.skipped_before, dates }
+}
+
+/** A semi-monthly schedule's gap between two scheduled days is at most 31 days. */
+const FIRST_OCCURRENCE_REACH_MS = 32 * 24 * 60 * 60 * 1000
+
+/**
+ * The first occurrence of an entry's schedule walked from `next_occurrence`, as the server
+ * walks it (`YYYY-MM-DD`): `next_occurrence` itself, except a semi-monthly one stored off its
+ * days, whose first is its next scheduled day (days 1/15 from Dec 26: Jan 1). Null when the
+ * walk yields nothing: an end date before it, or no occurrences left.
+ */
+export function firstWalkedOccurrence(entry: RecurringSchedule): string | null {
+  const anchor = parseEntryDate(entry.next_occurrence)
+  if (Number.isNaN(anchor.getTime())) return null
+  const [first] = generateOccurrences(entry, anchor, new Date(anchor.getTime() + FIRST_OCCURRENCE_REACH_MS), 3)
+  return first ? entryDay(first) : null
+}
+
+/**
+ * The occurrence a Mark paid dialog asks the server for. Opened on the entry's own
+ * `next_occurrence` (the entry's row, not a listed occurrence), that is the first walked
+ * occurrence (`firstWalkedOccurrence`): an off-day semi-monthly `next_occurrence` is not an
+ * occurrence, and its first one may be more than 31 days out, past the plain listing. Any
+ * other day, or no entry to read, is asked for as it is.
+ */
+export function markPaidRequestedOccurrence(occurrenceDate: string | null, entry: RecurringSchedule | undefined): string | null {
+  if (occurrenceDate === null || entry === undefined || occurrenceDate !== entryDay(entry.next_occurrence)) return occurrenceDate
+  return firstWalkedOccurrence(entry) ?? occurrenceDate
+}
+
+/**
+ * Why a Mark paid dialog lists no occurrence: every one recorded (a cap used up), an end date
+ * before the next scheduled day, or a first occurrence too far ahead to record yet. Without the
+ * entry, the plain line.
+ */
+export function noOccurrenceReason(entry: RecurringSchedule | undefined): string {
+  const plain = 'This entry has no occurrence left to record.'
+  if (entry === undefined) return plain
+  if (entry.end_mode === 'after_occurrences' && entry.max_occurrences != null && entry.max_occurrences <= 0) {
+    return 'Every occurrence of this entry is already recorded.'
+  }
+  const first = firstWalkedOccurrence(entry)
+  if (first === null) {
+    return entry.end_mode === 'on_date' && entry.end_date
+      ? `This entry ends on ${formatEntryDate(entry.end_date)}, before its next scheduled day.`
+      : plain
+  }
+  return `Its next occurrence, ${formatEntryDate(first)}, is too far ahead to record yet.`
 }

@@ -46,6 +46,17 @@ describe('isOtherUpcoming', () => {
     expect(isOtherUpcoming(new Set())(unconverted(7))).toBe(true)
   })
 
+  // The card-charges e2e cannot force this: its API fetches live rates, so whether its foreign
+  // subscription's upcoming row is unconverted depends on the network. The exclusion is covered here.
+  it('unconverted_foreign_excluded', () => {
+    const foreign = unconverted(7)
+    expect([foreign.unconverted, foreign.currency]).toEqual([true, 'USD'])
+    // Listed among its card's (PHP) charges: shown there, not under "Also coming up".
+    expect(isOtherUpcoming(fullCardChargeKeys([card([fullCharge(7)])]))(foreign)).toBe(false)
+    // The same row on no card is listed in its own currency.
+    expect(isOtherUpcoming(new Set())(foreign)).toBe(true)
+  })
+
   it('does not apply the card-charge exclusion to a limited event', () => {
     expect(isOtherUpcoming(keys)(limitedEvent)).toBe(true)
   })

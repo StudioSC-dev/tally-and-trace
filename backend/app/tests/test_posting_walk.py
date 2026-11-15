@@ -87,15 +87,14 @@ def test_walk_lists_a_clamped_semi_monthly_day_once():
 def test_capped_walk_counts_a_clamped_semi_monthly_day_once(monkeypatch):
     """Days 30/31, four left: the cap applies after Feb 28's two clamped days
     merge, so the walk is the four occurrences four Mark paids record. The
-    projection's own walk still caps first (both Feb 28s, three days)."""
+    projection's own walk merges and caps the same way (STU-364)."""
     e = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
                semi_monthly_day_2=31, end_mode="after_occurrences", max_occurrences=4)
     four = [date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30)]
 
     assert [o.date() for o in schedule_walk(e, date(2027, 3, 31))] == four
     assert [o.date() for o in schedule_walk(e, date(2027, 12, 31))] == four
-    assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2028, 1, 1))] == [
-        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28)]
+    assert [o.date() for o in iter_occurrences(e, e.next_occurrence, datetime(2028, 1, 1))] == four
 
     # ``unrecorded_occurrences`` (card missed items) caps the same way.
     monkeypatch.setattr(fc, "_linked_rows", lambda *a, **k: [])
@@ -133,3 +132,85 @@ def test_unrecorded_occurrences_count_pending_rows_only_when_asked(monkeypatch):
         date(2026, 12, 5), date(2027, 1, 5), date(2027, 2, 5)]
     assert [o.date() for o in fc.unrecorded_occurrences(
         None, [e], through, pending_records=True)[7]] == [date(2027, 2, 5)]
+
+
+# --- The projection walks a capped semi-monthly schedule as posting does (STU-364) ----------
+
+def _window(entry, start, end):
+    return [(when.date(), original.date() if original else None)
+            for when, original in fc.iter_window_occurrences(entry, start, end)]
+
+
+def test_projection_matches_distinct_day_walk():
+    """Days 30/31, five left: the forecast lists Feb 28 once and, with the cap
+    applied after the merge, keeps Mar 31 as the fifth occurrence (capping
+    first would have spent it on a second Feb 28). Every projection walk
+    matches posting's ``schedule_walk``."""
+    e = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
+               semi_monthly_day_2=31, end_mode="after_occurrences", max_occurrences=5)
+    five = [date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 30),
+            date(2027, 3, 31)]
+    end = datetime(2028, 1, 1)
+
+    assert [o.date() for o in schedule_walk(e, date(2027, 12, 31))] == five
+    assert [o.date() for o in iter_occurrences(e, e.next_occurrence, end)] == five
+    # The window from the schedule's start: every occurrence on its own day.
+    assert _window(e, datetime(2027, 1, 30), end) == [(d, None) for d in five]
+    # A window starting after Jan 31: January's two are still owed, overdue on
+    # the window start; Feb 28 is listed once.
+    assert _window(e, datetime(2027, 2, 15), end) == [
+        (date(2027, 2, 15), date(2027, 1, 30)), (date(2027, 2, 15), date(2027, 1, 31)),
+        (date(2027, 2, 28), None), (date(2027, 3, 30), None), (date(2027, 3, 31), None)]
+    # With a forced date (an unrelated one), the effective walk agrees.
+    moved = {date(2027, 3, 30): date(2027, 3, 29)}
+    assert [(w.date(), n.date()) for w, _, n in fc.effective_window_occurrences(
+        e, datetime(2027, 1, 30), end, moved)] == [
+        (date(2027, 1, 30), date(2027, 1, 30)), (date(2027, 1, 31), date(2027, 1, 31)),
+        (date(2027, 2, 28), date(2027, 2, 28)), (date(2027, 3, 29), date(2027, 3, 30)),
+        (date(2027, 3, 31), date(2027, 3, 31))]
+    # Days 29/30/31 clamp in a 30-day month too: Apr 30 is one occurrence.
+    april = _entry(F.SEMI_MONTHLY, datetime(2027, 4, 1), semi_monthly_day_1=30,
+                   semi_monthly_day_2=31, end_mode="after_occurrences", max_occurrences=3)
+    assert [o.date() for o in iter_occurrences(april, april.next_occurrence, end)] == [
+        date(2027, 4, 30), date(2027, 5, 30), date(2027, 5, 31)]
+    assert [o.date() for o in schedule_walk(april, date(2027, 12, 31))] == [
+        date(2027, 4, 30), date(2027, 5, 30), date(2027, 5, 31)]
+
+
+def test_non_semi_monthly_projection_unchanged():
+    """Fixed-step cadences, capped or not, project as before: no two of their
+    occurrences share a day, so merging changes nothing."""
+    end = datetime(2027, 7, 1)
+    monthly = _entry(F.MONTHLY, datetime(2027, 1, 31), anchor_day=31)
+    assert [o for o, _ in _window(monthly, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 31), date(2027, 4, 30),
+        date(2027, 5, 31), date(2027, 6, 30)]
+    capped_monthly = _entry(F.MONTHLY, datetime(2027, 1, 31), anchor_day=31,
+                            end_mode="after_occurrences", max_occurrences=3)
+    assert _window(capped_monthly, datetime(2027, 2, 15), end) == [
+        (date(2027, 2, 15), date(2027, 1, 31)), (date(2027, 2, 28), None),
+        (date(2027, 3, 31), None)]
+    weekly = _entry(F.WEEKLY, datetime(2027, 1, 4), end_mode="after_occurrences",
+                    max_occurrences=4)
+    assert [o for o, _ in _window(weekly, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 4), date(2027, 1, 11), date(2027, 1, 18), date(2027, 1, 25)]
+    quarterly = _entry(F.QUARTERLY, datetime(2027, 1, 15), end_mode="on_date",
+                       end_date=datetime(2027, 6, 30))
+    assert [o for o, _ in _window(quarterly, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 15), date(2027, 4, 15)]
+
+
+def test_uncapped_semi_monthly_walk_unchanged():
+    """An uncapped semi-monthly schedule projects as before: days 1/15 on both,
+    and days 30/31 still yield both clamped Feb 28s (only a capped walk
+    merges them)."""
+    end = datetime(2027, 4, 1)
+    plain = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 1))
+    assert [o for o, _ in _window(plain, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 1), date(2027, 1, 15), date(2027, 2, 1), date(2027, 2, 15),
+        date(2027, 3, 1), date(2027, 3, 15)]
+    ended = _entry(F.SEMI_MONTHLY, datetime(2027, 1, 30), semi_monthly_day_1=30,
+                   semi_monthly_day_2=31, end_mode="on_date", end_date=datetime(2027, 3, 30))
+    assert [o for o, _ in _window(ended, datetime(2027, 1, 1), end)] == [
+        date(2027, 1, 30), date(2027, 1, 31), date(2027, 2, 28), date(2027, 2, 28),
+        date(2027, 3, 30)]
