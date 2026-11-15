@@ -6,7 +6,7 @@ the monthly view, the upcoming/payables listings and the per-account closings.
 Generic fixtures on a throwaway user. Skips without a database.
 """
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -166,10 +166,10 @@ def _loan_events(db, user, end=END):
 
 
 def _payables(db, user, days=30):
-    from app.services.forecast import get_payables
+    from app.tests.projection_lists import payable_rows
 
     return [(p["due_date"], p["source"], p["amount"], p["account_id"])
-            for p in get_payables(db, user.id, days=days, reference=REF)]
+            for p in payable_rows(db, user.id, days=days, reference=REF)]
 
 
 def _closings(timeline):
@@ -177,9 +177,8 @@ def _closings(timeline):
 
 
 def test_loan_payment_on_the_4th_leaves_the_paying_account_exactly_once(db, user):
-    from app.services.forecast import (
-        get_payables, get_upcoming_items, project_cashflow, project_running_balance,
-    )
+    from app.services.forecast import project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows, upcoming_rows
 
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
@@ -203,12 +202,12 @@ def test_loan_payment_on_the_4th_leaves_the_paying_account_exactly_once(db, user
     assert months[0]["closing_balance"] == float(timeline["closing_balance"])
     assert [a["closing_balance"] for a in months[0]["by_account"]] == [42000.0]
 
-    upcoming = [i for i in get_upcoming_items(db, user.id, days=30, reference=REF)
+    upcoming = [i for i in upcoming_rows(db, user.id, days=30, reference=REF)
                 if i["source"] == "loan"]
     assert [(i["due_date"], i["amount"], i["source_id"]) for i in upcoming] == [
         ("2026-10-04", Decimal("8000.00"), loan.id)]
 
-    payables = get_payables(db, user.id, days=30, reference=REF)
+    payables = payable_rows(db, user.id, days=30, reference=REF)
     assert [(p["source"], p["amount"], p["account_id"]) for p in payables] == [
         ("loan", 8000.0, bank.id)]
 
@@ -459,9 +458,8 @@ def _cash_out(db, user, days):
 def test_materialised_recurring_loan_transfer_counts_once_and_advances_the_schedule(db, user):
     from app.routers.budget_entries import materialize_budget_entry
     from app.schemas.budget_entry import BudgetEntryMaterialize
-    from app.services.forecast import (
-        get_payables, get_upcoming_items, project_cashflow, project_running_balance,
-    )
+    from app.services.forecast import project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows, upcoming_rows
 
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
@@ -482,15 +480,16 @@ def test_materialised_recurring_loan_transfer_counts_once_and_advances_the_sched
     months = project_cashflow(db, user.id, months=2, reference=REF)
     assert [m["net"] for m in months] == [0.0, -8000.0]
     assert months[-1]["closing_balance"] == float(timeline["closing_balance"])
-    upcoming = get_upcoming_items(db, user.id, days=61, reference=REF)
+    upcoming = upcoming_rows(db, user.id, days=61, reference=REF)
     assert [(i["due_date"], i["source"]) for i in upcoming] == [("2026-11-04", "budget_entry")]
-    payables = get_payables(db, user.id, days=61, reference=REF)
+    payables = payable_rows(db, user.id, days=61, reference=REF)
     assert [(p["due_date"], p["source"], p["amount"]) for p in payables] == [
         ("2026-11-04", "budget_entry", 8000.0)]
 
 
 def test_generic_transfer_into_a_loan_is_a_scheduled_payment(db, user):
-    from app.services.forecast import get_payables, project_running_balance
+    from app.services.forecast import project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     bank = _bank(db, user)
     loan = _loan(db, user, bank)
@@ -502,7 +501,7 @@ def test_generic_transfer_into_a_loan_is_a_scheduled_payment(db, user):
     assert [e["date"] for e in _loan_events(db, user, END)] == [datetime(2026, 11, 4)]
     timeline = project_running_balance(db, user.id, days=61, reference=REF)
     assert timeline["closing_balance"] == Decimal("34000.00")
-    assert [(p["due_date"], p["source"]) for p in get_payables(db, user.id, days=61,
+    assert [(p["due_date"], p["source"]) for p in payable_rows(db, user.id, days=61,
                                                                  reference=REF)] == [
         ("2026-11-04", "loan")]
 
@@ -540,13 +539,13 @@ def test_generic_transfer_into_a_loan_keeps_the_loan_endpoint_rules(db, user):
 
 
 def test_planned_prepayment_is_a_payable_and_does_not_cover_the_due_date(db, user):
-    from app.services.forecast import get_payables
+    from app.tests.projection_lists import payable_rows
 
     bank = _bank(db, user)
     loan = _loan(db, user, bank, loan_amortization="reduce_term", loan_kind="home")
     _transfer(db, user, bank, loan, "20000", datetime(2026, 10, 10), kind="prepayment")
 
-    payables = get_payables(db, user.id, days=30, reference=REF)
+    payables = payable_rows(db, user.id, days=30, reference=REF)
     assert [(p["due_date"], p["source"], p["amount"]) for p in payables] == [
         ("2026-10-04", "loan", 8000.0), ("2026-10-10", "transaction", 20000.0)]
 
@@ -723,7 +722,8 @@ def _put(db, user, txn, **changes):
 
 def _assert_paid_once_then_november(db, user, loan, bank):
     """Oct 4 is settled by the posted payment; only Nov 4 is still projected."""
-    from app.services.forecast import get_payables, project_cashflow, project_running_balance
+    from app.services.forecast import project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     s = _schedule(db, loan)
     assert (s["payments_made"], str(s["next_due_date"])) == (1, "2026-11-04")
@@ -736,7 +736,7 @@ def _assert_paid_once_then_november(db, user, loan, bank):
     assert [m["net"] for m in months] == [0.0, -8000.0]
     assert months[-1]["closing_balance"] == float(timeline["closing_balance"])
     assert [(p["due_date"], p["source"], p["account_id"])
-            for p in get_payables(db, user.id, days=61, reference=REF)] == [
+            for p in payable_rows(db, user.id, days=61, reference=REF)] == [
         ("2026-11-04", "loan", bank.id)]
 
 
@@ -815,7 +815,8 @@ def test_a_wallet_funded_recurring_loan_payment_covers_and_settles_its_due_date(
     from app.models.account import AccountType
     from app.routers.budget_entries import materialize_budget_entry
     from app.schemas.budget_entry import BudgetEntryMaterialize
-    from app.services.forecast import collect_events, get_payables, project_running_balance
+    from app.services.forecast import collect_events, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     bank = _bank(db, user)
     wallet = _account(db, user, "GCash", AccountType.E_WALLET, "10000", is_spending_wallet=True)
@@ -830,7 +831,7 @@ def test_a_wallet_funded_recurring_loan_payment_covers_and_settles_its_due_date(
     assert [(leg["account_id"], leg["cash"]) for leg in occ[0]["legs"]] == [(wallet.id, False)]
     timeline = project_running_balance(db, user.id, days=30, reference=REF)
     assert timeline["closing_balance"] == Decimal("50000.00") and timeline["events"] == []
-    assert get_payables(db, user.id, days=30, reference=REF) == []
+    assert payable_rows(db, user.id, days=30, reference=REF) == []
 
     txn = materialize_budget_entry(entry.id, BudgetEntryMaterialize(), db=db, current_user=user)
     assert (txn.loan_payment_kind, txn.is_posted, txn.transfer_from_account_id) == (
@@ -844,7 +845,8 @@ def test_a_wallet_funded_recurring_loan_payment_covers_and_settles_its_due_date(
 
 def test_a_card_funded_transfer_into_a_loan_settles_its_due_date_once(db, user):
     from app.models.account import AccountType
-    from app.services.forecast import get_payables, project_running_balance
+    from app.services.forecast import project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     bank = _bank(db, user)
     card = _account(db, user, "Card", AccountType.CREDIT, "0", billing_cycle_start=15,
@@ -864,7 +866,7 @@ def test_a_card_funded_transfer_into_a_loan_settles_its_due_date_once(db, user):
         ("2026-11-04", "statement", Decimal("-8000.00"))]
     assert timeline["closing_balance"] == Decimal("34000.00")
     assert sorted((p["due_date"], p["source"], p["amount"])
-                  for p in get_payables(db, user.id, days=61, reference=REF)) == [
+                  for p in payable_rows(db, user.id, days=61, reference=REF)) == [
         ("2026-11-04", "loan", 8000.0), ("2026-11-04", "statement", 8000.0)]
 
 
@@ -1027,9 +1029,8 @@ def test_a_reduce_term_part_payment_and_a_planned_cover_leave_cash_once(db, user
 def test_a_loan_paid_from_an_account_outside_the_scope_leaves_cash_only_in_its_view(
         db, user, other):
     from app.models.account import AccountType
-    from app.services.forecast import (
-        collect_events, get_payables, project_cashflow, project_running_balance,
-    )
+    from app.services.forecast import collect_events, project_cashflow, project_running_balance
+    from app.tests.projection_lists import payable_rows
 
     _account(db, user, "Owner bank", AccountType.CHECKING, "1000")
     payer_bank = _account(db, other, "Payer bank", AccountType.CHECKING, "50000")
@@ -1044,7 +1045,7 @@ def test_a_loan_paid_from_an_account_outside_the_scope_leaves_cash_only_in_its_v
     month = project_cashflow(db, user.id, months=1, reference=REF)[0]
     assert (month["net"], month["closing_balance"], month["unassigned_closing"]) == (
         0.0, 1000.0, 0.0)
-    assert get_payables(db, user.id, days=30, reference=REF) == []
+    assert payable_rows(db, user.id, days=30, reference=REF) == []
     listed = [e for e in collect_events(db, REF, datetime(2026, 11, 1), user_id=user.id)
               if e["source"] == "loan"]
     assert [(e["source_id"], e["counts_as_cash"], e["legs"]) for e in listed] == [
@@ -1060,7 +1061,7 @@ def test_a_loan_paid_from_an_account_outside_the_scope_leaves_cash_only_in_its_v
     month = project_cashflow(db, other.id, months=1, reference=REF)[0]
     assert (month["net"], month["closing_balance"], month["unassigned_closing"]) == (
         -8000.0, 42000.0, 0.0)
-    assert [(p["kind"], p["face_amount"], p["account"]["id"]) for p in get_payables(
+    assert [(p["kind"], p["face_amount"], p["account"]["id"]) for p in payable_rows(
         db, other.id, days=30, reference=REF)] == [("loan_payment", 8000.0, payer_bank.id)]
 
 
@@ -1212,9 +1213,9 @@ def test_a_loan_the_caller_cannot_access_is_a_neutral_payment_on_its_paying_acco
     import json
     from app.models.account import AccountType
     from app.services.forecast import (
-        collect_events, get_payables, get_upcoming_items, project_cashflow,
-        project_running_balance, serialize_timeline,
+        collect_events, project_cashflow, project_running_balance, serialize_timeline,
     )
+    from app.tests.projection_lists import payable_rows, upcoming_rows
 
     payer_bank = _account(db, other, "Payer bank", AccountType.CHECKING, "1000")
     loan = _loan(db, user, payer_bank)
@@ -1227,8 +1228,8 @@ def test_a_loan_the_caller_cannot_access_is_a_neutral_payment_on_its_paying_acco
         timeline = serialize_timeline(project_running_balance(
             db, who.id, days=30, reference=REF))
         months = project_cashflow(db, who.id, months=1, reference=REF)
-        upcoming = get_upcoming_items(db, who.id, days=30, reference=REF)
-        payables = get_payables(db, who.id, days=30, reference=REF)
+        upcoming = upcoming_rows(db, who.id, days=30, reference=REF)
+        payables = payable_rows(db, who.id, days=30, reference=REF)
         return events, timeline, months, upcoming, payables
 
     # The paying account's owner pays it, once, with no loan detail.
@@ -1264,10 +1265,8 @@ def test_a_payment_into_a_loan_the_caller_cannot_access_is_a_neutral_payment(
         db, user, other, how, amount):
     import json
     from app.models.account import AccountType
-    from app.services.forecast import (
-        collect_events, get_payables, get_upcoming_items, project_running_balance,
-        serialize_timeline,
-    )
+    from app.services.forecast import collect_events, project_running_balance, serialize_timeline
+    from app.tests.projection_lists import payable_rows, upcoming_rows
 
     payer_bank = _account(db, other, "Payer bank", AccountType.CHECKING, "1000")
     loan = _loan(db, user, payer_bank)
@@ -1287,8 +1286,8 @@ def test_a_payment_into_a_loan_the_caller_cannot_access_is_a_neutral_payment(
     def views(who):
         timeline = serialize_timeline(project_running_balance(
             db, who.id, days=20, reference=REF))
-        upcoming = get_upcoming_items(db, who.id, days=20, reference=REF)
-        payables = get_payables(db, who.id, days=20, reference=REF)
+        upcoming = upcoming_rows(db, who.id, days=20, reference=REF)
+        payables = payable_rows(db, who.id, days=20, reference=REF)
         return timeline, upcoming, payables
 
     # The payment, plus the remainder of a partial cover, both leave the
@@ -1479,3 +1478,38 @@ def test_a_transfer_retargeted_into_a_loan_keeps_an_explicit_fee(db, user):
     assert _balances(db, bank, savings, loan) == (
         Decimal("42000.00"), Decimal("0.00"), Decimal("-82100.00"))
     _assert_paid_once_then_november(db, user, loan, bank)
+
+
+def test_legacy_converted_payable_cross_currency_funding_preserves_all_contributing_rates(
+        db, user):
+    """STU-306 part 5: a legacy USD loan paid from a PHP account. Its payable is
+    estimated USD -> PHP when its leg is built, so it is listed in PHP, labelled
+    from that estimate (the payable's own: USD 100 at 58.00), and the response's
+    ``fx`` carries the one rate that contributed. The upcoming list labels it the
+    same way."""
+    from app.core.context import RequestContext
+    from app.models.user import CurrencyType
+    from app.services.forecast import FxCollector, payables_by_currency, upcoming_by_currency
+    from app.tests.conftest import FX_REF
+
+    bank = _bank(db, user)
+    loan = _loan(db, user, bank, currency=CurrencyType.USD,
+                 loan_payment_amount=Decimal("100"))
+    rate_as_of = (FX_REF - timedelta(hours=1)).date().isoformat()  # the suite's stored rate
+    labels = {"currency": "PHP", "estimated": True, "original_amount": 100.0,
+              "original_currency": "USD", "rate": 58.0, "rate_as_of": rate_as_of,
+              "rate_stale": False}
+
+    collector = FxCollector()
+    (payable,) = payables_by_currency(RequestContext(db, user.id), days=30, reference=REF,
+                                      collector=collector)
+    assert (payable["source"], payable["source_id"], payable["due_date"], payable["amount"],
+            payable["account_id"]) == ("loan", loan.id, "2026-10-04", 5800.0, bank.id)
+    assert {k: payable.get(k) for k in labels} == labels
+    assert [(r["base"], r["quote"], r["rate"], r["stale"])
+            for r in collector.as_dict()["rates"]] == [("USD", "PHP", 58.0, False)]
+
+    upcoming = upcoming_by_currency(RequestContext(db, user.id), days=30, reference=REF)
+    (item,) = [i for i in upcoming["items"] if i["source"] == "loan"]
+    assert (item["amount"], *(item.get(k) for k in labels)) == (5800.0, *labels.values())
+    assert [(r["base"], r["quote"]) for r in upcoming["fx"]["rates"]] == [("USD", "PHP")]

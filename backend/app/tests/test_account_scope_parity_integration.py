@@ -224,12 +224,29 @@ def _without_accounts(timeline):
     return timeline
 
 
+# The golden file's upcoming and payables keys. The per-currency lists add each
+# row's ``currency`` and due fields (``overdue`` reads the wall clock), which the
+# golden file predates; an upcoming amount is compared as the Decimal it recorded.
+UPCOMING_KEYS = ("name", "amount", "due_date", "entry_type", "source", "source_id")
+PAYABLE_KEYS = ("due_date", "name", "amount", "source", "source_id", "account_id",
+                "account_name", "overflow_account_id", "overflow_account_name")
+
+
+def _golden_rows(rows, keys, decimal_amount=False):
+    out = [{k: r[k] for k in keys} for r in rows]
+    if decimal_amount:
+        for r in out:
+            r["amount"] = Decimal(f"{r['amount']:.2f}")
+    return out
+
+
 def views(db, built):
     """Every projection view, for both users, unscoped (the single-owner case)."""
     from app.services.forecast import (
-        collect_events, get_disposable_income, get_payables, get_upcoming_items,
-        project_cashflow, project_running_balance, serialize_timeline,
+        collect_events, get_disposable_income, project_cashflow, project_running_balance,
+        serialize_timeline,
     )
+    from app.tests.projection_lists import payable_rows, upcoming_rows
 
     out = {}
     for who in ("owner", "bare"):
@@ -241,8 +258,10 @@ def views(db, built):
             "timeline": _without_accounts(serialize_timeline(project_running_balance(
                 db, uid, days=60, reference=REF))),
             "cashflow": project_cashflow(db, uid, months=2, reference=REF),
-            "upcoming": get_upcoming_items(db, uid, days=60, reference=REF),
-            "payables": get_payables(db, uid, days=60, reference=REF),
+            "upcoming": _golden_rows(upcoming_rows(db, uid, days=60, reference=REF),
+                                     UPCOMING_KEYS, decimal_amount=True),
+            "payables": _golden_rows(payable_rows(db, uid, days=60, reference=REF),
+                                     PAYABLE_KEYS),
             "disposable": get_disposable_income(db, uid),
         }
     return _canonical(out, built["names"])
@@ -313,9 +332,8 @@ def test_own_entries_on_an_inactive_own_account_move_no_cash(db, fixtures):
     from app.models.account import Account, AccountType
     from app.models.budget_entry import BudgetEntry, BudgetEntryType
     from app.models.transaction import RecurrenceFrequency, Transaction, TransactionType
-    from app.services.forecast import (
-        collect_events, get_upcoming_items, project_cashflow, project_running_balance,
-    )
+    from app.services.forecast import collect_events, project_cashflow, project_running_balance
+    from app.tests.projection_lists import upcoming_rows
 
     uid = fixtures["owner"]
     before = project_running_balance(db, uid, days=30, reference=REF)
@@ -347,5 +365,5 @@ def test_own_entries_on_an_inactive_own_account_move_no_cash(db, fixtures):
     for key in ("net", "unassigned_closing", "income", "expenses"):
         if key in october:
             assert october[key] == october_before[key], key
-    upcoming = {i["name"] for i in get_upcoming_items(db, uid, days=60, reference=REF)}
+    upcoming = {i["name"] for i in upcoming_rows(db, uid, days=60, reference=REF)}
     assert {"Old salary", "Old debit"} <= upcoming

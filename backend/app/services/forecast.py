@@ -27,7 +27,7 @@ from app.core.access import (
 from app.core.context import RequestContext, context_of
 from app.core.redaction import CARD_PAYMENT, LIMITED, LOAN_PAYMENT, redactor_for
 from app.core.tags import effective_tag_criterion, ids_with_effective_tag
-from app.core.time import manila_wall_now
+from app.core.time import manila_today, manila_wall_now
 # Unused here since the window moved to Manila, but tests pin the clock by
 # patching this module's ``naive_utc_now``.
 from app.core.time import naive_utc_now  # noqa: F401
@@ -383,111 +383,9 @@ def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     return start, start + timedelta(days=days + 1)
 
 
-def get_upcoming_items(
-    db: Session,
-    user_id: int,
-    days: int = 30,
-    reference: Optional[datetime] = None,
-    tag_id: Optional[int] = None,
-) -> List[dict]:
-    """Single-currency test reference; never called from routes.
-
-    Return every dated event from ``collect_events`` within the next N days
-    (budget-entry occurrences, unposted transactions, credit-card statement
-    payables and loan payables on due dates), sorted by date. ``amount`` is the unsigned amount as entered.
-    """
-    start, end = _upcoming_window(days, reference)
-    return upcoming_items(collect_events(db, start, end, user_id=user_id, tag_id=tag_id))
-
-
-def upcoming_items(events: List[dict]) -> List[dict]:
-    """Single-currency test reference; never called from routes.
-
-    ``collect_events`` events as upcoming items (``get_upcoming_items``), sorted by date.
-    """
-    items = [
-        {
-            "name": e["name"],
-            "amount": e["face_amount"],
-            "due_date": _naive(e["date"]).date().isoformat(),
-            "entry_type": e["type"],
-            "source": e["source"],
-            "source_id": e["source_id"],
-            # Only on a Household occurrence the caller sees in full (their own).
-            **({"household_occurrence": True} if e.get("household_occurrence") else {}),
-            # Only in a Household view (services/household.household_upcoming).
-            **({"currency": e["currency"]} if "currency" in e else {}),
-        }
-        for e in events if e.get("view") != LIMITED
-    ]
-    # A limited event (see collect_events) is listed in its public shape only.
-    limited = [e for e in events if e.get("view") == LIMITED]
-    items += [limited_event(e, f"e{i}") for i, e in enumerate(
-        sorted(limited, key=_event_sort_key), start=1)]
-    items.sort(key=lambda x: x.get("due_date") or x["date"])
-    return items
-
-
 def get_available_cash(accounts) -> Decimal:
     """Pooled projection cash: the sum of projection-cash account balances."""
     return sum((_money(a.balance) for a in accounts if is_projection_cash(a)), Decimal("0"))
-
-
-def get_payables(
-    db: Session,
-    user_id: int,
-    days: int = 30,
-    reference: Optional[datetime] = None,
-    tag_id: Optional[int] = None,
-) -> List[dict]:
-    """Single-currency test reference; never called from routes.
-
-    Cash outflows due within the next N days, with the account each draws on.
-
-    Same window and events as ``get_upcoming_items``, restricted to events that
-    take cash out of the pool (bills, unposted debits, card statements, planned
-    card payments, loan payables on due dates, planned payments into a loan
-    from cash (scheduled payments and prepayments, for principal + interest),
-    and spending-wallet top-ups for their amount + fee: topping a wallet up is
-    the spending). Other transfers between your own accounts are not payables;
-    card charges reach cash via their statement payable instead.
-
-    A planned payment into a loan dated up to ``PLANNED_LOOKBACK`` (31 days)
-    after the window end can still cover a due date inside the window (see
-    services/loans.py), so that due date is not listed, while the payment
-    itself falls outside the window and is not listed either.
-    """
-    start, end = _upcoming_window(days, reference)
-    accounts = get_account_balances(db, user_id)
-    names = {a.id: a.name for a in accounts}
-    events = collect_events(db, start, end, user_id=user_id, accounts=accounts, tag_id=tag_id)
-
-    payables = []
-    public = 0
-    for e in sorted(events, key=_event_sort_key):
-        if not e["counts_as_cash"] or e["amount"] >= 0:
-            continue
-        if (e["type"] == TransactionType.TRANSFER.value and not e.get("card_payment")
-                and not e.get("top_up") and not e.get("loan_payment")):
-            continue
-        if e.get("view") == LIMITED:
-            public += 1
-            payables.append(limited_event(e, f"e{public}"))
-            continue
-        acc = e["funding_account_id"]
-        ov = e["overflow_account_id"]
-        payables.append({
-            "due_date": _naive(e["date"]).date().isoformat(),
-            "name": e["name"],
-            "amount": round(float(-e["amount"]), 2),
-            "source": e["source"],
-            "source_id": e["source_id"],
-            "account_id": acc,
-            "account_name": names.get(acc),
-            "overflow_account_id": ov,
-            "overflow_account_name": names.get(ov),
-        })
-    return payables
 
 
 def get_disposable_income(
@@ -495,6 +393,7 @@ def get_disposable_income(
     user_id: int,
     tag_id: Optional[int] = None,
     fx: Optional[FxRates] = None,
+    today: Optional[date] = None,
 ) -> dict:
     """
     Compute monthly net disposable income:
@@ -514,6 +413,9 @@ def get_disposable_income(
 
     With ``tag_id`` only entries carrying that tag effectively count
     (``app/core/tags.py``), each once.
+
+    An entry whose end date is before ``today`` (Manila, by default) has ended
+    and never counts (``_still_running``), even while it is still active.
     """
     # The accounts the caller sees (inactive ones included, ``tag_viewer`` too),
     # as in the period summary: a top-up counts only when its source is one of
@@ -521,29 +423,52 @@ def get_disposable_income(
     from app.core.access import household_grants
 
     scope_ids = viewable_account_ids(db, user_id, roles=VIEW_ROLES)
-    # Every entry the caller may read: their own, any touching an account they
-    # hold a direct role on, whoever created it, and through a tag share the
-    # sharer's own (rules (b2) and (c)).
+    entries, wallet_ids = _disposable_entries(
+        db, user_id, viewable_account_ids(db, user_id), household_grants(db, user_id),
+        scope_ids, today if today is not None else manila_today(), tag_id)
+    buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, Money(db, fx))
+    row = buckets.get(default_currency(db, user_id)) or _DisposableBucket()
+    return {k: v for k, v in row.as_dict().items() if k in DISPOSABLE_KEYS}
+
+
+def _disposable_entries(db: Session, user_id: int, viewable_ids, grants, scope_ids,
+                        today: date, tag_id: Optional[int]) -> tuple:
+    """``(entries, wallet_ids)``: the recurring entries both disposable figures
+    count (``get_disposable_income``, ``disposable_by_currency``), and the
+    wallets among the caller's accounts they reference.
+
+    Every entry the caller may read (``viewable_ids`` and ``grants``): their
+    own, any touching an account they hold a direct role on, whoever created
+    it, and through a tag share the sharer's own (rules (b2) and (c)); active,
+    not ended before ``today`` (``_still_running``) and, with ``tag_id``,
+    effectively carrying that tag. Wallets among ``scope_ids`` only: whether an
+    account the caller can't view is a wallet never moves a total (for a user
+    with no shares every referenced account is their own, so nothing changes).
+    """
     query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, viewable_account_ids(db, user_id),
-                           household_grants(db, user_id)),
+        readable_criterion(BudgetEntry, user_id, viewable_ids, grants),
         BudgetEntry.is_active.is_(True),
+        _still_running(today),
     )
     if tag_id is not None:
         query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
     entries = query.all()
-    # Wallets among those accounts only: whether an account the caller can't
-    # view is a wallet never moves a total (for a user with no shares every
-    # referenced account is their own, so nothing changes).
     referenced = {
         acc_id for e in entries
         for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
     }
-    wallet_ids = set(wallet_ids_of(db, referenced))
+    return entries, set(wallet_ids_of(db, referenced))
 
-    buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, Money(db, fx))
-    row = buckets.get(default_currency(db, user_id)) or _DisposableBucket()
-    return {k: v for k, v in row.as_dict().items() if k in DISPOSABLE_KEYS}
+
+def _still_running(today: date):
+    """Entries whose schedule has not passed its end date on ``today``: no end date,
+    or one on ``today`` or later (``posting.has_ended``'s date rule, as a filter).
+    An entry ending today still counts; one that ended before it does not."""
+    return or_(
+        BudgetEntry.end_mode != "on_date",
+        BudgetEntry.end_date.is_(None),
+        BudgetEntry.end_date >= _day_start(today),
+    )
 
 
 DISPOSABLE_KEYS = ("monthly_income", "monthly_expenses", "monthly_disposable")
@@ -647,21 +572,12 @@ def disposable_by_currency(ctx: RequestContext, tag_id: Optional[int] = None) ->
     """``/forecast/disposable``: the default currency's three figures, plus
     ``by_currency`` rows (``moved_in``/``moved_out`` too) and ``currencies``.
     Its rows are monthly equivalents of recurring entries; none is listed, so
-    ``fx`` reports no rows."""
+    ``fx`` reports no rows. An entry that ended before ``ctx.today`` never
+    counts (``_still_running``)."""
     db, user_id = ctx.db, ctx.uid
     scope_ids = ctx.viewable_ids(roles=VIEW_ROLES)
-    query = db.query(BudgetEntry).filter(
-        readable_criterion(BudgetEntry, user_id, ctx.viewable_ids(), ctx.grants.values()),
-        BudgetEntry.is_active.is_(True),
-    )
-    if tag_id is not None:
-        query = query.filter(effective_tag_criterion(BudgetEntry, tag_id))
-    entries = query.all()
-    referenced = {
-        acc_id for e in entries
-        for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
-    }
-    wallet_ids = set(wallet_ids_of(db, referenced))
+    entries, wallet_ids = _disposable_entries(db, user_id, ctx.viewable_ids(),
+                                              ctx.grants.values(), scope_ids, ctx.today, tag_id)
     money = Money(db, ctx.fx)
     buckets = _disposable_buckets(db, user_id, entries, scope_ids, wallet_ids, money)
     default = ctx.default_currency
@@ -3189,8 +3105,23 @@ def payables_by_currency(ctx: RequestContext, days: int = 30,
                          reference: Optional[datetime] = None, tag_id: Optional[int] = None,
                          collector: Optional[FxCollector] = None,
                          ids: Optional[PublicIds] = None) -> List[dict]:
-    """``get_payables`` split by currency (plan C4): each event's sign filter and
-    amount read its cash in each currency, never the raw ``amount``. A full
+    """Cash outflows due within the next N days, with the account each draws on,
+    split by currency (plan C4).
+
+    Restricted to events that take cash out of the pool (bills, unposted debits,
+    card statements, planned card payments, loan payables on due dates, planned
+    payments into a loan from cash (scheduled payments and prepayments, for
+    principal + interest), and spending-wallet top-ups for their amount + fee:
+    topping a wallet up is the spending). Other transfers between your own
+    accounts are not payables; card charges reach cash via their statement
+    payable instead. A planned payment into a loan dated up to
+    ``PLANNED_LOOKBACK`` (31 days) after the window end can still cover a due
+    date inside the window (see services/loans.py), so that due date is not
+    listed, while the payment itself falls outside the window and is not listed
+    either.
+
+    Each event's sign filter and amount read its cash in each currency, never
+    the raw ``amount``. A full
     payable carries ``currency`` and the B5 labels; an unconverted one moves no
     cash, so it is not a payable. ``ids`` numbers its limited payables
     (``PublicIds``, shared across a response's lists; a new one by default).

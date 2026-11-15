@@ -1183,7 +1183,8 @@ export interface DisposableResponse extends MonthlyDisposable, ProjectionMeta {
 
 // ─── Cash-flow timeline (pre-due-date solvency) ───────────────────────────────
 
-export interface CashflowTimelineEvent extends Partial<Estimate> {
+/** The timeline never sends `unconverted` (STU-306), so the type cannot carry it. */
+export interface CashflowTimelineEvent extends Partial<Omit<Estimate, 'unconverted'>> {
   /** A full event has no `view` key; a limited one is a `LimitedTimelineEvent`. */
   view?: undefined
   /** The currency of `amount` and `running_balance`: the currency row the event sits in. */

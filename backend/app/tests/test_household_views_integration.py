@@ -174,7 +174,7 @@ def test_multiple_sharers_each_view_scoped_to_one_sharer(hh, sw_client, sw_db):
 
 
 def test_upcoming_view_lists_the_occurrence_once_and_no_private_spending(hh, sw_client, sw_db):
-    from app.services.forecast import upcoming_items
+    from app.tests.projection_lists import event_rows
     from app.services.household import household_events, household_view
 
     a, c = hh["a"], hh["c"]
@@ -185,7 +185,7 @@ def test_upcoming_view_lists_the_occurrence_once_and_no_private_spending(hh, sw_
     _txn(sw_client, a, hh["joint"], 120, "2026-10-15T00:00:00", description="Household rent")
     sw_db.expire_all()
     grant = household_view(sw_db, c["id"], a["id"])
-    items = upcoming_items(household_events(sw_db, c["id"], grant, PROJECTED,
+    items = event_rows(household_events(sw_db, c["id"], grant, PROJECTED,
                                             datetime(2026, 12, 9)))
     assert [(i["date"], i["display_name"], i["face_amount"], i["cash_delta"]) for i in items] == [
         ("2026-10-12", "Household internet", 100.0, 0.0),

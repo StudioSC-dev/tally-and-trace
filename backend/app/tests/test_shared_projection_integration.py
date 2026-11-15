@@ -292,7 +292,8 @@ def test_t5_partner_records_on_joint_seen_through_owners_tag_share(sw, sw_client
 # --- Public shapes -----------------------------------------------------------------------
 
 def test_limited_events_have_the_allowlist_shape(sw, sw_client, sw_db):
-    from app.services.forecast import get_payables, get_upcoming_items, project_running_balance
+    from app.services.forecast import project_running_balance
+    from app.tests.projection_lists import payable_rows, upcoming_rows
     from app.services.forecast import serialize_timeline
 
     _put(sw_client, sw["a"], f"/accounts/{sw['a_card']}", {"payment_account_id": sw["joint"]})
@@ -302,9 +303,9 @@ def test_limited_events_have_the_allowlist_shape(sw, sw_client, sw_db):
               transfer_fee=500)
     b = sw["b"]["id"]
     sw_db.expire_all()
-    upcoming = [i for i in get_upcoming_items(sw_db, b, days=60, reference=REF)
+    upcoming = [i for i in upcoming_rows(sw_db, b, days=60, reference=REF)
                 if i.get("view") == "limited"]
-    payables = [p for p in get_payables(sw_db, b, days=60, reference=REF)
+    payables = [p for p in payable_rows(sw_db, b, days=60, reference=REF)
                 if p.get("view") == "limited"]
     timeline = serialize_timeline(project_running_balance(sw_db, b, days=60, reference=REF))
     limited_timeline = [e for e in timeline["events"] if e.get("view") == "limited"]
