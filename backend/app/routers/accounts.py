@@ -1033,9 +1033,16 @@ def _loan_or_404(db: Session, current_user: User, account_id: int, *, edit: bool
 
 def _loan_funding(db: Session, current_user: User, loan: Account,
                   from_account_id: Optional[int]) -> Account:
-    """The account paying the loan: the request's, else the loan's payment account."""
+    """The account paying the loan: the request's, else the loan's payment account.
+
+    With neither, a caller below admin (who is not shown the loan's routing)
+    gets the 404 an unusable payment account gives, so the response does not
+    tell a loan with no payment account from one paid from a hidden account.
+    """
     target_id = from_account_id or loan.payment_account_id
     if target_id is None:
+        if account_role(current_user, loan) not in MANAGE_ROLES:
+            raise HTTPException(status_code=404, detail="from_account_id account not found")
         raise HTTPException(
             status_code=400,
             detail="No funding account: pass from_account_id or set the loan's payment_account_id",
