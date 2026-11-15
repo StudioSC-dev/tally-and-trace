@@ -17,6 +17,12 @@
 //   edit     edit_does_not_autofill
 //   failure  suggestion_failure_preserves_manual_entry
 //   stale    stale_suggestion_response_is_ignored
+//   source   autofill_preserves_user_changes: an account picked on an expense is the source of
+//            a transfer autofilled after it (PR #172 audit)
+//   sequence unavailable_references_are_skipped: a second autofill blanks the category, tags and
+//            transfer accounts the first filled when it has none to give (PR #172 audit)
+//   currency the recording currency follows an autofilled account, as a manual pick; a currency
+//            the user chose in this form is kept (PR #172 audit)
 // Every scenario checks that no browser dialog fired.
 //
 // Starts its own API and web app against a throwaway database (./_local_stack.cjs) and
@@ -273,8 +279,9 @@ async function desktopOrPhone(browser, phone) {
       })
       await h.check('desktop.unlisted_fields_are_preserved.transfer', 'B', async () => {
         const got = await formState(modal)
-        // The category and tags filled from "Kopi Roti" were not the user's, but the transfer has none to give: kept.
-        return (got.description === 'Move to savings' && got.date === dateBefore) || `form ${JSON.stringify(got)}`
+        // The category and tags filled from "Kopi Roti" were not the user's and the transfer has none: blank.
+        const ok = got.description === 'Move to savings' && got.date === dateBefore && noCategory(got.category) && got.tags.length === 0
+        return ok || `form ${JSON.stringify(got)}`
       })
       await control(modal, 'amount').fill('300')
       const n = creates.length
@@ -585,6 +592,137 @@ async function scenarioStale(browser) {
   }
 }
 
+// ─── source ─────────────────────────────────────────────────────────────────
+async function scenarioSource(browser) {
+  console.log('\n=== (source) an account picked on an expense is the source of a transfer autofilled after it')
+  const seed = await seedUser('source')
+  await seedHistory(seed)
+  const { ctx, page, native, creates } = await openPage(browser, seed.user)
+  try {
+    const modal = await openAdd(page)
+    await pick(control(modal, 'account_id'), 'Auto Cash')
+    await typeDescription(modal, 'move')
+    await choose(modal, 'Move to savings')
+    await h.check('source.form', 'B', async () => {
+      const got = await until(() => formState(modal), (s) => s.type === 'Transfer' && starts(s.destination, 'Auto Savings'))
+      return (got.type === 'Transfer' && starts(got.account, 'Auto Cash') && starts(got.destination, 'Auto Savings')) ||
+        `form ${JSON.stringify(got)}`
+    })
+    await control(modal, 'amount').fill('40')
+    await h.waitQuiet(page)
+    await primaryOf(modal).click()
+    await until(async () => creates.length, (n) => n >= 1)
+    await h.check('autofill_preserves_user_changes.transfer-source', 'B', async () => {
+      const body = creates[0]
+      const ok = body && body.transaction_type === 'transfer' && body.account_id === seed.cash.id &&
+        body.transfer_from_account_id === seed.cash.id && body.transfer_to_account_id === seed.savings.id
+      return ok || `body ${JSON.stringify(body)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'source', native)
+    await ctx.close()
+  }
+}
+
+// ─── sequence ───────────────────────────────────────────────────────────────
+async function scenarioSequence(browser) {
+  console.log('\n=== (sequence) a second autofill leaves nothing of the first it cannot fill itself')
+  const seed = await seedUser('sequence')
+  await seedHistory(seed)
+  await client.post(seed.user.token, '/transactions/', { amount: 30, is_posted: true, account_id: seed.bank.id,
+    transaction_type: 'debit', description: 'Plain Bill', transaction_date: wire(addDays(today(), -1)) })
+  const { ctx, page, native, creates } = await openPage(browser, seed.user)
+  try {
+    const modal = await openAdd(page)
+    await typeDescription(modal, 'move')
+    await choose(modal, 'Move to savings')
+    await until(() => formState(modal), (s) => starts(s.destination, 'Auto Savings'))
+    await typeDescription(modal, 'kopi')
+    await choose(modal, 'Kopi Roti')
+    await h.check('sequence.first', 'B', async () => {
+      const got = await until(() => formState(modal), (s) => starts(s.category, 'Auto Food') && s.tags.length > 0)
+      return (got.type === 'Expense' && starts(got.category, 'Auto Food') && JSON.stringify(got.tags) === '["Auto Tag A"]') ||
+        `form ${JSON.stringify(got)}`
+    })
+    await typeDescription(modal, 'plain')
+    await choose(modal, 'Plain Bill')
+    await h.check('unavailable_references_are_skipped.sequence', 'B', async () => {
+      const got = await until(() => formState(modal), (s) => starts(s.account, 'Auto Bank') && s.tags.length === 0)
+      return (starts(got.account, 'Auto Bank') && noCategory(got.category) && got.tags.length === 0) || `form ${JSON.stringify(got)}`
+    })
+    await control(modal, 'amount').fill('30')
+    await h.waitQuiet(page)
+    await primaryOf(modal).click()
+    await until(async () => creates.length, (n) => n >= 1)
+    await h.check('unavailable_references_are_skipped.sequence-body', 'B', async () => {
+      const body = creates[0]
+      const ok = body && body.account_id === seed.bank.id && body.category_id == null &&
+        (body.tag_ids === undefined || (Array.isArray(body.tag_ids) && body.tag_ids.length === 0)) &&
+        body.transfer_from_account_id == null && body.transfer_to_account_id == null
+      return ok || `body ${JSON.stringify(body)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'sequence', native)
+    await ctx.close()
+  }
+}
+
+// ─── currency ───────────────────────────────────────────────────────────────
+async function scenarioCurrency(browser) {
+  console.log('\n=== (currency) the recording currency follows an autofilled account; a currency the user chose is kept')
+  const seed = await seedUser('currency')
+  const dollars = await client.post(seed.user.token, '/accounts/', { name: 'Auto Dollars', account_type: 'checking', balance: 500, currency: 'USD' })
+  await client.post(seed.user.token, '/transactions/', { amount: 12, is_posted: true, account_id: dollars.id, currency: 'USD',
+    transaction_type: 'debit', description: 'Dollar Lunch', transaction_date: wire(addDays(today(), -1)) })
+  const { ctx, page, native, creates } = await openPage(browser, seed.user)
+  const recording = (modal) => modal.getByText(/^Recording in [A-Z]{3}/).first().textContent().then((t) => (t || '').trim(), () => '')
+  const currencySelect = (modal) => modal.locator('select').filter({ has: page.locator('option[value="EUR"]') }).first()
+  try {
+    // (a) The user never touched a currency: the form records in the autofilled account's.
+    let modal = await openAdd(page)
+    await typeDescription(modal, 'dollar')
+    await choose(modal, 'Dollar Lunch')
+    await h.check('currency.follows-autofilled-account', 'B', async () => {
+      const text = await until(() => recording(modal), (t) => t.startsWith('Recording in USD'))
+      return text.startsWith('Recording in USD') || `reads ${JSON.stringify(text)}`
+    })
+    await control(modal, 'amount').fill('10')
+    await h.waitQuiet(page)
+    await primaryOf(modal).click()
+    await until(async () => creates.length, (n) => n >= 1)
+    await h.check('currency.follows-autofilled-account.body', 'B', async () => {
+      const body = creates[0]
+      return (body && body.account_id === dollars.id && body.currency === 'USD' && body.projected_currency === 'USD') ||
+        `body ${JSON.stringify(body)}`
+    })
+
+    // (b) The user chose EUR for a pending entry, then autofilled: EUR stays.
+    modal = await openAdd(page)
+    await modal.getByRole('checkbox', { name: 'Mark as posted' }).uncheck()
+    await currencySelect(modal).selectOption('EUR')
+    await typeDescription(modal, 'dollar')
+    await choose(modal, 'Dollar Lunch')
+    await until(() => formState(modal), (s) => starts(s.account, 'Auto Dollars'))
+    await h.sleep(300)
+    await h.check('currency.user-choice-kept', 'B', async () => {
+      const value = await currencySelect(modal).inputValue()
+      return value === 'EUR' || `currency select reads ${value}`
+    })
+    await control(modal, 'projected_amount').fill('10')
+    await h.waitQuiet(page)
+    await primaryOf(modal).click()
+    await until(async () => creates.length, (n) => n >= 2)
+    await h.check('currency.user-choice-kept.body', 'B', async () => {
+      const body = creates[1]
+      return (body && body.account_id === dollars.id && body.projected_currency === 'EUR' && body.currency === 'USD') ||
+        `body ${JSON.stringify(body)}`
+    })
+  } finally {
+    await d.checkNoNativeDialogs(h, 'currency', native)
+    await ctx.close()
+  }
+}
+
 const SCENARIOS = [
   ['desktop', (b) => desktopOrPhone(b, false)],
   ['phone', (b) => desktopOrPhone(b, true)],
@@ -595,6 +733,9 @@ const SCENARIOS = [
   ['edit', scenarioEdit],
   ['failure', scenarioFailure],
   ['stale', scenarioStale],
+  ['source', scenarioSource],
+  ['sequence', scenarioSequence],
+  ['currency', scenarioCurrency],
 ]
 
 ;(async () => {
