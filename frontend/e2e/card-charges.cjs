@@ -24,11 +24,18 @@
 //       currency (USD) in the Transactions list, its Details, and the section, as
 //       account detail already does (STU-462); it is a one-off, so the section lists it on
 //       its Not posted yet tab, "logged 2 days ago" and not Overdue (STU-485)
+//   (g) mark_paid_far_future_first_date: a semi-monthly card subscription (days 1/15)
+//       stored off its days 40 or more days out: Posted on its Plan row asks for its
+//       first walked occurrence and opens on it, not an empty dialog (STU-364)
+//
+// Not covered here: the unconverted-foreign exclusion in `isOtherUpcoming`. The stack's API
+// fetches live rates, so (a) cannot force a missing rate; upcoming.test.ts covers it
+// (unconverted_foreign_excluded).
 //
 // The section shows 3 rows a page: every count and absence check reads all pages and
 // every click first goes to the row's page (./_due_pages.cjs).
 //
-// Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f]
+// Usage: node frontend/e2e/card-charges.cjs [a|b|c|d|e|f|g]
 const { startLocalStack } = require('./_local_stack.cjs')
 const { useDueCheck, dialogOpened, allDueRows, rowsOf, showRow, openDueTab } = require('./_due_pages.cjs')
 const { waitQuiet } = require('./_smooth.cjs')
@@ -524,6 +531,41 @@ async function pendingForeignFace(browser) {
   await ctx.close()
 }
 
+// (g) A semi-monthly entry stored off its days far ahead: Mark paid opens on its first walked occurrence.
+async function markPaidFarFutureFirstDate(browser) {
+  console.log('\n=== (g) mark_paid_far_future_first_date: Posted opens on the first walked occurrence')
+  const u = await makeUser('g')
+  const bank = await checking(u)
+  const visa = await card(u, bank, 'Visa G', 24)
+  const today = manilaToday()
+  let stored = addDays(today, 40)
+  if (['01', '15'].includes(stored.slice(8, 10))) stored = addDays(stored, 1) // off its days
+  const first = Number(stored.slice(8, 10)) < 15 ? `${stored.slice(0, 8)}15` : addMonths(`${stored.slice(0, 8)}01`, 1, 1)
+  console.log(`    stored next_occurrence ${stored}; first walked occurrence ${first}`)
+  const gym = await expense(u, {
+    name: 'Gym G', amount: 1500, cadence: 'semi_monthly', semi_monthly_day_1: 1, semi_monthly_day_2: 15,
+    next_occurrence: wire(stored), account_id: visa.id,
+  })
+  // The stored day is not an occurrence, and the plain listing (31 days) does not reach the first one.
+  check('(g) the stored day is not an occurrence (422)', (await api(u.token, 'GET', `/budget-entries/${gym.id}/occurrences?include=${stored}`)).status, 422)
+  check('(g) the plain listing is empty', (await get(u.token, `/budget-entries/${gym.id}/occurrences`)).occurrences.length, 0)
+
+  const { ctx, page } = await newPage(browser)
+  await uiLogin(page, u)
+  await page.goto(`${stack.webUrl}/allocations`)
+  const row = page.locator('[data-testid="kind-section-subscription"] article').filter({ has: page.getByText('Gym G', { exact: true }) })
+  await row.first().waitFor()
+  await settle(page)
+  const asked = page.waitForRequest((r) => new URL(r.url()).pathname.endsWith(`/budget-entries/${gym.id}/occurrences`), { timeout: 10000 }).catch(() => null)
+  await row.locator('[data-testid="entry-posted-button"]').click()
+  if (!(await dialogOpened(dialog(page).locator('[data-testid="mark-paid-occurrence"]'), '(g) Posted opened Mark paid with an occurrence'))) return ctx.close()
+  const include = new URL((await asked)?.url() ?? 'http://none/').searchParams.get('include')
+  check('(g) the dialog asked for the first walked occurrence', include, first)
+  check('(g) it opens on that occurrence', await dialog(page).locator('[data-testid="mark-paid-occurrence"]').inputValue(), first)
+  check('(g) and does not say there is none', await dialog(page).locator('[data-testid="mark-paid-none"]').count(), 0)
+  await ctx.close()
+}
+
 ;(async () => {
   stack = await startLocalStack()
   API = `${stack.apiUrl}/api/v1`
@@ -535,6 +577,7 @@ async function pendingForeignFace(browser) {
   if (run('d')) await viewerSeesLimited(browser)
   if (run('e')) await pendingHasNoMarkPaid(browser)
   if (run('f')) await pendingForeignFace(browser)
+  if (run('g')) await markPaidFarFutureFirstDate(browser)
   await browser.close()
   stack.stop()
   console.log(`\nRESULT: ${pass}/${total} assertions passed`)

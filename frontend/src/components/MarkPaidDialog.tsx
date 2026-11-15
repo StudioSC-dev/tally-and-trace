@@ -11,7 +11,9 @@ import {
   isDetailed,
   markPaidAmountEdited,
   markPaidAmountShown,
+  markPaidRequestedOccurrence,
   markPaidSendsAmount,
+  noOccurrenceReason,
   PENDING_AMOUNT_HINT,
   markPaidWireDate,
   omittedRuns,
@@ -142,7 +144,9 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   onCloseRef.current = onClose
 
   // The clicked occurrence is asked for explicitly; one the schedule no longer has (a 422) falls back to the plain list.
-  const [include, setInclude] = useState<string | undefined>(occurrenceDate ?? undefined)
+  // Opened on the entry's own next date, the first walked occurrence is asked for (an off-day semi-monthly date is not one).
+  const [requested] = useState<string | null>(() => markPaidRequestedOccurrence(occurrenceDate, entry))
+  const [include, setInclude] = useState<string | undefined>(requested ?? undefined)
   const occurrencesQuery = useGetEntryOccurrencesQuery(
     include ? { id: entryId, include } : { id: entryId },
     { refetchOnMountOrArgChange: true },
@@ -234,7 +238,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
   const today = listing?.today ?? ''
   // The clicked occurrence when listed (a capped entry lists only its oldest month), else the first.
   const defaultSelected =
-    occurrences.find((o) => o.occurrence_date === occurrenceDate)?.occurrence_date ?? occurrences[0]?.occurrence_date ?? null
+    occurrences.find((o) => o.occurrence_date === requested)?.occurrence_date ?? occurrences[0]?.occurrence_date ?? null
   const selected = occurrences.find((o) => o.occurrence_date === (selectedInput ?? defaultSelected)) ?? null
 
   const kind = listing?.kind ?? detailed?.kind ?? null
@@ -409,7 +413,7 @@ export function MarkPaidDialog({ entryId, name, occurrenceDate, entry, action, o
           {!loading && !loadError && listing && (
             <>
               {occurrences.length === 0 ? (
-                <p className="text-sm text-muted" data-testid="mark-paid-none">This entry has no occurrence left to record.</p>
+                <p className="text-sm text-muted" data-testid="mark-paid-none">{noOccurrenceReason(detailed)}</p>
               ) : (
                 <div>
                   <label className="label" htmlFor={`${titleId}-occurrence`}>Occurrence</label>
