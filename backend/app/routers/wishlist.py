@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
+from app.core.context import RequestContext, request_context
 from app.core.database import get_db
 from app.core.access import get_owned_or_404, owned_criterion, require_owned_ref
 from app.models.category import Category
@@ -25,6 +26,19 @@ from app.core.time import utc_now
 router = APIRouter()
 
 SAVINGS_RATE_FACTOR = 0.5  # Assume 50% of disposable income goes to wishlist savings
+
+
+def no_projection_note(currency: str) -> str:
+    """What an item in a currency with no disposable row says (STU-304)."""
+    return f"No projected income or expenses in {currency}, so this can't be judged yet."
+
+
+def item_currency_row(ctx: RequestContext, item) -> Optional[dict]:
+    """The ``by_currency`` disposable row of the item's own currency, or None
+    when the projection has none (STU-304: never the default-currency scalars)."""
+    code = getattr(item.currency, "value", item.currency)
+    rows = forecast_svc.disposable_by_currency(ctx)["by_currency"]
+    return next((r for r in rows if r["currency"] == code), None)
 
 
 # ---------------------------------------------------------------------------
@@ -167,16 +181,23 @@ def delete_wishlist_item(
 @router.get("/{item_id}/readiness", response_model=WishlistReadiness)
 def get_readiness(
     item_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    ctx: RequestContext = Depends(request_context),
 ):
     """
-    Advisory: Given disposable income, calculate when the user can afford this item.
+    Advisory: Given disposable income in the item's own currency, calculate when
+    the user can afford this item. An item in a currency with no disposable row
+    is not affordable, and says so in ``note``.
     """
-    item = get_owned_or_404(db, WishlistItem, item_id, current_user, "Wishlist item not found")
+    item = get_owned_or_404(ctx.db, WishlistItem, item_id, ctx.user, "Wishlist item not found")
+    currency = getattr(item.currency, "value", item.currency)
 
-    disposable_data = forecast_svc.get_disposable_income(db, current_user.id)
-    monthly_disposable = disposable_data["monthly_disposable"]
+    row = item_currency_row(ctx, item)
+    note = None
+    if row is None:
+        monthly_disposable = 0.0
+        note = no_projection_note(currency)
+    else:
+        monthly_disposable = row["monthly_disposable"]
     savings_rate = monthly_disposable * SAVINGS_RATE_FACTOR
 
     if savings_rate <= 0:
@@ -192,9 +213,11 @@ def get_readiness(
         item_id=item.id,
         name=item.name,
         estimated_cost=item.estimated_cost,
+        currency=currency,
         monthly_disposable=monthly_disposable,
         savings_rate=savings_rate,
         months_needed=months_needed,
         estimated_purchase_date=estimated_date,
         affordable_now=affordable_now,
+        note=note,
     )
