@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum, ForeignKey, Index, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -48,6 +48,12 @@ class User(Base):
     # one run per user per 15 minutes (services/posting.py ``claim_page_open``).
     # Operational state: not exported, not in any response.
     installments_page_posted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # One user per email ignoring case (STU-241): registration and the share
+    # picker compare emails case-insensitively, and the database enforces it.
+    __table_args__ = (
+        Index("uq_users_lower_email", func.lower(email), unique=True),
+    )
 
     # Relationships
     accounts = relationship("Account", back_populates="user", foreign_keys="Account.user_id")

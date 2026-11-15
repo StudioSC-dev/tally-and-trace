@@ -342,25 +342,23 @@ def test_share_creation_counts_toward_the_lookup_limit(sw, sw_client, sw_people)
 
 # --- Emails differing only by case (audit round 2, 6) ------------------------------------
 
-def test_an_email_two_users_share_by_case_matches_no_one(sw, sw_client, sw_db, sw_people):
+def test_an_email_two_users_share_by_case_cannot_exist(sw, sw_client, sw_db, sw_people):
+    """Two users can no longer hold one email by case (STU-241, ``uq_users_lower_email``),
+    so the picker's "more than one match names no one" case can't arise; the
+    target keeps matching exactly."""
+    from sqlalchemy.exc import IntegrityError
     from app.models.user import User
 
     target = sw_people("Nia", "New")
     variant = sw_people("Eve", "Variant")
-    sw_db.query(User).filter(User.id == variant["id"]).update(
-        {User.email: target["email"].upper()})
-    sw_db.commit()
-    path = f"/accounts/{sw['joint']}/shares"
-    answers = []
+    with pytest.raises(IntegrityError, match="uq_users_lower_email"):
+        sw_db.query(User).filter(User.id == variant["id"]).update(
+            {User.email: target["email"].upper()})
+        sw_db.commit()
+    sw_db.rollback()
     for email in (target["email"], target["email"].upper(), f" {target['email'].title()} "):
-        answers.append(_call(sw_client, sw["a"], "get", "/users/lookup",
-                             params={"email": email}))
-        answers.append(_call(sw_client, sw["a"], "post", path,
-                             json={"email": email, "role": "viewer"}))
-    assert {(r.status_code, r.text) for r in answers} == {(404, '{"detail":"No matching user"}')}
-    from app.models.account_share import AccountShare
-    assert sw_db.query(AccountShare).filter(
-        AccountShare.user_id.in_([target["id"], variant["id"]])).count() == 0
+        r = _call(sw_client, sw["a"], "get", "/users/lookup", params={"email": email})
+        assert (r.status_code, r.json()["id"]) == (200, target["id"]), email
 
 
 def test_registration_refuses_an_email_differing_only_by_case(sw, sw_client, sw_db):
