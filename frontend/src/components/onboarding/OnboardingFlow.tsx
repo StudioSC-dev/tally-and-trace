@@ -79,6 +79,20 @@ function scrollTargetIntoView(element: HTMLElement) {
   element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
 }
 
+const FOCUSABLE = 'button:not([disabled]), [tabindex="0"]'
+
+function focusableControls(bubble: HTMLElement) {
+  return Array.from(bubble.querySelectorAll<HTMLElement>(FOCUSABLE))
+}
+
+// The step's primary button (Next / Get Started) takes focus, so Enter or Space
+// moves on; it is the last control in the bubble.
+function focusStepControl(bubble: HTMLElement) {
+  const controls = focusableControls(bubble)
+  const primary = controls[controls.length - 1] ?? bubble
+  primary.focus({ preventScroll: true })
+}
+
 interface Size {
   width: number
   height: number
@@ -116,6 +130,8 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   // Tagged with its step, so a target found for one step is never shown for another
   const [resolved, setResolved] = useState<{ step: number; element: HTMLElement } | null>(null)
   const targetElement = resolved?.step === currentStep ? resolved.element : null
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const skipRef = useRef<() => void>(() => {})
   const navigate = useNavigate()
   const [completeOnboarding] = useCompleteOnboardingMutation()
 
@@ -132,17 +148,51 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     const inBubbleScroll = (e: Event) =>
       e.target instanceof Element && e.target.closest('[data-onboarding-scroll]') !== null
 
-    // Prevent keyboard navigation
+    // The tour is modal: keep Tab inside the bubble, let Escape skip, and
+    // swallow keys that would otherwise scroll or act on the page behind.
     const handleKeyDown = (e: KeyboardEvent) => {
+      const bubble = bubbleRef.current
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!e.repeat) skipRef.current()
+        return
+      }
+      if (e.key === 'Tab' && bubble) {
+        const controls = focusableControls(bubble)
+        if (controls.length === 0) {
+          e.preventDefault()
+          bubble.focus({ preventScroll: true })
+          return
+        }
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        const active = document.activeElement
+        if (!bubble.contains(active) || (e.shiftKey && (active === first || active === bubble)) || (!e.shiftKey && active === last)) {
+          e.preventDefault()
+          ;(e.shiftKey ? last : first).focus({ preventScroll: true })
+        }
+        return
+      }
       // Scrolling keys work inside the focused body text region
       if (inBubbleScroll(e)) return
-      // Allow only Tab, Enter, Escape for navigation
-      if (!['Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      // Space presses the focused bubble button
+      if (e.key === ' ' && e.target instanceof HTMLButtonElement && bubble?.contains(e.target)) return
+      // Allow only Enter and the arrows through for navigation
+      if (!['Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault()
         e.stopPropagation()
       }
     }
-    
+
+    // Focus that lands outside the bubble (script, assistive tech) comes back
+    const handleFocusIn = (e: FocusEvent) => {
+      const bubble = bubbleRef.current
+      if (bubble && e.target instanceof Node && !bubble.contains(e.target)) {
+        focusStepControl(bubble)
+      }
+    }
+
     // Prevent scroll events
     const handleWheel = (e: WheelEvent) => {
       if (inBubbleScroll(e)) return
@@ -158,12 +208,14 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
     
     window.addEventListener('keydown', handleKeyDown, { capture: true })
+    document.addEventListener('focusin', handleFocusIn)
     window.addEventListener('wheel', handleWheel, { passive: false, capture: true })
     window.addEventListener('touchmove', handleTouchMove, { passive: false, capture: true })
     
     return () => {
       root.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
+      document.removeEventListener('focusin', handleFocusIn)
       window.removeEventListener('wheel', handleWheel, { capture: true })
       window.removeEventListener('touchmove', handleTouchMove, { capture: true })
     }
@@ -313,15 +365,22 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
     }
   }
 
+  skipRef.current = handleSkip
+
+  // Move focus into the bubble on every step
+  useEffect(() => {
+    if (bubbleRef.current) focusStepControl(bubbleRef.current)
+  }, [currentStep])
+
   // Track the target, the bubble and the viewport every frame while a step is
   // active, so the highlight follows layout shifts (cards loading, smooth
   // scroll, resize). State only changes when something actually moved.
-  const bubbleRef = useRef<HTMLDivElement>(null)
   // Whether the body text overflows; only then is it a (keyboard) scroll region
   const bodyRef = useRef<HTMLDivElement>(null)
   const lastBodyScrollable = useRef(false)
   const [bodyScrollable, setBodyScrollable] = useState(false)
   const titleId = useId()
+  const descriptionId = useId()
   const lastGeometry = useRef<Geometry | null>(null)
   const [geometry, setGeometry] = useState<Geometry | null>(null)
 
@@ -410,7 +469,16 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           maxHeight: `${(geometry?.viewport.height ?? window.innerHeight) - BUBBLE_VIEWPORT_MARGIN * 2}px`,
         }}
         data-onboarding-controls
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
       >
+        {/* Announces the step on entry; focus lands on the button, not the title */}
+        <div className="sr-only" role="status" aria-live="polite">
+          Step {currentStep + 1} of {TOTAL_STEPS}: {currentStepData.title}
+        </div>
         <div className="flex min-h-0 flex-col p-4">
           {/* Progress indicator */}
           <div className="mb-3 shrink-0">
@@ -445,7 +513,7 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
             <h3 id={titleId} className="text-base font-semibold text-ink mb-1.5">
               {currentStepData.title}
             </h3>
-            <p className="text-sm text-body">{currentStepData.description}</p>
+            <p id={descriptionId} className="text-sm text-body">{currentStepData.description}</p>
           </div>
 
           {/* Navigation buttons */}
