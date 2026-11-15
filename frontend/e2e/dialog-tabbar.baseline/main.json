@@ -1,0 +1,97 @@
+{
+  "desktop": {
+    "transaction": [
+      {
+        "label": "Create Transaction",
+        "x": 376,
+        "y": 694,
+        "w": 168,
+        "h": 58
+      },
+      {
+        "label": "Save and add another",
+        "x": 556,
+        "y": 694,
+        "w": 168,
+        "h": 58
+      },
+      {
+        "label": "Cancel",
+        "x": 736,
+        "y": 694,
+        "w": 168,
+        "h": 58
+      }
+    ],
+    "account": [
+      {
+        "label": "Create Account",
+        "x": 441,
+        "y": 701,
+        "w": 193,
+        "h": 50
+      },
+      {
+        "label": "Cancel",
+        "x": 646,
+        "y": 701,
+        "w": 193,
+        "h": 50
+      }
+    ],
+    "recurring": [
+      {
+        "label": "Save Recurring Entry",
+        "x": 328,
+        "y": 712,
+        "w": 306,
+        "h": 40
+      },
+      {
+        "label": "Cancel",
+        "x": 646,
+        "y": 712,
+        "w": 306,
+        "h": 40
+      }
+    ],
+    "category": [
+      {
+        "label": "Create",
+        "x": 441,
+        "y": 578.5,
+        "w": 193,
+        "h": 46
+      },
+      {
+        "label": "Cancel",
+        "x": 646,
+        "y": 578.5,
+        "w": 193,
+        "h": 46
+      }
+    ],
+    "tag": [
+      {
+        "label": "Create",
+        "x": 441,
+        "y": 502,
+        "w": 193,
+        "h": 46
+      },
+      {
+        "label": "Cancel",
+        "x": 646,
+        "y": 502,
+        "w": 193,
+        "h": 46
+      }
+    ]
+  },
+  "tabbar": {
+    "x": 0,
+    "y": 779,
+    "w": 390,
+    "h": 65
+  }
+}

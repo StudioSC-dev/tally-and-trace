@@ -439,7 +439,7 @@ export function AccountsPage() {
   const limitTargets = sharedLimitTargets(routingAccounts, {
     id: editingAccount?.id ?? null,
     currency: formData.currency,
-    ownerName: editingAccount ? editingAccount.owner_name : null,
+    ownerId: editingAccount ? editingAccount.owner_id : null,
   })
   const linkedToEditing = editingAccount
     ? routingAccounts.filter((a) => a.shares_limit_with_account_id === editingAccount.id)
