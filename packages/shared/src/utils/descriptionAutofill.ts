@@ -81,10 +81,12 @@ export function autofillPatch<F extends AutofillForm>(
   const transfer = type === 'transfer'
   const okAccount = (id: number | null): id is number => id !== null && usable.account(id)
 
-  // A transfer's account is its source: the form keeps both in step.
+  // A transfer's account is its source: the form keeps both in step, so the source is the
+  // account the form ends up with (the user's pick, else the suggestion's), never a hidden other.
   const source = transfer ? suggestion.transfer_from_account_id ?? suggestion.account_id : suggestion.account_id
   if (free('account_id') && okAccount(source)) patch.account_id = source
-  if (transfer && free('transfer_from_account_id') && okAccount(source)) patch.transfer_from_account_id = source
+  const account = patch.account_id ?? form.account_id
+  if (transfer && free('transfer_from_account_id') && account) patch.transfer_from_account_id = account
   if (transfer && free('transfer_to_account_id') && okAccount(suggestion.transfer_to_account_id)) {
     const from = patch.account_id ?? form.account_id
     if (suggestion.transfer_to_account_id !== from) patch.transfer_to_account_id = suggestion.transfer_to_account_id

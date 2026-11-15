@@ -94,6 +94,14 @@ describe('transaction_description_autofill', () => {
     expect(apply(blank(), transfer, new Set<AutofillField>(['transaction_type']))).toEqual(blank({ account_id: 7 }))
   })
 
+  it('autofill_preserves_user_changes: a transfer\'s source is the account the user picked', () => {
+    // The user picked account 3 while the form was an expense, then chose a transfer's description.
+    const changed = new Set<AutofillField>(['account_id'])
+    const out = apply(blank({ account_id: 3 }), transfer, changed)
+    expect([out.transaction_type, out.account_id, out.transfer_from_account_id, out.transfer_to_account_id])
+      .toEqual(['transfer', 3, 3, 8])
+  })
+
   it('unavailable_references_are_skipped: an unusable account, category or tag leaves its field blank', () => {
     const usable: AutofillUsable = {
       account: (id) => id !== 7 && id !== 8,
