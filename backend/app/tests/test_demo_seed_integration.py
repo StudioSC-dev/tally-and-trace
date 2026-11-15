@@ -10,6 +10,7 @@ Demo Partner, the owner's Joint Account shared with them as editor, household
 bills on the joint account and the owner's card, and the partner's deposit.
 Skips without a database.
 """
+import hashlib
 import json
 import logging
 import os
@@ -209,7 +210,7 @@ def test_a_missing_state_row_replaces_the_demo_data(db, seed):
 def test_shape_2_tags_the_demo_records_the_seed_names(client, db, seed):
     from app.core.seed import DEMO_EMAIL, DEMO_PASSWORD, DEMO_SHAPE_VERSION
 
-    assert DEMO_SHAPE_VERSION == 7  # shapes 3–7 (STU-232, 233, 236, 217) keep shape 2's tags
+    assert DEMO_SHAPE_VERSION == 8  # shapes 3–8 (STU-232, 233, 236, 217, 308) keep shape 2's tags
     seed.seed_database()
     r = client.post(f"{API}/auth/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD})
     headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -583,3 +584,122 @@ def test_a_current_startup_restores_a_missing_tag_share_without_reseeding(db, se
     assert partner_after["shares"] == partner_before["shares"]
     seed.seed_database()
     assert (_snapshot(db), _partner_snapshot(db)) == (owner_after, partner_after)
+
+
+# --- Shape 8 (STU-308): the electric bill, the salary and the rebalanced budget ------------
+
+# The figures proposed in the PR; the owner approves them there.
+SALARY_USD = Decimal("1500.00")
+ELECTRIC_PHP = Decimal("4800.00")
+REBALANCE_PHP = {"Gym Membership": Decimal("2800.00"), "Brokerage Auto-Deposit": Decimal("30000.00"),
+                 "Rent": Decimal("48000.00"), "Internet": Decimal("2500.00")}
+# The amounts those rows held in shape 7, and a hash of the whole seed file as it was
+# then (canonical JSON), so any other change to the seed shows up.
+SHAPE_7_AMOUNTS = {"Monthly Salary": 55.0, "Electric Bill": 1200.0, "Gym Membership": 45.0,
+                   "Brokerage Auto-Deposit": 500.0, "Rent": 2500.0, "Internet": 60.0}
+SHAPE_7_SEED_SHA256 = "3f187b1b8c9d937285f4c1dd1e9cbefccd3e78407dbfdc62bc96cb85b30d1abf"
+
+
+def _seed_entry(name):
+    from app.core.seed import _SEED_FILE
+
+    with open(_SEED_FILE) as f:
+        data = json.load(f)
+    (entry,) = [e for e in data["budget_entries"] if e["name"] == name]
+    return entry
+
+
+def _demo_entry(db, name):
+    from app.core.seed import DEMO_EMAIL
+    from app.models import BudgetEntry, User
+
+    db.expire_all()
+    uid = db.query(User.id).filter(User.email == DEMO_EMAIL).scalar()
+    return db.query(BudgetEntry).filter(BudgetEntry.user_id == uid, BudgetEntry.name == name).one()
+
+
+def _entry_tags(db, row):
+    from app.core.tags import LINKS
+    from app.models import BudgetEntry, Tag
+
+    link, column = LINKS[BudgetEntry]
+    return sorted(name for (name,) in db.query(Tag.name).join(link, link.c.tag_id == Tag.id)
+                  .filter(link.c[column] == row.id))
+
+
+def test_demo_electric_bill_row(db, seed):
+    """AC1: a monthly household electric bill in PHP, on the 20th of the month."""
+    entry = _seed_entry("Electric Bill")
+    assert (entry["entry_type"], entry["currency"], entry["cadence"], entry["account_id"],
+            entry["end_mode"], entry["tags"], entry["lead_time_days"]) == (
+        "EXPENSE", "PHP", "MONTHLY", 1, "indefinite", ["Household"], 5)
+    assert entry["next_occurrence"].endswith("-20T07:00:00")
+    assert Decimal("800.00") <= Decimal(str(entry["amount"])) <= Decimal("6000.00")
+    assert Decimal(str(entry["amount"])) == ELECTRIC_PHP
+
+    seed.seed_database()
+    row = _demo_entry(db, "Electric Bill")
+    assert (row.entry_type.value.upper(), row.currency.value, row.cadence.value.upper(), row.end_mode,
+            row.lead_time_days, row.next_occurrence.day, _entry_tags(db, row)) == (
+        "EXPENSE", "PHP", "MONTHLY", "indefinite", 5, 20, ["Household"])
+    assert row.account.name == "Main Checking Account" and row.amount == ELECTRIC_PHP
+
+
+def test_demo_salary_row(db, seed):
+    """AC2: a monthly salary in USD on the Main Checking Account, on the 11th."""
+    entry = _seed_entry("Monthly Salary")
+    assert (entry["entry_type"], entry["currency"], entry["cadence"], entry["account_id"],
+            entry["end_mode"], entry["lead_time_days"]) == (
+        "INCOME", "USD", "MONTHLY", 1, "indefinite", 3)
+    assert entry["next_occurrence"].endswith("-11T09:00:00")
+    assert Decimal("1500.00") <= Decimal(str(entry["amount"])) <= Decimal("6000.00")
+    assert Decimal(str(entry["amount"])) == SALARY_USD
+
+    seed.seed_database()
+    row = _demo_entry(db, "Monthly Salary")
+    assert (row.entry_type.value.upper(), row.currency.value, row.cadence.value.upper(), row.end_mode,
+            row.next_occurrence.day) == ("INCOME", "USD", "MONTHLY", "indefinite", 11)
+    assert row.account.name == "Main Checking Account" and row.amount == SALARY_USD
+
+
+def test_demo_rebalance_changes_only_listed_rows():
+    """AC5: against the shape 7 seed, only the salary and electric amounts and the four
+    rebalance rows' amounts differ; every other row and field is as it was."""
+    from app.core.seed import _SEED_FILE
+
+    with open(_SEED_FILE) as f:
+        data = json.load(f)
+    amounts = {e["name"]: e["amount"] for e in data["budget_entries"]}
+    assert {n: Decimal(str(amounts[n])) for n in REBALANCE_PHP} == REBALANCE_PHP
+    changed = {n for n, old in SHAPE_7_AMOUNTS.items() if amounts[n] != old}
+    assert changed == set(SHAPE_7_AMOUNTS)  # each of the six moved, no more
+    for name in REBALANCE_PHP:
+        assert _seed_entry(name)["currency"] == "PHP" and _seed_entry(name)["entry_type"] == "EXPENSE"
+    for entry in data["budget_entries"]:
+        if entry["name"] in SHAPE_7_AMOUNTS:
+            entry["amount"] = SHAPE_7_AMOUNTS[entry["name"]]
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    assert hashlib.sha256(canonical).hexdigest() == SHAPE_7_SEED_SHA256
+
+
+def test_shape_version_bumped(db, seed):
+    """AC3: the shape is 8, and a demo seeded at shape 7 is reseeded with the new figures."""
+    from app.models.demo_state import DemoState
+
+    assert seed.DEMO_SHAPE_VERSION == 8
+    before = _snapshot(db)
+    state = db.get(DemoState, 1)
+    state.shape_version = 7
+    db.commit()
+    db.query(type(_demo_entry(db, "Electric Bill"))).filter_by(name="Electric Bill").update(
+        {"amount": Decimal("1200.00")})
+    db.commit()
+    assert _demo_entry(db, "Electric Bill").amount == Decimal("1200.00")
+
+    seed.seed_database()
+
+    after = _snapshot(db)
+    assert after["state"][0] == 8
+    assert not set(before["owned"]["budget_entries"]) & set(after["owned"]["budget_entries"])
+    assert _demo_entry(db, "Electric Bill").amount == ELECTRIC_PHP
+    assert _demo_entry(db, "Monthly Salary").amount == SALARY_USD
