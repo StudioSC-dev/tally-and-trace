@@ -47,6 +47,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setEmail(value)
+    setResendMessage('') // a resend result belongs to the email it was sent for
 
     // Validate email format
     const trimmedValue = value.trim()
@@ -79,6 +80,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
   const handleDemoLogin = async (demoEmail: string) => {
     setIsLoading(true)
     setError('')
+    setResendMessage('')
     try {
       await login(demoEmail, 'password123')
       onSuccess?.()
@@ -106,6 +108,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess, successMessage 
 
     setIsLoading(true)
     setError('')
+    setResendMessage('')
     setShowSuccessMessage(false) // Clear success message on submit
     navigate({
       to: '/login',
