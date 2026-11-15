@@ -537,7 +537,13 @@ body::after {
   overflow-y-auto bg-black/60 py-6`: padding its bottom by that room lets the dialog scroll, and
   centre, above the stack, so its buttons are never under a toast. The confirm dialog (z-100) sits
   above the stack, so it needs no room. Outside @layer so it wins over the py-6 utility.
+
+  The overlay also sits above the bottom tab bar (STU-635): BottomNav is z-50 and later in the
+  document, so a z-50 overlay was painted under it and the tab bar covered the dialog's lower
+  part at phone widths. z-60 is the level the other dialogs already use; the toast stack (z-70)
+  and the confirm dialog (z-100) stay above it.
 */
 .fixed.inset-0.overflow-y-auto.bg-black\/60:not(.z-\[100\]) {
+  z-index: 60;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px), var(--toast-room, 0px));
 }
