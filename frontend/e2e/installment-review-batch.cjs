@@ -74,16 +74,23 @@ const addDays = (day, n) => {
 }
 const dom = (day) => Number(day.slice(8, 10))
 const wire = (day) => `${day}T00:00:00`
-/** About 65 days back, on a day of the month no later than the 28th: three months are missed. */
+/** A card installment is stored on the card's close day (28 here: makeCard, PR3's _installment_on_close),
+ *  whatever day it is created on, so the seeds are dated on a close day. The latest close on or before today. */
+const latestClose = () => {
+  const today = manilaToday()
+  if (dom(today) >= 28) return `${today.slice(0, 8)}28`
+  const d = new Date(`${today.slice(0, 7)}-01T00:00:00Z`)
+  d.setUTCMonth(d.getUTCMonth() - 1)
+  return `${d.toISOString().slice(0, 8)}28`
+}
+/** Three closes back from the latest one: the three months from there through it are missed. */
 const backdatedStart = () => {
-  const day = addDays(manilaToday(), -65)
-  return dom(day) > 28 ? `${day.slice(0, 8)}28` : day
+  const d = new Date(`${latestClose()}T00:00:00Z`)
+  d.setUTCMonth(d.getUTCMonth() - 2)
+  return d.toISOString().slice(0, 10)
 }
-/** About 10 days back, on a day no later than the 28th: exactly one month is due. */
-const recentStart = () => {
-  const day = addDays(manilaToday(), -10)
-  return dom(day) > 28 ? `${day.slice(0, 8)}28` : day
-}
+/** The latest close: exactly one month is due. */
+const recentStart = () => latestClose()
 
 let stack, API
 async function api(token, method, url, body, headers = {}) {
@@ -343,7 +350,7 @@ async function postedLinkedClean(u, card, name) {
   const start = recentStart()
   const e = await installment(u, card, name, 2500, start, 12)
   const typed = await post(u.token, '/transactions/', {
-    account_id: card.id, transaction_type: 'debit', amount: 2500, description: `${name} typed by hand`, transaction_date: wire(addDays(start, 1)), is_posted: true,
+    account_id: card.id, transaction_type: 'debit', amount: 2500, description: `${name} typed by hand`, transaction_date: wire(addDays(start, -1)), is_posted: true,
   })
   const review = await get(u.token, `/budget-entries/${e.id}/auto-post-review`)
   const candidate = review.candidates.find((c) => c.occurrence_date.slice(0, 10) === start)
