@@ -122,6 +122,26 @@ def is_spending_wallet(account) -> bool:
     )
 
 
+def tag_viewer_ids(db: Session, user_id) -> frozenset:
+    """The accounts the caller holds only through a Household tag share (``tag_viewer``).
+
+    Each is plain cash in the caller's available cash and projection (STU-253):
+    whether it is a spending wallet is its owner's setting, which the share
+    never shows, so the flag moves no figure the tag viewer sees.
+    """
+    from app.core.access import access_map
+
+    return frozenset(access_map(db, user_id).ids(frozenset({TAG_VIEWER})))
+
+
+def counts_as_cash(account, plain_ids=frozenset()) -> bool:
+    """``is_projection_cash`` as the caller counts it: an account in ``plain_ids``
+    (``tag_viewer_ids``) is cash unless it is a card or a loan."""
+    if account.id in plain_ids:
+        return account.account_type not in (AccountType.CREDIT, AccountType.LOAN)
+    return is_projection_cash(account)
+
+
 def wallet_ids_of(db: Session, account_ids) -> frozenset:
     """The spending wallets among ``account_ids``, judged from the accounts themselves.
 
@@ -383,9 +403,11 @@ def _upcoming_window(days: int, reference: Optional[datetime]) -> tuple:
     return start, start + timedelta(days=days + 1)
 
 
-def get_available_cash(accounts) -> Decimal:
-    """Pooled projection cash: the sum of projection-cash account balances."""
-    return sum((_money(a.balance) for a in accounts if is_projection_cash(a)), Decimal("0"))
+def get_available_cash(accounts, plain_ids=frozenset()) -> Decimal:
+    """Pooled projection cash: the sum of projection-cash account balances, each
+    account in ``plain_ids`` (``tag_viewer_ids``) counted as plain cash."""
+    return sum((_money(a.balance) for a in accounts if counts_as_cash(a, plain_ids)),
+               Decimal("0"))
 
 
 def get_disposable_income(
@@ -457,7 +479,7 @@ def _disposable_entries(db: Session, user_id: int, viewable_ids, grants, scope_i
         acc_id for e in entries
         for acc_id in (e.account_id, e.transfer_to_account_id) if acc_id in scope_ids
     }
-    return entries, set(wallet_ids_of(db, referenced))
+    return entries, set(wallet_ids_of(db, referenced)) - tag_viewer_ids(db, user_id)
 
 
 def _still_running(today: date):
@@ -518,9 +540,10 @@ def _disposable_buckets(db: Session, user_id: int, entries: list, scope_ids, wal
         figure, _ = money.to(entry.amount, entry.currency, currency)
         return None if figure is None else _monthly_equivalent(figure, entry.cadence)
 
+    plain_ids = tag_viewer_ids(db, user_id)
     cash_ids = {
         a.id for a in db.query(Account).filter(Account.id.in_(set(scope_ids))).all()
-        if is_projection_cash(a)
+        if counts_as_cash(a, plain_ids)
     } if scope_ids else set()
 
     for entry in entries:
@@ -1180,7 +1203,9 @@ def collect_events(
     recurring transfers) are skipped. Whether an account is a wallet is read from
     the account itself (``wallet_ids_of``), so an inactive wallet is still a
     wallet; an account the caller can't view is never read as one, so its flag
-    changes nothing they are shown. A statement payable funded from a wallet has a
+    changes nothing they are shown, and outside a Household view nor is one the
+    caller holds only as ``tag_viewer``: that is plain cash (``tag_viewer_ids``).
+    A statement payable funded from a wallet has a
     non-cash funding leg: the wallet's money left projection cash when it was
     topped up, so paying the card from it must not take cash out a second time.
     A loan payable's leg is on the loan's paying account and routed like a
@@ -1266,12 +1291,16 @@ def collect_events(
         accounts = get_account_balances(db, user_id)
     money = Money(db, fx)
     money.seed(accounts)
-    cash_ids = {a.id for a in accounts if is_projection_cash(a)}
+    # A tag viewer's accounts are plain cash, never wallets (``tag_viewer_ids``),
+    # in the caller's own projection; a Household view keeps the sharer's wallets.
+    plain_ids = tag_viewer_ids(db, user_id) if household is None else frozenset()
+    cash_ids = {a.id for a in accounts if counts_as_cash(a, plain_ids)}
     card_ids = {a.id for a in accounts if a.account_type == AccountType.CREDIT}
     loans = [a for a in accounts if a.account_type == AccountType.LOAN]
     loan_ids = frozenset(a.id for a in loans)
     # In-scope wallets: their legs are kept (never as cash).
-    scoped_wallet_ids = frozenset(a.id for a in accounts if is_spending_wallet(a))
+    scoped_wallet_ids = frozenset(a.id for a in accounts
+                                  if is_spending_wallet(a) and a.id not in plain_ids)
     # Cards whose statements are modelled; the rest keep their charges as cash.
     billed_ids = {a.id for a in accounts
                   if a.id in card_ids and resolve_cycle_fields(a) is not None}
@@ -1326,7 +1355,7 @@ def collect_events(
         *(acc for a in accounts if a.id in billed_ids
           for acc in (a.payment_account_id, a.payment_overflow_account_id)),
         *(a.payment_account_id for a in loans),
-    ) if acc in viewable_ids))
+    ) if acc in viewable_ids)) - plain_ids
 
     # Every loan any transfer references, in scope or not (loan payments are payables).
     known_loan_ids = loan_ids | _loan_ids_of(db, (
@@ -2699,8 +2728,9 @@ class Projection:
         self.db = ctx.db
         self.user_id = ctx.uid
         self.accounts = ctx.accounts
+        plain_ids = tag_viewer_ids(ctx.db, ctx.uid)
         self.opening_by_account = {
-            a.id: Decimal(str(a.balance)) for a in self.accounts if is_projection_cash(a)}
+            a.id: Decimal(str(a.balance)) for a in self.accounts if counts_as_cash(a, plain_ids)}
         self.names = {a.id: a.name for a in self.accounts}
         self.money = Money(ctx.db, ctx.fx)
         self.money.seed(self.accounts)

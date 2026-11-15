@@ -150,13 +150,15 @@ def get_snapshot(
     # 1. Account balances
     # -----------------------------------------------------------------------
     accounts = ctx.accounts
+    # A tag viewer's accounts count as plain cash (STU-253, forecast.tag_viewer_ids).
+    plain_ids = forecast_svc.tag_viewer_ids(db, current_user.id)
     total_balance = sum(a.balance for a in accounts if a.currency.value == default)
     balance_rows = [
         {
             "currency": c,
             "total": round(sum(a.balance for a in accounts if a.currency.value == c), 2),
             "available_cash": round(float(forecast_svc.get_available_cash(
-                [a for a in accounts if a.currency.value == c])), 2),
+                [a for a in accounts if a.currency.value == c], plain_ids)), 2),
         }
         for c in forecast_svc.ordered_currencies({a.currency.value for a in accounts}, default)
     ]
@@ -169,7 +171,8 @@ def get_snapshot(
             "name": a.name,
             "balance": a.balance,
             "currency": a.currency.value,
-            # Shown, but not counted in available cash or projections.
+            # A wallet is shown, but not counted in available cash or projections;
+            # a tag viewer's account always counts, as plain cash (STU-253).
             **({} if held.of(a) == TAG_VIEWER
                else {"is_spending_wallet": forecast_svc.is_spending_wallet(a)}),
         }
@@ -262,7 +265,7 @@ def get_snapshot(
     # 7. Available cash, per-account closings, payables
     # -----------------------------------------------------------------------
     available_cash = forecast_svc.get_available_cash(
-        [a for a in accounts if a.currency.value == default])
+        [a for a in accounts if a.currency.value == default], plain_ids)
     account_closings = [
         {
             "period_label": p["period_label"],

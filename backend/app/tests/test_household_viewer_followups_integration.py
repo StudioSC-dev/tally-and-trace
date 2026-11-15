@@ -84,3 +84,62 @@ def test_inactive_tag_viewer_hidden_export(hh, inactive_household, sw_client):
                       params={"table": "shared_accounts"})
     assert r.status_code == 200
     assert "Old joint" not in r.text and "Joint account" in r.text
+
+
+# --- Part 6: a tag viewer's account is plain cash in their projection ---------------------
+
+def _projection(client, who):
+    """Every figure the caller's available cash and projection reach."""
+    snapshot = _get(client, who, "/dashboard/snapshot")
+    return {
+        "snapshot": {k: snapshot[k] for k in (
+            "balances", "available_cash", "upcoming_this_month", "monthly_summary",
+            "forecast_next_3_months", "account_closings", "payables")},
+        "cashflow": _get(client, who, "/forecast/cashflow"),
+        "timeline": _get(client, who, "/forecast/timeline"),
+        "upcoming": _get(client, who, "/forecast/upcoming"),
+        "disposable": _get(client, who, "/forecast/disposable"),
+    }
+
+
+def _set_wallet(db, account_id, flag):
+    from app.models.account import Account
+
+    db.query(Account).filter(Account.id == account_id).update({"is_spending_wallet": flag})
+    db.commit()
+
+
+def test_tag_viewer_wallet_flag_not_inferable(hh, sw_client, sw_db):
+    """AC5: toggling a tag-viewer account's ``is_spending_wallet`` moves nothing C sees."""
+    from datetime import date, timedelta
+
+    a, c = hh["a"], hh["c"]
+    wallet = hh["a_wallet"]  # A's spending wallet, balance 800
+    r = sw_client.put(f"{API}/accounts/{wallet}", headers=a["headers"],
+                      json={"tag_ids": [hh["hh_a"]]})
+    assert r.status_code == 200, r.text
+    soon = (date.today() + timedelta(days=5)).isoformat() + "T00:00:00"
+    # A's own records, read by C through the share (b2): a top-up from the joint
+    # account, spending from the wallet, and a recurring expense funded from it.
+    sw_post(sw_client, a, "/transactions/", {
+        "account_id": hh["joint"], "transfer_from_account_id": hh["joint"],
+        "transfer_to_account_id": wallet, "amount": 300, "transaction_type": "transfer",
+        "description": "Top-up", "transaction_date": soon, "is_posted": False})
+    sw_post(sw_client, a, "/transactions/", {
+        "account_id": wallet, "amount": 45, "transaction_type": "debit",
+        "description": "Snacks", "transaction_date": soon, "is_posted": False})
+    sw_post(sw_client, a, "/budget-entries/", {
+        "name": "Market", "entry_type": "expense", "amount": 70, "cadence": "monthly",
+        "next_occurrence": soon, "account_id": wallet})
+    on = _projection(sw_client, c)
+    assert any(row["id"] == wallet for row in on["snapshot"]["balances"]["by_account"])
+    _set_wallet(sw_db, wallet, False)
+    off = _projection(sw_client, c)
+    for key in on:
+        assert on[key] == off[key], key
+    # Plain cash: the wallet's balance is in C's available cash.
+    assert off["snapshot"]["available_cash"] == 10_000 + 800 + 2_000
+    # The owner, who sees the setting, still projects it as a wallet.
+    _set_wallet(sw_db, wallet, True)
+    assert _get(sw_client, a, "/dashboard/snapshot")["available_cash"] == 10_000 + 5_000
+
