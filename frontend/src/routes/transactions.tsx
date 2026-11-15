@@ -11,8 +11,8 @@ import type {
   SharedFullTransaction,
 } from '../store/api'
 import { DEFAULT_SETTLEMENT, canMakeRepeat, formatCadenceLabel, editFormProjectedAmount, fieldErrorProps, repeatFieldControl, repeatingRefusal, repeatScheduleOf, scheduleRequest, schedulePreview, scheduleState, settlementControlState, formatEntryDate, isLimited, isOwnerFull, isSharedFull, listBounds, localToday, manilaToday, pageWindow, scheduledRange, postedCycleHint, postingDay, RECORD_DATE_MIN, recordDateError, recordDateMax, relativeEntryDay, rowAmount, toTotal, transactionDate, transactionDescription, transactionStatus, transferAccountFields, withoutError, completionShown, pendingTargets } from '@tally-trace/shared'
-import { AUTOFILL_FIELDS, autofillPatch } from '@tally-trace/shared'
-import type { AutofillField, DescriptionSuggestion } from '@tally-trace/shared'
+import { AUTOFILL_FIELDS, autofillForm, cleanFormForType } from '@tally-trace/shared'
+import type { AutofillField, DescriptionSuggestion, TypeFits } from '@tally-trace/shared'
 import type { FieldErrors, ListRange, OutboxKind, OutboxRequest, RepeatingTransactionInput, ScheduleContext, ScheduleDraft, TransactionStatus } from '@tally-trace/shared'
 import { apiErrorMessage, apiErrorStatus } from '../utils/apiError'
 import { useConfirm } from '../hooks/useConfirm'
@@ -1235,17 +1235,16 @@ export function TransactionsPage() {
     if (editingTransaction) return
     const changed = new Set(changedFields.current)
     setFormData((prev) => {
-      const patch = autofillPatch(prev, suggestion, changed, {
+      // A type change runs the type-button clean-up first (cleanFormForType), then fills.
+      const next = autofillForm(prev, suggestion, changed, {
         account: (id) => writableAccounts.some((account) => account.id === id),
         category: (id, type) =>
           categories.some((category) => category.id === id && categoryKind(category) === TYPE_TO_KIND[type]),
         tag: (id) => tagOptions.some((tag) => tag.id === id),
-      })
-      if (Object.keys(patch).length === 0) return prev
-      const next = { ...prev, ...patch }
-      if (patch.account_id !== undefined) {
+      }, typeFits)
+      if (next.account_id !== prev.account_id) {
         // The account's currency is the form's recording currency, as a manual pick sets it.
-        const account = accounts.find((a) => a.id === patch.account_id)
+        const account = accounts.find((a) => a.id === next.account_id)
         if (account) next.currency = account.currency as CurrencyCode
       }
       return next
@@ -1253,48 +1252,22 @@ export function TransactionsPage() {
     setFieldErrors((prev) => withoutErrors(prev, ['account_id', 'transfer_to_account_id']))
   }
 
+  // What still fits a transaction of a type: the one clean-up for a type click and for autofill.
+  const typeFits: TypeFits = {
+    budgetEntry: (id, type) => {
+      const entry = budgetEntries.find((e) => e.id === id)
+      return !!entry && entry.entry_type === (type === 'credit' ? 'income' : 'expense')
+    },
+    category: (id, type) => {
+      const category = categories.find((c) => c.id === id)
+      return !!category && categoryKind(category) === TYPE_TO_KIND[type]
+    },
+  }
+
   const handleTypeChange = (nextType: Transaction['transaction_type']) => {
     // The destination, fee and received figure come and go with the type.
     setFieldErrors((prev) => withoutErrors(prev, ['transfer_to_account_id', 'transfer_fee', 'received_amount']))
-    setFormData((prev) => {
-      let nextBudgetEntryId = prev.budget_entry_id
-      if (nextType === 'transfer') {
-        nextBudgetEntryId = undefined
-      } else if (nextBudgetEntryId) {
-        const linkedEntry = budgetEntries.find((entry) => entry.id === nextBudgetEntryId)
-        const expectedType = nextType === 'credit' ? 'income' : 'expense'
-        if (!linkedEntry || linkedEntry.entry_type !== expectedType) {
-          nextBudgetEntryId = undefined
-        }
-      }
-
-      // Keep the category only if its kind still fits the new type
-      // (an expense category makes no sense on a transfer, and vice versa).
-      let nextCategoryId = prev.category_id
-      if (nextCategoryId) {
-        const linkedCategory = categories.find((cat) => cat.id === nextCategoryId)
-        if (!linkedCategory || categoryKind(linkedCategory) !== TYPE_TO_KIND[nextType]) {
-          nextCategoryId = undefined
-        }
-      }
-
-      return {
-        ...prev,
-        transaction_type: nextType,
-        budget_entry_id: nextBudgetEntryId,
-        category_id: nextCategoryId,
-        allocation_id: nextType === 'transfer' ? undefined : prev.allocation_id,
-        transfer_fee: nextType === 'transfer' ? prev.transfer_fee : undefined,
-        transfer_from_account_id:
-          nextType === 'transfer' ? prev.account_id || prev.transfer_from_account_id : undefined,
-        transfer_to_account_id:
-          nextType === 'transfer'
-            ? prev.transfer_to_account_id && prev.transfer_to_account_id !== (prev.account_id || prev.transfer_from_account_id)
-              ? prev.transfer_to_account_id
-              : undefined
-            : undefined,
-      }
-    })
+    setFormData((prev) => cleanFormForType(prev, nextType, typeFits))
   }
 
   const openActionModal = (transaction: Transaction) => {
