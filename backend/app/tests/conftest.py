@@ -177,6 +177,26 @@ def sw_people(sw_client, sw_db):
     db.commit()
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "schedule_date_guards: the schedule walk's guards on 1970, 1985 and 9999 schedules "
+        "(STU-427 scenario schedule-date-guards; run with -m schedule_date_guards)")
+
+
+@pytest.fixture
+def entry_date_bounds_lifted(monkeypatch):
+    """Recurring-entry dates unbounded for one test (STU-427). A guard on a
+    1970, 1985 or 9999 schedule, or on a legacy row before 2000, sets its entry
+    up through the API as before; the bounds now refuse those dates, which
+    only a row stored before them still holds."""
+    from app.routers import budget_entries
+    from app.schemas import budget_entry
+
+    monkeypatch.setattr(budget_entry, "check_record_date", lambda value, years=None: value)
+    monkeypatch.setattr(budget_entries, "BOUNDED_DATES", ())
+
+
 def sw_post(client, who, path, body, expect=(200, 201)):
     r = client.post(f"{API}{path}", json=body, headers=who["headers"])
     assert r.status_code in expect, (path, r.status_code, r.text)

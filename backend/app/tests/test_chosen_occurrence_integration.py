@@ -130,6 +130,8 @@ def test_skipped_header_count_is_complete_for_a_long_stale_schedule(sw_client, s
     assert _balance(client, me, checking) == Decimal("49900.00")
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_mark_paid_resolves_a_recent_occurrence_of_a_decades_stale_schedule(sw_client,
                                                                            sw_people):
     """Past the projection's guard (2000 weekly steps, 600 semi-monthly months)."""

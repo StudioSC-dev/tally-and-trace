@@ -318,6 +318,8 @@ def test_one_instant_with_any_offset_keeps_the_same_final_month(world, sw_db):
     assert results[0][1:] == (21, 3, date(2028, 6, 30))
 
 
+@pytest.mark.schedule_date_guards
+@pytest.mark.usefixtures("entry_date_bounds_lifted")
 def test_a_kept_end_on_the_last_day_a_date_holds(world, sw_db):
     client, o = world["client"], world["o"]
     far = _entry(client, o, world["card"], "Far", "9999-11-05", 2)

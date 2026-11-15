@@ -17,6 +17,9 @@ from app.core.auth import get_current_active_user
 from app.core.idempotency import Idempotency, finish, idempotency
 from app.core.database import get_db
 from app.core.time import manila_midnight, manila_today, utc_now
+from app.core.record_dates import (
+    ENTRY_END_YEARS_AHEAD, ENTRY_NEXT_YEARS_AHEAD, refuse_record_date,
+)
 from app.core.access import (
     VIEW_ROLES,
     RecordAccess,
@@ -733,6 +736,33 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
     return value.astimezone(timezone.utc)
 
 
+def _same_instant(sent: datetime, stored: Optional[datetime]) -> bool:
+    """Whether ``sent`` is ``stored`` (naive, read as UTC); False when ``sent``
+    cannot be read in UTC."""
+    if stored is None:
+        return False
+    try:
+        return _as_utc(sent) == _as_utc(stored)
+    except (OverflowError, ValueError):
+        return False
+
+
+# The dates an edit is bounded on, each with its reach (app/core/record_dates.py).
+BOUNDED_DATES = (("next_occurrence", ENTRY_NEXT_YEARS_AHEAD), ("end_date", ENTRY_END_YEARS_AHEAD))
+
+
+def _refuse_changed_dates(entry: BudgetEntry, prospective_data: dict) -> None:
+    """422 for a date the edit changes to one outside its range (STU-427). A
+    date left as stored, omitted or sent equal to the stored value, is not
+    checked, so an entry stored with an out-of-range date still saves an
+    unrelated edit; null (clearing an end date) is never refused."""
+    for field, years in BOUNDED_DATES:
+        sent = prospective_data.get(field)
+        if sent is None or _same_instant(sent, getattr(entry, field)):
+            continue
+        refuse_record_date(sent, years)
+
+
 def _walk_fields(entry: BudgetEntry) -> tuple:
     """The stored fields that decide which days the schedule walks."""
     return (entry.cadence, entry.anchor_day, entry.day_rule, entry.semi_monthly_day_1,
@@ -766,6 +796,7 @@ def update_budget_entry(
         expected = prospective_data.pop("expected_updated_at")
         if _as_utc(expected) != _as_utc(entry.updated_at):
             raise HTTPException(status_code=409, detail=STALE_COPY_MESSAGE)
+    _refuse_changed_dates(entry, prospective_data)
     # The creator's private references, which a non-creator is never shown:
     # any request naming one is refused, null included (clearing is a change),
     # so it can neither change them nor probe their stored values.
