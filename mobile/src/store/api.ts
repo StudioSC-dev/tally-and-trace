@@ -209,7 +209,7 @@ export const accountingApi = createApi({
     }),
 
     // ── Wishlist ──────────────────────────────────────────────────────────────
-    getWishlistItems: builder.query<PaginatedResponse<WishlistItem>, { is_achieved?: boolean; limit?: number; offset?: number } | void>({
+    getWishlistItems: builder.query<PaginatedResponse<WishlistItem>, { is_purchased?: boolean; limit?: number; offset?: number } | void>({
       query: (params) => ({ url: 'wishlist/', params: params ?? {} }),
       providesTags: ['Wishlist'],
     }),

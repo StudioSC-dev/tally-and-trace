@@ -354,8 +354,6 @@ async function editKeepsReceivedAmountUnlistedAccount() {
 
 // The diagnostics present on main 06a95a9, by file, code and message.
 const BASELINE = new Set([
-  "app/(tabs)/more.tsx | TS2353 | Object literal may only specify known properties, and 'is_achieved' does not exist in type 'Partial<WishlistItem>'.",
-  "app/(tabs)/more.tsx | TS2339 | Property 'is_achieved' does not exist on type 'WishlistItem'.",
 ])
 
 // Runs tsc and returns the diagnostics. Anything but a clean run (exit 0) or a normal
