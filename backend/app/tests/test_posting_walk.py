@@ -7,6 +7,8 @@ Pure: no database. ``iter_occurrences`` keeps the projection's step guard
 from datetime import date, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from app.models.transaction import RecurrenceFrequency as F
 from app.services import forecast as fc
 from app.services.forecast import iter_occurrences
@@ -24,6 +26,7 @@ def _entry(cadence, next_occurrence, **kw):
     return SimpleNamespace(**defaults)
 
 
+@pytest.mark.schedule_date_guards
 def test_weekly_schedule_decades_stale_is_walked_to_the_date():
     e = _entry(F.WEEKLY, datetime(1985, 1, 6))
 
@@ -37,6 +40,7 @@ def test_weekly_schedule_decades_stale_is_walked_to_the_date():
     assert projected == walk[:2000]
 
 
+@pytest.mark.schedule_date_guards
 def test_semi_monthly_schedule_past_600_months_is_walked_to_the_date():
     e = _entry(F.SEMI_MONTHLY, datetime(1970, 1, 1))
 

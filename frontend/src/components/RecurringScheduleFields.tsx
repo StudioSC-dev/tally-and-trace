@@ -60,6 +60,8 @@ interface RecurringScheduleFieldsProps {
   touch?: boolean
   /** The date is fixed (Repeat): the weekday is shown, not changed. */
   dateFixed?: boolean
+  /** The end date input's min and max (`datetime-local` values); left off when not given. */
+  endDateBounds?: { min: string; max: string }
 }
 
 /**
@@ -86,6 +88,7 @@ export function RecurringScheduleFields({
   idPrefix = 'recurring',
   touch = false,
   dateFixed = false,
+  endDateBounds,
 }: RecurringScheduleFieldsProps) {
   const control = touch ? 'mt-1 block w-full min-h-11 border border-line px-3 py-2' : 'mt-1 block w-full border border-line px-3 py-2'
   const { chargedOnClose, cardCloseDay, cadence } = state
@@ -296,6 +299,8 @@ export function RecurringScheduleFields({
                       className={control}
                       ref={bindField('end_date')}
                       data-field="end_date"
+                      min={endDateBounds?.min}
+                      max={endDateBounds?.max}
                       {...fieldProps('end_date')}
                     />
                     {renderFieldError('end_date')}
