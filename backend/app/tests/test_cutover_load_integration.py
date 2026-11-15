@@ -1504,8 +1504,8 @@ def test_an_application_clock_five_minutes_ahead(edit, tmp_path, owner, sw_db, s
         assert counts(sw_db, owner["id"])["accounts"] == 0
 
 
-def test_reset_runs_at_repeatable_read(tmp_path, owner, sw_db, monkeypatch):
-    """One snapshot: the deletes act on the state the fingerprint was taken of."""
+def test_reset_reads_one_repeatable_read_snapshot(tmp_path, owner, sw_db, monkeypatch):
+    """The counts and the fingerprint are read in one REPEATABLE READ snapshot."""
     from app.cutover_load import loader
 
     _, record = load(tmp_path, fixture(), owner)
@@ -1949,9 +1949,10 @@ def test_the_check_is_refused_while_a_load_holds_the_lock(tmp_path, owner):
 
 
 def test_one_changed_input_row_fails_the_check_and_names_it(tmp_path, owner):
-    """Plan v3: changing one input row makes the check fail and name that row. The
-    spouse deposit on the joint account is loaded at 5100 instead of 5000; the check
-    against the unchanged frozen figures fails on that account's balance only."""
+    """Plan v3: changing one input row makes the check fail and name the account and
+    checkpoint. The spouse deposit on the joint account is loaded at 5100 instead of
+    5000; the check against the unchanged frozen figures fails on that account's
+    balance only."""
     data = fixture()
     by_key(data["transactions"], "spouse_dep")["amount"] = "5100.00"
     path = write_input(tmp_path, data, owner)

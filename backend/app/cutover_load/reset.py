@@ -313,8 +313,11 @@ def run_reset(*, url, run_record_path: str, confirm: str, dry_run: bool, expect_
     _window_open(record, confirm)
     if not record.get("fingerprint"):
         raise Refused("run_record", "the run record has no fingerprint of the loaded state")
-    # REPEATABLE READ: one snapshot for the whole reset, so the deletes act on
-    # exactly the state whose counts and fingerprint were just checked.
+    # REPEATABLE READ: the counts, the fingerprint and the deletes read one snapshot,
+    # fixed by the first statement (the lock). A concurrent change to a row the reset
+    # deletes makes it fail with a serialization error. A row another transaction
+    # inserts after the snapshot is not seen, so the owner's writes must queue behind
+    # the lock (STU-226).
     engine = reset_engine(url)
     try:
         with engine.connect() as conn:
