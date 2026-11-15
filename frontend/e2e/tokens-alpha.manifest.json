@@ -1,0 +1,318 @@
+{
+  "ticket": "STU-210",
+  "baseCommit": "75cba71",
+  "note": "Regression manifest captured on 75cba71 (post-STU-188), before any token change. values are computed styles recorded by `node frontend/e2e/tokens-alpha.cjs --record-manifest` on the unchanged tree.",
+  "tokens": {
+    "paper": [
+      "#dedad4",
+      "#1c1917"
+    ],
+    "surface": [
+      "#e9e6e0",
+      "#231f1d"
+    ],
+    "sunken": [
+      "#d2cdc6",
+      "#171412"
+    ],
+    "line": [
+      "#c2bcb4",
+      "#332e2b"
+    ],
+    "line-strong": [
+      "#a9a29a",
+      "#443d39"
+    ],
+    "ink": [
+      "#201d1a",
+      "#f5f5f4"
+    ],
+    "body": [
+      "#43403c",
+      "#d6d3d1"
+    ],
+    "muted": [
+      "#59554f",
+      "#a8a29e"
+    ],
+    "ok": [
+      "#3c610b",
+      "#a3b18a"
+    ],
+    "warn": [
+      "#7f4021",
+      "#d9a05b"
+    ],
+    "info": [
+      "#59554f",
+      "#a8a29e"
+    ],
+    "danger": [
+      "#8c221d",
+      "#e0918a"
+    ]
+  },
+  "tokenOrder": [
+    "light",
+    "dark"
+  ],
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "routes": [
+    "/",
+    "/forecast",
+    "/accounts",
+    "/transactions",
+    "/allocations",
+    "/settings",
+    "/accounts/household"
+  ],
+  "states": [
+    "breakdown-dialog",
+    "account-modal"
+  ],
+  "samples": [
+    {
+      "id": "s01-page-paper",
+      "route": "/",
+      "selector": "html",
+      "note": "--paper as the page background",
+      "values": {
+        "light": {
+          "color": "rgb(0, 0, 0)",
+          "backgroundColor": "rgb(222, 218, 212)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(255, 255, 255)",
+          "backgroundColor": "rgb(28, 25, 23)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s02-body-text",
+      "route": "/",
+      "selector": "body",
+      "note": "--body text",
+      "values": {
+        "light": {
+          "color": "rgb(67, 64, 60)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(214, 211, 209)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s03-heading-ink",
+      "route": "/",
+      "selector": "h1",
+      "note": "--ink heading",
+      "values": {
+        "light": {
+          "color": "rgb(32, 29, 26)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(245, 245, 244)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s04-card-surface",
+      "route": "/forecast",
+      "selector": ".bg-surface.border-line",
+      "note": "--surface fill, --line border",
+      "values": {
+        "light": {
+          "color": "rgb(67, 64, 60)",
+          "backgroundColor": "rgb(233, 230, 224)",
+          "borderTopColor": "rgb(194, 188, 180)"
+        },
+        "dark": {
+          "color": "rgb(214, 211, 209)",
+          "backgroundColor": "rgb(35, 31, 29)",
+          "borderTopColor": "rgb(51, 46, 43)"
+        }
+      }
+    },
+    {
+      "id": "s05-tile-sunken",
+      "route": "/forecast",
+      "selector": ".bg-sunken",
+      "note": "--sunken fill",
+      "values": {
+        "light": {
+          "color": "rgb(67, 64, 60)",
+          "backgroundColor": "rgb(210, 205, 198)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(214, 211, 209)",
+          "backgroundColor": "rgb(23, 20, 18)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s06-muted-text",
+      "route": "/forecast",
+      "selector": ".text-muted",
+      "note": "--muted",
+      "values": {
+        "light": {
+          "color": "rgb(89, 85, 79)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgba(0, 0, 0, 0)"
+        },
+        "dark": {
+          "color": "rgb(168, 162, 158)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgba(0, 0, 0, 0)"
+        }
+      }
+    },
+    {
+      "id": "s07-ok-text",
+      "route": "/forecast",
+      "selector": ".text-ok",
+      "note": "--ok",
+      "values": {
+        "light": {
+          "color": "rgb(60, 97, 11)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(163, 177, 138)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s08-danger-text",
+      "route": "/transactions",
+      "selector": ".text-danger",
+      "note": "--danger",
+      "values": {
+        "light": {
+          "color": "rgb(140, 34, 29)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(224, 145, 138)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s09-warn-text",
+      "route": "/",
+      "selector": ".text-warn",
+      "note": "--warn",
+      "values": {
+        "light": {
+          "color": "rgb(127, 64, 33)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        },
+        "dark": {
+          "color": "rgb(217, 160, 91)",
+          "backgroundColor": "rgba(0, 0, 0, 0)",
+          "borderTopColor": "rgb(229, 231, 235)"
+        }
+      }
+    },
+    {
+      "id": "s10-primary-button",
+      "route": "/allocations",
+      "selector": ".btn-primary",
+      "note": "component-layer button, --ink fill",
+      "values": {
+        "light": {
+          "color": "rgb(222, 218, 212)",
+          "backgroundColor": "rgb(32, 29, 26)",
+          "borderTopColor": "rgb(32, 29, 26)"
+        },
+        "dark": {
+          "color": "rgb(28, 25, 23)",
+          "backgroundColor": "rgb(245, 245, 244)",
+          "borderTopColor": "rgb(245, 245, 244)"
+        }
+      }
+    }
+  ],
+  "recordedOn": "75cba71",
+  "tokenProbe": {
+    "light": {
+      "paper": "rgb(222, 218, 212)",
+      "surface": "rgb(233, 230, 224)",
+      "sunken": "rgb(210, 205, 198)",
+      "line": "rgb(194, 188, 180)",
+      "line-strong": "rgb(169, 162, 154)",
+      "ink": "rgb(32, 29, 26)",
+      "body": "rgb(67, 64, 60)",
+      "muted": "rgb(89, 85, 79)",
+      "ok": "rgb(60, 97, 11)",
+      "warn": "rgb(127, 64, 33)",
+      "info": "rgb(89, 85, 79)",
+      "danger": "rgb(140, 34, 29)"
+    },
+    "dark-class": {
+      "paper": "rgb(28, 25, 23)",
+      "surface": "rgb(35, 31, 29)",
+      "sunken": "rgb(23, 20, 18)",
+      "line": "rgb(51, 46, 43)",
+      "line-strong": "rgb(68, 61, 57)",
+      "ink": "rgb(245, 245, 244)",
+      "body": "rgb(214, 211, 209)",
+      "muted": "rgb(168, 162, 158)",
+      "ok": "rgb(163, 177, 138)",
+      "warn": "rgb(217, 160, 91)",
+      "info": "rgb(168, 162, 158)",
+      "danger": "rgb(224, 145, 138)"
+    },
+    "dark-media": {
+      "paper": "rgb(28, 25, 23)",
+      "surface": "rgb(35, 31, 29)",
+      "sunken": "rgb(23, 20, 18)",
+      "line": "rgb(51, 46, 43)",
+      "line-strong": "rgb(68, 61, 57)",
+      "ink": "rgb(245, 245, 244)",
+      "body": "rgb(214, 211, 209)",
+      "muted": "rgb(168, 162, 158)",
+      "ok": "rgb(163, 177, 138)",
+      "warn": "rgb(217, 160, 91)",
+      "info": "rgb(168, 162, 158)",
+      "danger": "rgb(224, 145, 138)"
+    }
+  },
+  "renderNoise": {
+    "maxOutsidePixels": 0,
+    "maxChannelDelta": 0,
+    "repeats": 4,
+    "screens": 36,
+    "measuredOn": "75cba71faa71fac0a6ecd85211cb98dce66eb5bc"
+  }
+}

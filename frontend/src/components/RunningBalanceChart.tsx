@@ -21,9 +21,9 @@ const W = 720
 // with the page instead of staying a saturated blue island on paper. The
 // balance series is ink: on a ledger the primary series is the subject, and
 // colour is reserved for the exceptions (shortfall, trough).
-const SERIES = 'var(--ink)'
-const DANGER = 'var(--danger)'
-const WARN = 'var(--warn)'
+const SERIES = 'rgb(var(--ink))'
+const DANGER = 'rgb(var(--danger))'
+const WARN = 'rgb(var(--warn))'
 
 const shortDate = (iso: string) => {
   const d = new Date(iso)

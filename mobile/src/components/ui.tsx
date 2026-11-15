@@ -14,6 +14,8 @@ import {
   type TouchableOpacityProps,
   type TextInputProps,
 } from 'react-native'
+import { CURRENCY_CONFIGS } from '@tally-trace/shared'
+import type { CurrencyCode } from '@tally-trace/shared'
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
@@ -177,6 +179,7 @@ interface AmountTextProps extends TextProps {
 
 export const AmountText: React.FC<AmountTextProps> = ({
   amount,
+  currency,
   positive,
   negative,
   className = '',
@@ -188,13 +191,20 @@ export const AmountText: React.FC<AmountTextProps> = ({
     ? 'text-red-400'
     : 'text-white'
 
+  // The currency's symbol, placed as its config says; a code with no config goes in front.
+  const config = CURRENCY_CONFIGS[currency as CurrencyCode]
+  const symbol = config?.symbol ?? currency
+  const symbolAfter = config?.position === 'after'
+
   return (
     <Text className={`font-semibold ${colorClass} ${className}`} {...props}>
       {amount >= 0 ? '' : '-'}
+      {symbolAfter ? '' : config ? symbol : `${symbol} `}
       {Math.abs(amount).toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}
+      {symbolAfter ? ` ${symbol}` : ''}
     </Text>
   )
 }
