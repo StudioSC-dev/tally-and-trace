@@ -29,7 +29,6 @@ import {
   transferAccountFields,
 } from '@tally-trace/shared'
 import type { CurrencyCode } from '@tally-trace/shared'
-import { isCrossCurrencyTransfer } from '../../src/utils/currencyDisplay'
 import { Card, Button, Input, LoadingSpinner, EmptyState, Badge, SectionHeader } from '../../src/components/ui'
 
 // ─── Transaction Item ─────────────────────────────────────────────────────────
@@ -169,6 +168,11 @@ export function TransactionFormModal({
         ? (initial.transfer_to_account_id ?? '')
         : '',
     ),
+    received_amount: String(
+      initial?.transaction_type === 'transfer'
+        ? (initial.received_amount ?? '')
+        : '',
+    ),
     category_id: String(initial && initial.view === 'full' ? (initial.category_id ?? '') : ''),
     transaction_date: initial?.transaction_date
       ? initial.transaction_date.split('T')[0]
@@ -177,6 +181,13 @@ export function TransactionFormModal({
 
   const update = (key: keyof typeof form, value: string) =>
     setForm((p) => ({ ...p, [key]: value }))
+
+  // A transfer between two currencies also needs what the destination received.
+  const isTransferType = form.transaction_type === 'transfer'
+  const sourceCurrency = eligibleAccounts.find((a) => String(a.id) === form.transfer_from_account_id)?.currency
+  const destinationCurrency = eligibleAccounts.find((a) => String(a.id) === form.transfer_to_account_id)?.currency
+  const crossCurrency =
+    isTransferType && !!sourceCurrency && !!destinationCurrency && sourceCurrency !== destinationCurrency
 
   const handleSubmit = async () => {
     const isTransfer = form.transaction_type === 'transfer'
@@ -190,6 +201,9 @@ export function TransactionFormModal({
       }
       if (form.transfer_from_account_id === form.transfer_to_account_id) {
         return Alert.alert('Error', 'Source and destination must be different accounts.')
+      }
+      if (crossCurrency && !(parseFloat(form.received_amount) > 0)) {
+        return Alert.alert('Error', `Enter the amount received in ${destinationCurrency}.`)
       }
     } else if (!form.amount || !form.account_id) {
       return Alert.alert('Error', 'Amount and account are required.')
@@ -215,6 +229,8 @@ export function TransactionFormModal({
           form.transfer_from_account_id ? parseInt(form.transfer_from_account_id) : undefined,
           form.transfer_to_account_id ? parseInt(form.transfer_to_account_id) : undefined,
         ),
+        // Only a transfer between currencies carries what the destination received.
+        ...(crossCurrency ? { received_amount: parseFloat(form.received_amount) } : {}),
         // The API accepts an explicit null here; the shared field type only lists a number.
       } as Partial<FullTransaction>
       // Another user's record: the server refuses references owned by someone else.
@@ -351,6 +367,18 @@ export function TransactionFormModal({
               </View>
             ))}
 
+          {/* Amount received, only for a transfer between currencies */}
+          {crossCurrency && (
+            <Input
+              label={`Received amount (${destinationCurrency})`}
+              placeholder="0.00"
+              value={form.received_amount}
+              onChangeText={(v) => update('received_amount', v)}
+              keyboardType="decimal-pad"
+              testID="received-amount"
+            />
+          )}
+
           {/* Category (hidden when editing another user's record) */}
           {!isSharedEdit && (
           <View className="gap-2">
@@ -457,10 +485,6 @@ export default function TransactionsScreen() {
 
   const openEdit = (tx: Transaction) => {
     if (tx.view === 'limited' || !tx.permissions.can_edit) return
-    if (isCrossCurrencyTransfer(tx, accounts)) {
-      Alert.alert('Edit on the web', 'Edit this transfer on the web')
-      return
-    }
     setEditing(tx)
     setModalVisible(true)
   }

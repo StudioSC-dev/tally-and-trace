@@ -147,11 +147,12 @@ async function payloadTransferCreate() {
   ui.press('type-transfer')
   ui.press('transfer-from-1'); ui.press('transfer-to-2')
   ui.byLabel('Amount').props.onChangeText('75')
+  ui.byLabel('Received amount (EUR)').props.onChangeText('68.5') // USD -> EUR needs what lands (STU-632)
   await ui.submit()
   assert.strictEqual(form.calls.create.length, 1, `not submitted: ${JSON.stringify(form.calls.alerts)}`)
   assert.deepStrictEqual(json(form.calls.create[0]), {
     amount: 75, transaction_type: 'transfer', account_id: 1, transaction_date: TODAY, currency: 'USD',
-    transfer_from_account_id: 1, transfer_to_account_id: 2,
+    transfer_from_account_id: 1, transfer_to_account_id: 2, received_amount: 68.5,
   })
 }
 
@@ -160,12 +161,14 @@ async function payloadTransferEdit() {
     const { form, ui } = fresh(record(type))
     ui.press('type-transfer')
     ui.press('transfer-from-2'); ui.press('transfer-to-1')
+    ui.byLabel('Received amount (USD)').props.onChangeText('55') // EUR -> USD needs what lands (STU-632)
     await ui.submit()
     assert.strictEqual(form.calls.update.length, 1, `${type} -> transfer not submitted: ${JSON.stringify(form.calls.alerts)}`)
     assert.strictEqual(form.calls.update[0].id, 10)
     assert.deepStrictEqual(json(form.calls.update[0].data), {
       description: 'old note', amount: 50, transaction_type: 'transfer', account_id: 2, category_id: 3,
       transaction_date: '2026-03-01T00:00:00.000Z', currency: 'USD', transfer_from_account_id: 2, transfer_to_account_id: 1,
+      received_amount: 55,
     })
   }
 }
@@ -249,6 +252,81 @@ async function nonTransferRegression() {
   }
 }
 
+// STU-632: the received amount of a transfer between currencies.
+const CROSS = {
+  amount: 75, transaction_type: 'transfer', account_id: 1, transaction_date: TODAY, currency: 'USD',
+  transfer_from_account_id: 1, transfer_to_account_id: 2,
+}
+
+async function crossCurrencyReceivedAmount() {
+  const { form, ui } = fresh()
+  ui.press('type-transfer')
+  assert(!ui.ids().includes('received-amount'), 'received field shown before both accounts are chosen')
+  ui.press('transfer-from-1'); ui.press('transfer-to-2')
+  const field = ui.byLabel('Received amount (EUR)')
+  assert(field, 'no received-amount field in the destination currency (EUR)')
+  assert(!ui.byLabel('Received amount (USD)'), 'received field must not show the source currency')
+  ui.byLabel('Amount').props.onChangeText('75')
+  field.props.onChangeText('68.5')
+  await ui.submit()
+  assert.strictEqual(form.calls.create.length, 1, `not submitted: ${JSON.stringify(form.calls.alerts)}`)
+  assert.deepStrictEqual(json(form.calls.create[0]), { ...CROSS, received_amount: 68.5 })
+}
+
+async function missingReceivedAmountRefused() {
+  for (const entered of [undefined, '', '0', 'abc']) {
+    const { form, ui } = fresh()
+    ui.press('type-transfer')
+    ui.press('transfer-from-1'); ui.press('transfer-to-2')
+    ui.byLabel('Amount').props.onChangeText('75')
+    if (entered !== undefined) ui.byLabel('Received amount (EUR)').props.onChangeText(entered)
+    await ui.submit()
+    assert.strictEqual(form.calls.create.length, 0, `saved with received amount ${JSON.stringify(entered)}`)
+    const alert = lastAlert(form)
+    assert(alert && /received/i.test(alert.message) && /EUR/.test(alert.message), `no explanation: ${JSON.stringify(alert)}`)
+  }
+}
+
+async function sameCurrencyPayloadUnchanged() {
+  // A second USD account, so the pair shares a currency.
+  const form = loadForm()
+  const accounts = [...ACCOUNTS, { id: 4, name: 'Second USD', currency: 'USD', permissions: { can_add_transactions: true } }]
+  const ui = mountForm(form, props({ accounts }))
+  ui.press('type-transfer')
+  ui.press('transfer-from-1'); ui.press('transfer-to-4')
+  assert(!ui.ids().includes('received-amount') && !ui.byLabel('Received amount (USD)'), 'received field shown for a same-currency transfer')
+  ui.byLabel('Amount').props.onChangeText('75')
+  await ui.submit()
+  assert.strictEqual(form.calls.create.length, 1, `not submitted: ${JSON.stringify(form.calls.alerts)}`)
+  assert.deepStrictEqual(json(form.calls.create[0]), { ...CROSS, transfer_to_account_id: 4 })
+  // Typing a received amount for a cross pair, then switching to a same-currency pair, sends none.
+  const f2 = loadForm()
+  const ui2 = mountForm(f2, props({ accounts }))
+  ui2.press('type-transfer')
+  ui2.press('transfer-from-1'); ui2.press('transfer-to-2')
+  ui2.byLabel('Received amount (EUR)').props.onChangeText('68.5')
+  ui2.press('transfer-to-4')
+  ui2.byLabel('Amount').props.onChangeText('75')
+  await ui2.submit()
+  assert(!('received_amount' in json(f2.calls.create[0])), 'stale received_amount sent for a same-currency transfer')
+}
+
+async function editKeepsReceivedAmount() {
+  const rec = { ...record('transfer'), transfer_from_account_id: 1, transfer_to_account_id: 2, received_amount: 46.25 }
+  const { form, ui } = fresh(rec)
+  const field = ui.byLabel('Received amount (EUR)')
+  assert(field, 'edit of a cross-currency transfer must show the received amount')
+  assert.strictEqual(field.props.value, '46.25', 'received amount not pre-filled')
+  ui.byLabel('Description (optional)').props.onChangeText('new note')
+  await ui.submit()
+  assert.strictEqual(form.calls.update.length, 1, `not submitted: ${JSON.stringify(form.calls.alerts)}`)
+  assert.deepStrictEqual(json(form.calls.update[0].data), {
+    description: 'new note', amount: 50, transaction_type: 'transfer', account_id: 1, category_id: 3,
+    transaction_date: '2026-03-01T00:00:00.000Z', currency: 'USD', transfer_from_account_id: 1, transfer_to_account_id: 2,
+    received_amount: 46.25,
+  })
+}
+
 // The diagnostics present on main 06a95a9, by file, code and message.
 const BASELINE = new Set([
   "app/(tabs)/more.tsx | TS2353 | Object literal may only specify known properties, and 'is_achieved' does not exist in type 'Partial<WishlistItem>'.",
@@ -291,6 +369,10 @@ async function main() {
     ['missing-destination-refused', () => missingRefused('destination')],
     ['b.payload-nontransfer', payloadNonTransfer],
     ['c.same-account-refused', sameAccountRefused],
+    ['cross-currency-received-amount', crossCurrencyReceivedAmount],
+    ['missing-received-amount-refused', missingReceivedAmountRefused],
+    ['same-currency-payload-unchanged', sameCurrencyPayloadUnchanged],
+    ['edit-keeps-received-amount', editKeepsReceivedAmount],
     ['typecheck-baseline', typecheckBaseline],
     ['nontransfer-create-edit-regression', nonTransferRegression],
   ]
